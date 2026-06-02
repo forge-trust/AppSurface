@@ -1,0 +1,186 @@
+namespace ForgeTrust.AppSurface.Flow;
+
+/// <summary>
+/// Identifies the terminal or pause status returned by an AppSurface Flow runner.
+/// </summary>
+/// <remarks>
+/// The numeric values are part of the public compatibility contract for logs, persisted state, and tests. Do not
+/// reorder, renumber, remove, or reuse values. Add new statuses only at the end with explicit numeric values and a
+/// migration/versioning plan.
+/// </remarks>
+public enum FlowRunStatus
+{
+    /// <summary>
+    /// The flow is waiting for an external event.
+    /// </summary>
+    Waiting = 0,
+
+    /// <summary>
+    /// The flow completed successfully.
+    /// </summary>
+    Completed = 1,
+
+    /// <summary>
+    /// The flow returned a process-level fault.
+    /// </summary>
+    Faulted = 2,
+
+    /// <summary>
+    /// The flow handled a timeout branch.
+    /// </summary>
+    TimedOut = 3,
+}
+
+/// <summary>
+/// Result returned by a flow runner after executing until the next pause or terminal outcome.
+/// </summary>
+/// <typeparam name="TContext">Serializable context type carried by the flow.</typeparam>
+public sealed record FlowRunResult<TContext>
+{
+    private FlowRunResult(
+        FlowRunStatus status,
+        TContext? context,
+        string? nodeId,
+        string? waitingEventName,
+        FlowTimeout? timeout,
+        string? timedOutEventName,
+        FlowFault? fault)
+    {
+        Status = status;
+        Context = context;
+        NodeId = nodeId;
+        WaitingEventName = waitingEventName;
+        Timeout = timeout;
+        TimedOutEventName = timedOutEventName;
+        Fault = fault;
+    }
+
+    /// <summary>
+    /// Gets the runner status.
+    /// </summary>
+    public FlowRunStatus Status { get; }
+
+    /// <summary>
+    /// Gets the latest context when the result carries one.
+    /// </summary>
+    public TContext? Context { get; }
+
+    /// <summary>
+    /// Gets the node id where execution paused or ended.
+    /// </summary>
+    public string? NodeId { get; }
+
+    /// <summary>
+    /// Gets the event name awaited by a waiting result.
+    /// </summary>
+    public string? WaitingEventName { get; }
+
+    /// <summary>
+    /// Gets the optional timeout associated with a waiting result.
+    /// </summary>
+    public FlowTimeout? Timeout { get; }
+
+    /// <summary>
+    /// Gets the event whose timeout branch completed.
+    /// </summary>
+    public string? TimedOutEventName { get; }
+
+    /// <summary>
+    /// Gets the fault details for a faulted result.
+    /// </summary>
+    public FlowFault? Fault { get; }
+
+    /// <summary>
+    /// Creates a waiting result.
+    /// </summary>
+    /// <param name="nodeId">Node id where the flow paused.</param>
+    /// <param name="eventName">External event name the node is waiting for.</param>
+    /// <param name="context">Context to preserve while the flow is waiting.</param>
+    /// <param name="timeout">Optional timeout associated with the wait.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> or <paramref name="eventName"/> is empty.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is null.</exception>
+    /// <remarks>
+    /// Inspect <see cref="Status"/> before reading wait-specific properties. <paramref name="timeout"/> is optional and
+    /// remains null for waits without a timeout.
+    /// </remarks>
+    public static FlowRunResult<TContext> Waiting(
+        string nodeId,
+        string eventName,
+        TContext context,
+        FlowTimeout? timeout = null) =>
+        new(
+            FlowRunStatus.Waiting,
+            FlowNodeOutcome<TContext>.RequireContext(context),
+            FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            FlowDefinition<object>.RequireText(eventName, nameof(eventName)),
+            timeout,
+            null,
+            null);
+
+    /// <summary>
+    /// Creates a completed result.
+    /// </summary>
+    /// <param name="nodeId">Node id that completed the flow.</param>
+    /// <param name="context">Final flow context.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="nodeId"/> is empty.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is null.</exception>
+    /// <remarks>
+    /// A completed result does not carry wait, timeout, or fault details. Inspect <see cref="Status"/> before reading
+    /// status-specific properties.
+    /// </remarks>
+    public static FlowRunResult<TContext> Completed(string nodeId, TContext context) =>
+        new(
+            FlowRunStatus.Completed,
+            FlowNodeOutcome<TContext>.RequireContext(context),
+            FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            null,
+            null,
+            null,
+            null);
+
+    /// <summary>
+    /// Creates a timed-out result.
+    /// </summary>
+    /// <param name="nodeId">Node id that handled the timeout branch.</param>
+    /// <param name="eventName">Event whose wait timed out.</param>
+    /// <param name="context">Context after timeout handling.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> or <paramref name="eventName"/> is empty.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is null.</exception>
+    /// <remarks>
+    /// A timed-out result means timeout handling ran; it is distinct from a waiting result that carries a future
+    /// timeout. Inspect <see cref="Status"/> before reading timeout-specific properties.
+    /// </remarks>
+    public static FlowRunResult<TContext> TimedOut(string nodeId, string eventName, TContext context) =>
+        new(
+            FlowRunStatus.TimedOut,
+            FlowNodeOutcome<TContext>.RequireContext(context),
+            FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            null,
+            null,
+            FlowDefinition<object>.RequireText(eventName, nameof(eventName)),
+            null);
+
+    /// <summary>
+    /// Creates a faulted result.
+    /// </summary>
+    /// <param name="nodeId">Node id that produced the fault.</param>
+    /// <param name="fault">Flow fault details.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="nodeId"/> is empty.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="fault"/> is null.</exception>
+    /// <remarks>
+    /// Faulted results do not carry a context. Inspect <see cref="Status"/> before reading fault-specific properties.
+    /// </remarks>
+    public static FlowRunResult<TContext> Faulted(string nodeId, FlowFault fault) =>
+        new(
+            FlowRunStatus.Faulted,
+            default,
+            FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            null,
+            null,
+            null,
+            fault ?? throw new ArgumentNullException(nameof(fault)));
+}

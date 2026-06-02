@@ -63,6 +63,11 @@ This approach aims to:
 
 - [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
 
+### [Flow](./Flow/README.md)
+
+- [**ForgeTrust.AppSurface.Flow**](./Flow/ForgeTrust.AppSurface.Flow/README.md) – Typed long-running process contracts, graph validation, definition registry, and an in-memory runner for local tests and hello-world flows.
+- [**ForgeTrust.AppSurface.Flow.DurableTask**](./Flow/ForgeTrust.AppSurface.Flow.DurableTask/README.md) – Durable Task adapter boundary with runner/client services, resume-event authorization, timeout, late-event and retry behavior, and context serialization validation.
+
 ### [Console](./Console/README.md)
 
 - [**ForgeTrust.AppSurface.Console**](./Console/ForgeTrust.AppSurface.Console/README.md) – Helpers for building command line apps with [CliFx](https://github.com/Tyrrrz/CliFx), source-generated command descriptors, a `CriticalService`-based command runner, and helpers for configuring services.
@@ -156,6 +161,7 @@ Check out the examples to see how modules are composed in practice:
 
 ```bash
 dotnet run --project examples/console-app
+dotnet run --project examples/flow-approval-local/FlowApprovalLocalExample.csproj
 dotnet run --project examples/web-app
 dotnet run --project examples/razorwire-mvc/RazorWireWebExample.csproj
 ```
@@ -197,6 +203,8 @@ how to use this project.
   non-HTML behavior.
 - [Config validation example](examples/config-validation/README.md) – shows scalar
   validation on a strongly typed config wrapper and the startup failure shape.
+- [Flow approval local example](examples/flow-approval-local/README.md) – shows a typed
+  flow that waits for an approval event and resumes through the in-memory runner.
 
 ## License
 
