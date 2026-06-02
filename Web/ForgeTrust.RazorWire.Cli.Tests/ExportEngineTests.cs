@@ -4088,7 +4088,7 @@ public class ExportEngineTests
             var path = request.RequestUri?.AbsolutePath ?? "/";
             return path == "/" || path == "/index"
                 ? Html("""<html><body><script src="/missing.js"></script></body></html>""")
-                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+                : NotFound();
         }
     }
 
@@ -4101,7 +4101,7 @@ public class ExportEngineTests
             {
                 "/" or "/index" => Html("""<html><head><link rel="stylesheet" href="/styles/site.css"></head><body></body></html>"""),
                 "/styles/site.css" => Text(".map { background-image: url('/img/map-image.png'); }", "text/css"),
-                _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound))
+                _ => NotFound()
             };
         }
     }
@@ -4113,7 +4113,7 @@ public class ExportEngineTests
             var path = request.RequestUri?.AbsolutePath ?? "/";
             return path == "/" || path == "/index"
                 ? Html("""<html><head><link rel="modulepreload" href="/assets/app.js"></head><body></body></html>""")
-                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+                : NotFound();
         }
     }
 
@@ -4137,7 +4137,7 @@ public class ExportEngineTests
                       </body>
                     </html>
                     """)
-                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+                : NotFound();
         }
     }
 
