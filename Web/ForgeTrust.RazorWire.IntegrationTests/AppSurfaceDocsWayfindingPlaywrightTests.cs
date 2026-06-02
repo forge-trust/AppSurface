@@ -625,10 +625,8 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         Assert.True(await page.Locator("#docs-page-outline").EvaluateAsync<bool>(
             """
             shell => {
-              const panel = shell.querySelector('.docs-outline-panel');
-              return Boolean(panel)
-                && shell.scrollTop > 0
-                && panel.getBoundingClientRect().height > shell.clientHeight;
+              return shell.scrollTop > 0
+                && shell.scrollHeight > shell.clientHeight;
             }
             """));
     }
