@@ -260,6 +260,28 @@ public class CSharpDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadUtf8SourceAsync_WhenMaxFileSizeBytesIsLongMaxValueReadsSource()
+    {
+        var source = CreateDocumentedClassSource("UnboundedService");
+        await WriteUtf8Async(CombineUnder(_testRoot, "UnboundedService.cs"), source);
+
+        var result = await AppSurfaceDocsParserInputBudget.ReadUtf8SourceAsync(
+            CombineUnder(_testRoot, "UnboundedService.cs"),
+            "UnboundedService.cs",
+            long.MaxValue,
+            "AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes",
+            DocHarvestDiagnosticCodes.CSharpFileTooLarge,
+            nameof(CSharpDocHarvester),
+            "C#",
+            "Exclude generated C# source.",
+            CancellationToken.None);
+
+        Assert.True(result.Included);
+        Assert.Equal(source, result.Source);
+        Assert.Null(result.Diagnostic);
+    }
+
+    [Fact]
     public async Task HarvestAsync_WhenCSharpFileIsReparsePointSkipsCandidate()
     {
         var externalRoot = CreateExternalTempDirectory();

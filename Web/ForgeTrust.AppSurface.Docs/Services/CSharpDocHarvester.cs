@@ -336,11 +336,8 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                         }
                     }
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException
+                catch (Exception ex) when (ex is not OperationCanceledException
+                                           and not OutOfMemoryException
                                            and not StackOverflowException
                                            and not AccessViolationException
                                            and not AppDomainUnloadedException

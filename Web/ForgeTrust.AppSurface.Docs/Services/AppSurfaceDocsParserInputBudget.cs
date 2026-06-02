@@ -73,9 +73,7 @@ internal static class AppSurfaceDocsParserInputBudget
         var readLimit = maxFileSizeBytes == long.MaxValue ? long.MaxValue : maxFileSizeBytes + 1;
         var bufferSize = (int)Math.Min(16 * 1024, Math.Max(1L, readLimit));
         var buffer = new byte[bufferSize];
-        var initialCapacity = stream.CanSeek
-            ? (int)Math.Min(Math.Min(stream.Length, maxFileSizeBytes), bufferSize)
-            : 0;
+        var initialCapacity = (int)Math.Min(Math.Min(stream.Length, maxFileSizeBytes), bufferSize);
         using var output = new MemoryStream(capacity: initialCapacity);
         long totalBytesRead = 0;
 
@@ -92,13 +90,12 @@ internal static class AppSurfaceDocsParserInputBudget
             totalBytesRead += bytesRead;
             if (totalBytesRead > maxFileSizeBytes)
             {
-                var observedSizeBytes = stream.CanSeek ? stream.Length : totalBytesRead;
                 return AppSurfaceDocsParserInputReadResult.Skipped(
                     CreateFileTooLargeDiagnostic(
                         diagnosticCode,
                         harvesterType,
                         relativePath,
-                        observedSizeBytes,
+                        stream.Length,
                         maxFileSizeBytes,
                         configurationKey,
                         sourceKindLabel,
