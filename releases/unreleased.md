@@ -183,6 +183,10 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 - Tailwind build execution now uses a compiled MSBuild task with stable `ASTW###` diagnostics, structured CLI arguments, bounded output capture, cancellation support, and a packed-package smoke test that proves task and dependency loading from a real nupkg consumer.
 - AppSurface preview startup now treats `--port` as a loopback-only shortcut that binds `http://localhost:<port>`. Add `--all-hosts` with `--port` only when LAN, container, or other all-interface preview access is intentional; that opt-in preserves the previous `http://localhost:<port>;http://*:<port>` wildcard shape.
 
+### CI and contributor verification
+
+- AppSurface PR validation now records its trusted CI decision path, cancels stale long-running build/package workflow runs, avoids duplicate generated and web-asset verification in the docs export job, and records coverage timing/artifact data while keeping PR tests in one runner-minute-conscious lane.
+
 ### Dependency maintenance
 
 - The central .NET dependency set now carries `Microsoft.Extensions.Caching.Memory`, `Microsoft.Extensions.Hosting`, and `Microsoft.Extensions.Logging.Console` `10.0.8`, while the ABP benchmark host now uses ABP `10.4.0`; solution lock files were regenerated so locked restore sees the same graph in CI and local development.
