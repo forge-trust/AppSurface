@@ -103,6 +103,25 @@ dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.App
 
 For failed submissions, RazorWire also ships a convention-based form UX stack: default form-local fallbacks for unhandled failures, server helpers for validation errors, anti-forgery diagnostics in development, and styling/event hooks for consumers. See [Failed Form UX](Docs/form-failures.md) or run the sample and visit `/Reactivity/FormFailures`.
 
+## Page Navigation in 3 Minutes
+
+Use RazorWire page navigation when a server-rendered page needs same-page section links, active state, and optional mobile-panel close behavior without app-specific JavaScript.
+
+```cshtml
+<nav rw-page-nav aria-label="Page sections">
+    <button rw-page-nav-toggle="page-sections-panel" aria-expanded="true">Sections</button>
+    <div id="page-sections-panel" rw-page-nav-panel>
+        <a rw-page-nav-link href="#overview">Overview</a>
+        <a rw-page-nav-link href="#pricing">Pricing</a>
+    </div>
+</nav>
+
+<section id="overview" style="scroll-margin-top: 6rem">...</section>
+<section id="pricing" style="scroll-margin-top: 6rem">...</section>
+```
+
+RazorWire renders stable `data-rw-page-nav*` attributes, updates `aria-current="location"` on the active link, mirrors panel state through `data-rw-page-nav-panel-state`, and leaves all layout and styling to the host application. This replaces common brochure-site hooks such as `.page-scroll`, `data-bs-spy`, active classes, and `.navbar-collapse` close scripts. See the full contract and migration table in [Page Navigation](Docs/page-navigation.md), or run the MVC sample and visit `/Navigation/PageNavigation`.
+
 ## Generated UI Design Contract
 
 RazorWire should feel like a quiet enhancement inside the host application, not like a separate visual product placed on top of it. Package-owned generated UI follows the [RazorWire generated UI design contract](DESIGN.md).
@@ -140,9 +159,11 @@ RazorWire markup only lights up when your views import the package TagHelpers an
 
 <!-- appsurface:snippet id="razorwire-scripts" file="examples/razorwire-mvc/Views/Shared/_Layout.cshtml" marker="razorwire-scripts" lang="cshtml" -->
 ```cshtml
-<rw:scripts/>
+<rw:scripts page-navigation="true"/>
 ```
 <!-- /appsurface:snippet -->
+
+Use plain `<rw:scripts/>` when you only need the core runtime. Add `page-navigation="true"` on layouts or pages that render `rw-page-nav` / `data-rw-page-nav` markup.
 
 ## Configure Services (Optional)
 

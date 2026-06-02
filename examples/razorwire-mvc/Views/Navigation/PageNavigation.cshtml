@@ -1,0 +1,114 @@
+@{
+    ViewData["Title"] = "Page Navigation";
+}
+
+<style>
+    .brochure-section {
+        scroll-margin-top: 6rem;
+    }
+
+    .brochure-page-nav [data-rw-page-nav-active="true"] {
+        border-color: rgb(79 70 229);
+        background: rgb(238 242 255);
+        color: rgb(67 56 202);
+    }
+
+    .brochure-page-nav [data-rw-page-nav-panel-state="closed"] {
+        display: none;
+    }
+
+    @@media (min-width: 768px) {
+        .brochure-page-nav [data-rw-page-nav-panel] {
+            display: block;
+        }
+    }
+</style>
+
+<div class="grid gap-8 lg:grid-cols-[18rem_1fr]">
+    <aside class="brochure-page-nav lg:sticky lg:top-24 lg:self-start">
+        <nav rw-page-nav
+             class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+             aria-label="Brochure page sections">
+            <button rw-page-nav-toggle="brochure-sections-panel"
+                    class="flex w-full items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-left text-sm font-semibold text-slate-800 md:hidden"
+                    aria-expanded="true">
+                <span>Sections</span>
+                <span aria-hidden="true">+</span>
+            </button>
+            <div id="brochure-sections-panel"
+                 rw-page-nav-panel
+                 class="mt-3 space-y-2 md:mt-0"
+                 data-rw-page-nav-panel-state="open">
+                <a rw-page-nav-link
+                   class="block rounded-md border border-transparent px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-200 hover:bg-slate-50"
+                   href="#trust">Trust Signals</a>
+                <a rw-page-nav-link
+                   class="block rounded-md border border-transparent px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-200 hover:bg-slate-50"
+                   href="#workflow">Buyer Workflow</a>
+                <a rw-page-nav-link
+                   class="block rounded-md border border-transparent px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-200 hover:bg-slate-50"
+                   href="#replacement">Bootstrap Replacement</a>
+            </div>
+        </nav>
+    </aside>
+
+    <article class="space-y-8">
+        <header class="rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
+            <p class="text-sm font-semibold uppercase text-indigo-600">RazorWire behavior</p>
+            <h1 class="mt-3 text-4xl font-bold tracking-tight text-slate-950">Page navigation without brochure-site JavaScript</h1>
+            <p class="mt-4 max-w-2xl text-lg text-slate-600">
+                This page uses normal anchors, normal sections, RazorWire data attributes, and app-owned CSS. RazorWire owns the active state, hash updates, and optional mobile panel close.
+            </p>
+        </header>
+
+        <section id="trust" class="brochure-section rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
+            <h2 class="text-2xl font-bold text-slate-950">Trust Signals</h2>
+            <p class="mt-4 text-slate-600">
+                A brochure page can keep its durable anchor URLs and still get active navigation state. Each link points at a section id, so the no-JavaScript path remains a plain browser jump.
+            </p>
+            <div class="mt-6 grid gap-4 sm:grid-cols-3">
+                <div class="rounded-lg border border-slate-200 p-4">
+                    <div class="text-2xl font-bold text-slate-950">0</div>
+                    <p class="text-sm text-slate-500">Custom click handlers</p>
+                </div>
+                <div class="rounded-lg border border-slate-200 p-4">
+                    <div class="text-2xl font-bold text-slate-950">3</div>
+                    <p class="text-sm text-slate-500">Stable section links</p>
+                </div>
+                <div class="rounded-lg border border-slate-200 p-4">
+                    <div class="text-2xl font-bold text-slate-950">1</div>
+                    <p class="text-sm text-slate-500">Shared runtime owner</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="workflow" class="brochure-section rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
+            <h2 class="text-2xl font-bold text-slate-950">Buyer Workflow</h2>
+            <p class="mt-4 text-slate-600">
+                Mobile navigation can be a host-owned panel. The toggle and panel use normal ARIA attributes; RazorWire only mirrors open and closed state and closes the panel after successful same-page navigation.
+            </p>
+            <ol class="mt-6 space-y-3 text-slate-600">
+                <li><strong class="text-slate-900">1.</strong> Keep ordinary section anchors in rendered HTML.</li>
+                <li><strong class="text-slate-900">2.</strong> Add <code class="text-indigo-700">rw-page-nav-link</code> to same-page links.</li>
+                <li><strong class="text-slate-900">3.</strong> Style <code class="text-indigo-700">data-rw-page-nav-active</code> in app CSS.</li>
+            </ol>
+        </section>
+
+        <section id="replacement" class="brochure-section rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
+            <h2 class="text-2xl font-bold text-slate-950">Bootstrap Replacement</h2>
+            <p class="mt-4 text-slate-600">
+                Bootstrap scrollspy hooks such as <code class="text-indigo-700">data-bs-spy</code>, <code class="text-indigo-700">.page-scroll</code>, and navbar collapse behavior map to RazorWire page navigation attributes plus host CSS.
+            </p>
+            <dl class="mt-6 grid gap-4 sm:grid-cols-2">
+                <div class="rounded-lg border border-slate-200 p-4">
+                    <dt class="font-semibold text-slate-900">Old hook</dt>
+                    <dd class="mt-1 text-sm text-slate-600"><code>.page-scroll</code> click behavior</dd>
+                </div>
+                <div class="rounded-lg border border-slate-200 p-4">
+                    <dt class="font-semibold text-slate-900">New hook</dt>
+                    <dd class="mt-1 text-sm text-slate-600"><code>rw-page-nav-link</code> on normal anchors</dd>
+                </div>
+            </dl>
+        </section>
+    </article>
+</div>

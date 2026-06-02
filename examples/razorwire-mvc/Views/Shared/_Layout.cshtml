@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
     @* docs:snippet razorwire-scripts:start *@
-    <rw:scripts/>
+    <rw:scripts page-navigation="true"/>
     @* docs:snippet razorwire-scripts:end *@
     <link rel="stylesheet" href="~/css/site.gen.css" asp-append-version="true"/>
     <script src="~/js/site.js" data-turbo-eval="false"></script>
@@ -27,6 +27,7 @@
                     <a class="text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors" asp-area="" asp-controller="Reactivity" asp-action="Index">Reactivity</a>
                     <a class="text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors" asp-area="" asp-controller="Reactivity" asp-action="FormFailures">Form Failures</a>
                     <a class="text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors" asp-area="" asp-controller="Navigation" asp-action="Index">Navigation</a>
+                    <a class="text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors" asp-area="" asp-controller="Navigation" asp-action="PageNavigation">Page Nav</a>
                 </div>
             </div>
         </div>

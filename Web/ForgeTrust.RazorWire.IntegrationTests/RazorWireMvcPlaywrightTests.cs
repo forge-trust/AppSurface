@@ -50,6 +50,49 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task PageNavigationSample_TracksHashActiveStateAndClosesMobilePanel()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Navigation/PageNavigation#workflow");
+        await page.WaitForFunctionAsync(
+            """
+            () => window.RazorWire?.pageNavigationManager
+              && document.querySelector('.brochure-page-nav a[href="#workflow"]')?.getAttribute('aria-current') === 'location'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        Assert.True(await page.Locator("script[src*='/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js']").CountAsync() > 0);
+        Assert.Equal("true", await page.GetAttributeAsync(".brochure-page-nav [data-rw-page-nav-toggle]", "aria-expanded"));
+
+        await page.ClickAsync(".brochure-page-nav a[href='#replacement']");
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const active = document.querySelector('.brochure-page-nav a[href="#replacement"]');
+              const toggle = document.querySelector('.brochure-page-nav [data-rw-page-nav-toggle]');
+              const panel = document.getElementById('brochure-sections-panel');
+              return window.location.hash === '#replacement'
+                && active?.getAttribute('aria-current') === 'location'
+                && active?.getAttribute('data-rw-page-nav-active') === 'true'
+                && toggle?.getAttribute('aria-expanded') === 'false'
+                && panel?.getAttribute('data-rw-page-nav-panel-state') === 'closed';
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+    }
+
+    [Fact]
     public async Task RuntimeIslands_OnlyStrategyHydratesClientModuleAndClearsServerContent()
     {
         await using var context = await _fixture.Browser.NewContextAsync();

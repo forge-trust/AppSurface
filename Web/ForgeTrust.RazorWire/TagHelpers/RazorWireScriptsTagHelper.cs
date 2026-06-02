@@ -42,6 +42,16 @@ public class RazorWireScriptsTagHelper : TagHelper
     public ViewContext ViewContext { get; set; } = default!;
 
     /// <summary>
+    /// Gets or sets a value indicating whether the opt-in page-navigation runtime should be rendered after the core runtime.
+    /// </summary>
+    /// <remarks>
+    /// Page navigation is split out of the core runtime to keep the default startup path lightweight. Set this attribute
+    /// to <c>true</c> on layouts or pages that render <c>rw-page-nav</c> / <c>data-rw-page-nav</c> markup.
+    /// </remarks>
+    [HtmlAttributeName("page-navigation")]
+    public bool PageNavigation { get; set; }
+
+    /// <summary>
     /// Renders the client-side script tags required by RazorWire and removes the wrapper element so no enclosing tag is emitted.
     /// </summary>
     /// <param name="context">The current tag helper context.</param>
@@ -72,6 +82,11 @@ public class RazorWireScriptsTagHelper : TagHelper
         var islandsJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js");
+        var pageNavigationJs = PageNavigation
+            ? _fileVersionProvider.AddFileVersionToPath(
+                pathBase,
+                "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js")
+            : null;
 
         var diagnosticsEnabled = _options.Forms.EnableFailureUx
                                  && _options.Forms.EnableDevelopmentDiagnostics
@@ -90,12 +105,19 @@ public class RazorWireScriptsTagHelper : TagHelper
             pathBase.Add(new PathString(_options.Forms.Antiforgery.TokenEndpointPath)).Value!);
 
         // This includes Turbo.js and the custom RazorWire island loader.
-        output.Content.SetHtmlContent(
-            $@"
+        var scripts = $@"
 <script src=""https://cdn.jsdelivr.net/npm/@hotwired/turbo@8.0.12/dist/turbo.es2017-umd.js"" integrity=""sha256-1evN/OxCRDJtuVCzQ3gklVq8LzN6qhCm7x/sbawknOk="" crossorigin=""anonymous""></script>
 <script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}"" data-rw-live-origin=""{liveOrigin}"" data-rw-hybrid-credentials=""{credentialsMode}"" data-rw-antiforgery-endpoint=""{antiforgeryEndpoint}""></script>
 <script src=""{islandsJs}""></script>
-");
+";
+
+        if (pageNavigationJs is not null)
+        {
+            scripts += $@"<script src=""{pageNavigationJs}""></script>
+";
+        }
+
+        output.Content.SetHtmlContent(scripts);
     }
 
     private static string ResolveHybridCredentialsAttribute(RazorWireOptions options, string? normalizedLiveOrigin)

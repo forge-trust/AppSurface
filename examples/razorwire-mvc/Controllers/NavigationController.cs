@@ -15,4 +15,13 @@ public class NavigationController : Controller
     {
         return View();
     }
+
+    /// <summary>
+    /// Renders a brochure-style same-page navigation sample backed by RazorWire page navigation.
+    /// </summary>
+    /// <returns>A ViewResult that renders the page-navigation sample.</returns>
+    public IActionResult PageNavigation()
+    {
+        return View();
+    }
 }

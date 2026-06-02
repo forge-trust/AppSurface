@@ -79,6 +79,34 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains(
             "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js?v=456\"",
             content);
+        Assert.DoesNotContain("page-navigation.js", content);
+    }
+
+    [Fact]
+    public void Process_WhenPageNavigationEnabled_RendersOptInScript()
+    {
+        // Arrange
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider)
+        {
+            ViewContext = _viewContext,
+            PageNavigation = true
+        };
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789");
+
+        // Act
+        helper.Process(_context, _output);
+
+        // Assert
+        var content = _output.Content.GetContent();
+        Assert.Contains(
+            "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789\"",
+            content);
     }
 
     [Fact]

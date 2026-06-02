@@ -61,6 +61,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 - RazorWire stream endpoints now enforce single-process public SSE admission guardrails before allocating hub subscriber state. Channel names are validated before authorization, malformed channels return `400`, authorization denials still return `403`, and live capacity exhaustion returns `429` before SSE headers are written.
 - RazorWire streams can now emit same-origin Turbo Drive visit commands with `RazorWireStreamBuilder.Visit(...)`, giving live subscribers a narrow one-shot navigation primitive while keeping retained replay channels reserved for state snapshots.
 - RazorWire hybrid export can now keep managed streams, islands, and forms live after static publication. Exported pages may point those RazorWire-owned interactions at a configured live origin, choose credential behavior, or preserve same-origin app-owned routes for backend-passthrough hybrid hosts.
+- RazorWire now has first-class page navigation for server-rendered brochure and docs pages. Native anchors opt in with `rw-page-nav` / `rw-page-nav-link` / `rw-page-nav-toggle` / `rw-page-nav-panel`, the runtime owns same-page active state, hash navigation, lifecycle-safe rebinding, diagnostics, and optional panel close, and apps keep layout/styling through stable `data-rw-page-nav*` attributes.
 
 ### AppSurface Docs product example
 

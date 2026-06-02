@@ -240,6 +240,16 @@
         return entries[0]?.link ?? null;
     }
 
+    function isRazorWirePageNavigationManaged(shell) {
+        return shell?.hasAttribute?.("data-rw-page-nav") === true
+            && typeof window.RazorWire?.pageNavigationManager?.scan === "function";
+    }
+
+    function getRazorWireActiveLink(links) {
+        return links.find(link => link.getAttribute("data-rw-page-nav-active") === "true"
+            || link.getAttribute("aria-current") === "location") ?? null;
+    }
+
     function getOutlineEntries(links) {
         return links
             .map(link => {
@@ -788,6 +798,7 @@
         };
         const links = Array.from(shell.querySelectorAll(outlineLinkSelector))
             .filter(link => link instanceof HTMLAnchorElement);
+        const razorWireManaged = isRazorWirePageNavigationManaged(shell);
 
         if (links.length === 0) {
             return;
@@ -818,8 +829,25 @@
             setExpanded(shell, toggle, shell.dataset.outlineExpanded !== "true");
         });
 
+        if (razorWireManaged) {
+            addLifecycleEventListener(shell, "razorwire:page-nav:active-change", event => {
+                const link = event.detail?.link;
+                setActiveLink(links, links.includes(link) ? link : null, outlineContext);
+            });
+        }
+
         for (const link of links) {
             addLifecycleEventListener(link, "click", event => {
+                if (razorWireManaged) {
+                    setActiveLink(links, link, outlineContext);
+
+                    if (compactMedia?.matches) {
+                        setExpanded(shell, toggle, false);
+                    }
+
+                    return;
+                }
+
                 if (!mainContent) {
                     return;
                 }
@@ -849,13 +877,18 @@
             });
         }
 
-        setActiveLink(links, getInitialActiveLink(entries), outlineContext);
+        setActiveLink(
+            links,
+            razorWireManaged ? getRazorWireActiveLink(links) ?? getInitialActiveLink(entries) : getInitialActiveLink(entries),
+            outlineContext);
 
-        addLifecycleEventListener(window, "hashchange", () => {
-            setActiveLink(links, getActiveEntryFromHash(entries)?.link ?? null, outlineContext);
-        });
+        if (!razorWireManaged) {
+            addLifecycleEventListener(window, "hashchange", () => {
+                setActiveLink(links, getActiveEntryFromHash(entries)?.link ?? null, outlineContext);
+            });
+        }
 
-        if (!("IntersectionObserver" in window) || !mainContent) {
+        if (razorWireManaged || !("IntersectionObserver" in window) || !mainContent) {
             return;
         }
 
