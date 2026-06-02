@@ -144,6 +144,22 @@ public class CSharpDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_WhenOversizedCSharpFileIsSeekableReportsFullByteLength()
+    {
+        const int maxFileSizeBytes = 128;
+        var source = CreateDocumentedClassSource("LargeService", new string('x', 512));
+        var sourceBytes = Encoding.UTF8.GetBytes(source);
+        var harvester = CreateHarvester(CreateOptionsWithCSharpMaxFileSize(maxFileSizeBytes));
+        await WriteUtf8Async(CombineUnder(_testRoot, "LargeService.cs"), source);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+        Assert.Contains($"observed source size is {sourceBytes.Length} bytes", diagnostic.Cause, StringComparison.Ordinal);
+        Assert.Contains($"MaxFileSizeBytes is {maxFileSizeBytes}", diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldIncludeUtf8BomInCSharpParserInputByteBudget()
     {
         var source = CreateDocumentedClassSource("BomService");

@@ -37,7 +37,9 @@ public sealed class AppSurfaceDocsCSharpHarvestOptions
     /// <remarks>
     /// Oversized files are skipped with a harvest diagnostic before Roslyn parsing so generated or adversarial source
     /// cannot dominate harvest memory. Prefer excluding generated source with <see cref="ExcludeGlobs"/> instead of
-    /// raising this limit. The default is sized for authored API source, not as a Roslyn parser safety threshold.
+    /// raising this limit. The value must be greater than zero; zero and negative values are invalid and are rejected
+    /// during options validation. The <see cref="DefaultMaxFileSizeBytes"/> default is sized for authored API source,
+    /// not as a Roslyn parser safety threshold.
     /// </remarks>
     public long MaxFileSizeBytes { get; set; } = DefaultMaxFileSizeBytes;
 }
