@@ -30,11 +30,20 @@ Update an existing global install with the same package id:
 dotnet tool update --global ForgeTrust.AppSurface.Cli --prerelease
 ```
 
+Verify the installed global or tool-path command reports the package SemVer exactly:
+
+```bash
+appsurface --version
+```
+
+Prerelease installs print values such as `0.1.0-rc.1`, without a leading `v` or build metadata. Use the package artifact manifest, publish ledger, or release note when you need build provenance beyond the package version.
+
 Use a local tool manifest when you want the command version pinned per repository:
 
 ```bash
 dotnet new tool-manifest
 dotnet tool install ForgeTrust.AppSurface.Cli --prerelease
+dotnet tool run appsurface --version
 dotnet tool run appsurface docs --repo .
 ```
 
@@ -42,6 +51,7 @@ Update the repo-scoped tool version with:
 
 ```bash
 dotnet tool update ForgeTrust.AppSurface.Cli --prerelease
+dotnet tool run appsurface --version
 ```
 
 ## Commands
