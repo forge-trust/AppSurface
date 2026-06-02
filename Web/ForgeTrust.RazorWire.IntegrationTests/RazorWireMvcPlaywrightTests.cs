@@ -93,6 +93,33 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task PageNavigationSample_NoJavaScriptFallbackAnchorsWork()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            JavaScriptEnabled = false,
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Navigation/PageNavigation#workflow");
+
+        Assert.Equal(1, await page.Locator(".brochure-page-nav a[href='#workflow']").CountAsync());
+        Assert.Equal(1, await page.Locator("#workflow").CountAsync());
+        Assert.EndsWith("#workflow", page.Url, StringComparison.Ordinal);
+
+        await page.ClickAsync(".brochure-page-nav a[href='#replacement']");
+
+        Assert.EndsWith("#replacement", page.Url, StringComparison.Ordinal);
+        Assert.Equal(1, await page.Locator("#replacement").CountAsync());
+        Assert.Equal(0, await page.Locator(".brochure-page-nav [data-rw-page-nav-active='true']").CountAsync());
+    }
+
+    [Fact]
     public async Task RuntimeIslands_OnlyStrategyHydratesClientModuleAndClearsServerContent()
     {
         await using var context = await _fixture.Browser.NewContextAsync();

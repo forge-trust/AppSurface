@@ -69,7 +69,9 @@ interface PageNavigationEntry {
 
         refreshActiveFromHash() {
             for (const controller of this.controllers.values()) {
-                controller.refreshActiveFromHash();
+                if (!controller.refreshActiveFromHash()) {
+                    controller.refreshActiveFromViewport();
+                }
             }
         }
 

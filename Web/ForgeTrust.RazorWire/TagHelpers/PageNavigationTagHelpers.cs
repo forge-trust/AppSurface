@@ -70,8 +70,8 @@ public sealed class PageNavigationToggleTagHelper : TagHelper
     /// Gets or sets the optional id of the panel controlled by this toggle.
     /// </summary>
     /// <remarks>
-    /// When a non-empty value other than <c>true</c> is supplied, the helper emits it as <c>aria-controls</c> unless
-    /// the button already defines <c>aria-controls</c>.
+    /// When a non-empty value other than the boolean sentinels <c>true</c> or <c>false</c> is supplied, the helper emits
+    /// it as <c>aria-controls</c> unless the button already defines <c>aria-controls</c>.
     /// </remarks>
     [HtmlAttributeName("rw-page-nav-toggle")]
     public string? Controls { get; set; }
@@ -88,6 +88,7 @@ public sealed class PageNavigationToggleTagHelper : TagHelper
 
         if (!string.IsNullOrWhiteSpace(Controls)
             && !string.Equals(Controls, "true", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(Controls, "false", StringComparison.OrdinalIgnoreCase)
             && !output.Attributes.ContainsName("aria-controls"))
         {
             output.Attributes.SetAttribute("aria-controls", Controls);

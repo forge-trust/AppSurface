@@ -159,11 +159,11 @@ RazorWire markup only lights up when your views import the package TagHelpers an
 
 <!-- appsurface:snippet id="razorwire-scripts" file="examples/razorwire-mvc/Views/Shared/_Layout.cshtml" marker="razorwire-scripts" lang="cshtml" -->
 ```cshtml
-<rw:scripts page-navigation="true"/>
+<rw:scripts/>
 ```
 <!-- /appsurface:snippet -->
 
-Use plain `<rw:scripts/>` when you only need the core runtime. Add `page-navigation="true"` on layouts or pages that render `rw-page-nav` / `data-rw-page-nav` markup.
+Plain `<rw:scripts/>` is enough for page navigation. RazorWire emits a small detector that loads the separate `page-navigation.js` asset only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup, including after Turbo page or frame renders. The optional `page-navigation="true"` attribute is still supported as an eager-load escape hatch, but it is not required for normal adoption.
 
 ## Configure Services (Optional)
 

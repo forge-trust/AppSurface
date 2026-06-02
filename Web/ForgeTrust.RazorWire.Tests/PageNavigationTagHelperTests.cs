@@ -74,6 +74,8 @@ public sealed class PageNavigationTagHelperTests
     [InlineData("")]
     [InlineData("true")]
     [InlineData("TRUE")]
+    [InlineData("false")]
+    [InlineData("FALSE")]
     public void Toggle_Process_WhenControlsIsEmptyOrBooleanSentinel_DoesNotEmitAriaControls(string controls)
     {
         var output = CreateOutput("button", "rw-page-nav-toggle", controls);

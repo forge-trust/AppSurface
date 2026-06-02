@@ -58,6 +58,10 @@ public class RazorWireScriptsTagHelperTests
                 "/my-app",
                 "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js"))
             .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js?v=456");
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789");
 
         // Act
         _helper.Process(_context, _output);
@@ -79,11 +83,14 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains(
             "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js?v=456\"",
             content);
-        Assert.DoesNotContain("page-navigation.js", content);
+        Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789\"", content);
+        Assert.Contains("const selector = \"[data-rw-page-nav]\";", content);
+        Assert.Contains("data-rw-page-navigation-runtime", content);
+        Assert.Contains("turbo:frame-load", content);
     }
 
     [Fact]
-    public void Process_WhenPageNavigationEnabled_RendersOptInScript()
+    public void Process_WhenPageNavigationEnabled_RendersEagerScript()
     {
         // Arrange
         var helper = new RazorWireScriptsTagHelper(_fileVersionProvider)
@@ -107,6 +114,8 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains(
             "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789\"",
             content);
+        Assert.Contains("data-rw-page-navigation-runtime=\"eager\"", content);
+        Assert.DoesNotContain("const selector = \"[data-rw-page-nav]\";", content);
     }
 
     [Fact]

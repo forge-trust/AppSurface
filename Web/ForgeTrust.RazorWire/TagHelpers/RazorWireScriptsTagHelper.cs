@@ -42,11 +42,13 @@ public class RazorWireScriptsTagHelper : TagHelper
     public ViewContext ViewContext { get; set; } = default!;
 
     /// <summary>
-    /// Gets or sets a value indicating whether the opt-in page-navigation runtime should be rendered after the core runtime.
+    /// Gets or sets a value indicating whether the page-navigation runtime should be eagerly rendered after the core runtime.
     /// </summary>
     /// <remarks>
-    /// Page navigation is split out of the core runtime to keep the default startup path lightweight. Set this attribute
-    /// to <c>true</c> on layouts or pages that render <c>rw-page-nav</c> / <c>data-rw-page-nav</c> markup.
+    /// Page navigation is split out of the core runtime to keep the default startup path lightweight. Plain
+    /// <c>&lt;rw:scripts /&gt;</c> emits a small usage detector that loads the runtime only when the rendered page contains
+    /// <c>rw-page-nav</c> / <c>data-rw-page-nav</c> markup. Set this attribute to <c>true</c> only when a host wants to
+    /// eagerly fetch the page-navigation asset before the detector runs.
     /// </remarks>
     [HtmlAttributeName("page-navigation")]
     public bool PageNavigation { get; set; }
@@ -82,11 +84,9 @@ public class RazorWireScriptsTagHelper : TagHelper
         var islandsJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js");
-        var pageNavigationJs = PageNavigation
-            ? _fileVersionProvider.AddFileVersionToPath(
-                pathBase,
-                "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js")
-            : null;
+        var pageNavigationJs = _fileVersionProvider.AddFileVersionToPath(
+            pathBase,
+            "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js");
 
         var diagnosticsEnabled = _options.Forms.EnableFailureUx
                                  && _options.Forms.EnableDevelopmentDiagnostics
@@ -111,13 +111,47 @@ public class RazorWireScriptsTagHelper : TagHelper
 <script src=""{islandsJs}""></script>
 ";
 
-        if (pageNavigationJs is not null)
+        if (PageNavigation)
         {
-            scripts += $@"<script src=""{pageNavigationJs}""></script>
+            scripts += $@"<script src=""{pageNavigationJs}"" data-rw-page-navigation-runtime=""eager""></script>
 ";
+        }
+        else
+        {
+            scripts += BuildPageNavigationAutoloadScript(pageNavigationJs);
         }
 
         output.Content.SetHtmlContent(scripts);
+    }
+
+    private static string BuildPageNavigationAutoloadScript(string pageNavigationJs)
+    {
+        var encodedSource = JavaScriptEncoder.Default.Encode(pageNavigationJs);
+
+        return $@"<script>
+(() => {{
+  const source = ""{encodedSource}"";
+  const marker = ""data-rw-page-navigation-runtime"";
+  const selector = ""[data-rw-page-nav]"";
+  const load = () => {{
+    if (window.RazorWirePageNavigationInitialized || document.querySelector(`script[${{marker}}]`) || !document.querySelector(selector)) return;
+    const script = document.createElement(""script"");
+    script.src = source;
+    script.defer = true;
+    script.setAttribute(marker, ""auto"");
+    document.head.appendChild(script);
+  }};
+  if (document.readyState === ""loading"") {{
+    document.addEventListener(""DOMContentLoaded"", load, {{ once: true }});
+  }} else {{
+    load();
+  }}
+  document.addEventListener(""turbo:render"", load);
+  document.addEventListener(""turbo:load"", load);
+  document.addEventListener(""turbo:frame-load"", load);
+}})();
+</script>
+";
     }
 
     private static string ResolveHybridCredentialsAttribute(RazorWireOptions options, string? normalizedLiveOrigin)

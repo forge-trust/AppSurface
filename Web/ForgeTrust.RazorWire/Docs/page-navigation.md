@@ -6,7 +6,7 @@ The no-JavaScript fallback is ordinary hash navigation. RazorWire owns behavior 
 
 ## Page Navigation in 3 Minutes
 
-1. Confirm your layout renders `<rw:scripts page-navigation="true"/>`.
+1. Confirm your layout renders `<rw:scripts/>`.
 1. Add one page-nav root with same-page hash links.
 1. Add matching section `id` values and app CSS for active state or sticky-header offset.
 
@@ -156,13 +156,13 @@ RazorWire does not emulate Bootstrap classes, breakpoints, off-canvas menus, tab
 
 ## Static Export
 
-The markup remains static HTML. If a static export includes a page-nav root and uses RazorWire enhancement, the exported tree must include the opt-in `page-navigation.js` RazorWire asset. Archive validation should confirm the script is present when page navigation appears in exported content.
+The markup remains static HTML. If a static export includes a page-nav root and uses RazorWire enhancement, the exported tree must include the standard `<rw:scripts/>` output and the package `page-navigation.js` asset. The standard scripts output lazy-loads that asset when page-navigation roots are present, so archive validation should confirm the asset remains available when page navigation appears in exported content.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `window.RazorWire.pageNavigationManager` is undefined | The opt-in script was not rendered. | Use `<rw:scripts page-navigation="true"/>` or include the package `page-navigation.js` asset after the core runtime. |
+| `window.RazorWire.pageNavigationManager` is undefined | No page-navigation root has been rendered yet, `<rw:scripts/>` is missing, or a custom script pipeline omitted the package asset. | Render `<rw:scripts/>` once in the layout and keep `page-navigation.js` available, or include the package asset after the core runtime in a custom pipeline. |
 | No active link changes | Links are missing `data-rw-page-nav-link` or targets lack matching `id` values. | Add link markers and stable section IDs. |
 | Panel does not close | Toggle is missing `aria-controls`, controls a missing id, or no panel is marked. | Add `rw-page-nav-toggle="panel-id"` and `id="panel-id"` on the panel. |
 | Links disappear without JavaScript | App CSS hides the panel before enhancement. | Scope closed-panel CSS under `[data-rw-page-nav-enhanced="true"]`. |

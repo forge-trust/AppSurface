@@ -1025,6 +1025,24 @@ test('page navigation promotes the first visible section from viewport state', (
   assert.equal(pricingLink.getAttribute('data-rw-page-nav-active'), 'true');
 });
 
+test('page navigation falls back to viewport state when hash no longer resolves', () => {
+  const { context, document, window } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const { nav, overview, pricing, overviewLink, pricingLink } = createPageNavigationFixture(document);
+  overview.rectTop = 24;
+  pricing.rectTop = 800;
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+  assert.equal(pricingLink.getAttribute('aria-current'), 'location');
+
+  window.location.href = 'https://example.test/#missing';
+  window.location.hash = '#missing';
+  context.window.RazorWire.pageNavigationManager.refreshActiveFromHash();
+
+  assert.equal(overviewLink.getAttribute('aria-current'), 'location');
+  assert.equal(overviewLink.getAttribute('data-rw-page-nav-active'), 'true');
+  assert.equal(pricingLink.hasAttribute('aria-current'), false);
+});
+
 test('page navigation honors reduced motion when scrolling to a target', () => {
   const { context, document } = loadRuntime({
     pageNavigation: true,

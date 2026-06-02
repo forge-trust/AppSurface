@@ -36,7 +36,7 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @config window.RazorWire.pageNavigationManager
  * @type {object}
- * @source <rw:scripts page-navigation="true" />
+ * @source <rw:scripts /> with rendered `[data-rw-page-nav]` markup
  * @property {Function} scan - Re-scans the document for `[data-rw-page-nav]` roots after custom DOM updates.
  * @property {Function} prune - Removes controllers for disconnected roots.
  * @property {Function} refreshActiveFromHash - Recomputes active links from the current `window.location.hash`.
