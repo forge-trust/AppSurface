@@ -26,6 +26,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - RazorWire and AppSurface hybrid export now fail missing browser-delivered static assets with `RWEXPORT003` while still tolerating live/page routes, frames, forms, streams, islands, canonical metadata, DNS hints, and page-shaped preload or prefetch hints.
 - Config audit discovered-key reports now expose value display state and omit raw unknown or broad-descendant scalar values unless the exact leaf key is registered or the value is redacted.
 - AppSurface Docs standalone 404 pages now render a harvest-free recovery hub with safe links to Search, Docs home, and route-safe Start Here or Packages destinations while preserving API, JSON, and non-browser 404 behavior.
+- Static website export docs now explain deployment-owned extras such as `CNAME`, custom `/404.html` routes, exporter-owned `_redirects`, and AppSurface Docs exact release archive boundaries.
 
 ## 0.1.0-rc.1 - 2026-05-29
 
