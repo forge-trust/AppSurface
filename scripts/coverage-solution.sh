@@ -389,7 +389,6 @@ if [[ "$MERGE_ONLY" == true ]]; then
   exit 0
 fi
 
-mkdir -p "$OUTPUT_DIR/projects"
 rm -f "$OUTPUT_DIR/coverage.cobertura.xml" "$OUTPUT_DIR/summary.txt" "$TIMINGS_FILE" "$OUTPUT_DIR"/junit-*.xml
 rm -rf "$OUTPUT_DIR/projects" "$OUTPUT_DIR/reportgenerator"
 mkdir -p "$OUTPUT_DIR/projects"
@@ -451,7 +450,7 @@ for i in "${!test_projects[@]}"; do
     "--logger:junit;LogFilePath=$junit_file"
     /p:CollectCoverage=true
     "/p:CoverletOutput=$project_output_dir/coverage"
-    "/p:CoverletOutputFormat=json%2ccobertura"
+    "/p:CoverletOutputFormat=cobertura"
     "/p:Include=$INCLUDE_FILTER"
     "/p:Exclude=$EXCLUDE_FILTER"
   )
