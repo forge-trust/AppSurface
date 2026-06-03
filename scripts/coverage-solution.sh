@@ -116,19 +116,25 @@ if [[ -z "$BUILD_SOLUTION" ]]; then
   fi
 fi
 
+if [[ "$MERGE_ONLY" == true ]]; then
+  GROUP_NAME="merge-only"
+fi
+
 if [[ ! -f "$SOLUTION_PATH" ]]; then
   echo "Solution not found: $SOLUTION_PATH" >&2
   exit 1
 fi
 
-case "$GROUP_NAME" in
-  all|core|tools|web|docs|razorwire|integration) ;;
-  *)
-    echo "Unknown test group: $GROUP_NAME" >&2
-    echo "Valid groups: all, core, tools, web, docs, razorwire, integration" >&2
-    exit 2
-    ;;
-esac
+if [[ "$MERGE_ONLY" != true ]]; then
+  case "$GROUP_NAME" in
+    all|core|tools|web|docs|razorwire|integration) ;;
+    *)
+      echo "Unknown test group: $GROUP_NAME" >&2
+      echo "Valid groups: all, core, tools, web, docs, razorwire, integration" >&2
+      exit 2
+      ;;
+  esac
+fi
 
 canonicalize_directory() {
   local label="$1"
@@ -137,6 +143,29 @@ canonicalize_directory() {
 
   if ! canonical="$(mkdir -p "$path" && cd "$path" && pwd)"; then
     echo "Unable to prepare $label directory: $path" >&2
+    return 1
+  fi
+
+  if [[ -z "$canonical" ]]; then
+    echo "Unable to resolve $label directory: $path" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$canonical"
+}
+
+canonicalize_existing_directory() {
+  local label="$1"
+  local path="$2"
+  local canonical
+
+  if [[ ! -d "$path" ]]; then
+    echo "$label directory not found: $path" >&2
+    return 1
+  fi
+
+  if ! canonical="$(cd "$path" && pwd)"; then
+    echo "Unable to resolve $label directory: $path" >&2
     return 1
   fi
 
@@ -373,7 +402,7 @@ EOF
 
 if [[ "$MERGE_ONLY" == true ]]; then
   start_time="$(seconds_now)"
-  if ! MERGE_SOURCE_DIR="$(canonicalize_directory "merge source" "$MERGE_SOURCE_DIR")"; then
+  if ! MERGE_SOURCE_DIR="$(canonicalize_existing_directory "Merge source" "$MERGE_SOURCE_DIR")"; then
     exit 1
   fi
   rm -f "$OUTPUT_DIR/coverage.cobertura.xml" "$OUTPUT_DIR/summary.txt" "$TIMINGS_FILE" "$OUTPUT_DIR"/junit-*.xml
