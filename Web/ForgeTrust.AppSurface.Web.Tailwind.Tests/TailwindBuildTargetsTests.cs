@@ -902,12 +902,12 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         var taskAssemblyDirectory = Path.GetDirectoryName(typeof(RunTailwindBuildTask).Assembly.Location)!;
         foreach (var file in Directory.EnumerateFiles(taskAssemblyDirectory, "*.dll"))
         {
-            File.Copy(file, Path.Join(taskDirectory, Path.GetFileName(file)));
+            File.Copy(file, TestPathUtils.PathUnder(taskDirectory, Path.GetFileName(file)));
         }
 
         foreach (var file in Directory.EnumerateFiles(taskAssemblyDirectory, "*.deps.json"))
         {
-            File.Copy(file, Path.Join(taskDirectory, Path.GetFileName(file)));
+            File.Copy(file, TestPathUtils.PathUnder(taskDirectory, Path.GetFileName(file)));
         }
 
         await Task.CompletedTask;

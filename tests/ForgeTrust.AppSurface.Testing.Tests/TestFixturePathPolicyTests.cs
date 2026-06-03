@@ -79,9 +79,9 @@ public sealed class TestFixturePathPolicyTests
         const string source = """
             public sealed class SampleTests
             {
-                public void Test(string root, string assetRelativePath)
+                public void Test(string root, string fileName)
                 {
-                    var path = Path.Join(root, assetRelativePath);
+                    var path = Path.Join(root, fileName);
                 }
             }
             """;
@@ -89,7 +89,7 @@ public sealed class TestFixturePathPolicyTests
         var violation = Assert.Single(TestPathPolicyScanner.ScanSource("Sample.Tests/SampleTests.cs", source));
 
         Assert.Equal("DynamicUnderBasePath", violation.Kind);
-        Assert.Equal("assetRelativePath", violation.RiskyArgument);
+        Assert.Equal("fileName", violation.RiskyArgument);
     }
 
     [Fact]
@@ -278,16 +278,19 @@ internal sealed record PathPolicyViolation(
 /// <remarks>
 /// The scanner examines test source paths selected by <see cref="IsTestSourcePath" /> and classifies
 /// <c>Path.Combine</c>/<c>Path.Join</c> calls through <see cref="ScanSource" />. Arguments after the first base segment
-/// are considered risky when their expression names contain tokens from <c>RiskyNameTokens</c>, such as
-/// <c>path</c> or <c>relative</c>. This catches fixture helpers that should use <c>TestPathUtils.PathUnder</c>
-/// because rooted later segments can discard the intended base.
+/// are considered risky when their expression names contain child path tokens such as <c>path</c>, <c>relative</c>,
+/// <c>file</c>, <c>child</c>, or <c>segment</c>, or when they access a child <c>Name</c> member. This catches fixture
+/// helpers that should use <c>TestPathUtils.PathUnder</c> because rooted later segments can discard the intended base.
 /// </remarks>
 internal static class TestPathPolicyScanner
 {
     private static readonly string[] RiskyNameTokens =
     [
         "path",
-        "relative"
+        "relative",
+        "file",
+        "child",
+        "segment"
     ];
 
     /// <summary>
@@ -432,7 +435,9 @@ internal static class TestPathPolicyScanner
 
     private static bool ContainsRiskyMemberAccess(MemberAccessExpressionSyntax memberAccess)
     {
-        if (IsRiskyName(memberAccess.Name.Identifier.ValueText))
+        var memberName = memberAccess.Name.Identifier.ValueText;
+        if (IsRiskyName(memberName)
+            || string.Equals(memberName, "Name", StringComparison.Ordinal))
         {
             return true;
         }
@@ -443,15 +448,11 @@ internal static class TestPathPolicyScanner
 
     private static bool ContainsRiskyInvocation(InvocationExpressionSyntax invocation)
     {
-        var expressionIsRisky = invocation.Expression switch
-        {
-            IdentifierNameSyntax identifier => IsRiskyName(identifier.Identifier.ValueText),
-            MemberAccessExpressionSyntax memberAccess => IsRiskyName(memberAccess.Name.Identifier.ValueText)
-                || (!IsSystemPathExpression(memberAccess.Expression) && ContainsRiskyExpression(memberAccess.Expression)),
-            _ => ContainsRiskyExpression(invocation.Expression)
-        };
+        var receiverIsRisky = invocation.Expression is MemberAccessExpressionSyntax memberAccess
+            && !IsSystemPathExpression(memberAccess.Expression)
+            && ContainsRiskyExpression(memberAccess.Expression);
 
-        return expressionIsRisky
+        return receiverIsRisky
             || invocation.ArgumentList.Arguments.Any(argument => ContainsRiskyExpression(argument.Expression));
     }
 
