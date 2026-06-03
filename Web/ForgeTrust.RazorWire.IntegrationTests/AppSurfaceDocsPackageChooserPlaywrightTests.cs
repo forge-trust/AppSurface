@@ -8,8 +8,6 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
 {
     private const string CurrentPackageReleaseNotePath = "/docs/releases/v0.1.0-rc.2";
     private const string CurrentPackageReleaseNoteHeading = "Release 0.1.0-rc.2";
-    private const string PublicPackageReadmeReleaseNotePath = "/docs/releases/v0.1.0-rc.1";
-    private const string PublicPackageReadmeReleaseNoteHeading = "AppSurface 0.1.0 RC 1";
 
     private readonly AppSurfaceDocsPlaywrightFixture _fixture;
 
@@ -128,8 +126,8 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
         Assert.Equal(
-            PublicPackageReadmeReleaseNotePath,
-            await page.GetAttributeAsync($".docs-content a[href='{PublicPackageReadmeReleaseNotePath}']", "href"));
+            CurrentPackageReleaseNotePath,
+            await page.GetAttributeAsync($".docs-content a[href='{CurrentPackageReleaseNotePath}']", "href"));
 
         await page.GotoAsync($"{_fixture.DocsUrl}/web/forgetrust.appsurface.web.openapi");
         await page.WaitForFunctionAsync(
@@ -137,9 +135,9 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
 
-        await page.Locator($".docs-content a[href='{PublicPackageReadmeReleaseNotePath}']").First.ClickAsync();
-        await WaitForPathAndHeadingAsync(page, PublicPackageReadmeReleaseNotePath, PublicPackageReadmeReleaseNoteHeading);
-        Assert.Equal(PublicPackageReadmeReleaseNoteHeading, (await page.TextContentAsync("h1"))?.Trim());
+        await page.Locator($".docs-content a[href='{CurrentPackageReleaseNotePath}']").First.ClickAsync();
+        await WaitForPathAndHeadingAsync(page, CurrentPackageReleaseNotePath, CurrentPackageReleaseNoteHeading);
+        Assert.Equal(CurrentPackageReleaseNoteHeading, (await page.TextContentAsync("h1"))?.Trim());
     }
 
     [Fact]
