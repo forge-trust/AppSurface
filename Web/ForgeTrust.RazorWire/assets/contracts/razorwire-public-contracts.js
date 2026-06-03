@@ -205,12 +205,30 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
- * CSS inset contract for active page navigation reveal inside overflowing vertical nav surfaces.
+ * Logical CSS inset contract for active page navigation reveal inside overflowing vertical nav surfaces.
+ * @public
+ * @namespace RazorWire
+ * @cssHook scroll-padding-block
+ * @hookKind css-property
+ * @target visible vertical scrollable ancestor between `a[data-rw-page-nav-link]` and `[data-rw-page-nav]`
+ * @stability stable
+ */
+
+/**
+ * Start-side CSS inset contract for active page navigation reveal inside overflowing vertical nav surfaces.
  * @public
  * @namespace RazorWire
  * @cssHook scroll-padding-top
+ * @hookKind css-property
+ * @target visible vertical scrollable ancestor between `a[data-rw-page-nav-link]` and `[data-rw-page-nav]`
+ * @stability stable
+ */
+
+/**
+ * End-side CSS inset contract for active page navigation reveal inside overflowing vertical nav surfaces.
+ * @public
+ * @namespace RazorWire
  * @cssHook scroll-padding-bottom
- * @cssHook scroll-padding-block
  * @hookKind css-property
  * @target visible vertical scrollable ancestor between `a[data-rw-page-nav-link]` and `[data-rw-page-nav]`
  * @stability stable
