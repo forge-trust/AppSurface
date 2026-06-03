@@ -402,6 +402,9 @@
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
+      },
       "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {

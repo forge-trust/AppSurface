@@ -345,7 +345,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var exception = await Assert.ThrowsAsync<ArgumentException>(
             () => WriteAsync("../escaped.js", "export const escaped = true;"));
 
-        Assert.Contains("Test fixture paths must stay under the test root.", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("parent traversal", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -2573,29 +2573,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
     private async Task WriteAsync(string relativePath, string content)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
-
-        var normalizedRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
-        if (Path.IsPathRooted(normalizedRelativePath))
-        {
-            throw new ArgumentException("Test fixture paths must be relative.", nameof(relativePath));
-        }
-
-        var safeRelativePath = normalizedRelativePath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var fullRoot = Path.GetFullPath(_testRoot);
-        var fullPath = Path.GetFullPath(Path.Join(fullRoot, safeRelativePath));
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        var rootPrefix = fullRoot.EndsWith(Path.DirectorySeparatorChar)
-            ? fullRoot
-            : fullRoot + Path.DirectorySeparatorChar;
-        if (!fullPath.Equals(fullRoot, comparison)
-            && !fullPath.StartsWith(rootPrefix, comparison))
-        {
-            throw new ArgumentException("Test fixture paths must stay under the test root.", nameof(relativePath));
-        }
-
+        var fullPath = TestPathUtils.PathUnder(_testRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllTextAsync(fullPath, content);
     }

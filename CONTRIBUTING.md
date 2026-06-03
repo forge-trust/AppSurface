@@ -38,6 +38,14 @@ Good docs pull requests usually include:
 - Pitfalls that call out ordering requirements, generated output, hosting assumptions, or common mistakes.
 - Verification notes for commands, links, snippets, or examples that were checked.
 
+## Test fixture path policy
+
+Tests that build a full filesystem path under a repository root, temp workspace, project directory, output directory, or other trusted base should use `TestPathUtils.PathUnder` from `ForgeTrust.AppSurface.Testing`. Add a project reference to `tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj` and a `Using Include="ForgeTrust.AppSurface.Testing"` entry when a test project needs the helper.
+
+Use `PathUnder` for dynamic repo-relative, temp-relative, or output-relative values such as `projectPath`, `relativePath`, and `outputRelativePath`. Use `TestPathUtils.RelativePath` only when the test needs a validated relative string rather than a full filesystem path.
+
+Literal expected paths and tests intentionally exercising `Path.Join` or `Path.Combine` platform behavior may continue to use the BCL APIs directly. If the policy test flags an intentional case, add a reasoned entry to `tests/ForgeTrust.AppSurface.Testing/path-policy-allowlist.yml`; entries without reasons or entries that no longer match a violation fail validation.
+
 ## Release contract
 
 - AppSurface releases the monorepo in unison. Packages, CLI tooling, examples, and docs-facing behavior all roll into the same next version.

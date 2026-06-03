@@ -27,10 +27,12 @@
 
   <ItemGroup>
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
+    <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <Using Include="ForgeTrust.AppSurface.Testing" />
     <Using Include="Xunit" />
   </ItemGroup>
 

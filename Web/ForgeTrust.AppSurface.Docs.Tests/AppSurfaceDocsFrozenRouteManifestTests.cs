@@ -547,7 +547,7 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
 
     private void WriteFrozenManifest(string json)
     {
-        File.WriteAllText(Path.Join(_tempDirectory, AppSurfaceDocsFrozenRouteManifest.FileName), json);
+        File.WriteAllText(TestPathUtils.PathUnder(_tempDirectory, AppSurfaceDocsFrozenRouteManifest.FileName), json);
     }
 
     private AppSurfaceDocsFrozenRouteManifest LoadFrozenManifest(string json)

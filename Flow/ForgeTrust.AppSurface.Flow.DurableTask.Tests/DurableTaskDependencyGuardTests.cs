@@ -24,6 +24,16 @@ public sealed class DurableTaskDependencyGuardTests
         Assert.DoesNotContain(references, reference => reference.Name?.Contains("SemanticKernel", StringComparison.OrdinalIgnoreCase) == true);
     }
 
+    [Fact]
+    public void LoadProject_WithRootedPath_ThrowsArgumentException()
+    {
+        var rootedPath = Path.GetFullPath("Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj");
+
+        var exception = Assert.Throws<ArgumentException>(() => LoadProject(rootedPath));
+
+        Assert.Contains("rooted", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static IEnumerable<string> GetIncludes(XDocument project, string elementName) =>
         project.Descendants()
             .Where(element => element.Name.LocalName == elementName)
@@ -33,23 +43,7 @@ public sealed class DurableTaskDependencyGuardTests
 
     private static XDocument LoadProject(string projectPath)
     {
-        var repositoryRoot = FindRepositoryRoot();
-        return XDocument.Load(Path.Join(repositoryRoot, projectPath.Replace('/', Path.DirectorySeparatorChar)));
-    }
-
-    private static string FindRepositoryRoot()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null)
-        {
-            if (File.Exists(Path.Join(current.FullName, "ForgeTrust.AppSurface.slnx")))
-            {
-                return current.FullName;
-            }
-
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException("Could not find repository root.");
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        return XDocument.Load(TestPathUtils.PathUnder(repositoryRoot, projectPath));
     }
 }

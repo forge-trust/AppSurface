@@ -60,6 +60,17 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task WriteAsync_WhenPathEscapesRoot_ThrowsHelpfulArgumentException()
+    {
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => WriteAsync("../outside/.gitignore", string.Empty));
+
+        Assert.Equal("relativePath", exception.ParamName);
+        Assert.Contains("relative and stay under the test root", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.IsType<ArgumentException>(exception.InnerException);
+    }
+
+    [Fact]
     public async Task ShouldPruneDirectory_WhenDirectoryIsRootDoesNotPrune()
     {
         await WriteAsync(".gitignore", "*\n");
@@ -804,17 +815,14 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
 
     private async Task WriteAsync(string relativePath, string content)
     {
-        var localRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
-        if (Path.IsPathRooted(localRelativePath))
+        string fullPath;
+        try
         {
-            throw new ArgumentException("Fixture paths must be relative.", nameof(relativePath));
+            fullPath = TestPathUtils.PathUnder(_root, relativePath);
         }
-
-        var fullPath = Path.GetFullPath(Path.Join(_root, localRelativePath));
-        var rootPrefix = Path.TrimEndingDirectorySeparator(_root) + Path.DirectorySeparatorChar;
-        if (!fullPath.StartsWith(rootPrefix, StringComparison.Ordinal))
+        catch (ArgumentException exception)
         {
-            throw new ArgumentException("Fixture paths must stay under the test root.", nameof(relativePath));
+            throw new ArgumentException("Fixture paths must be relative and stay under the test root.", nameof(relativePath), exception);
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
