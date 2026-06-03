@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 
 const runtimePath = new URL('../wwwroot/razorwire/razorwire.js', import.meta.url);
+const pageNavigationPath = new URL('../wwwroot/razorwire/page-navigation.js', import.meta.url);
 
 test('runtime merges config and exposes formFailureManager', () => {
   const { context, document } = loadRuntime();
@@ -13,6 +14,7 @@ test('runtime merges config and exposes formFailureManager', () => {
   assert.equal(context.window.RazorWire.config.failureUxEnabled, true);
   assert.equal(context.window.RazorWire.config.failureMode, 'auto');
   assert.ok(context.window.RazorWire.formFailureManager);
+  assert.equal(context.window.RazorWire.pageNavigationManager, undefined);
   assert.equal(document.head.querySelectorAll('#rw-form-failure-default-styles').length, 1);
 });
 
@@ -914,8 +916,317 @@ test('stream errors dispatch observable detail to registered stream source eleme
   assert.equal(error.detail.src, '/streams/orders');
 });
 
+test('page navigation manager exposes diagnostics and starts inert without roots', () => {
+  const { context } = loadRuntime({ pageNavigation: true });
+
+  assert.ok(context.window.RazorWire.pageNavigationManager);
+  assert.equal(context.window.RazorWire.pageNavigationManager.controllers.size, 0);
+  assert.equal(context.window.RazorWire.pageNavigationManager.getDiagnostics().length, 0);
+});
+
+test('page navigation sets active state from the initial hash', () => {
+  const { context, document } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const { nav, overviewLink, pricingLink } = createPageNavigationFixture(document);
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  assert.equal(overviewLink.hasAttribute('aria-current'), false);
+  assert.equal(pricingLink.getAttribute('aria-current'), 'location');
+  assert.equal(pricingLink.getAttribute('data-rw-page-nav-active'), 'true');
+});
+
+test('page navigation closes the configured panel after same-page navigation', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav, overviewLink, toggle, panel } = createPageNavigationFixture(document);
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  const event = {
+    type: 'click',
+    target: overviewLink,
+    button: 0,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    }
+  };
+
+  nav.dispatchEvent(event);
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(panel.getAttribute('data-rw-page-nav-panel-state'), 'closed');
+  assert.equal(overviewLink.getAttribute('aria-current'), 'location');
+});
+
+test('page navigation leaves modified clicks and missing targets alone', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav, overviewLink } = createPageNavigationFixture(document);
+  const missing = new FakeElement('a');
+  missing.setAttribute('href', '#missing');
+  missing.setAttribute('data-rw-page-nav-link', 'true');
+  nav.appendChild(missing);
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  const modified = clickEvent(overviewLink, { metaKey: true });
+  nav.dispatchEvent(modified);
+  const absentTarget = clickEvent(missing);
+  nav.dispatchEvent(absentTarget);
+
+  assert.equal(modified.defaultPrevented, false);
+  assert.equal(absentTarget.defaultPrevented, false);
+});
+
+test('page navigation falls back to native hash navigation when history pushState is unavailable', () => {
+  const { context, document } = loadRuntime({
+    pageNavigation: true,
+    history: null
+  });
+  const { nav, overviewLink, toggle, panel, overview } = createPageNavigationFixture(document);
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  const event = clickEvent(overviewLink);
+  nav.dispatchEvent(event);
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(overview.lastScrollIntoViewOptions, null);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(panel.getAttribute('data-rw-page-nav-panel-state'), 'closed');
+  assert.equal(overviewLink.getAttribute('aria-current'), 'location');
+});
+
+test('page navigation prunes removed roots and records missing panel diagnostics', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const nav = new FakeElement('nav');
+  nav.setAttribute('data-rw-page-nav', 'true');
+  const toggle = new FakeElement('button');
+  toggle.setAttribute('data-rw-page-nav-toggle', 'true');
+  toggle.setAttribute('aria-controls', 'missing-panel');
+  nav.appendChild(toggle);
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+  assert.equal(context.window.RazorWire.pageNavigationManager.controllers.size, 1);
+  assert.equal(context.window.RazorWire.pageNavigationManager.getDiagnostics().length, 1);
+
+  nav.remove();
+  context.window.RazorWire.pageNavigationManager.prune();
+
+  assert.equal(context.window.RazorWire.pageNavigationManager.controllers.size, 0);
+});
+
+test('page navigation rescans without duplicating root listeners', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav } = createPageNavigationFixture(document);
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+  context.window.RazorWire.pageNavigationManager.scan();
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  assert.equal(context.window.RazorWire.pageNavigationManager.controllers.size, 1);
+  assert.equal(nav.listeners.get('click').length, 2);
+});
+
+test('page navigation promotes the first visible section from viewport state', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav, overview, pricing, pricingLink } = createPageNavigationFixture(document);
+  overview.rectTop = -500;
+  pricing.rectTop = 24;
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  assert.equal(pricingLink.getAttribute('aria-current'), 'location');
+  assert.equal(pricingLink.getAttribute('data-rw-page-nav-active'), 'true');
+});
+
+test('page navigation falls back to viewport state when hash no longer resolves', () => {
+  const { context, document, window } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const { nav, overview, pricing, overviewLink, pricingLink } = createPageNavigationFixture(document);
+  overview.rectTop = 24;
+  pricing.rectTop = 800;
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+  assert.equal(pricingLink.getAttribute('aria-current'), 'location');
+
+  window.location.href = 'https://example.test/#missing';
+  window.location.hash = '#missing';
+  context.window.RazorWire.pageNavigationManager.refreshActiveFromHash();
+
+  assert.equal(overviewLink.getAttribute('aria-current'), 'location');
+  assert.equal(overviewLink.getAttribute('data-rw-page-nav-active'), 'true');
+  assert.equal(pricingLink.hasAttribute('aria-current'), false);
+});
+
+test('page navigation does not keep a hash active outside the boundary window', () => {
+  const { context, document } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const { nav, overview, pricing, overviewLink, pricingLink } = createPageNavigationFixture(document);
+  overview.rectTop = 24;
+  pricing.rectTop = 800;
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+  assert.equal(pricingLink.getAttribute('aria-current'), 'location');
+
+  const controller = context.window.RazorWire.pageNavigationManager.controllers.get(nav);
+  controller.refreshActiveFromViewport();
+
+  assert.equal(overviewLink.getAttribute('aria-current'), 'location');
+  assert.equal(pricingLink.hasAttribute('aria-current'), false);
+});
+
+test('page navigation keeps an initial hash active at the host scroll margin', () => {
+  const { context, document } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const { nav, overview, pricing, pricingLink } = createPageNavigationFixture(document);
+  overview.rectTop = -600;
+  pricing.rectTop = 176;
+  pricing.computedStyle = { overflowY: 'visible', scrollMarginTop: '160px' };
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  const controller = context.window.RazorWire.pageNavigationManager.controllers.get(nav);
+  controller.refreshActiveFromViewport();
+
+  assert.equal(pricingLink.getAttribute('aria-current'), 'location');
+});
+
+test('page navigation aligns active boundaries with section scroll margin', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav, overview, pricing, pricingLink } = createPageNavigationFixture(document);
+  overview.rectTop = -500;
+  pricing.rectTop = 88;
+  pricing.computedStyle = { overflowY: 'visible', scrollMarginTop: '96px' };
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  assert.equal(pricingLink.getAttribute('aria-current'), 'location');
+});
+
+test('page navigation uses the target scroll margin when scrolling an element root', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav, overview, pricing, pricingLink } = createPageNavigationFixture(document);
+  const scroller = new FakeElement('div');
+  scroller.rectTop = 100;
+  scroller.clientHeight = 400;
+  scroller.scrollHeight = 1200;
+  scroller.computedStyle = { overflowY: 'auto' };
+  scroller.scrollTop = 0;
+  overview.rectTop = 100;
+  overview.computedStyle = { overflowY: 'visible', scrollMarginTop: '20px' };
+  pricing.rectTop = 500;
+  pricing.computedStyle = { overflowY: 'visible', scrollMarginTop: '120px' };
+  scroller.append(overview, pricing);
+  document.body.append(scroller, nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  nav.dispatchEvent(clickEvent(pricingLink));
+
+  assert.equal(scroller.lastScrollToOptions.top, 280);
+});
+
+test('page navigation scrolls the nearest scrollable section root', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav, overview, pricing, pricingLink } = createPageNavigationFixture(document);
+  const scroller = new FakeElement('div');
+  scroller.rectTop = 100;
+  scroller.clientHeight = 400;
+  scroller.scrollHeight = 1200;
+  scroller.computedStyle = { overflowY: 'auto' };
+  scroller.scrollTop = 0;
+  overview.rectTop = 100;
+  pricing.rectTop = 500;
+  scroller.append(overview, pricing);
+  document.body.append(scroller, nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  nav.dispatchEvent(clickEvent(pricingLink));
+
+  assert.equal(pricing.lastScrollIntoViewOptions, null);
+  assert.equal(scroller.lastScrollToOptions.top, 336);
+  assert.equal(scroller.lastScrollToOptions.behavior, 'smooth');
+});
+
+test('page navigation honors reduced motion when scrolling to a target', () => {
+  const { context, document } = loadRuntime({
+    pageNavigation: true,
+    matchMedia: () => ({ matches: true })
+  });
+  const { nav, overview, overviewLink } = createPageNavigationFixture(document);
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  nav.dispatchEvent(clickEvent(overviewLink));
+
+  assert.equal(overview.lastScrollIntoViewOptions.behavior, 'auto');
+  assert.equal(overview.lastScrollIntoViewOptions.block, 'start');
+});
+
+test('page navigation leaves external download target and prehandled clicks alone', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav, panel, overviewLink } = createPageNavigationFixture(document);
+  const external = createPageNavigationLink('https://elsewhere.test/#overview');
+  const download = createPageNavigationLink('#overview');
+  download.setAttribute('download', 'overview.txt');
+  const blank = createPageNavigationLink('#overview');
+  blank.setAttribute('target', '_blank');
+  panel.append(external, download, blank);
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  const prehandled = clickEvent(overviewLink, { defaultPrevented: true });
+  nav.dispatchEvent(prehandled);
+  const externalClick = clickEvent(external);
+  nav.dispatchEvent(externalClick);
+  const downloadClick = clickEvent(download);
+  nav.dispatchEvent(downloadClick);
+  const blankClick = clickEvent(blank);
+  nav.dispatchEvent(blankClick);
+
+  assert.equal(prehandled.defaultPrevented, true);
+  assert.equal(externalClick.defaultPrevented, false);
+  assert.equal(downloadClick.defaultPrevented, false);
+  assert.equal(blankClick.defaultPrevented, false);
+});
+
+test('page navigation tolerates malformed hashes and falls back to viewport state', () => {
+  const { context, document } = loadRuntime({ windowHref: 'https://example.test/#%E0%A4%A', pageNavigation: true });
+  const { nav, overviewLink, pricingLink } = createPageNavigationFixture(document);
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  assert.equal(overviewLink.getAttribute('aria-current'), 'location');
+  assert.equal(pricingLink.hasAttribute('aria-current'), false);
+});
+
+test('page navigation toggles a fallback panel when aria-controls is omitted', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const nav = new FakeElement('nav');
+  nav.setAttribute('data-rw-page-nav', 'true');
+  const toggle = new FakeElement('button');
+  toggle.setAttribute('data-rw-page-nav-toggle', 'true');
+  toggle.setAttribute('aria-expanded', 'false');
+  const panel = new FakeElement('div');
+  panel.setAttribute('data-rw-page-nav-panel', 'true');
+  nav.append(toggle, panel);
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+  assert.equal(panel.getAttribute('data-rw-page-nav-panel-state'), 'closed');
+
+  nav.dispatchEvent(clickEvent(toggle));
+
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(panel.getAttribute('data-rw-page-nav-panel-state'), 'open');
+});
+
 function loadRuntime(runtimeOptions = {}) {
   const document = new FakeDocument(runtimeOptions);
+  const locationUrl = new URL(runtimeOptions.windowHref ?? 'https://example.test/');
   const visits = [];
   const turbo = runtimeOptions.turbo === null ? null : {
     StreamActions: {},
@@ -928,10 +1239,25 @@ function loadRuntime(runtimeOptions = {}) {
     RazorWireInitialized: false,
     RazorWire: { config: { existing: true } },
     location: {
-      href: runtimeOptions.windowHref ?? 'https://example.test/',
-      origin: 'https://example.test'
+      href: locationUrl.href,
+      origin: locationUrl.origin,
+      pathname: locationUrl.pathname,
+      search: locationUrl.search,
+      hash: locationUrl.hash
     },
-    addEventListener: () => {}
+    history: runtimeOptions.history === null ? null : {
+      pushState: (_state, _title, url) => {
+        const next = new URL(url, window.location.href);
+        window.location.href = next.href;
+        window.location.pathname = next.pathname;
+        window.location.search = next.search;
+        window.location.hash = next.hash;
+      }
+    },
+    matchMedia: runtimeOptions.matchMedia ?? (() => ({ matches: false })),
+    getComputedStyle: element => element.computedStyle ?? { overflowY: 'visible' },
+    addEventListener: () => {},
+    removeEventListener: () => {}
   };
   if (turbo !== null) {
     window.Turbo = turbo;
@@ -962,8 +1288,61 @@ function loadRuntime(runtimeOptions = {}) {
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(readFileSync(runtimePath, 'utf8'), context);
+  if (runtimeOptions.pageNavigation) {
+    vm.runInContext(readFileSync(pageNavigationPath, 'utf8'), context);
+  }
 
   return { context, document, window, turbo };
+}
+
+function createPageNavigationFixture(document) {
+  const overview = new FakeElement('section');
+  overview.setAttribute('id', 'overview');
+  overview.rectTop = 0;
+  const pricing = new FakeElement('section');
+  pricing.setAttribute('id', 'pricing');
+  pricing.rectTop = 800;
+  document.body.append(overview, pricing);
+
+  const nav = new FakeElement('nav');
+  nav.setAttribute('data-rw-page-nav', 'true');
+  const toggle = new FakeElement('button');
+  toggle.setAttribute('data-rw-page-nav-toggle', 'true');
+  toggle.setAttribute('aria-controls', 'page-sections-panel');
+  toggle.setAttribute('aria-expanded', 'true');
+  const panel = new FakeElement('div');
+  panel.setAttribute('id', 'page-sections-panel');
+  panel.setAttribute('data-rw-page-nav-panel', 'true');
+  const overviewLink = new FakeElement('a');
+  overviewLink.setAttribute('href', '#overview');
+  overviewLink.setAttribute('data-rw-page-nav-link', 'true');
+  const pricingLink = new FakeElement('a');
+  pricingLink.setAttribute('href', '#pricing');
+  pricingLink.setAttribute('data-rw-page-nav-link', 'true');
+  panel.append(overviewLink, pricingLink);
+  nav.append(toggle, panel);
+
+  return { nav, overview, pricing, overviewLink, pricingLink, toggle, panel };
+}
+
+function createPageNavigationLink(href) {
+  const link = new FakeElement('a');
+  link.setAttribute('href', href);
+  link.setAttribute('data-rw-page-nav-link', 'true');
+  return link;
+}
+
+function clickEvent(target, overrides = {}) {
+  return {
+    type: 'click',
+    target,
+    button: 0,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    ...overrides
+  };
 }
 
 function loadRuntimeWithVisitAction(runtimeOptions = {}) {
@@ -1045,6 +1424,7 @@ class FakeElement {
     this.attributes = new Map();
     this.children = [];
     this.parentElement = null;
+    this.listeners = new Map();
     this.textContent = '';
     this.disabled = false;
     this.id = '';
@@ -1052,6 +1432,17 @@ class FakeElement {
     this.name = '';
     this.type = '';
     this.value = '';
+    this.rectTop = 0;
+    this.clientHeight = 100;
+    this.scrollHeight = 100;
+    this.scrollTop = 0;
+    this.computedStyle = { overflowY: 'visible' };
+    this.lastScrollIntoViewOptions = null;
+    this.lastScrollToOptions = null;
+  }
+
+  get isConnected() {
+    return this.tagName === 'BODY' || this.tagName === 'HEAD' || this.parentElement !== null;
   }
 
   setAttribute(name, value) {
@@ -1098,11 +1489,47 @@ class FakeElement {
 
   focus() {}
 
-  scrollIntoView() {}
+  scrollIntoView(options) {
+    this.lastScrollIntoViewOptions = options;
+  }
+
+  scrollTo(options) {
+    this.lastScrollToOptions = options;
+    if (typeof options.top === 'number') this.scrollTop = options.top;
+  }
+
+  getBoundingClientRect() {
+    return { top: this.rectTop, bottom: this.rectTop + 100, height: 100 };
+  }
+
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) || [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type, listener) {
+    const listeners = this.listeners.get(type) || [];
+    this.listeners.set(type, listeners.filter(candidate => candidate !== listener));
+  }
 
   dispatchEvent(event) {
     event.target = event.target || this;
+    for (const listener of this.listeners.get(event.type) || []) {
+      listener(event);
+    }
     return !event.defaultPrevented;
+  }
+
+  contains(candidate) {
+    if (candidate === this) return true;
+    let current = candidate?.parentElement || null;
+    while (current) {
+      if (current === this) return true;
+      current = current.parentElement;
+    }
+
+    return false;
   }
 
   closest(selector) {
@@ -1255,6 +1682,11 @@ function matches(element, selector) {
   if (selector === '[data-rw-form-error-detail="true"]') return element.getAttribute('data-rw-form-error-detail') === 'true';
   if (selector === '[data-rw-form-error-hints="true"]') return element.getAttribute('data-rw-form-error-hints') === 'true';
   if (selector === '#rw-form-failure-default-styles') return element.id === 'rw-form-failure-default-styles';
+  if (selector === '[data-rw-page-nav]') return element.hasAttribute('data-rw-page-nav');
+  if (selector === '[data-rw-page-nav-link]') return element.hasAttribute('data-rw-page-nav-link');
+  if (selector === 'a[data-rw-page-nav-link]') return element.tagName === 'A' && element.hasAttribute('data-rw-page-nav-link');
+  if (selector === '[data-rw-page-nav-toggle]') return element.hasAttribute('data-rw-page-nav-toggle');
+  if (selector === '[data-rw-page-nav-panel]') return element.hasAttribute('data-rw-page-nav-panel');
   if (selector.startsWith('script[src*=')) return element.tagName === 'SCRIPT' && element.getAttribute('src')?.includes('/razorwire/razorwire.js');
   if (selector.startsWith('[data-rw-form-error-generated="true"][data-rw-form-error-owner="')) {
     const owner = selector.match(/data-rw-form-error-owner="([^"]+)"/)?.[1];

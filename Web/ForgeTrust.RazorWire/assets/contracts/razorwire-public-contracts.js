@@ -31,6 +31,20 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
+ * Page navigation manager for same-page section links, active state, optional collapsible panels, and lifecycle-safe rebinding.
+ * @public
+ * @namespace RazorWire
+ * @config window.RazorWire.pageNavigationManager
+ * @type {object}
+ * @source <rw:scripts /> with rendered `[data-rw-page-nav]` markup
+ * @property {Function} scan - Re-scans the document for `[data-rw-page-nav]` roots after custom DOM updates.
+ * @property {Function} prune - Removes controllers for disconnected roots.
+ * @property {Function} refreshActiveFromHash - Recomputes active links from the current `window.location.hash`.
+ * @property {Function} getDiagnostics - Returns page navigation diagnostics recorded since startup.
+ * @property {Function} clearDiagnostics - Clears recorded page navigation diagnostics.
+ */
+
+/**
  * A RazorWire-enhanced form started submitting through Turbo.
  * @public
  * @namespace RazorWire
@@ -39,6 +53,18 @@ window.RazorWire = window.RazorWire || {};
  * @firesWhen Turbo begins submitting a RazorWire-enhanced form and RazorWire marks it busy.
  * @property {HTMLFormElement} detail.form - Submitted form.
  * @property {HTMLElement|null} detail.submitter - Button or submit control that initiated the submission.
+ * @bubbles true
+ * @cancelable false
+ */
+
+/**
+ * A RazorWire page navigation root changed its active link.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:page-nav:active-change
+ * @target [data-rw-page-nav]
+ * @firesWhen RazorWire promotes a same-page link to the active section from hash, scroll, or click state.
+ * @property {Element|null} detail.link - Active link element, or null when no target link is active.
  * @bubbles true
  * @cancelable false
  */
@@ -118,6 +144,73 @@ window.RazorWire = window.RazorWire || {};
  * @attribute data-rw-form
  * @target form
  * @type {"true"}
+ */
+
+/**
+ * Marks a same-page navigation root that RazorWire should enhance.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-page-nav
+ * @target nav, aside, div
+ * @type {"true"}
+ */
+
+/**
+ * Marks an anchor as a RazorWire same-page navigation link.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-page-nav-link
+ * @target a
+ * @type {"true"}
+ */
+
+/**
+ * Marks a button that toggles the optional page navigation panel.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-page-nav-toggle
+ * @target button
+ * @type {"true"}
+ * @related aria-controls
+ */
+
+/**
+ * Marks the optional panel that should close after successful same-page navigation.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-page-nav-panel
+ * @target div, nav, ul
+ * @type {"true"}
+ */
+
+/**
+ * Stable selector for page navigation roots that have been enhanced by RazorWire.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-page-nav-enhanced="true"]
+ * @hookKind data-attribute
+ * @target [data-rw-page-nav]
+ * @stability stable
+ */
+
+/**
+ * Stable selector for the active page navigation link.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-page-nav-active="true"]
+ * @hookKind data-attribute
+ * @target a[data-rw-page-nav-link]
+ * @stability stable
+ */
+
+/**
+ * Stable selector for page navigation panels that RazorWire closed.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-page-nav-panel-state="closed"]
+ * @hookKind data-attribute
+ * @target [data-rw-page-nav-panel]
+ * @stability stable
  */
 
 /**

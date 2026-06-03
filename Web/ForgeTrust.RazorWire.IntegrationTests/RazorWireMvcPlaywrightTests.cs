@@ -50,6 +50,144 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task PageNavigationSample_TracksHashActiveStateAndClosesMobilePanel()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Navigation/PageNavigation#workflow");
+        await page.WaitForFunctionAsync(
+            """
+            () => window.RazorWire?.pageNavigationManager
+              && document.querySelector('.brochure-page-nav a[href="#workflow"]')?.getAttribute('aria-current') === 'location'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        Assert.True(await page.Locator("script[src*='/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js']").CountAsync() > 0);
+        Assert.Equal("false", await page.GetAttributeAsync(".brochure-page-nav [data-rw-page-nav-toggle]", "aria-expanded"));
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const active = document.querySelector('.brochure-page-nav a[href="#workflow"]');
+              const panel = document.getElementById('brochure-sections-panel');
+              const activeStyle = active ? getComputedStyle(active) : null;
+              return panel?.getAttribute('data-rw-page-nav-panel-state') === 'closed'
+                && active?.textContent?.trim() === 'Buyer Workflow'
+                && activeStyle?.display !== 'none'
+                && activeStyle?.boxShadow === 'none';
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await page.ClickAsync(".brochure-page-nav [data-rw-page-nav-toggle]");
+        await page.WaitForFunctionAsync(
+            """
+            () => document.querySelector('.brochure-page-nav [data-rw-page-nav-toggle]')?.getAttribute('aria-expanded') === 'true'
+              && document.getElementById('brochure-sections-panel')?.getAttribute('data-rw-page-nav-panel-state') === 'open'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await page.ClickAsync(".brochure-page-nav a[href='#replacement']");
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const active = document.querySelector('.brochure-page-nav a[href="#replacement"]');
+              const toggle = document.querySelector('.brochure-page-nav [data-rw-page-nav-toggle]');
+              const panel = document.getElementById('brochure-sections-panel');
+              const panelStyle = panel ? getComputedStyle(panel) : null;
+              return window.location.hash === '#replacement'
+                && active?.getAttribute('aria-current') === 'location'
+                && active?.getAttribute('data-rw-page-nav-active') === 'true'
+                && active?.textContent?.trim() === 'Runtime Ownership'
+                && toggle?.getAttribute('aria-expanded') === 'false'
+                && panel?.getAttribute('data-rw-page-nav-panel-state') === 'closed'
+                && panelStyle?.overflow === 'hidden'
+                && getComputedStyle(active).display !== 'none'
+                && getComputedStyle(active).boxShadow === 'none';
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+    }
+
+    [Fact]
+    public async Task PageNavigationSample_UpdatesActiveStateWhileScrolling()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1280,
+                Height = 720
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Navigation/PageNavigation");
+        await page.WaitForFunctionAsync(
+            """
+            () => window.RazorWire?.pageNavigationManager
+              && document.querySelector('.brochure-page-nav a[href="#trust"]')?.getAttribute('aria-current') === 'location'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await page.EvaluateAsync("() => document.getElementById('state')?.scrollIntoView({ block: 'start' })");
+        await page.WaitForFunctionAsync(
+            """
+            () => document.querySelector('.brochure-page-nav a[href="#state"]')?.getAttribute('aria-current') === 'location'
+              && document.querySelector('.brochure-page-nav a[href="#state"]')?.getAttribute('data-rw-page-nav-active') === 'true'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await page.EvaluateAsync("() => document.getElementById('handoff')?.scrollIntoView({ block: 'start' })");
+        await page.WaitForFunctionAsync(
+            """
+            () => document.querySelector('.brochure-page-nav a[href="#handoff"]')?.getAttribute('aria-current') === 'location'
+              && document.querySelectorAll('.brochure-page-nav [data-rw-page-nav-active="true"]').length === 1
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+    }
+
+    [Fact]
+    public async Task PageNavigationSample_NoJavaScriptFallbackAnchorsWork()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            JavaScriptEnabled = false,
+            ViewportSize = new ViewportSize
+            {
+                Width = 1280,
+                Height = 720
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Navigation/PageNavigation");
+
+        Assert.Equal(1, await page.Locator(".brochure-page-nav a[href='#workflow']").CountAsync());
+        Assert.Equal(1, await page.Locator("#workflow").CountAsync());
+
+        await page.ClickAsync(".brochure-page-nav a[href='#replacement']");
+
+        Assert.EndsWith("#replacement", page.Url, StringComparison.Ordinal);
+        Assert.Equal(1, await page.Locator("#replacement").CountAsync());
+        Assert.Equal(0, await page.Locator(".brochure-page-nav [data-rw-page-nav-active='true']").CountAsync());
+    }
+
+    [Fact]
     public async Task RuntimeIslands_OnlyStrategyHydratesClientModuleAndClearsServerContent()
     {
         await using var context = await _fixture.Browser.NewContextAsync();

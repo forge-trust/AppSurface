@@ -2155,18 +2155,23 @@ When `DocDetailsViewModel.HasOutline` is true, AppSurface Docs renders one seman
 - narrower viewports: a closed-by-default `On this page` toggle above the article
 - all viewports: the same outline list, never separate desktop and mobile TOCs
 
-The outline client enhances the server-rendered links by:
+The outline renders RazorWire page-navigation attributes so shared RazorWire runtime owns generic same-page navigation behavior:
 
-- using `#main-content` as the scroll root for `IntersectionObserver`
-- marking the current section with `aria-current="location"`
-- refreshing the active section from the scroll position on scroll, throttled through `requestAnimationFrame`, so long sections do not stay pinned to the previous outline item until the next heading enters the observer band
-- keeping the active outline link visible inside the sticky desktop rail when the page-local outline is taller than the viewport
-- easing outline-link clicks to the target section over 620 ms, while preserving instant jumps for readers who prefer reduced motion and canceling the animation when the reader manually wheels or touches the scroll root
-- initializing from the current URL hash
+- marking the current section with `aria-current="location"` and `data-rw-page-nav-active="true"`
+- initializing active state from the current URL hash
+- filtering modified, external, download, and missing-target links so normal browser behavior remains intact
+- updating the URL hash and scrolling the target for same-page clicks
 - rebinding after RazorWire/Turbo frame navigation replaces `rw:island id="doc-content"`
+
+The docs-owned outline client keeps only the AppSurface Docs chrome around that behavior:
+
+- rolling compact previous/current/next context when the active link changes
+- keeping the active outline link visible inside the sticky desktop rail when the page-local outline is taller than the viewport
+- placing the outline above the article on compact viewports and beside it on wide desktop
 - containing scroll inside the expanded compact outline so touch or wheel input over `On this page` does not move the article behind it
-- collapsing the mobile outline after an outline link is chosen
-- skipping missing heading targets for active-state tracking while leaving their normal hash links intact instead of marking stale entries current or closing the drawer
+- syncing the compact outline's docs-specific expanded state after an outline link is chosen
+- adding copy-link actions and manual-copy fallbacks for page sections
+- skipping missing heading targets for docs-specific context while leaving their normal hash links intact
 
 If JavaScript is unavailable, the server-rendered outline remains a normal list of hash links. If `IntersectionObserver` is unavailable, AppSurface Docs keeps static and hash-based behavior rather than adding a scroll polling fallback.
 

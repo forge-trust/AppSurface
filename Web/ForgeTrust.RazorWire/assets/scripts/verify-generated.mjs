@@ -7,7 +7,8 @@ const scriptRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptRoot, '..', '..', '..', '..');
 const trackedOutputPaths = [
   path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'razorwire.js'),
-  path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'razorwire.islands.js')
+  path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'razorwire.islands.js'),
+  path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'page-navigation.js')
 ];
 
 function readGeneratedOutput(relativePath) {

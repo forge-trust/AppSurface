@@ -25,6 +25,14 @@ const generatedOutputs = [
     banner: 'Generated from assets/src/razorwire.islands.ts. Do not edit wwwroot/razorwire/razorwire.islands.js by hand.',
     rawBytes: 9_000,
     gzipBytes: 3_500
+  },
+  {
+    entry: path.join(assetRoot, 'src', 'page-navigation.ts'),
+    output: path.join(outputRoot, 'page-navigation.js'),
+    label: 'page-navigation.js',
+    banner: 'Generated from assets/src/page-navigation.ts. Do not edit wwwroot/razorwire/page-navigation.js by hand.',
+    rawBytes: 9_000,
+    gzipBytes: 3_000
   }
 ];
 
