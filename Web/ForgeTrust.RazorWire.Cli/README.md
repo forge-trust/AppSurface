@@ -113,6 +113,48 @@ Use this quick chooser before exporting:
 | Serve static pages behind app-aware routing or live RazorWire frames, forms, streams, and islands | `hybrid` |
 | Make a missing CSS, image, script, stylesheet, module preload, icon, font, or other browser asset stop failing | Fix or externalize the asset; `hybrid` still validates browser-delivered assets |
 
+#### Static website deployment extras
+
+AppSurface export owns the app route graph and exporter-managed provider artifacts. It does not copy arbitrary project-root files into the output directory. Use this boundary when preparing folders for static hosts:
+
+- `--seeds` are routes, not local paths. A seed file line such as `/pricing` asks the exporter to crawl the app route `/pricing`; a line such as `deploy/CNAME` is not a request to copy `./deploy/CNAME`.
+- The conventional AppSurface 404 page uses the reserved `/_appsurface/errors/404` route. When that route is available and returns HTML, the exporter stages it as root `404.html` before normal crawl processing and validates it like any other CDN artifact.
+- `CNAME` and similar opaque deployment files are deployment-owned extras. Copy them into the publish root after export with explicit allowlisted commands.
+- `_redirects` is exporter-owned when a host integration selects `--redirects netlify`. Do not hand-author or copy `_redirects` into the output for that provider path.
+
+For a static host that needs a custom domain and an app-served `/404.html` route, use this shape:
+
+```bash
+printf '%s\n' '/' '/404.html' > seeds.txt
+razorwire export --project ./MySite.csproj --output ./dist --seeds ./seeds.txt
+install -m 0644 ./deploy/CNAME ./dist/CNAME
+test -f ./dist/CNAME
+test -f ./dist/404.html
+```
+
+Seed `/404.html` only when the app intentionally serves `/404.html` and is not relying on the conventional AppSurface 404 route. When the app uses AppSurface Web's conventional browser status pages, let `/_appsurface/errors/404` stage root `404.html`; adding `/404.html` to the seed file will not override the already staged conventional page.
+
+| Need | Recommended path |
+| --- | --- |
+| Conventional AppSurface 404 page | Serve `/_appsurface/errors/404`; export stages root `404.html` when the route returns HTML. |
+| Host-served custom `/404.html` route without conventional AppSurface 404 | Add `/404.html` to the seed route file. |
+| GitHub Pages custom domain | Copy `./deploy/CNAME` to `./dist/CNAME` after export and verify it exists. |
+| Netlify redirect aliases | Use the host integration's `--redirects netlify` path so the exporter owns `_redirects`. |
+| Other provider-owned opaque files | Copy a named allowlisted file from deployment configuration after export, unless the exporter documents ownership of that path. |
+| AppSurface Docs exact release archive plus deployment extras | Keep exact release trees clean for `.appsurface-docs-release-manifest.json`; copy publish-root extras such as `CNAME` outside the immutable exact release tree. |
+
+Do not copy the repository root, broad globs, symlinks, local config, secrets, generated credentials, or unrelated deployment folders into `./dist`. Prefer a deployment-owned directory such as `./deploy` and one explicit copy command per file.
+
+Troubleshooting:
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `CNAME` is missing from the uploaded site | Export crawled app routes but did not copy deployment-owned extras. | Run the explicit post-export copy and `test -f ./dist/CNAME` in CI. |
+| A seed file contains `deploy/CNAME`, but the export still succeeds without `CNAME` | Seeds are routes, not local paths; if no valid seed routes remain, export can fall back to `/`. | Put route paths such as `/` and `/404.html` in the seed file, then copy `CNAME` after export. |
+| `404.html` is missing or not the page you expected | The app neither served the conventional `/_appsurface/errors/404` HTML route nor exposed the intended `/404.html` route as a seed. | Use the conventional route for AppSurface 404 pages, or seed `/404.html` for a deliberate app-served page and verify `test -f ./dist/404.html`. |
+| `_redirects` collides with generated redirect output | A deployment step copied a hand-authored provider artifact into a path the exporter owns. | Remove the copied `_redirects` file and use `--redirects netlify` through the host integration. |
+| AppSurface Docs exact release verification fails after adding hidden deployment files | The `.appsurface-docs-release-manifest.json` archive contract expects a clean exact release tree. | Export exact releases to a clean directory, pin the manifest, then copy deployment extras into the surrounding publish root. |
+
 CDN validation fails the export when exporter-managed dependencies cannot be represented as static artifacts. Diagnostics use stable codes and include the discovered surface, such as `<img src>`, `<a href>`, `stylesheet url()`, or `stylesheet @import string`, plus the normalized path the exporter tried to prove:
 
 - `RWEXPORT001`: a server-fetched frame route did not materialize. Add or seed the frame route, or switch to `--mode hybrid` when a live server owns it.
