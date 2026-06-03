@@ -240,6 +240,14 @@
             .filter(entry => entry !== null);
     }
 
+    function getOutlineEntryForLink(entries, link) {
+        return entries.find(entry => entry.link === link) ?? null;
+    }
+
+    function isPlainLeftClick(event) {
+        return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+    }
+
     function buildSectionUrl(targetId) {
         const url = new URL(window.location.href);
         url.hash = targetId;
@@ -688,6 +696,10 @@
 
         for (const link of links) {
             addLifecycleEventListener(link, "click", event => {
+                if (event.defaultPrevented || !isPlainLeftClick(event) || !getOutlineEntryForLink(entries, link)) {
+                    return;
+                }
+
                 if (razorWireManaged) {
                     setActiveLink(links, link, outlineContext, { reveal: false });
 
