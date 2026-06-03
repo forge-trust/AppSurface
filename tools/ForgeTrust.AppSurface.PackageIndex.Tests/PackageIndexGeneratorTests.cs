@@ -2471,6 +2471,18 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task DiscoverProjects_PrunesHiddenCacheDirectories()
+    {
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync(".pnpm-store/v11/projects/cache-key/Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync(".nuget/packages/example/1.0.0/contentFiles/any/net10.0/CachedProject.csproj", "<Project />");
+
+        var projects = new PackageProjectScanner().DiscoverProjects(_repositoryRoot);
+
+        Assert.Equal(["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"], projects);
+    }
+
+    [Fact]
     [Trait("Category", "Integration")]
     public async Task DotNetProjectMetadataProvider_ParsesRealMsbuildOutput()
     {

@@ -1842,7 +1842,7 @@ internal sealed class PackageProjectScanner
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        return Directory.EnumerateFiles(repositoryRoot, "*.csproj", SearchOption.AllDirectories)
+        return EnumerateProjectFiles(repositoryRoot)
             .Select(path => Path.GetRelativePath(repositoryRoot, path).Replace('\\', '/'))
             .Where(IsCandidateProject)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
@@ -1898,6 +1898,33 @@ internal sealed class PackageProjectScanner
         return directory
             .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar])
             .Any(segment => segment.StartsWith(".", StringComparison.Ordinal));
+    }
+
+    private static IEnumerable<string> EnumerateProjectFiles(string directory)
+    {
+        foreach (var projectPath in Directory.EnumerateFiles(directory, "*.csproj", SearchOption.TopDirectoryOnly))
+        {
+            yield return projectPath;
+        }
+
+        foreach (var childDirectory in Directory.EnumerateDirectories(directory))
+        {
+            if (!ShouldDescendIntoDirectory(childDirectory))
+            {
+                continue;
+            }
+
+            foreach (var projectPath in EnumerateProjectFiles(childDirectory))
+            {
+                yield return projectPath;
+            }
+        }
+    }
+
+    private static bool ShouldDescendIntoDirectory(string directory)
+    {
+        var directoryName = Path.GetFileName(directory);
+        return !directoryName.StartsWith(".", StringComparison.Ordinal);
     }
 }
 

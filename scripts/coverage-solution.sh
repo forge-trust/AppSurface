@@ -29,7 +29,7 @@ Environment:
   TEST_GROUP            Test group to run. Defaults to all.
   BUILD_CONFIGURATION   Test configuration. Defaults to Debug.
   BUILD_SOLUTION        true/false. Defaults to true for all, false for named groups.
-  BUILD_NO_RESTORE      true/false. Adds --no-restore to the solution build after a prior restore.
+  BUILD_NO_RESTORE      true/false. Adds --no-restore to build and test commands after a prior restore.
   INCLUDE_FILTER        Coverlet include filter.
   EXCLUDE_FILTER        Coverlet exclude filter.
 EOF
@@ -497,6 +497,10 @@ for i in "${!test_projects[@]}"; do
 
   if [[ "$BUILD_SOLUTION" == true ]]; then
     args+=(--no-build)
+  fi
+
+  if [[ "$BUILD_NO_RESTORE" == true ]]; then
+    args+=(--no-restore)
   fi
 
   project_start="$(seconds_now)"
