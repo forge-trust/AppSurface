@@ -122,6 +122,21 @@ Use RazorWire page navigation when a server-rendered page needs same-page sectio
 
 RazorWire renders stable `data-rw-page-nav*` attributes, updates `aria-current="location"` on the active link, mirrors panel state through `data-rw-page-nav-panel-state`, and leaves all layout and styling to the host application. This replaces common brochure-site hooks such as `.page-scroll`, `data-bs-spy`, active classes, and `.navbar-collapse` close scripts. See the full contract and migration table in [Page Navigation](Docs/page-navigation.md), or run the MVC sample and visit `/Navigation/PageNavigation`.
 
+## Section Copy in 3 Minutes
+
+Use RazorWire section copy when long-form pages need "copy link to this section" behavior without host-specific clipboard JavaScript.
+
+```cshtml
+<h2 id="install" data-rw-section-copy-target="true">Install</h2>
+
+<h2 id="usage">Usage</h2>
+<button type="button" data-rw-section-copy="usage" data-rw-section-copy-title="Usage">
+    Copy link
+</button>
+```
+
+RazorWire resolves ids document-wide, writes copied/fallback state through stable `data-rw-section-copy*` hooks, announces feedback through an optional live status region, and renders an inline readonly-input fallback when clipboard writes are unavailable. See the full contract in [Section Copy](Docs/section-copy.md).
+
 ## Generated UI Design Contract
 
 RazorWire should feel like a quiet enhancement inside the host application, not like a separate visual product placed on top of it. Package-owned generated UI follows the [RazorWire generated UI design contract](DESIGN.md).
@@ -163,7 +178,7 @@ RazorWire markup only lights up when your views import the package TagHelpers an
 ```
 <!-- /appsurface:snippet -->
 
-Plain `<rw:scripts/>` is enough for page navigation. RazorWire emits a small detector that loads the separate `page-navigation.js` asset only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup, including after Turbo page or frame renders. The optional `page-navigation="true"` attribute is still supported as an eager-load escape hatch, but it is not required for normal adoption.
+Plain `<rw:scripts/>` is enough for page navigation and section copy. RazorWire emits small detectors that load `page-navigation.js` only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup and `section-copy.js` only when it contains `data-rw-section-copy` / `data-rw-section-copy-target` markup, including after Turbo page or frame renders. The optional `page-navigation="true"` and `section-copy="true"` attributes are eager-load escape hatches, but they are not required for normal adoption.
 
 ## Configure Services (Optional)
 

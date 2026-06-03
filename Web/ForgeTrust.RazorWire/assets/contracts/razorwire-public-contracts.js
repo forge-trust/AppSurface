@@ -45,6 +45,19 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
+ * Section copy manager for framework-neutral section permalink buttons, generated copy controls, clipboard fallback UI, and lifecycle-safe rebinding.
+ * @public
+ * @namespace RazorWire
+ * @config window.RazorWire.sectionCopyManager
+ * @type {object}
+ * @source <rw:scripts /> with rendered `[data-rw-section-copy]` or `[data-rw-section-copy-target]` markup
+ * @property {Function} scan - Re-scans the document for section-copy roots and markers after custom DOM updates.
+ * @property {Function} prune - Removes controllers for disconnected roots.
+ * @property {Function} getDiagnostics - Returns section copy diagnostics recorded since startup.
+ * @property {Function} clearDiagnostics - Clears recorded section copy diagnostics.
+ */
+
+/**
  * A RazorWire-enhanced form started submitting through Turbo.
  * @public
  * @namespace RazorWire
@@ -156,6 +169,54 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
+ * Marks an optional root that scopes section-copy status, generated buttons, feedback timers, and cleanup.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-section-copy-root
+ * @target section, article, main, div
+ * @type {"true"}
+ */
+
+/**
+ * Marks a button that copies a section permalink for the referenced target id.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-section-copy
+ * @target button
+ * @type {string}
+ * @value target id with optional leading #
+ */
+
+/**
+ * Provides reader-facing section title copy for `aria-label`, live status, and fallback dialog labels.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-section-copy-title
+ * @target button[data-rw-section-copy], [data-rw-section-copy-target]
+ * @type {string}
+ */
+
+/**
+ * Marks an optional live status region for section-copy feedback.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-section-copy-status
+ * @target span, div
+ * @type {"true"}
+ * @related aria-live
+ */
+
+/**
+ * Marks a heading or section container that should receive a generated plain-text copy button.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-section-copy-target
+ * @target h1, h2, h3, h4, h5, h6, header, section, div
+ * @type {"true"}
+ * @related id
+ */
+
+/**
  * Marks an anchor as a RazorWire same-page navigation link.
  * @public
  * @namespace RazorWire
@@ -210,6 +271,66 @@ window.RazorWire = window.RazorWire || {};
  * @cssHook [data-rw-page-nav-panel-state="closed"]
  * @hookKind data-attribute
  * @target [data-rw-page-nav-panel]
+ * @stability stable
+ */
+
+/**
+ * Stable selector for roots enhanced by the section-copy runtime.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-section-copy-enhanced="true"]
+ * @hookKind data-attribute
+ * @target [data-rw-section-copy-root], body
+ * @stability stable
+ */
+
+/**
+ * Stable selector for generated section-copy buttons.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-section-copy-inserted="true"]
+ * @hookKind data-attribute
+ * @target button[data-rw-section-copy]
+ * @stability stable
+ */
+
+/**
+ * Stable selector for transient copy feedback state.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-section-copy-state="copied|fallback"]
+ * @hookKind data-attribute
+ * @target button[data-rw-section-copy]
+ * @stability stable
+ */
+
+/**
+ * Stable selector for generated section-copy feedback text attached to a button.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-section-copy-message]
+ * @hookKind data-attribute
+ * @target button[data-rw-section-copy]
+ * @stability stable
+ */
+
+/**
+ * Stable selector for runtime-generated section-copy clipboard fallback UI.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-section-copy-fallback="true"]
+ * @hookKind data-attribute
+ * @target generated fallback dialog
+ * @stability stable
+ */
+
+/**
+ * Stable selector for runtime-generated section-copy status regions.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-section-copy-status-generated="true"]
+ * @hookKind data-attribute
+ * @target generated status region
  * @stability stable
  */
 

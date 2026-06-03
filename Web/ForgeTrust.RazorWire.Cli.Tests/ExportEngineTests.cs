@@ -897,6 +897,37 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_Should_Export_SectionCopy_Runtime_When_Lazy_Markup_Is_Present()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new SectionCopyRuntimeHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var scriptPath = Path.Join(
+                tempDir,
+                "_content",
+                "ForgeTrust.RazorWire",
+                "razorwire",
+                "section-copy.js");
+            Assert.True(File.Exists(scriptPath), "RazorWire section-copy runtime should be exported for lazy section-copy markup.");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Export_Redirected_Stylesheet_To_Original_Route_Path()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
@@ -3140,6 +3171,36 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractReferences_Should_Add_SectionCopy_Runtime_For_Lazy_Markup()
+    {
+        var html = """
+            <main>
+              <h2 id="intro" data-rw-section-copy-target="true">Intro</h2>
+              <button type="button" data-rw-section-copy="#intro">Copy</button>
+            </main>
+            """;
+
+        var reference = Assert.Single(
+            _sut.ExtractReferences(html, "/docs/start", htmlScope: true),
+            reference => reference.Path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
+
+        Assert.Equal(ExportReferenceKind.ScriptSrc, reference.Kind);
+        Assert.Equal(ExportReferenceRole.StaticAsset, reference.Role);
+        Assert.Equal("<h2 data-rw-section-copy-target>", reference.Provenance?.DisplaySource);
+
+        var withExplicitScript = """
+            <script src="/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc"></script>
+            <button type="button" data-rw-section-copy="intro">Copy</button>
+            """;
+
+        var explicitReferences = _sut.ExtractReferences(withExplicitScript, "/docs/start", htmlScope: true)
+            .Where(reference => reference.Path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js")
+            .ToArray();
+        Assert.Single(explicitReferences);
+        Assert.Equal("?v=abc", explicitReferences[0].Query);
+    }
+
+    [Fact]
     public void ExtractReferences_Should_Ignore_Hash_Only_Css_References()
     {
         var css = """
@@ -4473,6 +4534,38 @@ public class ExportEngineTests
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent("console.log('ok');", Encoding.UTF8, "text/javascript")
+                });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class SectionCopyRuntimeHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                var html = """
+                    <html>
+                      <body>
+                        <h2 id="intro" data-rw-section-copy-target="true">Intro</h2>
+                      </body>
+                    </html>
+                    """;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(html, Encoding.UTF8, "text/html")
+                });
+            }
+
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("window.RazorWire = window.RazorWire || {};", Encoding.UTF8, "text/javascript")
                 });
             }
 

@@ -18,6 +18,7 @@ namespace ForgeTrust.RazorWire.Cli;
 internal sealed partial class ExportReferenceProcessor
 {
     private const string ExportIgnoreAttributeName = "data-rw-export-ignore";
+    private const string SectionCopyRuntimePath = "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js";
     private static readonly Uri ManagedUrlBase = new("http://dummy");
 
     private static readonly HashSet<string> SourceNavigationAnchorExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -327,6 +328,8 @@ internal sealed partial class ExportReferenceProcessor
             references.AddRange(ExtractCssReferences(element.GetAttribute("style") ?? string.Empty, currentRoute, "style", element.LocalName, "style"));
         }
 
+        AddSyntheticSectionCopyRuntimeReference(references, document, currentRoute, attributeLookup);
+
         return references;
     }
 
@@ -351,6 +354,37 @@ internal sealed partial class ExportReferenceProcessor
                 currentRoute,
                 CreateInlineScriptProvenance("RazorWire page-navigation autoload source"));
         }
+    }
+
+    private void AddSyntheticSectionCopyRuntimeReference(
+        ICollection<ExportReference> references,
+        IDocument document,
+        string currentRoute,
+        IReadOnlyDictionary<HtmlAttributeLookupKey, HtmlAttributeSpan> attributeLookup)
+    {
+        var hasSectionCopyRuntime = document.QuerySelectorAll("script[src]")
+            .Any(element => (element.GetAttribute("src") ?? string.Empty)
+                .Contains("/razorwire/section-copy.js", StringComparison.OrdinalIgnoreCase));
+        if (hasSectionCopyRuntime)
+        {
+            return;
+        }
+
+        var marker = document.QuerySelector("[data-rw-section-copy], [data-rw-section-copy-target]");
+        if (marker is null)
+        {
+            return;
+        }
+
+        var attributeName = marker.HasAttribute("data-rw-section-copy")
+            ? "data-rw-section-copy"
+            : "data-rw-section-copy-target";
+        AddReference(
+            references,
+            SectionCopyRuntimePath,
+            ExportReferenceKind.ScriptSrc,
+            currentRoute,
+            CreateHtmlProvenance(marker, attributeName, attributeLookup));
     }
 
     private IReadOnlyList<ExportReference> ExtractCssReferences(

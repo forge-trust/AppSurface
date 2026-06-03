@@ -11,13 +11,11 @@
 
     const outlineSelector = "#docs-page-outline";
     const outlineLinkSelector = "a[data-doc-outline-link='true']";
-    const copyButtonSelector = "button[data-doc-section-copy]";
-    const insertedCopyButtonSelector = "button[data-doc-section-copy-inserted='true']";
-    const copyStatusSelector = "[data-doc-section-copy-status]";
-    const copyFallbackSelector = "[data-doc-section-copy-fallback='true']";
+    const copyButtonSelector = "button[data-rw-section-copy]";
+    const insertedCopyButtonSelector = "button[data-rw-section-copy-inserted-by-docs='true']";
+    const copyStatusSelector = "[data-rw-section-copy-status]";
     const compactMediaQuery = "(max-width: 79.999rem)";
     const outlineContextRollDurationMs = 180;
-    const copyFeedbackDurationMs = 1800;
 
     let lifecycleController = null;
     let contextRollTimeout = 0;
@@ -26,11 +24,6 @@
     let turboLoadHandler = null;
     let turboFrameLoadHandler = null;
     let domContentLoadedHandler = null;
-    let copyFeedbackTimers = [];
-    let activeCopyFallback = null;
-    let activeCopyFallbackButton = null;
-    let activeCopyFallbackShell = null;
-    let activeCopyFallbackPointerDown = null;
 
     function decodeHash(hash) {
         if (!hash) {
@@ -237,42 +230,6 @@
             .filter(entry => entry !== null);
     }
 
-    function buildSectionUrl(targetId) {
-        const url = new URL(window.location.href);
-        url.hash = targetId;
-        return url.toString();
-    }
-
-    function getSectionTitle(button) {
-        return button.dataset.docSectionCopyTitle?.trim() || "section";
-    }
-
-    function setCopyStatus(shell, message) {
-        const status = shell.querySelector(copyStatusSelector);
-        if (status) {
-            status.textContent = message;
-        }
-    }
-
-    function clearCopyFeedbackTimer(button) {
-        const timer = Number.parseInt(button.dataset.docSectionCopyTimer ?? "", 10);
-        if (Number.isFinite(timer) && timer > 0) {
-            window.clearTimeout(timer);
-            copyFeedbackTimers = copyFeedbackTimers.filter(candidate => candidate !== timer);
-        }
-
-        button.removeAttribute("data-doc-section-copy-timer");
-    }
-
-    function clearCopyFeedback(button) {
-        clearCopyFeedbackTimer(button);
-        button.removeAttribute("data-copy-state");
-        button.removeAttribute("data-doc-section-copy-message");
-
-        const title = getSectionTitle(button);
-        button.setAttribute("aria-label", `Copy link to ${title}`);
-    }
-
     function createCopyIcon() {
         const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
         svg.classList.add("docs-section-copy-icon");
@@ -296,34 +253,13 @@
         return svg;
     }
 
-    function showCopiedFeedback(button, shell) {
-        hideCopyFallback();
-        clearCopyFeedbackTimer(button);
-
-        const title = getSectionTitle(button);
-        button.dataset.copyState = "copied";
-        button.dataset.docSectionCopyMessage = "Copied";
-        button.setAttribute("aria-label", `Copied link to ${title}`);
-        setCopyStatus(shell, `Copied link to ${title}.`);
-
-        const timer = window.setTimeout(() => {
-            copyFeedbackTimers = copyFeedbackTimers.filter(candidate => candidate !== timer);
-            button.removeAttribute("data-doc-section-copy-timer");
-            clearCopyFeedback(button);
-            setCopyStatus(shell, "");
-        }, copyFeedbackDurationMs);
-
-        button.dataset.docSectionCopyTimer = String(timer);
-        copyFeedbackTimers.push(timer);
-    }
-
     function createCopyButton(targetId, title, className) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = `docs-section-copy ${className}`;
-        button.dataset.docSectionCopy = targetId;
-        button.dataset.docSectionCopyTitle = title;
-        button.dataset.docSectionCopyInserted = "true";
+        button.dataset.rwSectionCopy = targetId;
+        button.dataset.rwSectionCopyTitle = title;
+        button.dataset.rwSectionCopyInsertedByDocs = "true";
         button.setAttribute("aria-label", `Copy link to ${title}`);
 
         button.append(createCopyIcon());
@@ -350,7 +286,7 @@
         return entry.link.textContent?.trim() || entry.target.id || "section";
     }
 
-    function enhanceContentCopyTargets(entries, shell) {
+    function enhanceContentCopyTargets(entries) {
         for (const entry of entries) {
             const targetId = entry.target.id;
             if (!targetId) {
@@ -366,140 +302,28 @@
             const button = createCopyButton(targetId, title, "docs-content-copy");
             header.classList.add("docs-section-copy-target");
             header.append(button);
-            enhanceCopyButton(button, shell);
         }
     }
 
-    function enhanceCopyButtons(shell) {
+    function decorateSectionCopyButtons() {
         const buttons = Array.from(document.querySelectorAll(copyButtonSelector))
             .filter(button => button instanceof HTMLButtonElement);
 
         for (const button of buttons) {
-            enhanceCopyButton(button, shell);
-        }
-    }
-
-    function enhanceCopyButton(button, shell) {
-        if (!(button instanceof HTMLButtonElement)
-            || button.dataset.docSectionCopyEnhanced === "true") {
-            return;
-        }
-
-        button.dataset.docSectionCopyEnhanced = "true";
-        addLifecycleEventListener(button, "click", event => {
-            event.preventDefault();
-            event.stopPropagation();
-            copySectionLink(button, shell);
-        });
-    }
-
-    function copySectionLink(button, shell) {
-        const targetId = button.dataset.docSectionCopy?.trim();
-        if (!targetId) {
-            return;
-        }
-
-        const sectionUrl = buildSectionUrl(targetId);
-
-        if (navigator.clipboard?.writeText) {
-            navigator.clipboard.writeText(sectionUrl)
-                .then(() => showCopiedFeedback(button, shell))
-                .catch(() => showCopyFallback(button, shell, sectionUrl));
-            return;
-        }
-
-        showCopyFallback(button, shell, sectionUrl);
-    }
-
-    function hideCopyFallback() {
-        if (activeCopyFallbackPointerDown) {
-            document.removeEventListener("pointerdown", activeCopyFallbackPointerDown);
-            activeCopyFallbackPointerDown = null;
-        }
-
-        const button = activeCopyFallbackButton;
-        const shell = activeCopyFallbackShell;
-        activeCopyFallback?.remove();
-        activeCopyFallback = null;
-        activeCopyFallbackButton = null;
-        activeCopyFallbackShell = null;
-
-        if (button) {
-            clearCopyFeedback(button);
-        }
-
-        if (shell) {
-            setCopyStatus(shell, "");
-        }
-    }
-
-    function showCopyFallback(button, shell, sectionUrl) {
-        hideCopyFallback();
-
-        const title = getSectionTitle(button);
-        const fallback = document.createElement("span");
-        fallback.className = "docs-section-copy-fallback";
-        fallback.dataset.docSectionCopyFallback = "true";
-        fallback.setAttribute("role", "dialog");
-        fallback.setAttribute("aria-label", `Copy link to ${title}`);
-
-        const label = document.createElement("label");
-        label.className = "docs-section-copy-fallback-label";
-        label.textContent = "Section link";
-
-        const input = document.createElement("input");
-        input.className = "docs-section-copy-fallback-input";
-        input.type = "text";
-        input.readOnly = true;
-        input.value = sectionUrl;
-
-        const close = document.createElement("button");
-        close.className = "docs-section-copy-fallback-close";
-        close.type = "button";
-        close.textContent = "Close";
-
-        label.append(input);
-        fallback.append(label, close);
-        button.after(fallback);
-        activeCopyFallback = fallback;
-        activeCopyFallbackButton = button;
-        activeCopyFallbackShell = shell;
-
-        button.dataset.copyState = "fallback";
-        button.dataset.docSectionCopyMessage = "Copy";
-        setCopyStatus(shell, `Copy link to ${title} from the open text field.`);
-
-        addLifecycleEventListener(close, "click", hideCopyFallback);
-        addLifecycleEventListener(fallback, "keydown", event => {
-            if (event.key === "Escape") {
-                hideCopyFallback();
-                button.focus();
-            }
-        });
-        addLifecycleEventListener(fallback, "focusout", event => {
-            const nextTarget = event.relatedTarget;
-            if (nextTarget instanceof Node && fallback.contains(nextTarget)) {
-                return;
+            button.classList.add("docs-section-copy");
+            if (button.dataset.rwSectionCopyInserted === "true") {
+                button.classList.add("docs-content-copy");
             }
 
-            window.setTimeout(() => {
-                if (!fallback.contains(document.activeElement)) {
-                    hideCopyFallback();
-                }
-            }, 0);
-        });
-        activeCopyFallbackPointerDown = event => {
-            const target = event.target;
-            if (target instanceof Node
-                && !fallback.contains(target)
-                && target !== button) {
-                hideCopyFallback();
+            if (!button.querySelector(".docs-section-copy-icon")) {
+                button.textContent = "";
+                button.append(createCopyIcon());
             }
-        };
-        document.addEventListener("pointerdown", activeCopyFallbackPointerDown);
+        }
+    }
 
-        input.focus();
-        input.select();
+    function scanSectionCopyRuntime() {
+        window.RazorWire?.sectionCopyManager?.scan?.();
     }
 
     function createLifecycleController() {
@@ -536,24 +360,13 @@
     }
 
     function clearCopyArtifacts() {
-        for (const timer of copyFeedbackTimers) {
-            window.clearTimeout(timer);
-        }
-
-        copyFeedbackTimers = [];
-        hideCopyFallback();
-
         for (const button of document.querySelectorAll(copyButtonSelector)) {
-            button.removeAttribute("data-doc-section-copy-enhanced");
-            clearCopyFeedback(button);
+            button.removeAttribute("data-rw-section-copy-state");
+            button.removeAttribute("data-rw-section-copy-message");
         }
 
         for (const button of document.querySelectorAll(insertedCopyButtonSelector)) {
             button.remove();
-        }
-
-        for (const fallback of document.querySelectorAll(copyFallbackSelector)) {
-            fallback.remove();
         }
 
         for (const target of document.querySelectorAll(".docs-section-copy-target")) {
@@ -659,8 +472,9 @@
         lifecycleController = createLifecycleController();
         shell.dataset.outlineEnhanced = "true";
         shell.dataset.outlineClientVersion = clientVersion;
-        enhanceContentCopyTargets(entries, shell);
-        enhanceCopyButtons(shell);
+        enhanceContentCopyTargets(entries);
+        decorateSectionCopyButtons();
+        scanSectionCopyRuntime();
 
         const compactMedia = window.matchMedia ? window.matchMedia(compactMediaQuery) : null;
         const syncViewportState = () => {

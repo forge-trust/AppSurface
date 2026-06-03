@@ -33,6 +33,14 @@ const generatedOutputs = [
     banner: 'Generated from assets/src/page-navigation.ts. Do not edit wwwroot/razorwire/page-navigation.js by hand.',
     rawBytes: 9_000,
     gzipBytes: 3_000
+  },
+  {
+    entry: path.join(assetRoot, 'src', 'section-copy.ts'),
+    output: path.join(outputRoot, 'section-copy.js'),
+    label: 'section-copy.js',
+    banner: 'Generated from assets/src/section-copy.ts. Do not edit wwwroot/razorwire/section-copy.js by hand.',
+    rawBytes: 12_000,
+    gzipBytes: 4_000
   }
 ];
 

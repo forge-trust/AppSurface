@@ -150,7 +150,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         Assert.Equal("true", await page.GetAttributeAsync("#docs-page-outline", "data-outline-enhanced"));
         Assert.Equal(
             await page.Locator("#docs-page-outline a[data-doc-outline-link='true']").CountAsync(),
-            await page.Locator("#docs-page-outline button[data-doc-section-copy]").CountAsync());
+            await page.Locator("#docs-page-outline button[data-rw-section-copy]").CountAsync());
 
         await page.EvaluateAsync(
             """
@@ -160,10 +160,10 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             """);
         Assert.Equal(
             await page.Locator("#docs-page-outline a[data-doc-outline-link='true']").CountAsync(),
-            await page.Locator("#docs-page-outline button[data-doc-section-copy]").CountAsync());
+            await page.Locator("#docs-page-outline button[data-rw-section-copy]").CountAsync());
         Assert.Equal(
             1,
-            await page.Locator(".docs-content button[data-doc-section-copy='files-behind-the-hero-flow']").CountAsync());
+            await page.Locator(".docs-content button[data-rw-section-copy='files-behind-the-hero-flow']").CountAsync());
     }
 
     [Fact]
@@ -187,11 +187,11 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             State = WaitForSelectorState.Visible
         });
         await page.WaitForSelectorAsync(
-            ".docs-content button[data-doc-section-copy]",
+            ".docs-content button[data-rw-section-copy]",
             new PageWaitForSelectorOptions { Timeout = 30_000, State = WaitForSelectorState.Attached });
         await WaitForSectionCopyTargetCountAsync(page, 3);
-        var contentCopyButton = page.Locator(".docs-content button[data-doc-section-copy]").Nth(2);
-        var targetId = await contentCopyButton.GetAttributeAsync("data-doc-section-copy")
+        var contentCopyButton = page.Locator(".docs-content button[data-rw-section-copy]").Nth(2);
+        var targetId = await contentCopyButton.GetAttributeAsync("data-rw-section-copy")
             ?? throw new InvalidOperationException("Expected a section copy target.");
 
         var expectedUrl = await BuildSectionCopyExpectedUrlAsync(page, targetId);
@@ -200,9 +200,9 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         var outlineInitialScrollTop = await GetMainContentScrollTopAsync(page);
         Assert.True(outlineInitialScrollTop > 0);
 
-        await page.ClickAsync($"#docs-page-outline button[data-doc-section-copy='{targetId}']");
+        await page.ClickAsync($"#docs-page-outline button[data-rw-section-copy='{targetId}']");
         await page.WaitForSelectorAsync(
-            $"#docs-page-outline button[data-doc-section-copy='{targetId}'][data-copy-state='copied']",
+            $"#docs-page-outline button[data-rw-section-copy='{targetId}'][data-rw-section-copy-state='copied']",
             new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Attached });
 
         Assert.Equal(expectedUrl, await ReadClipboardTextAsync(page));
@@ -214,7 +214,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         var contentInitialScrollTop = await GetMainContentScrollTopAsync(page);
         await contentCopyButton.ClickAsync();
         await page.WaitForSelectorAsync(
-            $".docs-content button[data-doc-section-copy='{targetId}'][data-copy-state='copied']",
+            $".docs-content button[data-rw-section-copy='{targetId}'][data-rw-section-copy-state='copied']",
             new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Attached });
 
         Assert.Equal(expectedUrl, await ReadClipboardTextAsync(page));
@@ -251,7 +251,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             Timeout = 30_000,
             State = WaitForSelectorState.Visible
         });
-        var targetId = await page.Locator(".docs-content button[data-doc-section-copy]").First.GetAttributeAsync("data-doc-section-copy")
+        var targetId = await page.Locator(".docs-content button[data-rw-section-copy]").First.GetAttributeAsync("data-rw-section-copy")
             ?? throw new InvalidOperationException("Expected a section copy target.");
 
         var expectedUrl = await BuildSectionCopyExpectedUrlAsync(page, targetId);
@@ -285,7 +285,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             Timeout = 30_000,
             State = WaitForSelectorState.Visible
         });
-        var targetId = await page.Locator(".docs-content button[data-doc-section-copy]").First.GetAttributeAsync("data-doc-section-copy")
+        var targetId = await page.Locator(".docs-content button[data-rw-section-copy]").First.GetAttributeAsync("data-rw-section-copy")
             ?? throw new InvalidOperationException("Expected a section copy target.");
 
         var expectedUrl = await BuildSectionCopyExpectedUrlAsync(page, targetId);
@@ -313,16 +313,16 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             State = WaitForSelectorState.Visible
         });
         await page.WaitForSelectorAsync(
-            ".doc-type > .doc-type-header > button[data-doc-section-copy]",
+            ".doc-type > .doc-type-header > button[data-rw-section-copy]",
             new PageWaitForSelectorOptions { Timeout = 30_000, State = WaitForSelectorState.Attached });
 
-        Assert.True(await page.Locator(".doc-type > .doc-type-header > button[data-doc-section-copy]").CountAsync() > 0);
-        Assert.True(await page.Locator(".doc-method-group > .doc-method-group-header > button[data-doc-section-copy]").CountAsync() > 0);
-        Assert.True(await page.Locator(".docs-content button[data-doc-section-copy] .docs-section-copy-icon").CountAsync() > 0);
+        Assert.True(await page.Locator(".doc-type > .doc-type-header > button[data-rw-section-copy]").CountAsync() > 0);
+        Assert.True(await page.Locator(".doc-method-group > .doc-method-group-header > button[data-rw-section-copy]").CountAsync() > 0);
+        Assert.True(await page.Locator(".docs-content button[data-rw-section-copy] .docs-section-copy-icon").CountAsync() > 0);
         Assert.Equal(
             string.Empty,
-            await page.Locator(".docs-content button[data-doc-section-copy]").First.TextContentAsync());
-        Assert.True(await page.Locator(".docs-content button[data-doc-section-copy]").First.EvaluateAsync<bool>(
+            await page.Locator(".docs-content button[data-rw-section-copy]").First.TextContentAsync());
+        Assert.True(await page.Locator(".docs-content button[data-rw-section-copy]").First.EvaluateAsync<bool>(
             """
             button => {
               const style = getComputedStyle(button);
@@ -333,10 +333,10 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
                 && Number.parseFloat(style.opacity) > 0.7;
             }
             """));
-        Assert.Equal(0, await page.Locator("summary button[data-doc-section-copy]").CountAsync());
-        Assert.Equal(0, await page.Locator(".doc-signature button[data-doc-section-copy]").CountAsync());
-        Assert.Equal(0, await page.Locator(".doc-symbol-source-link button[data-doc-section-copy]").CountAsync());
-        Assert.Equal(0, await page.Locator("pre button[data-doc-section-copy], code button[data-doc-section-copy]").CountAsync());
+        Assert.Equal(0, await page.Locator("summary button[data-rw-section-copy]").CountAsync());
+        Assert.Equal(0, await page.Locator(".doc-signature button[data-rw-section-copy]").CountAsync());
+        Assert.Equal(0, await page.Locator(".doc-symbol-source-link button[data-rw-section-copy]").CountAsync());
+        Assert.Equal(0, await page.Locator("pre button[data-rw-section-copy], code button[data-rw-section-copy]").CountAsync());
     }
 
     [Fact]
@@ -366,7 +366,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             new PageWaitForFunctionOptions { Timeout = 15_000 });
         await WaitForSectionCopyTargetCountAsync(page, 3);
 
-        var targetId = await page.Locator(".docs-content button[data-doc-section-copy]").Nth(2).GetAttributeAsync("data-doc-section-copy")
+        var targetId = await page.Locator(".docs-content button[data-rw-section-copy]").Nth(2).GetAttributeAsync("data-rw-section-copy")
             ?? throw new InvalidOperationException("Expected a section copy target.");
         var expectedUrl = await BuildSectionCopyExpectedUrlAsync(page, targetId);
         await InstallSectionCopyHistoryCountersAsync(page);
@@ -374,9 +374,9 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         var initialScrollTop = await GetMainContentScrollTopAsync(page);
         Assert.True(initialScrollTop > 0);
 
-        await page.ClickAsync($"#docs-page-outline button[data-doc-section-copy='{targetId}']");
+        await page.ClickAsync($"#docs-page-outline button[data-rw-section-copy='{targetId}']");
         await page.WaitForSelectorAsync(
-            $"#docs-page-outline button[data-doc-section-copy='{targetId}'][data-copy-state='copied']",
+            $"#docs-page-outline button[data-rw-section-copy='{targetId}'][data-rw-section-copy-state='copied']",
             new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Attached });
 
         Assert.Equal(expectedUrl, await ReadClipboardTextAsync(page));
@@ -1563,7 +1563,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
     {
         await page.WaitForFunctionAsync(
             """
-            minimumCount => document.querySelectorAll('.docs-content button[data-doc-section-copy]').length >= minimumCount
+            minimumCount => document.querySelectorAll('.docs-content button[data-rw-section-copy]').length >= minimumCount
             """,
             minimumCount,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
@@ -1637,14 +1637,14 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         var initialScrollTop = await GetMainContentScrollTopAsync(page);
         Assert.True(initialScrollTop > 0);
 
-        await page.ClickAsync($"#docs-page-outline button[data-doc-section-copy='{targetId}']");
+        await page.ClickAsync($"#docs-page-outline button[data-rw-section-copy='{targetId}']");
         await page.WaitForSelectorAsync(
-            "[data-doc-section-copy-fallback='true'] input",
+            "[data-rw-section-copy-fallback='true'] input",
             new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Visible });
 
-        Assert.Equal(expectedUrl, await page.InputValueAsync("[data-doc-section-copy-fallback='true'] input"));
+        Assert.Equal(expectedUrl, await page.InputValueAsync("[data-rw-section-copy-fallback='true'] input"));
         await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
-        Assert.True(await page.Locator("[data-doc-section-copy-fallback='true']").EvaluateAsync<bool>(
+        Assert.True(await page.Locator("[data-rw-section-copy-fallback='true']").EvaluateAsync<bool>(
             """
             fallback => {
               const input = fallback.querySelector("input");
@@ -1654,31 +1654,31 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             }
             """));
 
-        await page.ClickAsync("[data-doc-section-copy-fallback='true'] input");
-        Assert.Equal(1, await page.Locator("[data-doc-section-copy-fallback='true']").CountAsync());
+        await page.ClickAsync("[data-rw-section-copy-fallback='true'] input");
+        Assert.Equal(1, await page.Locator("[data-rw-section-copy-fallback='true']").CountAsync());
 
         await page.Keyboard.PressAsync("Escape");
         await page.WaitForSelectorAsync(
-            "[data-doc-section-copy-fallback='true']",
+            "[data-rw-section-copy-fallback='true']",
             new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Detached });
         Assert.Null(await page.GetAttributeAsync(
-            $"#docs-page-outline button[data-doc-section-copy='{targetId}']",
-            "data-copy-state"));
+            $"#docs-page-outline button[data-rw-section-copy='{targetId}']",
+            "data-rw-section-copy-state"));
         await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
 
-        await page.ClickAsync($"#docs-page-outline button[data-doc-section-copy='{targetId}']");
+        await page.ClickAsync($"#docs-page-outline button[data-rw-section-copy='{targetId}']");
         await page.WaitForSelectorAsync(
-            "[data-doc-section-copy-fallback='true'] input",
+            "[data-rw-section-copy-fallback='true'] input",
             new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Visible });
 
-        Assert.Equal(expectedUrl, await page.InputValueAsync("[data-doc-section-copy-fallback='true'] input"));
+        Assert.Equal(expectedUrl, await page.InputValueAsync("[data-rw-section-copy-fallback='true'] input"));
         await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
-        await page.ClickAsync("[data-doc-section-copy-fallback='true'] input");
-        Assert.Equal(1, await page.Locator("[data-doc-section-copy-fallback='true']").CountAsync());
+        await page.ClickAsync("[data-rw-section-copy-fallback='true'] input");
+        Assert.Equal(1, await page.Locator("[data-rw-section-copy-fallback='true']").CountAsync());
 
         await page.Keyboard.PressAsync("Escape");
         await page.WaitForSelectorAsync(
-            "[data-doc-section-copy-fallback='true']",
+            "[data-rw-section-copy-fallback='true']",
             new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Detached });
         await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
     }

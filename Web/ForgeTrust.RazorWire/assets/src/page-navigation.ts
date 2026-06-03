@@ -6,6 +6,7 @@ interface Window {
         localTimeFormatter?: unknown;
         formFailureManager?: unknown;
         pageNavigationManager?: unknown;
+        sectionCopyManager?: unknown;
     };
 }
 
