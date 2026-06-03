@@ -1227,19 +1227,29 @@ test('page navigation toggles a fallback panel when aria-controls is omitted', (
 test('page navigation reveals a clipped active link inside the nearest vertical nav scroller', async () => {
   const { context, document, window } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
   const { nav, panel, pricingLink } = createPageNavigationFixture(document);
+  const outerPanel = new FakeElement('div');
+  outerPanel.rectTop = 80;
+  outerPanel.clientHeight = 160;
+  outerPanel.scrollHeight = 600;
+  outerPanel.computedStyle = { overflowY: 'auto' };
   panel.rectTop = 100;
   panel.clientHeight = 120;
   panel.scrollHeight = 500;
   panel.computedStyle = { overflowY: 'auto' };
   pricingLink.rectTop = 260;
+  nav.children = nav.children.filter(child => child !== panel);
+  outerPanel.appendChild(panel);
+  nav.appendChild(outerPanel);
   document.body.appendChild(nav);
   window.scrollY = 45;
 
   context.window.RazorWire.pageNavigationManager.scan();
   await waitForAnimationFrame();
 
-  assert.equal(panel.lastScrollToOptions.top, 160);
-  assert.equal(panel.lastScrollToOptions.behavior, 'auto');
+  assert.equal(panel.scrollTop, 160);
+  assert.equal(panel.lastScrollToOptions, null);
+  assert.equal(outerPanel.scrollTop, 0);
+  assert.equal(outerPanel.lastScrollToOptions, null);
   assert.equal(window.scrollY, 45);
 });
 
@@ -1349,7 +1359,14 @@ test('page navigation honors scroll-padding insets when revealing active links',
   context.window.RazorWire.pageNavigationManager.scan();
   await waitForAnimationFrame();
 
-  assert.equal(panel.lastScrollToOptions.top, 126);
+  assert.equal(panel.scrollTop, 126);
+
+  panel.scrollTop = 0;
+  panel.computedStyle = { overflowY: 'auto', scrollPaddingBlock: '16px 36px' };
+  context.window.RazorWire.pageNavigationManager.scan();
+  await waitForAnimationFrame();
+
+  assert.equal(panel.scrollTop, 126);
 });
 
 test('page navigation syncs unchanged active link visibility after refresh and resize', async () => {
@@ -1370,7 +1387,7 @@ test('page navigation syncs unchanged active link visibility after refresh and r
   context.window.RazorWire.pageNavigationManager.scan();
   await waitForAnimationFrame();
 
-  assert.equal(panel.lastScrollToOptions.top, 100);
+  assert.equal(panel.scrollTop, 100);
 
   panel.lastScrollToOptions = null;
   panel.scrollTop = 0;
@@ -1378,7 +1395,7 @@ test('page navigation syncs unchanged active link visibility after refresh and r
   window.dispatchEvent({ type: 'resize' });
   await waitForAnimationFrame();
 
-  assert.equal(panel.lastScrollToOptions.top, 110);
+  assert.equal(panel.scrollTop, 110);
 });
 
 test('page navigation resyncs active link visibility after panel open and resize observer changes', async () => {
@@ -1423,7 +1440,7 @@ test('page navigation resyncs active link visibility after panel open and resize
   panel.computedStyle = { overflowY: 'auto' };
   nav.dispatchEvent(clickEvent(toggle));
   await waitForAnimationFrame();
-  assert.equal(panel.lastScrollToOptions.top, 160);
+  assert.equal(panel.scrollTop, 160);
 
   panel.lastScrollToOptions = null;
   panel.scrollTop = 0;
@@ -1431,7 +1448,7 @@ test('page navigation resyncs active link visibility after panel open and resize
   resizeObservers.at(-1).trigger();
   await waitForAnimationFrame();
 
-  assert.equal(panel.lastScrollToOptions.top, 180);
+  assert.equal(panel.scrollTop, 180);
   assert.deepEqual(resizeObservers.at(-1).observed, [nav, panel]);
 });
 

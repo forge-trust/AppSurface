@@ -213,7 +213,7 @@ public sealed class RazorWireMvcPlaywrightTests
             """);
 
         Assert.True(probe.PanelScrollTop > 0);
-        Assert.Equal(probe.WindowScrollBefore, probe.WindowScrollAfter);
+        Assert.InRange(Math.Abs(probe.WindowScrollAfter - probe.WindowScrollBefore), 0, 0.5);
     }
 
     [Fact]

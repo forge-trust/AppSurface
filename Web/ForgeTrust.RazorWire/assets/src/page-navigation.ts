@@ -330,11 +330,7 @@ type PageNavigationScrollRoot = Window | Element;
             nextTop = Math.min(maxTop, Math.max(0, nextTop));
             if (Math.abs(nextTop - currentTop) < 1) return;
 
-            if (typeof container.scrollTo === 'function') {
-                container.scrollTo({ top: nextTop, behavior: 'auto' });
-            } else {
-                container.scrollTop = nextTop;
-            }
+            container.scrollTop = nextTop;
         }
 
         resolveActiveLinkRevealContainer(): Element | null {
@@ -397,9 +393,16 @@ type PageNavigationScrollRoot = Window | Element;
             const physicalValue = edge === 'top'
                 ? style?.scrollPaddingTop
                 : style?.scrollPaddingBottom;
-            const value = Number.parseFloat(blockValue || physicalValue || '');
+            const shorthandValue = this.getScrollPaddingBlock(style?.scrollPaddingBlock, edge);
+            const value = Number.parseFloat(blockValue || physicalValue || shorthandValue || '');
 
             return Number.isFinite(value) && value > 0 ? value : 0;
+        }
+
+        getScrollPaddingBlock(value: string | undefined, edge: 'top' | 'bottom') {
+            const parts = value?.trim().split(/\s+/) ?? [];
+
+            return edge === 'top' ? parts[0] ?? '' : parts[1] ?? parts[0] ?? '';
         }
 
         bindActiveLinkVisibilityObserver(container: Element | null) {
