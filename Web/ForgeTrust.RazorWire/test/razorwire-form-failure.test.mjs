@@ -1224,10 +1224,224 @@ test('page navigation toggles a fallback panel when aria-controls is omitted', (
   assert.equal(panel.getAttribute('data-rw-page-nav-panel-state'), 'open');
 });
 
+test('page navigation reveals a clipped active link inside the nearest vertical nav scroller', async () => {
+  const { context, document, window } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const { nav, panel, pricingLink } = createPageNavigationFixture(document);
+  panel.rectTop = 100;
+  panel.clientHeight = 120;
+  panel.scrollHeight = 500;
+  panel.computedStyle = { overflowY: 'auto' };
+  pricingLink.rectTop = 260;
+  document.body.appendChild(nav);
+  window.scrollY = 45;
+
+  context.window.RazorWire.pageNavigationManager.scan();
+  await waitForAnimationFrame();
+
+  assert.equal(panel.lastScrollToOptions.top, 160);
+  assert.equal(panel.lastScrollToOptions.behavior, 'auto');
+  assert.equal(window.scrollY, 45);
+});
+
+test('page navigation leaves an already visible active link alone', async () => {
+  const { context, document } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const { nav, panel, pricingLink } = createPageNavigationFixture(document);
+  panel.rectTop = 100;
+  panel.clientHeight = 180;
+  panel.scrollHeight = 500;
+  panel.computedStyle = { overflowY: 'auto' };
+  pricingLink.rectTop = 140;
+  pricingLink.rectHeight = 40;
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+  await waitForAnimationFrame();
+
+  assert.equal(panel.lastScrollToOptions, null);
+  assert.equal(panel.scrollTop, 0);
+});
+
+test('page navigation skips reveal when the nav surface does not overflow', async () => {
+  const { context, document } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const { nav, panel, pricingLink } = createPageNavigationFixture(document);
+  panel.rectTop = 100;
+  panel.clientHeight = 500;
+  panel.scrollHeight = 500;
+  panel.computedStyle = { overflowY: 'auto' };
+  pricingLink.rectTop = 520;
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+  await waitForAnimationFrame();
+
+  assert.equal(panel.lastScrollToOptions, null);
+});
+
+test('page navigation skips hidden, collapsed, horizontal-only, and clipped reveal surfaces', async () => {
+  const { context, document } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const hidden = createPageNavigationFixture(document);
+  hidden.panel.rectTop = 100;
+  hidden.panel.clientHeight = 100;
+  hidden.panel.scrollHeight = 500;
+  hidden.panel.computedStyle = { display: 'none', overflowY: 'auto' };
+  hidden.pricingLink.rectTop = 300;
+  document.body.appendChild(hidden.nav);
+
+  const collapsed = createPageNavigationFixture(document);
+  collapsed.nav.setAttribute('id', 'collapsed-nav');
+  collapsed.panel.setAttribute('id', 'collapsed-panel');
+  collapsed.toggle.setAttribute('aria-controls', 'collapsed-panel');
+  collapsed.toggle.setAttribute('aria-expanded', 'false');
+  collapsed.panel.rectTop = 100;
+  collapsed.panel.clientHeight = 100;
+  collapsed.panel.scrollHeight = 500;
+  collapsed.panel.computedStyle = { display: 'none', overflowY: 'auto' };
+  collapsed.pricingLink.rectTop = 300;
+  document.body.appendChild(collapsed.nav);
+
+  const horizontal = createPageNavigationFixture(document);
+  horizontal.nav.setAttribute('id', 'horizontal-nav');
+  horizontal.panel.setAttribute('id', 'horizontal-panel');
+  horizontal.toggle.setAttribute('aria-controls', 'horizontal-panel');
+  horizontal.panel.rectTop = 100;
+  horizontal.panel.clientHeight = 100;
+  horizontal.panel.scrollHeight = 500;
+  horizontal.panel.scrollWidth = 900;
+  horizontal.panel.clientWidth = 100;
+  horizontal.panel.computedStyle = { overflowY: 'visible', overflowX: 'auto' };
+  horizontal.pricingLink.rectTop = 300;
+  document.body.appendChild(horizontal.nav);
+
+  const clipped = createPageNavigationFixture(document);
+  clipped.nav.setAttribute('id', 'clipped-nav');
+  clipped.panel.setAttribute('id', 'clipped-panel');
+  clipped.toggle.setAttribute('aria-controls', 'clipped-panel');
+  clipped.nav.rectTop = 100;
+  clipped.nav.clientHeight = 100;
+  clipped.nav.scrollHeight = 600;
+  clipped.nav.computedStyle = { overflowY: 'auto' };
+  clipped.panel.rectTop = 100;
+  clipped.panel.clientHeight = 100;
+  clipped.panel.scrollHeight = 500;
+  clipped.panel.computedStyle = { overflowY: 'hidden' };
+  clipped.pricingLink.rectTop = 300;
+  document.body.appendChild(clipped.nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+  await waitForAnimationFrame();
+
+  assert.equal(hidden.panel.lastScrollToOptions, null);
+  assert.equal(collapsed.panel.lastScrollToOptions, null);
+  assert.equal(horizontal.panel.lastScrollToOptions, null);
+  assert.equal(clipped.nav.lastScrollToOptions, null);
+});
+
+test('page navigation honors scroll-padding insets when revealing active links', async () => {
+  const { context, document } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const { nav, panel, pricingLink } = createPageNavigationFixture(document);
+  panel.rectTop = 100;
+  panel.clientHeight = 120;
+  panel.scrollHeight = 500;
+  panel.computedStyle = { overflowY: 'auto', scrollPaddingTop: '24px', scrollPaddingBottom: '36px' };
+  pricingLink.rectTop = 190;
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+  await waitForAnimationFrame();
+
+  assert.equal(panel.lastScrollToOptions.top, 126);
+});
+
+test('page navigation syncs unchanged active link visibility after refresh and resize', async () => {
+  const { context, document, window } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const { nav, panel, pricingLink } = createPageNavigationFixture(document);
+  panel.rectTop = 100;
+  panel.clientHeight = 120;
+  panel.scrollHeight = 500;
+  panel.computedStyle = { overflowY: 'auto' };
+  pricingLink.rectTop = 140;
+  pricingLink.rectHeight = 40;
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+  await waitForAnimationFrame();
+  assert.equal(panel.lastScrollToOptions, null);
+
+  pricingLink.rectTop = 260;
+  context.window.RazorWire.pageNavigationManager.scan();
+  await waitForAnimationFrame();
+
+  assert.equal(panel.lastScrollToOptions.top, 100);
+
+  panel.lastScrollToOptions = null;
+  panel.scrollTop = 0;
+  pricingLink.rectTop = 270;
+  window.dispatchEvent({ type: 'resize' });
+  await waitForAnimationFrame();
+
+  assert.equal(panel.lastScrollToOptions.top, 110);
+});
+
+test('page navigation resyncs active link visibility after panel open and resize observer changes', async () => {
+  const resizeObservers = [];
+  class FakeResizeObserver {
+    constructor(callback) {
+      this.callback = callback;
+      this.observed = [];
+      resizeObservers.push(this);
+    }
+
+    observe(element) {
+      this.observed.push(element);
+    }
+
+    disconnect() {
+      this.disconnected = true;
+    }
+
+    trigger() {
+      this.callback([]);
+    }
+  }
+
+  const { context, document } = loadRuntime({
+    windowHref: 'https://example.test/#pricing',
+    pageNavigation: true,
+    ResizeObserver: FakeResizeObserver
+  });
+  const { nav, toggle, panel, pricingLink } = createPageNavigationFixture(document);
+  toggle.setAttribute('aria-expanded', 'false');
+  panel.rectTop = 100;
+  panel.clientHeight = 120;
+  panel.scrollHeight = 500;
+  panel.computedStyle = { display: 'none', overflowY: 'auto' };
+  pricingLink.rectTop = 260;
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+  await waitForAnimationFrame();
+  assert.equal(panel.lastScrollToOptions, null);
+
+  panel.computedStyle = { overflowY: 'auto' };
+  nav.dispatchEvent(clickEvent(toggle));
+  await waitForAnimationFrame();
+  assert.equal(panel.lastScrollToOptions.top, 160);
+
+  panel.lastScrollToOptions = null;
+  panel.scrollTop = 0;
+  pricingLink.rectTop = 280;
+  resizeObservers.at(-1).trigger();
+  await waitForAnimationFrame();
+
+  assert.equal(panel.lastScrollToOptions.top, 180);
+  assert.deepEqual(resizeObservers.at(-1).observed, [nav, panel]);
+});
+
 function loadRuntime(runtimeOptions = {}) {
   const document = new FakeDocument(runtimeOptions);
   const locationUrl = new URL(runtimeOptions.windowHref ?? 'https://example.test/');
   const visits = [];
+  const windowListeners = new Map();
+  const animationFrames = new Map();
+  let animationFrameId = 0;
   const turbo = runtimeOptions.turbo === null ? null : {
     StreamActions: {},
     visits,
@@ -1256,8 +1470,37 @@ function loadRuntime(runtimeOptions = {}) {
     },
     matchMedia: runtimeOptions.matchMedia ?? (() => ({ matches: false })),
     getComputedStyle: element => element.computedStyle ?? { overflowY: 'visible' },
-    addEventListener: () => {},
-    removeEventListener: () => {}
+    requestAnimationFrame: callback => {
+      const id = ++animationFrameId;
+      const timeout = setTimeout(() => {
+        animationFrames.delete(id);
+        callback(Date.now());
+      }, 0);
+      animationFrames.set(id, timeout);
+      return id;
+    },
+    cancelAnimationFrame: id => {
+      const timeout = animationFrames.get(id);
+      if (!timeout) return;
+      clearTimeout(timeout);
+      animationFrames.delete(id);
+    },
+    scrollY: 0,
+    addEventListener: (type, listener) => {
+      const listeners = windowListeners.get(type) || [];
+      listeners.push(listener);
+      windowListeners.set(type, listeners);
+    },
+    removeEventListener: (type, listener) => {
+      const listeners = windowListeners.get(type) || [];
+      windowListeners.set(type, listeners.filter(candidate => candidate !== listener));
+    },
+    dispatchEvent: event => {
+      for (const listener of windowListeners.get(event.type) || []) {
+        listener(event);
+      }
+      return !event.defaultPrevented;
+    }
   };
   if (turbo !== null) {
     window.Turbo = turbo;
@@ -1275,6 +1518,7 @@ function loadRuntime(runtimeOptions = {}) {
       observe() {}
       disconnect() {}
     },
+    ResizeObserver: runtimeOptions.ResizeObserver,
     setTimeout,
     clearTimeout,
     setInterval: () => 1,
@@ -1343,6 +1587,10 @@ function clickEvent(target, overrides = {}) {
     },
     ...overrides
   };
+}
+
+function waitForAnimationFrame() {
+  return new Promise(resolve => setTimeout(resolve, 0));
 }
 
 function loadRuntimeWithVisitAction(runtimeOptions = {}) {
@@ -1433,7 +1681,12 @@ class FakeElement {
     this.type = '';
     this.value = '';
     this.rectTop = 0;
+    this.rectLeft = 0;
+    this.rectWidth = 200;
+    this.rectHeight = 100;
+    this.clientWidth = 200;
     this.clientHeight = 100;
+    this.scrollWidth = 200;
     this.scrollHeight = 100;
     this.scrollTop = 0;
     this.computedStyle = { overflowY: 'visible' };
@@ -1499,7 +1752,14 @@ class FakeElement {
   }
 
   getBoundingClientRect() {
-    return { top: this.rectTop, bottom: this.rectTop + 100, height: 100 };
+    return {
+      top: this.rectTop,
+      bottom: this.rectTop + this.rectHeight,
+      left: this.rectLeft,
+      right: this.rectLeft + this.rectWidth,
+      width: this.rectWidth,
+      height: this.rectHeight
+    };
   }
 
   addEventListener(type, listener) {

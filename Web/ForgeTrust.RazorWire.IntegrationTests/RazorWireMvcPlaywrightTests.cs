@@ -162,6 +162,61 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task PageNavigationSample_RevealsActiveLinkInsideScrollableNavWithoutMovingDocument()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1280,
+                Height = 720
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Navigation/PageNavigation#replacement");
+        await page.WaitForFunctionAsync(
+            """
+            () => window.RazorWire?.pageNavigationManager
+              && document.querySelector('.brochure-page-nav a[href="#replacement"]')?.getAttribute('aria-current') === 'location'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var probe = await page.EvaluateAsync<PageNavigationRevealProbe>(
+            """
+            () => {
+                const panel = document.getElementById('brochure-sections-panel');
+                const links = [...document.querySelectorAll('.brochure-page-nav [data-rw-page-nav-link]')];
+                if (!panel) throw new Error('Missing page-navigation panel.');
+
+                panel.style.maxHeight = '96px';
+                panel.style.overflowY = 'auto';
+                panel.style.scrollPaddingTop = '12px';
+                panel.style.scrollPaddingBottom = '12px';
+                panel.scrollTop = 0;
+                for (const link of links) {
+                    link.style.display = 'block';
+                    link.style.minHeight = '48px';
+                }
+
+                window.scrollTo(0, 240);
+                const windowScrollBefore = window.scrollY;
+                window.RazorWire.pageNavigationManager.syncActiveLinkVisibility();
+
+                return {
+                    PanelScrollTop: panel.scrollTop,
+                    WindowScrollBefore: windowScrollBefore,
+                    WindowScrollAfter: window.scrollY
+                };
+            }
+            """);
+
+        Assert.True(probe.PanelScrollTop > 0);
+        Assert.Equal(probe.WindowScrollBefore, probe.WindowScrollAfter);
+    }
+
+    [Fact]
     public async Task PageNavigationSample_NoJavaScriptFallbackAnchorsWork()
     {
         await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
@@ -709,6 +764,15 @@ public sealed class RazorWireMvcPlaywrightTests
         public string RuntimeScriptPath { get; set; } = string.Empty;
 
         public string IslandsScriptPath { get; set; } = string.Empty;
+    }
+
+    private sealed class PageNavigationRevealProbe
+    {
+        public double PanelScrollTop { get; set; }
+
+        public double WindowScrollBefore { get; set; }
+
+        public double WindowScrollAfter { get; set; }
     }
 
     private static async Task WaitForMessageAsync(IPage page, string token)
