@@ -105,6 +105,9 @@ internal sealed partial class ExportReferenceProcessor
         ".woff2",
     };
 
+    private const string RazorWirePageNavigationRuntimeMarker = "data-rw-page-navigation-runtime";
+    private const string RazorWirePageNavigationSelectorMarker = "[data-rw-page-nav]";
+
     private readonly HtmlParser _htmlParser = new();
     private readonly ILogger _logger;
 
@@ -283,6 +286,8 @@ internal sealed partial class ExportReferenceProcessor
             AddReference(references, element.GetAttribute("src") ?? string.Empty, ExportReferenceKind.ScriptSrc, currentRoute, CreateHtmlProvenance(element, "src", attributeLookup));
         }
 
+        AddRazorWirePageNavigationAutoloadReferences(references, document, currentRoute);
+
         foreach (var element in document.QuerySelectorAll("link[href]")
             .Where(element => IsSupportedLinkRel(element.GetAttribute("rel") ?? string.Empty)))
         {
@@ -322,6 +327,30 @@ internal sealed partial class ExportReferenceProcessor
         }
 
         return references;
+    }
+
+    private void AddRazorWirePageNavigationAutoloadReferences(
+        ICollection<ExportReference> references,
+        IDocument document,
+        string currentRoute)
+    {
+        foreach (var element in document.QuerySelectorAll("script:not([src])"))
+        {
+            var script = element.TextContent;
+            if (!script.Contains(RazorWirePageNavigationRuntimeMarker, StringComparison.Ordinal)
+                || !script.Contains(RazorWirePageNavigationSelectorMarker, StringComparison.Ordinal)
+                || !TryExtractJavaScriptStringAssignment(script, "source", out var source))
+            {
+                continue;
+            }
+
+            AddReference(
+                references,
+                source,
+                ExportReferenceKind.ScriptSrc,
+                currentRoute,
+                CreateInlineScriptProvenance("RazorWire page-navigation autoload source"));
+        }
     }
 
     private IReadOnlyList<ExportReference> ExtractCssReferences(
@@ -1332,6 +1361,17 @@ internal sealed partial class ExportReferenceProcessor
             attribute.Line);
     }
 
+    private static ExportReferenceProvenance CreateInlineScriptProvenance(string tokenType)
+    {
+        return new ExportReferenceProvenance(
+            "html",
+            "script",
+            null,
+            tokenType,
+            null,
+            null);
+    }
+
     private static ExportReferenceProvenance CreateCssProvenance(
         string css,
         string surface,
@@ -1346,6 +1386,142 @@ internal sealed partial class ExportReferenceProcessor
             token.TokenType,
             token.ValueStart,
             CalculateLine(css, token.ValueStart));
+    }
+
+    private static bool TryExtractJavaScriptStringAssignment(string script, string variableName, out string value)
+    {
+        value = string.Empty;
+        var searchIndex = 0;
+
+        while (searchIndex < script.Length)
+        {
+            var variableIndex = script.IndexOf(variableName, searchIndex, StringComparison.Ordinal);
+            if (variableIndex < 0)
+            {
+                return false;
+            }
+
+            searchIndex = variableIndex + variableName.Length;
+            if ((variableIndex > 0 && IsJavaScriptIdentifierChar(script[variableIndex - 1]))
+                || (searchIndex < script.Length && IsJavaScriptIdentifierChar(script[searchIndex])))
+            {
+                continue;
+            }
+
+            var index = SkipJavaScriptWhitespace(script, searchIndex);
+            if (index >= script.Length || script[index] != '=')
+            {
+                continue;
+            }
+
+            index = SkipJavaScriptWhitespace(script, index + 1);
+            if (index >= script.Length || script[index] is not ('"' or '\''))
+            {
+                continue;
+            }
+
+            return TryReadJavaScriptStringLiteral(script, index, out value);
+        }
+
+        return false;
+    }
+
+    private static bool TryReadJavaScriptStringLiteral(string script, int quoteIndex, out string value)
+    {
+        value = string.Empty;
+        var quote = script[quoteIndex];
+        var builder = new StringBuilder();
+
+        for (var index = quoteIndex + 1; index < script.Length; index++)
+        {
+            var ch = script[index];
+            if (ch == quote)
+            {
+                value = builder.ToString();
+                return true;
+            }
+
+            if (ch != '\\')
+            {
+                builder.Append(ch);
+                continue;
+            }
+
+            if (++index >= script.Length)
+            {
+                return false;
+            }
+
+            var escaped = script[index];
+            switch (escaped)
+            {
+                case 'u' when TryReadHexEscape(script, index + 1, 4, out var unicodeValue):
+                    builder.Append((char)unicodeValue);
+                    index += 4;
+                    break;
+                case 'x' when TryReadHexEscape(script, index + 1, 2, out var hexValue):
+                    builder.Append((char)hexValue);
+                    index += 2;
+                    break;
+                case 'n':
+                    builder.Append('\n');
+                    break;
+                case 'r':
+                    builder.Append('\r');
+                    break;
+                case 't':
+                    builder.Append('\t');
+                    break;
+                default:
+                    builder.Append(escaped);
+                    break;
+            }
+        }
+
+        return false;
+    }
+
+    private static int SkipJavaScriptWhitespace(string script, int index)
+    {
+        while (index < script.Length && char.IsWhiteSpace(script[index]))
+        {
+            index++;
+        }
+
+        return index;
+    }
+
+    private static bool IsJavaScriptIdentifierChar(char ch)
+        => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '$';
+
+    private static bool TryReadHexEscape(string value, int start, int length, out int result)
+    {
+        result = 0;
+        if (start + length > value.Length)
+        {
+            return false;
+        }
+
+        for (var index = start; index < start + length; index++)
+        {
+            var ch = value[index];
+            var digit = ch switch
+            {
+                >= '0' and <= '9' => ch - '0',
+                >= 'a' and <= 'f' => ch - 'a' + 10,
+                >= 'A' and <= 'F' => ch - 'A' + 10,
+                _ => -1
+            };
+
+            if (digit < 0)
+            {
+                return false;
+            }
+
+            result = (result * 16) + digit;
+        }
+
+        return true;
     }
 
     private static HtmlAttributeSpan? FindHtmlAttribute(

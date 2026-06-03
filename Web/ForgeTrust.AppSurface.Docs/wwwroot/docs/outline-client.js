@@ -16,14 +16,10 @@
     const copyStatusSelector = "[data-doc-section-copy-status]";
     const copyFallbackSelector = "[data-doc-section-copy-fallback='true']";
     const compactMediaQuery = "(max-width: 79.999rem)";
-    const outlineClickScrollDurationMs = 620;
     const outlineContextRollDurationMs = 180;
     const copyFeedbackDurationMs = 1800;
 
     let lifecycleController = null;
-    let activeObserver = null;
-    let activeLinkAnimationFrame = 0;
-    let scrollAnimationFrame = 0;
     let contextRollTimeout = 0;
     let lastActiveIndex = -1;
     let fallbackDisposers = [];
@@ -212,24 +208,6 @@
         }
 
         return entries.find(entry => getLinkTargetId(entry.link) === targetId) ?? null;
-    }
-
-    function refreshHashActiveLink(entries, links, expectedLink, context) {
-        if (getActiveEntryFromHash(entries)?.link === expectedLink) {
-            setActiveLink(links, expectedLink, context);
-        }
-    }
-
-    function getEntryForLink(entries, link) {
-        return entries.find(entry => entry.link === link) ?? null;
-    }
-
-    function getLinkHash(link) {
-        try {
-            return new URL(link.href, window.location.href).hash;
-        } catch {
-            return link.hash ?? "";
-        }
     }
 
     function getInitialActiveLink(entries) {
@@ -524,132 +502,6 @@
         input.select();
     }
 
-    function getActiveEntryFromScrollPosition(entries, root) {
-        const rootTop = root.getBoundingClientRect().top;
-        const activationTop = rootTop + 64;
-        const hashEntry = getActiveEntryFromHash(entries);
-
-        if (hashEntry) {
-            const hashTargetTop = hashEntry.target.getBoundingClientRect().top;
-            if (hashTargetTop >= rootTop - 16 && hashTargetTop <= rootTop + 160) {
-                return hashEntry;
-            }
-        }
-
-        let activeEntry = entries[0];
-
-        for (const entry of entries) {
-            if (entry.target.getBoundingClientRect().top > activationTop) {
-                break;
-            }
-
-            activeEntry = entry;
-        }
-
-        return activeEntry;
-    }
-
-    function cancelScrollAnimation() {
-        if (scrollAnimationFrame === 0) {
-            return;
-        }
-
-        window.cancelAnimationFrame?.(scrollAnimationFrame);
-        scrollAnimationFrame = 0;
-    }
-
-    function easeOutCubic(progress) {
-        return 1 - Math.pow(1 - progress, 3);
-    }
-
-    function animateScrollTo(root, top) {
-        if (typeof window.requestAnimationFrame !== "function") {
-            root.scrollTo({ top, behavior: "auto" });
-            return;
-        }
-
-        cancelScrollAnimation();
-
-        const startTop = root.scrollTop;
-        const distance = top - startTop;
-        const duration = outlineClickScrollDurationMs;
-        const startTime = performance.now();
-
-        const step = timestamp => {
-            const progress = Math.min(1, (timestamp - startTime) / duration);
-            root.scrollTo({
-                top: startTop + distance * easeOutCubic(progress),
-                behavior: "auto"
-            });
-
-            if (progress < 1) {
-                scrollAnimationFrame = window.requestAnimationFrame(step);
-            } else {
-                scrollAnimationFrame = 0;
-            }
-        };
-
-        scrollAnimationFrame = window.requestAnimationFrame(step);
-    }
-
-    function scrollEntryIntoView(entry, root) {
-        if (!entry || !root) {
-            return;
-        }
-
-        const rootRect = root.getBoundingClientRect();
-        const targetRect = entry.target.getBoundingClientRect();
-        const desiredTop = root.scrollTop + targetRect.top - rootRect.top - 64;
-        const maxScrollTop = Math.max(0, root.scrollHeight - root.clientHeight);
-        const top = Math.min(Math.max(0, desiredTop), maxScrollTop);
-        const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
-
-        if (reduceMotion) {
-            cancelScrollAnimation();
-            root.scrollTo({ top, behavior: "auto" });
-            return;
-        }
-
-        animateScrollTo(root, top);
-    }
-
-    function disconnectActiveObserver() {
-        activeObserver?.disconnect();
-        activeObserver = null;
-    }
-
-    function cancelActiveLinkRefresh() {
-        if (activeLinkAnimationFrame === 0) {
-            return;
-        }
-
-        window.cancelAnimationFrame?.(activeLinkAnimationFrame);
-        activeLinkAnimationFrame = 0;
-    }
-
-    function updateActiveLinkFromScrollPosition(entries, links, root, context) {
-        const activeEntry = getActiveEntryFromScrollPosition(entries, root);
-        if (activeEntry) {
-            setActiveLink(links, activeEntry.link, context);
-        }
-    }
-
-    function scheduleActiveLinkRefresh(entries, links, root, context) {
-        if (activeLinkAnimationFrame !== 0) {
-            return;
-        }
-
-        if (typeof window.requestAnimationFrame !== "function") {
-            updateActiveLinkFromScrollPosition(entries, links, root, context);
-            return;
-        }
-
-        activeLinkAnimationFrame = window.requestAnimationFrame(() => {
-            activeLinkAnimationFrame = 0;
-            updateActiveLinkFromScrollPosition(entries, links, root, context);
-        });
-    }
-
     function createLifecycleController() {
         return typeof AbortController === "function" ? new AbortController() : null;
     }
@@ -734,11 +586,8 @@
 
     function teardown() {
         cleanupLifecycleEventListeners();
-        cancelActiveLinkRefresh();
-        cancelScrollAnimation();
         clearContextRollTimeout();
         resetContextMotion(document.querySelector("[data-doc-outline-context]"));
-        disconnectActiveObserver();
         lifecycleController?.abort();
         lifecycleController = null;
         lastActiveIndex = -1;
@@ -786,7 +635,6 @@
         }
 
         shell = resetStaleOutlineShell(shell);
-        const mainContent = document.getElementById("main-content");
         const primary = shell.parentElement?.querySelector(".docs-detail-primary");
         const toggle = shell.querySelector("[data-doc-outline-toggle='true']");
         const outlineContext = {
@@ -836,42 +684,15 @@
         }
 
         for (const link of links) {
-            addLifecycleEventListener(link, "click", event => {
-                if (razorWireManaged) {
-                    setActiveLink(links, link, outlineContext);
-
-                    if (compactMedia?.matches) {
-                        setExpanded(shell, toggle, false);
-                    }
-
+            addLifecycleEventListener(link, "click", () => {
+                if (!razorWireManaged) {
                     return;
                 }
 
-                if (!mainContent) {
-                    return;
-                }
-
-                const entry = getEntryForLink(entries, link);
-                if (!entry) {
-                    return;
-                }
-
-                event.preventDefault();
                 setActiveLink(links, link, outlineContext);
 
                 if (compactMedia?.matches) {
                     setExpanded(shell, toggle, false);
-                }
-
-                scrollEntryIntoView(entry, mainContent);
-
-                const hash = getLinkHash(link);
-                if (hash && window.location.hash !== hash) {
-                    window.history.pushState(null, "", hash);
-                }
-
-                for (const delay of [120, 360, 720]) {
-                    window.setTimeout(() => refreshHashActiveLink(entries, links, link, outlineContext), delay);
                 }
             });
         }
@@ -880,38 +701,6 @@
             links,
             razorWireManaged ? getRazorWireActiveLink(links) ?? getInitialActiveLink(entries) : getInitialActiveLink(entries),
             outlineContext);
-
-        if (!razorWireManaged) {
-            addLifecycleEventListener(window, "hashchange", () => {
-                setActiveLink(links, getActiveEntryFromHash(entries)?.link ?? null, outlineContext);
-            });
-        }
-
-        if (razorWireManaged || !("IntersectionObserver" in window) || !mainContent) {
-            return;
-        }
-
-        addLifecycleEventListener(mainContent, "scroll", () => {
-            scheduleActiveLinkRefresh(entries, links, mainContent, outlineContext);
-        });
-        addLifecycleEventListener(mainContent, "wheel", cancelScrollAnimation);
-        addLifecycleEventListener(mainContent, "touchstart", cancelScrollAnimation);
-
-        activeObserver = new IntersectionObserver(
-            observedEntries => {
-                if (observedEntries.some(entry => entry.isIntersecting)) {
-                    scheduleActiveLinkRefresh(entries, links, mainContent, outlineContext);
-                }
-            },
-            {
-                root: mainContent,
-                rootMargin: "-18% 0px -68% 0px",
-                threshold: [0, 1]
-            });
-
-        for (const entry of entries) {
-            activeObserver.observe(entry.target);
-        }
     }
 
     window[clientKey] = {
