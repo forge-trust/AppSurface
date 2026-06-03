@@ -25,6 +25,7 @@ Groups:
   all, core, tools, web, docs, razorwire, integration
 
 Environment:
+  TEST_GROUP            Test group to run. Defaults to all.
   BUILD_CONFIGURATION   Test configuration. Defaults to Debug.
   BUILD_SOLUTION        true/false. Defaults to true for all, false for named groups.
   INCLUDE_FILTER        Coverlet include filter.
@@ -120,7 +121,7 @@ if [[ "$MERGE_ONLY" == true ]]; then
   GROUP_NAME="merge-only"
 fi
 
-if [[ ! -f "$SOLUTION_PATH" ]]; then
+if [[ "$MERGE_ONLY" != true && ! -f "$SOLUTION_PATH" ]]; then
   echo "Solution not found: $SOLUTION_PATH" >&2
   exit 1
 fi
@@ -177,7 +178,10 @@ canonicalize_existing_directory() {
   printf '%s\n' "$canonical"
 }
 
-SOLUTION_DIR="$(cd "$(dirname "$SOLUTION_PATH")" && pwd)"
+SOLUTION_DIR=""
+if [[ "$MERGE_ONLY" != true ]]; then
+  SOLUTION_DIR="$(cd "$(dirname "$SOLUTION_PATH")" && pwd)"
+fi
 if ! OUTPUT_DIR="$(canonicalize_directory "output" "$OUTPUT_DIR")"; then
   exit 1
 fi
