@@ -224,9 +224,17 @@ type PageNavigationScrollRoot = Window | Element;
                 return;
             }
 
+            const shouldUpdateHistory = window.location.href !== targetUrl.href;
+            const canUpdateHistory = typeof window.history?.pushState === 'function';
+            if (shouldUpdateHistory && !canUpdateHistory) {
+                this.setActiveLink(link);
+                this.setPanelOpen(false);
+                return;
+            }
+
             event.preventDefault();
-            if (window.location.href !== targetUrl.href) {
-                window.history?.pushState?.(null, '', targetUrl.hash);
+            if (shouldUpdateHistory) {
+                window.history.pushState(null, '', targetUrl.hash);
             }
 
             const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;

@@ -979,6 +979,25 @@ test('page navigation leaves modified clicks and missing targets alone', () => {
   assert.equal(absentTarget.defaultPrevented, false);
 });
 
+test('page navigation falls back to native hash navigation when history pushState is unavailable', () => {
+  const { context, document } = loadRuntime({
+    pageNavigation: true,
+    history: null
+  });
+  const { nav, overviewLink, toggle, panel, overview } = createPageNavigationFixture(document);
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  const event = clickEvent(overviewLink);
+  nav.dispatchEvent(event);
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(overview.lastScrollIntoViewOptions, null);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(panel.getAttribute('data-rw-page-nav-panel-state'), 'closed');
+  assert.equal(overviewLink.getAttribute('aria-current'), 'location');
+});
+
 test('page navigation prunes removed roots and records missing panel diagnostics', () => {
   const { context, document } = loadRuntime({ pageNavigation: true });
   const nav = new FakeElement('nav');
@@ -1226,7 +1245,7 @@ function loadRuntime(runtimeOptions = {}) {
       search: locationUrl.search,
       hash: locationUrl.hash
     },
-    history: {
+    history: runtimeOptions.history === null ? null : {
       pushState: (_state, _title, url) => {
         const next = new URL(url, window.location.href);
         window.location.href = next.href;
