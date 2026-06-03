@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using ForgeTrust.AppSurface.Testing;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -210,6 +211,22 @@ public sealed class TestFixturePathPolicyTests
             """));
 
         Assert.Contains("expired", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Allowlist_ShouldRejectMalformedExpiresEntries()
+    {
+        var error = Assert.Throws<InvalidOperationException>(() => PathPolicyAllowlist.Parse(
+            """
+            entries:
+              - key: DynamicUnderBasePath|Sample.cs|1|1|Path.Join|relativePath
+                category: DynamicUnderBasePath
+                reason: intentional platform behavior
+                expires: 2026-13-40
+            """));
+
+        Assert.Contains("expires", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("yyyy-MM-dd", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -445,7 +462,7 @@ internal static class TestPathPolicyScanner
 /// </summary>
 /// <remarks>
 /// Entries are written under <c>entries:</c> and must include <c>key</c>, <c>category</c>, and <c>reason</c>.
-/// They may include <c>expires</c> as an ISO date in <c>yyyy-MM-dd</c> form; expired entries fail validation.
+/// They may include <c>expires</c> as an ISO date in <c>yyyy-MM-dd</c> form; invalid or expired entries fail validation.
 /// Duplicate keys are rejected by the backing immutable dictionary, missing required fields fail parsing, and
 /// unmatched keys are reported by <see cref="UnmatchedKeys(IEnumerable{PathPolicyViolation})" />.
 /// </remarks>
@@ -557,11 +574,17 @@ internal sealed class PathPolicyAllowlist
             throw new InvalidOperationException($"Allowlist entry '{key}' must include a reason (near line {lineNumber}).");
         }
 
-        if (current.TryGetValue("expires", out var expiresText)
-            && DateOnly.TryParse(expiresText, out var expires)
-            && expires < DateOnly.FromDateTime(DateTime.UtcNow))
+        if (current.TryGetValue("expires", out var expiresText))
         {
-            throw new InvalidOperationException($"Allowlist entry '{key}' expired on {expires:yyyy-MM-dd} (near line {lineNumber}).");
+            if (!DateOnly.TryParseExact(expiresText, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var expires))
+            {
+                throw new InvalidOperationException($"Allowlist entry '{key}' has malformed expires value '{expiresText}'; use yyyy-MM-dd (near line {lineNumber}).");
+            }
+
+            if (expires < DateOnly.FromDateTime(DateTime.UtcNow))
+            {
+                throw new InvalidOperationException($"Allowlist entry '{key}' expired on {expires:yyyy-MM-dd} (near line {lineNumber}).");
+            }
         }
 
         entries.Add(key, new Entry(category, reason));
