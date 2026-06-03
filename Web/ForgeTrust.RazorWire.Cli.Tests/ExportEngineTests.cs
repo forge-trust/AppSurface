@@ -230,6 +230,44 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractAssets_Should_Find_RazorWire_PageNavigation_Autoload_Source_When_Source_Is_Escaped()
+    {
+        var html = """
+            <script>
+            (() => {
+              const source = '\x2f_content\u002fForgeTrust.RazorWire/razorwire/page-navigation.js';
+              const marker = "data-rw-page-navigation-runtime";
+              const selector = "[data-rw-page-nav]";
+              const load = () => document.querySelector(selector) && marker && source;
+            })();
+            </script>
+            """;
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        _sut.ExtractAssets(html, "/", context);
+
+        Assert.Contains("/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js", context.Queue);
+    }
+
+    [Fact]
+    public void ExtractAssets_Should_Ignore_RazorWire_PageNavigation_Autoload_Source_When_Markers_Are_Missing()
+    {
+        var html = """
+            <script>
+            (() => {
+              const source = "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js";
+              const load = () => source;
+            })();
+            </script>
+            """;
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        _sut.ExtractAssets(html, "/", context);
+
+        Assert.DoesNotContain("/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js", context.Queue);
+    }
+
+    [Fact]
     public void ExtractAssets_Should_Find_Link_Href_For_Stylesheets_Only()
     {
         // Arrange
