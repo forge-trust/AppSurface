@@ -25,6 +25,7 @@ internal sealed class PackageIndexGenerator
     private const string ChangelogPath = "CHANGELOG.md";
     private const string UpgradePolicyPath = "releases/upgrade-policy.md";
     private const string WebExamplePath = "examples/web-app/README.md";
+    private const string WebPackageQuickstartPath = "start-here/first-success-path.md";
     private const string RepositoryIssuePrefix = "https://github.com/forge-trust/AppSurface/issues/";
     private const string RepositoryPullPrefix = "https://github.com/forge-trust/AppSurface/pull/";
     private static readonly string[] ProductFamilyValues =
@@ -257,6 +258,7 @@ internal sealed class PackageIndexGenerator
     private static void ValidateStaticDocumentationTargets(string repositoryRoot)
     {
         ResolveRepositoryFilePath(repositoryRoot, WebExamplePath, "Web example README");
+        ResolveRepositoryFilePath(repositoryRoot, WebPackageQuickstartPath, "Web package quickstart");
         ResolveRepositoryFilePath(repositoryRoot, ReleaseHubPath, "Release hub");
         ResolveRepositoryFilePath(repositoryRoot, ChangelogPath, "Changelog");
         ResolveRepositoryFilePath(repositoryRoot, UpgradePolicyPath, "Pre-1.0 upgrade policy");
@@ -602,7 +604,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine($"Not included: {webEntry.Manifest.DoesNotInclude}");
         builder.AppendLine();
-        builder.AppendLine($"Read next: {FormatMarkdownLink("examples/web-app/README.md", GetRelativeDocPath(request, WebExamplePath))}");
+        builder.AppendLine($"Read next: {FormatMarkdownLink("Package-first quickstart", GetRelativeDocPath(request, WebPackageQuickstartPath) + "#package-first-path")}");
         builder.AppendLine();
         builder.AppendLine("Release and readiness:");
         builder.AppendLine($"- {FormatMarkdownLink("Release hub", GetRelativeDocPath(request, ReleaseHubPath))} keeps the public release story, adoption risk, and policy links in one place.");

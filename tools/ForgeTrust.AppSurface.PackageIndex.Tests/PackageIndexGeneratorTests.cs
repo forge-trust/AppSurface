@@ -701,6 +701,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/README.md", "# RazorWire CLI");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("start-here/first-success-path.md", "# First Success Path");
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
@@ -756,7 +757,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("# AppSurface v0.1 package chooser", markdown, StringComparison.Ordinal);
         Assert.Contains("```bash", markdown, StringComparison.Ordinal);
         Assert.Contains("dotnet package add ForgeTrust.AppSurface.Web", markdown, StringComparison.Ordinal);
-        Assert.Contains("[examples/web-app/README.md](../examples/web-app/README.md)", markdown, StringComparison.Ordinal);
+        Assert.Contains("[Package-first quickstart](../start-here/first-success-path.md#package-first-path)", markdown, StringComparison.Ordinal);
         Assert.Contains("[v0.1.0 Release Preview](../releases/v0.1-preview.md)", markdown, StringComparison.Ordinal);
         Assert.Contains("| `ForgeTrust.AppSurface.Web` |", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain('\r', markdown);
@@ -901,6 +902,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web.Tailwind/README.md", "# Tailwind");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("start-here/first-success-path.md", "# First Success Path");
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
@@ -955,7 +957,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         var markdown = await generator.GenerateAsync(CreateRequest("docs/guides/README.md"));
 
-        Assert.Contains("[examples/web-app/README.md](../../examples/web-app/README.md)", markdown, StringComparison.Ordinal);
+        Assert.Contains("[Package-first quickstart](../../start-here/first-success-path.md#package-first-path)", markdown, StringComparison.Ordinal);
         Assert.Contains("[Package README](../../Web/ForgeTrust.AppSurface.Web/README.md)", markdown, StringComparison.Ordinal);
         Assert.Contains("[Release hub](../../releases/README.md)", markdown, StringComparison.Ordinal);
     }
@@ -992,6 +994,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj", "<Project />");
         await WriteFileAsync("Console/ForgeTrust.AppSurface.Console/README.md", "# Console");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("start-here/first-success-path.md", "# First Success Path");
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
         await WriteFileAsync("CHANGELOG.md", "# Changelog");
@@ -2859,6 +2862,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/README.md", "# RazorWire CLI");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("start-here/first-success-path.md", "# First Success Path");
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
@@ -2911,6 +2915,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             """);
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("start-here/first-success-path.md", "# First Success Path");
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/unreleased.md", "# Unreleased");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
