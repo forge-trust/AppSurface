@@ -218,7 +218,7 @@ public sealed class RazorWireReadmeContractTests
         var currentPath = fullRoot;
         foreach (var segment in relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
-            currentPath = Path.Combine(currentPath, segment);
+            currentPath = TestPathUtils.PathUnder(currentPath, segment);
             try
             {
                 if ((File.GetAttributes(currentPath) & FileAttributes.ReparsePoint) != 0)

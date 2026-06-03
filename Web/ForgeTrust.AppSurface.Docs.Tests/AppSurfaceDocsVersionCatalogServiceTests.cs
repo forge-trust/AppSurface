@@ -1582,7 +1582,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
             string candidatePath;
             try
             {
-                candidatePath = Path.GetFullPath(Path.Join(basePath, version.ExactTreePath.Trim()));
+                candidatePath = TestPathUtils.PathUnder(basePath, version.ExactTreePath.Trim());
             }
             catch (ArgumentException)
             {
@@ -1624,7 +1624,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
                 })
             .OrderBy(entry => entry.path, StringComparer.Ordinal)
             .ToArray();
-        var manifestPath = Path.Join(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        var manifestPath = TestPathUtils.PathUnder(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
         File.WriteAllText(
             manifestPath,
             JsonSerializer.Serialize(

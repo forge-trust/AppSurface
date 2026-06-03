@@ -5026,7 +5026,7 @@ public class DocAggregatorTests : IDisposable
                 throw new ArgumentException("Project file name must not contain directory segments.", nameof(projectFileName));
             }
 
-            await File.WriteAllTextAsync(Path.Join(projectDirectory, safeProjectFileName), projectContent);
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(projectDirectory, safeProjectFileName), projectContent);
             var harvestedDocs = new List<DocNode>
             {
                 new("RazorWire", "Namespaces/ForgeTrust.RazorWire", "<section class='doc-type'>Generated API body</section>"),

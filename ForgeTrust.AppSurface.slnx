@@ -58,6 +58,10 @@
     <Project Path="tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.Release/ForgeTrust.AppSurface.Release.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
+    <Project Path="tests/ForgeTrust.AppSurface.Testing.Tests/ForgeTrust.AppSurface.Testing.Tests.csproj" />
+  </Folder>
   <Folder Name="/Web/">
     <Project Path="Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj" />
     <Project Path="Web/ForgeTrust.RazorWire.Cli.Tests/ForgeTrust.RazorWire.Cli.Tests.csproj" />

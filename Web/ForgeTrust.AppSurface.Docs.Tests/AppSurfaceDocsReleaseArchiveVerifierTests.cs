@@ -104,7 +104,7 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
     public void TryVerify_ShouldFail_WhenManifestCannotBeRead()
     {
         var digest = WriteManifest();
-        var manifestPath = Path.Join(_tempDirectory, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        var manifestPath = TestPathUtils.PathUnder(_tempDirectory, AppSurfaceDocsReleaseArchiveVerifier.FileName);
         var fileSystem = ThrowingReleaseArchiveFileSystem.ThrowWhenReading(manifestPath);
 
         var failure = VerifyFailure(digest, fileSystem);
@@ -432,7 +432,7 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
 
     private string WriteRawManifest(string json)
     {
-        var path = Path.Join(_tempDirectory, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        var path = TestPathUtils.PathUnder(_tempDirectory, AppSurfaceDocsReleaseArchiveVerifier.FileName);
         File.WriteAllText(path, json);
         return ComputeFileSha256(path);
     }

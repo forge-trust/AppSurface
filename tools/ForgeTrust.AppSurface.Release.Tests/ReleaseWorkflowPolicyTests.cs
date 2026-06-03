@@ -53,29 +53,7 @@ public sealed class ReleaseWorkflowPolicyTests
 
     private static async Task<string> ReadRepositoryFileAsync(string relativePath)
     {
-        var root = FindRepositoryRoot();
-        var normalizedRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
-        if (Path.IsPathRooted(normalizedRelativePath))
-        {
-            throw new ArgumentException("Repository file paths must be relative.", nameof(relativePath));
-        }
-
-        return await File.ReadAllTextAsync(Path.Join(root, normalizedRelativePath));
-    }
-
-    private static string FindRepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Join(directory.FullName, "ForgeTrust.AppSurface.slnx")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new InvalidOperationException("Could not find repository root.");
+        var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        return await File.ReadAllTextAsync(TestPathUtils.PathUnder(root, relativePath));
     }
 }
