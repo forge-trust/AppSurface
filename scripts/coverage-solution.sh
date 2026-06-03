@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOLUTION_PATH="$ROOT_DIR/ForgeTrust.AppSurface.slnx"
 OUTPUT_DIR="$ROOT_DIR/TestResults/coverage-merged"
 BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-Debug}"
+BUILD_NO_RESTORE="${BUILD_NO_RESTORE:-false}"
 INCLUDE_FILTER="${INCLUDE_FILTER:-[ForgeTrust.AppSurface.*]*}"
 EXCLUDE_FILTER="${EXCLUDE_FILTER:-[*.Tests]*,[*.IntegrationTests]*}"
 EXCLUDE_FILTER="${EXCLUDE_FILTER//,/%2c}"
@@ -28,6 +29,7 @@ Environment:
   TEST_GROUP            Test group to run. Defaults to all.
   BUILD_CONFIGURATION   Test configuration. Defaults to Debug.
   BUILD_SOLUTION        true or false. Defaults to true for all, false for named groups.
+  BUILD_NO_RESTORE      true/false. Adds --no-restore to build and test commands after a prior restore.
   INCLUDE_FILTER        Coverlet include filter.
   EXCLUDE_FILTER        Coverlet exclude filter.
 EOF
@@ -454,7 +456,12 @@ build_seconds=0
 if [[ "$BUILD_SOLUTION" == true ]]; then
   echo "Building solution..."
   build_start="$(seconds_now)"
-  if ! dotnet build "$SOLUTION_PATH" --configuration "$BUILD_CONFIGURATION" -v minimal; then
+  build_args=(dotnet build "$SOLUTION_PATH" --configuration "$BUILD_CONFIGURATION" -v minimal)
+  if [[ "$BUILD_NO_RESTORE" == true ]]; then
+    build_args+=(--no-restore)
+  fi
+
+  if ! "${build_args[@]}"; then
     echo "Build failed for $SOLUTION_PATH" >&2
     exit 1
   fi
@@ -497,6 +504,10 @@ for i in "${!test_projects[@]}"; do
 
   if [[ "$BUILD_SOLUTION" == true ]]; then
     args+=(--no-build)
+  fi
+
+  if [[ "$BUILD_NO_RESTORE" == true ]]; then
+    args+=(--no-restore)
   fi
 
   project_start="$(seconds_now)"
