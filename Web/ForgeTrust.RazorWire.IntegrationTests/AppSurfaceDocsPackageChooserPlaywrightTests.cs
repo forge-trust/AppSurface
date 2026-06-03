@@ -104,6 +104,11 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
         Assert.Equal(CurrentPackageReleaseNoteHeading, (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("release note", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
 
+        await page.GotoAsync($"{_fixture.DocsUrl}/packages");
+        await page.WaitForFunctionAsync(
+            "() => document.querySelector('h1')?.textContent?.trim() === 'AppSurface v0.1 package chooser'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
         await page.Locator(".docs-content a[href='/docs/releases/upgrade-policy']").First.ClickAsync();
         await WaitForPathAndHeadingAsync(page, "/docs/releases/upgrade-policy", "Pre-1.0 upgrade policy");
         Assert.Equal("Pre-1.0 upgrade policy", (await page.TextContentAsync("h1"))?.Trim());
@@ -121,8 +126,8 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
         Assert.Equal(
-            "/docs/releases/v0.1.0-rc.2",
-            await page.GetAttributeAsync(".docs-content a[href='/docs/releases/v0.1.0-rc.2']", "href"));
+            CurrentPackageReleaseNotePath,
+            await page.GetAttributeAsync($".docs-content a[href='{CurrentPackageReleaseNotePath}']", "href"));
 
         await page.GotoAsync($"{_fixture.DocsUrl}/web/forgetrust.appsurface.web.openapi");
         await page.WaitForFunctionAsync(
@@ -130,8 +135,8 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
 
-        await page.Locator(".docs-content a[href='/docs/releases/v0.1.0-rc.2']").First.ClickAsync();
-        await WaitForPathAndHeadingAsync(page, "/docs/releases/v0.1.0-rc.2", CurrentPackageReleaseNoteHeading);
+        await page.Locator($".docs-content a[href='{CurrentPackageReleaseNotePath}']").First.ClickAsync();
+        await WaitForPathAndHeadingAsync(page, CurrentPackageReleaseNotePath, CurrentPackageReleaseNoteHeading);
         Assert.Equal(CurrentPackageReleaseNoteHeading, (await page.TextContentAsync("h1"))?.Trim());
     }
 
