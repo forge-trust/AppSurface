@@ -2466,6 +2466,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Web/obj/Release/net10.0/Generated.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("node_modules/package/Generated.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("examples/web-app/WebAppExample.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("Config/ForgeTrust.AppSurface.Config.Tests/ForgeTrust.AppSurface.Config.Tests.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("tests/Fixture/Fixture.csproj"));
@@ -2788,7 +2789,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         return new PackageIndexRequest(
             _repositoryRoot,
             Path.Combine(_repositoryRoot, "packages", "package-index.yml"),
-            Path.Combine(_repositoryRoot, outputRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+            TestPathUtils.PathUnder(_repositoryRoot, outputRelativePath));
     }
 
     private async Task WriteCommonChooserFilesAsync(bool includeUnreleased)
@@ -2964,7 +2965,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
     private async Task WriteFileAsync(string relativePath, string content)
     {
-        var fullPath = Path.Combine(_repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        var fullPath = TestPathUtils.PathUnder(_repositoryRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
     }

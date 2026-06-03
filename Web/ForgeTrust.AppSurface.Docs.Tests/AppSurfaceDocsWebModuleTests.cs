@@ -1858,7 +1858,7 @@ public class AppSurfaceDocsWebModuleTests
                 })
             .OrderBy(entry => entry.path, StringComparer.Ordinal)
             .ToArray();
-        var manifestPath = Path.Join(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        var manifestPath = TestPathUtils.PathUnder(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
         File.WriteAllText(
             manifestPath,
             JsonSerializer.Serialize(

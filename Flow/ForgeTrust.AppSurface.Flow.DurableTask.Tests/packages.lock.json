@@ -368,6 +368,9 @@
           "Microsoft.Extensions.Options": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
+      },
       "CliWrap": {
         "type": "CentralTransitive",
         "requested": "[3.10.1, )",

@@ -867,13 +867,7 @@ public sealed class ReleaseToolTests : IDisposable
 
     private string RepositoryPath(string relativePath)
     {
-        var normalizedRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
-        if (Path.IsPathRooted(normalizedRelativePath))
-        {
-            throw new ArgumentException("Test repository paths must be relative.", nameof(relativePath));
-        }
-
-        return Path.Join(_repositoryRoot, normalizedRelativePath);
+        return TestPathUtils.PathUnder(_repositoryRoot, relativePath);
     }
 
     private async Task<CliResult> RunAsync(string[] args, FakeCommandRunner runner)

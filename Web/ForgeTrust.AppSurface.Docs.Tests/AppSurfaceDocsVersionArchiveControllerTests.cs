@@ -149,6 +149,32 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
     }
 
     [Fact]
+    public void Versions_ShouldTolerateEscapingExactTreePathEntries()
+    {
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = "../outside-tree"
+                    }
+                ]
+            });
+        var controller = CreateController(catalogPath);
+
+        var result = controller.Versions();
+
+        var view = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<AppSurfaceDocsVersionArchiveViewModel>(view.Model);
+        var version = Assert.Single(model.Versions);
+        Assert.Equal("1.2.3", version.Version);
+        Assert.False(version.IsAvailable);
+    }
+
+    [Fact]
     public void VersionEntry_ShouldPreferCatalogLevelAvailabilityMessage_WhenTrustedReleaseRootIsMissing()
     {
         var catalogPath = WriteCatalog(
@@ -414,7 +440,16 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
                 continue;
             }
 
-            var candidatePath = Path.GetFullPath(Path.Join(basePath, version.ExactTreePath.Trim()));
+            string candidatePath;
+            try
+            {
+                candidatePath = TestPathUtils.PathUnder(basePath, version.ExactTreePath.Trim());
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+
             if (Directory.Exists(candidatePath)
                 && IsPathUnderOrEqual(basePath, candidatePath))
             {
@@ -451,7 +486,7 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
             .OrderBy(entry => entry.path, StringComparer.Ordinal)
             .ToArray();
         var manifestFileName = Path.GetFileName(AppSurfaceDocsReleaseArchiveVerifier.FileName);
-        var manifestPath = Path.GetFullPath(Path.Join(root, manifestFileName));
+        var manifestPath = TestPathUtils.PathUnder(root, manifestFileName);
         File.WriteAllText(
             manifestPath,
             JsonSerializer.Serialize(

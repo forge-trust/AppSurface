@@ -22,6 +22,11 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 - The release authoring checklist now records the preview-rollup rule: when a tagged or release-candidate note supersedes a preview, remove the preview source file and carry its browser routes as `redirect_aliases` on the canonical note.
 - Release preparation now leaves `CHANGELOG.md` as a compact ledger, moves detailed release narrative into tagged release notes, and makes generated release PR reports stop at a manual maintainer review gate before merge, tag, or publish.
 
+### Testing and repository policy
+
+- Test fixture paths now use a shared `ForgeTrust.AppSurface.Testing` helper with `TestPathUtils.PathUnder`, `RelativePath`, and `FindRepoRoot`, replacing duplicated local helpers in high-risk test path construction.
+- A repository policy test now scans test sources for dynamic `Path.Combine` and `Path.Join` under-base fixture paths, reports maintainer-friendly replacement guidance, and keeps intentional platform-path behavior behind reasoned allowlist entries.
+
 ### Configuration diagnostics
 
 - Config audit entries can now be explicitly classified with `ConfigAuditEntryOptions.Sensitivity`, letting package authors mark domain-specific provider-only or wrapper-discovered keys sensitive without changing key names. `Sensitive` redacts root values, traversed child values, and value-derived dictionary labels before structured/text output; `NonSensitive` documents intent but never downgrades conservative redaction from fragments or sources.
@@ -66,6 +71,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 - RazorWire hybrid export can now keep managed streams, islands, and forms live after static publication. Exported pages may point those RazorWire-owned interactions at a configured live origin, choose credential behavior, or preserve same-origin app-owned routes for backend-passthrough hybrid hosts.
 - RazorWire now has first-class page navigation for server-rendered brochure and docs pages. Native anchors opt in with `rw-page-nav` / `rw-page-nav-link` / `rw-page-nav-toggle` / `rw-page-nav-panel`, the runtime owns same-page active state, hash navigation, lifecycle-safe rebinding, diagnostics, and optional panel close, and apps keep layout/styling through stable `data-rw-page-nav*` attributes.
 - RazorWire and AppSurface hybrid export now fail missing browser-delivered static assets with `RWEXPORT003` instead of returning success for a folder that would keep serving broken CSS, image, script, stylesheet, module preload, icon, font, or asset-shaped preload/prefetch requests. Existing hybrid exports that previously exited `0` may now fail because the old success could publish broken assets; live/page routes, frames, forms, streams, islands, canonical metadata, DNS hints, and ambiguous page-shaped prefetch/preload hints remain hybrid-tolerated.
+- Static website export docs now spell out the deployment extras boundary: `--seeds` are crawl routes rather than local copy paths, AppSurface's conventional `/_appsurface/errors/404` output can stage root `404.html`, deployment-owned files such as `CNAME` belong in explicit post-export copy steps, and exporter-owned Netlify `_redirects` should still come from `--redirects netlify`.
 
 ### AppSurface Docs product example
 

@@ -142,7 +142,7 @@ public sealed class TailwindProcessRunnerTests : IDisposable
             throw new ArgumentException("Script file names must not include directory components.", nameof(fileName));
         }
 
-        var scriptPath = Path.Join(_tempRoot, fileName);
+        var scriptPath = TestPathUtils.PathUnder(_tempRoot, fileName);
         await File.WriteAllTextAsync(scriptPath, contents);
         const UnixFileMode executableMode =
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
