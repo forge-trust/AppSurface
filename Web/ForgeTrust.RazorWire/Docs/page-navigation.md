@@ -125,7 +125,7 @@ TagHelper aliases:
 
 When the active link sits inside a visible vertical page-navigation surface that overflows, RazorWire keeps that link perceivable inside the nav surface. This orientation behavior is a progressive enhancement on top of ordinary hash links: without JavaScript, links still navigate to their sections, but RazorWire cannot synchronize active visibility.
 
-RazorWire resolves the reveal surface from the active link upward to the nearest page-nav root. It uses the first ancestor that is rendered, vertically scrollable, and overflowing. Hidden, collapsed, zero-size, horizontal-only, clipped non-scrollable, and non-overflowing ancestors are skipped silently. RazorWire never calls `scrollIntoView()` for this nav reveal and never scrolls the document viewport as part of active-link orientation.
+RazorWire resolves the reveal surface from the active link upward to the nearest page-nav root. `resolveActiveLinkRevealContainer()` uses the first ancestor that is rendered, vertically scrollable, and overflowing. If it reaches a hidden, collapsed, zero-size, or clipped non-scrollable ancestor, resolution stops and returns no reveal container; RazorWire does not continue searching upward through that boundary. Horizontal-only and non-overflowing ancestors are not reveal surfaces. RazorWire never calls `scrollIntoView()` for this nav reveal and never scrolls the document viewport as part of active-link orientation.
 
 Customize reveal insets with CSS on the scrollable nav surface:
 

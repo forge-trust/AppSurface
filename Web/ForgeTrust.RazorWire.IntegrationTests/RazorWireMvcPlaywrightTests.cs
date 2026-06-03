@@ -766,12 +766,31 @@ public sealed class RazorWireMvcPlaywrightTests
         public string IslandsScriptPath { get; set; } = string.Empty;
     }
 
+    /// <summary>
+    /// Describes the Playwright-to-C# deserialization contract for the page-navigation active-link reveal probe.
+    /// </summary>
+    /// <remarks>
+    /// Values are sampled in the browser and must remain stable for deserialization. Future payload changes should
+    /// preserve these member names or update the browser evaluation script and assertions together.
+    /// </remarks>
     private sealed class PageNavigationRevealProbe
     {
+        /// <summary>
+        /// Gets or sets the reveal panel's <c>element.scrollTop</c>, sampled in CSS pixels.
+        /// </summary>
+        /// <remarks>The browser may report fractional scroll offsets, so the value is modeled as a <see cref="double" />.</remarks>
         public double PanelScrollTop { get; set; }
 
+        /// <summary>
+        /// Gets or sets <c>window.scrollY</c> before the reveal action, sampled in CSS pixels.
+        /// </summary>
+        /// <remarks>The browser may report fractional scroll offsets, so the value is modeled as a <see cref="double" />.</remarks>
         public double WindowScrollBefore { get; set; }
 
+        /// <summary>
+        /// Gets or sets <c>window.scrollY</c> after the reveal action, sampled in CSS pixels.
+        /// </summary>
+        /// <remarks>The browser may report fractional scroll offsets, so the value is modeled as a <see cref="double" />.</remarks>
         public double WindowScrollAfter { get; set; }
     }
 
