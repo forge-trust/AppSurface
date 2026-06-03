@@ -9,6 +9,7 @@ interface Window {
         connectionManager?: unknown;
         localTimeFormatter?: unknown;
         formFailureManager?: unknown;
+        pageNavigationManager?: unknown;
     };
     Turbo?: TurboRuntime;
 }
