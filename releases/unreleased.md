@@ -10,7 +10,12 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
-- Add release-facing changes here.
+- AppSurface Web browser status-page re-execution now preserves the original `401`, `403`, or `404` response status while rendering conventional browser recovery pages, so standalone docs 404 recovery keeps `NotFound` semantics across supported runtimes.
+
+### CI and package validation
+
+- CI now includes a measured NuGet cache rollout for selected build, docs export, and code-quality jobs while keeping package-gate restores isolated.
+- PackageIndex verification now ignores hidden local cache directories such as `.pnpm-store` and workspace `.nuget/packages` so local cache contents do not require package manifest entries.
 
 ## Migration watch
 

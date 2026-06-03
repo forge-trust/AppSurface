@@ -1827,8 +1827,9 @@ internal sealed record PackageProjectMetadata(
 /// Discovers candidate projects that should be classified by the package chooser manifest.
 /// </summary>
 /// <remarks>
-/// The scanner intentionally excludes tests, examples, tooling, and generated directories so the manifest only
-/// needs to classify packages that are meaningful to external adopters or package-surface maintainers.
+/// The scanner intentionally excludes tests, examples, tooling, generated directories, and hidden local cache
+/// directories so the manifest only needs to classify packages that are meaningful to external adopters or
+/// package-surface maintainers.
 /// </remarks>
 internal sealed class PackageProjectScanner
 {
@@ -1841,7 +1842,7 @@ internal sealed class PackageProjectScanner
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        return Directory.EnumerateFiles(repositoryRoot, "*.csproj", SearchOption.AllDirectories)
+        return EnumerateProjectFiles(repositoryRoot)
             .Select(path => Path.GetRelativePath(repositoryRoot, path).Replace('\\', '/'))
             .Where(IsCandidateProject)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
@@ -1855,38 +1856,75 @@ internal sealed class PackageProjectScanner
     /// <returns><c>true</c> when the path should be classified by the chooser manifest; otherwise, <c>false</c>.</returns>
     internal static bool IsCandidateProject(string relativePath)
     {
-        var normalizedPath = "/" + relativePath.Replace('\\', '/').Trim('/').ToLowerInvariant();
+        var normalizedPath = relativePath.Replace('\\', '/').Trim('/');
+        var normalizedPathLower = "/" + normalizedPath.ToLowerInvariant();
         var projectName = Path.GetFileNameWithoutExtension(relativePath).ToLowerInvariant();
 
-        if (normalizedPath.Contains("/.git/", StringComparison.Ordinal)
-            || normalizedPath.Contains("/.gstack/", StringComparison.Ordinal)
-            || normalizedPath.Contains("/.agent/", StringComparison.Ordinal)
-            || normalizedPath.Contains("/.claude/", StringComparison.Ordinal)
-            || normalizedPath.Contains("/.codex/", StringComparison.Ordinal)
-            || normalizedPath.Contains("/bin/", StringComparison.Ordinal)
-            || normalizedPath.Contains("/obj/", StringComparison.Ordinal)
-            || normalizedPath.Contains("/node_modules/", StringComparison.Ordinal)
-            || normalizedPath.Contains("/tools/", StringComparison.Ordinal))
+        if (HasHiddenDirectorySegment(normalizedPath)
+            || normalizedPathLower.Contains("/bin/", StringComparison.Ordinal)
+            || normalizedPathLower.Contains("/obj/", StringComparison.Ordinal)
+            || normalizedPathLower.Contains("/node_modules/", StringComparison.Ordinal)
+            || normalizedPathLower.Contains("/tools/", StringComparison.Ordinal))
         {
             return false;
         }
 
-        if (normalizedPath.Contains("/examples/", StringComparison.Ordinal)
-            || normalizedPath.Contains("/benchmarks/", StringComparison.Ordinal)
+        if (normalizedPathLower.Contains("/examples/", StringComparison.Ordinal)
+            || normalizedPathLower.Contains("/benchmarks/", StringComparison.Ordinal)
             || projectName.Contains("benchmarks", StringComparison.Ordinal))
         {
             return false;
         }
 
-        if (normalizedPath.Contains("/tests/", StringComparison.Ordinal)
-            || normalizedPath.Contains(".tests", StringComparison.Ordinal)
-            || normalizedPath.Contains("integrationtests", StringComparison.Ordinal)
+        if (normalizedPathLower.Contains("/tests/", StringComparison.Ordinal)
+            || normalizedPathLower.Contains(".tests", StringComparison.Ordinal)
+            || normalizedPathLower.Contains("integrationtests", StringComparison.Ordinal)
             || projectName.Contains("tests", StringComparison.Ordinal))
         {
             return false;
         }
 
         return true;
+    }
+
+    private static bool HasHiddenDirectorySegment(string relativePath)
+    {
+        var directory = Path.GetDirectoryName(relativePath.Replace('/', Path.DirectorySeparatorChar));
+        if (string.IsNullOrEmpty(directory))
+        {
+            return false;
+        }
+
+        return directory
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar])
+            .Any(segment => segment.StartsWith(".", StringComparison.Ordinal));
+    }
+
+    private static IEnumerable<string> EnumerateProjectFiles(string directory)
+    {
+        foreach (var projectPath in Directory.EnumerateFiles(directory, "*.csproj", SearchOption.TopDirectoryOnly))
+        {
+            yield return projectPath;
+        }
+
+        foreach (var childDirectory in Directory.EnumerateDirectories(directory))
+        {
+            if (!ShouldDescendIntoDirectory(childDirectory))
+            {
+                continue;
+            }
+
+            foreach (var projectPath in EnumerateProjectFiles(childDirectory))
+            {
+                yield return projectPath;
+            }
+        }
+    }
+
+    private static bool ShouldDescendIntoDirectory(string directory)
+    {
+        var directoryName = Path.GetFileName(directory);
+        return !directoryName.StartsWith(".", StringComparison.Ordinal);
     }
 }
 
