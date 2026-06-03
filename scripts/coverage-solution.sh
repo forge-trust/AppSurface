@@ -130,8 +130,28 @@ case "$GROUP_NAME" in
     ;;
 esac
 
+canonicalize_directory() {
+  local label="$1"
+  local path="$2"
+  local canonical
+
+  if ! canonical="$(mkdir -p "$path" && cd "$path" && pwd)"; then
+    echo "Unable to prepare $label directory: $path" >&2
+    return 1
+  fi
+
+  if [[ -z "$canonical" ]]; then
+    echo "Unable to resolve $label directory: $path" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$canonical"
+}
+
 SOLUTION_DIR="$(cd "$(dirname "$SOLUTION_PATH")" && pwd)"
-OUTPUT_DIR="$(mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)"
+if ! OUTPUT_DIR="$(canonicalize_directory "output" "$OUTPUT_DIR")"; then
+  exit 1
+fi
 TIMINGS_FILE="$OUTPUT_DIR/timings.json"
 
 seconds_now() {
@@ -353,7 +373,9 @@ EOF
 
 if [[ "$MERGE_ONLY" == true ]]; then
   start_time="$(seconds_now)"
-  MERGE_SOURCE_DIR="$(mkdir -p "$MERGE_SOURCE_DIR" && cd "$MERGE_SOURCE_DIR" && pwd)"
+  if ! MERGE_SOURCE_DIR="$(canonicalize_directory "merge source" "$MERGE_SOURCE_DIR")"; then
+    exit 1
+  fi
   rm -f "$OUTPUT_DIR/coverage.cobertura.xml" "$OUTPUT_DIR/summary.txt" "$TIMINGS_FILE" "$OUTPUT_DIR"/junit-*.xml
 
   merge_start="$(seconds_now)"

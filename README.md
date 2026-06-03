@@ -164,6 +164,8 @@ BUILD_CONFIGURATION=Release BUILD_SOLUTION=false ./scripts/coverage-solution.sh 
 ./scripts/coverage-solution.sh --merge-only TestResults/coverage-groups --output TestResults/coverage-merged
 ```
 
+Available bounded groups are `core`, `tools`, `web`, `docs`, `razorwire`, and `integration`.
+
 Default PR validation keeps solution coverage in one lane until measured group runs prove they reduce total GitHub Actions minutes, not just wall-clock time.
 
 The current CI critical-path policy and timing baseline live in [eng/ci-critical-path.md](./eng/ci-critical-path.md).
