@@ -551,7 +551,7 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
     }
 
     [Fact]
-    public async Task SearchPage_UsesTopLevelNavigation_ForDocumentationIndexRecoveryLink()
+    public async Task SearchPage_UsesTopLevelNavigation_ForDocsHomeRecoveryLink()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
@@ -603,19 +603,19 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
         await page.GotoAsync($"{_fixture.DocsUrl}/search?q={Uri.EscapeDataString("no-such-query")}");
         await WaitForSearchPageSettledAsync(page);
 
-        var docsIndexLink = page.GetByRole(AriaRole.Link, new PageGetByRoleOptions
+        var docsHomeLink = page.GetByRole(AriaRole.Link, new PageGetByRoleOptions
         {
-            Name = "Documentation index",
+            Name = "Docs home",
             Exact = true
         });
 
-        await docsIndexLink.WaitForAsync(new LocatorWaitForOptions
+        await docsHomeLink.WaitForAsync(new LocatorWaitForOptions
         {
             State = WaitForSelectorState.Visible,
             Timeout = 30_000
         });
 
-        Assert.Equal("_top", await docsIndexLink.GetAttributeAsync("data-turbo-frame"));
+        Assert.Equal("_top", await docsHomeLink.GetAttributeAsync("data-turbo-frame"));
     }
 
     [Fact]
