@@ -1,7 +1,7 @@
 namespace ForgeTrust.RazorWire.Cli;
 
 /// <summary>
-/// Represents exporter-domain validation failures that prevent CDN-safe output from being produced.
+/// Represents exporter-domain validation failures that prevent safe export output from being produced.
 /// </summary>
 /// <remarks>
 /// The export engine throws this exception without depending on CLI infrastructure. Command handlers should translate
@@ -20,7 +20,7 @@ public sealed class ExportValidationException : Exception
     }
 
     /// <summary>
-    /// Gets the diagnostics that describe why CDN export validation failed.
+    /// Gets the diagnostics that describe why export validation failed.
     /// </summary>
     public IReadOnlyList<ExportDiagnostic> Diagnostics { get; }
 
@@ -34,10 +34,10 @@ public sealed class ExportValidationException : Exception
     {
         if (diagnostics.Count == 0)
         {
-            return "CDN export validation failed.";
+            return "Export validation failed.";
         }
 
-        return "CDN export validation failed:" + Environment.NewLine
+        return "Export validation failed:" + Environment.NewLine
                + string.Join(Environment.NewLine, diagnostics.Select(d => $"{d.Code}: {d.Message}"));
     }
 }

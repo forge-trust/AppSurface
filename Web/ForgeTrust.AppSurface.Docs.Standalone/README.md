@@ -42,9 +42,9 @@ The shared AppSurface Web startup watchdog still applies through `WebOptions.Sta
 
 The standalone host explicitly enables AppSurface Web conventional browser status pages and owns the docs-specific `404` override at `Views/Shared/404.cshtml`. This keeps reusable `ForgeTrust.AppSurface.Web` generic while letting the docs-only executable guide stale documentation links back to search.
 
-The standalone `404` view uses `BrowserStatusPageModel` for the original request path and `DocsUrlBuilder.Routes.Search` for the recovery link. It renders those app-relative routes through `Url.PathBaseAware(...)`, so custom route roots, live version roots, and reverse-proxy `PathBase` prefixes all appear in the final browser link. The view does not require `Model.OriginalPath` to be under the docs route because direct preview and static-export probes hit `/_appsurface/errors/404` without an original docs path.
+The standalone `404` view uses `BrowserStatusPageModel` only for status and original-path display. Recovery navigation comes from the AppSurface Docs recovery-link builder, which is harvest-free and emits route-contract-backed links for Search, Start Here, Packages, and Docs home. The view renders those app-relative routes through `Url.PathBaseAware(...)`, so custom route roots, live version roots, and reverse-proxy `PathBase` prefixes all appear in the final browser link. It does not require `Model.OriginalPath` to be under the docs route because direct preview and static-export probes hit `/_appsurface/errors/404` without an original docs path, and it never derives hrefs from the original path.
 
-Static export probes `/_appsurface/errors/404` and writes the rendered override as `404.html`. To verify the standalone recovery page locally, run the host and request both a missing docs page and the reserved preview route:
+Static export probes `/_appsurface/errors/404` and writes the rendered override as `404.html`. The primary search link is crawlable when the search page is exported; optional Start Here, Packages, and Docs home recovery rows are marked `data-rw-export-ignore="true"` so sparse exports do not have to seed every recovery destination. To verify the standalone recovery page locally, run the host and request both a missing docs page and the reserved preview route:
 
 ```bash
 curl -i -H "Accept: text/html" http://127.0.0.1:5189/docs/missing-page
@@ -68,7 +68,7 @@ For the public AppSurface CLI export path, prefer the equivalent flag:
 appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 ```
 
-`--strict` is the harvest fail-closed gate. `--mode cdn` is the static artifact validation gate and preserves RazorWire `RWEXPORT00x` diagnostics when managed URLs cannot become CDN-safe files.
+`--strict` is the harvest fail-closed gate. `--mode cdn` is the full static artifact validation gate and preserves RazorWire `RWEXPORT00x` diagnostics when managed URLs cannot become CDN-safe files. `--mode hybrid` keeps live/page behavior available behind app-aware infrastructure, but it still fails missing browser-delivered static assets with `RWEXPORT003`; copy the asset, fix path casing, externalize the URL, or remove the reference.
 
 ## Dogfood Harvest Boundary
 

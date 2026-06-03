@@ -209,7 +209,7 @@ public class ExportCommandTests
 
             var ex = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(A.Fake<IConsole>()));
 
-            Assert.Contains("CDN export validation failed", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("Export validation failed", ex.Message, StringComparison.Ordinal);
             Assert.Contains("RWEXPORT003", ex.Message, StringComparison.Ordinal);
             Assert.Contains("/missing.png", ex.Message, StringComparison.Ordinal);
         }

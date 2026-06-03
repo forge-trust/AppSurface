@@ -633,6 +633,8 @@ public class ExportEngineTests
             var decodedHtml = Uri.UnescapeDataString(html);
             Assert.Contains("Exported 404 page", html);
             Assert.Contains("href=\"/about.html\"", html);
+            Assert.Contains("href=\"/docs/sections/start-here\" data-rw-export-ignore=\"true\"", html);
+            Assert.Contains("href=\"/docs/sections/packages\" data-rw-export-ignore=\"true\"", html);
             Assert.Contains("src=\"/img/error.png\"", html);
             Assert.DoesNotContain("Diagnostics", html, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("_health", decodedHtml, StringComparison.OrdinalIgnoreCase);
@@ -643,6 +645,16 @@ public class ExportEngineTests
             Assert.False(File.Exists(Path.Join(tempDir, "401.html")));
             Assert.False(File.Exists(Path.Join(tempDir, "403.html")));
             Assert.True(File.Exists(Path.Join(tempDir, "about.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "docs", "sections", "start-here.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "docs", "sections", "packages.html")));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/docs/sections/start-here", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/docs/sections/packages", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/401", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/401.html", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/403", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/403.html", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/404", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/404.html", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -1731,6 +1743,114 @@ public class ExportEngineTests
             var ex = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
 
             Assert.Contains("RWEXPORT003", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_Should_Fail_When_Required_Asset_Is_Missing()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new MissingAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
+            var ex = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains("RWEXPORT003", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("Hybrid export can leave page routes", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("/missing.js", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("use hybrid mode", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_Should_Fail_When_Css_References_Missing_Image()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new MissingCssImageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
+            var ex = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains("RWEXPORT003", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("stylesheet url()", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("/img/map-image.png", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_Should_Fail_When_ModulePreload_Asset_Is_Missing()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new MissingModulePreloadHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
+            var ex = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains("RWEXPORT003", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("<link href>", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("rel 'modulepreload'", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("/assets/app.js", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_Should_Tolerate_Page_Metadata_And_Ambiguous_Hints()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridToleratedReferenceHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
         }
         finally
         {
@@ -2925,6 +3045,36 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractReferences_Should_Classify_Link_Roles_For_Static_Validation()
+    {
+        var html = """
+            <link rel="stylesheet" href="/styles/site.css">
+            <link rel="icon" href="/favicon.ico">
+            <link rel="modulepreload" href="/assets/module.js">
+            <link rel=" preload " as=" script " href="/assets/app">
+            <link rel="prefetch" href="/assets/app.js">
+            <link rel="prefetch" href="/next-page">
+            <link rel="preload" as="fetch" href="/api/bootstrap">
+            <link rel="canonical" href="/docs/start">
+            <link rel="dns-prefetch" href="/dns">
+            """;
+
+        var references = _sut.ExtractReferences(html, "/", htmlScope: true);
+
+        Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/styles/site.css").Role);
+        Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/favicon.ico").Role);
+        Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/assets/module.js").Role);
+        var preloadReference = Assert.Single(references, reference => reference.Path == "/assets/app");
+        Assert.Equal(ExportReferenceRole.StaticAsset, preloadReference.Role);
+        Assert.Equal("rel 'preload', as 'script'", preloadReference.LinkMetadata?.Display);
+        Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/assets/app.js").Role);
+        Assert.Equal(ExportReferenceRole.PageRoute, Assert.Single(references, reference => reference.Path == "/next-page").Role);
+        Assert.Equal(ExportReferenceRole.PageRoute, Assert.Single(references, reference => reference.Path == "/api/bootstrap").Role);
+        Assert.Equal(ExportReferenceRole.Metadata, Assert.Single(references, reference => reference.Path == "/docs/start").Role);
+        Assert.Equal(ExportReferenceRole.Metadata, Assert.Single(references, reference => reference.Path == "/dns").Role);
+    }
+
+    [Fact]
     public void ExtractReferences_Should_Ignore_Hash_Only_Css_References()
     {
         var css = """
@@ -3568,6 +3718,11 @@ public class ExportEngineTests
                     """);
             }
 
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
+            }
+
             return NotFound();
         }
     }
@@ -3593,6 +3748,11 @@ public class ExportEngineTests
                     """);
             }
 
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
+            }
+
             return NotFound();
         }
     }
@@ -3614,6 +3774,12 @@ public class ExportEngineTests
                       </body>
                     </html>
                     """);
+            }
+
+            if (path is "/app/_content/ForgeTrust.RazorWire/razorwire/razorwire.js"
+                or "/app/app/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
             }
 
             return NotFound();
@@ -3705,6 +3871,11 @@ public class ExportEngineTests
                     """);
             }
 
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
+            }
+
             return NotFound();
         }
     }
@@ -3726,6 +3897,11 @@ public class ExportEngineTests
                       </body>
                     </html>
                     """);
+            }
+
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
             }
 
             return NotFound();
@@ -3863,6 +4039,11 @@ public class ExportEngineTests
                     """);
             }
 
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
+            }
+
             return NotFound();
         }
     }
@@ -3921,7 +4102,56 @@ public class ExportEngineTests
             var path = request.RequestUri?.AbsolutePath ?? "/";
             return path == "/" || path == "/index"
                 ? Html("""<html><body><script src="/missing.js"></script></body></html>""")
-                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+                : NotFound();
+        }
+    }
+
+    private sealed class MissingCssImageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path switch
+            {
+                "/" or "/index" => Html("""<html><head><link rel="stylesheet" href="/styles/site.css"></head><body></body></html>"""),
+                "/styles/site.css" => Text(".map { background-image: url('/img/map-image.png'); }", "text/css"),
+                _ => NotFound()
+            };
+        }
+    }
+
+    private sealed class MissingModulePreloadHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path == "/" || path == "/index"
+                ? Html("""<html><head><link rel="modulepreload" href="/assets/app.js"></head><body></body></html>""")
+                : NotFound();
+        }
+    }
+
+    private sealed class HybridToleratedReferenceHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path == "/" || path == "/index"
+                ? Html("""
+                    <html>
+                      <head>
+                        <link rel="canonical" href="/missing-canonical">
+                        <link rel="dns-prefetch" href="/dns">
+                        <link rel="prefetch" href="/next-page">
+                        <link rel="preload" as="fetch" href="/api/bootstrap">
+                      </head>
+                      <body>
+                        <a href="/missing-page">Missing page</a>
+                        <turbo-frame src="/missing-frame"></turbo-frame>
+                      </body>
+                    </html>
+                    """)
+                : NotFound();
         }
     }
 
@@ -4340,6 +4570,8 @@ public class ExportEngineTests
                             </details>
                             <a href="/about">About</a>
                             <a href="/docs/search">Search documentation</a>
+                            <a href="/docs/sections/start-here" data-rw-export-ignore="true">Start Here</a>
+                            <a href="/docs/sections/packages" data-rw-export-ignore="true">Packages</a>
                             <img src="/img/error.png">
                           </body>
                         </html>

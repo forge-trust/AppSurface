@@ -7,7 +7,7 @@ public class ExportValidationExceptionTests
     {
         var ex = new ExportValidationException([]);
 
-        Assert.Equal("CDN export validation failed.", ex.Message);
+        Assert.Equal("Export validation failed.", ex.Message);
         Assert.Empty(ex.Diagnostics);
     }
 
@@ -23,7 +23,7 @@ public class ExportValidationExceptionTests
         var ex = new ExportValidationException(diagnostics);
 
         Assert.Same(diagnostics, ex.Diagnostics);
-        Assert.Contains("CDN export validation failed:", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Export validation failed:", ex.Message, StringComparison.Ordinal);
         Assert.Contains("RWEXPORT003: Required asset was not exported.", ex.Message, StringComparison.Ordinal);
         Assert.Contains("RWEXPORT004: Managed URL could not be rewritten.", ex.Message, StringComparison.Ordinal);
     }

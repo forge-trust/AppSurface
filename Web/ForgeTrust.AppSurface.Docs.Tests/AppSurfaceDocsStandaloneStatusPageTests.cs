@@ -31,8 +31,13 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Contains("Documentation page not found", html);
+        Assert.Contains("Browse trusted entry points", html);
         Assert.Contains("Search documentation", html);
         Assert.Contains("href=\"/docs/search\"", html);
+        Assert.Contains("href=\"/docs/sections/start-here\" data-rw-export-ignore=\"true\"", html);
+        Assert.Contains("href=\"/docs/sections/packages\" data-rw-export-ignore=\"true\"", html);
+        Assert.Contains("href=\"/docs\" data-rw-export-ignore=\"true\"", html);
+        Assert.Contains("background: #0d182a", html);
         Assert.Contains("/docs/missing-page", html);
     }
 
@@ -70,6 +75,8 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
 
             Assert.Contains("Documentation page not found", html);
             Assert.Contains("href=\"/docs/search\"", html);
+            Assert.Contains("href=\"/docs/sections/start-here\" data-rw-export-ignore=\"true\"", html);
+            Assert.Contains("href=\"/docs/sections/packages\" data-rw-export-ignore=\"true\"", html);
             Assert.DoesNotContain("AppSurface default 404", html);
         }
         finally
@@ -140,6 +147,8 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         Assert.Contains("Documentation page not found", html);
         Assert.Contains("the requested documentation page", html);
         Assert.Contains("href=\"/docs/search\"", html);
+        Assert.Contains("href=\"/docs/sections/start-here\" data-rw-export-ignore=\"true\"", html);
+        Assert.Contains("href=\"/docs/sections/packages\" data-rw-export-ignore=\"true\"", html);
     }
 
     [Fact]
@@ -165,6 +174,8 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Contains("href=\"/foo/bar/next/search\"", html);
+            Assert.Contains("href=\"/foo/bar/next/sections/start-here\" data-rw-export-ignore=\"true\"", html);
+            Assert.Contains("href=\"/foo/bar/next/sections/packages\" data-rw-export-ignore=\"true\"", html);
             Assert.DoesNotContain("href=\"/foo/bar/search\"", html);
         }
         finally
@@ -186,7 +197,74 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Contains("href=\"/mounted/docs/search\"", html);
-        Assert.Contains("href=\"/mounted/docs\"", html);
+        Assert.Contains("href=\"/mounted/docs/sections/start-here\" data-rw-export-ignore=\"true\"", html);
+        Assert.Contains("href=\"/mounted/docs/sections/packages\" data-rw-export-ignore=\"true\"", html);
+        Assert.Contains("href=\"/mounted/docs\" data-rw-export-ignore=\"true\"", html);
+    }
+
+    [Fact]
+    public async Task MissingDocsRoute_ShouldNotTakeOverNonBrowserRequests()
+    {
+        await using var runningHost = await StartStandaloneHostAsync();
+
+        using var jsonRequest = new HttpRequestMessage(HttpMethod.Get, "/docs/missing-page");
+        jsonRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        using var jsonResponse = await runningHost.Client.SendAsync(jsonRequest);
+        var jsonBody = await jsonResponse.Content.ReadAsStringAsync();
+
+        using var noAcceptResponse = await runningHost.Client.GetAsync("/docs/another-missing-page");
+        var noAcceptBody = await noAcceptResponse.Content.ReadAsStringAsync();
+
+        using var postRequest = new HttpRequestMessage(HttpMethod.Post, "/docs/missing-page");
+        postRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
+        using var postResponse = await runningHost.Client.SendAsync(postRequest);
+        var postBody = await postResponse.Content.ReadAsStringAsync();
+
+        using var headRequest = new HttpRequestMessage(HttpMethod.Head, "/docs/missing-page");
+        headRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
+        using var headResponse = await runningHost.Client.SendAsync(headRequest);
+        var headBody = await headResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.NotFound, jsonResponse.StatusCode);
+        Assert.DoesNotContain("Documentation page not found", jsonBody);
+        Assert.Equal(HttpStatusCode.NotFound, noAcceptResponse.StatusCode);
+        Assert.DoesNotContain("Documentation page not found", noAcceptBody);
+        Assert.Equal(HttpStatusCode.NotFound, postResponse.StatusCode);
+        Assert.DoesNotContain("Documentation page not found", postBody);
+        Assert.Equal(HttpStatusCode.NotFound, headResponse.StatusCode);
+        Assert.Empty(headBody);
+    }
+
+    [Fact]
+    public async Task MissingJsonLikeDocsRoute_ShouldNotRenderBrowserRecovery_WhenJsonIsRequested()
+    {
+        await using var runningHost = await StartStandaloneHostAsync();
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/docs/missing.json");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await runningHost.Client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.DoesNotContain("Documentation page not found", body);
+        Assert.DoesNotContain("Search documentation", body);
+    }
+
+    [Fact]
+    public async Task MissingDocsRoute_ShouldHtmlEncodeOriginalPath()
+    {
+        await using var runningHost = await StartStandaloneHostAsync();
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/docs/%3Cscript%3Ealert(1)%3Cscript%3E%22quote");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
+
+        using var response = await runningHost.Client.SendAsync(request);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Contains("&lt;script&gt;alert(1)&lt;script&gt;&quot;quote", html);
+        Assert.DoesNotContain("<script>alert(1)<script>\"quote", html);
     }
 
     [Fact]
