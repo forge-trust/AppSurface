@@ -68,7 +68,7 @@ For the public AppSurface CLI export path, prefer the equivalent flag:
 appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 ```
 
-`--strict` is the harvest fail-closed gate. `--mode cdn` is the static artifact validation gate and preserves RazorWire `RWEXPORT00x` diagnostics when managed URLs cannot become CDN-safe files.
+`--strict` is the harvest fail-closed gate. `--mode cdn` is the full static artifact validation gate and preserves RazorWire `RWEXPORT00x` diagnostics when managed URLs cannot become CDN-safe files. `--mode hybrid` keeps live/page behavior available behind app-aware infrastructure, but it still fails missing browser-delivered static assets with `RWEXPORT003`; copy the asset, fix path casing, externalize the URL, or remove the reference.
 
 ## Dogfood Harvest Boundary
 

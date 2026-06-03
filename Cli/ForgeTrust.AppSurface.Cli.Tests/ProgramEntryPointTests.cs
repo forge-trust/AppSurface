@@ -2939,7 +2939,10 @@ public sealed class ProgramEntryPointTests
 
     private sealed class AppSurfaceExportHttpMessageHandler : HttpMessageHandler
     {
+        private const string RazorWireRuntimePath = "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js";
+
         private readonly Queue<HttpResponseMessage> _okResponses;
+        private readonly Queue<HttpResponseMessage> _assetResponses;
         private readonly Queue<HttpResponseMessage> _notFoundResponses;
         private readonly List<HttpResponseMessage> _responses;
 
@@ -2947,9 +2950,13 @@ public sealed class ProgramEntryPointTests
         {
             _responses = Enumerable.Range(0, 8)
                 .Select(_ => CreateOkResponse())
+                .Concat(Enumerable.Range(0, 8).Select(_ => CreateAssetResponse()))
                 .Concat(Enumerable.Range(0, 8).Select(_ => new HttpResponseMessage(HttpStatusCode.NotFound)))
                 .ToList();
-            _okResponses = new Queue<HttpResponseMessage>(_responses.Where(response => response.StatusCode == HttpStatusCode.OK));
+            _okResponses = new Queue<HttpResponseMessage>(
+                _responses.Where(response => response.Content?.Headers.ContentType?.MediaType == "text/html"));
+            _assetResponses = new Queue<HttpResponseMessage>(
+                _responses.Where(response => response.Content?.Headers.ContentType?.MediaType == "text/javascript"));
             _notFoundResponses = new Queue<HttpResponseMessage>(_responses.Where(response => response.StatusCode == HttpStatusCode.NotFound));
         }
 
@@ -2959,6 +2966,11 @@ public sealed class ProgramEntryPointTests
             if (path == "/" || path == "/index")
             {
                 return Task.FromResult(DequeueOrThrow(_okResponses, HttpStatusCode.OK, path));
+            }
+
+            if (path == RazorWireRuntimePath)
+            {
+                return Task.FromResult(DequeueOrThrow(_assetResponses, HttpStatusCode.OK, path));
             }
 
             return Task.FromResult(DequeueOrThrow(_notFoundResponses, HttpStatusCode.NotFound, path));
@@ -3011,6 +3023,17 @@ public sealed class ProgramEntryPointTests
                     """,
                     System.Text.Encoding.UTF8,
                     "text/html")
+            };
+        }
+
+        private static HttpResponseMessage CreateAssetResponse()
+        {
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "window.RazorWire = window.RazorWire || {};",
+                    System.Text.Encoding.UTF8,
+                    "text/javascript")
             };
         }
     }

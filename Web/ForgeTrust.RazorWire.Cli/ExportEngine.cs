@@ -1015,6 +1015,10 @@ public class ExportEngine
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         ValidateRedirectArtifacts(context, seen);
+        if (context.Mode == ExportMode.Hybrid)
+        {
+            ValidateRequiredStaticAssets(context, seen);
+        }
 
         if (context.Mode != ExportMode.Cdn)
         {
@@ -1070,6 +1074,17 @@ public class ExportEngine
         if (context.Diagnostics.Count > 0)
         {
             throw new ExportValidationException(context.Diagnostics);
+        }
+    }
+
+    private void ValidateRequiredStaticAssets(ExportContext context, ISet<string> seen)
+    {
+        foreach (var reference in context.References.Where(reference => reference.RequiresStaticMaterialization(context.Mode)))
+        {
+            if (!TryResolveReferenceArtifactUrl(reference, context, out _))
+            {
+                AddMissingReferenceDiagnostic(context, seen, reference);
+            }
         }
     }
 
@@ -1319,16 +1334,25 @@ public class ExportEngine
         var sourceDescription = provenance is null
             ? $"from '{reference.SourceRoute}'"
             : $"from {provenance.DisplaySource} on '{reference.SourceRoute}'";
+        var linkDescription = reference.LinkMetadata is null
+            ? string.Empty
+            : $" ({reference.LinkMetadata.Display})";
         var positionDescription = provenance?.Line is null
             ? string.Empty
             : $" near line {provenance.Line.Value}";
+        var validationTarget = context.Mode == ExportMode.Hybrid
+            ? "during hybrid export"
+            : "to an emitted static export artifact";
+        var fix = context.Mode == ExportMode.Hybrid && code == "RWEXPORT003"
+            ? "Hybrid export can leave page routes, frames, forms, streams, and islands to live infrastructure, but browser-delivered assets requested by HTML or CSS must be emitted by the export or made external/data/hash-only. Add or copy the asset, correct path casing, make the URL external/data/hash-only, or remove the browser dependency."
+            : "Add the route or asset to the export, make the reference external/data/hash-only, or use hybrid mode when a live server owns it.";
 
         AddDiagnostic(
             context,
             seen,
             new ExportDiagnostic(
                 code,
-                $"The {description} '{reference.RawValue}' {sourceDescription}{positionDescription} did not map to an emitted CDN artifact. Normalized path: '{reference.Path}'. Add the route or asset to the export, make the reference external/data/hash-only, or use hybrid mode when a live server owns it.",
+                $"The {description} '{reference.RawValue}' {sourceDescription}{linkDescription}{positionDescription} did not resolve {validationTarget}. Normalized path: '{reference.Path}'. {fix}",
                 reference.SourceRoute,
             reference));
     }
