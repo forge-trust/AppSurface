@@ -139,7 +139,7 @@ Example:
 RazorWire page navigation: data-rw-page-nav-toggle controls "page-sections-panel", but no element with that id exists.
 Impact: panel close behavior is disabled for this nav root.
 Fix: add id="page-sections-panel" to the panel or remove the toggle value.
-Docs: Web/ForgeTrust.RazorWire/Docs/page-navigation.md#attribute-reference
+Docs: Web/ForgeTrust.RazorWire/Docs/page-navigation.md#troubleshooting
 ```
 
 ## Bootstrap Migration

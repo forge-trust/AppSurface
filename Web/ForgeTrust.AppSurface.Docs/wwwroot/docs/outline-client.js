@@ -241,8 +241,7 @@
     }
 
     function isRazorWirePageNavigationManaged(shell) {
-        return shell?.hasAttribute?.("data-rw-page-nav") === true
-            && typeof window.RazorWire?.pageNavigationManager?.scan === "function";
+        return shell?.hasAttribute?.("data-rw-page-nav") === true;
     }
 
     function getRazorWireActiveLink(links) {

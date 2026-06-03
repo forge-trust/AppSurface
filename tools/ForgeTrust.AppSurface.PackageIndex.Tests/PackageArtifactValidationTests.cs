@@ -2408,7 +2408,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             restoreFailure,
             restoreFailure,
             new ExternalCommandResult(0, "installed", string.Empty),
-            new ExternalCommandResult(0, "USAGE\nappsurface [command]", string.Empty)
+            new ExternalCommandResult(0, "USAGE\nappsurface [command]", string.Empty),
+            new ExternalCommandResult(0, PackageVersion, string.Empty)
         ]);
         var delays = new List<TimeSpan>();
         var workflow = new PackageSmokeInstallWorkflow(
@@ -2445,14 +2446,14 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("installed", toolEntry.Output, StringComparison.Ordinal);
         Assert.Equal(4, delays.Count);
         Assert.Equal(
-            ["dotnet restore", "dotnet restore", "dotnet restore", "dotnet restore", "dotnet restore", "dotnet tool install", "dotnet tool run"],
+            ["dotnet restore", "dotnet restore", "dotnet restore", "dotnet restore", "dotnet restore", "dotnet tool install", "dotnet tool run", "dotnet tool run"],
             commandRunner.Requests.Select(request => request.OperationName).ToArray());
     }
 
     [Theory]
     [InlineData("USAGE\nappsurface [command]")]
     [InlineData("USAGE\nappsurface.exe [command]")]
-    public async Task PackageSmokeInstallWorkflow_InstallsToolAndRunsHelpCommand(string helpOutput)
+    public async Task PackageSmokeInstallWorkflow_InstallsToolAndVerifiesVersionCommand(string helpOutput)
     {
         await WriteFileAsync("packages/package-index.yml",
             """
@@ -2501,7 +2502,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var commandRunner = new RecordingExternalCommandRunner([
             new ExternalCommandResult(0, "restored", string.Empty),
             new ExternalCommandResult(0, "installed", string.Empty),
-            new ExternalCommandResult(0, helpOutput, string.Empty)
+            new ExternalCommandResult(0, helpOutput, string.Empty),
+            new ExternalCommandResult(0, PackageVersion, string.Empty)
         ]);
         var workflow = new PackageSmokeInstallWorkflow(
             new PackageArtifactManifestReader(),
@@ -2539,9 +2541,19 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Equal(PackageSmokeInstallStatus.Restored, toolEntry.Status);
         Assert.False(File.Exists(stalePackageRestoreFile));
         Assert.False(File.Exists(staleToolWorkFile));
-        var toolRunRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet tool run");
-        Assert.Contains("appsurface", Path.GetFileName(toolRunRequest.FileName), StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(["--help"], toolRunRequest.Arguments);
+        var toolRunRequests = commandRunner.Requests.Where(request => request.OperationName == "dotnet tool run").ToArray();
+        Assert.Collection(
+            toolRunRequests,
+            helpRequest =>
+            {
+                Assert.Contains("appsurface", Path.GetFileName(helpRequest.FileName), StringComparison.OrdinalIgnoreCase);
+                Assert.Equal(["--help"], helpRequest.Arguments);
+            },
+            versionRequest =>
+            {
+                Assert.Contains("appsurface", Path.GetFileName(versionRequest.FileName), StringComparison.OrdinalIgnoreCase);
+                Assert.Equal(["--version"], versionRequest.Arguments);
+            });
     }
 
     [Fact]
@@ -2657,6 +2669,76 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("installed", toolEntry.Output, StringComparison.Ordinal);
         Assert.Contains("help failed", toolEntry.Output, StringComparison.Ordinal);
         Assert.Equal(["dotnet restore", "dotnet tool install", "dotnet tool run"], commandRunner.Requests.Select(request => request.OperationName).ToArray());
+    }
+
+    [Fact]
+    public async Task PackageSmokeInstallWorkflow_FailsToolSmokeWhenHelpCommandWritesStderr()
+    {
+        var (report, commandRunner) = await RunToolOnlySmokeWorkflowAsync(
+            new ExternalCommandResult(0, "web restored", string.Empty),
+            new ExternalCommandResult(0, "installed", string.Empty),
+            new ExternalCommandResult(0, "USAGE\nappsurface [command]", "lifecycle noise"));
+
+        var toolEntry = Assert.Single(report.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Cli");
+        Assert.Equal(PackageSmokeInstallStatus.Failed, toolEntry.Status);
+        Assert.Equal(1, toolEntry.ExitCode);
+        Assert.Contains("completed but also wrote to stderr", toolEntry.Output, StringComparison.Ordinal);
+        Assert.Contains("lifecycle noise", toolEntry.Output, StringComparison.Ordinal);
+        Assert.Equal(["dotnet restore", "dotnet tool install", "dotnet tool run"], commandRunner.Requests.Select(request => request.OperationName).ToArray());
+    }
+
+    [Theory]
+    [InlineData("v0.0.0-ci.42")]
+    [InlineData("0.0.0")]
+    [InlineData("0.0.0-ci.42+abc123")]
+    [InlineData("USAGE\nappsurface [command]")]
+    public async Task PackageSmokeInstallWorkflow_FailsToolSmokeWhenVersionOutputDoesNotMatchPackageVersion(string versionOutput)
+    {
+        var (report, commandRunner) = await RunToolOnlySmokeWorkflowAsync(
+            new ExternalCommandResult(0, "web restored", string.Empty),
+            new ExternalCommandResult(0, "installed", string.Empty),
+            new ExternalCommandResult(0, "USAGE\nappsurface [command]", string.Empty),
+            new ExternalCommandResult(0, versionOutput, string.Empty));
+
+        var toolEntry = Assert.Single(report.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Cli");
+        Assert.Equal(PackageSmokeInstallStatus.Failed, toolEntry.Status);
+        Assert.Equal(1, toolEntry.ExitCode);
+        Assert.Contains($"expected installed tool version '{PackageVersion}'", toolEntry.Output, StringComparison.Ordinal);
+        Assert.Contains(versionOutput.Trim(), toolEntry.Output, StringComparison.Ordinal);
+        Assert.Equal(["dotnet restore", "dotnet tool install", "dotnet tool run", "dotnet tool run"], commandRunner.Requests.Select(request => request.OperationName).ToArray());
+    }
+
+    [Fact]
+    public async Task PackageSmokeInstallWorkflow_FailsToolSmokeWhenVersionCommandFails()
+    {
+        var (report, commandRunner) = await RunToolOnlySmokeWorkflowAsync(
+            new ExternalCommandResult(0, "web restored", string.Empty),
+            new ExternalCommandResult(0, "installed", string.Empty),
+            new ExternalCommandResult(0, "USAGE\nappsurface [command]", string.Empty),
+            new ExternalCommandResult(2, string.Empty, "version failed"));
+
+        var toolEntry = Assert.Single(report.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Cli");
+        Assert.Equal(PackageSmokeInstallStatus.Failed, toolEntry.Status);
+        Assert.Equal(2, toolEntry.ExitCode);
+        Assert.Contains("version failed", toolEntry.Output, StringComparison.Ordinal);
+        Assert.Equal(["dotnet restore", "dotnet tool install", "dotnet tool run", "dotnet tool run"], commandRunner.Requests.Select(request => request.OperationName).ToArray());
+    }
+
+    [Fact]
+    public async Task PackageSmokeInstallWorkflow_FailsToolSmokeWhenVersionCommandWritesStderr()
+    {
+        var (report, commandRunner) = await RunToolOnlySmokeWorkflowAsync(
+            new ExternalCommandResult(0, "web restored", string.Empty),
+            new ExternalCommandResult(0, "installed", string.Empty),
+            new ExternalCommandResult(0, "USAGE\nappsurface [command]", string.Empty),
+            new ExternalCommandResult(0, PackageVersion, "lifecycle noise"));
+
+        var toolEntry = Assert.Single(report.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Cli");
+        Assert.Equal(PackageSmokeInstallStatus.Failed, toolEntry.Status);
+        Assert.Equal(1, toolEntry.ExitCode);
+        Assert.Contains("also wrote to stderr", toolEntry.Output, StringComparison.Ordinal);
+        Assert.Contains("lifecycle noise", toolEntry.Output, StringComparison.Ordinal);
+        Assert.Equal(["dotnet restore", "dotnet tool install", "dotnet tool run", "dotnet tool run"], commandRunner.Requests.Select(request => request.OperationName).ToArray());
     }
 
     [Fact]

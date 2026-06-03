@@ -272,6 +272,7 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.LocalizationLocaleFolderConflict` (`appsurfacedocs.localization.locale_folder_conflict`)
 - `DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant` (`appsurfacedocs.localization.fallback_disabled_missing_variant`)
 - `DocHarvestDiagnosticCodes.LocalizationFallbackConflict` (`appsurfacedocs.localization.fallback_conflict`)
+- `DocHarvestDiagnosticCodes.CSharpFileTooLarge` (`appsurfacedocs.csharp.file_too_large`)
 - `DocHarvestDiagnosticCodes.JavaScriptFileTooLarge` (`appsurfacedocs.javascript.file_too_large`)
 - `DocHarvestDiagnosticCodes.JavaScriptParseFailed` (`appsurfacedocs.javascript.parse_failed`)
 - `DocHarvestDiagnosticCodes.JavaScriptMissingInclude` (`appsurfacedocs.javascript.missing_include`)
@@ -281,6 +282,20 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet` (`appsurfacedocs.javascript.incomplete_public_doclet`)
 - `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`)
 - `DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor` (`appsurfacedocs.javascript.duplicate_anchor`)
+
+### Oversized source diagnostics
+
+The built-in C# and JavaScript harvesters apply parser-input byte budgets before decoding source text. This protects source-backed docs snapshots from generated files and accidental large bundles without changing the public path policy contract.
+
+`DocHarvestDiagnosticCodes.CSharpFileTooLarge` (`appsurfacedocs.csharp.file_too_large`) means a policy-approved `.cs` file was skipped before Roslyn parsing because the harvester read more bytes than `AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes` allows. The default C# limit is `1048576` bytes. It is intentionally larger than the JavaScript default because authored C# API source commonly carries XML documentation and generated JavaScript bundles are noisier in broad discovery.
+
+Recovery order:
+
+1. Prefer excluding generated C# with `AppSurfaceDocs:Harvest:CSharp:ExcludeGlobs`, or by tightening global `AppSurfaceDocs:Harvest:Paths`.
+2. Raise `AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes` only for authored source that should become API reference.
+3. In CI, read `{DocsRootPath}/_health.json` and branch on diagnostic codes. Block release output when `diagnostics[].code` contains `appsurfacedocs.csharp.file_too_large` for a path that should publish, rather than changing aggregate health semantics.
+
+`DocHarvestDiagnosticCodes.JavaScriptFileTooLarge` keeps the existing JavaScript behavior and default `262144` byte limit. JavaScript strictness is still controlled by `AppSurfaceDocs:Harvest:JavaScript:StrictHealth`, nonempty JavaScript `IncludeGlobs`, and the strict public event option.
 
 An all-failed snapshot logs one critical message when that snapshot is generated. Reusing the cached health snapshot does not log again. Calling `InvalidateCache()` and then reading docs or harvest health can generate a new snapshot and, if every harvester still fails, a new critical log entry.
 
@@ -630,6 +645,7 @@ AppSurface Docs harvests from source by default, so every host should be intenti
         "IncludeGlobs": [
           "src/**/*.cs"
         ],
+        "MaxFileSizeBytes": 1048576,
         "DefaultExclusions": {
           "DisabledGroups": [
             "CSharpExampleSource"
@@ -847,9 +863,9 @@ var routeInspectorJson = routes.RouteInspectorJson;
 
 `AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `SearchIndexRefreshMethod`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
 
-The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; operator UI should submit a browser form to `Routes.SearchIndexRefresh` with `Routes.SearchIndexRefreshMethod`.
+The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state. Search browse recovery is search-only: it can choose representative documents from the harvested snapshot, then fills remaining space with the harvest-free recovery links for Start Here, Packages, and Docs home. Public reader retry should use `Routes.SearchIndex`; operator UI should submit a browser form to `Routes.SearchIndexRefresh` with `Routes.SearchIndexRefreshMethod`.
 
-Embedded hosts decide their own app-wide browser error UX. The reusable `ForgeTrust.AppSurface.Docs` package registers docs routes and route references, but it does not install a docs-aware application `404` page. Hosts that want stale-docs recovery should opt into AppSurface Web conventional browser status pages, add their own `~/Views/Shared/404.cshtml`, use `BrowserStatusPageModel` for status/original-path context, inject `DocsUrlBuilder`, and link to `DocsUrlBuilder.Routes.Search` through the host's path-base-aware rendering helper.
+Embedded hosts decide their own app-wide browser error UX. The reusable `ForgeTrust.AppSurface.Docs` package registers docs routes and route references, but it does not install a docs-aware application `404` page. Hosts that want stale-docs recovery should opt into AppSurface Web conventional browser status pages, add their own `~/Views/Shared/404.cshtml`, use `BrowserStatusPageModel` for status/original-path context, and render a small harvest-free link set from route contracts: Search, Start Here, Packages, and Docs home. Do not derive recovery links from `BrowserStatusPageModel.OriginalPath`, and do not move search's snapshot-derived representative-document fallback into a standalone `404` page. Optional browse links in sparse static exports should be marked `data-rw-export-ignore="true"` unless the export seeds those routes.
 
 ### Document route identity
 
@@ -1157,6 +1173,11 @@ static web assets.
 - `AppSurfaceDocs:Harvest:CSharp:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
   - Defaults mirror the global path option shape, but apply only to C# API-reference candidates.
   - `CSharpExampleSource` is only a C# default group. Markdown example READMEs stay eligible unless excluded by other policy.
+- `AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes`
+  - Defaults to `1048576`.
+  - Must be a positive byte value.
+  - The C# harvester reads at most this value plus one byte before decoding and Roslyn parsing. Files over the limit are skipped with `appsurfacedocs.csharp.file_too_large` and do not block aggregate health by default.
+  - Prefer `AppSurfaceDocs:Harvest:CSharp:ExcludeGlobs` for generated source. Raise this limit only when an authored C# API source file is intentionally larger.
 - `AppSurfaceDocs:Harvest:JavaScript:Enabled`
   - Defaults to `true`.
   - Set to `false` to opt out of JavaScript public API harvesting entirely.

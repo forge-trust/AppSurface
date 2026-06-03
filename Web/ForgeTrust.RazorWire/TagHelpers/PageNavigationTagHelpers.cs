@@ -86,18 +86,24 @@ public sealed class PageNavigationToggleTagHelper : TagHelper
         output.Attributes.RemoveAll("rw-page-nav-toggle");
         output.Attributes.SetAttribute("data-rw-page-nav-toggle", "true");
 
-        if (!string.IsNullOrWhiteSpace(Controls)
-            && !string.Equals(Controls, "true", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(Controls, "false", StringComparison.OrdinalIgnoreCase)
-            && !output.Attributes.ContainsName("aria-controls"))
+        var controls = Controls?.Trim();
+        if (!IsControlsSentinel(controls) && !output.Attributes.ContainsName("aria-controls"))
         {
-            output.Attributes.SetAttribute("aria-controls", Controls);
+            output.Attributes.SetAttribute("aria-controls", controls);
         }
 
         if (!output.Attributes.ContainsName("type"))
         {
             output.Attributes.SetAttribute("type", "button");
         }
+    }
+
+    private static bool IsControlsSentinel(string? controls)
+    {
+        return string.IsNullOrWhiteSpace(controls)
+            || string.Equals(controls, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(controls, "false", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(controls, "rw-page-nav-toggle", StringComparison.OrdinalIgnoreCase);
     }
 }
 

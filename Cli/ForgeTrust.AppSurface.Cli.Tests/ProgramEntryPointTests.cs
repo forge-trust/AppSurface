@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Reflection;
+using System.Reflection.Emit;
 using System.Text.Json;
 
 using CliFx.Infrastructure;
@@ -40,6 +42,71 @@ public sealed class ProgramEntryPointTests
         Assert.DoesNotContain("dotnet ForgeTrust.AppSurface.Cli.dll", result.AllText, StringComparison.Ordinal);
         Assert.Contains("docs", result.AllText, StringComparison.Ordinal);
         Assert.Contains("docs export", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("0.1.0", "0.1.0")]
+    [InlineData("0.1.0-rc.1", "0.1.0-rc.1")]
+    [InlineData("0.1.0-rc-1", "0.1.0-rc-1")]
+    [InlineData("v0.1.0", "0.1.0")]
+    [InlineData("V0.1.0-rc.1", "0.1.0-rc.1")]
+    [InlineData("0.1.0+abc123", "0.1.0")]
+    [InlineData("v0.1.0-rc.1+abc123", "0.1.0-rc.1")]
+    [InlineData(" 0.1.0-rc.1 ", "0.1.0-rc.1")]
+    public void AppSurfaceCliVersion_NormalizesPackageDisplayVersion(string rawVersion, string expectedVersion)
+    {
+        var version = AppSurfaceCliVersion.NormalizeDisplayVersion(rawVersion);
+
+        Assert.Equal(expectedVersion, version);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("0.1.0\nrc.1")]
+    [InlineData("0.1.0\rrc.1")]
+    [InlineData("v")]
+    [InlineData("v+sha")]
+    [InlineData("vNext")]
+    [InlineData("0.1")]
+    [InlineData("0..1")]
+    [InlineData("0.1.x")]
+    [InlineData("0.1.0-")]
+    [InlineData("0.1.0-rc_1")]
+    public void AppSurfaceCliVersion_UsesTruthfulFallbackWhenPackageMetadataIsUnavailable(string? rawVersion)
+    {
+        var version = AppSurfaceCliVersion.NormalizeDisplayVersion(rawVersion);
+
+        Assert.Equal("unknown (package version metadata unavailable)", version);
+    }
+
+    [Fact]
+    public void AppSurfaceCliVersion_UsesTruthfulFallbackWhenAssemblyLacksPackageMetadata()
+    {
+        var assembly = AssemblyBuilder.DefineDynamicAssembly(
+            new AssemblyName("AppSurfaceCliVersionTests_NoMetadata"),
+            AssemblyBuilderAccess.Run);
+
+        var version = AppSurfaceCliVersion.ResolveDisplayVersion(assembly);
+
+        Assert.Equal("unknown (package version metadata unavailable)", version);
+    }
+
+    [Fact]
+    public async Task EntryPoint_Should_Print_Normalized_Package_Version_Without_Lifecycle_Noise()
+    {
+        var result = await InvokeEntryPointAsync(["--version"]);
+        var output = result.Stdout.Trim();
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(AppSurfaceCliVersion.ResolveDisplayVersion(typeof(AppSurfaceCliApp).Assembly), output);
+        Assert.False(output.StartsWith('v'));
+        Assert.DoesNotContain('+', output);
+        Assert.DoesNotContain(Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.DoesNotContain("usage", result.AllText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
     }
@@ -2872,7 +2939,10 @@ public sealed class ProgramEntryPointTests
 
     private sealed class AppSurfaceExportHttpMessageHandler : HttpMessageHandler
     {
+        private const string RazorWireRuntimePath = "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js";
+
         private readonly Queue<HttpResponseMessage> _okResponses;
+        private readonly Queue<HttpResponseMessage> _assetResponses;
         private readonly Queue<HttpResponseMessage> _notFoundResponses;
         private readonly List<HttpResponseMessage> _responses;
 
@@ -2880,9 +2950,13 @@ public sealed class ProgramEntryPointTests
         {
             _responses = Enumerable.Range(0, 8)
                 .Select(_ => CreateOkResponse())
+                .Concat(Enumerable.Range(0, 8).Select(_ => CreateAssetResponse()))
                 .Concat(Enumerable.Range(0, 8).Select(_ => new HttpResponseMessage(HttpStatusCode.NotFound)))
                 .ToList();
-            _okResponses = new Queue<HttpResponseMessage>(_responses.Where(response => response.StatusCode == HttpStatusCode.OK));
+            _okResponses = new Queue<HttpResponseMessage>(
+                _responses.Where(response => response.Content?.Headers.ContentType?.MediaType == "text/html"));
+            _assetResponses = new Queue<HttpResponseMessage>(
+                _responses.Where(response => response.Content?.Headers.ContentType?.MediaType == "text/javascript"));
             _notFoundResponses = new Queue<HttpResponseMessage>(_responses.Where(response => response.StatusCode == HttpStatusCode.NotFound));
         }
 
@@ -2892,6 +2966,11 @@ public sealed class ProgramEntryPointTests
             if (path == "/" || path == "/index")
             {
                 return Task.FromResult(DequeueOrThrow(_okResponses, HttpStatusCode.OK, path));
+            }
+
+            if (path == RazorWireRuntimePath)
+            {
+                return Task.FromResult(DequeueOrThrow(_assetResponses, HttpStatusCode.OK, path));
             }
 
             return Task.FromResult(DequeueOrThrow(_notFoundResponses, HttpStatusCode.NotFound, path));
@@ -2944,6 +3023,17 @@ public sealed class ProgramEntryPointTests
                     """,
                     System.Text.Encoding.UTF8,
                     "text/html")
+            };
+        }
+
+        private static HttpResponseMessage CreateAssetResponse()
+        {
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "window.RazorWire = window.RazorWire || {};",
+                    System.Text.Encoding.UTF8,
+                    "text/javascript")
             };
         }
     }

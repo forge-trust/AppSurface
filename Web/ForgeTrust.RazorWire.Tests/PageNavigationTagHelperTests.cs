@@ -76,6 +76,8 @@ public sealed class PageNavigationTagHelperTests
     [InlineData("TRUE")]
     [InlineData("false")]
     [InlineData("FALSE")]
+    [InlineData("rw-page-nav-toggle")]
+    [InlineData("RW-PAGE-NAV-TOGGLE")]
     public void Toggle_Process_WhenControlsIsEmptyOrBooleanSentinel_DoesNotEmitAriaControls(string controls)
     {
         var output = CreateOutput("button", "rw-page-nav-toggle", controls);
@@ -84,6 +86,16 @@ public sealed class PageNavigationTagHelperTests
 
         Assert.Equal("true", output.Attributes["data-rw-page-nav-toggle"].Value);
         Assert.False(output.Attributes.ContainsName("aria-controls"));
+    }
+
+    [Fact]
+    public void Toggle_Process_TrimsControlsBeforeEmittingAriaControls()
+    {
+        var output = CreateOutput("button", "rw-page-nav-toggle", " page-sections-panel ");
+
+        new PageNavigationToggleTagHelper { Controls = " page-sections-panel " }.Process(CreateContext("button"), output);
+
+        Assert.Equal("page-sections-panel", output.Attributes["aria-controls"].Value);
     }
 
     [Fact]

@@ -1063,8 +1063,8 @@ test('page navigation keeps an initial hash active at the host scroll margin', (
   const { context, document } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
   const { nav, overview, pricing, pricingLink } = createPageNavigationFixture(document);
   overview.rectTop = -600;
-  overview.computedStyle = { overflowY: 'visible', scrollMarginTop: '160px' };
   pricing.rectTop = 176;
+  pricing.computedStyle = { overflowY: 'visible', scrollMarginTop: '160px' };
   document.body.appendChild(nav);
   context.window.RazorWire.pageNavigationManager.scan();
 
@@ -1078,13 +1078,35 @@ test('page navigation aligns active boundaries with section scroll margin', () =
   const { context, document } = loadRuntime({ pageNavigation: true });
   const { nav, overview, pricing, pricingLink } = createPageNavigationFixture(document);
   overview.rectTop = -500;
-  overview.computedStyle = { overflowY: 'visible', scrollMarginTop: '96px' };
   pricing.rectTop = 88;
+  pricing.computedStyle = { overflowY: 'visible', scrollMarginTop: '96px' };
   document.body.appendChild(nav);
 
   context.window.RazorWire.pageNavigationManager.scan();
 
   assert.equal(pricingLink.getAttribute('aria-current'), 'location');
+});
+
+test('page navigation uses the target scroll margin when scrolling an element root', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav, overview, pricing, pricingLink } = createPageNavigationFixture(document);
+  const scroller = new FakeElement('div');
+  scroller.rectTop = 100;
+  scroller.clientHeight = 400;
+  scroller.scrollHeight = 1200;
+  scroller.computedStyle = { overflowY: 'auto' };
+  scroller.scrollTop = 0;
+  overview.rectTop = 100;
+  overview.computedStyle = { overflowY: 'visible', scrollMarginTop: '20px' };
+  pricing.rectTop = 500;
+  pricing.computedStyle = { overflowY: 'visible', scrollMarginTop: '120px' };
+  scroller.append(overview, pricing);
+  document.body.append(scroller, nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  nav.dispatchEvent(clickEvent(pricingLink));
+
+  assert.equal(scroller.lastScrollToOptions.top, 280);
 });
 
 test('page navigation scrolls the nearest scrollable section root', () => {

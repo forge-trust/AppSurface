@@ -14,7 +14,7 @@ internal enum ExportReferenceKind
     /// <summary>A script <c>src</c> attribute.</summary>
     ScriptSrc,
 
-    /// <summary>A supported link <c>href</c> attribute such as a stylesheet, icon, preload, or prefetch.</summary>
+    /// <summary>A supported link <c>href</c> attribute such as a stylesheet, icon, module preload, preload, prefetch, canonical, or DNS hint.</summary>
     LinkHref,
 
     /// <summary>An image <c>src</c> attribute.</summary>

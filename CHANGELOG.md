@@ -20,9 +20,12 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Behavior change: AppSurface Docs `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` continues to expose harvest health routes outside Development, but live harvest progress streaming now also requires a custom host-owned `IRazorWireChannelAuthorizer`.
 - AppSurface Docs version catalogs now require trusted-root-relative `exactTreePath` values under `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`; migrate old absolute tree paths by moving the parent into the trusted root setting and keeping catalog entries relative.
 - AppSurface Docs Markdown harvesting now skips oversized Markdown bodies before read/Markdig parse and ignores oversized `.md.yml` / `.md.yaml` sidecars before YAML parse, emitting visible warning diagnostics while otherwise healthy snapshots remain healthy by default.
+- AppSurface Docs C# harvesting now applies a parser-input byte budget before UTF-8 decoding and Roslyn parsing, skipping oversized source with `appsurfacedocs.csharp.file_too_large` while healthy sibling API docs continue harvesting.
 - AppSurface Docs JavaScript harvesting now skips symlinks, junctions, and other reparse points before explicit include reads, include-root traversal, and recursive child descent. Configured JavaScript link includes emit `appsurfacedocs.javascript.reparse_point_skipped` with redacted recovery guidance and block strict JavaScript health when JavaScript participates.
 - RazorWire stream endpoints now reject malformed channels with `400`, deny unauthorized channels with `403`, and return `429` when per-process live-channel or subscription admission limits are exhausted before hub subscriber state is allocated.
+- RazorWire and AppSurface hybrid export now fail missing browser-delivered static assets with `RWEXPORT003` while still tolerating live/page routes, frames, forms, streams, islands, canonical metadata, DNS hints, and page-shaped preload or prefetch hints.
 - Config audit discovered-key reports now expose value display state and omit raw unknown or broad-descendant scalar values unless the exact leaf key is registered or the value is redacted.
+- AppSurface Docs standalone 404 pages now render a harvest-free recovery hub with safe links to Search, Docs home, and route-safe Start Here or Packages destinations while preserving API, JSON, and non-browser 404 behavior.
 
 ## 0.1.0-rc.1 - 2026-05-29
 

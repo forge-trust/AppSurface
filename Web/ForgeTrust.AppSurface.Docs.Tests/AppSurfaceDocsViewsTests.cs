@@ -3786,7 +3786,7 @@ public class AppSurfaceDocsViewsTests
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
         Assert.Matches("<a[^>]*href=\"/docs\"[^>]*data-turbo-frame=\"_top\"", html);
         Assert.Equal(string.Empty, document.QuerySelector("#docs-search-page-failure")?.TextContent.Trim());
-        Assert.Contains("Documentation index", document.QuerySelector("#docs-search-page-recovery")!.TextContent);
+        Assert.Contains("Docs home", document.QuerySelector("#docs-search-page-recovery")!.TextContent);
     }
 
     [Fact]

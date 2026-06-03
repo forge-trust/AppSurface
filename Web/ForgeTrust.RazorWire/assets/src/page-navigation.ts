@@ -161,7 +161,9 @@ type PageNavigationScrollRoot = Window | Element;
             if (hashEntry) {
                 const hashRect = hashEntry.target.getBoundingClientRect?.();
                 const rootTop = this.getScrollRootTop();
-                const hashBoundaryAfter = Math.max(PageNavigationController.hashBoundaryAfter, this.getActivationOffset() + PageNavigationController.hashBoundaryBefore);
+                const hashBoundaryAfter = Math.max(
+                    PageNavigationController.hashBoundaryAfter,
+                    this.getActivationOffset(hashEntry.target) + PageNavigationController.hashBoundaryBefore);
                 if (hashRect && hashRect.top >= rootTop - PageNavigationController.hashBoundaryBefore && hashRect.top <= rootTop + hashBoundaryAfter) {
                     this.setActiveLink(hashEntry.link);
                     return;
@@ -169,9 +171,9 @@ type PageNavigationScrollRoot = Window | Element;
             }
 
             let active = this.entries[0];
-            const activationTop = this.getScrollRootTop() + this.getActivationOffset();
             for (const entry of this.entries) {
                 const rect = entry.target.getBoundingClientRect?.();
+                const activationTop = this.getScrollRootTop() + this.getActivationOffset(entry.target);
                 if (!rect || rect.top > activationTop) break;
                 active = entry;
             }
@@ -303,7 +305,7 @@ type PageNavigationScrollRoot = Window | Element;
             const targetTop = entry.target.getBoundingClientRect?.().top ?? rootTop;
             const currentTop = root.scrollTop ?? 0;
             const maxTop = Math.max(0, (root.scrollHeight ?? 0) - (root.clientHeight ?? 0));
-            const top = Math.min(maxTop, Math.max(0, currentTop + targetTop - rootTop - this.getActivationOffset()));
+            const top = Math.min(maxTop, Math.max(0, currentTop + targetTop - rootTop - this.getActivationOffset(entry.target)));
 
             if (typeof root.scrollTo === 'function') {
                 root.scrollTo({ top, behavior });
@@ -312,8 +314,7 @@ type PageNavigationScrollRoot = Window | Element;
             }
         }
 
-        getActivationOffset() {
-            const target = this.entries[0]?.target;
+        getActivationOffset(target: HTMLElement | null) {
             const style = target && typeof window.getComputedStyle === 'function' ? window.getComputedStyle(target) : null;
             const scrollMarginTop = Number.parseFloat(style?.scrollMarginTop ?? '');
 

@@ -25,6 +25,14 @@
         transition: max-height 160ms ease, opacity 160ms ease;
     }
 
+    .brochure-page-nav [data-rw-page-nav-toggle] {
+        display: none;
+    }
+
+    .brochure-page-nav [data-rw-page-nav-enhanced="true"] [data-rw-page-nav-toggle] {
+        display: flex;
+    }
+
     .brochure-page-nav [data-rw-page-nav-panel-state="open"] {
         flex-wrap: wrap;
         max-height: 12rem;
@@ -140,6 +148,10 @@
             padding-bottom: 0;
             padding-top: 0;
             mask-image: none;
+        }
+
+        .brochure-page-nav [data-rw-page-nav-enhanced="true"] [data-rw-page-nav-toggle] {
+            display: none;
         }
 
         .brochure-page-nav [data-rw-page-nav-enhanced="true"] [data-rw-page-nav-panel-state="closed"] {
