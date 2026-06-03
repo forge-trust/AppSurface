@@ -620,6 +620,11 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
                                 return;
                             }
 
+                            if (!isDirectRequest)
+                            {
+                                httpContext.Response.StatusCode = statusCode.Value;
+                            }
+
                             await httpContext.RequestServices
                                 .GetRequiredService<BrowserStatusPageRenderer>()
                                 .RenderAsync(httpContext);
