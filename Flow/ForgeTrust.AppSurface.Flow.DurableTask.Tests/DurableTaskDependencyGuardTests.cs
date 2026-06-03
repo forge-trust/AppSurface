@@ -24,6 +24,16 @@ public sealed class DurableTaskDependencyGuardTests
         Assert.DoesNotContain(references, reference => reference.Name?.Contains("SemanticKernel", StringComparison.OrdinalIgnoreCase) == true);
     }
 
+    [Fact]
+    public void LoadProject_WithRootedPath_ThrowsArgumentException()
+    {
+        var rootedPath = Path.GetFullPath("Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj");
+
+        var exception = Assert.Throws<ArgumentException>(() => LoadProject(rootedPath));
+
+        Assert.Contains("rooted", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static IEnumerable<string> GetIncludes(XDocument project, string elementName) =>
         project.Descendants()
             .Where(element => element.Name.LocalName == elementName)

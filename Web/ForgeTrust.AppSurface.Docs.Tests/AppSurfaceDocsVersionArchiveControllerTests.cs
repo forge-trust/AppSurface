@@ -149,6 +149,32 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
     }
 
     [Fact]
+    public void Versions_ShouldTolerateEscapingExactTreePathEntries()
+    {
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = "../outside-tree"
+                    }
+                ]
+            });
+        var controller = CreateController(catalogPath);
+
+        var result = controller.Versions();
+
+        var view = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<AppSurfaceDocsVersionArchiveViewModel>(view.Model);
+        var version = Assert.Single(model.Versions);
+        Assert.Equal("1.2.3", version.Version);
+        Assert.False(version.IsAvailable);
+    }
+
+    [Fact]
     public void VersionEntry_ShouldPreferCatalogLevelAvailabilityMessage_WhenTrustedReleaseRootIsMissing()
     {
         var catalogPath = WriteCatalog(

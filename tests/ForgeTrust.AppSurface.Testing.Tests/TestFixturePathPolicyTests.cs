@@ -229,6 +229,16 @@ public sealed class TestFixturePathPolicyTests
     }
 }
 
+/// <summary>
+/// Represents a detected violation of the test fixture path policy.
+/// </summary>
+/// <param name="Kind">Policy category for the violation, such as <c>DynamicUnderBasePath</c>.</param>
+/// <param name="RelativePath">Repository-relative source file path containing the violation.</param>
+/// <param name="Line">1-based source line for the risky argument.</param>
+/// <param name="Column">1-based source column for the risky argument.</param>
+/// <param name="Invocation">Path API invocation name, such as <c>Path.Join</c> or <c>Path.Combine</c>.</param>
+/// <param name="RiskyArgument">Source text for the dynamic argument that may escape the intended base path.</param>
+/// <param name="Reason">Human-readable explanation of why the pattern is blocked.</param>
 internal sealed record PathPolicyViolation(
     string Kind,
     string RelativePath,
@@ -238,9 +248,23 @@ internal sealed record PathPolicyViolation(
     string RiskyArgument,
     string Reason)
 {
+    /// <summary>
+    /// Gets the pipe-delimited allowlist key in
+    /// <c>{Kind}|{RelativePath}|{Line}|{Column}|{Invocation}|{RiskyArgument}</c> format.
+    /// </summary>
     internal string Key => $"{Kind}|{RelativePath}|{Line}|{Column}|{Invocation}|{RiskyArgument}";
 }
 
+/// <summary>
+/// Scans C# test source files for dynamic path construction that can bypass a base directory.
+/// </summary>
+/// <remarks>
+/// The scanner examines test source paths selected by <see cref="IsTestSourcePath" /> and classifies
+/// <c>Path.Combine</c>/<c>Path.Join</c> calls through <see cref="ScanSource" />. Arguments after the first base segment
+/// are considered risky when their expression names contain tokens from <c>RiskyNameTokens</c>, such as
+/// <c>path</c> or <c>relative</c>. This catches fixture helpers that should use <c>TestPathUtils.PathUnder</c>
+/// because rooted later segments can discard the intended base.
+/// </remarks>
 internal static class TestPathPolicyScanner
 {
     private static readonly string[] RiskyNameTokens =
@@ -249,6 +273,15 @@ internal static class TestPathPolicyScanner
         "relative"
     ];
 
+    /// <summary>
+    /// Scans repository test source files and returns policy violations ordered by path, line, and column.
+    /// </summary>
+    /// <param name="repositoryRoot">Repository root directory whose test source files should be scanned.</param>
+    /// <returns>Detected <see cref="PathPolicyViolation" /> values ordered for stable failure output.</returns>
+    /// <remarks>
+    /// File reads are performed through <c>TestPathUtils.PathUnder</c>, so each enumerated repository-relative path is
+    /// validated against <paramref name="repositoryRoot" /> before <see cref="File.ReadAllText(string)" /> is called.
+    /// </remarks>
     internal static PathPolicyViolation[] ScanRepository(string repositoryRoot)
     {
         return Directory.EnumerateFiles(repositoryRoot, "*.cs", SearchOption.AllDirectories)
@@ -263,6 +296,12 @@ internal static class TestPathPolicyScanner
             .ToArray();
     }
 
+    /// <summary>
+    /// Parses one source file and classifies its path API invocations.
+    /// </summary>
+    /// <param name="relativePath">Repository-relative path used in emitted violation locations.</param>
+    /// <param name="source">C# source text to scan.</param>
+    /// <returns>Violations found in <paramref name="source" />.</returns>
     internal static PathPolicyViolation[] ScanSource(string relativePath, string source)
     {
         var tree = CSharpSyntaxTree.ParseText(source);
@@ -401,6 +440,15 @@ internal static class TestPathPolicyScanner
 
 }
 
+/// <summary>
+/// Parses and validates the YAML-like allowlist for intentional path policy exceptions.
+/// </summary>
+/// <remarks>
+/// Entries are written under <c>entries:</c> and must include <c>key</c>, <c>category</c>, and <c>reason</c>.
+/// They may include <c>expires</c> as an ISO date in <c>yyyy-MM-dd</c> form; expired entries fail validation.
+/// Duplicate keys are rejected by the backing immutable dictionary, missing required fields fail parsing, and
+/// unmatched keys are reported by <see cref="UnmatchedKeys(IEnumerable{PathPolicyViolation})" />.
+/// </remarks>
 internal sealed class PathPolicyAllowlist
 {
     private readonly ImmutableDictionary<string, Entry> _entries;
@@ -410,17 +458,35 @@ internal sealed class PathPolicyAllowlist
         _entries = entries;
     }
 
+    /// <summary>
+    /// Reads an allowlist file from disk and parses it.
+    /// </summary>
+    /// <param name="path">Allowlist file path to read.</param>
+    /// <returns>Parsed allowlist entries.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when allowlist content is invalid.</exception>
+    /// <remarks>Callers pass paths constructed with <c>TestPathUtils.PathUnder</c>.</remarks>
     internal static PathPolicyAllowlist Load(string path)
     {
         return Parse(File.ReadAllText(path));
     }
 
+    /// <summary>
+    /// Parses allowlist content and validates required fields, reasons, and expiration dates.
+    /// </summary>
+    /// <param name="content">YAML-like allowlist content.</param>
+    /// <returns>Parsed allowlist entries.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when a line is malformed, required fields are missing, reasons are blank, or an entry has expired.
+    /// </exception>
     internal static PathPolicyAllowlist Parse(string content)
     {
         var entries = ImmutableDictionary.CreateBuilder<string, Entry>(StringComparer.Ordinal);
         var current = new Dictionary<string, string>(StringComparer.Ordinal);
+        var currentStartLine = 0;
 
-        foreach (var line in content.Split('\n').Select(rawLine => rawLine.TrimEnd('\r')))
+        foreach (var (line, lineNumber) in content
+                     .Split('\n')
+                     .Select((rawLine, index) => (Line: rawLine.TrimEnd('\r'), LineNumber: index + 1)))
         {
             var trimmed = line.Trim();
             if (trimmed.Length == 0 || trimmed.StartsWith('#'))
@@ -436,8 +502,9 @@ internal sealed class PathPolicyAllowlist
 
             if (trimmed.StartsWith("- ", StringComparison.Ordinal))
             {
-                AddEntry(entries, current);
+                AddEntry(entries, current, currentStartLine);
                 current = new Dictionary<string, string>(StringComparer.Ordinal);
+                currentStartLine = lineNumber;
                 AddProperty(current, trimmed[2..]);
                 continue;
             }
@@ -445,7 +512,7 @@ internal sealed class PathPolicyAllowlist
             AddProperty(current, trimmed);
         }
 
-        AddEntry(entries, current);
+        AddEntry(entries, current, currentStartLine);
         return new PathPolicyAllowlist(entries.ToImmutable());
     }
 
@@ -475,36 +542,36 @@ internal sealed class PathPolicyAllowlist
         current[line[..separatorIndex].Trim()] = line[(separatorIndex + 1)..].Trim();
     }
 
-    private static void AddEntry(ImmutableDictionary<string, Entry>.Builder entries, Dictionary<string, string> current)
+    private static void AddEntry(ImmutableDictionary<string, Entry>.Builder entries, Dictionary<string, string> current, int lineNumber)
     {
         if (current.Count == 0)
         {
             return;
         }
 
-        var key = Require(current, "key");
-        var category = Require(current, "category");
-        var reason = Require(current, "reason");
+        var key = Require(current, "key", lineNumber);
+        var category = Require(current, "category", lineNumber);
+        var reason = Require(current, "reason", lineNumber);
         if (string.IsNullOrWhiteSpace(reason))
         {
-            throw new InvalidOperationException($"Allowlist entry '{key}' must include a reason.");
+            throw new InvalidOperationException($"Allowlist entry '{key}' must include a reason (near line {lineNumber}).");
         }
 
         if (current.TryGetValue("expires", out var expiresText)
             && DateOnly.TryParse(expiresText, out var expires)
             && expires < DateOnly.FromDateTime(DateTime.UtcNow))
         {
-            throw new InvalidOperationException($"Allowlist entry '{key}' expired on {expires:yyyy-MM-dd}.");
+            throw new InvalidOperationException($"Allowlist entry '{key}' expired on {expires:yyyy-MM-dd} (near line {lineNumber}).");
         }
 
         entries.Add(key, new Entry(category, reason));
     }
 
-    private static string Require(Dictionary<string, string> current, string key)
+    private static string Require(Dictionary<string, string> current, string key, int lineNumber)
     {
         if (!current.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value))
         {
-            throw new InvalidOperationException($"Allowlist entry must include {key}.");
+            throw new InvalidOperationException($"Allowlist entry near line {lineNumber} must include {key}.");
         }
 
         return value;
@@ -513,8 +580,26 @@ internal sealed class PathPolicyAllowlist
     private sealed record Entry(string Category, string Reason);
 }
 
+/// <summary>
+/// Formats test fixture path policy failures into human-readable diagnostics for test output.
+/// </summary>
+/// <remarks>
+/// The output is a multi-line string separated with <see cref="Environment.NewLine" />. It starts with policy guidance
+/// headers, then emits one block per <see cref="PathPolicyViolation" /> containing the kind, file location, invocation,
+/// risky argument, reason, replacement guidance, allowlist instructions, and allowlist key. Unmatched allowlist entries
+/// are listed in separate blocks. Callers should treat the result as a diagnostic for assertion messages and logs.
+/// </remarks>
 internal static class PathPolicyFailureFormatter
 {
+    /// <summary>
+    /// Formats violations and unmatched allowlist keys into a multi-line diagnostic string.
+    /// </summary>
+    /// <param name="violations">Detected path policy violations to describe.</param>
+    /// <param name="unmatchedKeys">Allowlist keys that no longer correspond to active violations.</param>
+    /// <returns>
+    /// An empty string when both collections are empty; otherwise a newline-separated diagnostic containing header
+    /// guidance, per-violation details, and unmatched allowlist entries.
+    /// </returns>
     internal static string Format(IReadOnlyCollection<PathPolicyViolation> violations, IReadOnlyCollection<string> unmatchedKeys)
     {
         if (violations.Count == 0 && unmatchedKeys.Count == 0)

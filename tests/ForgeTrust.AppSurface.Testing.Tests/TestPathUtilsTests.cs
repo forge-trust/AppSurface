@@ -178,6 +178,14 @@ public sealed class TestPathUtilsTests : IDisposable
         Assert.Equal(repoRoot, TestPathUtils.FindRepoRoot(missingNestedDirectory));
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void FindRepoRoot_ShouldRejectBlankStartPath(string startPath)
+    {
+        Assert.Throws<ArgumentException>(() => TestPathUtils.FindRepoRoot(startPath));
+    }
+
     [Fact]
     public void FindRepoRoot_ShouldThrowWhenSolutionFileIsMissing()
     {

@@ -60,6 +60,17 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task WriteAsync_WhenPathEscapesRoot_ThrowsHelpfulArgumentException()
+    {
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => WriteAsync("../outside/.gitignore", string.Empty));
+
+        Assert.Equal("relativePath", exception.ParamName);
+        Assert.Contains("relative and stay under the test root", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.IsType<ArgumentException>(exception.InnerException);
+    }
+
+    [Fact]
     public async Task ShouldPruneDirectory_WhenDirectoryIsRootDoesNotPrune()
     {
         await WriteAsync(".gitignore", "*\n");

@@ -174,9 +174,11 @@ public sealed partial class RepositoryReadmePolicyTests
         {
             return TestPathUtils.PathUnder(repoRoot, repositoryRelativePath);
         }
-        catch (ArgumentException)
+        catch (ArgumentException exception)
         {
-            throw new InvalidOperationException($"{description} must be repository-relative and stay under the repository root.");
+            throw new InvalidOperationException(
+                $"{description} must be repository-relative and stay under the repository root.",
+                exception);
         }
     }
 

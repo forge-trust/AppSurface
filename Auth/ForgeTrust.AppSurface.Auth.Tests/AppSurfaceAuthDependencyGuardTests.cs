@@ -64,20 +64,12 @@ public sealed class AppSurfaceAuthDependencyGuardTests
 
         var exception = Assert.Throws<ArgumentException>(() => LoadProject(rootedPath));
 
-        Assert.Equal("projectPath", exception.ParamName);
-        Assert.Contains("relative", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("rooted", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static XDocument LoadProject(string projectPath)
     {
         var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        try
-        {
-            return XDocument.Load(TestPathUtils.PathUnder(repositoryRoot, projectPath));
-        }
-        catch (ArgumentException exception)
-        {
-            throw new ArgumentException("Project path must be relative and stay under the repository root.", nameof(projectPath), exception);
-        }
+        return XDocument.Load(TestPathUtils.PathUnder(repositoryRoot, projectPath));
     }
 }

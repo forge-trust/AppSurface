@@ -99,12 +99,28 @@ public static class TestPathUtils
     }
 
     /// <summary>
-    /// Finds the repository root by walking upward from a start path until the solution file is found.
+    /// Finds the repository root by walking upward from a file or directory start path until the solution file is found.
     /// </summary>
-    /// <param name="startPath">Directory or file path to begin searching from.</param>
-    /// <returns>The repository root directory.</returns>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="startPath" /> is blank.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the solution file cannot be found in any ancestor.</exception>
+    /// <param name="startPath">
+    /// Directory or file path to begin searching from. Existing files start at their parent directory; existing directories
+    /// and non-existent inputs are treated as directory start paths.
+    /// </param>
+    /// <returns>
+    /// The directory containing <c>ForgeTrust.AppSurface.slnx</c>. This discovery result is not itself a containment
+    /// guarantee; use <see cref="PathUnder(string, string[])" /> or <see cref="RelativePath(string[])" /> for paths that
+    /// must remain under the discovered root.
+    /// </returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown by <see cref="ArgumentException.ThrowIfNullOrWhiteSpace(string?, string?)" /> when
+    /// <paramref name="startPath" /> is blank.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <c>ForgeTrust.AppSurface.slnx</c> cannot be found in any ancestor.
+    /// </exception>
+    /// <remarks>
+    /// The sentinel file name is intentionally hardcoded to <c>ForgeTrust.AppSurface.slnx</c> because this helper is scoped
+    /// to this repository's test projects.
+    /// </remarks>
     public static string FindRepoRoot(string startPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(startPath);
