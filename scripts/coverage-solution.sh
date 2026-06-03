@@ -27,7 +27,7 @@ Groups:
 Environment:
   TEST_GROUP            Test group to run. Defaults to all.
   BUILD_CONFIGURATION   Test configuration. Defaults to Debug.
-  BUILD_SOLUTION        true/false. Defaults to true for all, false for named groups.
+  BUILD_SOLUTION        true or false. Defaults to true for all, false for named groups.
   INCLUDE_FILTER        Coverlet include filter.
   EXCLUDE_FILTER        Coverlet exclude filter.
 EOF
@@ -109,7 +109,10 @@ if [[ "$LIST_GROUPS" == true ]]; then
   exit 0
 fi
 
-if [[ -z "$BUILD_SOLUTION" ]]; then
+if [[ "$MERGE_ONLY" == true ]]; then
+  GROUP_NAME="merge-only"
+  BUILD_SOLUTION=false
+elif [[ -z "$BUILD_SOLUTION" ]]; then
   if [[ "$GROUP_NAME" == "all" ]]; then
     BUILD_SOLUTION=true
   else
@@ -117,9 +120,13 @@ if [[ -z "$BUILD_SOLUTION" ]]; then
   fi
 fi
 
-if [[ "$MERGE_ONLY" == true ]]; then
-  GROUP_NAME="merge-only"
-fi
+case "$BUILD_SOLUTION" in
+  true|false) ;;
+  *)
+    echo "BUILD_SOLUTION must be true or false." >&2
+    exit 2
+    ;;
+esac
 
 if [[ "$MERGE_ONLY" != true && ! -f "$SOLUTION_PATH" ]]; then
   echo "Solution not found: $SOLUTION_PATH" >&2
