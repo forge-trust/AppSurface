@@ -6,8 +6,10 @@ namespace ForgeTrust.RazorWire.IntegrationTests;
 [Trait("Category", "Integration")]
 public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
 {
-    private const string CurrentPackageReleaseNotePath = "/docs/releases/v0.1.0-rc.1";
-    private const string CurrentPackageReleaseNoteHeading = "AppSurface 0.1.0 RC 1";
+    private const string CurrentPackageReleaseNotePath = "/docs/releases/v0.1.0-rc.2";
+    private const string CurrentPackageReleaseNoteHeading = "Release 0.1.0-rc.2";
+    private const string PublicPackageReadmeReleaseNotePath = "/docs/releases/v0.1.0-rc.1";
+    private const string PublicPackageReadmeReleaseNoteHeading = "AppSurface 0.1.0 RC 1";
 
     private readonly AppSurfaceDocsPlaywrightFixture _fixture;
 
@@ -104,6 +106,11 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
         Assert.Equal(CurrentPackageReleaseNoteHeading, (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("release note", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
 
+        await page.GotoAsync($"{_fixture.DocsUrl}/packages");
+        await page.WaitForFunctionAsync(
+            "() => document.querySelector('h1')?.textContent?.trim() === 'AppSurface v0.1 package chooser'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
         await page.Locator(".docs-content a[href='/docs/releases/upgrade-policy']").First.ClickAsync();
         await WaitForPathAndHeadingAsync(page, "/docs/releases/upgrade-policy", "Pre-1.0 upgrade policy");
         Assert.Equal("Pre-1.0 upgrade policy", (await page.TextContentAsync("h1"))?.Trim());
@@ -121,8 +128,8 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
         Assert.Equal(
-            "/docs/releases/v0.1.0-rc.1",
-            await page.GetAttributeAsync(".docs-content a[href='/docs/releases/v0.1.0-rc.1']", "href"));
+            PublicPackageReadmeReleaseNotePath,
+            await page.GetAttributeAsync($".docs-content a[href='{PublicPackageReadmeReleaseNotePath}']", "href"));
 
         await page.GotoAsync($"{_fixture.DocsUrl}/web/forgetrust.appsurface.web.openapi");
         await page.WaitForFunctionAsync(
@@ -130,9 +137,9 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
 
-        await page.Locator(".docs-content a[href='/docs/releases/v0.1.0-rc.1']").First.ClickAsync();
-        await WaitForPathAndHeadingAsync(page, "/docs/releases/v0.1.0-rc.1", "AppSurface 0.1.0 RC 1");
-        Assert.Equal("AppSurface 0.1.0 RC 1", (await page.TextContentAsync("h1"))?.Trim());
+        await page.Locator($".docs-content a[href='{PublicPackageReadmeReleaseNotePath}']").First.ClickAsync();
+        await WaitForPathAndHeadingAsync(page, PublicPackageReadmeReleaseNotePath, PublicPackageReadmeReleaseNoteHeading);
+        Assert.Equal(PublicPackageReadmeReleaseNoteHeading, (await page.TextContentAsync("h1"))?.Trim());
     }
 
     [Fact]
