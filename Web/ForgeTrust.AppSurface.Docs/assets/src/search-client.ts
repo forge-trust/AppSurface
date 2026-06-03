@@ -1236,7 +1236,7 @@ declare global {
     }
 
     if (links.length < 3) {
-      links.push({ title: 'Documentation index', href: docsRootPath });
+      links.push({ title: 'Docs home', href: docsRootPath });
     }
 
     return links;

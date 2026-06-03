@@ -103,6 +103,25 @@ dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.App
 
 For failed submissions, RazorWire also ships a convention-based form UX stack: default form-local fallbacks for unhandled failures, server helpers for validation errors, anti-forgery diagnostics in development, and styling/event hooks for consumers. See [Failed Form UX](Docs/form-failures.md) or run the sample and visit `/Reactivity/FormFailures`.
 
+## Page Navigation in 3 Minutes
+
+Use RazorWire page navigation when a server-rendered page needs same-page section links, active state, and optional mobile-panel close behavior without app-specific JavaScript.
+
+```cshtml
+<nav rw-page-nav aria-label="Page sections">
+    <button rw-page-nav-toggle="page-sections-panel" aria-expanded="true">Sections</button>
+    <div id="page-sections-panel" rw-page-nav-panel>
+        <a rw-page-nav-link href="#overview">Overview</a>
+        <a rw-page-nav-link href="#pricing">Pricing</a>
+    </div>
+</nav>
+
+<section id="overview" style="scroll-margin-top: 6rem">...</section>
+<section id="pricing" style="scroll-margin-top: 6rem">...</section>
+```
+
+RazorWire renders stable `data-rw-page-nav*` attributes, updates `aria-current="location"` on the active link, mirrors panel state through `data-rw-page-nav-panel-state`, and leaves all layout and styling to the host application. This replaces common brochure-site hooks such as `.page-scroll`, `data-bs-spy`, active classes, and `.navbar-collapse` close scripts. See the full contract and migration table in [Page Navigation](Docs/page-navigation.md), or run the MVC sample and visit `/Navigation/PageNavigation`.
+
 ## Generated UI Design Contract
 
 RazorWire should feel like a quiet enhancement inside the host application, not like a separate visual product placed on top of it. Package-owned generated UI follows the [RazorWire generated UI design contract](DESIGN.md).
@@ -143,6 +162,8 @@ RazorWire markup only lights up when your views import the package TagHelpers an
 <rw:scripts/>
 ```
 <!-- /appsurface:snippet -->
+
+Plain `<rw:scripts/>` is enough for page navigation. RazorWire emits a small detector that loads the separate `page-navigation.js` asset only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup, including after Turbo page or frame renders. The optional `page-navigation="true"` attribute is still supported as an eager-load escape hatch, but it is not required for normal adoption.
 
 ## Configure Services (Optional)
 
@@ -492,14 +513,17 @@ artifact URLs. When the conventional
 `/_appsurface/errors/404` route is available, it emits `404.html` through the same
 validation and rewrite path. Use `--mode hybrid` when the exported directory will
 still be served behind infrastructure that resolves application-style extensionless
-URLs.
+URLs, live frames, forms, streams, or islands.
 
 Hybrid export can serve RazorWire endpoints through same-origin backend passthrough. Safe RazorWire forms with static anti-forgery tokens are converted to lazy runtime token refresh so the backend wakes only when the user starts interacting with the form or submits it. For split-origin hybrid sites, add `--live-origin https://api.example.com`; RazorWire export then also rewrites managed live surfaces to that origin without requiring per-form flags: stream sources, live island frames, and RazorWire forms with static anti-forgery tokens. Unsafe anti-forgery fails early with `RWEXPORT006` when the form is unmanaged, opts out with `rw-antiforgery="off"`, posts to an external action, or split-origin credentials are omitted. CDN mode fails any anti-forgery surface because a plain static host cannot mint runtime tokens.
 
 CDN export validates the static references it can discover while crawling.
 Missing frame routes, unsafe query-bearing frame sources, missing internal assets,
 and managed URLs that cannot be rewritten fail the export with `RWEXPORT###`
-diagnostics instead of producing a broken folder. The diagnostics include the
+diagnostics instead of producing a broken folder. Hybrid export keeps page and
+live-behavior routes live, but it still fails missing browser-delivered assets
+such as scripts, stylesheets, module preloads, icons, images, `srcset` candidates, CSS `url(...)`,
+CSS `@import`, and asset-shaped preload or prefetch hints. The diagnostics include the
 HTML element/attribute or CSS token that produced the reference and the normalized
 path the exporter attempted to prove. The validation boundary is deliberate:
 app-authored JavaScript fetches, form posts, Server-Sent Events, import maps, and
@@ -507,7 +531,7 @@ other runtime behavior outside markup/CSS references are not proven static by th
 exporter.
 
 Parser-backed discovery may find valid references that older exporter versions
-missed. Treat new CDN validation failures after upgrading as potentially correct:
+missed. Treat new export validation failures after upgrading as potentially correct:
 export the missing route or asset, fix path casing, mark authoring-only anchors
 with `data-rw-export-ignore`, or choose `--mode hybrid` when live infrastructure
 owns the dependency.

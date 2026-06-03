@@ -225,6 +225,14 @@ public class RazorWireWebModuleTests
             Assert.Equal("text/javascript", islandsResponse.Content.Headers.ContentType?.MediaType);
             Assert.True(islandsResponse.Content.Headers.ContentLength > 0);
 
+            using var pageNavigationResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js");
+            Assert.Equal(HttpStatusCode.OK, pageNavigationResponse.StatusCode);
+            Assert.Equal("text/javascript", pageNavigationResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains(
+                "Generated from assets/src/page-navigation.ts",
+                await pageNavigationResponse.Content.ReadAsStringAsync(),
+                StringComparison.Ordinal);
+
             using var imageResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/background.png");
             Assert.Equal(HttpStatusCode.OK, imageResponse.StatusCode);
             Assert.Equal("image/png", imageResponse.Content.Headers.ContentType?.MediaType);

@@ -29,6 +29,7 @@ public class DocsController : Controller
 
     private readonly DocAggregator _aggregator;
     private readonly DocsUrlBuilder _docsUrlBuilder;
+    private readonly DocsRecoveryLinkBuilder _recoveryLinkBuilder;
     private readonly AppSurfaceDocsVersionCatalogService _versionCatalogService;
     private readonly DocFeaturedPageResolver _featuredPageResolver;
     private readonly AppSurfaceDocsOptions _options;
@@ -139,6 +140,7 @@ public class DocsController : Controller
     {
         _aggregator = aggregator ?? throw new ArgumentNullException(nameof(aggregator));
         _docsUrlBuilder = docsUrlBuilder ?? throw new ArgumentNullException(nameof(docsUrlBuilder));
+        _recoveryLinkBuilder = new DocsRecoveryLinkBuilder(_docsUrlBuilder);
         _versionCatalogService = versionCatalogService ?? throw new ArgumentNullException(nameof(versionCatalogService));
         _featuredPageResolver = featuredPageResolver ?? throw new ArgumentNullException(nameof(featuredPageResolver));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -1607,7 +1609,8 @@ public class DocsController : Controller
             "Packages",
             "Review package entry points and installation-facing docs.",
             DocPublicSection.Packages,
-            doc => IsPackageFallbackDoc(doc));
+            doc => IsPackageFallbackDoc(doc),
+            preferSectionRouteWhenRepresentativeExists: true);
 
         TryAddFallbackBucket(
             links,
@@ -1628,17 +1631,47 @@ public class DocsController : Controller
                    || doc.Path.StartsWith("Namespaces/", StringComparison.OrdinalIgnoreCase)
                    || string.Equals(doc.Path, "Namespaces", StringComparison.OrdinalIgnoreCase));
 
+        AddStaticRecoveryLinks(links);
+
         if (links.Count < SearchFallbackBucketCount)
         {
             TryAddFallbackLink(
                 links,
                 _docsUrlBuilder.BuildHomeUrl(),
-                "Documentation index",
-                "Return to the docs index and keep exploring from there.",
+                "Docs home",
+                "Return to the docs home and keep exploring from there.",
                 usesDocsFrame: false);
         }
 
         return links;
+    }
+
+    private void AddStaticRecoveryLinks(ICollection<SearchPageFallbackLink> links)
+    {
+        foreach (var recoveryLink in _recoveryLinkBuilder.BuildRecoveryLinks())
+        {
+            if (links.Count >= SearchFallbackBucketCount)
+            {
+                return;
+            }
+
+            if (recoveryLink.Kind == DocsRecoveryLinkKind.Primary)
+            {
+                continue;
+            }
+
+            if (links.Any(link => string.Equals(link.Title, recoveryLink.Title, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            TryAddFallbackLink(
+                links,
+                recoveryLink.Href,
+                recoveryLink.Title,
+                recoveryLink.Description,
+                usesDocsFrame: !string.Equals(recoveryLink.Href, _docsUrlBuilder.BuildHomeUrl(), StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     private void TryAddFallbackBucket(
@@ -1647,9 +1680,13 @@ public class DocsController : Controller
         string title,
         string description,
         DocPublicSection? section,
-        Func<DocNode, bool> representativePredicate)
+        Func<DocNode, bool> representativePredicate,
+        bool preferSectionRouteWhenRepresentativeExists = false)
     {
-        if (section is not null && HasPublicSectionDocs(docs, section.Value))
+        if (section is not null
+            && (HasPublicSectionDocs(docs, section.Value)
+                || (preferSectionRouteWhenRepresentativeExists
+                    && docs.Any(doc => IsPublicFallbackCandidate(doc) && representativePredicate(doc)))))
         {
             TryAddFallbackLink(
                 links,
