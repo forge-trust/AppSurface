@@ -175,7 +175,7 @@ public class TailwindCliManagerTests : IDisposable
 
         var runtimeProjectDir = GetDevelopmentRuntimeProjectDirectory(_currentHostRid);
         Directory.CreateDirectory(runtimeProjectDir);
-        var expectedPath = Path.Join(runtimeProjectDir, EnsureFileName(_currentHostRuntimeProjectBinaryName));
+        var expectedPath = TestPathUtils.PathUnder(runtimeProjectDir, EnsureFileName(_currentHostRuntimeProjectBinaryName));
         File.WriteAllText(expectedPath, "dummy");
 
         var result = _manager.GetTailwindPath();
@@ -194,7 +194,7 @@ public class TailwindCliManagerTests : IDisposable
 
         var runtimeProjectDir = GetDevelopmentRuntimeProjectDirectory(_currentHostRid, "tailwind-4.1.18");
         Directory.CreateDirectory(runtimeProjectDir);
-        var expectedPath = Path.Join(runtimeProjectDir, EnsureFileName(_currentHostRuntimeProjectBinaryName));
+        var expectedPath = TestPathUtils.PathUnder(runtimeProjectDir, EnsureFileName(_currentHostRuntimeProjectBinaryName));
         File.WriteAllText(expectedPath, "dummy");
 
         var result = _manager.GetTailwindPath();
@@ -213,12 +213,12 @@ public class TailwindCliManagerTests : IDisposable
 
         var runtimeProjectDir = GetDevelopmentRuntimeProjectDirectory(_currentHostRid);
         Directory.CreateDirectory(runtimeProjectDir);
-        var expectedPath = Path.Join(runtimeProjectDir, EnsureFileName(_currentHostRuntimeProjectBinaryName));
+        var expectedPath = TestPathUtils.PathUnder(runtimeProjectDir, EnsureFileName(_currentHostRuntimeProjectBinaryName));
         File.WriteAllText(expectedPath, "legacy");
 
         var versionedDir = Path.Join(runtimeProjectDir, "tailwind-4.1.18");
         Directory.CreateDirectory(versionedDir);
-        File.WriteAllText(Path.Join(versionedDir, EnsureFileName(_currentHostRuntimeProjectBinaryName)), "versioned");
+        File.WriteAllText(TestPathUtils.PathUnder(versionedDir, EnsureFileName(_currentHostRuntimeProjectBinaryName)), "versioned");
 
         var result = _manager.GetTailwindPath();
 
@@ -238,7 +238,7 @@ public class TailwindCliManagerTests : IDisposable
 
         var runtimeProjectDir = GetDevelopmentRuntimeProjectDirectory(rid);
         Directory.CreateDirectory(runtimeProjectDir);
-        var expectedPath = Path.Join(runtimeProjectDir, EnsureFileName(binaryName));
+        var expectedPath = TestPathUtils.PathUnder(runtimeProjectDir, EnsureFileName(binaryName));
         File.WriteAllText(expectedPath, "dummy");
 
         var result = _manager.GetTailwindPath();
@@ -258,7 +258,7 @@ public class TailwindCliManagerTests : IDisposable
 
         var runtimeProjectDir = GetDevelopmentRuntimeProjectDirectory(_currentHostRid);
         Directory.CreateDirectory(runtimeProjectDir);
-        var expectedPath = Path.Join(runtimeProjectDir, EnsureFileName(_currentHostRuntimeProjectBinaryName));
+        var expectedPath = TestPathUtils.PathUnder(runtimeProjectDir, EnsureFileName(_currentHostRuntimeProjectBinaryName));
         File.WriteAllText(expectedPath, "dummy");
 
         var result = _manager.GetTailwindPath();

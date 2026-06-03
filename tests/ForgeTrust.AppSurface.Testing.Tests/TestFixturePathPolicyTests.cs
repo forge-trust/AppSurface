@@ -165,6 +165,24 @@ public sealed class TestFixturePathPolicyTests
     }
 
     [Fact]
+    public void Scanner_ShouldFlagPathLikeNoArgumentWrapperCalls()
+    {
+        const string source = """
+            public sealed class SampleTests
+            {
+                public void Test(string root)
+                {
+                    var path = Path.Join(root, GetRelativePath());
+                }
+            }
+            """;
+
+        var violation = Assert.Single(TestPathPolicyScanner.ScanSource("Sample.Tests/SampleTests.cs", source));
+
+        Assert.Equal("GetRelativePath()", violation.RiskyArgument);
+    }
+
+    [Fact]
     public void FailureFormatter_ShouldDescribeReplacementAndAllowlistFlow()
     {
         var violation = new PathPolicyViolation(
@@ -448,11 +466,19 @@ internal static class TestPathPolicyScanner
 
     private static bool ContainsRiskyInvocation(InvocationExpressionSyntax invocation)
     {
-        var receiverIsRisky = invocation.Expression is MemberAccessExpressionSyntax memberAccess
-            && !IsSystemPathExpression(memberAccess.Expression)
-            && ContainsRiskyExpression(memberAccess.Expression);
+        var invocationNameIsRisky = invocation.Expression switch
+        {
+            IdentifierNameSyntax identifier => IsRiskyName(identifier.Identifier.ValueText),
+            MemberAccessExpressionSyntax memberAccess => !IsSystemPathExpression(memberAccess.Expression)
+                && IsRiskyName(memberAccess.Name.Identifier.ValueText),
+            _ => false
+        };
+        var receiverIsRisky = invocation.Expression is MemberAccessExpressionSyntax receiverAccess
+            && !IsSystemPathExpression(receiverAccess.Expression)
+            && ContainsRiskyExpression(receiverAccess.Expression);
 
-        return receiverIsRisky
+        return invocationNameIsRisky
+            || receiverIsRisky
             || invocation.ArgumentList.Arguments.Any(argument => ContainsRiskyExpression(argument.Expression));
     }
 
