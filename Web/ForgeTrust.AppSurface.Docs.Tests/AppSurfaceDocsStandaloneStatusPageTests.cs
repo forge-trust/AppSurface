@@ -290,7 +290,8 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         var repositoryRoot = CreateRepositoryRoot();
         var configuration = new Dictionary<string, string?>
         {
-            ["AppSurfaceDocs:Source:RepositoryRoot"] = repositoryRoot
+            ["AppSurfaceDocs:Source:RepositoryRoot"] = repositoryRoot,
+            ["AppSurfaceDocs:Harvest:StartupMode"] = "Blocking"
         };
 
         if (configurationOverrides is not null)
