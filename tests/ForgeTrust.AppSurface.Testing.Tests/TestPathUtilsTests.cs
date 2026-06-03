@@ -170,6 +170,15 @@ public sealed class TestPathUtilsTests : IDisposable
     }
 
     [Fact]
+    public void FindRepoRoot_ShouldFindRootFromNonexistentDirectoryStartPath()
+    {
+        var repoRoot = CreateRepositoryRoot();
+        var missingNestedDirectory = Path.Join(repoRoot, "src", "generated", "tests");
+
+        Assert.Equal(repoRoot, TestPathUtils.FindRepoRoot(missingNestedDirectory));
+    }
+
+    [Fact]
     public void FindRepoRoot_ShouldThrowWhenSolutionFileIsMissing()
     {
         Directory.CreateDirectory(_tempRoot);

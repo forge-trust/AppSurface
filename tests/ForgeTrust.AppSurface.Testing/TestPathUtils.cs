@@ -1,5 +1,7 @@
 namespace ForgeTrust.AppSurface.Testing;
 
+using System.Diagnostics.CodeAnalysis;
+
 /// <summary>
 /// Provides path helpers for tests that need deterministic containment under a known root.
 /// </summary>
@@ -133,9 +135,7 @@ public static class TestPathUtils
     /// </remarks>
     private static bool IsSameOrDescendant(string basePath, string candidatePath)
     {
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
+        var comparison = GetFilesystemPathComparison();
         if (string.Equals(
             Path.TrimEndingDirectorySeparator(candidatePath),
             Path.TrimEndingDirectorySeparator(basePath),
@@ -148,6 +148,14 @@ public static class TestPathUtils
             ? basePath
             : basePath + Path.DirectorySeparatorChar;
         return candidatePath.StartsWith(basePrefix, comparison);
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Runtime OS probe; Linux/macOS and Windows exercise opposite branches in their own CI environments.")]
+    private static StringComparison GetFilesystemPathComparison()
+    {
+        return OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
     }
 
     private static DirectoryInfo ResolveStartDirectory(string startPath)

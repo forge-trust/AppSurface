@@ -420,9 +420,8 @@ internal sealed class PathPolicyAllowlist
         var entries = ImmutableDictionary.CreateBuilder<string, Entry>(StringComparer.Ordinal);
         var current = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        foreach (var rawLine in content.Split('\n'))
+        foreach (var line in content.Split('\n').Select(rawLine => rawLine.TrimEnd('\r')))
         {
-            var line = rawLine.TrimEnd('\r');
             var trimmed = line.Trim();
             if (trimmed.Length == 0 || trimmed.StartsWith('#'))
             {
