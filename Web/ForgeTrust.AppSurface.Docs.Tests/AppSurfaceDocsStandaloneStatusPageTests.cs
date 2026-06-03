@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
+using ForgeTrust.AppSurface.Docs;
 using ForgeTrust.AppSurface.Docs.Standalone;
 using ForgeTrust.AppSurface.Web;
 using Microsoft.AspNetCore.Builder;
@@ -291,7 +292,7 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         var configuration = new Dictionary<string, string?>
         {
             ["AppSurfaceDocs:Source:RepositoryRoot"] = repositoryRoot,
-            ["AppSurfaceDocs:Harvest:StartupMode"] = "Blocking"
+            ["AppSurfaceDocs:Harvest:StartupMode"] = nameof(AppSurfaceDocsHarvestStartupMode.Blocking)
         };
 
         if (configurationOverrides is not null)

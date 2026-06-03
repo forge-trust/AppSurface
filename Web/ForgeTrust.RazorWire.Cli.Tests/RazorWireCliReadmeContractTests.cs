@@ -1,3 +1,5 @@
+using ForgeTrust.AppSurface.Core;
+
 namespace ForgeTrust.RazorWire.Cli.Tests;
 
 public sealed class RazorWireCliReadmeContractTests
@@ -12,7 +14,7 @@ public sealed class RazorWireCliReadmeContractTests
         Assert.Contains("`CNAME` and similar opaque deployment files are deployment-owned extras.", readme, StringComparison.Ordinal);
         Assert.Contains("`/_appsurface/errors/404`", readme, StringComparison.Ordinal);
         Assert.Contains("root `404.html`", readme, StringComparison.Ordinal);
-        Assert.Contains("`_redirects` is exporter-owned when a host integration selects `--redirects netlify`.", readme, StringComparison.Ordinal);
+        Assert.Contains("through a host integration using `ExportRedirectStrategy.Netlify` or through `appsurface docs export --redirects netlify`", readme, StringComparison.Ordinal);
         Assert.Contains("install -m 0644 ./deploy/CNAME ./dist/CNAME", readme, StringComparison.Ordinal);
         Assert.Contains("test -f ./dist/CNAME", readme, StringComparison.Ordinal);
         Assert.Contains("test -f ./dist/404.html", readme, StringComparison.Ordinal);
@@ -23,18 +25,7 @@ public sealed class RazorWireCliReadmeContractTests
 
     private static string GetRazorWireCliReadmePath()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null)
-        {
-            var candidate = Path.Join(directory.FullName, "Web", "ForgeTrust.RazorWire.Cli", "README.md");
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new InvalidOperationException("Unable to find Web/ForgeTrust.RazorWire.Cli/README.md from the current test assembly path.");
+        var repositoryRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        return Path.Join(repositoryRoot, "Web", "ForgeTrust.RazorWire.Cli", "README.md");
     }
 }
