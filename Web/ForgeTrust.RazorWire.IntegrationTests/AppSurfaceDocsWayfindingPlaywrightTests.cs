@@ -947,6 +947,66 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
     }
 
     [Fact]
+    public async Task MobileOutline_ModifiedAnchorClick_DoesNotChangeActiveStateOrCollapsePanel()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await AppSurfaceDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        await page.WaitForFunctionAsync(
+            "() => document.getElementById('docs-page-outline')?.dataset.outlineEnhanced === 'true'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await page.ClickAsync("#docs-page-outline [data-doc-outline-toggle]");
+        await page.WaitForFunctionAsync(
+            "() => document.querySelector('#docs-page-outline [data-doc-outline-toggle]')?.getAttribute('aria-expanded') === 'true'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await page.EvaluateAsync(
+            """
+            () => {
+              const shell = document.getElementById('docs-page-outline');
+              const link = Array.from(shell?.querySelectorAll("a[data-doc-outline-link='true']") ?? [])
+                .find(candidate => !candidate.hasAttribute('aria-current'));
+              if (!link) {
+                throw new Error('Expected a non-active outline link.');
+              }
+
+              link.dataset.modifiedClickTarget = 'true';
+              link.addEventListener('click', event => event.preventDefault(), { once: true });
+              link.dispatchEvent(new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                button: 0,
+                metaKey: true
+              }));
+            }
+            """);
+
+        Assert.Equal("true", await page.GetAttributeAsync("#docs-page-outline [data-doc-outline-toggle]", "aria-expanded"));
+        Assert.Null(await page.GetAttributeAsync("#docs-page-outline a[data-modified-click-target='true']", "aria-current"));
+        Assert.True(await page.Locator("#docs-page-outline-panel").IsVisibleAsync());
+    }
+
+    [Fact]
     public async Task MobileOutline_ExpandedPanelContainsScroll()
     {
         await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
