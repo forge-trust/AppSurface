@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text;
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
@@ -334,9 +335,8 @@ internal sealed partial class ExportReferenceProcessor
         IDocument document,
         string currentRoute)
     {
-        foreach (var element in document.QuerySelectorAll("script:not([src])"))
+        foreach (var script in document.QuerySelectorAll("script:not([src])").Select(element => element.TextContent))
         {
-            var script = element.TextContent;
             if (!script.Contains(RazorWirePageNavigationRuntimeMarker, StringComparison.Ordinal)
                 || !script.Contains(RazorWirePageNavigationSelectorMarker, StringComparison.Ordinal)
                 || !TryExtractJavaScriptStringAssignment(script, "source", out var source))
