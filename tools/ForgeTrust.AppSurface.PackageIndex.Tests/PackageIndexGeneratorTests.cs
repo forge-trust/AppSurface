@@ -2462,11 +2462,18 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     public void IsCandidateProject_ExcludesGeneratedAndToolingPaths()
     {
         Assert.False(PackageProjectScanner.IsCandidateProject("tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Web/bin/Release/net10.0/Generated.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Web/obj/Release/net10.0/Generated.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("node_modules/package/Generated.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("examples/web-app/WebAppExample.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("Config/ForgeTrust.AppSurface.Config.Tests/ForgeTrust.AppSurface.Config.Tests.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("tests/Fixture/Fixture.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("src/BenchmarkHarness.Benchmarks.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("src/FixtureTests.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject(".pnpm-store/v11/projects/cache-key/Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject(".nuget/packages/example/1.0.0/contentFiles/any/net10.0/CachedProject.csproj"));
+        Assert.True(PackageProjectScanner.IsCandidateProject("RootPackage.csproj"));
         Assert.True(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj"));
     }
 
