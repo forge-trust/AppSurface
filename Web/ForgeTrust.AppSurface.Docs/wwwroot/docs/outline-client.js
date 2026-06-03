@@ -684,8 +684,14 @@
         }
 
         for (const link of links) {
-            addLifecycleEventListener(link, "click", () => {
-                if (!razorWireManaged) {
+            addLifecycleEventListener(link, "click", event => {
+                if (!razorWireManaged
+                    || event.defaultPrevented
+                    || event.button !== 0
+                    || event.metaKey
+                    || event.ctrlKey
+                    || event.shiftKey
+                    || event.altKey) {
                     return;
                 }
 

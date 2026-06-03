@@ -14,7 +14,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
-- RazorWire CLI static export now materializes the lazy page-navigation runtime emitted by AppSurface Docs outlines, so CDN exports fail and publish consistently when the shared navigation script is required.
+- RazorWire CLI static export now materializes the lazy page-navigation runtime emitted by AppSurface Docs outlines, so CDN exports succeed and publish consistently when the shared navigation script is required.
 - CI now includes a measured NuGet cache rollout for selected build, docs export, and code-quality jobs while keeping package-gate restores isolated.
 - PackageIndex verification now ignores hidden local cache directories such as `.pnpm-store` and workspace `.nuget/packages` so local cache contents do not require package manifest entries.
 - AppSurface Web browser status-page re-execution now preserves original browser error status codes while direct reserved preview routes continue to render normally.
