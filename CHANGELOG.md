@@ -25,6 +25,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Test fixture paths now use a shared path-under-base helper and repository policy test, so dynamic test fixture paths must stay under their intended root unless a reasoned allowlist entry documents intentional platform-path behavior.
 - RazorWire stream endpoints now reject malformed channels with `400`, deny unauthorized channels with `403`, and return `429` when per-process live-channel or subscription admission limits are exhausted before hub subscriber state is allocated.
 - RazorWire and AppSurface hybrid export now fail missing browser-delivered static assets with `RWEXPORT003` while still tolerating live/page routes, frames, forms, streams, islands, canonical metadata, DNS hints, and page-shaped preload or prefetch hints.
+- RazorWire CLI static export now materializes the lazy page-navigation runtime emitted by AppSurface Docs outlines, so CDN exports fail and publish consistently when the shared navigation script is required.
 - Config audit discovered-key reports now expose value display state and omit raw unknown or broad-descendant scalar values unless the exact leaf key is registered or the value is redacted.
 - AppSurface Docs standalone 404 pages now render a harvest-free recovery hub with safe links to Search, Docs home, and route-safe Start Here or Packages destinations while preserving API, JSON, and non-browser 404 behavior.
 
