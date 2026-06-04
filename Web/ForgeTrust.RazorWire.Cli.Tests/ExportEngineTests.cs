@@ -204,6 +204,70 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractAssets_Should_Find_RazorWire_PageNavigation_Autoload_Source()
+    {
+        var html = """
+            <script src="/_content/ForgeTrust.RazorWire/razorwire/razorwire.js"></script>
+            <script>
+            (() => {
+              const source = "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js";
+              const marker = "data-rw-page-navigation-runtime";
+              const selector = "[data-rw-page-nav]";
+              const load = () => {
+                if (!document.querySelector(selector)) return;
+                const script = document.createElement("script");
+                script.src = source;
+              };
+            })();
+            </script>
+            """;
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        _sut.ExtractAssets(html, "/", context);
+
+        Assert.Contains("/_content/ForgeTrust.RazorWire/razorwire/razorwire.js", context.Queue);
+        Assert.Contains("/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js", context.Queue);
+    }
+
+    [Fact]
+    public void ExtractAssets_Should_Find_RazorWire_PageNavigation_Autoload_Source_When_Source_Is_Escaped()
+    {
+        var html = """
+            <script>
+            (() => {
+              const source = '\x2f_content\u002fForgeTrust.RazorWire/razorwire/page-navigation.js';
+              const marker = "data-rw-page-navigation-runtime";
+              const selector = "[data-rw-page-nav]";
+              const load = () => document.querySelector(selector) && marker && source;
+            })();
+            </script>
+            """;
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        _sut.ExtractAssets(html, "/", context);
+
+        Assert.Contains("/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js", context.Queue);
+    }
+
+    [Fact]
+    public void ExtractAssets_Should_Ignore_RazorWire_PageNavigation_Autoload_Source_When_Markers_Are_Missing()
+    {
+        var html = """
+            <script>
+            (() => {
+              const source = "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js";
+              const load = () => source;
+            })();
+            </script>
+            """;
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        _sut.ExtractAssets(html, "/", context);
+
+        Assert.DoesNotContain("/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js", context.Queue);
+    }
+
+    [Fact]
     public void ExtractAssets_Should_Find_Link_Href_For_Stylesheets_Only()
     {
         // Arrange
@@ -1098,6 +1162,7 @@ public class ExportEngineTests
             var css = await File.ReadAllTextAsync(Path.Join(tempDir, "css", "site.css"));
             Assert.Contains("url('/img/bg.png?v=1')", css);
             Assert.True(File.Exists(Path.Join(tempDir, "_content", "pkg", "app.js")));
+            Assert.True(File.Exists(Path.Join(tempDir, "_content", "ForgeTrust.RazorWire", "razorwire", "page-navigation.js")));
             Assert.True(File.Exists(Path.Join(tempDir, "img", "bg.png")));
             Assert.True(File.Exists(Path.Join(tempDir, "img", "hero.avif")));
             Assert.True(File.Exists(Path.Join(tempDir, "img", "hero.webp")));
@@ -3663,6 +3728,18 @@ public class ExportEngineTests
                         <a href="/docs/start#intro">Docs</a>
                         <turbo-frame id="doc-content" src="/docs/start"></turbo-frame>
                         <script src="/_content/pkg/app.js?v=abc123"></script>
+                        <script>
+                        (() => {
+                          const source = "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js";
+                          const marker = "data-rw-page-navigation-runtime";
+                          const selector = "[data-rw-page-nav]";
+                          const load = () => {
+                            if (!document.querySelector(selector)) return;
+                            const script = document.createElement("script");
+                            script.src = source;
+                          };
+                        })();
+                        </script>
                         <picture><source data-copy="img/hero.avif 1x, img/hero.webp 2x" srcset="img/hero.avif 1x, img/hero.webp 2x" type="image/avif"></picture>
                         <img src="/img/logo.png" srcset="/img/logo-2x.png 2x, /img/logo-small.png 300w">
                         <img srcset="img/a.png 1x, img/a.png?version=1 2x">
@@ -3696,6 +3773,11 @@ public class ExportEngineTests
             if (path is "/_content/pkg/app.js")
             {
                 return Text("console.log('cdn');", "text/javascript");
+            }
+
+            if (path is "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js")
+            {
+                return Text("console.log('page nav');", "text/javascript");
             }
 
             if (path.StartsWith("/img/", StringComparison.Ordinal))
