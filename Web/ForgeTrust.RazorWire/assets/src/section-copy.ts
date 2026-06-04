@@ -174,7 +174,7 @@ interface SectionCopyBinding {
         }
 
         private bindAuthoredButtons() {
-            const authoredControls = Array.from(this.root.querySelectorAll('[data-rw-section-copy]'));
+            const authoredControls = this.getOwnedElements('[data-rw-section-copy]');
             for (const control of authoredControls) {
                 if (control.getAttribute('data-rw-section-copy-inserted') === 'true') continue;
                 if (control.tagName !== 'BUTTON') {
@@ -190,7 +190,7 @@ interface SectionCopyBinding {
         }
 
         private addGeneratedButtons() {
-            for (const target of Array.from(this.root.querySelectorAll('[data-rw-section-copy-target]'))) {
+            for (const target of this.getOwnedElements('[data-rw-section-copy-target]')) {
                 if (!(target instanceof HTMLElement)) continue;
                 if (!target.id) {
                     this.manager.recordDiagnostic(
@@ -382,7 +382,7 @@ interface SectionCopyBinding {
         }
 
         private resolveStatus() {
-            const status = this.root.querySelector('[data-rw-section-copy-status]');
+            const status = this.getOwnedElements('[data-rw-section-copy-status]')[0] ?? null;
             if (status instanceof HTMLElement) {
                 const ariaLive = status.getAttribute('aria-live')?.trim().toLowerCase();
                 if (ariaLive === 'polite' || ariaLive === 'assertive') {
@@ -403,6 +403,23 @@ interface SectionCopyBinding {
             this.root.appendChild(generatedStatus);
             this.generatedStatus = generatedStatus;
             return generatedStatus;
+        }
+
+        private getOwnedElements(selector: string) {
+            const candidates = [
+                ...(this.root.matches(selector) ? [this.root] : []),
+                ...Array.from(this.root.querySelectorAll(selector))
+            ];
+            const rootIsExplicit = this.root.hasAttribute('data-rw-section-copy-root');
+
+            return candidates.filter(element => {
+                if (element === this.root) return true;
+
+                const ownerRoot = element.closest('[data-rw-section-copy-root]');
+                return rootIsExplicit
+                    ? ownerRoot === this.root
+                    : ownerRoot === null;
+            });
         }
 
         private normalizeTargetId(rawValue: string, button: Element) {

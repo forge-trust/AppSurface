@@ -116,6 +116,67 @@ test('section copy retires the ambient controller when explicit roots own all ma
   assert.equal(copyCount, 1);
 });
 
+test('section copy binds markers on the root element itself', async () => {
+  let copiedText = '';
+  const { context, document } = loadSectionCopyRuntime({
+    clipboard: {
+      writeText: async value => {
+        copiedText = value;
+      }
+    }
+  });
+  const rootTarget = document.createElement('section');
+  rootTarget.id = 'overview';
+  rootTarget.textContent = 'Overview';
+  rootTarget.setAttribute('data-rw-section-copy-root', 'true');
+  rootTarget.setAttribute('data-rw-section-copy-target', 'true');
+  document.body.appendChild(rootTarget);
+
+  context.window.RazorWire.sectionCopyManager.scan();
+
+  const button = rootTarget.querySelector('button[data-rw-section-copy]');
+  assert.equal(button?.getAttribute('data-rw-section-copy'), 'overview');
+
+  button.dispatchEvent(createEvent('click'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(copiedText, 'https://docs.example.test/guide?tab=api#overview');
+});
+
+test('section copy does not double-bind markers inside nested explicit roots', async () => {
+  let copyCount = 0;
+  const { context, document } = loadSectionCopyRuntime({
+    clipboard: {
+      writeText: async () => {
+        copyCount += 1;
+      }
+    }
+  });
+  const outerRoot = document.createElement('section');
+  outerRoot.setAttribute('data-rw-section-copy-root', 'true');
+  const innerRoot = document.createElement('section');
+  innerRoot.setAttribute('data-rw-section-copy-root', 'true');
+  const target = document.createElement('h2');
+  target.id = 'nested';
+  target.textContent = 'Nested';
+  const button = document.createElement('button');
+  button.setAttribute('data-rw-section-copy', 'nested');
+  innerRoot.append(target, button);
+  outerRoot.appendChild(innerRoot);
+  document.body.appendChild(outerRoot);
+
+  const manager = context.window.RazorWire.sectionCopyManager;
+  manager.scan();
+
+  assert.equal(manager.controllers.has(outerRoot), true);
+  assert.equal(manager.controllers.has(innerRoot), true);
+
+  button.dispatchEvent(createEvent('click'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(copyCount, 1);
+});
+
 function loadSectionCopyRuntime(options = {}) {
   const document = new FakeDocument();
   const window = {
@@ -279,6 +340,16 @@ class FakeElement {
   contains(node) {
     if (node === this) return true;
     return this.children.some(child => child.contains(node));
+  }
+
+  closest(selector) {
+    let current = this;
+    while (current) {
+      if (current.matches(selector)) return current;
+      current = current.parentElement;
+    }
+
+    return null;
   }
 
   querySelector(selector) {
