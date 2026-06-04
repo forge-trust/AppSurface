@@ -18,7 +18,17 @@ namespace ForgeTrust.RazorWire.Cli;
 internal sealed partial class ExportReferenceProcessor
 {
     private const string ExportIgnoreAttributeName = "data-rw-export-ignore";
+
+    /// <summary>
+    /// Managed runtime path for the RazorWire section-copy client script: <c>/_content/ForgeTrust.RazorWire/razorwire/section-copy.js</c>.
+    /// </summary>
+    /// <remarks>
+    /// Static export uses this package-relative path only for internal synthetic script registration when section-copy markup
+    /// exists without an explicit runtime script reference. The value must match the RazorWire static web asset and embedded
+    /// fallback route; callers should not rewrite it at runtime or use it as an application-specific override point.
+    /// </remarks>
     private const string SectionCopyRuntimePath = "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js";
+
     private static readonly Uri ManagedUrlBase = new("http://dummy");
 
     private static readonly HashSet<string> SourceNavigationAnchorExtensions = new(StringComparer.OrdinalIgnoreCase)

@@ -3219,6 +3219,24 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractReferences_Should_Add_SectionCopy_Runtime_For_Button_Only_Lazy_Markup()
+    {
+        var html = """
+            <main>
+              <button type="button" data-rw-section-copy="#intro">Copy</button>
+            </main>
+            """;
+
+        var reference = Assert.Single(
+            _sut.ExtractReferences(html, "/docs/start", htmlScope: true),
+            reference => reference.Path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
+
+        Assert.Equal(ExportReferenceKind.ScriptSrc, reference.Kind);
+        Assert.Equal(ExportReferenceRole.StaticAsset, reference.Role);
+        Assert.Equal("<button data-rw-section-copy>", reference.Provenance?.DisplaySource);
+    }
+
+    [Fact]
     public void ExtractReferences_Should_Ignore_Hash_Only_Css_References()
     {
         var css = """

@@ -473,8 +473,8 @@
         shell.dataset.outlineEnhanced = "true";
         shell.dataset.outlineClientVersion = clientVersion;
         enhanceContentCopyTargets(entries);
-        decorateSectionCopyButtons();
         scanSectionCopyRuntime();
+        decorateSectionCopyButtons();
 
         const compactMedia = window.matchMedia ? window.matchMedia(compactMediaQuery) : null;
         const syncViewportState = () => {
