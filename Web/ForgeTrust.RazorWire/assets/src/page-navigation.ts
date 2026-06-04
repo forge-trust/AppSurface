@@ -304,9 +304,14 @@ type PageNavigationScrollRoot = Window | Element;
         }
 
         syncActiveLinkVisibility() {
+            if (!this.activeLink) {
+                this.unbindActiveLinkVisibilityObserver();
+                return;
+            }
+
             const container = this.resolveActiveLinkRevealContainer();
             this.bindActiveLinkVisibilityObserver(container);
-            if (!container || !this.activeLink) return;
+            if (!container) return;
 
             const containerRect = container.getBoundingClientRect?.();
             const linkRect = this.activeLink.getBoundingClientRect?.();

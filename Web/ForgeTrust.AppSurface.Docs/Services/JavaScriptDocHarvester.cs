@@ -726,7 +726,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             diagnostics.Add(MalformedDoclet(
                 relativePath,
                 line,
-                "A public JavaScript CSS hook doclet must use a supported @hookKind and a narrow selector value."));
+                "A public JavaScript CSS hook doclet must use a supported @hookKind and a stable selector or CSS property name."));
             return false;
         }
 

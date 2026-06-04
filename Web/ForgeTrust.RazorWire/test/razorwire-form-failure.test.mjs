@@ -924,6 +924,42 @@ test('page navigation manager exposes diagnostics and starts inert without roots
   assert.equal(context.window.RazorWire.pageNavigationManager.getDiagnostics().length, 0);
 });
 
+test('page navigation does not bind active visibility observers without an active link', async () => {
+  const resizeObservers = [];
+  class FakeResizeObserver {
+    constructor(callback) {
+      this.callback = callback;
+      this.observed = [];
+      resizeObservers.push(this);
+    }
+
+    observe(element) {
+      this.observed.push(element);
+    }
+
+    disconnect() {
+      this.disconnected = true;
+    }
+  }
+
+  const { context, document } = loadRuntime({
+    windowHref: 'https://example.test/#missing',
+    pageNavigation: true,
+    ResizeObserver: FakeResizeObserver
+  });
+  const nav = new FakeElement('nav');
+  nav.setAttribute('data-rw-page-nav', 'true');
+  const link = createPageNavigationLink('#missing');
+  nav.appendChild(link);
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+  await waitForAnimationFrame();
+
+  assert.equal(context.window.RazorWire.pageNavigationManager.controllers.size, 1);
+  assert.equal(resizeObservers.length, 0);
+});
+
 test('page navigation sets active state from the initial hash', () => {
   const { context, document } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
   const { nav, overviewLink, pricingLink } = createPageNavigationFixture(document);

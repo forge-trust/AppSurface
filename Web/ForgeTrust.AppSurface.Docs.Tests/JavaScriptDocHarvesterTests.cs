@@ -625,7 +625,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             3,
             GetDiagnostics(harvester).Count(
                 diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
-                              && diagnostic.Cause == "A public JavaScript CSS hook doclet must use a supported @hookKind and a narrow selector value."));
+                              && diagnostic.Cause == "A public JavaScript CSS hook doclet must use a supported @hookKind and a stable selector or CSS property name."));
     }
 
     [Fact]
