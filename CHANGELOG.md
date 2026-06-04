@@ -17,6 +17,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - RazorWire CLI static export now materializes the lazy page-navigation runtime emitted by AppSurface Docs outlines, so CDN exports succeed and publish consistently when the shared navigation script is required.
 - CI now includes a measured NuGet cache rollout for selected build, docs export, and code-quality jobs while keeping package-gate restores isolated.
 - PackageIndex verification now ignores hidden local cache directories such as `.pnpm-store` and workspace `.nuget/packages` so local cache contents do not require package manifest entries.
+- RazorWire and AppSurface CLI exports now accept explicit `--publish-root-extras` manifests for single-file publish-root deployment extras such as GitHub Pages `CNAME`, while AppSurface Docs exact archive exports stay immutable and reject that deployment-owned surface.
 - AppSurface Web browser status-page re-execution now preserves original browser error status codes while direct reserved preview routes continue to render normally.
 
 ## 0.1.0-rc.2 - 2026-06-03
