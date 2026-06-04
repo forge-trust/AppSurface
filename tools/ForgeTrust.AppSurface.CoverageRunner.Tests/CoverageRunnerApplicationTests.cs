@@ -105,6 +105,73 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldIgnoreNonTestProjectsDuringDiscovery()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddSolutionProject("src/Sample/Sample.csproj");
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace);
+        var app = CreateApp(runner);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(runner.TestCommands);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldTreatMissingProjectFilesAsShareable()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddSolutionProject("tools/Missing.Tests/Missing.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace);
+        var app = CreateApp(runner);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(runner.TestCommands);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldCleanExistingOutputDirectoryBeforeRunning()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Join(outputDirectory, "coverage.json"), "{}");
+        File.WriteAllText(Path.Join(outputDirectory, "coverage.cobertura.xml"), "<old />");
+        File.WriteAllText(Path.Join(outputDirectory, "summary.txt"), "old");
+        File.WriteAllText(Path.Join(outputDirectory, "timings.json"), "{}");
+        File.WriteAllText(Path.Join(outputDirectory, "junit-old.xml"), "<old />");
+        Directory.CreateDirectory(Path.Join(outputDirectory, "projects", "Old.Tests"));
+        File.WriteAllText(Path.Join(outputDirectory, "projects", "Old.Tests", "old.txt"), "old");
+        Directory.CreateDirectory(Path.Join(outputDirectory, "reportgenerator"));
+        File.WriteAllText(Path.Join(outputDirectory, "reportgenerator", "old.txt"), "old");
+        var app = CreateApp(new RecordingCommandRunner(workspace));
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        Assert.False(File.Exists(Path.Join(outputDirectory, "coverage.json")));
+        Assert.False(File.Exists(Path.Join(outputDirectory, "junit-old.xml")));
+        Assert.False(File.Exists(Path.Join(outputDirectory, "projects", "Old.Tests", "old.txt")));
+        Assert.False(File.Exists(Path.Join(outputDirectory, "reportgenerator", "old.txt")));
+        Assert.True(File.Exists(Path.Join(outputDirectory, "summary.txt")));
+        Assert.True(File.Exists(Path.Join(outputDirectory, "timings.json")));
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldBuildSolutionAndPassNoBuildToProjectTests()
     {
         using var workspace = TestRepo.Create();
@@ -169,6 +236,48 @@ public sealed class CoverageRunnerApplicationTests
         Assert.True(File.Exists(Path.Join(outputDirectory, "summary.txt")));
         Assert.True(File.Exists(Path.Join(outputDirectory, "timings.json")));
         Assert.True(File.Exists(Path.Join(outputDirectory, "junit-tools-1-Sample.Tests.xml")));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldReturnMergeExitCodeWhenMergeOnlyReportGenerationFails()
+    {
+        using var workspace = TestRepo.Create();
+        var sourceDirectory = Path.Join(workspace.Root, "coverage-shards");
+        var outputDirectory = Path.Join(workspace.Root, "merged");
+        Directory.CreateDirectory(sourceDirectory);
+        File.WriteAllText(
+            Path.Join(sourceDirectory, "coverage.cobertura.xml"),
+            "<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
+        var runner = new RecordingCommandRunner(workspace) { ReportGeneratorExitCode = 9 };
+        var app = CreateApp(runner);
+
+        var exitCode = await app.RunAsync(
+            ["--merge-only", sourceDirectory, "--output", outputDirectory],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(9, exitCode);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldReturnOneWhenMergeOnlySummaryCannotBeParsed()
+    {
+        using var workspace = TestRepo.Create();
+        var sourceDirectory = Path.Join(workspace.Root, "coverage-shards");
+        var outputDirectory = Path.Join(workspace.Root, "merged");
+        Directory.CreateDirectory(sourceDirectory);
+        File.WriteAllText(
+            Path.Join(sourceDirectory, "coverage.cobertura.xml"),
+            "<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
+        var runner = new RecordingCommandRunner(workspace) { ReportGeneratorCoverageText = "<coverage />" };
+        var app = CreateApp(runner);
+
+        var exitCode = await app.RunAsync(
+            ["--merge-only", sourceDirectory, "--output", outputDirectory],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(1, exitCode);
     }
 
     [Fact]
@@ -239,6 +348,51 @@ public sealed class CoverageRunnerApplicationTests
 
         Assert.Equal(1, exitCode);
         Assert.Contains("Failed to parse numeric coverage attributes", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldReturnOneWhenMergedCoverageAttributesAreNotNumeric()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            ReportGeneratorCoverageText =
+                "<coverage lines-covered=\"abc\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />",
+        };
+        var error = new StringWriter();
+        var app = CreateApp(runner, standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Failed to parse numeric coverage attributes", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldWriteZeroRatesWhenCoverageDenominatorsAreZero()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            ReportGeneratorCoverageText =
+                "<coverage lines-covered=\"0\" lines-valid=\"0\" branches-covered=\"0\" branches-valid=\"0\" />",
+        };
+        var output = new StringWriter();
+        var app = CreateApp(runner, output);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Line coverage: 0.00% (0/0)", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Branch coverage: 0.00% (0/0)", output.ToString(), StringComparison.Ordinal);
     }
 
     [Theory]

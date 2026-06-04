@@ -71,6 +71,27 @@ public sealed class CoverageRunnerOptionsTests
     }
 
     [Fact]
+    public void Parse_ShouldUseCurrentDirectoryWhenRepositoryRootCannotBeResolved()
+    {
+        var currentDirectory = Path.Join(Path.GetTempPath(), "coverage-runner-no-root-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(currentDirectory);
+        try
+        {
+            var result = CoverageRunnerOptions.Parse(
+                [],
+                currentDirectory,
+                new Dictionary<string, string?>());
+
+            Assert.NotNull(result.Options);
+            Assert.Equal(Path.GetFullPath(currentDirectory), result.Options.RepositoryRoot);
+        }
+        finally
+        {
+            Directory.Delete(currentDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Parse_ShouldDefaultNamedGroupsToSkipSolutionBuild()
     {
         using var workspace = TestRepo.Create();

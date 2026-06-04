@@ -15,6 +15,12 @@ public sealed class TestProjectClassifierTests
     }
 
     [Fact]
+    public void GetGroup_ShouldDefaultUnknownProjectsToCore()
+    {
+        Assert.Equal("core", TestProjectClassifier.GetGroup("Unknown/Sample.Tests/Sample.Tests.csproj"));
+    }
+
+    [Fact]
     public void IsExclusive_ShouldTreatIntegrationProjectsAsExclusive()
     {
         Assert.True(TestProjectClassifier.IsExclusive(

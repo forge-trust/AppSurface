@@ -267,8 +267,7 @@ internal sealed class CoverageRunnerApplication
 
     private static bool IsTestProjectPath(string projectPath)
     {
-        return projectPath.EndsWith("Tests.csproj", StringComparison.Ordinal)
-            || projectPath.EndsWith("IntegrationTests.csproj", StringComparison.Ordinal);
+        return projectPath.EndsWith("Tests.csproj", StringComparison.Ordinal);
     }
 
     private async Task<IReadOnlyList<ProjectRunResult>> RunScheduledProjectsAsync(
@@ -422,11 +421,6 @@ internal sealed class CoverageRunnerApplication
         }
 
         var mergeDirectory = Path.Join(options.OutputDirectory, "reportgenerator");
-        if (Directory.Exists(mergeDirectory))
-        {
-            Directory.Delete(mergeDirectory, recursive: true);
-        }
-
         Directory.CreateDirectory(mergeDirectory);
         var reports = string.Join(';', coverageFiles);
         var merge = await _commandRunner.RunAsync(

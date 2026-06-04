@@ -31,6 +31,11 @@ internal sealed class TestRepo : IDisposable
         _projects.Add(relativePath);
     }
 
+    public void AddSolutionProject(string projectPath)
+    {
+        _projects.Add(projectPath);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(Root))
