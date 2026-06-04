@@ -613,6 +613,200 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_Should_Copy_Deployment_Extra_After_Export()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var sourceRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-source-").FullName;
+        try
+        {
+            var sourcePath = Path.Join(sourceRoot, "CNAME");
+            await File.WriteAllTextAsync(sourcePath, "docs.example.com");
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            context.AddDeploymentExtra(sourcePath, "/CNAME");
+
+            await _sut.RunAsync(context);
+
+            var targetPath = Path.Join(tempDir, "CNAME");
+            Assert.True(File.Exists(targetPath));
+            Assert.Equal("docs.example.com", await File.ReadAllTextAsync(targetPath));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fail_When_Deployment_Extra_Targets_Generated_Output()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var sourceRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-source-").FullName;
+        try
+        {
+            var sourcePath = Path.Join(sourceRoot, "index.html");
+            await File.WriteAllTextAsync(sourcePath, "<html>extra</html>");
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            context.AddDeploymentExtra(sourcePath, "/index.html");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT007", diagnostic.Code);
+            Assert.Contains("[target-generated-collision]", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fail_Before_Crawl_When_ReleaseArchive_Has_Deployment_Extras()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var sourceRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-source-").FullName;
+        try
+        {
+            var sourcePath = Path.Join(sourceRoot, "CNAME");
+            await File.WriteAllTextAsync(sourcePath, "docs.example.com");
+            using var handler = new CountingHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            context.AddDeploymentExtra(sourcePath, "/CNAME");
+            context.EnableReleaseArchiveManifest();
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT007", diagnostic.Code);
+            Assert.Contains("[release-archive-incompatible]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Equal(0, handler.RequestCount);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fail_When_Deployment_Extra_Target_Already_Exists()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var sourceRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-source-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(tempDir, "CNAME"), "existing.example.com");
+            var sourcePath = Path.Join(sourceRoot, "CNAME");
+            await File.WriteAllTextAsync(sourcePath, "docs.example.com");
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            context.AddDeploymentExtra(sourcePath, "/CNAME");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT007", diagnostic.Code);
+            Assert.Contains("[target-exists]", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Validate_All_Deployment_Extra_Target_Parents_Before_Copying()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var sourceRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-source-").FullName;
+        var outsideRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-outside-").FullName;
+        try
+        {
+            var cnameSourcePath = Path.Join(sourceRoot, "CNAME");
+            await File.WriteAllTextAsync(cnameSourcePath, "docs.example.com");
+            var securitySourcePath = Path.Join(sourceRoot, "security.txt");
+            await File.WriteAllTextAsync(securitySourcePath, "Contact: mailto:security@example.com");
+            var linkedParent = Path.Join(tempDir, "linked");
+            if (!TryCreateDirectorySymlink(linkedParent, outsideRoot))
+            {
+                return;
+            }
+
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            context.AddDeploymentExtra(cnameSourcePath, "/CNAME");
+            context.AddDeploymentExtra(securitySourcePath, "/linked/security.txt");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT007", diagnostic.Code);
+            Assert.Contains("[target-parent-symlink]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(tempDir, "CNAME")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+
+            if (Directory.Exists(outsideRoot))
+            {
+                Directory.Delete(outsideRoot, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Write_404Html_When_ReservedRoute_ReturnsHtml()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
@@ -4791,6 +4985,41 @@ public class ExportEngineTests
                     Location = new Uri("/loop", UriKind.Relative)
                 }
             });
+        }
+    }
+
+    private sealed class CountingHandler : HttpMessageHandler
+    {
+        public int RequestCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("<html><body><h1>Home</h1></body></html>", Encoding.UTF8, "text/html")
+            });
+        }
+    }
+
+    private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
         }
     }
 

@@ -426,7 +426,8 @@
           "CliWrap": "[3.10.1, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
-          "ForgeTrust.RazorWire": "[0.1.0, )"
+          "ForgeTrust.RazorWire": "[0.1.0, )",
+          "YamlDotNet": "[18.0.0, )"
         }
       },
       "AngleSharp": {
@@ -547,6 +548,12 @@
           "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.8",
           "Microsoft.Extensions.Primitives": "10.0.8"
         }
+      },
+      "YamlDotNet": {
+        "type": "CentralTransitive",
+        "requested": "[18.0.0, )",
+        "resolved": "18.0.0",
+        "contentHash": "ptHVgcYmLejGuWXV7RMFoEqFKYMXnieOlWLPzEslfDtzZ9ngMhjYwykfqjBN2+fMEAEyobozkj07lKEpR4dssA=="
       }
     }
   }

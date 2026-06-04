@@ -32,6 +32,7 @@ public class ProgramEntryPointTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Export a RazorWire site to a static directory.", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--seeds", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--publish-root-extras", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--mode", result.AllText, StringComparison.Ordinal);
         Assert.Contains("cdn", result.AllText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("--routes", result.AllText, StringComparison.Ordinal);

@@ -63,4 +63,57 @@ public class ExportContextTests
 
         Assert.Equal("publicOrigin", exception.ParamName);
     }
+
+    [Fact]
+    public async Task AddDeploymentExtra_Should_Register_Absolute_Source_And_PublishPath()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-context-").FullName;
+        try
+        {
+            var sourcePath = Path.Join(tempDir, "CNAME");
+            await File.WriteAllTextAsync(sourcePath, "docs.example.com");
+            var context = new ExportContext("dist", null, "http://localhost:5000");
+
+            context.AddDeploymentExtra(sourcePath, "/CNAME");
+
+            var extra = Assert.Single(context.DeploymentExtras);
+            Assert.Equal(sourcePath, extra.SourcePath);
+            Assert.Equal("/CNAME", extra.PublishPath);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task AddDeploymentExtra_Should_Reject_Duplicate_Targets_Case_Insensitively()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-context-").FullName;
+        try
+        {
+            var first = Path.Join(tempDir, "CNAME");
+            var second = Path.Join(tempDir, "cname.txt");
+            await File.WriteAllTextAsync(first, "docs.example.com");
+            await File.WriteAllTextAsync(second, "docs.example.net");
+            var context = new ExportContext("dist", null, "http://localhost:5000");
+
+            context.AddDeploymentExtra(first, "/CNAME");
+            var exception = Assert.Throws<ExportValidationException>(() => context.AddDeploymentExtra(second, "/cname"));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT007", diagnostic.Code);
+            Assert.Contains("[target-duplicate]", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
 }

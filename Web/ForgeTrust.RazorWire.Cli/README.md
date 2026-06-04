@@ -79,6 +79,7 @@ Exports a RazorWire application to a static directory.
 **Options:**
 - **`-o|--output <path>`**: Output directory where the static files will be saved (default: `dist`).
 - **`-r|--seeds <path>`**: Optional path to a file containing seed routes to crawl.
+- **`--publish-root-extras <path>`**: Optional YAML manifest for explicit single-file deployment extras copied into the publish root after generated output is proven collision-free.
 - **`-u|--url <url>`**: Base URL of a running application used for crawling.
 - **`-p|--project <path.csproj>`**: Path to a .NET project to run automatically and export.
 - **`-d|--dll <path.dll>`**: Path to a .NET DLL to run automatically and export.
@@ -118,41 +119,73 @@ Use this quick chooser before exporting:
 RazorWire export owns the app route graph and exporter-managed provider artifacts. It does not copy arbitrary project-root files into the output directory. Use this boundary when preparing folders for static hosts:
 
 - `--seeds` are routes, not local paths. A seed file line such as `/pricing` asks the exporter to crawl the app route `/pricing`; a line such as `deploy/CNAME` is not a request to copy `./deploy/CNAME`.
+- `--publish-root-extras` are deployment-owned publish-root files, not routes. The option reads a checked-in YAML manifest and copies only the named regular files after export proves each target path is not generated, reserved, preexisting, or hidden inside an exact release archive.
 - The conventional AppSurface 404 page uses the reserved `/_appsurface/errors/404` route. When that route is available and returns HTML, the exporter stages it as root `404.html` before normal crawl processing and validates it like any other CDN artifact.
-- `CNAME` and similar opaque deployment files are deployment-owned extras. Copy them into the publish root after export with explicit allowlisted commands.
-- `_redirects` is exporter-owned when the export strategy is Netlify, for example through a host integration using `ExportRedirectStrategy.Netlify` or through `appsurface docs export --redirects netlify`. Do not hand-author or copy `_redirects` into the output for that provider path.
+- `CNAME`, `.nojekyll`, and `/.well-known/security.txt` are deployment-owned extras when your host needs them. Keep them in a deployment directory such as `deploy/` and name each file explicitly in `deploy/export-extras.yml`.
+- `/_redirects` and `/_headers` are reserved in v1. `_redirects` is exporter-owned when the export strategy is Netlify, for example through a host integration using `ExportRedirectStrategy.Netlify` or through `appsurface docs export --redirects netlify`. Future provider headers and redirects should be structured exporter features, not raw copy-through files.
 
-For a static host that needs a custom domain and an app-served `/404.html` route, use this shape:
+The manifest schema is intentionally small:
 
-```bash
-printf '%s\n' '/' '/404.html' > seeds.txt
-razorwire export --project ./MySite.csproj --output ./dist --seeds ./seeds.txt
-install -m 0644 ./deploy/CNAME ./dist/CNAME
-test -f ./dist/CNAME
-test -f ./dist/404.html
+```yaml
+version: 1
+extras:
+  - source: CNAME
+    publishPath: /CNAME
 ```
 
-Seed `/404.html` only when the app intentionally serves `/404.html` and is not relying on the conventional AppSurface 404 route. When the app uses AppSurface Web's conventional browser status pages, let `/_appsurface/errors/404` stage root `404.html`; adding `/404.html` to the seed file will not override the already staged conventional page.
+`source` resolves relative to the manifest directory and must stay under that directory without symlink or reparse traversal. `publishPath` is a publish-root file path, not a route: it must start with `/`, must not contain traversal, encoded slashes, query strings, fragments, protocols, control characters, or invalid filesystem segments, and is matched case-insensitively against exporter-owned paths.
+
+For GitHub Pages branch or folder publishing with a custom domain:
+
+```bash
+mkdir -p deploy
+printf '%s\n' 'www.example.com' > deploy/CNAME
+cat > deploy/export-extras.yml <<'YAML'
+version: 1
+extras:
+  - source: CNAME
+    publishPath: /CNAME
+YAML
+razorwire export --project ./MySite.csproj --output ./dist --publish-root-extras ./deploy/export-extras.yml
+test -f ./dist/CNAME
+```
+
+When the site also needs an app-served `/404.html` route, add `/404.html` to `--seeds` only when the app intentionally serves that route and is not relying on the conventional AppSurface 404 route. When the app uses AppSurface Web's conventional browser status pages, let `/_appsurface/errors/404` stage root `404.html`; adding `/404.html` to the seed file will not override the already staged conventional page.
+
+Custom GitHub Actions Pages artifact workflows can still assemble the final upload around the exported folder. Keep the extras manifest in the repository, run `razorwire export` with `--publish-root-extras`, then upload the resulting publish root; do not add a later broad copy step that can overwrite exporter-owned files.
 
 | Need | Recommended path |
 | --- | --- |
 | Conventional AppSurface 404 page | Serve `/_appsurface/errors/404`; export stages root `404.html` when the route returns HTML. |
 | Host-served custom `/404.html` route without conventional AppSurface 404 | Add `/404.html` to the seed route file. |
-| GitHub Pages custom domain | Copy `./deploy/CNAME` to `./dist/CNAME` after export and verify it exists. |
+| GitHub Pages custom domain | Add `deploy/CNAME` to `deploy/export-extras.yml` with `publishPath: /CNAME`, then export with `--publish-root-extras`. |
+| GitHub Pages Jekyll bypass | Add `deploy/.nojekyll` with `publishPath: /.nojekyll`. |
+| Security contact file | Add `deploy/.well-known/security.txt` with `publishPath: /.well-known/security.txt`. |
 | Netlify redirect aliases | Use `ExportRedirectStrategy.Netlify` in the host integration, or `appsurface docs export --redirects netlify` for AppSurface Docs, so the exporter owns `_redirects`. |
-| Other provider-owned opaque files | Copy a named allowlisted file from deployment configuration after export, unless the exporter documents ownership of that path. |
-| AppSurface Docs exact release archive plus deployment extras | Keep exact release trees clean for `.appsurface-docs-release-manifest.json`; copy publish-root extras such as `CNAME` outside the immutable exact release tree. |
+| Netlify headers | Reserved in v1; do not copy `/_headers` through deployment extras. |
+| AppSurface Docs exact release archive plus deployment extras | Keep exact release trees clean for `.appsurface-docs-release-manifest.json`; copy publish-root extras such as `CNAME` into the surrounding publish root outside the immutable exact release tree. |
 
-Do not copy the repository root, broad globs, symlinks, local config, secrets, generated credentials, or unrelated deployment folders into `./dist`. Prefer a deployment-owned directory such as `./deploy` and one explicit copy command per file.
+Why not `public/`? RazorWire exports from the running app and validates the generated artifact graph before writing deployment extras. A framework-style `public/` overlay would blur route-owned files, provider-owned files, stale output, secrets, and generated artifacts. Use `deploy/export-extras.yml` instead: every extra is named, validated, copied without overwrite, and rejected if it collides with a generated route artifact, provider file, `404.html`, docs archive manifest, or existing final target.
+
+Migration examples:
+
+| Old step | New step |
+| --- | --- |
+| `install -m 0644 ./deploy/CNAME ./dist/CNAME` | Add `source: CNAME`, `publishPath: /CNAME` to `deploy/export-extras.yml`; pass `--publish-root-extras ./deploy/export-extras.yml`. |
+| `cp -R public/* dist/` | Move only needed single files into `deploy/`, list each one in the manifest, and let export reject collisions. |
+| `printf '/old /new 301!' > dist/_redirects` | Register redirect aliases and select `ExportRedirectStrategy.Netlify`, or use `appsurface docs export --redirects netlify` for AppSurface Docs. |
+
+Do not copy the repository root, broad globs, symlinks, local config, secrets, generated credentials, or unrelated deployment folders into `./dist`. Deployment extras are explicit single regular files only; v1 has no directories, globs, symlink following, overlays, overwrite mode, provider profiles, or raw provider headers/redirects.
 
 Troubleshooting:
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `CNAME` is missing from the uploaded site | Export crawled app routes but did not copy deployment-owned extras. | Run the explicit post-export copy and `test -f ./dist/CNAME` in CI. |
-| A seed file contains `deploy/CNAME`, but the export still succeeds without `CNAME` | Seeds are routes, not local paths; if no valid seed routes remain, export can fall back to `/`. | Put route paths such as `/` and `/404.html` in the seed file, then copy `CNAME` after export. |
+| `CNAME` is missing from the uploaded site | Export crawled app routes but no extras manifest registered the deployment-owned file. | Add `deploy/export-extras.yml`, pass `--publish-root-extras`, and verify `test -f ./dist/CNAME` in CI. |
+| A seed file contains `deploy/CNAME`, but the export still succeeds without `CNAME` | Seeds are routes, not local paths; if no valid seed routes remain, export can fall back to `/`. | Put route paths such as `/` and `/404.html` in the seed file, then register `CNAME` with `--publish-root-extras`. |
 | `404.html` is missing or not the page you expected | The app neither served the conventional `/_appsurface/errors/404` HTML route nor exposed the intended `/404.html` route as a seed. | Use the conventional route for AppSurface 404 pages, or seed `/404.html` for a deliberate app-served page and verify `test -f ./dist/404.html`. |
-| `_redirects` collides with generated redirect output | A deployment step copied a hand-authored provider artifact into a path the exporter owns. | Remove the copied `_redirects` file and select the Netlify redirect strategy through the host integration or `appsurface docs export --redirects netlify`. |
+| `RWEXPORT007 [target-reserved]` reports `/_redirects` or `/_headers` | The manifest tried to raw-copy a provider file reserved by the exporter. | Remove the raw extra and select the structured redirect/header feature when available; for Netlify redirects, use the Netlify redirect strategy. |
+| `RWEXPORT007 [target-generated-collision]` reports an extra path | The manifest target matches a generated route artifact, redirect artifact, 404 page, provider file, docs manifest, or existing output file. | Change the deployment file path or remove the extra; generated output owns that publish path. |
 | AppSurface Docs exact release verification fails after adding hidden deployment files | The `.appsurface-docs-release-manifest.json` archive contract expects a clean exact release tree. | Export exact releases to a clean directory, pin the manifest, then copy deployment extras into the surrounding publish root. |
 
 CDN validation fails the export when exporter-managed dependencies cannot be represented as static artifacts. Diagnostics use stable codes and include the discovered surface, such as `<img src>`, `<a href>`, `stylesheet url()`, or `stylesheet @import string`, plus the normalized path the exporter tried to prove:
@@ -163,6 +196,7 @@ CDN validation fails the export when exporter-managed dependencies cannot be rep
 - `RWEXPORT004`: a managed internal URL could not be rewritten to an emitted artifact URL. Seed or expose the target route so it emits an artifact, or mark authoring-only anchors with `data-rw-export-ignore`.
 - `RWEXPORT005`: a registered redirect alias cannot safely point at its canonical route, collides with another route or provider redirect output, or was already crawled as a normal HTML page. Fix the host redirect registration so aliases map to exported canonical routes without artifact collisions.
 - `RWEXPORT006`: an export found anti-forgery behavior that cannot run safely in the selected mode. CDN mode rejects any anti-forgery surface because a plain static host cannot mint runtime tokens. Hybrid RazorWire-managed forms are auto-converted to lazy token refresh when they have a safe app-owned action and credentialed split-origin live calls are enabled. Export fails early when the form opts out, posts to an external action, uses `--hybrid-credentials omit` with `--live-origin`, or is not managed by RazorWire.
+- `RWEXPORT007`: a publish-root deployment extra could not be accepted. Stable reason labels include `schema`, `source-missing`, `source-directory`, `source-symlink`, `target-invalid`, `target-duplicate`, `target-reserved`, `target-generated-collision`, `target-exists`, `target-parent-symlink`, `copy-failed`, and `release-archive-incompatible`.
 
 `hybrid` mode preserves the older application-style URL behavior. Use it when the exported directory will still be served by infrastructure that resolves extensionless URLs, dynamic frame endpoints, or other live-server behavior. Hybrid mode tolerates missing page and live-behavior references that server-backed infrastructure may own, but it still fails missing browser-delivered static assets with `RWEXPORT003`: scripts, stylesheets, module preloads, icons, images, `srcset` candidates, CSS `url(...)`, CSS `@import`, and asset-shaped preload or prefetch hints. Canonical metadata, DNS hints, anchors, and ambiguous page/API-shaped preload or prefetch hints are not hybrid static-asset failures. Safe RazorWire forms with static anti-forgery tokens are converted to lazy runtime refresh in hybrid mode even without `--live-origin`; this supports same-origin CDN passthrough to the backend for RazorWire endpoints.
 

@@ -20,6 +20,7 @@ public class ExportContext
     public string? SeedRoutesPath { get; }
 
     private readonly List<string> _additionalSeedRoutes = [];
+    private readonly List<ExportDeploymentExtra> _deploymentExtras = [];
 
     /// <summary>
     /// Gets optional in-memory seed routes used when <see cref="SeedRoutesPath"/> is not configured.
@@ -41,6 +42,16 @@ public class ExportContext
     /// exports do not depend on every page being linked from the initial crawl roots.
     /// </remarks>
     public IReadOnlyList<string> AdditionalSeedRoutes => _additionalSeedRoutes;
+
+    /// <summary>
+    /// Gets deployment-owned files that should be copied into the publish root after exporter-owned artifacts are proven.
+    /// </summary>
+    /// <remarks>
+    /// The public registration surface is <see cref="AddDeploymentExtra(string,string)"/>. This internal view lets the
+    /// export engine validate collisions against generated artifacts and then materialize the files. Entries are already
+    /// normalized to absolute source file paths and root-relative publish paths.
+    /// </remarks>
+    internal IReadOnlyList<ExportDeploymentExtra> DeploymentExtras => _deploymentExtras;
 
     /// <summary>
     /// Gets the base URL of the source application being exported.
@@ -229,6 +240,53 @@ public class ExportContext
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(seedRoute);
         _additionalSeedRoutes.Add(seedRoute);
+    }
+
+    /// <summary>
+    /// Registers a deployment-owned file that should be copied into the publish root after export validation succeeds.
+    /// </summary>
+    /// <param name="sourcePath">Absolute path to an existing regular local file. Directories, symlinks, junctions, and reparse points are rejected.</param>
+    /// <param name="publishPath">
+    /// Root-relative publish-root file path such as <c>/CNAME</c> or <c>/.well-known/security.txt</c>. This is not an app
+    /// route, seed route, URL, or directory path.
+    /// </param>
+    /// <remarks>
+    /// Deployment extras are explicit single files for host metadata such as GitHub Pages <c>CNAME</c> files. They are
+    /// validated with the same rules as CLI manifest entries, never overwrite generated exporter output, and are
+    /// incompatible with exact AppSurface Docs release archive exports. Raw provider-owned files such as
+    /// <c>/_redirects</c> and <c>/_headers</c> are reserved so future structured provider support can remain
+    /// exporter-owned.
+    /// </remarks>
+    /// <exception cref="ExportValidationException">
+    /// Thrown with <c>RWEXPORT007</c> diagnostics when the source file or publish path violates the deployment extras
+    /// contract.
+    /// </exception>
+    public void AddDeploymentExtra(string sourcePath, string publishPath)
+    {
+        var extra = ExportDeploymentExtras.CreateRegisteredExtra(sourcePath, publishPath);
+        if (_deploymentExtras.Any(existing => string.Equals(existing.PublishPath, extra.PublishPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw ExportDeploymentExtras.CreateException(
+                "target-duplicate",
+                $"Publish-root deployment extra target '{extra.PublishPath}' is already registered. Fix: remove duplicate deployment extras; publish paths are matched case-insensitively.",
+                extra.PublishPath);
+        }
+
+        _deploymentExtras.Add(extra);
+    }
+
+    internal void AddDeploymentExtra(ExportDeploymentExtra extra)
+    {
+        ArgumentNullException.ThrowIfNull(extra);
+        if (_deploymentExtras.Any(existing => string.Equals(existing.PublishPath, extra.PublishPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw ExportDeploymentExtras.CreateException(
+                "target-duplicate",
+                $"Publish-root deployment extra target '{extra.PublishPath}' is already registered. Fix: remove duplicate deployment extras; publish paths are matched case-insensitively.",
+                extra.PublishPath);
+        }
+
+        _deploymentExtras.Add(extra);
     }
 
     /// <summary>
