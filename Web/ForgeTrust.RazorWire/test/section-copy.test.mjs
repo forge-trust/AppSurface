@@ -57,6 +57,7 @@ test('section copy shows an inline fallback when clipboard is unavailable', asyn
   const input = fallback.querySelector('input');
   assert.equal(input.value, 'https://docs.example.test/guide?tab=api#intro');
   assert.equal(input.readOnly, true);
+  assert.equal(input.getAttribute('aria-label'), 'Section link');
   assert.equal(button.getAttribute('data-rw-section-copy-state'), 'fallback');
 
   fallback.dispatchEvent(createEvent('keydown', { key: 'Escape' }));
@@ -78,6 +79,41 @@ test('section copy records diagnostics for malformed controls', () => {
   assert.equal(diagnostics.length, 1);
   assert.match(diagnostics[0].message, /is not a button/);
   assert.match(diagnostics[0].docs, /section-copy\.md#troubleshooting/);
+});
+
+test('section copy retires the ambient controller when explicit roots own all markers', async () => {
+  let copyCount = 0;
+  const { context, document } = loadSectionCopyRuntime({
+    clipboard: {
+      writeText: async () => {
+        copyCount += 1;
+      }
+    }
+  });
+  const target = document.createElement('h2');
+  target.id = 'intro';
+  target.textContent = 'Intro';
+  const button = document.createElement('button');
+  button.setAttribute('data-rw-section-copy', 'intro');
+  document.body.append(target, button);
+
+  const manager = context.window.RazorWire.sectionCopyManager;
+  manager.scan();
+  assert.equal(manager.controllers.has(document.body), true);
+
+  const root = document.createElement('section');
+  root.setAttribute('data-rw-section-copy-root', 'true');
+  root.append(target, button);
+  document.body.appendChild(root);
+  manager.scan();
+
+  assert.equal(manager.controllers.has(document.body), false);
+  assert.equal(manager.controllers.has(root), true);
+
+  button.dispatchEvent(createEvent('click'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(copyCount, 1);
 });
 
 function loadSectionCopyRuntime(options = {}) {
@@ -209,6 +245,9 @@ class FakeElement {
   }
 
   appendChild(node) {
+    if (node.parentElement) {
+      node.parentElement.children = node.parentElement.children.filter(child => child !== node);
+    }
     node.parentElement = this;
     node.ownerDocument = this.ownerDocument;
     node.isConnected = true;

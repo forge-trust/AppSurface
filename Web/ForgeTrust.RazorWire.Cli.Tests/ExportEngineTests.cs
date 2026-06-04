@@ -3174,6 +3174,13 @@ public class ExportEngineTests
     public void ExtractReferences_Should_Add_SectionCopy_Runtime_For_Lazy_Markup()
     {
         var html = """
+            <script>
+            (() => {
+              const source = "/app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc";
+              const marker = "data-rw-section-copy-runtime";
+              const selectors = ["[data-rw-section-copy]", "[data-rw-section-copy-target]"];
+            })();
+            </script>
             <main>
               <h2 id="intro" data-rw-section-copy-target="true">Intro</h2>
               <button type="button" data-rw-section-copy="#intro">Copy</button>
@@ -3182,11 +3189,13 @@ public class ExportEngineTests
 
         var reference = Assert.Single(
             _sut.ExtractReferences(html, "/docs/start", htmlScope: true),
-            reference => reference.Path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
+            reference => reference.Path == "/app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
 
         Assert.Equal(ExportReferenceKind.ScriptSrc, reference.Kind);
         Assert.Equal(ExportReferenceRole.StaticAsset, reference.Role);
-        Assert.Equal("<h2 data-rw-section-copy-target>", reference.Provenance?.DisplaySource);
+        Assert.Equal("?v=abc", reference.Query);
+        Assert.Equal("<script>", reference.Provenance?.DisplaySource);
+        Assert.Equal("RazorWire section-copy autoload source", reference.Provenance?.TokenType);
 
         var withExplicitScript = """
             <script src="/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc"></script>
@@ -3198,6 +3207,15 @@ public class ExportEngineTests
             .ToArray();
         Assert.Single(explicitReferences);
         Assert.Equal("?v=abc", explicitReferences[0].Query);
+
+        var withoutAutoload = """
+            <button type="button" data-rw-section-copy="intro">Copy</button>
+            """;
+
+        var syntheticReference = Assert.Single(
+            _sut.ExtractReferences(withoutAutoload, "/docs/start", htmlScope: true),
+            reference => reference.Path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
+        Assert.Equal("<button data-rw-section-copy>", syntheticReference.Provenance?.DisplaySource);
     }
 
     [Fact]

@@ -52,8 +52,12 @@ interface SectionCopyBinding {
             }
 
             const ambientRoot = document.body ?? document.documentElement;
-            if (ambientRoot && this.hasUnownedMarkers(explicitRoots)) {
-                this.register(ambientRoot);
+            if (ambientRoot && !explicitRoots.includes(ambientRoot)) {
+                if (this.hasUnownedMarkers(explicitRoots)) {
+                    this.register(ambientRoot);
+                } else {
+                    this.unregister(ambientRoot);
+                }
             }
 
             this.prune();
@@ -69,6 +73,14 @@ interface SectionCopyBinding {
             const controller = new SectionCopyController(root, this);
             this.controllers.set(root, controller);
             controller.connect();
+        }
+
+        unregister(root: Element) {
+            const controller = this.controllers.get(root);
+            if (!controller) return;
+
+            controller.disconnect();
+            this.controllers.delete(root);
         }
 
         prune() {
@@ -302,6 +314,7 @@ interface SectionCopyBinding {
             input.type = 'text';
             input.readOnly = true;
             input.value = url;
+            input.setAttribute('aria-label', 'Section link');
 
             const closeButton = document.createElement('button');
             closeButton.type = 'button';

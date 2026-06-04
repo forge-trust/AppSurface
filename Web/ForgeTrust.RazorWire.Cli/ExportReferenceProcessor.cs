@@ -109,6 +109,9 @@ internal sealed partial class ExportReferenceProcessor
 
     private const string RazorWirePageNavigationRuntimeMarker = "data-rw-page-navigation-runtime";
     private const string RazorWirePageNavigationSelectorMarker = "[data-rw-page-nav]";
+    private const string RazorWireSectionCopyRuntimeMarker = "data-rw-section-copy-runtime";
+    private const string RazorWireSectionCopyButtonSelectorMarker = "[data-rw-section-copy]";
+    private const string RazorWireSectionCopyTargetSelectorMarker = "[data-rw-section-copy-target]";
 
     private readonly HtmlParser _htmlParser = new();
     private readonly ILogger _logger;
@@ -328,7 +331,7 @@ internal sealed partial class ExportReferenceProcessor
             references.AddRange(ExtractCssReferences(element.GetAttribute("style") ?? string.Empty, currentRoute, "style", element.LocalName, "style"));
         }
 
-        AddSyntheticSectionCopyRuntimeReference(references, document, currentRoute, attributeLookup);
+        AddRazorWireSectionCopyAutoloadReferences(references, document, currentRoute, attributeLookup);
 
         return references;
     }
@@ -356,7 +359,7 @@ internal sealed partial class ExportReferenceProcessor
         }
     }
 
-    private void AddSyntheticSectionCopyRuntimeReference(
+    private void AddRazorWireSectionCopyAutoloadReferences(
         ICollection<ExportReference> references,
         IDocument document,
         string currentRoute,
@@ -374,6 +377,23 @@ internal sealed partial class ExportReferenceProcessor
         if (marker is null)
         {
             return;
+        }
+
+        foreach (var script in document.QuerySelectorAll("script:not([src])").Select(element => element.TextContent))
+        {
+            if (script.Contains(RazorWireSectionCopyRuntimeMarker, StringComparison.Ordinal)
+                && script.Contains(RazorWireSectionCopyButtonSelectorMarker, StringComparison.Ordinal)
+                && script.Contains(RazorWireSectionCopyTargetSelectorMarker, StringComparison.Ordinal)
+                && TryExtractJavaScriptStringAssignment(script, "source", out var source))
+            {
+                AddReference(
+                    references,
+                    source,
+                    ExportReferenceKind.ScriptSrc,
+                    currentRoute,
+                    CreateInlineScriptProvenance("RazorWire section-copy autoload source"));
+                return;
+            }
         }
 
         var attributeName = marker.HasAttribute("data-rw-section-copy")
