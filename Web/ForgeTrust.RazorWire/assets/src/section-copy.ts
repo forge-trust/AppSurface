@@ -47,6 +47,7 @@ interface SectionCopyBinding {
 
         scan() {
             const explicitRoots = Array.from(document.querySelectorAll('[data-rw-section-copy-root]'));
+            const ownedRoots = new Set<Element>(explicitRoots);
             for (const root of explicitRoots) {
                 this.register(root);
             }
@@ -55,11 +56,13 @@ interface SectionCopyBinding {
             if (ambientRoot && !explicitRoots.includes(ambientRoot)) {
                 if (this.hasUnownedMarkers(explicitRoots)) {
                     this.register(ambientRoot);
+                    ownedRoots.add(ambientRoot);
                 } else {
                     this.unregister(ambientRoot);
                 }
             }
 
+            this.unregisterUnownedControllers(ownedRoots);
             this.prune();
         }
 
@@ -81,6 +84,14 @@ interface SectionCopyBinding {
 
             controller.disconnect();
             this.controllers.delete(root);
+        }
+
+        unregisterUnownedControllers(ownedRoots: Set<Element>) {
+            for (const root of this.controllers.keys()) {
+                if (root.isConnected && !ownedRoots.has(root)) {
+                    this.unregister(root);
+                }
+            }
         }
 
         prune() {

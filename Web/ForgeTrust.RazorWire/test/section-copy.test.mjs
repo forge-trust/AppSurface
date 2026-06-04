@@ -177,6 +177,41 @@ test('section copy does not double-bind markers inside nested explicit roots', a
   assert.equal(copyCount, 1);
 });
 
+test('section copy unregisters connected roots that lose ownership', async () => {
+  let copyCount = 0;
+  const { context, document } = loadSectionCopyRuntime({
+    clipboard: {
+      writeText: async () => {
+        copyCount += 1;
+      }
+    }
+  });
+  const root = document.createElement('section');
+  root.setAttribute('data-rw-section-copy-root', 'true');
+  const target = document.createElement('h2');
+  target.id = 'moved';
+  target.textContent = 'Moved';
+  const button = document.createElement('button');
+  button.setAttribute('data-rw-section-copy', 'moved');
+  root.append(target, button);
+  document.body.appendChild(root);
+
+  const manager = context.window.RazorWire.sectionCopyManager;
+  manager.scan();
+  assert.equal(manager.controllers.has(root), true);
+
+  root.removeAttribute('data-rw-section-copy-root');
+  manager.scan();
+
+  assert.equal(manager.controllers.has(root), false);
+  assert.equal(manager.controllers.has(document.body), true);
+
+  button.dispatchEvent(createEvent('click'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(copyCount, 1);
+});
+
 function loadSectionCopyRuntime(options = {}) {
   const document = new FakeDocument();
   const window = {
