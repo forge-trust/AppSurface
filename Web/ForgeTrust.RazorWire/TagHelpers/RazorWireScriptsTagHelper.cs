@@ -137,7 +137,7 @@ public class RazorWireScriptsTagHelper : TagHelper
                 pageNavigationJs,
                 "data-rw-page-navigation-runtime",
                 "RazorWirePageNavigationInitialized",
-                ["[data-rw-page-nav]"]);
+                ["rw-page-nav", "[data-rw-page-nav]"]);
         }
 
         if (SectionCopy)

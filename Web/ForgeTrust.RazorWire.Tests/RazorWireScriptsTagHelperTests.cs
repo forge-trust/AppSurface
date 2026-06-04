@@ -89,7 +89,7 @@ public class RazorWireScriptsTagHelperTests
             content);
         Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789\"", content);
         Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc\"", content);
-        Assert.Contains("const selectors = [\"[data-rw-page-nav]\"];", content);
+        Assert.Contains("const selectors = [\"rw-page-nav\", \"[data-rw-page-nav]\"];", content);
         Assert.Contains("data-rw-page-navigation-runtime", content);
         Assert.Contains("RazorWirePageNavigationInitialized", content);
         Assert.Contains("data-rw-section-copy-runtime", content);
@@ -124,7 +124,7 @@ public class RazorWireScriptsTagHelperTests
             "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789\"",
             content);
         Assert.Contains("data-rw-page-navigation-runtime=\"eager\"", content);
-        Assert.DoesNotContain("const selectors = [\"[data-rw-page-nav]\"];", content);
+        Assert.DoesNotContain("const selectors = [\"rw-page-nav\", \"[data-rw-page-nav]\"];", content);
         Assert.Contains("data-rw-section-copy-runtime", content);
     }
 

@@ -53,7 +53,11 @@ window.RazorWire = window.RazorWire || {};
  * @source <rw:scripts /> with rendered `[data-rw-section-copy]` or `[data-rw-section-copy-target]` markup
  * @property {Function} scan - Re-scans the document for section-copy roots and markers after custom DOM updates.
  * @property {Function} prune - Removes controllers for disconnected roots.
- * @property {Function} getDiagnostics - Returns section copy diagnostics recorded since startup.
+ * @property {Function} getDiagnostics - Returns an array of stable section-copy diagnostic objects recorded since startup.
+ * @property {string} getDiagnostics[].message - Required reader-facing problem statement for the invalid marker or runtime state.
+ * @property {string} getDiagnostics[].impact - Required explanation of the behavior RazorWire skipped, changed, or could not guarantee.
+ * @property {string} getDiagnostics[].fix - Required remediation guidance suitable for docs, tests, and development diagnostics.
+ * @property {string} getDiagnostics[].docs - Required repository documentation path for the related troubleshooting guidance.
  * @property {Function} clearDiagnostics - Clears recorded section copy diagnostics.
  */
 

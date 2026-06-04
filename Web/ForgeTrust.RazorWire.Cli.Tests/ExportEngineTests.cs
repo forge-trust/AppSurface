@@ -4566,28 +4566,42 @@ public class ExportEngineTests
             var path = request.RequestUri?.AbsolutePath ?? "/";
             if (path == "/" || path == "/index")
             {
-                var html = """
+                return Task.FromResult(CreateHtmlResponse("""
                     <html>
                       <body>
                         <h2 id="intro" data-rw-section-copy-target="true">Intro</h2>
                       </body>
                     </html>
-                    """;
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(html, Encoding.UTF8, "text/html")
-                });
+                    """));
             }
 
             if (path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js")
             {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent("window.RazorWire = window.RazorWire || {};", Encoding.UTF8, "text/javascript")
-                });
+                return Task.FromResult(CreateScriptResponse("window.RazorWire = window.RazorWire || {};"));
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            return Task.FromResult(CreateNotFoundResponse());
+        }
+
+        private static HttpResponseMessage CreateHtmlResponse(string html)
+        {
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(html, Encoding.UTF8, "text/html")
+            };
+        }
+
+        private static HttpResponseMessage CreateScriptResponse(string script)
+        {
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(script, Encoding.UTF8, "text/javascript")
+            };
+        }
+
+        private static HttpResponseMessage CreateNotFoundResponse()
+        {
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
     }
 

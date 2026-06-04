@@ -57,7 +57,7 @@ test('section copy shows an inline fallback when clipboard is unavailable', asyn
   const input = fallback.querySelector('input');
   assert.equal(input.value, 'https://docs.example.test/guide?tab=api#intro');
   assert.equal(input.readOnly, true);
-  assert.equal(input.getAttribute('aria-label'), 'Section link');
+  assert.equal(input.getAttribute('aria-label'), 'Section link for Intro');
   assert.equal(button.getAttribute('data-rw-section-copy-state'), 'fallback');
 
   fallback.dispatchEvent(createEvent('keydown', { key: 'Escape' }));
@@ -114,6 +114,48 @@ test('section copy retires the ambient controller when explicit roots own all ma
   await new Promise(resolve => setTimeout(resolve, 0));
 
   assert.equal(copyCount, 1);
+});
+
+test('section copy keeps ambient and explicit root ownership separate', async () => {
+  const copiedUrls = [];
+  const { context, document } = loadSectionCopyRuntime({
+    clipboard: {
+      writeText: async value => {
+        copiedUrls.push(value);
+      }
+    }
+  });
+
+  const explicitRoot = document.createElement('section');
+  explicitRoot.setAttribute('data-rw-section-copy-root', 'true');
+  const explicitTarget = document.createElement('h2');
+  explicitTarget.id = 'owned';
+  explicitTarget.textContent = 'Owned';
+  const explicitButton = document.createElement('button');
+  explicitButton.setAttribute('data-rw-section-copy', 'owned');
+  explicitRoot.append(explicitTarget, explicitButton);
+
+  const ambientTarget = document.createElement('h2');
+  ambientTarget.id = 'ambient';
+  ambientTarget.textContent = 'Ambient';
+  const ambientButton = document.createElement('button');
+  ambientButton.setAttribute('data-rw-section-copy', 'ambient');
+  document.body.append(explicitRoot, ambientTarget, ambientButton);
+
+  const manager = context.window.RazorWire.sectionCopyManager;
+  manager.scan();
+
+  assert.equal(manager.controllers.has(document.body), true);
+  assert.equal(manager.controllers.has(explicitRoot), true);
+
+  explicitButton.dispatchEvent(createEvent('click'));
+  ambientButton.dispatchEvent(createEvent('click'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.deepEqual(copiedUrls, [
+    'https://docs.example.test/guide?tab=api#owned',
+    'https://docs.example.test/guide?tab=api#ambient'
+  ]);
 });
 
 test('section copy binds markers on the root element itself', async () => {

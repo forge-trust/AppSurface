@@ -325,7 +325,7 @@ interface SectionCopyBinding {
             input.type = 'text';
             input.readOnly = true;
             input.value = url;
-            input.setAttribute('aria-label', 'Section link');
+            input.setAttribute('aria-label', `Section link for ${title}`);
 
             const closeButton = document.createElement('button');
             closeButton.type = 'button';

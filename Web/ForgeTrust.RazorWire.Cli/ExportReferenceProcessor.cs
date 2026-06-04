@@ -359,6 +359,29 @@ internal sealed partial class ExportReferenceProcessor
         }
     }
 
+    /// <summary>
+    /// Adds the section-copy runtime script reference required by lazy RazorWire section-copy markup.
+    /// </summary>
+    /// <param name="references">The export reference collection that receives the runtime script reference.</param>
+    /// <param name="document">The parsed HTML document being scanned for section-copy markers and autoload scripts.</param>
+    /// <param name="currentRoute">The route whose HTML owns any generated provenance for the injected reference.</param>
+    /// <param name="attributeLookup">Source span lookup used to attach HTML provenance to synthetic marker-based references.</param>
+    /// <remarks>
+    /// The export pipeline needs a concrete <see cref="ExportReferenceKind.ScriptSrc"/> reference even when a host relies on
+    /// the <c>&lt;rw:scripts /&gt;</c> lazy detector instead of rendering <c>section-copy.js</c> eagerly. This method first
+    /// skips documents that already reference <c>/razorwire/section-copy.js</c> in any script <c>src</c>, using
+    /// case-insensitive matching so versioned or path-base-qualified runtime URLs are treated as already materialized.
+    /// It then looks for <c>data-rw-section-copy</c> or <c>data-rw-section-copy-target</c> markers, prefers the autoload
+    /// script's own encoded <c>source</c> assignment when present, and otherwise injects the default RazorWire runtime path
+    /// with HTML provenance from the first marker.
+    /// </remarks>
+    /// <remarks>
+    /// The marker fallback is intentionally synthetic: static export has to copy assets before client-side lazy detection can
+    /// run. Attribute provenance prefers <c>data-rw-section-copy</c> when the first marker has both button and target
+    /// attributes; otherwise it records <c>data-rw-section-copy-target</c>. Only the first matching marker is used, so pages
+    /// with multiple markers still get one runtime reference. This method runs after direct script extraction, and before the
+    /// normal de-duplication stage turns repeated runtime discoveries into a single queued asset.
+    /// </remarks>
     private void AddRazorWireSectionCopyAutoloadReferences(
         ICollection<ExportReference> references,
         IDocument document,
@@ -379,21 +402,25 @@ internal sealed partial class ExportReferenceProcessor
             return;
         }
 
-        foreach (var script in document.QuerySelectorAll("script:not([src])").Select(element => element.TextContent))
-        {
-            if (script.Contains(RazorWireSectionCopyRuntimeMarker, StringComparison.Ordinal)
-                && script.Contains(RazorWireSectionCopyButtonSelectorMarker, StringComparison.Ordinal)
-                && script.Contains(RazorWireSectionCopyTargetSelectorMarker, StringComparison.Ordinal)
-                && TryExtractJavaScriptStringAssignment(script, "source", out var source))
+        foreach (var match in document.QuerySelectorAll("script:not([src])")
+            .Select(element => element.TextContent)
+            .Select(script =>
             {
-                AddReference(
-                    references,
-                    source,
-                    ExportReferenceKind.ScriptSrc,
-                    currentRoute,
-                    CreateInlineScriptProvenance("RazorWire section-copy autoload source"));
-                return;
-            }
+                var hasSource = TryExtractJavaScriptStringAssignment(script, "source", out var source);
+                return new { Script = script, HasSource = hasSource, Source = source };
+            })
+            .Where(match => match.Script.Contains(RazorWireSectionCopyRuntimeMarker, StringComparison.Ordinal)
+                            && match.Script.Contains(RazorWireSectionCopyButtonSelectorMarker, StringComparison.Ordinal)
+                            && match.Script.Contains(RazorWireSectionCopyTargetSelectorMarker, StringComparison.Ordinal)
+                            && match.HasSource))
+        {
+            AddReference(
+                references,
+                match.Source,
+                ExportReferenceKind.ScriptSrc,
+                currentRoute,
+                CreateInlineScriptProvenance("RazorWire section-copy autoload source"));
+            return;
         }
 
         var attributeName = marker.HasAttribute("data-rw-section-copy")
