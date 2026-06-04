@@ -104,7 +104,6 @@ For the status-page proof, read [From Program.cs to an AppSurface Module](../gui
 - Pass `--port 5055` when following docs. Without it, AppSurface may choose a deterministic development port for your worktree.
 - Start with `ForgeTrust.AppSurface.Web` for a normal web app. Add optional modules only when the [package chooser](../packages/README.md) points to them.
 - In .NET 10, `dotnet package add` and `dotnet add package` are equivalent. Use whichever form your SDK and team already prefer.
-- If you are using a private package feed or prerelease feed, configure that source before running the package-first install command.
 - Treat the startup log as the source of truth if you choose a different port.
 
 Next: [From Program.cs to an AppSurface Module](../guides/from-program-cs-to-module.md)

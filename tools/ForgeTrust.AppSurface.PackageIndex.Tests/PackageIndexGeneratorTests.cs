@@ -4,6 +4,12 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
 public sealed class PackageIndexGeneratorTests : IDisposable
 {
+    private const string FirstSuccessPathMarkdown = """
+        # First Success Path
+
+        ## Package-First Path
+        """;
+
     private readonly string _repositoryRoot;
 
     public PackageIndexGeneratorTests()
@@ -701,7 +707,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/README.md", "# RazorWire CLI");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
-        await WriteFileAsync("start-here/first-success-path.md", "# First Success Path");
+        await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
@@ -840,6 +846,59 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerateAsync_ThrowsWhenWebPackageQuickstartFragmentTargetIsMissing()
+    {
+        await WriteProgramRepoAsync();
+        await WriteFileAsync(
+            "start-here/first-success-path.md",
+            """
+            # First Success Path
+
+            ## Fresh App Path
+            """);
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
+
+        Assert.Contains("start-here/first-success-path.md#package-first-path", error.Message, StringComparison.Ordinal);
+        Assert.Contains("fragment target", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("""
+        # First Success Path
+
+        ## Fresh App Path {#package-first-path}
+        """)]
+    [InlineData("""
+        <a id="package-first-path"></a>
+
+        # First Success Path
+        """)]
+    public async Task GenerateAsync_AcceptsExplicitWebPackageQuickstartFragmentTargets(string quickstartMarkdown)
+    {
+        await WriteProgramRepoAsync();
+        await WriteFileAsync("start-here/first-success-path.md", quickstartMarkdown);
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web")
+        });
+
+        var markdown = await generator.GenerateAsync(CreateRequest());
+
+        Assert.Contains("[Package-first quickstart](../start-here/first-success-path.md#package-first-path)", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GenerateAsync_ThrowsWhenDeclaredReleaseNotesPathIsMissing()
     {
         await WriteProgramRepoAsync(releaseNotesPath: "releases/v0.1-preview.md");
@@ -902,7 +961,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web.Tailwind/README.md", "# Tailwind");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
-        await WriteFileAsync("start-here/first-success-path.md", "# First Success Path");
+        await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
@@ -994,7 +1053,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj", "<Project />");
         await WriteFileAsync("Console/ForgeTrust.AppSurface.Console/README.md", "# Console");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
-        await WriteFileAsync("start-here/first-success-path.md", "# First Success Path");
+        await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
         await WriteFileAsync("CHANGELOG.md", "# Changelog");
@@ -2862,7 +2921,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/README.md", "# RazorWire CLI");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
-        await WriteFileAsync("start-here/first-success-path.md", "# First Success Path");
+        await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
@@ -2915,7 +2974,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             """);
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
-        await WriteFileAsync("start-here/first-success-path.md", "# First Success Path");
+        await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/unreleased.md", "# Unreleased");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");

@@ -127,7 +127,7 @@ bash examples/web-error-pages/verify.sh
 
 That proof starts a local production-mode web app, checks conventional browser `401`, `403`, `404`, and `500` pages, and verifies API requests do not receive surprise browser HTML.
 
-If you are evaluating packages from your own app project rather than running this repo, use the [package-first path](./start-here/first-success-path.md#package-first-path) to create a fresh ASP.NET Core app, install `ForgeTrust.AppSurface.Web`, and verify the first route. The generated package chooser in [packages/README.md](./packages/README.md) is the install map for picking optional modules after that first proof.
+If you are evaluating packages from your own app project rather than running this repo, use the [package-first path](./start-here/first-success-path.md#package-first-path) to create a fresh ASP.NET Core app, install `ForgeTrust.AppSurface.Web`, and verify the first route. Run the package command from the app project directory, or pass the project path explicitly. The generated package chooser in [packages/README.md](./packages/README.md) is the install map for picking optional modules after that first proof.
 
 ```bash
 dotnet package add ForgeTrust.AppSurface.Web
