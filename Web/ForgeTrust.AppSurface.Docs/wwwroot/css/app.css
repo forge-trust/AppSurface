@@ -858,7 +858,8 @@ body {
     right: 0;
     bottom: calc(100% + 0.35rem);
     z-index: 30;
-    min-width: max-content;
+    width: max-content;
+    max-width: min(22rem, calc(100vw - 2rem));
     padding: 0.28rem 0.45rem;
     border: 1px solid var(--docs-color-border-accent-active);
     border-radius: 0.45rem;
@@ -868,6 +869,8 @@ body {
     font-size: 0.72rem;
     font-weight: 700;
     line-height: 1.1;
+    overflow-wrap: break-word;
+    white-space: normal;
     pointer-events: none;
 }
 
