@@ -164,11 +164,12 @@ internal sealed class CoverageRunnerApplication
         var results = await RunScheduledProjectsAsync(options, testProjects, solutionDirectory, cancellationToken);
         await ReplayLogsAsync(results);
 
+        var projectsOutputDirectory = Path.Join(options.OutputDirectory, "projects");
         var mergeTimer = _clock.StartTimer();
-        var mergeExit = await MergeCoverageFilesAsync(options, Path.Combine(options.OutputDirectory, "projects"), cancellationToken);
+        var mergeExit = await MergeCoverageFilesAsync(options, projectsOutputDirectory, cancellationToken);
         var mergeSeconds = mergeTimer.ElapsedSeconds;
         var junitCount = Directory.EnumerateFiles(options.OutputDirectory, "junit-*.xml", SearchOption.TopDirectoryOnly).Count();
-        var coverageCount = Directory.EnumerateFiles(Path.Combine(options.OutputDirectory, "projects"), "coverage.cobertura.xml", SearchOption.AllDirectories).Count();
+        var coverageCount = Directory.EnumerateFiles(projectsOutputDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories).Count();
         var summaryExit = 0;
         if (mergeExit == 0 && !await WriteSummaryAsync(options))
         {
@@ -236,9 +237,10 @@ internal sealed class CoverageRunnerApplication
         }
 
         var projects = new List<TestProject>();
-        foreach (var line in result.Output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        foreach (var project in result.Output
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim()))
         {
-            var project = line.Trim();
             if (!project.EndsWith(".csproj", StringComparison.Ordinal) || !IsTestProjectPath(project))
             {
                 continue;
@@ -250,7 +252,7 @@ internal sealed class CoverageRunnerApplication
                 continue;
             }
 
-            var fullPath = Path.IsPathRooted(project) ? project : Path.GetFullPath(Path.Combine(solutionDirectory, project));
+            var fullPath = Path.IsPathRooted(project) ? project : Path.GetFullPath(project, solutionDirectory);
             var projectContents = File.Exists(fullPath) ? await File.ReadAllTextAsync(fullPath, cancellationToken) : string.Empty;
             projects.Add(new TestProject(
                 project,
@@ -324,10 +326,12 @@ internal sealed class CoverageRunnerApplication
         string solutionDirectory,
         CancellationToken cancellationToken)
     {
-        var projectOutputDirectory = Path.Combine(options.OutputDirectory, "projects", project.Slug);
+        var projectSlug = RequirePathSegment(project.Slug, nameof(project.Slug));
+        var groupName = RequirePathSegment(options.GroupName, nameof(options.GroupName));
+        var projectOutputDirectory = Path.Join(options.OutputDirectory, "projects", projectSlug);
         Directory.CreateDirectory(projectOutputDirectory);
-        var junitFile = Path.Combine(options.OutputDirectory, $"junit-{options.GroupName}-{index + 1}-{project.Slug}.xml");
-        var logFile = Path.Combine(projectOutputDirectory, "dotnet-test.log");
+        var junitFile = Path.Join(options.OutputDirectory, $"junit-{groupName}-{index + 1}-{projectSlug}.xml");
+        var logFile = Path.Join(projectOutputDirectory, "dotnet-test.log");
 
         await _standardOut.WriteLineAsync($"[{index + 1}/{count}][{options.GroupName}] starting dotnet test {project.RelativePath}{(project.IsExclusive ? " (exclusive)" : string.Empty)}");
 
@@ -363,7 +367,7 @@ internal sealed class CoverageRunnerApplication
             "--logger:GitHubActions;report-warnings=false",
             $"--logger:junit;LogFilePath={junitFile}",
             "/p:CollectCoverage=true",
-            $"/p:CoverletOutput={Path.Combine(projectOutputDirectory, "coverage")}",
+            $"/p:CoverletOutput={Path.Join(projectOutputDirectory, "coverage")}",
             "/p:CoverletOutputFormat=cobertura",
             $"/p:Include={options.IncludeFilter}",
             $"/p:Exclude={options.ExcludeFilter}",
@@ -417,7 +421,7 @@ internal sealed class CoverageRunnerApplication
             return toolRestore.ExitCode;
         }
 
-        var mergeDirectory = Path.Combine(options.OutputDirectory, "reportgenerator");
+        var mergeDirectory = Path.Join(options.OutputDirectory, "reportgenerator");
         if (Directory.Exists(mergeDirectory))
         {
             Directory.Delete(mergeDirectory, recursive: true);
@@ -438,18 +442,18 @@ internal sealed class CoverageRunnerApplication
             return merge.ExitCode;
         }
 
-        var mergedCoverage = Path.Combine(mergeDirectory, "Cobertura.xml");
+        var mergedCoverage = Path.Join(mergeDirectory, "Cobertura.xml");
         if (!File.Exists(mergedCoverage))
         {
             await _standardError.WriteLineAsync($"ReportGenerator did not create {mergedCoverage}");
             return 1;
         }
 
-        File.Copy(mergedCoverage, Path.Combine(options.OutputDirectory, "coverage.cobertura.xml"), overwrite: true);
-        var reportGeneratorSummary = Path.Combine(mergeDirectory, "Summary.txt");
+        File.Copy(mergedCoverage, Path.Join(options.OutputDirectory, "coverage.cobertura.xml"), overwrite: true);
+        var reportGeneratorSummary = Path.Join(mergeDirectory, "Summary.txt");
         if (File.Exists(reportGeneratorSummary))
         {
-            File.Copy(reportGeneratorSummary, Path.Combine(options.OutputDirectory, "reportgenerator-summary.txt"), overwrite: true);
+            File.Copy(reportGeneratorSummary, Path.Join(options.OutputDirectory, "reportgenerator-summary.txt"), overwrite: true);
         }
 
         return 0;
@@ -483,7 +487,7 @@ internal sealed class CoverageRunnerApplication
         var copied = 0;
         foreach (var junitFile in Directory.EnumerateFiles(sourceDirectory, "junit-*.xml", SearchOption.AllDirectories))
         {
-            File.Copy(junitFile, Path.Combine(outputDirectory, Path.GetFileName(junitFile)), overwrite: true);
+            File.Copy(junitFile, Path.Join(outputDirectory, Path.GetFileName(junitFile)), overwrite: true);
             copied++;
         }
 
@@ -492,7 +496,7 @@ internal sealed class CoverageRunnerApplication
 
     private async Task<bool> WriteSummaryAsync(CoverageRunnerOptions options)
     {
-        var coveragePath = Path.Combine(options.OutputDirectory, "coverage.cobertura.xml");
+        var coveragePath = Path.Join(options.OutputDirectory, "coverage.cobertura.xml");
         if (!File.Exists(coveragePath))
         {
             await _standardError.WriteLineAsync($"Merged Cobertura file was not created: {coveragePath}");
@@ -511,7 +515,7 @@ internal sealed class CoverageRunnerApplication
 
         var lineRate = linesValid == 0 ? 0 : linesCovered * 100m / linesValid;
         var branchRate = branchesValid == 0 ? 0 : branchesCovered * 100m / branchesValid;
-        var timingsPath = Path.Combine(options.OutputDirectory, "timings.json");
+        var timingsPath = Path.Join(options.OutputDirectory, "timings.json");
         var summary = FormattableString.Invariant($"""
             Solution coverage summary
             Group: {options.GroupName}
@@ -520,7 +524,7 @@ internal sealed class CoverageRunnerApplication
             Cobertura: {coveragePath}
             Timings: {timingsPath}
             """);
-        await File.WriteAllTextAsync(Path.Combine(options.OutputDirectory, "summary.txt"), summary);
+        await File.WriteAllTextAsync(Path.Join(options.OutputDirectory, "summary.txt"), summary);
         await _standardOut.WriteLineAsync(summary);
         return true;
     }
@@ -571,7 +575,7 @@ internal sealed class CoverageRunnerApplication
             {
                 junitFiles = junitCount,
                 coverageFiles = coverageCount,
-                cobertura = Path.Combine(options.OutputDirectory, "coverage.cobertura.xml"),
+                cobertura = Path.Join(options.OutputDirectory, "coverage.cobertura.xml"),
             },
             projects = results
                 .OrderBy(result => result.Index)
@@ -587,24 +591,24 @@ internal sealed class CoverageRunnerApplication
         };
 
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(Path.Combine(options.OutputDirectory, "timings.json"), json + Environment.NewLine);
+        await File.WriteAllTextAsync(Path.Join(options.OutputDirectory, "timings.json"), json + Environment.NewLine);
     }
 
     private static void PrepareOutputDirectory(CoverageRunnerOptions options)
     {
         Directory.CreateDirectory(options.OutputDirectory);
-        DeleteFileIfExists(Path.Combine(options.OutputDirectory, "coverage.json"));
-        DeleteFileIfExists(Path.Combine(options.OutputDirectory, "coverage.cobertura.xml"));
-        DeleteFileIfExists(Path.Combine(options.OutputDirectory, "summary.txt"));
-        DeleteFileIfExists(Path.Combine(options.OutputDirectory, "timings.json"));
+        DeleteFileIfExists(Path.Join(options.OutputDirectory, "coverage.json"));
+        DeleteFileIfExists(Path.Join(options.OutputDirectory, "coverage.cobertura.xml"));
+        DeleteFileIfExists(Path.Join(options.OutputDirectory, "summary.txt"));
+        DeleteFileIfExists(Path.Join(options.OutputDirectory, "timings.json"));
         foreach (var junitFile in Directory.EnumerateFiles(options.OutputDirectory, "junit-*.xml", SearchOption.TopDirectoryOnly))
         {
             File.Delete(junitFile);
         }
 
-        DeleteDirectoryIfExists(Path.Combine(options.OutputDirectory, "projects"));
-        DeleteDirectoryIfExists(Path.Combine(options.OutputDirectory, "reportgenerator"));
-        Directory.CreateDirectory(Path.Combine(options.OutputDirectory, "projects"));
+        DeleteDirectoryIfExists(Path.Join(options.OutputDirectory, "projects"));
+        DeleteDirectoryIfExists(Path.Join(options.OutputDirectory, "reportgenerator"));
+        Directory.CreateDirectory(Path.Join(options.OutputDirectory, "projects"));
     }
 
     private static void DeleteFileIfExists(string path)
@@ -621,6 +625,20 @@ internal sealed class CoverageRunnerApplication
         {
             Directory.Delete(path, recursive: true);
         }
+    }
+
+    private static string RequirePathSegment(string segment, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(segment)
+            || Path.IsPathRooted(segment)
+            || Path.IsPathFullyQualified(segment)
+            || segment.Contains(Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            || segment.Contains(Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Coverage runner path segment '{parameterName}' is not a safe file or directory name.");
+        }
+
+        return segment;
     }
 
     private static string Normalize(string path)

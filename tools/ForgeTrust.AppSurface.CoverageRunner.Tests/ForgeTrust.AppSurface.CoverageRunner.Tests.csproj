@@ -32,6 +32,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../ForgeTrust.AppSurface.CoverageRunner/ForgeTrust.AppSurface.CoverageRunner.csproj" />
+    <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
   </ItemGroup>
 
 </Project>

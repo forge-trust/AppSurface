@@ -1,3 +1,5 @@
+using ForgeTrust.AppSurface.Testing;
+
 namespace ForgeTrust.AppSurface.CoverageRunner.Tests;
 
 internal sealed class TestRepo : IDisposable
@@ -7,7 +9,7 @@ internal sealed class TestRepo : IDisposable
     private TestRepo(string root)
     {
         Root = root;
-        File.WriteAllText(Path.Combine(root, "ForgeTrust.AppSurface.slnx"), "<Solution />");
+        File.WriteAllText(Path.Join(root, "ForgeTrust.AppSurface.slnx"), "<Solution />");
     }
 
     public string Root { get; }
@@ -16,14 +18,14 @@ internal sealed class TestRepo : IDisposable
 
     public static TestRepo Create()
     {
-        var root = Path.Combine(Path.GetTempPath(), "coverage-runner-" + Guid.NewGuid().ToString("N"));
+        var root = Path.Join(Path.GetTempPath(), "coverage-runner-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         return new TestRepo(root);
     }
 
     public void AddProject(string relativePath, string contents = "<Project />")
     {
-        var fullPath = Path.Combine(Root, relativePath);
+        var fullPath = TestPathUtils.PathUnder(Root, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         File.WriteAllText(fullPath, contents);
         _projects.Add(relativePath);

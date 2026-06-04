@@ -90,8 +90,8 @@ internal sealed record CoverageRunnerOptions
 
         var repositoryRoot = ResolveRepositoryRoot(currentDirectory);
         var callerDirectory = ReadEnvironment(environment, "COVERAGE_CALLER_DIRECTORY") ?? currentDirectory;
-        var defaultSolutionPath = Path.Combine(repositoryRoot, "ForgeTrust.AppSurface.slnx");
-        var defaultOutputDirectory = Path.Combine(repositoryRoot, "TestResults", "coverage-merged");
+        var defaultSolutionPath = Path.Join(repositoryRoot, "ForgeTrust.AppSurface.slnx");
+        var defaultOutputDirectory = Path.Join(repositoryRoot, "TestResults", "coverage-merged");
 
         var solutionPath = defaultSolutionPath;
         var outputDirectory = defaultOutputDirectory;
@@ -278,7 +278,7 @@ internal sealed record CoverageRunnerOptions
 
     private static string ResolveUserPath(string path, string callerDirectory)
     {
-        return Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(callerDirectory, path));
+        return Path.IsPathRooted(path) ? Path.GetFullPath(path) : Path.GetFullPath(path, callerDirectory);
     }
 
     private static string ResolveRepositoryRoot(string currentDirectory)
@@ -286,7 +286,7 @@ internal sealed record CoverageRunnerOptions
         var directory = new DirectoryInfo(currentDirectory);
         while (directory is not null)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "ForgeTrust.AppSurface.slnx")))
+            if (File.Exists(Path.Join(directory.FullName, "ForgeTrust.AppSurface.slnx")))
             {
                 return directory.FullName;
             }

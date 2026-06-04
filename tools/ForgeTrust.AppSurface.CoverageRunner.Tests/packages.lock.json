@@ -119,6 +119,9 @@
       },
       "forgetrust.appsurface.coveragerunner": {
         "type": "Project"
+      },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
       }
     }
   }
