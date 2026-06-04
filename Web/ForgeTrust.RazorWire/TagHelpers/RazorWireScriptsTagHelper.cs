@@ -42,6 +42,18 @@ public class RazorWireScriptsTagHelper : TagHelper
     public ViewContext ViewContext { get; set; } = default!;
 
     /// <summary>
+    /// Gets or sets a value indicating whether the page-navigation runtime should be eagerly rendered after the core runtime.
+    /// </summary>
+    /// <remarks>
+    /// Page navigation is split out of the core runtime to keep the default startup path lightweight. Plain
+    /// <c>&lt;rw:scripts /&gt;</c> emits a small usage detector that loads the runtime only when the rendered page contains
+    /// <c>rw-page-nav</c> / <c>data-rw-page-nav</c> markup. Set this attribute to <c>true</c> only when a host wants to
+    /// eagerly fetch the page-navigation asset before the detector runs.
+    /// </remarks>
+    [HtmlAttributeName("page-navigation")]
+    public bool PageNavigation { get; set; }
+
+    /// <summary>
     /// Renders the client-side script tags required by RazorWire and removes the wrapper element so no enclosing tag is emitted.
     /// </summary>
     /// <param name="context">The current tag helper context.</param>
@@ -72,6 +84,9 @@ public class RazorWireScriptsTagHelper : TagHelper
         var islandsJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js");
+        var pageNavigationJs = _fileVersionProvider.AddFileVersionToPath(
+            pathBase,
+            "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js");
 
         var diagnosticsEnabled = _options.Forms.EnableFailureUx
                                  && _options.Forms.EnableDevelopmentDiagnostics
@@ -90,12 +105,53 @@ public class RazorWireScriptsTagHelper : TagHelper
             pathBase.Add(new PathString(_options.Forms.Antiforgery.TokenEndpointPath)).Value!);
 
         // This includes Turbo.js and the custom RazorWire island loader.
-        output.Content.SetHtmlContent(
-            $@"
+        var scripts = $@"
 <script src=""https://cdn.jsdelivr.net/npm/@hotwired/turbo@8.0.12/dist/turbo.es2017-umd.js"" integrity=""sha256-1evN/OxCRDJtuVCzQ3gklVq8LzN6qhCm7x/sbawknOk="" crossorigin=""anonymous""></script>
 <script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}"" data-rw-live-origin=""{liveOrigin}"" data-rw-hybrid-credentials=""{credentialsMode}"" data-rw-antiforgery-endpoint=""{antiforgeryEndpoint}""></script>
 <script src=""{islandsJs}""></script>
-");
+";
+
+        if (PageNavigation)
+        {
+            scripts += $@"<script src=""{pageNavigationJs}"" data-rw-page-navigation-runtime=""eager""></script>
+";
+        }
+        else
+        {
+            scripts += BuildPageNavigationAutoloadScript(pageNavigationJs);
+        }
+
+        output.Content.SetHtmlContent(scripts);
+    }
+
+    private static string BuildPageNavigationAutoloadScript(string pageNavigationJs)
+    {
+        var encodedSource = JavaScriptEncoder.Default.Encode(pageNavigationJs);
+
+        return $@"<script>
+(() => {{
+  const source = ""{encodedSource}"";
+  const marker = ""data-rw-page-navigation-runtime"";
+  const selector = ""[data-rw-page-nav]"";
+  const load = () => {{
+    if (window.RazorWirePageNavigationInitialized || document.querySelector(`script[${{marker}}]`) || !document.querySelector(selector)) return;
+    const script = document.createElement(""script"");
+    script.src = source;
+    script.defer = true;
+    script.setAttribute(marker, ""auto"");
+    document.head.appendChild(script);
+  }};
+  if (document.readyState === ""loading"") {{
+    document.addEventListener(""DOMContentLoaded"", load, {{ once: true }});
+  }} else {{
+    load();
+  }}
+  document.addEventListener(""turbo:render"", load);
+  document.addEventListener(""turbo:load"", load);
+  document.addEventListener(""turbo:frame-load"", load);
+}})();
+</script>
+";
     }
 
     private static string ResolveHybridCredentialsAttribute(RazorWireOptions options, string? normalizedLiveOrigin)

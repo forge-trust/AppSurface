@@ -14,12 +14,17 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.head.label || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
     steps:
       - name: Checkout code
@@ -28,10 +33,34 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET SDK
+        id: setup-dotnet
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
           dotnet-version: |
             10.0.x
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+
+      - name: Restore .NET packages (locked, cache-aware)
+        run: |
+          start_seconds="$(date +%s)"
+          dotnet nuget locals global-packages --list
+          dotnet restore ForgeTrust.AppSurface.slnx --locked-mode
+          restore_seconds="$(( $(date +%s) - start_seconds ))"
+          package_size="$(du -sh "$NUGET_PACKAGES" 2>/dev/null | cut -f1 || true)"
+
+          {
+            echo "### NuGet cache summary"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Workflow job | build.yml / build |"
+            echo "| Cache hit | ${{ steps.setup-dotnet.outputs.cache-hit }} |"
+            echo "| Cache dependency path | \`**/packages.lock.json\` |"
+            echo "| NUGET_PACKAGES | \`$NUGET_PACKAGES\` |"
+            echo "| Package folder size | ${package_size:-unknown} |"
+            echo "| Locked restore duration | ${restore_seconds}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
@@ -47,11 +76,11 @@ jobs:
 
       - name: Verify generated package chooser
         run: |
-          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-restore -- verify
 
       - name: Verify generated Markdown snippets
         run: |
-          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj -- verify
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify
 
       - name: Verify web assets
         run: |
@@ -64,6 +93,7 @@ jobs:
       - name: Run solution coverage
         env:
           BUILD_CONFIGURATION: Release
+          BUILD_NO_RESTORE: true
           COVERAGE_PARALLELISM: 2
         run: |
           ./scripts/coverage-solution.sh
@@ -77,7 +107,7 @@ jobs:
 
       - name: Upload test results to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
-        if: ${{ !cancelled() && env.CODECOV_TOKEN_PRESENT == 'true' }}
+        if: ${{ always() && !cancelled() && env.CODECOV_TOKEN_PRESENT == 'true' }}
         with:
           files: 'TestResults/coverage-merged/junit-*.xml'
           report_type: test_results
@@ -89,6 +119,8 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
     steps:
       - name: Checkout code
@@ -98,48 +130,44 @@ jobs:
           fetch-depth: 0
 
       - name: Setup .NET SDK
+        id: setup-dotnet
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
           dotnet-version: |
             10.0.x
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
-        with:
-          version: 11.1.3
-
-      - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: Web/pnpm-lock.yaml
-
-      - name: Verify generated package chooser
+      - name: Restore AppSurface CLI packages (locked, cache-aware)
         run: |
-          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify
+          start_seconds="$(date +%s)"
+          dotnet nuget locals global-packages --list
+          dotnet restore Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --locked-mode
+          restore_seconds="$(( $(date +%s) - start_seconds ))"
+          package_size="$(du -sh "$NUGET_PACKAGES" 2>/dev/null | cut -f1 || true)"
 
-      - name: Verify generated Markdown snippets
-        run: |
-          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj -- verify
-
-      - name: Verify web assets
-        run: |
-          pnpm --dir Web install --frozen-lockfile
-          pnpm --dir Web run assets:typecheck
-          pnpm --dir Web run assets:test
-          pnpm --dir Web run assets:build
-          pnpm --dir Web run assets:verify
+          {
+            echo "### NuGet cache summary"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Workflow job | build.yml / export-appsurface-docs |"
+            echo "| Cache hit | ${{ steps.setup-dotnet.outputs.cache-hit }} |"
+            echo "| Cache dependency path | \`**/packages.lock.json\` |"
+            echo "| NUGET_PACKAGES | \`$NUGET_PACKAGES\` |"
+            echo "| Package folder size | ${package_size:-unknown} |"
+            echo "| Locked restore duration | ${restore_seconds}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build AppSurface CLI (Release)
         run: |
-          dotnet build Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release
+          dotnet build Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-restore
 
       - name: Verify AppSurface Docs harvest health
         env:
           AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js
         run: |
-          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build -- \
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build --no-restore -- \
             docs verify-health \
             --repo . \
             --require-complete-event-doclets \
@@ -165,7 +193,7 @@ jobs:
         run: |
           printf '%s\n' '/' '/docs' > "$RUNNER_TEMP/appsurface-docs-seeds.txt"
           # CI docs export can spend just over 10s in cold host startup while generating the first harvest snapshot.
-          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build -- \
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build --no-restore -- \
             docs export \
             --repo . \
             --mode cdn \

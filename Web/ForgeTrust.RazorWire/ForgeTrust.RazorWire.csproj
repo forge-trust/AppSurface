@@ -26,6 +26,7 @@
   <ItemGroup>
     <EmbeddedResource Include="wwwroot\background.png" LogicalName="RazorWireEmbeddedAssets/background.png" />
     <EmbeddedResource Include="wwwroot\exampleJsInterop.js" LogicalName="RazorWireEmbeddedAssets/exampleJsInterop.js" />
+    <EmbeddedResource Include="wwwroot\razorwire\page-navigation.js" LogicalName="RazorWireEmbeddedAssets/razorwire/page-navigation.js" />
     <EmbeddedResource Include="wwwroot\razorwire\razorwire.islands.js" LogicalName="RazorWireEmbeddedAssets/razorwire/razorwire.islands.js" />
     <EmbeddedResource Include="wwwroot\razorwire\razorwire.js" LogicalName="RazorWireEmbeddedAssets/razorwire/razorwire.js" />
   </ItemGroup>

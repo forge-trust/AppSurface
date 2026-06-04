@@ -467,19 +467,18 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
-    public void OutlineClient_ShouldUseMainContentRoot_AndRebindAfterFrameNavigation()
+    public void OutlineClient_ShouldMirrorRazorWirePageNavigation_AndRebindAfterFrameNavigation()
     {
         var outlineClient = ReadOutlineClientMarkup();
 
         Assert.Contains("const outlineSelector = \"#docs-page-outline\"", outlineClient);
-        Assert.Contains("const mainContent = document.getElementById(\"main-content\")", outlineClient);
-        Assert.Contains("if (!mainContent)", outlineClient);
         Assert.Contains("if (entries.length === 0)", outlineClient);
-        Assert.Contains("root: mainContent", outlineClient);
         Assert.Contains("document.addEventListener(\"turbo:frame-load\"", outlineClient);
-        Assert.Contains("activeObserver?.disconnect()", outlineClient);
         Assert.Contains("aria-current", outlineClient);
         Assert.Contains("data-doc-outline-context", outlineClient);
+        Assert.Contains("razorwire:page-nav:active-change", outlineClient);
+        Assert.DoesNotContain("IntersectionObserver", outlineClient);
+        Assert.DoesNotContain("scrollEntryIntoView", outlineClient);
         Assert.Contains("const clientVersion = \"rolling-context\";", outlineClient);
         Assert.Contains("existingClient?.version === clientVersion", outlineClient);
         Assert.Contains("existingClient?.destroy?.();", outlineClient);
@@ -3786,7 +3785,7 @@ public class AppSurfaceDocsViewsTests
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
         Assert.Matches("<a[^>]*href=\"/docs\"[^>]*data-turbo-frame=\"_top\"", html);
         Assert.Equal(string.Empty, document.QuerySelector("#docs-search-page-failure")?.TextContent.Trim());
-        Assert.Contains("Documentation index", document.QuerySelector("#docs-search-page-recovery")!.TextContent);
+        Assert.Contains("Docs home", document.QuerySelector("#docs-search-page-recovery")!.TextContent);
     }
 
     [Fact]

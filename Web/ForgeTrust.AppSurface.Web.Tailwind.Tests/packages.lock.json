@@ -137,6 +137,9 @@
           "CliWrap": "[3.10.1, )"
         }
       },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
+      },
       "forgetrust.appsurface.web.tailwind": {
         "type": "Project",
         "dependencies": {

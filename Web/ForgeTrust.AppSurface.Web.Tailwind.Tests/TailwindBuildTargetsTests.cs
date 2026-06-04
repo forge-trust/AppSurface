@@ -702,7 +702,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             task.TailwindCliPath = relativeCliPath;
             task.TailwindVersion = "4.1.18";
         });
-        var cliPath = Path.Join(task.ProjectDirectory, relativeCliPath);
+        var cliPath = TestPathUtils.PathUnder(task.ProjectDirectory, relativeCliPath);
         Directory.CreateDirectory(Path.GetDirectoryName(cliPath)!);
         await File.WriteAllTextAsync(cliPath, "#!/bin/sh\nexit 0\n");
 
@@ -902,12 +902,12 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         var taskAssemblyDirectory = Path.GetDirectoryName(typeof(RunTailwindBuildTask).Assembly.Location)!;
         foreach (var file in Directory.EnumerateFiles(taskAssemblyDirectory, "*.dll"))
         {
-            File.Copy(file, Path.Join(taskDirectory, Path.GetFileName(file)));
+            File.Copy(file, TestPathUtils.PathUnder(taskDirectory, Path.GetFileName(file)));
         }
 
         foreach (var file in Directory.EnumerateFiles(taskAssemblyDirectory, "*.deps.json"))
         {
-            File.Copy(file, Path.Join(taskDirectory, Path.GetFileName(file)));
+            File.Copy(file, TestPathUtils.PathUnder(taskDirectory, Path.GetFileName(file)));
         }
 
         await Task.CompletedTask;
@@ -999,12 +999,12 @@ exit 0
         string? stderrLine = null,
         int exitCode = 0)
     {
-        var outputPath = Path.Join(projectDirectory, outputRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        var outputPath = TestPathUtils.PathUnder(projectDirectory, outputRelativePath);
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             var relativePath = Path.Join(toolDirectoryName, "tailwindcss.cmd");
-            var fullPath = Path.Join(projectDirectory, relativePath);
+            var fullPath = TestPathUtils.PathUnder(projectDirectory, relativePath);
             await File.WriteAllTextAsync(
                 fullPath,
                 $@"@echo off
@@ -1024,7 +1024,7 @@ echo invoked>""{markerPath}""
             UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
 
         var unixRelativePath = Path.Join(toolDirectoryName, "tailwindcss");
-        var unixFullPath = Path.Join(projectDirectory, unixRelativePath);
+        var unixFullPath = TestPathUtils.PathUnder(projectDirectory, unixRelativePath);
         await File.WriteAllTextAsync(
             unixFullPath,
             $@"#!/bin/sh
@@ -1051,7 +1051,7 @@ exit {exitCode}
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             var relativePath = Path.Join("tools", "tailwindcss.cmd");
-            var fullPath = Path.Join(projectDirectory, relativePath);
+            var fullPath = TestPathUtils.PathUnder(projectDirectory, relativePath);
             await File.WriteAllTextAsync(
                 fullPath,
                 $@"@echo off
@@ -1069,7 +1069,7 @@ exit /b 0
             UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
 
         var unixRelativePath = Path.Join("tools", "tailwindcss");
-        var unixFullPath = Path.Join(projectDirectory, unixRelativePath);
+        var unixFullPath = TestPathUtils.PathUnder(projectDirectory, unixRelativePath);
         await File.WriteAllTextAsync(
             unixFullPath,
             $@"#!/bin/sh

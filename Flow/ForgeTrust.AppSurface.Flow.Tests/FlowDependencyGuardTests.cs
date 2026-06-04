@@ -33,7 +33,7 @@ public sealed class FlowDependencyGuardTests
 
         var exception = Assert.Throws<ArgumentException>(() => LoadProject(rootedPath));
 
-        Assert.Equal("projectPath", exception.ParamName);
+        Assert.Contains("rooted", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsDurableTaskOrSemanticKernel(AssemblyName reference) =>
@@ -49,29 +49,7 @@ public sealed class FlowDependencyGuardTests
 
     private static XDocument LoadProject(string projectPath)
     {
-        var normalizedProjectPath = projectPath.Replace('/', Path.DirectorySeparatorChar);
-        if (Path.IsPathRooted(normalizedProjectPath))
-        {
-            throw new ArgumentException("Project path must be relative.", nameof(projectPath));
-        }
-
-        var repositoryRoot = FindRepositoryRoot();
-        return XDocument.Load(Path.Join(repositoryRoot, normalizedProjectPath));
-    }
-
-    private static string FindRepositoryRoot()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null)
-        {
-            if (File.Exists(Path.Join(current.FullName, "ForgeTrust.AppSurface.slnx")))
-            {
-                return current.FullName;
-            }
-
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException("Could not find repository root.");
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        return XDocument.Load(TestPathUtils.PathUnder(repositoryRoot, projectPath));
     }
 }

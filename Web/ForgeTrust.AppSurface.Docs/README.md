@@ -863,9 +863,9 @@ var routeInspectorJson = routes.RouteInspectorJson;
 
 `AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `SearchIndexRefreshMethod`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
 
-The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; operator UI should submit a browser form to `Routes.SearchIndexRefresh` with `Routes.SearchIndexRefreshMethod`.
+The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state. Search browse recovery is search-only: it can choose representative documents from the harvested snapshot, then fills remaining space with the harvest-free recovery links for Start Here, Packages, and Docs home. Public reader retry should use `Routes.SearchIndex`; operator UI should submit a browser form to `Routes.SearchIndexRefresh` with `Routes.SearchIndexRefreshMethod`.
 
-Embedded hosts decide their own app-wide browser error UX. The reusable `ForgeTrust.AppSurface.Docs` package registers docs routes and route references, but it does not install a docs-aware application `404` page. Hosts that want stale-docs recovery should opt into AppSurface Web conventional browser status pages, add their own `~/Views/Shared/404.cshtml`, use `BrowserStatusPageModel` for status/original-path context, inject `DocsUrlBuilder`, and link to `DocsUrlBuilder.Routes.Search` through the host's path-base-aware rendering helper.
+Embedded hosts decide their own app-wide browser error UX. The reusable `ForgeTrust.AppSurface.Docs` package registers docs routes and route references, but it does not install a docs-aware application `404` page. Hosts that want stale-docs recovery should opt into AppSurface Web conventional browser status pages, add their own `~/Views/Shared/404.cshtml`, use `BrowserStatusPageModel` for status/original-path context, and render a small harvest-free link set from route contracts: Search, Start Here, Packages, and Docs home. Do not derive recovery links from `BrowserStatusPageModel.OriginalPath`, and do not move search's snapshot-derived representative-document fallback into a standalone `404` page. Optional browse links in sparse static exports should be marked `data-rw-export-ignore="true"` unless the export seeds those routes.
 
 ### Document route identity
 
@@ -1537,6 +1537,7 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 - `search.css` at the tree root. The bundled search stylesheet carries search-local fallbacks for the shared style tokens so exact release search controls remain styled even when a historical/static export does not include `site.gen.css`.
 - `search-client.js` at the tree root
 - `outline-client.js` at the tree root for outline-aware exports whose HTML references the page-local outline runtime
+- `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js` when exported HTML contains RazorWire page-navigation roots. The standard RazorWire scripts output lazy-loads this runtime from an inline detector, so static exports must materialize the package asset even though it is not a literal `<script src>` in the original HTML.
 - `minisearch.min.js` at the tree root
 - any section, detail, partial, and asset routes that belong to the exported docs surface for that release
 
@@ -1548,7 +1549,7 @@ AppSurface Docs does not regenerate these trees at request time. It resolves ext
 
 Use the limit for exported `.html` pages and the root `search-index.json` only. It is not a general docs file-size policy, it does not cap source harvesting, and it does not block images, fonts, CSS, JavaScript, or other streamed assets. When AppSurface Docs rejects an oversized rewritten artifact, diagnostics include the artifact type, observed size, configured limit, `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`, the failure outcome, and this section name. Remediate by shrinking or re-exporting the artifact, or by setting a larger explicit limit within the supported range.
 
-When the hidden frozen route manifest is present, mounted archives also use it before file lookup to redirect archived source-shaped Markdown aliases and declared redirect aliases to the mount-local canonical route. For example, a manifest alias of `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` when the tree is mounted at `/docs/v/1.2.3`, or to `/foo/bar/packages` when the recommended release is mounted at a custom route root. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but a manifest canonical route may still include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
+When the hidden frozen route manifest is present, mounted archives also use it before file lookup to redirect archived source-shaped Markdown aliases and declared redirect aliases to the mount-local canonical route. For example, a manifest alias of `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` when the tree is mounted at `/docs/v/1.2.3`, or to `/foo/bar/packages` when the recommended release is mounted at a custom route root. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but a manifest canonical route may still include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, the RazorWire page-navigation runtime when page-navigation roots are present, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
 
 If a strict search-index path failure appears after upgrade, inspect the affected tree's `search-index.json`, find the reported `documents[index]`, and rewrite valid docs pages back to canonical `/docs/...` paths. For example, replace `https://docs.example.com/foo/bar/guide.html`, `/some-base/docs/guide.html`, or `/foo/bar/guide.html` with `/docs/guide.html` before rebuilding or republishing the archive. Do not repair unsafe rows by pointing them at external sites or operational docs endpoints; those entries should be removed or regenerated from a valid docs route.
 
@@ -2155,18 +2156,23 @@ When `DocDetailsViewModel.HasOutline` is true, AppSurface Docs renders one seman
 - narrower viewports: a closed-by-default `On this page` toggle above the article
 - all viewports: the same outline list, never separate desktop and mobile TOCs
 
-The outline client enhances the server-rendered links by:
+The outline renders RazorWire page-navigation attributes so shared RazorWire runtime owns generic same-page navigation behavior:
 
-- using `#main-content` as the scroll root for `IntersectionObserver`
-- marking the current section with `aria-current="location"`
-- refreshing the active section from the scroll position on scroll, throttled through `requestAnimationFrame`, so long sections do not stay pinned to the previous outline item until the next heading enters the observer band
-- keeping the active outline link visible inside the sticky desktop rail when the page-local outline is taller than the viewport
-- easing outline-link clicks to the target section over 620 ms, while preserving instant jumps for readers who prefer reduced motion and canceling the animation when the reader manually wheels or touches the scroll root
-- initializing from the current URL hash
+- marking the current section with `aria-current="location"` and `data-rw-page-nav-active="true"`
+- initializing active state from the current URL hash
+- filtering modified, external, download, and missing-target links so normal browser behavior remains intact
+- updating the URL hash and scrolling the target for same-page clicks
 - rebinding after RazorWire/Turbo frame navigation replaces `rw:island id="doc-content"`
+
+The docs-owned outline client keeps only the AppSurface Docs chrome around that behavior:
+
+- rolling compact previous/current/next context when the active link changes
+- keeping the active outline link visible inside the sticky desktop rail when the page-local outline is taller than the viewport
+- placing the outline above the article on compact viewports and beside it on wide desktop
 - containing scroll inside the expanded compact outline so touch or wheel input over `On this page` does not move the article behind it
-- collapsing the mobile outline after an outline link is chosen
-- skipping missing heading targets for active-state tracking while leaving their normal hash links intact instead of marking stale entries current or closing the drawer
+- syncing the compact outline's docs-specific expanded state after an outline link is chosen
+- adding copy-link actions and manual-copy fallbacks for page sections
+- skipping missing heading targets for docs-specific context while leaving their normal hash links intact
 
 If JavaScript is unavailable, the server-rendered outline remains a normal list of hash links. If `IntersectionObserver` is unavailable, AppSurface Docs keeps static and hash-based behavior rather than adding a scroll polling fallback.
 

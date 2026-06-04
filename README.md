@@ -154,6 +154,21 @@ This command:
 - Excludes test modules (`*.Tests` and `*.IntegrationTests`) from coverage.
 - Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
 - Writes a summary to `TestResults/coverage-merged/summary.txt`.
+- Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
+- Restores the pinned local ReportGenerator .NET tool when coverage files need to be merged.
+
+The script also supports bounded test groups for local or CI experiments:
+
+```bash
+BUILD_CONFIGURATION=Release BUILD_SOLUTION=false ./scripts/coverage-solution.sh --group web --output TestResults/coverage-groups/web
+./scripts/coverage-solution.sh --merge-only TestResults/coverage-groups --output TestResults/coverage-merged
+```
+
+Available bounded groups are `core`, `tools`, `web`, `docs`, `razorwire`, and `integration`.
+
+Default PR validation keeps solution coverage in one lane until measured group runs prove they reduce total GitHub Actions minutes, not just wall-clock time.
+
+The current CI critical-path policy and timing baseline live in [eng/ci-critical-path.md](./eng/ci-critical-path.md).
 
 When tests need to launch child processes, prefer CliWrap-backed helpers over raw `System.Diagnostics.Process` setup. Keep process-output capture in the helper result so CI failures include stdout and stderr, and reserve raw `Process` usage for tests that intentionally exercise process-wrapper behavior.
 

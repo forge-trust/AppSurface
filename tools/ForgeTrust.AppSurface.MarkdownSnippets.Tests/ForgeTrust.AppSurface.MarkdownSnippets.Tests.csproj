@@ -27,11 +27,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Using Include="ForgeTrust.AppSurface.Testing" />
     <Using Include="Xunit" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj" />
+    <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
   </ItemGroup>
 
 </Project>

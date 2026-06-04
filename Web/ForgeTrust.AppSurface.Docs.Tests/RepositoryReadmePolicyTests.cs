@@ -15,7 +15,7 @@ public sealed partial class RepositoryReadmePolicyTests
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var violatingReadmes = EnumerateAuthoredReadmePaths(repoRoot)
             .Where(
-                path => StartsWithYamlFrontMatter(File.ReadAllText(Path.Combine(repoRoot, path))))
+                path => StartsWithYamlFrontMatter(File.ReadAllText(TestPathUtils.PathUnder(repoRoot, path))))
             .ToArray();
 
         Assert.True(
@@ -73,7 +73,7 @@ public sealed partial class RepositoryReadmePolicyTests
 
             Assert.Contains("## Release Guidance", content, StringComparison.Ordinal);
 
-            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1.0-rc.1.md"), repoRoot);
+            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1.0-rc.2.md"), repoRoot);
             var linksToReleaseNote = MarkdownLinkRegex()
                 .Matches(content)
                 .Select(match => ResolveRelativeLinkTarget(
@@ -82,7 +82,7 @@ public sealed partial class RepositoryReadmePolicyTests
                     readmePath))
                 .Any(target => string.Equals(target, expectedTarget, StringComparison.Ordinal));
 
-            Assert.True(linksToReleaseNote, $"{readmePath} must link to the v0.1.0 RC 1 release note.");
+            Assert.True(linksToReleaseNote, $"{readmePath} must link to the v0.1.0 RC 2 release note.");
         }
     }
 
@@ -133,7 +133,7 @@ public sealed partial class RepositoryReadmePolicyTests
     private static ServiceProvider CreatePolicyProvider(string repoRoot)
     {
         var standaloneConfigRelativePath = Path.Join("Web", "ForgeTrust.AppSurface.Docs.Standalone", "appsettings.json");
-        var standaloneConfigPath = Path.Join(repoRoot, standaloneConfigRelativePath);
+        var standaloneConfigPath = TestPathUtils.PathUnder(repoRoot, standaloneConfigRelativePath);
         var configuration = new ConfigurationBuilder()
             .AddJsonFile(
                 standaloneConfigPath,
@@ -170,10 +170,16 @@ public sealed partial class RepositoryReadmePolicyTests
 
     private static string ResolveRepositoryRelativePath(string repoRoot, string repositoryRelativePath, string description)
     {
-        var normalizedPath = repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar);
-        Assert.False(Path.IsPathRooted(normalizedPath), $"{description} must be repository-relative.");
-
-        return Path.GetFullPath(normalizedPath, repoRoot);
+        try
+        {
+            return TestPathUtils.PathUnder(repoRoot, repositoryRelativePath);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidOperationException(
+                $"{description} must be repository-relative and stay under the repository root.",
+                exception);
+        }
     }
 
     private static string ResolveRelativeLinkTarget(string baseDirectory, string href, string readmePath)

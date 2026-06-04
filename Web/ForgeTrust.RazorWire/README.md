@@ -21,7 +21,7 @@ When consuming package builds from a configured feed, reference `ForgeTrust.Razo
 
 ## Release Guidance
 
-AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 1 release note](../../releases/v0.1.0-rc.1.md) for current release risk, migration guidance, and package readiness.
+AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 2 release note](../../releases/v0.1.0-rc.2.md) for current release risk, migration guidance, and package readiness.
 
 ## Hero Proof
 
@@ -103,6 +103,25 @@ dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.App
 
 For failed submissions, RazorWire also ships a convention-based form UX stack: default form-local fallbacks for unhandled failures, server helpers for validation errors, anti-forgery diagnostics in development, and styling/event hooks for consumers. See [Failed Form UX](Docs/form-failures.md) or run the sample and visit `/Reactivity/FormFailures`.
 
+## Page Navigation in 3 Minutes
+
+Use RazorWire page navigation when a server-rendered page needs same-page section links, active state, and optional mobile-panel close behavior without app-specific JavaScript.
+
+```cshtml
+<nav rw-page-nav aria-label="Page sections">
+    <button rw-page-nav-toggle="page-sections-panel" aria-expanded="true">Sections</button>
+    <div id="page-sections-panel" rw-page-nav-panel>
+        <a rw-page-nav-link href="#overview">Overview</a>
+        <a rw-page-nav-link href="#pricing">Pricing</a>
+    </div>
+</nav>
+
+<section id="overview" style="scroll-margin-top: 6rem">...</section>
+<section id="pricing" style="scroll-margin-top: 6rem">...</section>
+```
+
+RazorWire renders stable `data-rw-page-nav*` attributes, updates `aria-current="location"` on the active link, mirrors panel state through `data-rw-page-nav-panel-state`, and leaves all layout and styling to the host application. This replaces common brochure-site hooks such as `.page-scroll`, `data-bs-spy`, active classes, and `.navbar-collapse` close scripts. See the full contract and migration table in [Page Navigation](Docs/page-navigation.md), or run the MVC sample and visit `/Navigation/PageNavigation`.
+
 ## Generated UI Design Contract
 
 RazorWire should feel like a quiet enhancement inside the host application, not like a separate visual product placed on top of it. Package-owned generated UI follows the [RazorWire generated UI design contract](DESIGN.md).
@@ -143,6 +162,8 @@ RazorWire markup only lights up when your views import the package TagHelpers an
 <rw:scripts/>
 ```
 <!-- /appsurface:snippet -->
+
+Plain `<rw:scripts/>` is enough for page navigation. RazorWire emits a small detector that loads the separate `page-navigation.js` asset only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup, including after Turbo page or frame renders. The optional `page-navigation="true"` attribute is still supported as an eager-load escape hatch, but it is not required for normal adoption.
 
 ## Configure Services (Optional)
 

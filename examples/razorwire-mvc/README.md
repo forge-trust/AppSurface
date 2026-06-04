@@ -23,6 +23,8 @@ That is the core RazorWire workflow in one interaction: a normal MVC form posts,
 
 To inspect failed-submission conventions, navigate to `/Reactivity/FormFailures`. That page intentionally triggers validation, anti-forgery, authorization, malformed request, and server failures so you can compare server-handled errors with the default runtime fallback.
 
+To inspect same-page navigation conventions, navigate to `/Navigation/PageNavigation`. That page is a brochure-style proof for active section links, initial hash state, optional mobile panel close, and Bootstrap scrollspy replacement without custom page JavaScript.
+
 ## What Just Happened
 
 ```text
@@ -150,6 +152,18 @@ The sample includes a dedicated `/Reactivity/FormFailures` page that demonstrate
 - Consumer customization with CSS variables and `razorwire:form:failure` in manual mode.
 
 See the package guide for the API contract and troubleshooting notes: [Failed Form UX](../../Web/ForgeTrust.RazorWire/Docs/form-failures.md).
+
+### Page Navigation
+
+The sample includes a dedicated `/Navigation/PageNavigation` page that demonstrates:
+
+- `rw-page-nav` on a normal navigation root.
+- `rw-page-nav-link` on ordinary section anchors.
+- `rw-page-nav-toggle` and `rw-page-nav-panel` for an optional narrow-viewport panel.
+- Active-state styling through `data-rw-page-nav-active="true"`.
+- Sticky-header offset through app-owned `scroll-margin-top`.
+
+The page is intentionally free of custom JavaScript. It is the migration path for brochure sites that previously needed `.page-scroll`, `data-bs-spy`, active class scripts, or Bootstrap navbar-collapse hooks. See the package guide for the full contract and migration table: [Page Navigation](../../Web/ForgeTrust.RazorWire/Docs/page-navigation.md).
 
 ## Project Structure
 
