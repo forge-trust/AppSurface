@@ -5,6 +5,15 @@ namespace ForgeTrust.AppSurface.CoverageRunner;
 /// <summary>
 /// Coordinates solution coverage project discovery, scheduling, test execution, and artifact merging.
 /// </summary>
+/// <remarks>
+/// This type is the implementation behind <c>scripts/coverage-solution.sh</c>. It preserves the
+/// script contract while moving the scheduling logic into testable C# code: normal runs discover
+/// projects with <c>dotnet sln list</c>, optionally build the solution, run selected test projects,
+/// replay captured logs in solution order, merge Cobertura files with ReportGenerator, and write
+/// <c>coverage.cobertura.xml</c>, <c>summary.txt</c>, <c>timings.json</c>, top-level
+/// <c>junit-*.xml</c> files, and per-project <c>dotnet-test.log</c> files under the output
+/// directory. Merge-only runs skip discovery/build/test and only merge an existing artifact tree.
+/// </remarks>
 internal sealed class CoverageRunnerApplication
 {
     private const string Usage = """
@@ -53,13 +62,41 @@ internal sealed class CoverageRunnerApplication
     }
 
     /// <summary>
-    /// Runs the coverage runner.
+    /// Runs the coverage workflow described by script-compatible arguments and environment
+    /// variables.
     /// </summary>
-    /// <param name="args">Command-line arguments.</param>
-    /// <param name="currentDirectory">Current working directory.</param>
-    /// <param name="environment">Environment variables.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Process exit code.</returns>
+    /// <param name="args">
+    /// Command-line arguments accepted by <c>scripts/coverage-solution.sh</c>, including
+    /// positional <c>[solution] [output]</c>, <c>--group</c>, <c>--list-groups</c>,
+    /// <c>--merge-only</c>, <c>--output</c>, <c>--solution</c>, <c>--build-solution</c>, and
+    /// <c>--skip-solution-build</c>.
+    /// </param>
+    /// <param name="currentDirectory">
+    /// Directory used to find the repository root and, through the wrapper-provided
+    /// <c>COVERAGE_CALLER_DIRECTORY</c>, resolve user-supplied relative paths.
+    /// </param>
+    /// <param name="environment">
+    /// Environment variables. Defaults are <c>TEST_GROUP=all</c>,
+    /// <c>BUILD_CONFIGURATION=Debug</c>, <c>BUILD_SOLUTION=true</c> for <c>all</c> and
+    /// <c>false</c> for named groups, <c>BUILD_NO_RESTORE=false</c>, and
+    /// <c>COVERAGE_PARALLELISM=1</c>.
+    /// </param>
+    /// <param name="cancellationToken">
+    /// Cancellation token forwarded to external command execution and file writes. Cancellation
+    /// aborts the active operation rather than writing a partial success summary.
+    /// </param>
+    /// <returns>
+    /// <c>0</c> for success, <c>2</c> for invalid invocation, or the first failing test/merge
+    /// command exit code. Test failures do not stop scheduling; all selected projects run before
+    /// the aggregate non-zero exit is returned.
+    /// </returns>
+    /// <remarks>
+    /// Non-exclusive projects run through a bounded queue up to <c>COVERAGE_PARALLELISM</c>.
+    /// Projects classified as integration tests or Playwright users are a conservative first
+    /// rollout: they wait for active work to drain, run alone, and then release the queue. In
+    /// merge-only mode the source directory must not equal, contain, or be contained by the output
+    /// directory because the output directory is cleaned before writing merged artifacts.
+    /// </remarks>
     public async Task<int> RunAsync(
         string[] args,
         string currentDirectory,
@@ -116,9 +153,9 @@ internal sealed class CoverageRunnerApplication
             return 1;
         }
 
-        if (AreSameDirectory(options.MergeSourceDirectory, options.OutputDirectory))
+        if (DirectoriesOverlap(options.MergeSourceDirectory, options.OutputDirectory))
         {
-            await _standardError.WriteLineAsync("--merge-only source directory must be different from the output directory.");
+            await _standardError.WriteLineAsync("--merge-only source directory must not overlap the output directory.");
             return 2;
         }
 
@@ -640,11 +677,21 @@ internal sealed class CoverageRunnerApplication
         return path.Replace('\\', '/');
     }
 
-    private static bool AreSameDirectory(string left, string right)
+    private static bool DirectoriesOverlap(string left, string right)
     {
         var normalizedLeft = Normalize(Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)));
         var normalizedRight = Normalize(Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)));
-        return string.Equals(normalizedLeft, normalizedRight, GetPathComparison());
+        var comparison = GetPathComparison();
+
+        return string.Equals(normalizedLeft, normalizedRight, comparison)
+            || IsDirectoryAncestor(normalizedLeft, normalizedRight, comparison)
+            || IsDirectoryAncestor(normalizedRight, normalizedLeft, comparison);
+    }
+
+    private static bool IsDirectoryAncestor(string ancestor, string descendant, StringComparison comparison)
+    {
+        var prefix = ancestor.EndsWith('/') ? ancestor : ancestor + "/";
+        return descendant.StartsWith(prefix, comparison);
     }
 
     private static StringComparison GetPathComparison()
@@ -656,22 +703,48 @@ internal sealed class CoverageRunnerApplication
 }
 
 /// <summary>
-/// Test project selected for coverage execution.
+/// Test project selected for coverage execution after solution discovery and group filtering.
 /// </summary>
-/// <param name="RelativePath">Solution-relative project path.</param>
-/// <param name="FullPath">Full project path.</param>
-/// <param name="Group">Coverage group.</param>
-/// <param name="Slug">Artifact directory slug.</param>
-/// <param name="IsExclusive">Whether the project must run alone.</param>
+/// <param name="RelativePath">
+/// Path exactly as reported by <c>dotnet sln list</c>. This value is used for stable logging and
+/// timings so CI output follows solution order.
+/// </param>
+/// <param name="FullPath">
+/// Absolute project file path passed to <c>dotnet test</c>. Relative solution entries are resolved
+/// against the solution directory.
+/// </param>
+/// <param name="Group">
+/// Coverage group from <see cref="TestProjectClassifier.GetGroup"/>. Valid scheduled groups are
+/// <c>core</c>, <c>tools</c>, <c>web</c>, <c>docs</c>, <c>razorwire</c>, and
+/// <c>integration</c>; unmatched paths fall back to <c>core</c>.
+/// </param>
+/// <param name="Slug">
+/// File-system-safe artifact directory slug. The slug must be a single path segment because it is
+/// used below <c>projects/</c> and in top-level JUnit file names.
+/// </param>
+/// <param name="IsExclusive">
+/// Whether the scheduler must drain active work before running this project alone. This is used for
+/// integration and Playwright projects to avoid browser/server/resource contention during the first
+/// parallelism rollout.
+/// </param>
 internal sealed record TestProject(string RelativePath, string FullPath, string Group, string Slug, bool IsExclusive);
 
 /// <summary>
-/// Result from one project test run.
+/// Result from one project test run, including timing, process outcome, and captured log location.
 /// </summary>
-/// <param name="Index">Original project order.</param>
-/// <param name="Project">Project metadata.</param>
-/// <param name="Seconds">Runtime in seconds.</param>
-/// <param name="ExitCode">Process exit code.</param>
-/// <param name="Output">Captured process output.</param>
-/// <param name="LogFile">Captured log file path.</param>
+/// <param name="Index">
+/// Original solution-order index. Log replay and <c>timings.json</c> sort by this value so parallel
+/// execution does not make CI output unstable.
+/// </param>
+/// <param name="Project">Project metadata used to write timings, classify failures, and locate artifacts.</param>
+/// <param name="Seconds">Measured project runtime in whole seconds from the injected clock.</param>
+/// <param name="ExitCode">
+/// Exit code returned by <c>dotnet test</c>. Non-zero values are recorded and reported after all
+/// selected projects have been scheduled; they do not stop remaining projects from running.
+/// </param>
+/// <param name="Output">
+/// Captured standard output and standard error from <c>dotnet test</c>. The runner writes this to
+/// the per-project log file and replays it in solution order before the final summary.
+/// </param>
+/// <param name="LogFile">Full path to the per-project <c>dotnet-test.log</c> file.</param>
 internal sealed record ProjectRunResult(int Index, TestProject Project, long Seconds, int ExitCode, string Output, string LogFile);

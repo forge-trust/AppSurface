@@ -3,82 +3,127 @@ namespace ForgeTrust.AppSurface.CoverageRunner;
 /// <summary>
 /// Parsed command-line and environment configuration for a coverage runner invocation.
 /// </summary>
+/// <remarks>
+/// Command-line options have precedence over environment defaults. Positional arguments are
+/// interpreted as <c>[solution] [output]</c> only when the matching named option was not supplied.
+/// Relative user paths are resolved from <c>COVERAGE_CALLER_DIRECTORY</c> when the shell wrapper
+/// provides it, otherwise from the current directory passed to <see cref="Parse"/>. Supported
+/// groups are <c>all</c>, <c>core</c>, <c>tools</c>, <c>web</c>, <c>docs</c>,
+/// <c>razorwire</c>, and <c>integration</c>. <c>--list-groups</c> is list-only and skips
+/// unrelated environment validation; <c>--merge-only</c> skips project discovery, builds, and
+/// tests, then uses <see cref="MergeSourceDirectory"/> as the existing artifact source.
+/// </remarks>
 internal sealed record CoverageRunnerOptions
 {
     private static readonly string[] ValidGroups = ["all", "core", "tools", "web", "docs", "razorwire", "integration"];
 
     /// <summary>
-    /// Gets the repository root inferred from the current working tree or current directory.
+    /// Gets the repository root inferred by walking upward for <c>ForgeTrust.AppSurface.slnx</c>,
+    /// or the supplied current directory when no repository root can be found.
     /// </summary>
     public required string RepositoryRoot { get; init; }
 
     /// <summary>
-    /// Gets the solution path used for test project discovery.
+    /// Gets the solution path used for test project discovery. Defaults to
+    /// <c>ForgeTrust.AppSurface.slnx</c> under <see cref="RepositoryRoot"/> and can be overridden
+    /// by positional argument one or <c>--solution</c>.
     /// </summary>
     public required string SolutionPath { get; init; }
 
     /// <summary>
-    /// Gets the coverage output directory.
+    /// Gets the coverage output directory. Defaults to <c>TestResults/coverage-merged</c> under
+    /// <see cref="RepositoryRoot"/> and can be overridden by positional argument two or
+    /// <c>--output</c>.
     /// </summary>
     public required string OutputDirectory { get; init; }
 
     /// <summary>
-    /// Gets the selected test group.
+    /// Gets the selected test group. Defaults to <c>TEST_GROUP</c> or <c>all</c>; valid values
+    /// are returned by <see cref="GetValidGroups"/>. Merge-only invocations set this to
+    /// <c>merge-only</c> for summaries and timings.
     /// </summary>
     public required string GroupName { get; init; }
 
     /// <summary>
     /// Gets the build configuration supplied to <c>dotnet build</c> and <c>dotnet test</c>.
+    /// Defaults to <c>BUILD_CONFIGURATION</c> or <c>Debug</c>.
     /// </summary>
     public required string BuildConfiguration { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether solution build should run before test projects.
+    /// Gets a value indicating whether solution build should run before test projects. Defaults
+    /// to <c>true</c> for group <c>all</c> and <c>false</c> for named groups; <c>BUILD_SOLUTION</c>,
+    /// <c>--build-solution</c>, and <c>--skip-solution-build</c> override that default. Merge-only
+    /// always disables the build.
     /// </summary>
     public required bool BuildSolution { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether <c>--no-restore</c> should be passed to build and test commands.
+    /// Gets a value indicating whether <c>--no-restore</c> should be passed to build and test
+    /// commands. Defaults to <c>true</c> only when <c>BUILD_NO_RESTORE=true</c>.
     /// </summary>
     public required bool BuildNoRestore { get; init; }
 
     /// <summary>
-    /// Gets the coverlet include filter.
+    /// Gets the coverlet include filter. Defaults to <c>[ForgeTrust.AppSurface.*]*</c>.
     /// </summary>
     public required string IncludeFilter { get; init; }
 
     /// <summary>
-    /// Gets the coverlet exclude filter with commas escaped for MSBuild.
+    /// Gets the coverlet exclude filter with commas escaped for MSBuild. Defaults to
+    /// <c>[*.Tests]*,[*.IntegrationTests]*</c> before comma escaping.
     /// </summary>
     public required string ExcludeFilter { get; init; }
 
     /// <summary>
-    /// Gets the maximum number of non-exclusive test projects that may run at once.
+    /// Gets the maximum number of non-exclusive test projects that may run at once. Defaults to
+    /// <c>COVERAGE_PARALLELISM</c> or <c>1</c>; invalid, zero, or negative values are parse
+    /// failures except for list-only invocations.
     /// </summary>
     public required int Parallelism { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether the invocation should only merge existing coverage artifacts.
+    /// Gets a value indicating whether the invocation should only merge existing coverage
+    /// artifacts. Merge-only mode skips solution discovery, builds, and tests.
     /// </summary>
     public required bool MergeOnly { get; init; }
 
     /// <summary>
-    /// Gets the source directory for merge-only invocations.
+    /// Gets the source directory for merge-only invocations. This value is required for
+    /// <see cref="MergeOnly"/> and is resolved using the same caller-relative path rules as
+    /// <see cref="SolutionPath"/> and <see cref="OutputDirectory"/>.
     /// </summary>
     public string? MergeSourceDirectory { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether the invocation should list supported test groups and exit.
+    /// Gets a value indicating whether the invocation should list supported test groups and exit
+    /// without validating unrelated environment values or touching the filesystem.
     /// </summary>
     public required bool ListGroups { get; init; }
 
     /// <summary>
-    /// Parses coverage runner options from script-compatible arguments.
+    /// Parses coverage runner options from script-compatible arguments and environment variables.
     /// </summary>
-    /// <param name="args">Command-line arguments.</param>
-    /// <param name="currentDirectory">Current working directory.</param>
-    /// <param name="environment">Environment variables.</param>
-    /// <returns>A parsed options result.</returns>
+    /// <param name="args">
+    /// Script-compatible arguments. Named options override environment defaults and positional
+    /// values; missing option values, unknown options, unexpected positional values, unknown
+    /// groups, invalid <c>BUILD_SOLUTION</c>, and invalid <c>COVERAGE_PARALLELISM</c> return a
+    /// failed parse result with exit code <c>2</c>.
+    /// </param>
+    /// <param name="currentDirectory">
+    /// Current directory used for repository-root discovery and, when
+    /// <c>COVERAGE_CALLER_DIRECTORY</c> is not supplied, relative path resolution.
+    /// </param>
+    /// <param name="environment">
+    /// Environment variables used for defaults: <c>TEST_GROUP</c>, <c>BUILD_CONFIGURATION</c>,
+    /// <c>BUILD_SOLUTION</c>, <c>BUILD_NO_RESTORE</c>, <c>COVERAGE_PARALLELISM</c>,
+    /// <c>INCLUDE_FILTER</c>, <c>EXCLUDE_FILTER</c>, and <c>COVERAGE_CALLER_DIRECTORY</c>.
+    /// </param>
+    /// <returns>
+    /// A parse result containing options on success, usage-only state for <c>--help</c>, or a
+    /// validation error and usage flag for invalid invocations. <c>--list-groups</c> returns
+    /// successful list-only options before validating unrelated environment values.
+    /// </returns>
     public static CoverageRunnerParseResult Parse(
         string[] args,
         string currentDirectory,
@@ -186,6 +231,26 @@ internal sealed record CoverageRunnerOptions
                     i++;
                     break;
             }
+        }
+
+        if (listGroups)
+        {
+            return CoverageRunnerParseResult.Success(new CoverageRunnerOptions
+            {
+                RepositoryRoot = Path.GetFullPath(repositoryRoot),
+                SolutionPath = ResolveUserPath(solutionPath, callerDirectory),
+                OutputDirectory = ResolveUserPath(outputDirectory, callerDirectory),
+                GroupName = "all",
+                BuildConfiguration = buildConfiguration,
+                BuildSolution = false,
+                BuildNoRestore = buildNoRestore,
+                IncludeFilter = includeFilter,
+                ExcludeFilter = excludeFilter,
+                Parallelism = 1,
+                MergeOnly = false,
+                MergeSourceDirectory = null,
+                ListGroups = true,
+            });
         }
 
         if (!TryParseParallelism(ReadEnvironment(environment, "COVERAGE_PARALLELISM"), out var parallelism))

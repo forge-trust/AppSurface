@@ -543,6 +543,50 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldRejectMergeOnlyWhenSourceIsUnderOutput()
+    {
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        var sourceDirectory = Path.Join(outputDirectory, "projects");
+        var coverageFile = Path.Join(sourceDirectory, "Sample.Tests", "coverage.cobertura.xml");
+        Directory.CreateDirectory(Path.GetDirectoryName(coverageFile)!);
+        File.WriteAllText(coverageFile, "<coverage />");
+
+        var runner = new RecordingCommandRunner(workspace);
+        var app = CreateApp(runner);
+
+        var exitCode = await app.RunAsync(
+            ["--merge-only", sourceDirectory, "--output", outputDirectory],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(2, exitCode);
+        Assert.True(File.Exists(coverageFile));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldRejectMergeOnlyWhenOutputIsUnderSource()
+    {
+        using var workspace = TestRepo.Create();
+        var sourceDirectory = Path.Join(workspace.Root, "coverage-shards");
+        var outputDirectory = Path.Join(sourceDirectory, "merged");
+        var coverageFile = Path.Join(sourceDirectory, "Sample.Tests", "coverage.cobertura.xml");
+        Directory.CreateDirectory(Path.GetDirectoryName(coverageFile)!);
+        File.WriteAllText(coverageFile, "<coverage />");
+
+        var runner = new RecordingCommandRunner(workspace);
+        var app = CreateApp(runner);
+
+        var exitCode = await app.RunAsync(
+            ["--merge-only", sourceDirectory, "--output", outputDirectory],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(2, exitCode);
+        Assert.True(File.Exists(coverageFile));
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldRejectMergeOnlyWhenCaseVariantSourceMatchesOutputOnCaseInsensitiveFileSystems()
     {
         using var workspace = TestRepo.Create();

@@ -18,6 +18,9 @@ default so they can be used as focused local probes.
 
 ## Environment
 
+- `TEST_GROUP`: group selected when `--group` is not supplied. Valid values are `all`, `core`,
+  `tools`, `web`, `docs`, `razorwire`, and `integration`. Defaults to `all`; this runs every
+  discovered test project and uses the default solution-build path.
 - `BUILD_CONFIGURATION`: `dotnet build` and `dotnet test` configuration. Defaults to `Debug`.
 - `BUILD_SOLUTION`: `true` or `false`. Overrides the default build behavior.
 - `BUILD_NO_RESTORE`: when `true`, forwards `--no-restore` to build and test commands.

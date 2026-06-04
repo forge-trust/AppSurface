@@ -5,26 +5,14 @@ public sealed class CoverageRunnerSupportTests
     [Fact]
     public async Task ProgramMain_ShouldListGroups()
     {
-        var originalOut = Console.Out;
-        var originalError = Console.Error;
         using var output = new StringWriter();
         using var error = new StringWriter();
-        try
-        {
-            Console.SetOut(output);
-            Console.SetError(error);
 
-            var exitCode = await Program.Main(["--list-groups"]);
+        var exitCode = await Program.RunAsync(["--list-groups"], output, error);
 
-            Assert.Equal(0, exitCode);
-            Assert.Contains("tools", output.ToString(), StringComparison.Ordinal);
-            Assert.Empty(error.ToString());
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
+        Assert.Equal(0, exitCode);
+        Assert.Contains("tools", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
     }
 
     [Fact]

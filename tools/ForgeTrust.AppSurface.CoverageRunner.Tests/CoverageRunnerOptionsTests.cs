@@ -135,6 +135,26 @@ public sealed class CoverageRunnerOptionsTests
         Assert.Equal(2, result.Options.Parallelism);
     }
 
+    [Fact]
+    public void Parse_ShouldLetListGroupsIgnoreUnrelatedInvalidEnvironment()
+    {
+        using var workspace = TestRepo.Create();
+
+        var result = CoverageRunnerOptions.Parse(
+            ["--list-groups"],
+            workspace.Root,
+            new Dictionary<string, string?>
+            {
+                ["COVERAGE_PARALLELISM"] = "0",
+                ["TEST_GROUP"] = "unknown",
+                ["BUILD_SOLUTION"] = "maybe",
+            });
+
+        Assert.NotNull(result.Options);
+        Assert.True(result.Options.ListGroups);
+        Assert.Equal(0, result.ExitCode);
+    }
+
     [Theory]
     [InlineData("--group", "--group requires a value")]
     [InlineData("--merge-only", "--merge-only requires a source directory")]

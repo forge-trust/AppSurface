@@ -12,7 +12,16 @@ internal static class Program
     /// </summary>
     /// <param name="args">Command-line arguments supplied by <c>scripts/coverage-solution.sh</c>.</param>
     /// <returns>Process exit code where <c>0</c> indicates success.</returns>
-    internal static async Task<int> Main(string[] args)
+    internal static Task<int> Main(string[] args) => RunAsync(args, Console.Out, Console.Error);
+
+    /// <summary>
+    /// Launches the coverage runner with injectable output writers.
+    /// </summary>
+    /// <param name="args">Command-line arguments supplied by <c>scripts/coverage-solution.sh</c>.</param>
+    /// <param name="standardOut">Writer used for normal runner output.</param>
+    /// <param name="standardError">Writer used for diagnostics and failures.</param>
+    /// <returns>Process exit code where <c>0</c> indicates success.</returns>
+    internal static async Task<int> RunAsync(string[] args, TextWriter standardOut, TextWriter standardError)
     {
         var environment = Environment.GetEnvironmentVariables()
             .Cast<DictionaryEntry>()
@@ -20,8 +29,8 @@ internal static class Program
         var app = new CoverageRunnerApplication(
             new ProcessCommandRunner(),
             new SystemClock(),
-            Console.Out,
-            Console.Error);
+            standardOut,
+            standardError);
 
         return await app.RunAsync(args, Directory.GetCurrentDirectory(), environment);
     }
