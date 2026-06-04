@@ -89,7 +89,7 @@ public sealed class CoverageRunnerApplicationTests
             new Dictionary<string, string?>());
 
         Assert.Equal(7, exitCode);
-        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Combine(workspace.Root, "TestResults", "coverage-merged", "timings.json")));
+        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(workspace.Root, "TestResults", "coverage-merged", "timings.json")));
         var project = Assert.Single(timings.RootElement.GetProperty("projects").EnumerateArray());
         Assert.Equal(7, project.GetProperty("exitCode").GetInt32());
         Assert.Equal(1, timings.RootElement.GetProperty("merge").GetProperty("exitCode").GetInt32());
@@ -110,7 +110,7 @@ public sealed class CoverageRunnerApplicationTests
             new Dictionary<string, string?>());
 
         Assert.Equal(9, exitCode);
-        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Combine(workspace.Root, "TestResults", "coverage-merged", "timings.json")));
+        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(workspace.Root, "TestResults", "coverage-merged", "timings.json")));
         Assert.Equal(9, timings.RootElement.GetProperty("merge").GetProperty("exitCode").GetInt32());
         var project = Assert.Single(timings.RootElement.GetProperty("projects").EnumerateArray());
         Assert.Equal(0, project.GetProperty("exitCode").GetInt32());
@@ -120,8 +120,8 @@ public sealed class CoverageRunnerApplicationTests
     public async Task RunAsync_ShouldRejectMergeOnlyWhenSourceMatchesOutput()
     {
         using var workspace = TestRepo.Create();
-        var outputDirectory = Path.Combine(workspace.Root, "TestResults", "coverage-merged");
-        var coverageFile = Path.Combine(outputDirectory, "projects", "Sample.Tests", "coverage.cobertura.xml");
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        var coverageFile = Path.Join(outputDirectory, "projects", "Sample.Tests", "coverage.cobertura.xml");
         Directory.CreateDirectory(Path.GetDirectoryName(coverageFile)!);
         File.WriteAllText(coverageFile, "<coverage />");
 
@@ -141,12 +141,12 @@ public sealed class CoverageRunnerApplicationTests
     public async Task RunAsync_ShouldRejectMergeOnlyWhenCaseVariantSourceMatchesOutputOnCaseInsensitiveFileSystems()
     {
         using var workspace = TestRepo.Create();
-        var outputDirectory = Path.Combine(workspace.Root, "TestResults", "coverage-merged");
-        var coverageFile = Path.Combine(outputDirectory, "projects", "Sample.Tests", "coverage.cobertura.xml");
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        var coverageFile = Path.Join(outputDirectory, "projects", "Sample.Tests", "coverage.cobertura.xml");
         Directory.CreateDirectory(Path.GetDirectoryName(coverageFile)!);
         File.WriteAllText(coverageFile, "<coverage />");
 
-        var caseVariantOutputDirectory = Path.Combine(workspace.Root, "testresults", "coverage-merged");
+        var caseVariantOutputDirectory = Path.Join(workspace.Root, "testresults", "coverage-merged");
         if (!Directory.Exists(caseVariantOutputDirectory))
         {
             return;
@@ -249,7 +249,7 @@ public sealed class CoverageRunnerApplicationTests
                 var target = arguments.Single(argument => argument.StartsWith("-targetdir:", StringComparison.Ordinal))["-targetdir:".Length..];
                 Directory.CreateDirectory(target);
                 File.WriteAllText(
-                    Path.Combine(target, "Cobertura.xml"),
+                    Path.Join(target, "Cobertura.xml"),
                     "<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
                 return new CommandResult(0, "");
             }

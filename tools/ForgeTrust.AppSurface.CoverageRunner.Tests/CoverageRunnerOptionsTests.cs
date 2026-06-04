@@ -13,8 +13,8 @@ public sealed class CoverageRunnerOptionsTests
             new Dictionary<string, string?>());
 
         Assert.NotNull(result.Options);
-        Assert.Equal(Path.Combine(workspace.Root, "custom.slnx"), result.Options.SolutionPath);
-        Assert.Equal(Path.Combine(workspace.Root, "artifacts", "coverage"), result.Options.OutputDirectory);
+        Assert.Equal(Path.Join(workspace.Root, "custom.slnx"), result.Options.SolutionPath);
+        Assert.Equal(Path.Join(workspace.Root, "artifacts", "coverage"), result.Options.OutputDirectory);
         Assert.Equal("all", result.Options.GroupName);
         Assert.True(result.Options.BuildSolution);
     }
@@ -23,7 +23,7 @@ public sealed class CoverageRunnerOptionsTests
     public void Parse_ShouldResolveRelativeUserPathsFromScriptCallerDirectory()
     {
         using var workspace = TestRepo.Create();
-        var caller = Path.Combine(workspace.Root, "caller");
+        var caller = Path.Join(workspace.Root, "caller");
         Directory.CreateDirectory(caller);
 
         var result = CoverageRunnerOptions.Parse(
@@ -32,8 +32,8 @@ public sealed class CoverageRunnerOptionsTests
             new Dictionary<string, string?> { ["COVERAGE_CALLER_DIRECTORY"] = caller });
 
         Assert.NotNull(result.Options);
-        Assert.Equal(Path.Combine(caller, "custom.slnx"), result.Options.SolutionPath);
-        Assert.Equal(Path.Combine(caller, "artifacts", "coverage"), result.Options.OutputDirectory);
+        Assert.Equal(Path.Join(caller, "custom.slnx"), result.Options.SolutionPath);
+        Assert.Equal(Path.Join(caller, "artifacts", "coverage"), result.Options.OutputDirectory);
     }
 
     [Fact]
