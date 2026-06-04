@@ -994,11 +994,15 @@ internal sealed class PackageIndexGenerator
     /// </remarks>
     private static bool MarkdownDefinesFragmentTarget(string markdown, string fragment)
     {
-        if (markdown.Contains($"{{#{fragment}}}", StringComparison.OrdinalIgnoreCase)
-            || markdown.Contains($"id=\"{fragment}\"", StringComparison.OrdinalIgnoreCase)
-            || markdown.Contains($"id='{fragment}'", StringComparison.OrdinalIgnoreCase)
-            || markdown.Contains($"name=\"{fragment}\"", StringComparison.OrdinalIgnoreCase)
-            || markdown.Contains($"name='{fragment}'", StringComparison.OrdinalIgnoreCase))
+        var explicitTargets = new[]
+        {
+            $"{{#{fragment}}}",
+            $"id=\"{fragment}\"",
+            $"id='{fragment}'",
+            $"name=\"{fragment}\"",
+            $"name='{fragment}'"
+        };
+        if (explicitTargets.Any(target => markdown.Contains(target, StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }

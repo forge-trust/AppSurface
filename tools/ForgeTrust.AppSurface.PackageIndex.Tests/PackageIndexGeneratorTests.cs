@@ -877,7 +877,32 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         ## Fresh App Path {#package-first-path}
         """)]
     [InlineData("""
+        # First Success Path
+
+        ## Package-First Path ##
+        """)]
+    [InlineData("""
+        # First Success Path
+
+        ## Package First Path -
+        """)]
+    [InlineData("""
         <a id="package-first-path"></a>
+
+        # First Success Path
+        """)]
+    [InlineData("""
+        <a id='package-first-path'></a>
+
+        # First Success Path
+        """)]
+    [InlineData("""
+        <a name="package-first-path"></a>
+
+        # First Success Path
+        """)]
+    [InlineData("""
+        <a name='package-first-path'></a>
 
         # First Success Path
         """)]
