@@ -627,7 +627,7 @@ internal sealed class CoverageRunnerApplication
         }
     }
 
-    private static string RequirePathSegment(string segment, string parameterName)
+    internal static string RequirePathSegment(string segment, string parameterName)
     {
         if (string.IsNullOrWhiteSpace(segment)
             || Path.IsPathRooted(segment)

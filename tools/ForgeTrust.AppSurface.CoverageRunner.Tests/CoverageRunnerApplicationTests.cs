@@ -6,6 +6,257 @@ namespace ForgeTrust.AppSurface.CoverageRunner.Tests;
 public sealed class CoverageRunnerApplicationTests
 {
     [Fact]
+    public async Task RunAsync_ShouldWriteUsageToStandardOutForHelp()
+    {
+        using var workspace = TestRepo.Create();
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var app = CreateApp(new RecordingCommandRunner(workspace), output, error);
+
+        var exitCode = await app.RunAsync(["--help"], workspace.Root, new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("ForgeTrust.AppSurface.CoverageRunner", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldWriteParseErrorsToStandardError()
+    {
+        using var workspace = TestRepo.Create();
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var app = CreateApp(new RecordingCommandRunner(workspace), output, error);
+
+        var exitCode = await app.RunAsync(["--group"], workspace.Root, new Dictionary<string, string?>());
+
+        Assert.Equal(2, exitCode);
+        Assert.Empty(output.ToString());
+        Assert.Contains("--group requires a value", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldListGroups()
+    {
+        using var workspace = TestRepo.Create();
+        var output = new StringWriter();
+        var app = CreateApp(new RecordingCommandRunner(workspace), output);
+
+        var exitCode = await app.RunAsync(["--list-groups"], workspace.Root, new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("all", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("integration", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldReturnOneWhenSolutionIsMissing()
+    {
+        using var workspace = TestRepo.Create();
+        var error = new StringWriter();
+        var app = CreateApp(new RecordingCommandRunner(workspace), standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--solution", "missing.slnx"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Solution not found:", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldReturnOneWhenSolutionListFails()
+    {
+        using var workspace = TestRepo.Create();
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            SlnListExitCode = 4,
+            SlnListOutput = "sln list failed",
+        };
+        var error = new StringWriter();
+        var app = CreateApp(runner, standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("sln list failed", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldReturnOneWhenNoProjectsMatchGroup()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var error = new StringWriter();
+        var app = CreateApp(new RecordingCommandRunner(workspace), standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "docs"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("No test projects found for group 'docs'", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldBuildSolutionAndPassNoBuildToProjectTests()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace);
+        var app = CreateApp(runner);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--build-solution"],
+            workspace.Root,
+            new Dictionary<string, string?> { ["BUILD_CONFIGURATION"] = "Release", ["BUILD_NO_RESTORE"] = "true" });
+
+        Assert.Equal(0, exitCode);
+        var buildArguments = Assert.Single(runner.BuildCommands);
+        Assert.Contains("build", buildArguments);
+        Assert.Contains("Release", buildArguments);
+        Assert.Contains("--no-restore", buildArguments);
+        var testArguments = Assert.Single(runner.TestArguments);
+        Assert.Contains("--no-build", testArguments);
+        Assert.Contains("--no-restore", testArguments);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldStopBeforeTestsWhenSolutionBuildFails()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace) { BuildExitCode = 5 };
+        var error = new StringWriter();
+        var app = CreateApp(runner, standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--build-solution"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(runner.TestCommands);
+        Assert.Contains("Build failed", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldRunMergeOnlyAndCopyJunitFiles()
+    {
+        using var workspace = TestRepo.Create();
+        var sourceDirectory = Path.Join(workspace.Root, "coverage-shards");
+        var outputDirectory = Path.Join(workspace.Root, "merged");
+        Directory.CreateDirectory(sourceDirectory);
+        File.WriteAllText(
+            Path.Join(sourceDirectory, "coverage.cobertura.xml"),
+            "<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
+        File.WriteAllText(Path.Join(sourceDirectory, "junit-tools-1-Sample.Tests.xml"), "<testsuite />");
+        var app = CreateApp(new RecordingCommandRunner(workspace));
+
+        var exitCode = await app.RunAsync(
+            ["--merge-only", sourceDirectory, "--output", outputDirectory],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        Assert.True(File.Exists(Path.Join(outputDirectory, "coverage.cobertura.xml")));
+        Assert.True(File.Exists(Path.Join(outputDirectory, "summary.txt")));
+        Assert.True(File.Exists(Path.Join(outputDirectory, "timings.json")));
+        Assert.True(File.Exists(Path.Join(outputDirectory, "junit-tools-1-Sample.Tests.xml")));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldReturnOneWhenMergeOnlySourceIsMissing()
+    {
+        using var workspace = TestRepo.Create();
+        var error = new StringWriter();
+        var app = CreateApp(new RecordingCommandRunner(workspace), standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--merge-only", "missing-shards"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Merge source directory not found:", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldReturnToolRestoreExitCodeWhenMergeRestoreFails()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace) { ToolRestoreExitCode = 6 };
+        var error = new StringWriter();
+        var app = CreateApp(runner, standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(6, exitCode);
+        Assert.Contains("Failed to restore local .NET tools", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldReturnOneWhenReportGeneratorDoesNotCreateMergedCoverage()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace) { ReportGeneratorShouldOmitCoverage = true };
+        var error = new StringWriter();
+        var app = CreateApp(runner, standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("ReportGenerator did not create", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldReturnOneWhenMergedCoverageSummaryCannotBeParsed()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace) { ReportGeneratorCoverageText = "<coverage />" };
+        var error = new StringWriter();
+        var app = CreateApp(runner, standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Failed to parse numeric coverage attributes", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("nested/path")]
+    public void RequirePathSegment_ShouldRejectUnsafeSegments(string segment)
+    {
+        Assert.Throws<InvalidOperationException>(() => CoverageRunnerApplication.RequirePathSegment(segment, "segment"));
+    }
+
+    [Fact]
+    public void RequirePathSegment_ShouldReturnSafeSegments()
+    {
+        Assert.Equal("Sample.Tests", CoverageRunnerApplication.RequirePathSegment("Sample.Tests", "segment"));
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldLimitNonExclusiveProjectConcurrency()
     {
         using var workspace = TestRepo.Create();
@@ -211,13 +462,30 @@ public sealed class CoverageRunnerApplicationTests
 
         public TimeSpan TestDelay { get; init; }
 
+        public int SlnListExitCode { get; init; }
+
+        public string? SlnListOutput { get; init; }
+
+        public int BuildExitCode { get; init; }
+
+        public int ToolRestoreExitCode { get; init; }
+
         public string? FailingProject { get; init; }
 
         public string? MissingCoverageProject { get; init; }
 
         public int ReportGeneratorExitCode { get; init; }
 
+        public bool ReportGeneratorShouldOmitCoverage { get; init; }
+
+        public string ReportGeneratorCoverageText { get; init; } =
+            "<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />";
+
         public int MaxConcurrentTests { get; private set; }
+
+        public ConcurrentBag<IReadOnlyList<string>> BuildCommands { get; } = [];
+
+        public ConcurrentBag<IReadOnlyList<string>> TestArguments { get; } = [];
 
         public ConcurrentBag<string> TestCommands { get; } = [];
 
@@ -231,12 +499,23 @@ public sealed class CoverageRunnerApplicationTests
         {
             if (arguments.Count == 3 && arguments[0] == "sln" && arguments[2] == "list")
             {
+                if (SlnListExitCode != 0)
+                {
+                    return new CommandResult(SlnListExitCode, SlnListOutput ?? "");
+                }
+
                 return new CommandResult(0, string.Join(Environment.NewLine, _workspace.Projects));
+            }
+
+            if (arguments.Count > 0 && arguments[0] == "build")
+            {
+                BuildCommands.Add(arguments.ToArray());
+                return new CommandResult(BuildExitCode, BuildExitCode == 0 ? "build ok" : "build failed");
             }
 
             if (arguments.Count == 2 && arguments[0] == "tool" && arguments[1] == "restore")
             {
-                return new CommandResult(0, "");
+                return new CommandResult(ToolRestoreExitCode, ToolRestoreExitCode == 0 ? "" : "tool restore failed");
             }
 
             if (arguments.Count >= 4 && arguments[0] == "tool" && arguments[2] == "reportgenerator")
@@ -248,15 +527,19 @@ public sealed class CoverageRunnerApplicationTests
 
                 var target = arguments.Single(argument => argument.StartsWith("-targetdir:", StringComparison.Ordinal))["-targetdir:".Length..];
                 Directory.CreateDirectory(target);
-                File.WriteAllText(
-                    Path.Join(target, "Cobertura.xml"),
-                    "<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
+                if (!ReportGeneratorShouldOmitCoverage)
+                {
+                    File.WriteAllText(Path.Join(target, "Cobertura.xml"), ReportGeneratorCoverageText);
+                }
+
+                File.WriteAllText(Path.Join(target, "Summary.txt"), "reportgenerator summary");
                 return new CommandResult(0, "");
             }
 
             if (arguments.Count > 0 && arguments[0] == "test")
             {
                 var project = arguments[1];
+                TestArguments.Add(arguments.ToArray());
                 var active = Interlocked.Increment(ref _activeTests);
                 MaxConcurrentTests = Math.Max(MaxConcurrentTests, active);
                 TestCommands.Add(project);

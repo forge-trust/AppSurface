@@ -31,10 +31,24 @@ public sealed class TestProjectClassifierTests
     }
 
     [Fact]
+    public void IsExclusive_ShouldTreatRegularProjectsAsShareable()
+    {
+        Assert.False(TestProjectClassifier.IsExclusive(
+            "tools/Some.Tests/Some.Tests.csproj",
+            "<Project />"));
+    }
+
+    [Fact]
     public void CreateSlug_ShouldUseProjectFileName()
     {
         Assert.Equal(
             "ForgeTrust.AppSurface.Web.Tests",
             TestProjectClassifier.CreateSlug("Web/ForgeTrust.AppSurface.Web.Tests/ForgeTrust.AppSurface.Web.Tests.csproj"));
+    }
+
+    [Fact]
+    public void CreateSlug_ShouldRemoveInvalidFileNameCharacters()
+    {
+        Assert.Equal("Bad-Project.Tests", TestProjectClassifier.CreateSlug("Bad:Project.Tests.csproj"));
     }
 }
