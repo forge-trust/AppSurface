@@ -1,4 +1,5 @@
-using System.Diagnostics;
+using CliWrap;
+using CliWrap.Buffered;
 
 namespace ForgeTrust.AppSurface.CoverageRunner;
 
@@ -45,26 +46,14 @@ internal sealed class ProcessCommandRunner : ICommandRunner
         ArgumentNullException.ThrowIfNull(arguments);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
-        var startInfo = new ProcessStartInfo(command)
-        {
-            WorkingDirectory = workingDirectory,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-        };
-
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Unable to start command '{command}'.");
-        var standardOutput = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var standardError = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
+        var result = await Cli.Wrap(command)
+            .WithArguments(arguments)
+            .WithWorkingDirectory(workingDirectory)
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
 
         return new CommandResult(
-            process.ExitCode,
-            string.Concat(await standardOutput, await standardError));
+            result.ExitCode,
+            string.Concat(result.StandardOutput, result.StandardError));
     }
 }
