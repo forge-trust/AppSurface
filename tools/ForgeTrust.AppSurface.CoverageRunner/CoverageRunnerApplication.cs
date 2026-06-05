@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.CoverageRunner;
@@ -401,7 +402,7 @@ internal sealed class CoverageRunnerApplication
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception)
         {
             var output = $"Failed to run dotnet test for {project.RelativePath}: {ex.Message}{Environment.NewLine}";
             await File.WriteAllTextAsync(logFile, output, cancellationToken);

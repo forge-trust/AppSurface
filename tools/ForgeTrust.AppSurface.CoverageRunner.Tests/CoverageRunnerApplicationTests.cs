@@ -834,7 +834,7 @@ public sealed class CoverageRunnerApplicationTests
 
                     if (ThrowingProject is not null && project.EndsWith(ThrowingProject, StringComparison.Ordinal))
                     {
-                        throw new InvalidOperationException($"simulated command failure for {project}");
+                        throw new IOException($"simulated command failure for {project}");
                     }
 
                     if (CancelingProject is not null && project.EndsWith(CancelingProject, StringComparison.Ordinal))
