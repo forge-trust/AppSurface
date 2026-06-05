@@ -346,6 +346,24 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     }
 
     [Fact]
+    public async Task RuntimeBinaryResolution_TreatsWhitespacePropertyValueAsUnset()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "runtime-whitespace-property");
+        var projectPath = await CreateRuntimeProjectAsync(projectDirectory);
+        await WriteRuntimeBinaryCacheAsync(projectDirectory, CurrentConfiguration);
+
+        var result = await RunDotNetBuildAsync(
+            projectPath,
+            projectDirectory,
+            ("TailwindRuntimeBinaryResolutionEnabled", "   "));
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.True(result.ExitCode == 0, combinedOutput);
+        Assert.DoesNotContain("ASTW009", combinedOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("Tailwind runtime binary resolution is disabled for this build", combinedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RuntimeBinaryResolution_SkipsDownloadWork_WhenDisabledForBuild()
     {
         var projectDirectory = Path.Join(_tempRoot, "runtime-disabled-build");
