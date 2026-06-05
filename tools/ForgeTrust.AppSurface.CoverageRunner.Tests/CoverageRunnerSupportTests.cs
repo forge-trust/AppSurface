@@ -35,6 +35,18 @@ public sealed class CoverageRunnerSupportTests
         }
     }
 
+    [Theory]
+    [InlineData("", "err", "err")]
+    [InlineData("out", "", "out")]
+    [InlineData("out\n", "err", "out\nerr")]
+    public void ProcessCommandRunner_ShouldJoinBufferedOutputWithReadableBoundaries(
+        string standardOutput,
+        string standardError,
+        string expected)
+    {
+        Assert.Equal(expected, ProcessCommandRunner.JoinOutput(standardOutput, standardError));
+    }
+
     [Fact]
     public async Task ProcessCommandRunner_ShouldStreamOutputToFile()
     {
@@ -74,6 +86,69 @@ public sealed class CoverageRunnerSupportTests
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("Failed to start command", result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProcessCommandRunner_ShouldWriteLaunchFailureToOutputFile()
+    {
+        var runner = new ProcessCommandRunner();
+        var logFile = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+
+        try
+        {
+            var result = await runner.RunAsync(
+                "forge-trust-appsurface-missing-command",
+                [],
+                Directory.GetCurrentDirectory(),
+                CancellationToken.None,
+                outputFile: logFile);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Failed to start command", await File.ReadAllTextAsync(logFile), StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(logFile);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessCommandRunner_ShouldReturnFailureWhenLaunchFailureLogCannotBeWritten()
+    {
+        var runner = new ProcessCommandRunner();
+        var existingFile = Path.GetTempFileName();
+
+        try
+        {
+            var result = await runner.RunAsync(
+                "forge-trust-appsurface-missing-command",
+                [],
+                Directory.GetCurrentDirectory(),
+                CancellationToken.None,
+                outputFile: Path.Join(existingFile, "dotnet-test.log"));
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Failed to start command", result.Output, StringComparison.Ordinal);
+            Assert.Contains("Failed to write command log", result.Output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(existingFile);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessCommandRunner_ShouldPreserveCancellation()
+    {
+        var runner = new ProcessCommandRunner();
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => runner.RunAsync(
+            OperatingSystem.IsWindows() ? "cmd" : "/bin/sh",
+            OperatingSystem.IsWindows() ? ["/c", "timeout /t 1"] : ["-c", "sleep 1"],
+            Directory.GetCurrentDirectory(),
+            cancellation.Token));
     }
 
     [Fact]

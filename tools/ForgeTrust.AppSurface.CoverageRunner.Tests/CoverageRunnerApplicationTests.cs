@@ -666,6 +666,21 @@ public sealed class CoverageRunnerApplicationTests
         Assert.Equal(0, projects[1].GetProperty("exitCode").GetInt32());
     }
 
+    [Fact]
+    public async Task RunAsync_ShouldPreserveProjectCommandCancellation()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Cancel.Tests/Cancel.Tests.csproj");
+
+        var runner = new RecordingCommandRunner(workspace) { CancelingProject = "Cancel.Tests.csproj" };
+        var app = CreateApp(runner);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>()));
+    }
+
     private static CoverageRunnerApplication CreateApp(
         ICommandRunner commandRunner,
         TextWriter? standardOut = null,
@@ -703,6 +718,8 @@ public sealed class CoverageRunnerApplicationTests
         public string? MissingCoverageProject { get; init; }
 
         public string? ThrowingProject { get; init; }
+
+        public string? CancelingProject { get; init; }
 
         public int ReportGeneratorExitCode { get; init; }
 
@@ -787,6 +804,11 @@ public sealed class CoverageRunnerApplicationTests
                     if (ThrowingProject is not null && project.EndsWith(ThrowingProject, StringComparison.Ordinal))
                     {
                         throw new InvalidOperationException($"simulated command failure for {project}");
+                    }
+
+                    if (CancelingProject is not null && project.EndsWith(CancelingProject, StringComparison.Ordinal))
+                    {
+                        throw new OperationCanceledException();
                     }
 
                     var coveragePrefix = arguments.Single(argument => argument.StartsWith("/p:CoverletOutput=", StringComparison.Ordinal))["/p:CoverletOutput=".Length..];
