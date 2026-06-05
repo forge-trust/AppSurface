@@ -16,6 +16,31 @@ public sealed class CoverageRunnerSupportTests
     }
 
     [Fact]
+    public async Task ProgramMain_ShouldUseConsoleWriters()
+    {
+        var originalOut = Console.Out;
+        var originalError = Console.Error;
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Console.SetError(error);
+
+            var exitCode = await Program.Main(["--list-groups"]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("tools", output.ToString(), StringComparison.Ordinal);
+            Assert.Empty(error.ToString());
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+        }
+    }
+
+    [Fact]
     public async Task ProcessCommandRunner_ShouldCaptureOutputErrorAndExitCode()
     {
         var runner = new ProcessCommandRunner();
@@ -135,6 +160,18 @@ public sealed class CoverageRunnerSupportTests
         {
             File.Delete(existingFile);
         }
+    }
+
+    [Fact]
+    public async Task ProcessCommandRunner_ShouldPreserveCancellationWhenWritingLaunchFailureLog()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ProcessCommandRunner.TryAppendFailureLogAsync(
+            Path.Join(Path.GetTempPath(), Path.GetRandomFileName()),
+            "failed",
+            cancellation.Token));
     }
 
     [Fact]

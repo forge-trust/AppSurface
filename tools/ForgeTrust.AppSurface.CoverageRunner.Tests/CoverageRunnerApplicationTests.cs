@@ -373,6 +373,37 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
+    public async Task WriteSummaryAsync_ShouldReturnFalseWhenMergedCoverageFileIsMissing()
+    {
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(outputDirectory);
+        var error = new StringWriter();
+        var app = CreateApp(new RecordingCommandRunner(workspace), standardError: error);
+
+        var result = await app.WriteSummaryAsync(
+            new CoverageRunnerOptions
+            {
+                RepositoryRoot = workspace.Root,
+                SolutionPath = Path.Join(workspace.Root, "ForgeTrust.AppSurface.slnx"),
+                OutputDirectory = outputDirectory,
+                GroupName = "tools",
+                BuildConfiguration = "Release",
+                BuildSolution = false,
+                BuildNoRestore = false,
+                IncludeFilter = "[ForgeTrust.AppSurface.*]*",
+                ExcludeFilter = "[*.Tests]*%2c[*.IntegrationTests]*",
+                Parallelism = 1,
+                MergeOnly = false,
+                ListGroups = false,
+            },
+            CancellationToken.None);
+
+        Assert.False(result);
+        Assert.Contains("Merged Cobertura file was not created", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldWriteZeroRatesWhenCoverageDenominatorsAreZero()
     {
         using var workspace = TestRepo.Create();

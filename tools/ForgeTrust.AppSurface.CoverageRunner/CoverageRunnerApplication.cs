@@ -551,7 +551,20 @@ internal sealed class CoverageRunnerApplication
         return copied;
     }
 
-    private async Task<bool> WriteSummaryAsync(CoverageRunnerOptions options, CancellationToken cancellationToken)
+    /// <summary>
+    /// Writes the human-readable coverage summary from the merged Cobertura artifact.
+    /// </summary>
+    /// <param name="options">Runner options that identify the output directory and group.</param>
+    /// <param name="cancellationToken">Cancellation token used for summary file reads and writes.</param>
+    /// <returns>
+    /// <c>true</c> when the summary was written; <c>false</c> when the merged coverage artifact is
+    /// missing or cannot be parsed.
+    /// </returns>
+    /// <remarks>
+    /// This method is internal so tests can verify summary failure behavior without depending on a
+    /// failing ReportGenerator invocation that would stop before summary generation.
+    /// </remarks>
+    internal async Task<bool> WriteSummaryAsync(CoverageRunnerOptions options, CancellationToken cancellationToken)
     {
         var coveragePath = Path.Join(options.OutputDirectory, "coverage.cobertura.xml");
         if (!File.Exists(coveragePath))

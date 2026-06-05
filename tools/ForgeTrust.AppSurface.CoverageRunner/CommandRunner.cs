@@ -190,7 +190,18 @@ internal sealed class ProcessCommandRunner : ICommandRunner
             or IOException;
     }
 
-    private static async Task<string> TryAppendFailureLogAsync(
+    /// <summary>
+    /// Appends a process-launch failure diagnostic to a streamed log file.
+    /// </summary>
+    /// <param name="outputFile">Log file to append.</param>
+    /// <param name="output">Diagnostic text to write.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>An additional diagnostic when the log file cannot be written; otherwise an empty string.</returns>
+    /// <remarks>
+    /// This method is internal so tests can verify cancellation and unwritable-log behavior without
+    /// forcing platform-specific process-launch failures to also race file-system failures.
+    /// </remarks>
+    internal static async Task<string> TryAppendFailureLogAsync(
         string outputFile,
         string output,
         CancellationToken cancellationToken)
