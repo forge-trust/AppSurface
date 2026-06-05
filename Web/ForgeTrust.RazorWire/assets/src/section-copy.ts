@@ -304,6 +304,8 @@ interface SectionCopyBinding {
             this.feedbackTimer = window.setTimeout(() => {
                 button.removeAttribute('data-rw-section-copy-state');
                 button.removeAttribute('data-rw-section-copy-message');
+                this.feedbackTimer = 0;
+                this.clearStatus();
             }, 2200);
         }
 
@@ -381,6 +383,7 @@ interface SectionCopyBinding {
             const source = this.fallbackSource;
             source?.removeAttribute('data-rw-section-copy-state');
             source?.removeAttribute('data-rw-section-copy-message');
+            this.clearStatus();
             this.fallback.remove();
             this.fallback = null;
             this.fallbackSource = null;
@@ -518,6 +521,12 @@ interface SectionCopyBinding {
             if (this.feedbackTimer === 0) return;
             window.clearTimeout(this.feedbackTimer);
             this.feedbackTimer = 0;
+        }
+
+        private clearStatus() {
+            if (this.status) {
+                this.status.textContent = '';
+            }
         }
     }
 

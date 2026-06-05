@@ -7,11 +7,20 @@ const sectionCopyPath = new URL('../wwwroot/razorwire/section-copy.js', import.m
 
 test('section copy generates plain buttons and copies encoded section urls', async () => {
   let copiedText = '';
+  let feedbackTimer = null;
   const { context, document } = loadSectionCopyRuntime({
     clipboard: {
       writeText: async value => {
         copiedText = value;
       }
+    },
+    setTimeout: (callback, delay) => {
+      if (delay === 2200) {
+        feedbackTimer = callback;
+        return 42;
+      }
+
+      return setTimeout(callback, delay);
     }
   });
 
@@ -35,6 +44,15 @@ test('section copy generates plain buttons and copies encoded section urls', asy
   assert.equal(copiedText, 'https://docs.example.test/guide?tab=api#api%20key');
   assert.equal(button.getAttribute('data-rw-section-copy-state'), 'copied');
   assert.match(button.getAttribute('data-rw-section-copy-message'), /Copied link to API Key\./);
+  const status = document.querySelector('[data-rw-section-copy-status]');
+  assert.match(status?.textContent, /Copied link to API Key\./);
+
+  assert.equal(typeof feedbackTimer, 'function');
+  feedbackTimer();
+
+  assert.equal(button.getAttribute('data-rw-section-copy-state'), null);
+  assert.equal(button.getAttribute('data-rw-section-copy-message'), null);
+  assert.equal(status.textContent, '');
 });
 
 test('section copy shows an inline fallback when clipboard is unavailable', async () => {
@@ -59,11 +77,14 @@ test('section copy shows an inline fallback when clipboard is unavailable', asyn
   assert.equal(input.readOnly, true);
   assert.equal(input.getAttribute('aria-label'), 'Section link for Intro');
   assert.equal(button.getAttribute('data-rw-section-copy-state'), 'fallback');
+  const status = document.querySelector('[data-rw-section-copy-status]');
+  assert.match(status?.textContent, /Copy unavailable\. Select the link for Intro\./);
 
   fallback.dispatchEvent(createEvent('keydown', { key: 'Escape' }));
 
   assert.equal(document.querySelector('[data-rw-section-copy-fallback]'), null);
   assert.equal(button.getAttribute('data-rw-section-copy-state'), null);
+  assert.equal(status.textContent, '');
   assert.equal(document.activeElement, button);
 });
 
@@ -259,8 +280,8 @@ function loadSectionCopyRuntime(options = {}) {
   const window = {
     RazorWire: { config: { developmentDiagnostics: true } },
     location: { href: 'https://docs.example.test/guide?tab=api' },
-    setTimeout: (callback, delay) => setTimeout(callback, delay),
-    clearTimeout: id => clearTimeout(id),
+    setTimeout: options.setTimeout ?? ((callback, delay) => setTimeout(callback, delay)),
+    clearTimeout: options.clearTimeout ?? (id => clearTimeout(id)),
     addEventListener() {}
   };
   const context = {
@@ -272,8 +293,8 @@ function loadSectionCopyRuntime(options = {}) {
     navigator: options.clipboard ? { clipboard: options.clipboard } : {},
     console,
     URL,
-    setTimeout,
-    clearTimeout
+    setTimeout: window.setTimeout,
+    clearTimeout: window.clearTimeout
   };
   window.document = document;
   document.defaultView = window;
