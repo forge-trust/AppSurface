@@ -48,6 +48,17 @@ internal sealed partial class AppSurfaceExportCommand : ICommand
     [CommandOption("seeds", Description = "Path to a file containing seed routes.")]
     public string? SeedRoutesPath { get; set; }
 
+    /// <summary>
+    /// Gets or sets an optional path to a publish-root deployment extras manifest.
+    /// </summary>
+    /// <remarks>
+    /// The manifest declares explicit deployment-owned files, such as <c>CNAME</c>, that should be copied into the
+    /// publish root after export proves they do not collide with generated output. This option is distinct from
+    /// <see cref="SeedRoutesPath"/>, which contains routes to crawl.
+    /// </remarks>
+    [CommandOption("publish-root-extras", Description = "Path to a YAML manifest for explicit deployment-owned publish-root files; not route seeds.")]
+    public string? PublishRootExtrasPath { get; set; }
+
     [CommandOption("mode", 'm', Description = "Export mode: cdn (default) or hybrid.")]
     public ExportMode Mode { get; set; } = ExportMode.Cdn;
 
@@ -104,36 +115,43 @@ internal sealed partial class AppSurfaceExportCommand : ICommand
 
     internal async ValueTask ExecuteAsync(IConsole console, CancellationToken cancellationToken)
     {
-        if (!ExportHybridOptions.TryNormalizeOrigin(LiveOrigin, out var normalizedLiveOrigin))
-        {
-            throw new CommandException("The --live-origin value must be an absolute http or https origin, such as 'https://api.example.com', with no path, query string, fragment, or userinfo.");
-        }
-
-        if (!ExportHybridOptions.TryNormalizeOrigin(PublicOrigin, out var normalizedPublicOrigin))
-        {
-            throw new CommandException("The --public-origin value must be an absolute http or https origin, such as 'https://example.com', with no path, query string, fragment, or userinfo.");
-        }
-
-        var request = _requestFactory.Create(BaseUrl, ProjectPath, DllPath, Framework, AppArgs, NoBuild);
-        await using var resolvedSource = await _sourceResolver.ResolveAsync(request, cancellationToken);
-
-        _logger.LogInformation("Exporting AppSurface app to {OutputPath}.", OutputPath);
-        var context = new ExportContext(
-            OutputPath,
-            SeedRoutesPath,
-            initialSeedRoutes: null,
-            resolvedSource.BaseUrl,
-            Mode,
-            ExportRedirectStrategy.Html,
-            new ExportHybridOptions
-            {
-                LiveOrigin = normalizedLiveOrigin,
-                CredentialsMode = HybridCredentials
-            },
-            publicOrigin: normalizedPublicOrigin);
-
         try
         {
+            if (!ExportHybridOptions.TryNormalizeOrigin(LiveOrigin, out var normalizedLiveOrigin))
+            {
+                throw new CommandException("The --live-origin value must be an absolute http or https origin, such as 'https://api.example.com', with no path, query string, fragment, or userinfo.");
+            }
+
+            if (!ExportHybridOptions.TryNormalizeOrigin(PublicOrigin, out var normalizedPublicOrigin))
+            {
+                throw new CommandException("The --public-origin value must be an absolute http or https origin, such as 'https://example.com', with no path, query string, fragment, or userinfo.");
+            }
+
+            IReadOnlyList<ExportDeploymentExtra> deploymentExtras = string.IsNullOrWhiteSpace(PublishRootExtrasPath)
+                ? []
+                : ExportDeploymentExtrasManifestReader.Read(PublishRootExtrasPath);
+            var request = _requestFactory.Create(BaseUrl, ProjectPath, DllPath, Framework, AppArgs, NoBuild);
+            await using var resolvedSource = await _sourceResolver.ResolveAsync(request, cancellationToken);
+
+            _logger.LogInformation("Exporting AppSurface app to {OutputPath}.", OutputPath);
+            var context = new ExportContext(
+                OutputPath,
+                SeedRoutesPath,
+                initialSeedRoutes: null,
+                resolvedSource.BaseUrl,
+                Mode,
+                ExportRedirectStrategy.Html,
+                new ExportHybridOptions
+                {
+                    LiveOrigin = normalizedLiveOrigin,
+                    CredentialsMode = HybridCredentials
+                },
+                publicOrigin: normalizedPublicOrigin);
+            foreach (var extra in deploymentExtras)
+            {
+                context.AddDeploymentExtra(extra);
+            }
+
             await _engine.RunAsync(context, cancellationToken);
         }
         catch (ExportValidationException ex)

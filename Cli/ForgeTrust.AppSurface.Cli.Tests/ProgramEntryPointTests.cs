@@ -418,6 +418,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("netlify", result.AllText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("--seeds", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--strict", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("--publish-root-extras", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--port", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--urls", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--all-hosts", result.AllText, StringComparison.Ordinal);
@@ -1033,6 +1034,18 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task EntryPoint_Should_Print_AppSurface_Export_Help_With_PublishRootExtras()
+    {
+        var result = await InvokeEntryPointAsync(["export", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Export an AppSurface/RazorWire application to static or hybrid files.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--publish-root-extras", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--seeds", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--public-origin", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AppSurfaceExportCommand_Should_Run_Generic_Hybrid_Export()
     {
         using var output = TempDirectory.Create("appsurface-export-output-");
@@ -1056,6 +1069,40 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("data-rw-live-origin=\"https://api.example.com\"", html);
         Assert.Contains("action=\"https://api.example.com/profile/save\"", html);
         Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+    }
+
+    [Fact]
+    public async Task AppSurfaceExportCommand_Should_Copy_PublishRootExtrasManifest_Files()
+    {
+        using var output = TempDirectory.Create("appsurface-export-output-");
+        using var deploy = TempDirectory.Create("appsurface-export-deploy-");
+        using var handler = new AppSurfaceExportHttpMessageHandler();
+        await File.WriteAllTextAsync(Path.Join(deploy.Path, "CNAME"), "docs.example.com");
+        var manifestPath = Path.Join(deploy.Path, "export-extras.yml");
+        await File.WriteAllTextAsync(
+            manifestPath,
+            """
+            version: 1
+            extras:
+              - source: CNAME
+                publishPath: /CNAME
+            """);
+
+        var result = await InvokeProgramEntryPointAsync(
+            [
+                "export",
+                "--url", "http://localhost:5000",
+                "--output", output.Path,
+                "--publish-root-extras", manifestPath,
+                "--mode", "hybrid",
+                "--public-origin", "https://www.example.com",
+                "--live-origin", "https://api.example.com"
+            ],
+            options => options.CustomRegistrations.Add(
+                services => services.AddSingleton<IHttpClientFactory>(new FixedHttpClientFactory(handler))));
+
+        Assert.True(result.ExitCode == 0, result.AllText);
+        Assert.Equal("docs.example.com", await File.ReadAllTextAsync(Path.Join(output.Path, "CNAME")));
     }
 
     [Fact]
