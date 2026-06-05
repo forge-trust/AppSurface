@@ -2162,12 +2162,13 @@ The outline renders RazorWire page-navigation attributes so shared RazorWire run
 - initializing active state from the current URL hash
 - filtering modified, external, download, and missing-target links so normal browser behavior remains intact
 - updating the URL hash and scrolling the target for same-page clicks
+- keeping the active outline link visible inside the visible overflowing vertical outline surface
 - rebinding after RazorWire/Turbo frame navigation replaces `rw:island id="doc-content"`
 
 The docs-owned outline client keeps only the AppSurface Docs chrome around that behavior:
 
 - rolling compact previous/current/next context when the active link changes
-- keeping the active outline link visible inside the sticky desktop rail when the page-local outline is taller than the viewport
+- keeping the active outline link visible only for non-RazorWire fallback outlines
 - placing the outline above the article on compact viewports and beside it on wide desktop
 - containing scroll inside the expanded compact outline so touch or wheel input over `On this page` does not move the article behind it
 - syncing the compact outline's docs-specific expanded state after an outline link is chosen
