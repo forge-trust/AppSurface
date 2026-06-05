@@ -5077,11 +5077,10 @@ public class ExportEngineTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             RequestCount++;
-            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent("<html><body><h1>Home</h1></body></html>", Encoding.UTF8, "text/html")
-            };
-            return Task.FromResult(response);
+            });
         }
     }
 

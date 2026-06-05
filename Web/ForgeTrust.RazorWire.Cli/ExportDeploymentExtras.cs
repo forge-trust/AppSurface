@@ -75,7 +75,7 @@ internal static class ExportDeploymentExtras
                 publishPath);
         }
 
-        var resolvedSource = Path.GetFullPath(Path.Combine(manifestDirectory, source));
+        var resolvedSource = Path.GetFullPath(Path.Join(manifestDirectory, source));
         ValidateRegularSourceFile(resolvedSource, manifestDirectory, manifestPath, entryIndex, publishPath);
         return new ExportDeploymentExtra(resolvedSource, NormalizePublishPath(publishPath, manifestPath, entryIndex));
     }
@@ -371,7 +371,7 @@ internal static class ExportDeploymentExtras
                     publishPath);
             }
 
-            cursor = Path.Combine(cursor, segment);
+            cursor = Path.Join(cursor, segment);
             if (!File.Exists(cursor) && !Directory.Exists(cursor))
             {
                 break;
