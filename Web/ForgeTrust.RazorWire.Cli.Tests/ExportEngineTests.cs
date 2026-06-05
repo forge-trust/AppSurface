@@ -834,7 +834,8 @@ public class ExportEngineTests
             var linkedParent = Path.Join(tempDir, "linked");
             if (!TryCreateDirectorySymlink(linkedParent, outsideRoot))
             {
-                return;
+                throw new InvalidOperationException(
+                    $"Symlink creation failed; cannot verify target-parent-symlink validation from '{linkedParent}' to '{outsideRoot}'.");
             }
 
             using var handler = new TestHttpMessageHandler();

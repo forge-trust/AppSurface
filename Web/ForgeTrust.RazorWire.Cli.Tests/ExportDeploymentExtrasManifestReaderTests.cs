@@ -146,6 +146,49 @@ public class ExportDeploymentExtrasManifestReaderTests
         }
     }
 
+    [Theory]
+    [InlineData("/bad*name.txt")]
+    [InlineData("/bad%2Aname.txt")]
+    [InlineData("/bad<name.txt")]
+    [InlineData("/bad>name.txt")]
+    [InlineData("/bad|name.txt")]
+    [InlineData("/bad\"name.txt")]
+    [InlineData("/badname.")]
+    [InlineData("/badname ")]
+    public async Task Read_Should_Reject_Invalid_Filesystem_PublishPath_Segments(string publishPath)
+    {
+        var root = Directory.CreateTempSubdirectory("razorwire-extras-manifest-").FullName;
+        try
+        {
+            var deploy = Path.Join(root, "deploy");
+            Directory.CreateDirectory(deploy);
+            await File.WriteAllTextAsync(Path.Join(deploy, "CNAME"), "docs.example.com");
+            var manifestPath = Path.Join(deploy, "export-extras.yml");
+            await File.WriteAllTextAsync(
+                manifestPath,
+                $$"""
+                version: 1
+                extras:
+                  - source: CNAME
+                    publishPath: '{{publishPath}}'
+                """);
+
+            var exception = Assert.Throws<ExportValidationException>(
+                () => ExportDeploymentExtrasManifestReader.Read(manifestPath));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT007", diagnostic.Code);
+            Assert.Contains("[target-invalid]", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
     [Fact]
     public async Task Read_Should_Reject_Source_Outside_Manifest_Directory()
     {

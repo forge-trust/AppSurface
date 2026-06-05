@@ -275,6 +275,22 @@ public class ExportContext
         _deploymentExtras.Add(extra);
     }
 
+    /// <summary>
+    /// Registers a prevalidated deployment extra for publish-root materialization.
+    /// </summary>
+    /// <param name="extra">
+    /// Deployment extra with a normalized absolute <see cref="ExportDeploymentExtra.SourcePath"/> and root-relative
+    /// <see cref="ExportDeploymentExtra.PublishPath"/>.
+    /// </param>
+    /// <remarks>
+    /// This overload exists for internal call paths that already produced an <see cref="ExportDeploymentExtra"/>
+    /// instance. It still enforces case-insensitive publish-path uniqueness using
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/>; callers should not register duplicate publish-root targets.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="extra"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ExportValidationException">
+    /// Thrown with <c>RWEXPORT007</c> diagnostics when a case-insensitive duplicate publish path is registered.
+    /// </exception>
     internal void AddDeploymentExtra(ExportDeploymentExtra extra)
     {
         ArgumentNullException.ThrowIfNull(extra);

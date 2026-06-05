@@ -464,6 +464,7 @@ public class ExportEngine
         CancellationToken cancellationToken)
     {
         var targetPath = ExportDeploymentExtras.MapPublishPathToFilePath(outputPath, extra.PublishPath);
+        // Keep the copy helper defensive if future call paths bypass the batch preflight.
         ExportDeploymentExtras.ValidateTargetParentPath(outputPath, targetPath, extra.PublishPath);
         var targetDirectory = Path.GetDirectoryName(targetPath);
         if (!string.IsNullOrWhiteSpace(targetDirectory))

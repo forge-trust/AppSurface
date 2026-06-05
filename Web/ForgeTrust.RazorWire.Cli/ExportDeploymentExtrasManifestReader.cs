@@ -169,7 +169,7 @@ internal static class ExportDeploymentExtrasManifestReader
 
         switch (node)
         {
-            case { } when string.Equals(node.GetType().Name, "YamlAliasNode", StringComparison.Ordinal):
+            case { NodeType: YamlNodeType.Alias }:
                 throw Schema(manifestPath, null, "YAML aliases and anchors are not supported in publish-root extras manifests.");
             case YamlMappingNode mapping:
                 foreach (var pair in mapping.Children)

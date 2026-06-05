@@ -41,6 +41,8 @@ internal static class ExportDeploymentExtras
         "LPT9"
     };
 
+    private static readonly char[] WindowsInvalidFileNameChars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+
     internal static ExportDeploymentExtra CreateRegisteredExtra(string sourcePath, string publishPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
@@ -118,7 +120,7 @@ internal static class ExportDeploymentExtras
             return false;
         }
 
-        var candidate = publishPath.Trim();
+        var candidate = publishPath;
         if (!candidate.StartsWith("/", StringComparison.Ordinal)
             || candidate.StartsWith("//", StringComparison.Ordinal))
         {
@@ -169,6 +171,14 @@ internal static class ExportDeploymentExtras
                 || unescaped.Any(char.IsControl))
             {
                 message = $"Publish-root deployment extra publishPath '{publishPath}' contains encoded traversal or separators. Fix: use literal safe path segments.";
+                return false;
+            }
+
+            if (unescaped.IndexOfAny(WindowsInvalidFileNameChars) >= 0
+                || unescaped.EndsWith(" ", StringComparison.Ordinal)
+                || unescaped.EndsWith(".", StringComparison.Ordinal))
+            {
+                message = $"Publish-root deployment extra publishPath '{publishPath}' contains invalid filesystem characters or segments. Fix: use portable file names such as 'CNAME' or 'security.txt'.";
                 return false;
             }
 
