@@ -607,8 +607,9 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             """
             () => {
               const shell = document.getElementById('docs-page-outline');
-              const active = shell?.querySelector("a[data-outline-qa-target='true']");
-              if (!shell || active?.getAttribute('aria-current') !== 'location') {
+              const target = shell?.querySelector("a[data-outline-qa-target='true']");
+              const active = shell?.querySelector("a[aria-current='location']");
+              if (!shell || !target || !active) {
                 return false;
               }
 
