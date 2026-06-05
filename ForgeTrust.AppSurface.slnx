@@ -37,12 +37,15 @@
   <Folder Name="/Examples/">
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
+    <Project Path="examples/flow-generated-authoring/FlowGeneratedAuthoringExample.csproj" />
     <Project Path="examples/flow-approval-local/FlowApprovalLocalExample.csproj" />
     <Project Path="examples/web-app/WebAppExample.csproj" />
     <Project Path="examples/web-error-pages/WebErrorPagesExample.csproj" />
   </Folder>
   <Folder Name="/Flow/">
     <Project Path="Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj" />
+    <Project Path="Flow/ForgeTrust.AppSurface.Flow.Generators/ForgeTrust.AppSurface.Flow.Generators.csproj" />
+    <Project Path="Flow/ForgeTrust.AppSurface.Flow.Generators.Tests/ForgeTrust.AppSurface.Flow.Generators.Tests.csproj" />
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.Tests/ForgeTrust.AppSurface.Flow.Tests.csproj" />
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj" />
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.DurableTask.Tests/ForgeTrust.AppSurface.Flow.DurableTask.Tests.csproj" />

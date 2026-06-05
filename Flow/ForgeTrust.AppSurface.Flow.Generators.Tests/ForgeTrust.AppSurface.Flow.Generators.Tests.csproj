@@ -20,18 +20,15 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj" />
-    <ProjectReference Include="../ForgeTrust.AppSurface.Flow.Generators/ForgeTrust.AppSurface.Flow.Generators.csproj"
-                      ReferenceOutputAssembly="false"
-                      OutputItemType="Analyzer"
-                      PrivateAssets="all" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Flow.Generators/ForgeTrust.AppSurface.Flow.Generators.csproj" />
   </ItemGroup>
 
   <ItemGroup>

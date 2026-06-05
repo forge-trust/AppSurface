@@ -65,7 +65,7 @@ This approach aims to:
 
 ### [Flow](./Flow/README.md)
 
-- [**ForgeTrust.AppSurface.Flow**](./Flow/ForgeTrust.AppSurface.Flow/README.md) – Typed long-running process contracts, graph validation, definition registry, and an in-memory runner for local tests and hello-world flows.
+- [**ForgeTrust.AppSurface.Flow**](./Flow/ForgeTrust.AppSurface.Flow/README.md) – Typed long-running process contracts, generated-case authoring, graph validation, definition registry, and an in-memory runner for local tests and hello-world flows.
 - [**ForgeTrust.AppSurface.Flow.DurableTask**](./Flow/ForgeTrust.AppSurface.Flow.DurableTask/README.md) – Durable Task adapter boundary with runner/client services, resume-event authorization, timeout, late-event and retry behavior, and context serialization validation.
 
 ### [Console](./Console/README.md)

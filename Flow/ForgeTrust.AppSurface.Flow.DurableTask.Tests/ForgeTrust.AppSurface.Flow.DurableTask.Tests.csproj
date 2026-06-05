@@ -29,6 +29,10 @@
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Flow.Generators/ForgeTrust.AppSurface.Flow.Generators.csproj"
+                      ReferenceOutputAssembly="false"
+                      OutputItemType="Analyzer"
+                      PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

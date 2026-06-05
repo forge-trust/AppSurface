@@ -10,10 +10,24 @@
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Flow.DurableTask" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Flow.Tests" />
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Flow.Generators/ForgeTrust.AppSurface.Flow.Generators.csproj"
+                      ReferenceOutputAssembly="false"
+                      OutputItemType="Analyzer"
+                      PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Options" />
   </ItemGroup>
+
+  <Target Name="IncludeFlowAuthoringGeneratorInPackage" BeforeTargets="_GetPackageFiles">
+    <ItemGroup>
+      <None Include="../ForgeTrust.AppSurface.Flow.Generators/bin/$(Configuration)/netstandard2.0/ForgeTrust.AppSurface.Flow.Generators.dll"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs"
+            Visible="false"
+            Condition="Exists('../ForgeTrust.AppSurface.Flow.Generators/bin/$(Configuration)/netstandard2.0/ForgeTrust.AppSurface.Flow.Generators.dll')" />
+    </ItemGroup>
+  </Target>
 
 </Project>
