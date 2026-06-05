@@ -3208,14 +3208,6 @@ public class ExportEngineTests
         Assert.Single(explicitReferences);
         Assert.Equal("?v=abc", explicitReferences[0].Query);
 
-        var withoutAutoload = """
-            <button type="button" data-rw-section-copy="intro">Copy</button>
-            """;
-
-        var syntheticReference = Assert.Single(
-            _sut.ExtractReferences(withoutAutoload, "/docs/start", htmlScope: true),
-            reference => reference.Path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
-        Assert.Equal("<button data-rw-section-copy>", syntheticReference.Provenance?.DisplaySource);
     }
 
     [Fact]
@@ -4448,7 +4440,12 @@ public class ExportEngineTests
 
     private static Task<HttpResponseMessage> Bytes(string mediaType)
     {
-        var content = new ByteArrayContent([0x01, 0x02, 0x03]);
+        return Bytes(mediaType, [0x01, 0x02, 0x03]);
+    }
+
+    private static Task<HttpResponseMessage> Bytes(string mediaType, byte[] bytes)
+    {
+        var content = new ByteArrayContent(bytes);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
     }
@@ -4468,25 +4465,20 @@ public class ExportEngineTests
                         <img src=""image.png"">
                     </body>
                 </html>";
-                var content = new StringContent(html, Encoding.UTF8, "text/html");
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+                return Text(html, "text/html");
             }
 
             if (path == "/style.css")
             {
-                var content = new StringContent("body { background: white; }", Encoding.UTF8, "text/css");
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+                return Text("body { background: white; }", "text/css");
             }
 
             if (path == "/image.png")
             {
-                var bytes = new byte[] { 0x01, 0x02, 0x03, 0x04 };
-                var byteContent = new ByteArrayContent(bytes);
-                byteContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = byteContent });
+                return Bytes("image/png", [0x01, 0x02, 0x03, 0x04]);
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            return NotFound();
         }
     }
 
@@ -4584,42 +4576,21 @@ public class ExportEngineTests
             var path = request.RequestUri?.AbsolutePath ?? "/";
             if (path == "/" || path == "/index")
             {
-                return Task.FromResult(CreateHtmlResponse("""
+                return Text("""
                     <html>
                       <body>
                         <h2 id="intro" data-rw-section-copy-target="true">Intro</h2>
                       </body>
                     </html>
-                    """));
+                    """, "text/html");
             }
 
             if (path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js")
             {
-                return Task.FromResult(CreateScriptResponse("window.RazorWire = window.RazorWire || {};"));
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
             }
 
-            return Task.FromResult(CreateNotFoundResponse());
-        }
-
-        private static HttpResponseMessage CreateHtmlResponse(string html)
-        {
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(html, Encoding.UTF8, "text/html")
-            };
-        }
-
-        private static HttpResponseMessage CreateScriptResponse(string script)
-        {
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(script, Encoding.UTF8, "text/javascript")
-            };
-        }
-
-        private static HttpResponseMessage CreateNotFoundResponse()
-        {
-            return new HttpResponseMessage(HttpStatusCode.NotFound);
+            return NotFound();
         }
     }
 

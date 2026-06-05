@@ -504,6 +504,11 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("data-rw-section-copy-inserted-by-docs", outlineClient);
         Assert.Contains("function decorateSectionCopyButtons", outlineClient);
         Assert.Contains("window.RazorWire?.sectionCopyManager?.scan?.();", outlineClient);
+        var sectionCopyScanCall = outlineClient.IndexOf("scanSectionCopyRuntime();", StringComparison.Ordinal);
+        var decorateSectionCopyCall = outlineClient.IndexOf("decorateSectionCopyButtons();", StringComparison.Ordinal);
+        Assert.True(sectionCopyScanCall >= 0);
+        Assert.True(decorateSectionCopyCall >= 0);
+        Assert.True(sectionCopyScanCall < decorateSectionCopyCall);
         Assert.DoesNotContain("navigator.clipboard.writeText", outlineClient);
         Assert.DoesNotContain("data-doc-section-copy", outlineClient);
     }

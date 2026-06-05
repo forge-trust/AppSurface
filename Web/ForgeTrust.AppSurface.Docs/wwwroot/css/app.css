@@ -860,6 +860,7 @@ body {
     z-index: 30;
     width: max-content;
     max-width: min(22rem, calc(100vw - 2rem));
+    box-sizing: border-box;
     padding: 0.28rem 0.45rem;
     border: 1px solid var(--docs-color-border-accent-active);
     border-radius: 0.45rem;

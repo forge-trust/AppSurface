@@ -505,6 +505,11 @@ interface SectionCopyBinding {
         }
 
         private findElementsById(id: string) {
+            if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+                return Array.from(document.querySelectorAll(`#${CSS.escape(id)}`))
+                    .filter((element): element is HTMLElement => element instanceof HTMLElement && element.id === id);
+            }
+
             return Array.from(document.querySelectorAll('[id]'))
                 .filter((element): element is HTMLElement => element instanceof HTMLElement && element.id === id);
         }
