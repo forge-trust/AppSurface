@@ -88,6 +88,77 @@ test('section copy shows an inline fallback when clipboard is unavailable', asyn
   assert.equal(document.activeElement, button);
 });
 
+test('section copy clears previous feedback when another button copies', async () => {
+  const copiedUrls = [];
+  const feedbackTimers = new Map();
+  const clearedTimers = [];
+  let nextTimerId = 0;
+  const { context, document } = loadSectionCopyRuntime({
+    clipboard: {
+      writeText: async value => {
+        copiedUrls.push(value);
+      }
+    },
+    setTimeout: (callback, delay) => {
+      if (delay === 2200) {
+        nextTimerId += 1;
+        feedbackTimers.set(nextTimerId, callback);
+        return nextTimerId;
+      }
+
+      return setTimeout(callback, delay);
+    },
+    clearTimeout: id => {
+      clearedTimers.push(id);
+    }
+  });
+
+  const firstTarget = document.createElement('h2');
+  firstTarget.id = 'alpha';
+  firstTarget.textContent = 'Alpha';
+  const firstButton = document.createElement('button');
+  firstButton.setAttribute('data-rw-section-copy', 'alpha');
+  firstButton.setAttribute('data-rw-section-copy-title', 'Alpha');
+
+  const secondTarget = document.createElement('h2');
+  secondTarget.id = 'beta';
+  secondTarget.textContent = 'Beta';
+  const secondButton = document.createElement('button');
+  secondButton.setAttribute('data-rw-section-copy', 'beta');
+  secondButton.setAttribute('data-rw-section-copy-title', 'Beta');
+  document.body.append(firstTarget, firstButton, secondTarget, secondButton);
+
+  context.window.RazorWire.sectionCopyManager.scan();
+
+  firstButton.dispatchEvent(createEvent('click'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(firstButton.getAttribute('data-rw-section-copy-state'), 'copied');
+
+  secondButton.dispatchEvent(createEvent('click'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.deepEqual(copiedUrls, [
+    'https://docs.example.test/guide?tab=api#alpha',
+    'https://docs.example.test/guide?tab=api#beta'
+  ]);
+  assert.deepEqual(clearedTimers, [1]);
+  assert.equal(firstButton.getAttribute('data-rw-section-copy-state'), null);
+  assert.equal(firstButton.getAttribute('data-rw-section-copy-message'), null);
+  assert.equal(secondButton.getAttribute('data-rw-section-copy-state'), 'copied');
+  assert.match(secondButton.getAttribute('data-rw-section-copy-message'), /Copied link to Beta\./);
+  const status = document.querySelector('[data-rw-section-copy-status]');
+  assert.match(status?.textContent, /Copied link to Beta\./);
+
+  feedbackTimers.get(1)();
+  assert.equal(secondButton.getAttribute('data-rw-section-copy-state'), 'copied');
+  assert.match(status?.textContent, /Copied link to Beta\./);
+
+  feedbackTimers.get(2)();
+  assert.equal(secondButton.getAttribute('data-rw-section-copy-state'), null);
+  assert.equal(secondButton.getAttribute('data-rw-section-copy-message'), null);
+  assert.equal(status.textContent, '');
+});
+
 test('section copy records diagnostics for malformed controls', () => {
   const { context, document } = loadSectionCopyRuntime();
   const link = document.createElement('a');

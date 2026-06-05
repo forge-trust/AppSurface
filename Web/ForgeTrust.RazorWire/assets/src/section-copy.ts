@@ -137,6 +137,7 @@ interface SectionCopyBinding {
         private generatedButtons: HTMLElement[] = [];
         private generatedStatus: HTMLElement | null = null;
         private status: HTMLElement | null = null;
+        private activeFeedbackButton: HTMLElement | null = null;
         private feedbackTimer = 0;
         private fallback: HTMLElement | null = null;
         private fallbackSource: HTMLElement | null = null;
@@ -155,7 +156,7 @@ interface SectionCopyBinding {
 
         disconnect() {
             this.closeFallback(false);
-            this.clearFeedbackTimer();
+            this.clearFeedback();
             for (const binding of this.bindings) {
                 binding.button.removeEventListener('click', binding.listener);
                 binding.button.removeAttribute('data-rw-section-copy-enhanced');
@@ -294,7 +295,8 @@ interface SectionCopyBinding {
 
         private showCopiedFeedback(button: HTMLElement, title: string) {
             const message = `Copied link to ${title}.`;
-            this.clearFeedbackTimer();
+            this.clearFeedback();
+            this.activeFeedbackButton = button;
             button.setAttribute('data-rw-section-copy-state', 'copied');
             button.setAttribute('data-rw-section-copy-message', message);
             if (this.status) {
@@ -302,16 +304,16 @@ interface SectionCopyBinding {
             }
 
             this.feedbackTimer = window.setTimeout(() => {
-                button.removeAttribute('data-rw-section-copy-state');
-                button.removeAttribute('data-rw-section-copy-message');
-                this.feedbackTimer = 0;
-                this.clearStatus();
+                if (this.activeFeedbackButton === button) {
+                    this.clearFeedback();
+                }
             }, 2200);
         }
 
         private showFallback(button: HTMLElement, title: string, url: string) {
             const message = `Copy unavailable. Select the link for ${title}.`;
-            this.clearFeedbackTimer();
+            this.clearFeedback();
+            this.activeFeedbackButton = button;
             button.setAttribute('data-rw-section-copy-state', 'fallback');
             button.setAttribute('data-rw-section-copy-message', message);
             if (this.status) {
@@ -383,6 +385,9 @@ interface SectionCopyBinding {
             const source = this.fallbackSource;
             source?.removeAttribute('data-rw-section-copy-state');
             source?.removeAttribute('data-rw-section-copy-message');
+            if (this.activeFeedbackButton === source) {
+                this.activeFeedbackButton = null;
+            }
             this.clearStatus();
             this.fallback.remove();
             this.fallback = null;
@@ -521,6 +526,14 @@ interface SectionCopyBinding {
             if (this.feedbackTimer === 0) return;
             window.clearTimeout(this.feedbackTimer);
             this.feedbackTimer = 0;
+        }
+
+        private clearFeedback() {
+            this.clearFeedbackTimer();
+            this.activeFeedbackButton?.removeAttribute('data-rw-section-copy-state');
+            this.activeFeedbackButton?.removeAttribute('data-rw-section-copy-message');
+            this.activeFeedbackButton = null;
+            this.clearStatus();
         }
 
         private clearStatus() {
