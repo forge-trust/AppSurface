@@ -97,7 +97,7 @@ internal sealed record CoverageRunnerOptions
 
     /// <summary>
     /// Gets a value indicating whether the invocation should list supported test groups and exit
-    /// without validating unrelated environment values or touching the filesystem.
+    /// without validating unrelated environment values.
     /// </summary>
     public required bool ListGroups { get; init; }
 

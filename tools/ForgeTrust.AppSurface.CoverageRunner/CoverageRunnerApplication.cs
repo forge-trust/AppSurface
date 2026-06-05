@@ -22,6 +22,7 @@ internal sealed class CoverageRunnerApplication
         Usage:
           scripts/coverage-solution.sh [solution] [output]
           scripts/coverage-solution.sh --group <name> [--output <dir>] [--solution <path>]
+          scripts/coverage-solution.sh --list-groups
           scripts/coverage-solution.sh --merge-only <source-dir> [--output <dir>]
 
         Groups:
@@ -171,12 +172,12 @@ internal sealed class CoverageRunnerApplication
 
         var junitCount = CopyJunitFiles(options.MergeSourceDirectory, options.OutputDirectory);
         var coverageCount = CoverageFileCountForMerge(options.MergeSourceDirectory);
-        if (!await WriteSummaryAsync(options))
+        if (!await WriteSummaryAsync(options, cancellationToken))
         {
             return 1;
         }
 
-        await WriteTimingsAsync(options, totalTimer.ElapsedSeconds, 0, mergeSeconds, mergeExit, junitCount, coverageCount, []);
+        await WriteTimingsAsync(options, totalTimer.ElapsedSeconds, 0, mergeSeconds, mergeExit, junitCount, coverageCount, [], cancellationToken);
         return 0;
     }
 
@@ -199,7 +200,7 @@ internal sealed class CoverageRunnerApplication
         }
 
         var results = await RunScheduledProjectsAsync(options, testProjects, solutionDirectory, cancellationToken);
-        await ReplayLogsAsync(results);
+        await ReplayLogsAsync(results, cancellationToken);
 
         var projectsOutputDirectory = Path.Join(options.OutputDirectory, "projects");
         var mergeTimer = _clock.StartTimer();
@@ -208,12 +209,12 @@ internal sealed class CoverageRunnerApplication
         var junitCount = Directory.EnumerateFiles(options.OutputDirectory, "junit-*.xml", SearchOption.TopDirectoryOnly).Count();
         var coverageCount = Directory.EnumerateFiles(projectsOutputDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories).Count();
         var summaryExit = 0;
-        if (mergeExit == 0 && !await WriteSummaryAsync(options))
+        if (mergeExit == 0 && !await WriteSummaryAsync(options, cancellationToken))
         {
             summaryExit = 1;
         }
 
-        await WriteTimingsAsync(options, totalTimer.ElapsedSeconds, buildSeconds, mergeSeconds, mergeExit, junitCount, coverageCount, results);
+        await WriteTimingsAsync(options, totalTimer.ElapsedSeconds, buildSeconds, mergeSeconds, mergeExit, junitCount, coverageCount, results, cancellationToken);
 
         var failures = results.Where(result => result.ExitCode != 0).ToArray();
         if (failures.Length == 0 && mergeExit == 0 && summaryExit == 0)
@@ -373,9 +374,8 @@ internal sealed class CoverageRunnerApplication
 
         var args = CreateTestArguments(options, project, projectOutputDirectory, junitFile);
         var timer = _clock.StartTimer();
-        var result = await _commandRunner.RunAsync("dotnet", args, solutionDirectory, cancellationToken);
+        var result = await RunProjectCommandAsync(project, args, solutionDirectory, logFile, cancellationToken);
         var seconds = timer.ElapsedSeconds;
-        await File.WriteAllTextAsync(logFile, result.Output, cancellationToken);
 
         await _standardOut.WriteLineAsync($"[{index + 1}/{count}][{options.GroupName}] finished {project.RelativePath} in {seconds}s (exit {result.ExitCode})");
         if (result.ExitCode != 0)
@@ -383,7 +383,30 @@ internal sealed class CoverageRunnerApplication
             await _standardError.WriteLineAsync($"Test run failed for {project.RelativePath} (exit {result.ExitCode})");
         }
 
-        return new ProjectRunResult(index, project, seconds, result.ExitCode, result.Output, logFile);
+        return new ProjectRunResult(index, project, seconds, result.ExitCode, logFile);
+    }
+
+    private async Task<CommandResult> RunProjectCommandAsync(
+        TestProject project,
+        IReadOnlyList<string> args,
+        string solutionDirectory,
+        string logFile,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _commandRunner.RunAsync("dotnet", args, solutionDirectory, cancellationToken, outputFile: logFile);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var output = $"Failed to run dotnet test for {project.RelativePath}: {ex.Message}{Environment.NewLine}";
+            await File.WriteAllTextAsync(logFile, output, cancellationToken);
+            return new CommandResult(1, output);
+        }
     }
 
     private static List<string> CreateTestArguments(
@@ -422,15 +445,18 @@ internal sealed class CoverageRunnerApplication
         return args;
     }
 
-    private async Task ReplayLogsAsync(IReadOnlyList<ProjectRunResult> results)
+    private async Task ReplayLogsAsync(IReadOnlyList<ProjectRunResult> results, CancellationToken cancellationToken)
     {
         foreach (var result in results.OrderBy(result => result.Index))
         {
             await _standardOut.WriteLineAsync($"--- BEGIN {result.Project.RelativePath} ---");
-            if (!string.IsNullOrEmpty(result.Output))
+            var output = File.Exists(result.LogFile)
+                ? await File.ReadAllTextAsync(result.LogFile, cancellationToken)
+                : string.Empty;
+            if (!string.IsNullOrEmpty(output))
             {
-                await _standardOut.WriteAsync(result.Output);
-                if (!result.Output.EndsWith('\n'))
+                await _standardOut.WriteAsync(output);
+                if (!output.EndsWith('\n'))
                 {
                     await _standardOut.WriteLineAsync();
                 }
@@ -494,7 +520,7 @@ internal sealed class CoverageRunnerApplication
     {
         var shardCoverageFiles = Directory.Exists(sourceDirectory)
             ? Directory.EnumerateFiles(sourceDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories)
-                .Where(path => !Normalize(path).Contains("/projects/", StringComparison.Ordinal))
+                .Where(path => !IsProjectCoveragePath(path, GetPathComparison()))
                 .ToArray()
             : [];
 
@@ -525,7 +551,7 @@ internal sealed class CoverageRunnerApplication
         return copied;
     }
 
-    private async Task<bool> WriteSummaryAsync(CoverageRunnerOptions options)
+    private async Task<bool> WriteSummaryAsync(CoverageRunnerOptions options, CancellationToken cancellationToken)
     {
         var coveragePath = Path.Join(options.OutputDirectory, "coverage.cobertura.xml");
         if (!File.Exists(coveragePath))
@@ -534,7 +560,7 @@ internal sealed class CoverageRunnerApplication
             return false;
         }
 
-        var coverageText = await File.ReadAllTextAsync(coveragePath);
+        var coverageText = await File.ReadAllTextAsync(coveragePath, cancellationToken);
         if (!TryReadIntAttribute(coverageText, "lines-covered", out var linesCovered)
             || !TryReadIntAttribute(coverageText, "lines-valid", out var linesValid)
             || !TryReadIntAttribute(coverageText, "branches-covered", out var branchesCovered)
@@ -555,7 +581,7 @@ internal sealed class CoverageRunnerApplication
             Cobertura: {coveragePath}
             Timings: {timingsPath}
             """);
-        await File.WriteAllTextAsync(Path.Join(options.OutputDirectory, "summary.txt"), summary);
+        await File.WriteAllTextAsync(Path.Join(options.OutputDirectory, "summary.txt"), summary, cancellationToken);
         await _standardOut.WriteLineAsync(summary);
         return true;
     }
@@ -583,7 +609,8 @@ internal sealed class CoverageRunnerApplication
         int mergeExitCode,
         int junitCount,
         int coverageCount,
-        IReadOnlyList<ProjectRunResult> results)
+        IReadOnlyList<ProjectRunResult> results,
+        CancellationToken cancellationToken)
     {
         var payload = new
         {
@@ -622,7 +649,7 @@ internal sealed class CoverageRunnerApplication
         };
 
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(Path.Join(options.OutputDirectory, "timings.json"), json + Environment.NewLine);
+        await File.WriteAllTextAsync(Path.Join(options.OutputDirectory, "timings.json"), json + Environment.NewLine, cancellationToken);
     }
 
     private static void PrepareOutputDirectory(CoverageRunnerOptions options)
@@ -675,6 +702,17 @@ internal sealed class CoverageRunnerApplication
     private static string Normalize(string path)
     {
         return path.Replace('\\', '/');
+    }
+
+    /// <summary>
+    /// Gets whether a coverage path belongs to a per-project artifact directory.
+    /// </summary>
+    /// <param name="path">Coverage file path to inspect.</param>
+    /// <param name="comparison">Filesystem-aware comparison used for path segment matching.</param>
+    /// <returns><c>true</c> when the normalized path contains a <c>projects</c> segment.</returns>
+    internal static bool IsProjectCoveragePath(string path, StringComparison comparison)
+    {
+        return Normalize(path).Contains("/projects/", comparison);
     }
 
     private static bool DirectoriesOverlap(string left, string right)
@@ -760,9 +798,5 @@ internal sealed record TestProject(string RelativePath, string FullPath, string 
 /// Exit code returned by <c>dotnet test</c>. Non-zero values are recorded and reported after all
 /// selected projects have been scheduled; they do not stop remaining projects from running.
 /// </param>
-/// <param name="Output">
-/// Captured standard output and standard error from <c>dotnet test</c>. The runner writes this to
-/// the per-project log file and replays it in solution order before the final summary.
-/// </param>
 /// <param name="LogFile">Full path to the per-project <c>dotnet-test.log</c> file.</param>
-internal sealed record ProjectRunResult(int Index, TestProject Project, long Seconds, int ExitCode, string Output, string LogFile);
+internal sealed record ProjectRunResult(int Index, TestProject Project, long Seconds, int ExitCode, string LogFile);

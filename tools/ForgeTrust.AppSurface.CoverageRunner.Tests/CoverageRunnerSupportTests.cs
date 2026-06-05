@@ -29,6 +29,51 @@ public sealed class CoverageRunnerSupportTests
         Assert.Equal(3, result.ExitCode);
         Assert.Contains("out", result.Output, StringComparison.Ordinal);
         Assert.Contains("err", result.Output, StringComparison.Ordinal);
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Contains($"out{Environment.NewLine}err", result.Output, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessCommandRunner_ShouldStreamOutputToFile()
+    {
+        var runner = new ProcessCommandRunner();
+        var command = OperatingSystem.IsWindows() ? "cmd" : "/bin/sh";
+        var arguments = OperatingSystem.IsWindows()
+            ? new[] { "/c", "echo out && echo err 1>&2 && exit /b 3" }
+            : ["-c", "printf out && printf err >&2 && exit 3"];
+        var logFile = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+
+        try
+        {
+            var result = await runner.RunAsync(command, arguments, Directory.GetCurrentDirectory(), CancellationToken.None, outputFile: logFile);
+
+            Assert.Equal(3, result.ExitCode);
+            Assert.Empty(result.Output);
+            var log = await File.ReadAllTextAsync(logFile);
+            Assert.Contains("out", log, StringComparison.Ordinal);
+            Assert.Contains("err", log, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(logFile);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessCommandRunner_ShouldReturnFailureWhenProcessCannotStart()
+    {
+        var runner = new ProcessCommandRunner();
+
+        var result = await runner.RunAsync(
+            "forge-trust-appsurface-missing-command",
+            [],
+            Directory.GetCurrentDirectory(),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Failed to start command", result.Output, StringComparison.Ordinal);
     }
 
     [Fact]

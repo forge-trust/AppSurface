@@ -604,6 +604,15 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
+    public void IsProjectCoveragePath_ShouldRespectPathComparison()
+    {
+        var coveragePath = "/tmp/coverage/PROJECTS/Sample.Tests/coverage.cobertura.xml";
+
+        Assert.True(CoverageRunnerApplication.IsProjectCoveragePath(coveragePath, StringComparison.OrdinalIgnoreCase));
+        Assert.False(CoverageRunnerApplication.IsProjectCoveragePath(coveragePath, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldReplayLogsInSolutionOrder()
     {
         using var workspace = TestRepo.Create();
@@ -624,6 +633,37 @@ public sealed class CoverageRunnerApplicationTests
         Assert.True(
             text.IndexOf("--- BEGIN tools/First.Tests/First.Tests.csproj ---", StringComparison.Ordinal)
             < text.IndexOf("--- BEGIN tools/Second.Tests/Second.Tests.csproj ---", StringComparison.Ordinal));
+        Assert.Contains("passed ", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldRecordProjectCommandExceptionsAndContinue()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Throw.Tests/Throw.Tests.csproj");
+        workspace.AddProject("tools/Pass.Tests/Pass.Tests.csproj");
+
+        var runner = new RecordingCommandRunner(workspace) { ThrowingProject = "Throw.Tests.csproj" };
+        var error = new StringWriter();
+        var app = CreateApp(runner, standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?> { ["COVERAGE_PARALLELISM"] = "2" });
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(2, runner.TestCommands.Count);
+        Assert.Contains("Test run failed for tools/Throw.Tests/Throw.Tests.csproj (exit 1)", error.ToString(), StringComparison.Ordinal);
+
+        var logFile = Path.Join(workspace.Root, "TestResults", "coverage-merged", "projects", "Throw.Tests", "dotnet-test.log");
+        Assert.Contains("Failed to run dotnet test", File.ReadAllText(logFile), StringComparison.Ordinal);
+
+        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(workspace.Root, "TestResults", "coverage-merged", "timings.json")));
+        var projects = timings.RootElement.GetProperty("projects").EnumerateArray().ToArray();
+        Assert.Equal(2, projects.Length);
+        Assert.Equal(1, projects[0].GetProperty("exitCode").GetInt32());
+        Assert.Equal(0, projects[1].GetProperty("exitCode").GetInt32());
     }
 
     private static CoverageRunnerApplication CreateApp(
@@ -662,6 +702,8 @@ public sealed class CoverageRunnerApplicationTests
 
         public string? MissingCoverageProject { get; init; }
 
+        public string? ThrowingProject { get; init; }
+
         public int ReportGeneratorExitCode { get; init; }
 
         public bool ReportGeneratorShouldOmitCoverage { get; init; }
@@ -685,7 +727,8 @@ public sealed class CoverageRunnerApplicationTests
             string command,
             IReadOnlyList<string> arguments,
             string workingDirectory,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string? outputFile = null)
         {
             if (arguments.Count == 3 && arguments[0] == "sln" && arguments[2] == "list")
             {
@@ -741,6 +784,11 @@ public sealed class CoverageRunnerApplicationTests
                         await Task.Delay(TestDelay, cancellationToken);
                     }
 
+                    if (ThrowingProject is not null && project.EndsWith(ThrowingProject, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException($"simulated command failure for {project}");
+                    }
+
                     var coveragePrefix = arguments.Single(argument => argument.StartsWith("/p:CoverletOutput=", StringComparison.Ordinal))["/p:CoverletOutput=".Length..];
                     if (MissingCoverageProject is null || !project.EndsWith(MissingCoverageProject, StringComparison.Ordinal))
                     {
@@ -755,10 +803,10 @@ public sealed class CoverageRunnerApplicationTests
 
                     if (FailingProject is not null && project.EndsWith(FailingProject, StringComparison.Ordinal))
                     {
-                        return new CommandResult(7, $"failed {project}");
+                        return Complete(7, $"failed {project}", outputFile);
                     }
 
-                    return new CommandResult(0, $"passed {project}");
+                    return Complete(0, $"passed {project}", outputFile);
                 }
                 finally
                 {
@@ -767,6 +815,23 @@ public sealed class CoverageRunnerApplicationTests
             }
 
             return new CommandResult(0, "");
+        }
+
+        private static CommandResult Complete(int exitCode, string output, string? outputFile)
+        {
+            if (outputFile is null)
+            {
+                return new CommandResult(exitCode, output);
+            }
+
+            var directory = Path.GetDirectoryName(outputFile);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.WriteAllText(outputFile, output);
+            return new CommandResult(exitCode, string.Empty);
         }
 
         private void RecordMaxConcurrentTests(int active)

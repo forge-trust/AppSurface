@@ -9,6 +9,7 @@ project discovery, scheduling, coverage artifact layout, and summary generation.
 ```bash
 scripts/coverage-solution.sh [solution] [output]
 scripts/coverage-solution.sh --group <name> [--output <dir>] [--solution <path>]
+scripts/coverage-solution.sh --list-groups
 scripts/coverage-solution.sh --merge-only <source-dir> [--output <dir>]
 ```
 
