@@ -1012,18 +1012,14 @@ internal sealed class PackageIndexGenerator
             return true;
         }
 
-        foreach (var heading in markdown.Split('\n')
+        return markdown.Split('\n')
             .Select(line => TryGetMarkdownHeadingText(line.TrimEnd('\r')))
             .Where(heading => heading is not null)
-            .Select(heading => heading!))
-        {
-            if (string.Equals(SlugifyMarkdownHeading(heading), fragment, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+            .Select(heading => heading!)
+            .Any(heading => string.Equals(
+                SlugifyMarkdownHeading(heading),
+                fragment,
+                StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
