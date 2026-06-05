@@ -82,7 +82,7 @@ Build mode uses a compiled MSBuild task instead of `<Exec>`. The task receives s
 | `TailwindOutputPath` | `wwwroot/css/site.gen.css` | Generated CSS path, resolved relative to the project directory. Keep it under `wwwroot/` for static web asset registration. |
 | `TailwindCliPath` | empty | Explicit build-time Tailwind CLI path. Relative paths resolve from the project directory. Build mode does not fall back to `PATH`. |
 | `TailwindVersion` | from `build/tailwind.version` | Tailwind standalone CLI version used by runtime packages. Override only when testing a coordinated runtime-package change. |
-| `TailwindRuntimeBinaryResolutionEnabled` | `true` | Maintainer/CI-only. Set to `false` only in non-package restore/build/test jobs that must skip runtime binary downloads. Do not use it for consumer builds or package creation; see [`eng/ci-critical-path.md`](../../eng/ci-critical-path.md#tailwind-runtime-binary-resolution-in-ci). |
+| `TailwindRuntimeBinaryResolutionEnabled` | `true` | Maintainer/CI-only. Set to `false` only in non-package jobs that skip runtime binary downloads and do not build Tailwind-consuming projects, unless the job also intentionally sets `TailwindEnabled=false`. Do not use it for consumer builds or package creation; see [`eng/ci-critical-path.md`](../../eng/ci-critical-path.md#tailwind-runtime-binary-resolution-in-ci). |
 
 ### Runtime option reference
 
@@ -99,7 +99,7 @@ Build mode uses a compiled MSBuild task instead of `<Exec>`. The task receives s
 
 Runtime packages download the official Tailwind checksum file and standalone binary during build or publish, then verify the binary with SHA-256 before packaging it. These downloads retry transient network failures by default, which keeps CI resilient to brief GitHub release CDN 5xx responses and timeouts without weakening checksum validation.
 
-Maintainers can set `TailwindRuntimeBinaryResolutionEnabled=false` only for fast CI jobs that restore, build, or test without producing package artifacts. Package validation, `dotnet pack`, and release workflows must leave the property enabled or pass `/p:TailwindRuntimeBinaryResolutionEnabled=true`. The authoritative CI matrix and copy-paste examples live in [`eng/ci-critical-path.md`](../../eng/ci-critical-path.md#tailwind-runtime-binary-resolution-in-ci).
+Maintainers can set `TailwindRuntimeBinaryResolutionEnabled=false` only for fast CI jobs that restore, build, or test without producing package artifacts and without compiling Tailwind-consuming projects. Jobs that intentionally skip CSS generation can pair it with `TailwindEnabled=false`, but solution builds should leave runtime binary resolution enabled. Package validation, `dotnet pack`, and release workflows must leave the property enabled or pass `/p:TailwindRuntimeBinaryResolutionEnabled=true`. The authoritative CI matrix and copy-paste examples live in [`eng/ci-critical-path.md`](../../eng/ci-critical-path.md#tailwind-runtime-binary-resolution-in-ci).
 
 The retry behavior is configurable with MSBuild properties:
 

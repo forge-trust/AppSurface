@@ -36,7 +36,7 @@
     BeforeTargets="Build;Pack">
     <Error
       Code="ASTW009"
-      Text="ASTW009 Tailwind runtime binary resolution has an invalid value. Problem: TailwindRuntimeBinaryResolutionEnabled is '$(TailwindRuntimeBinaryResolutionEnabled)'. Cause: runtime binary resolution accepts only true, false, or an unset value that defaults to true. Fix: set /p:TailwindRuntimeBinaryResolutionEnabled=true for package validation and runtime package creation, or false only for fast restore/build/test paths that do not create packages. Docs: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md#tailwind-diagnostics."
+      Text="ASTW009 Tailwind runtime binary resolution has an invalid value. Problem: TailwindRuntimeBinaryResolutionEnabled is '$(TailwindRuntimeBinaryResolutionEnabled)'. Cause: runtime binary resolution accepts only true, false, or an unset value that defaults to true. Fix: set /p:TailwindRuntimeBinaryResolutionEnabled=true for package validation, runtime package creation, and solution builds that compile Tailwind-consuming projects; use false only for fast non-package paths that do not compile Tailwind-consuming projects. Docs: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md#tailwind-diagnostics."
       Condition="'$(_TailwindRuntimeBinaryResolutionEnabledNormalized)' != 'true' and '$(_TailwindRuntimeBinaryResolutionEnabledNormalized)' != 'false'" />
   </Target>
 
@@ -47,7 +47,7 @@
     Condition="'$(_TailwindRuntimeBinaryResolutionEnabledNormalized)' == 'false'">
     <Message
       Importance="High"
-      Text="Tailwind runtime binary resolution is disabled for this build. This is valid only for fast restore/build/test paths that do not create runtime packages; package validation and runtime package creation must use /p:TailwindRuntimeBinaryResolutionEnabled=true." />
+      Text="Tailwind runtime binary resolution is disabled for this build. This is valid only for fast non-package paths that do not compile Tailwind-consuming projects; package validation, runtime package creation, and solution builds that compile generated CSS must use /p:TailwindRuntimeBinaryResolutionEnabled=true or leave the property unset." />
   </Target>
 
   <Target

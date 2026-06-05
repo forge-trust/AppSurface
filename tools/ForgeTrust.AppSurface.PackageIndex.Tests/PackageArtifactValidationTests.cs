@@ -1725,7 +1725,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
-    public async Task TailwindRuntimeBinaryResolutionWorkflowPolicy_SeparatesFastCiFromPackageValidation()
+    public async Task TailwindRuntimeBinaryResolutionWorkflowPolicy_KeepsSolutionBuildsAndPackageValidationEnabled()
     {
         var repositoryRoot = GetRepositoryRoot();
         var buildWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "build.yml"));
@@ -1733,8 +1733,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var packageGateWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-gate.yml"));
         var packageArtifactsWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-artifacts.yml"));
 
-        Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"false\"", buildWorkflow, StringComparison.Ordinal);
-        Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"false\"", codeQualityWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled: \"false\"", buildWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled: \"false\"", codeQualityWorkflow, StringComparison.Ordinal);
         Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"true\"", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled: \"false\"", packageGateWorkflow, StringComparison.Ordinal);

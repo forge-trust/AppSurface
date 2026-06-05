@@ -58,21 +58,21 @@ Package-sensitive workflows stay uncached unless a separate issue evaluates thei
 
 ## Tailwind runtime binary resolution in CI
 
-Tailwind runtime package references must stay visible in every build graph. Fast CI may skip only the runtime binary download/checksum target by setting `TailwindRuntimeBinaryResolutionEnabled=false` on non-package jobs. Package creation and package validation must force the property back to `true`; otherwise runtime package creation fails before emitting an empty `.nupkg`.
+Tailwind runtime package references must stay visible in every build graph. `TailwindRuntimeBinaryResolutionEnabled` controls only runtime package binary downloads; it does not disable the Tailwind build integration used by applications and docs projects. Fast CI may set it to `false` only on non-package jobs that do not build or publish Tailwind-consuming projects, or on jobs that intentionally set `TailwindEnabled=false` and accept skipping generated CSS. Package creation and package validation must force the property back to `true`; otherwise runtime package creation fails before emitting an empty `.nupkg`.
 
 | Workflow/job | Package-sensitive? | Property value | Where to set it |
 | --- | --- | --- | --- |
-| `build.yml` / `build` | No | `false` | Job-level `env: TailwindRuntimeBinaryResolutionEnabled: "false"` |
-| `code-quality.yml` / `dotnet-format` | No | `false` | Job-level `env: TailwindRuntimeBinaryResolutionEnabled: "false"` |
+| `build.yml` / `build` | No | default `true` | Leave unset because the solution build compiles Tailwind-consuming projects |
+| `code-quality.yml` / `dotnet-format` | No | default `true` | Leave unset because the pre-format build compiles Tailwind-consuming projects |
 | `package-gate.yml` / `package-gate` | Yes | `true` | Pass `/p:TailwindRuntimeBinaryResolutionEnabled=true` on restore/build/pack |
 | `package-artifacts.yml` / `package-artifacts` | Yes | `true` | Job-level `env`, plus `verify-packages` forces `true` internally |
 | `nuget-prerelease-publish.yml` package verification | Yes | `true` | Use `verify-packages`; do not override to `false` |
 
-Fast CI example:
+Fast CI example for a graph that does not run Tailwind-consuming project builds:
 
 ```yaml
 jobs:
-  build:
+  restore-or-test-non-tailwind-graph:
     env:
       TailwindRuntimeBinaryResolutionEnabled: "false"
 ```

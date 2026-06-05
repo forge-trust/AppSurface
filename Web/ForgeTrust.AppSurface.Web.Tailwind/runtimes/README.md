@@ -26,7 +26,7 @@ During build and pack, each runtime project downloads the official Tailwind chec
 
 ## Maintainer CI behavior
 
-`TailwindRuntimeBinaryResolutionEnabled` is an internal maintainer switch for repository CI. It defaults to `true`. Non-package restore/build/test jobs may set it to `false` to skip runtime binary download and checksum work, but runtime package creation fails when it is disabled. Package validation, release packaging, and manual `dotnet pack` commands must use `/p:TailwindRuntimeBinaryResolutionEnabled=true`.
+`TailwindRuntimeBinaryResolutionEnabled` is an internal maintainer switch for repository CI. It defaults to `true`. Non-package restore/build/test jobs may set it to `false` to skip runtime binary download and checksum work only when they do not compile Tailwind-consuming projects, unless they also intentionally set `TailwindEnabled=false`. Runtime package creation fails when binary resolution is disabled. Package validation, release packaging, and manual `dotnet pack` commands must use `/p:TailwindRuntimeBinaryResolutionEnabled=true`.
 
 Use `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version <prerelease>` as the primary package proof path. That workflow forces runtime binary resolution on before packing. Raw `dotnet pack` commands are advanced/manual and must pass `/p:TailwindRuntimeBinaryResolutionEnabled=true`.
 

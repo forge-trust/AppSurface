@@ -25,7 +25,6 @@ jobs:
     env:
       CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
-      TailwindRuntimeBinaryResolutionEnabled: "false"
 
     steps:
       - name: Checkout code

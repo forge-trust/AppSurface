@@ -63,7 +63,7 @@ It forces `TailwindRuntimeBinaryResolutionEnabled=true` during restore, build, a
 pack so runtime `.nupkg` files cannot be created without their native Tailwind
 binary payload. Do not set `TailwindRuntimeBinaryResolutionEnabled=false` for
 release package validation; that switch is only for non-package CI restore,
-build, and test jobs.
+build, and test jobs that do not compile Tailwind-consuming projects.
 
 Tracked follow-up for actual publishing: #253, "Add protected NuGet prerelease publish workflow after rename pass".
 
