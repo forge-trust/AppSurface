@@ -31,6 +31,7 @@ public class TailwindCliManagerTests : IDisposable
         _manager = new TailwindCliManager(_logger);
         _manager.BaseDirectoryOverride = _tempPath;
         _manager.AssemblyDirectoryOverride = Path.Join(_tempPath, "isolated-assembly");
+        _manager.DownloadCacheRootOverride = Path.Join(_tempPath, "empty-download-cache");
         _binaryName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "tailwindcss.exe" : "tailwindcss";
         _currentHostRid = GetSupportedHostRid();
         _currentHostRuntimeProjectBinaryName = GetRuntimeProjectBinaryName(_currentHostRid);
@@ -116,7 +117,8 @@ public class TailwindCliManagerTests : IDisposable
         {
             BaseDirectoryOverride = _tempPath,
             AssemblyDirectoryOverride = _tempPath,
-            RidOverride = "win-x64"
+            RidOverride = "win-x64",
+            DownloadCacheRootOverride = Path.Join(_tempPath, "empty-download-cache")
         };
 
         var result = manager.GetTailwindPath();
@@ -200,6 +202,43 @@ public class TailwindCliManagerTests : IDisposable
         var result = _manager.GetTailwindPath();
 
         Assert.Equal(expectedPath, result);
+    }
+
+    [Fact]
+    public void GetTailwindPath_ReturnsSharedDownloadCachePath_IfFound()
+    {
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(baseDir, "assembly-shadow");
+        Directory.CreateDirectory(baseDir);
+        _manager.BaseDirectoryOverride = baseDir;
+        _manager.AssemblyDirectoryOverride = assemblyDir;
+
+        var cacheRoot = Path.Join(_tempPath, "shared-tailwind-cache");
+        _manager.DownloadCacheRootOverride = cacheRoot;
+        var expectedPath = TailwindDownloadCache.GetRuntimeBinaryPath(
+            cacheRoot,
+            "4.1.18",
+            _currentHostRid,
+            _currentHostRuntimeProjectBinaryName);
+        Directory.CreateDirectory(Path.GetDirectoryName(expectedPath)!);
+        File.WriteAllText(expectedPath, "dummy");
+
+        var result = _manager.GetTailwindPath();
+
+        Assert.Equal(expectedPath, result);
+    }
+
+    [Fact]
+    public void DownloadCache_DefaultRoot_UsesXdgCacheHomeBeforeHome()
+    {
+        var result = TailwindDownloadCache.GetDefaultRoot(name => name switch
+        {
+            "XDG_CACHE_HOME" => Path.Join(_tempPath, "xdg"),
+            "HOME" => Path.Join(_tempPath, "home"),
+            _ => null
+        });
+
+        Assert.Equal(Path.Join(_tempPath, "xdg", "forgetrust", "appsurface", "tailwind"), result);
     }
 
     [Fact]
@@ -335,7 +374,8 @@ public class TailwindCliManagerTests : IDisposable
         {
             BaseDirectoryOverride = _tempPath,
             AssemblyDirectoryOverride = _tempPath,
-            RidOverride = "win-x64"
+            RidOverride = "win-x64",
+            DownloadCacheRootOverride = Path.Join(_tempPath, "empty-download-cache")
         };
 
         var result = manager.GetTailwindPath();
@@ -357,7 +397,8 @@ public class TailwindCliManagerTests : IDisposable
         {
             BaseDirectoryOverride = _tempPath,
             AssemblyDirectoryOverride = _tempPath,
-            RidOverride = "win-x64"
+            RidOverride = "win-x64",
+            DownloadCacheRootOverride = Path.Join(_tempPath, "empty-download-cache")
         };
 
         var result = manager.GetTailwindPath();
@@ -476,7 +517,8 @@ public class TailwindCliManagerTests : IDisposable
         {
             BaseDirectoryOverride = _tempPath,
             AssemblyDirectoryOverride = _tempPath,
-            RidOverride = "win-x64"
+            RidOverride = "win-x64",
+            DownloadCacheRootOverride = Path.Join(_tempPath, "empty-download-cache")
         };
 
         Assert.Throws<FileNotFoundException>(() => manager.GetTailwindPath());
@@ -497,7 +539,8 @@ public class TailwindCliManagerTests : IDisposable
         {
             BaseDirectoryOverride = _tempPath,
             AssemblyDirectoryOverride = _tempPath,
-            RidOverride = "win-x64"
+            RidOverride = "win-x64",
+            DownloadCacheRootOverride = Path.Join(_tempPath, "empty-download-cache")
         };
 
         var result = manager.GetTailwindPath();

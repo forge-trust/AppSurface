@@ -22,7 +22,9 @@ Most consumers should install only `ForgeTrust.AppSurface.Web.Tailwind`. These r
 
 Install one directly only if you have a specialized packaging or build scenario that requires explicit control over the Tailwind CLI binary payload.
 
-During build and pack, each runtime project downloads the official Tailwind checksum file and matching standalone binary, then verifies the binary hash before adding it to the package. The download step retries transient network failures by default using `TailwindDownloadRetries` and `TailwindDownloadRetryDelayMilliseconds`. Keep those defaults for normal CI; tune them only when your build environment needs more patience for GitHub release asset downloads or intentionally wants fail-fast behavior.
+During build and pack, each runtime project downloads the official Tailwind checksum file and matching standalone binary, then verifies the binary hash before adding it to the package. The download step uses a shared user-level cache by default so local Git worktrees do not each carry their own full set of Tailwind executables. The default cache root is selected from `$XDG_CACHE_HOME/forgetrust/appsurface/tailwind`, `%LOCALAPPDATA%/ForgeTrust/AppSurface/Tailwind`, `$HOME/.cache/forgetrust/appsurface/tailwind`, or `%USERPROFILE%/.cache/forgetrust/appsurface/tailwind`, in that order. Set `TailwindDownloadCacheRoot` when CI should use a specific persistent cache volume or when a one-off build needs an isolated cache.
+
+The download step retries transient network failures by default using `TailwindDownloadRetries` and `TailwindDownloadRetryDelayMilliseconds`. Keep those defaults for normal CI; tune them only when your build environment needs more patience for GitHub release asset downloads or intentionally wants fail-fast behavior.
 
 ## Maintainer CI behavior
 

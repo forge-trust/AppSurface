@@ -102,6 +102,18 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
     public string? TargetFramework { get; set; }
 
     /// <summary>
+    /// Gets or sets the shared source-tree Tailwind download cache root.
+    /// </summary>
+    /// <remarks>
+    /// Optional. The imported targets default this to a user-level cache such as
+    /// <c>$XDG_CACHE_HOME/forgetrust/appsurface/tailwind</c> or
+    /// <c>$HOME/.cache/forgetrust/appsurface/tailwind</c>. The task probes this cache so source-tree builds can
+    /// reuse runtime-project downloads across Git worktrees instead of copying every Tailwind executable under
+    /// each worktree's <c>obj</c> directory.
+    /// </remarks>
+    public string? TailwindDownloadCacheRoot { get; set; }
+
+    /// <summary>
     /// Gets or sets an optional Tailwind RID override for tests.
     /// </summary>
     /// <remarks>
@@ -301,6 +313,15 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
         }
 
         yield return Path.GetFullPath(Path.Join(ProjectDirectory, "runtimes", rid, "native", runtimeBinaryName));
+
+        if (!string.IsNullOrWhiteSpace(TailwindDownloadCacheRoot))
+        {
+            yield return Path.GetFullPath(TailwindDownloadCache.GetRuntimeBinaryPath(
+                TailwindDownloadCacheRoot,
+                TailwindVersion!,
+                rid,
+                runtimeBinaryName));
+        }
 
         var localBinaryName = TailwindRuntimeMap.GetLocalBinaryName();
         if (IsFileName(localBinaryName))

@@ -281,6 +281,50 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     }
 
     [Fact]
+    public void TailwindTargets_PassesDownloadCacheRootToBuildTask()
+    {
+        var document = XDocument.Load(GetTailwindTargetsPath());
+        var task = Assert.Single(
+            document.Descendants("ForgeTrust.AppSurface.Web.Tailwind.Tasks.RunTailwindBuildTask"));
+
+        Assert.Equal("$(TailwindDownloadCacheRoot)", task.Attribute("TailwindDownloadCacheRoot")?.Value);
+    }
+
+    [Fact]
+    public void TailwindTargets_DefaultsDownloadCacheRootFromUserCacheEnvironment()
+    {
+        var document = XDocument.Load(GetTailwindTargetsPath());
+        var defaultElements = document
+            .Descendants("TailwindDownloadCacheRoot")
+            .Where(element => element.Attribute("Condition")?.Value.Contains("$(_TailwindIsSourceTreeImport)", StringComparison.Ordinal) is true)
+            .ToArray();
+        var defaults = defaultElements
+            .Select(element => element.Value)
+            .ToArray();
+
+        Assert.Contains("$(XDG_CACHE_HOME)/forgetrust/appsurface/tailwind", defaults);
+        Assert.Contains("$(HOME)/.cache/forgetrust/appsurface/tailwind", defaults);
+        Assert.All(
+            defaultElements,
+            element => Assert.Contains(
+                "'$(_TailwindIsSourceTreeImport)' == 'true'",
+                element.Attribute("Condition")?.Value,
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RuntimeTargets_NormalizesDownloadCacheRootWithMsbuildEnsureTrailingSlash()
+    {
+        var document = XDocument.Load(GetTailwindRuntimeTargetsPath());
+        var normalizedRoot = Assert.Single(document.Descendants("_TailwindDownloadCacheRoot"));
+
+        Assert.Equal("'$(TailwindDownloadCacheRoot)' != ''", normalizedRoot.Attribute("Condition")?.Value);
+        Assert.Equal(
+            "$([MSBuild]::EnsureTrailingSlash('$(TailwindDownloadCacheRoot)'))",
+            normalizedRoot.Value);
+    }
+
+    [Fact]
     public void TailwindProject_KeepsRuntimeProjectReferencesUnconditional()
     {
         var document = XDocument.Load(GetTailwindProjectPath());
@@ -467,6 +511,58 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     }
 
     [Fact]
+    public async Task RunTailwindBuild_DoesNotUseImplicitUserCache_WhenPackagedRuntimeIsMissing()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var projectDirectory = Path.Join(_tempRoot, "sample-packaged-target-no-implicit-cache");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        await File.WriteAllTextAsync(
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
+            "@import \"tailwindcss\";" + Environment.NewLine);
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        var fakeHomeDirectory = Path.Join(projectDirectory, "fake-home");
+        var fakeCacheRoot = Path.Join(fakeHomeDirectory, ".cache", "forgetrust", "appsurface", "tailwind");
+        var ambientCacheRuntimePath = TailwindDownloadCache.GetRuntimeBinaryPath(fakeCacheRoot, "4.1.18", rid, runtimeBinaryName);
+        await CreateRuntimeTailwindCliStubAsync(projectDirectory, ambientCacheRuntimePath);
+
+        var projectPath = Path.Join(projectDirectory, "Sample.csproj");
+        var targetsPath = await CreatePackagedTargetsCopyAsync(projectDirectory);
+        await File.WriteAllTextAsync(
+            projectPath,
+            $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <TailwindInputPath>wwwroot/css/app.css</TailwindInputPath>
+                <TailwindOutputPath>wwwroot/css/site.gen.css</TailwindOutputPath>
+              </PropertyGroup>
+
+              <Import Project="{{EscapeForXml(targetsPath)}}" />
+            </Project>
+            """);
+
+        var result = await RunDotNetBuildAsync(
+            projectPath,
+            projectDirectory,
+            ("HOME", fakeHomeDirectory),
+            ("XDG_CACHE_HOME", string.Empty),
+            ("LOCALAPPDATA", string.Empty),
+            ("USERPROFILE", string.Empty));
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("ASTW004", combinedOutput, StringComparison.Ordinal);
+        Assert.False(File.Exists(GetRuntimeSelectionMarkerPath(ambientCacheRuntimePath)));
+    }
+
+    [Fact]
     public async Task RunTailwindBuild_DoesNotUsePathFallback_WhenBuildCliIsMissing()
     {
         var projectDirectory = Path.Join(Path.GetFullPath(_tempRoot), "sample-no-path-fallback");
@@ -489,6 +585,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
                 <TargetFramework>net10.0</TargetFramework>
                 <TailwindInputPath>wwwroot/css/app.css</TailwindInputPath>
                 <TailwindOutputPath>wwwroot/css/site.gen.css</TailwindOutputPath>
+                <TailwindDownloadCacheRoot>{{EscapeForXml(Path.Join(projectDirectory, "empty-download-cache"))}}</TailwindDownloadCacheRoot>
               </PropertyGroup>
 
               <Import Project="{{EscapeForXml(targetsPath)}}" />
@@ -803,6 +900,37 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         Assert.Empty(buildEngine.Errors);
         Assert.Empty(buildEngine.Warnings);
         Assert.Contains(buildEngine.Messages, message => message.Importance == MessageImportance.Normal && message.Message == "≈ tailwindcss v4.1.18");
+        Assert.Equal(runtimePath, await File.ReadAllTextAsync(GetRuntimeSelectionMarkerPath(runtimePath)));
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_UsesSharedDownloadCacheCandidate_WhenPresent()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        var cacheRoot = Path.Join(_tempRoot, "tailwind-download-cache");
+        var runtimePath = TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, "4.1.18", rid, runtimeBinaryName);
+        var task = CreateBuildTask("sample-shared-runtime-cache", task =>
+        {
+            task.TailwindTargetRid = rid;
+            task.TailwindVersion = "4.1.18";
+            task.TailwindDownloadCacheRoot = cacheRoot;
+        });
+        await CreateRuntimeTailwindCliStubAsync(task.ProjectDirectory, runtimePath);
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.True(result);
+        Assert.True(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
+        Assert.Empty(buildEngine.Errors);
+        Assert.Empty(buildEngine.Warnings);
         Assert.Equal(runtimePath, await File.ReadAllTextAsync(GetRuntimeSelectionMarkerPath(runtimePath)));
     }
 
