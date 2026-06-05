@@ -5,6 +5,7 @@ var definition = GeneratedApprovalFlow.BuildDefinition(
     graph => graph
         .MapStartNodeApprovedToReviewNode()
         .MarkStartNodeApprovalSubmittedTerminal()
+        .MarkStartNodeApprovalTimeoutTerminal()
         .MarkStartNodeDeniedTerminal()
         .MapReviewNodeAgainToReviewNode()
         .MarkReviewNodeDoneTerminal(),
@@ -16,14 +17,28 @@ var runner = new InMemoryFlowRunner<GeneratedApprovalFlow.GeneratedApprovalFlowC
 var waiting = await runner.RunAsync(
     definition,
     GeneratedApprovalFlow.CreateStartContext(new StartState("created")));
-Console.WriteLine($"Waiting: {waiting.WaitingEventName}");
+Console.WriteLine($"Waiting: {waiting.WaitingEventName}, timeout: {waiting.Timeout?.Duration.TotalMinutes:0}m");
 
 var completed = await runner.ResumeAsync(
     definition,
     "start",
     waiting.Context!,
     new FlowResumeEvent("approval-submitted", "approved"));
-Console.WriteLine($"Completed: {completed.Context?.DoneState?.Status}");
+Console.WriteLine($"Completed after re-entry: {completed.Context?.DoneState?.Status}");
+
+var faulted = await runner.ResumeAsync(
+    definition,
+    "start",
+    GeneratedApprovalFlow.CreateStartContext(new StartState("waiting")),
+    new FlowResumeEvent("approval-submitted", "denied"));
+Console.WriteLine($"Faulted: {faulted.Fault?.Code}");
+
+var timedOut = await runner.ResumeAsync(
+    definition,
+    "start",
+    GeneratedApprovalFlow.CreateStartContext(new StartState("waiting")),
+    new FlowResumeEvent("approval-timeout", isTimeout: true));
+Console.WriteLine($"Timed out: {timedOut.Context?.StartState?.Status}");
 
 [FlowAuthoring("generated-approval")]
 internal partial class GeneratedApprovalFlow
@@ -32,6 +47,7 @@ internal partial class GeneratedApprovalFlow
     [FlowNode("start", typeof(StartState))]
     [FlowOutcome("approved", FlowOutcomeKind.Next, typeof(ReviewState))]
     [FlowOutcome("approval-submitted", FlowOutcomeKind.Wait, typeof(StartState))]
+    [FlowOutcome("approval-timeout", FlowOutcomeKind.TimedOut, typeof(StartState))]
     [FlowOutcome("denied", FlowOutcomeKind.Fault, typeof(FlowFault))]
     internal partial class StartNode : IFlowTransformerNode<StartState, StartNodeOutcomes>
     {
@@ -39,10 +55,18 @@ internal partial class GeneratedApprovalFlow
             FlowTransformerContext<StartState> context,
             CancellationToken cancellationToken = default)
         {
+            if (context.ResumeEvent?.EventName == "approval-timeout")
+            {
+                return ValueTask.FromResult<StartNodeOutcomes>(
+                    StartNodeOutcomes.ApprovalTimeout(context.State with { Status = "timed-out" }));
+            }
+
             if (context.ResumeEvent is null)
             {
                 return ValueTask.FromResult<StartNodeOutcomes>(
-                    StartNodeOutcomes.ApprovalSubmitted(context.State with { Status = "waiting" }));
+                    StartNodeOutcomes.ApprovalSubmitted(
+                        context.State with { Status = "waiting" },
+                        new FlowTimeout(TimeSpan.FromMinutes(5))));
             }
 
             if (string.Equals(context.ResumeEvent.Payload?.ToString(), "denied", StringComparison.Ordinal))
