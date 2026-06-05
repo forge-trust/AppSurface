@@ -49,6 +49,7 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
         }
 
         AssertEvaluatorSequenceMetadata(docs);
+        AssertFirstSuccessPathCoversRepoAndPackageProofs(docs);
 
         var groups = rootLanding.Metadata?.FeaturedPageGroups ?? [];
         AssertIntentOrder(groups, "evaluate-appsurface", "prove-first-service", "recover-and-read");
@@ -82,6 +83,11 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
             "start-here/should-i-use-appsurface.md",
             aliases: ["plain ASP.NET Core"],
             keywords: []);
+        AssertSearchMetadata(
+            searchIndex,
+            "start-here/first-success-path.md",
+            aliases: ["package-first", "NuGet"],
+            keywords: ["dotnet package add", "ForgeTrust.AppSurface.Web"]);
         AssertSearchMetadata(
             searchIndex,
             "guides/from-program-cs-to-module.md",
@@ -185,6 +191,23 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
 
         Assert.Null(SingleDoc(docs, "troubleshooting/startup-and-modules.md").Metadata?.SequenceKey);
         Assert.Null(SingleDoc(docs, "concepts/glossary.md").Metadata?.SequenceKey);
+    }
+
+    private static void AssertFirstSuccessPathCoversRepoAndPackageProofs(IReadOnlyList<DocNode> docs)
+    {
+        var doc = SingleDoc(docs, "start-here/first-success-path.md");
+
+        Assert.Contains("Repo-First Path", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("dotnet run --project examples/web-app -- --port 5055", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("Package-First Path", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("dotnet new web -n AppSurfaceQuickstart", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("dotnet package add ForgeTrust.AppSurface.Web", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("WebApp", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("QuickstartModule", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("RunAsync", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("NoHostModule", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("IAppSurfaceWebModule", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("Hello from AppSurface!", doc.Content, StringComparison.Ordinal);
     }
 
     private static async Task AssertStartHereLandingAndOrderAsync(DocAggregator aggregator)

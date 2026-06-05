@@ -197,6 +197,7 @@
         const mainContent = document.getElementById("main-content");
         const mobileMedia = window.matchMedia ? window.matchMedia("(max-width: 767px)") : null;
         let lastFocusedBeforeSidebarOpen = null;
+        let pendingFrameHashNavigation = null;
 
         function shouldAutoCloseSidebar() {
             return mobileMedia ? mobileMedia.matches : window.innerWidth < 768;
@@ -321,17 +322,56 @@
                 return;
             }
 
+            restorePendingFrameHashNavigation();
             restoreMainScrollPosition();
 
             if (typeof requestAnimationFrame === "function") {
                 requestAnimationFrame(() => {
-                    requestAnimationFrame(restoreMainScrollPosition);
+                    requestAnimationFrame(restoreFrameHashAndMainScrollPosition);
                 });
             }
 
             for (const delay of [80, 240]) {
-                window.setTimeout(restoreMainScrollPosition, delay);
+                window.setTimeout(restoreFrameHashAndMainScrollPosition, delay);
             }
+        }
+
+        function restoreFrameHashAndMainScrollPosition() {
+            restorePendingFrameHashNavigation();
+            restoreMainScrollPosition();
+        }
+
+        function rememberPendingFrameHashNavigation(anchorLink, targetUrl) {
+            if (anchorLink.getAttribute("data-turbo-frame") !== "doc-content"
+                || !targetUrl.hash
+                || targetUrl.origin !== window.location.origin
+                || (targetUrl.pathname === window.location.pathname && targetUrl.search === window.location.search)) {
+                pendingFrameHashNavigation = null;
+                return;
+            }
+
+            pendingFrameHashNavigation = {
+                pathname: targetUrl.pathname,
+                search: targetUrl.search,
+                hash: targetUrl.hash
+            };
+        }
+
+        function restorePendingFrameHashNavigation() {
+            if (!pendingFrameHashNavigation) {
+                return;
+            }
+
+            const target = pendingFrameHashNavigation;
+            if (target.pathname !== window.location.pathname || target.search !== window.location.search) {
+                return;
+            }
+
+            if (window.location.hash !== target.hash) {
+                history.replaceState(null, "", `${target.pathname}${target.search}${target.hash}`);
+            }
+
+            pendingFrameHashNavigation = null;
         }
 
         function closeSidebar({ restoreFocus = true } = {}) {
@@ -492,6 +532,7 @@
             }
 
             const targetUrl = new URL(anchorLink.href, window.location.origin);
+            rememberPendingFrameHashNavigation(anchorLink, targetUrl);
             if (targetUrl.pathname !== window.location.pathname
                 || targetUrl.search !== window.location.search
                 || !targetUrl.hash) {
