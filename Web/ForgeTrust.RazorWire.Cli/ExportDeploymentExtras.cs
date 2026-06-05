@@ -300,10 +300,7 @@ internal static class ExportDeploymentExtras
                 publishPath);
         }
 
-        if (sourceRoot is not null)
-        {
-            RejectExistingReparseSegments(sourceRoot, sourcePath, "source-symlink", publishPath, manifestPath, entryIndex);
-        }
+        RejectExistingReparseSegments(sourceRoot, sourcePath, "source-symlink", publishPath, manifestPath, entryIndex);
 
         var info = new FileInfo(sourcePath);
         if ((info.Attributes & FileAttributes.ReparsePoint) != 0 || !string.IsNullOrEmpty(info.LinkTarget))

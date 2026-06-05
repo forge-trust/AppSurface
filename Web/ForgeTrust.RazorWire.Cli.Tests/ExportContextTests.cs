@@ -67,7 +67,7 @@ public class ExportContextTests
     [Fact]
     public async Task AddDeploymentExtra_Should_Register_Absolute_Source_And_PublishPath()
     {
-        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-context-").FullName;
+        var tempDir = CreateSafeTempDirectory("razorwire-export-context-");
         try
         {
             var sourcePath = Path.Join(tempDir, "CNAME");
@@ -92,7 +92,7 @@ public class ExportContextTests
     [Fact]
     public async Task AddDeploymentExtra_Should_Reject_Duplicate_Targets_Case_Insensitively()
     {
-        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-context-").FullName;
+        var tempDir = CreateSafeTempDirectory("razorwire-export-context-");
         try
         {
             var first = Path.Join(tempDir, "CNAME");
@@ -114,6 +114,67 @@ public class ExportContextTests
             {
                 Directory.Delete(tempDir, true);
             }
+        }
+    }
+
+    [Fact]
+    public async Task AddDeploymentExtra_Should_Reject_Source_Ancestor_Symlink()
+    {
+        var tempDir = CreateSafeTempDirectory("razorwire-export-context-");
+        try
+        {
+            var realDeploy = Path.Join(tempDir, "real-deploy");
+            Directory.CreateDirectory(realDeploy);
+            await File.WriteAllTextAsync(Path.Join(realDeploy, "CNAME"), "docs.example.com");
+            var linkedDeploy = Path.Join(tempDir, "linked-deploy");
+            if (!TryCreateDirectorySymlink(linkedDeploy, realDeploy))
+            {
+                throw new InvalidOperationException(
+                    $"Symlink creation failed; cannot verify public deployment extra source ancestor validation from '{linkedDeploy}' to '{realDeploy}'.");
+            }
+
+            var context = new ExportContext("dist", null, "http://localhost:5000");
+
+            var exception = Assert.Throws<ExportValidationException>(() => context.AddDeploymentExtra(Path.Join(linkedDeploy, "CNAME"), "/CNAME"));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT007", diagnostic.Code);
+            Assert.Contains("[source-symlink]", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    private static string CreateSafeTempDirectory(string prefix)
+    {
+        var baseDirectory = Path.Join(AppContext.BaseDirectory, "test-temp");
+        Directory.CreateDirectory(baseDirectory);
+        return Directory.CreateDirectory(Path.Join(baseDirectory, $"{prefix}{Guid.NewGuid():N}")).FullName;
+    }
+
+    private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
         }
     }
 }

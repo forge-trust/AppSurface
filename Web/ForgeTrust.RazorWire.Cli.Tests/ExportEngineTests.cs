@@ -680,7 +680,7 @@ public class ExportEngineTests
     public async Task RunAsync_Should_Copy_Deployment_Extra_After_Export()
     {
         var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
-        var sourceRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-source-").FullName;
+        var sourceRoot = CreateSafeTempDirectory("razorwire-export-extra-source-");
         try
         {
             var sourcePath = Path.Join(sourceRoot, "CNAME");
@@ -715,7 +715,7 @@ public class ExportEngineTests
     public async Task RunAsync_Should_Fail_When_Deployment_Extra_Targets_Generated_Output()
     {
         var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
-        var sourceRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-source-").FullName;
+        var sourceRoot = CreateSafeTempDirectory("razorwire-export-extra-source-");
         try
         {
             var sourcePath = Path.Join(sourceRoot, "index.html");
@@ -750,7 +750,7 @@ public class ExportEngineTests
     public async Task RunAsync_Should_Fail_Before_Crawl_When_ReleaseArchive_Has_Deployment_Extras()
     {
         var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
-        var sourceRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-source-").FullName;
+        var sourceRoot = CreateSafeTempDirectory("razorwire-export-extra-source-");
         try
         {
             var sourcePath = Path.Join(sourceRoot, "CNAME");
@@ -787,7 +787,7 @@ public class ExportEngineTests
     public async Task RunAsync_Should_Fail_When_Deployment_Extra_Target_Already_Exists()
     {
         var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
-        var sourceRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-source-").FullName;
+        var sourceRoot = CreateSafeTempDirectory("razorwire-export-extra-source-");
         try
         {
             await File.WriteAllTextAsync(Path.Join(tempDir, "CNAME"), "existing.example.com");
@@ -823,7 +823,7 @@ public class ExportEngineTests
     public async Task RunAsync_Should_Validate_All_Deployment_Extra_Target_Parents_Before_Copying()
     {
         var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
-        var sourceRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-source-").FullName;
+        var sourceRoot = CreateSafeTempDirectory("razorwire-export-extra-source-");
         var outsideRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-outside-").FullName;
         try
         {
@@ -5080,6 +5080,13 @@ public class ExportEngineTests
             RequestCount++;
             return Task.FromException<HttpResponseMessage>(new InvalidOperationException("Release archive extras preflight should fail before crawl."));
         }
+    }
+
+    private static string CreateSafeTempDirectory(string prefix)
+    {
+        var baseDirectory = Path.Join(AppContext.BaseDirectory, "test-temp");
+        Directory.CreateDirectory(baseDirectory);
+        return Directory.CreateDirectory(Path.Join(baseDirectory, $"{prefix}{Guid.NewGuid():N}")).FullName;
     }
 
     private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
