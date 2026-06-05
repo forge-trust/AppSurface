@@ -182,6 +182,42 @@ public class ExportDeploymentExtrasManifestReaderTests
     }
 
     [Fact]
+    public async Task Read_Should_Reject_Rooted_Source_Path()
+    {
+        var root = Directory.CreateTempSubdirectory("razorwire-extras-manifest-").FullName;
+        try
+        {
+            var deploy = Path.Join(root, "deploy");
+            Directory.CreateDirectory(deploy);
+            var sourcePath = Path.Join(deploy, "CNAME");
+            await File.WriteAllTextAsync(sourcePath, "docs.example.com");
+            var manifestPath = Path.Join(deploy, "export-extras.yml");
+            await File.WriteAllTextAsync(
+                manifestPath,
+                $$"""
+                version: 1
+                extras:
+                  - source: {{sourcePath}}
+                    publishPath: /CNAME
+                """);
+
+            var exception = Assert.Throws<ExportValidationException>(
+                () => ExportDeploymentExtrasManifestReader.Read(manifestPath));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT007", diagnostic.Code);
+            Assert.Contains("[source-outside-root]", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task Read_Should_Reject_Source_Directory()
     {
         var root = Directory.CreateTempSubdirectory("razorwire-extras-manifest-").FullName;

@@ -64,6 +64,17 @@ internal static class ExportDeploymentExtras
         string source,
         string publishPath)
     {
+        if (Path.IsPathFullyQualified(source) || Path.IsPathRooted(source))
+        {
+            throw CreateException(
+                "source-outside-root",
+                FormatMessage(
+                    manifestPath,
+                    entryIndex,
+                    $"Source '{source}' must be relative to the manifest directory. Fix: use a relative source path such as 'CNAME'."),
+                publishPath);
+        }
+
         var resolvedSource = Path.GetFullPath(Path.Combine(manifestDirectory, source));
         ValidateRegularSourceFile(resolvedSource, manifestDirectory, manifestPath, entryIndex, publishPath);
         return new ExportDeploymentExtra(resolvedSource, NormalizePublishPath(publishPath, manifestPath, entryIndex));
@@ -177,10 +188,13 @@ internal static class ExportDeploymentExtras
     {
         var outputRoot = Path.GetFullPath(outputPath);
         var relativeSegments = publishPath.TrimStart('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var parts = new string[relativeSegments.Length + 1];
-        parts[0] = outputRoot;
-        Array.Copy(relativeSegments, 0, parts, 1, relativeSegments.Length);
-        var fullPath = Path.GetFullPath(Path.Combine(parts));
+        var candidate = outputRoot;
+        foreach (var segment in relativeSegments)
+        {
+            candidate = Path.Join(candidate, segment);
+        }
+
+        var fullPath = Path.GetFullPath(candidate);
         if (!IsPathUnderRoot(fullPath, outputRoot, StringComparison.OrdinalIgnoreCase))
         {
             throw CreateException(
@@ -322,8 +336,8 @@ internal static class ExportDeploymentExtras
 
         if (File.Exists(root) || Directory.Exists(root))
         {
-            var rootInfo = File.Exists(root)
-                ? new FileInfo(root) as FileSystemInfo
+            FileSystemInfo rootInfo = File.Exists(root)
+                ? new FileInfo(root)
                 : new DirectoryInfo(root);
             if ((rootInfo.Attributes & FileAttributes.ReparsePoint) != 0 || !string.IsNullOrEmpty(rootInfo.LinkTarget))
             {
@@ -346,14 +360,25 @@ internal static class ExportDeploymentExtras
         var cursor = root;
         foreach (var segment in relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
         {
+            if (Path.IsPathRooted(segment))
+            {
+                throw CreateException(
+                    reason,
+                    FormatMessage(
+                        manifestPath,
+                        entryIndex,
+                        $"Path segment '{segment}' is rooted. Fix: use regular relative file and directory segments only."),
+                    publishPath);
+            }
+
             cursor = Path.Combine(cursor, segment);
             if (!File.Exists(cursor) && !Directory.Exists(cursor))
             {
                 break;
             }
 
-            var info = File.Exists(cursor)
-                ? new FileInfo(cursor) as FileSystemInfo
+            FileSystemInfo info = File.Exists(cursor)
+                ? new FileInfo(cursor)
                 : new DirectoryInfo(cursor);
             if ((info.Attributes & FileAttributes.ReparsePoint) != 0 || !string.IsNullOrEmpty(info.LinkTarget))
             {

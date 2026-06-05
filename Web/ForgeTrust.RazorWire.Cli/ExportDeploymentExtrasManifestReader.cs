@@ -135,12 +135,9 @@ internal static class ExportDeploymentExtrasManifestReader
             }
         }
 
-        foreach (var required in allowedKeys)
+        foreach (var required in allowedKeys.Where(required => !result.ContainsKey(required)))
         {
-            if (!result.ContainsKey(required))
-            {
-                throw Schema(manifestPath, entryIndex, $"Missing required field '{required}'.");
-            }
+            throw Schema(manifestPath, entryIndex, $"Missing required field '{required}'.");
         }
 
         return result;
