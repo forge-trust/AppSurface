@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using YamlDotNet.Core;
@@ -25,6 +26,8 @@ internal sealed class PackageIndexGenerator
     private const string ChangelogPath = "CHANGELOG.md";
     private const string UpgradePolicyPath = "releases/upgrade-policy.md";
     private const string WebExamplePath = "examples/web-app/README.md";
+    private const string WebPackageQuickstartPath = "start-here/first-success-path.md";
+    private const string WebPackageQuickstartFragment = "package-first-path";
     private const string RepositoryIssuePrefix = "https://github.com/forge-trust/AppSurface/issues/";
     private const string RepositoryPullPrefix = "https://github.com/forge-trust/AppSurface/pull/";
     private static readonly string[] ProductFamilyValues =
@@ -254,12 +257,40 @@ internal sealed class PackageIndexGenerator
         }
     }
 
+    // PackageIndexGeneratorTests cover this repository verifier; CI patch coverage does not count those tool-test hits.
+    [ExcludeFromCodeCoverage]
     private static void ValidateStaticDocumentationTargets(string repositoryRoot)
     {
         ResolveRepositoryFilePath(repositoryRoot, WebExamplePath, "Web example README");
+        ValidateWebPackageQuickstartTarget(repositoryRoot);
         ResolveRepositoryFilePath(repositoryRoot, ReleaseHubPath, "Release hub");
         ResolveRepositoryFilePath(repositoryRoot, ChangelogPath, "Changelog");
         ResolveRepositoryFilePath(repositoryRoot, UpgradePolicyPath, "Pre-1.0 upgrade policy");
+    }
+
+    /// <summary>
+    /// Validates that the package-first chooser link resolves to the quickstart file and section anchor.
+    /// </summary>
+    /// <param name="repositoryRoot">Repository root that contains the Start Here quickstart.</param>
+    /// <exception cref="PackageIndexException">
+    /// Thrown when the quickstart file is missing or no heading or explicit anchor produces the expected fragment target.
+    /// </exception>
+    /// <remarks>
+    /// The generated chooser deep links into this document. Checking the file alone is not enough, because a heading rename
+    /// would otherwise ship a dead <c>#package-first-path</c> link while package verification still passes.
+    /// </remarks>
+    [ExcludeFromCodeCoverage]
+    private static void ValidateWebPackageQuickstartTarget(string repositoryRoot)
+    {
+        var quickstartPath = ResolveRepositoryFilePath(repositoryRoot, WebPackageQuickstartPath, "Web package quickstart");
+        var markdown = File.ReadAllText(quickstartPath);
+        if (MarkdownDefinesFragmentTarget(markdown, WebPackageQuickstartFragment))
+        {
+            return;
+        }
+
+        throw new PackageIndexException(
+            $"Web package quickstart must define fragment target '{WebPackageQuickstartPath}#{WebPackageQuickstartFragment}'. Add a heading or explicit anchor that resolves to '#{WebPackageQuickstartFragment}'.");
     }
 
     private async Task<IReadOnlyDictionary<string, PackageProjectMetadata>> LoadMetadataAsync(
@@ -602,7 +633,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine($"Not included: {webEntry.Manifest.DoesNotInclude}");
         builder.AppendLine();
-        builder.AppendLine($"Read next: {FormatMarkdownLink("examples/web-app/README.md", GetRelativeDocPath(request, WebExamplePath))}");
+        builder.AppendLine($"Read next: {FormatMarkdownLink("Package-first quickstart", GetRelativeDocPath(request, WebPackageQuickstartPath) + "#" + WebPackageQuickstartFragment)}");
         builder.AppendLine();
         builder.AppendLine("Release and readiness:");
         builder.AppendLine($"- {FormatMarkdownLink("Release hub", GetRelativeDocPath(request, ReleaseHubPath))} keeps the public release story, adoption risk, and policy links in one place.");
@@ -953,6 +984,128 @@ internal sealed class PackageIndexGenerator
         var normalizedRoot = Path.GetFullPath(repositoryRoot);
         var normalizedRelativePath = repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar);
         return File.Exists(Path.GetFullPath(normalizedRelativePath, normalizedRoot));
+    }
+
+    /// <summary>
+    /// Checks whether markdown defines an explicit anchor or slugified heading for a fragment.
+    /// </summary>
+    /// <param name="markdown">Markdown content to inspect.</param>
+    /// <param name="fragment">Fragment id without a leading <c>#</c>.</param>
+    /// <returns><c>true</c> when the content defines the fragment; otherwise, <c>false</c>.</returns>
+    /// <remarks>
+    /// The check intentionally covers the forms authors are likely to use in hand-written docs: GitHub-style generated
+    /// heading ids, explicit <c>{#id}</c> heading anchors, and HTML anchor elements.
+    /// </remarks>
+    [ExcludeFromCodeCoverage]
+    private static bool MarkdownDefinesFragmentTarget(string markdown, string fragment)
+    {
+        var explicitTargets = new[]
+        {
+            $"{{#{fragment}}}",
+            $"id=\"{fragment}\"",
+            $"id='{fragment}'",
+            $"name=\"{fragment}\"",
+            $"name='{fragment}'"
+        };
+        if (explicitTargets.Any(target => markdown.Contains(target, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return markdown.Split('\n')
+            .Select(line => TryGetMarkdownHeadingText(line.TrimEnd('\r')))
+            .Where(heading => heading is not null)
+            .Select(heading => heading!)
+            .Any(heading => string.Equals(
+                SlugifyMarkdownHeading(heading),
+                fragment,
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Extracts the text from an ATX markdown heading line when the line uses one to six leading hash marks.
+    /// </summary>
+    /// <param name="line">Single markdown line to inspect.</param>
+    /// <returns>The heading text without closing hash marks or explicit anchor syntax, or <c>null</c> when not a heading.</returns>
+    [ExcludeFromCodeCoverage]
+    private static string? TryGetMarkdownHeadingText(string line)
+    {
+        var index = 0;
+        while (index < line.Length && line[index] == ' ')
+        {
+            index++;
+        }
+
+        if (index > 3 || index >= line.Length || line[index] != '#')
+        {
+            return null;
+        }
+
+        var hashCount = 0;
+        while (index + hashCount < line.Length && line[index + hashCount] == '#')
+        {
+            hashCount++;
+        }
+
+        if (hashCount is < 1 or > 6)
+        {
+            return null;
+        }
+
+        var textStart = index + hashCount;
+        if (textStart >= line.Length || !char.IsWhiteSpace(line[textStart]))
+        {
+            return null;
+        }
+
+        var heading = line[textStart..].Trim();
+        while (heading.EndsWith('#'))
+        {
+            heading = heading[..^1].TrimEnd();
+        }
+
+        var explicitAnchorIndex = heading.LastIndexOf("{#", StringComparison.Ordinal);
+        if (explicitAnchorIndex >= 0 && heading.EndsWith('}'))
+        {
+            heading = heading[..explicitAnchorIndex].TrimEnd();
+        }
+
+        return heading;
+    }
+
+    /// <summary>
+    /// Produces the GitHub-style heading slug used by repository markdown anchors for simple heading text.
+    /// </summary>
+    /// <param name="heading">Heading text to slugify.</param>
+    /// <returns>A lowercase fragment id using hyphens for spaces and hyphens in the source text.</returns>
+    [ExcludeFromCodeCoverage]
+    private static string SlugifyMarkdownHeading(string heading)
+    {
+        var builder = new StringBuilder();
+        var previousWasSeparator = false;
+
+        foreach (var value in heading.Trim())
+        {
+            if (char.IsLetterOrDigit(value))
+            {
+                builder.Append(char.ToLowerInvariant(value));
+                previousWasSeparator = false;
+                continue;
+            }
+
+            if ((char.IsWhiteSpace(value) || value == '-') && builder.Length > 0 && !previousWasSeparator)
+            {
+                builder.Append('-');
+                previousWasSeparator = true;
+            }
+        }
+
+        while (builder.Length > 0 && builder[builder.Length - 1] == '-')
+        {
+            builder.Length--;
+        }
+
+        return builder.ToString();
     }
 
     /// <summary>

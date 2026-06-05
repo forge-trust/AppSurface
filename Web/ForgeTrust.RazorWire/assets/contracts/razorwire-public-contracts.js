@@ -40,6 +40,7 @@ window.RazorWire = window.RazorWire || {};
  * @property {Function} scan - Re-scans the document for `[data-rw-page-nav]` roots after custom DOM updates.
  * @property {Function} prune - Removes controllers for disconnected roots.
  * @property {Function} refreshActiveFromHash - Recomputes active links from the current `window.location.hash`.
+ * @property {Function} syncActiveLinkVisibility - Re-checks the current active link and reveals it inside the nearest visible vertical overflowing page-nav container without scrolling the document viewport.
  * @property {Function} getDiagnostics - Returns page navigation diagnostics recorded since startup.
  * @property {Function} clearDiagnostics - Clears recorded page navigation diagnostics.
  */
@@ -200,6 +201,36 @@ window.RazorWire = window.RazorWire || {};
  * @cssHook [data-rw-page-nav-active="true"]
  * @hookKind data-attribute
  * @target a[data-rw-page-nav-link]
+ * @stability stable
+ */
+
+/**
+ * Logical CSS inset contract for active page navigation reveal inside overflowing vertical nav surfaces.
+ * @public
+ * @namespace RazorWire
+ * @cssHook scroll-padding-block
+ * @hookKind css-property
+ * @target visible vertical scrollable ancestor between `a[data-rw-page-nav-link]` and `[data-rw-page-nav]`
+ * @stability stable
+ */
+
+/**
+ * Start-side CSS inset contract for active page navigation reveal inside overflowing vertical nav surfaces.
+ * @public
+ * @namespace RazorWire
+ * @cssHook scroll-padding-top
+ * @hookKind css-property
+ * @target visible vertical scrollable ancestor between `a[data-rw-page-nav-link]` and `[data-rw-page-nav]`
+ * @stability stable
+ */
+
+/**
+ * End-side CSS inset contract for active page navigation reveal inside overflowing vertical nav surfaces.
+ * @public
+ * @namespace RazorWire
+ * @cssHook scroll-padding-bottom
+ * @hookKind css-property
+ * @target visible vertical scrollable ancestor between `a[data-rw-page-nav-link]` and `[data-rw-page-nav]`
  * @stability stable
  */
 

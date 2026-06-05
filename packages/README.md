@@ -18,7 +18,7 @@ What you get: Base ASP.NET Core hosting, middleware and endpoint composition, co
 
 Not included: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, or the AppSurface Docs host.
 
-Read next: [examples/web-app/README.md](../examples/web-app/README.md)
+Read next: [Package-first quickstart](../start-here/first-success-path.md#package-first-path)
 
 Release and readiness:
 - [Release hub](../releases/README.md) keeps the public release story, adoption risk, and policy links in one place.

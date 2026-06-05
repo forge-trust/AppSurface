@@ -503,6 +503,11 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("function clearCopyArtifacts", outlineClient);
         Assert.Contains("data-doc-section-copy-inserted", outlineClient);
         Assert.Contains("data-doc-section-copy-fallback", outlineClient);
+        Assert.Contains("function keepOutlineLinkVisible", outlineClient);
+        Assert.Contains("const reveal = options.reveal !== false;", outlineClient);
+        Assert.Contains("setActiveLink(links, links.includes(link) ? link : null, outlineContext, { reveal: false });", outlineClient);
+        Assert.Contains("setActiveLink(links, link, outlineContext, { reveal: false });", outlineClient);
+        Assert.Contains("{ reveal: !razorWireManaged }", outlineClient);
     }
 
     [Fact]

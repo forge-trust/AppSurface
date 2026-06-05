@@ -8,6 +8,7 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
 {
     private const string CurrentPackageReleaseNotePath = "/docs/releases/v0.1.0-rc.2";
     private const string CurrentPackageReleaseNoteHeading = "Release 0.1.0-rc.2";
+    private const string WebPackageQuickstartPath = "/docs/start-here/first-success-path#package-first-path";
 
     private readonly AppSurfaceDocsPlaywrightFixture _fixture;
 
@@ -42,8 +43,8 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
         Assert.Contains("v0.1 chooser", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("dotnet package add ForgeTrust.AppSurface.Web", await page.InnerTextAsync(".docs-content"), StringComparison.Ordinal);
         Assert.Equal(
-            "/docs/examples/web-app",
-            await page.GetAttributeAsync(".docs-content a[href='/docs/examples/web-app']", "href"));
+            WebPackageQuickstartPath,
+            await page.GetAttributeAsync($".docs-content a[href='{WebPackageQuickstartPath}']", "href"));
         Assert.NotNull(await page.GetAttributeAsync(".docs-content a[href='/docs/releases']", "href"));
         Assert.Equal(
             CurrentPackageReleaseNotePath,

@@ -162,6 +162,61 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task PageNavigationSample_RevealsActiveLinkInsideScrollableNavWithoutMovingDocument()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1280,
+                Height = 720
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Navigation/PageNavigation#replacement");
+        await page.WaitForFunctionAsync(
+            """
+            () => window.RazorWire?.pageNavigationManager
+              && document.querySelector('.brochure-page-nav a[href="#replacement"]')?.getAttribute('aria-current') === 'location'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var probe = await page.EvaluateAsync<PageNavigationRevealProbe>(
+            """
+            () => {
+                const panel = document.getElementById('brochure-sections-panel');
+                const links = [...document.querySelectorAll('.brochure-page-nav [data-rw-page-nav-link]')];
+                if (!panel) throw new Error('Missing page-navigation panel.');
+
+                panel.style.maxHeight = '96px';
+                panel.style.overflowY = 'auto';
+                panel.style.scrollPaddingTop = '12px';
+                panel.style.scrollPaddingBottom = '12px';
+                panel.scrollTop = 0;
+                for (const link of links) {
+                    link.style.display = 'block';
+                    link.style.minHeight = '48px';
+                }
+
+                window.scrollTo(0, 240);
+                const windowScrollBefore = window.scrollY;
+                window.RazorWire.pageNavigationManager.syncActiveLinkVisibility();
+
+                return {
+                    PanelScrollTop: panel.scrollTop,
+                    WindowScrollBefore: windowScrollBefore,
+                    WindowScrollAfter: window.scrollY
+                };
+            }
+            """);
+
+        Assert.True(probe.PanelScrollTop > 0);
+        Assert.InRange(Math.Abs(probe.WindowScrollAfter - probe.WindowScrollBefore), 0, 0.5);
+    }
+
+    [Fact]
     public async Task PageNavigationSample_NoJavaScriptFallbackAnchorsWork()
     {
         await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
@@ -709,6 +764,34 @@ public sealed class RazorWireMvcPlaywrightTests
         public string RuntimeScriptPath { get; set; } = string.Empty;
 
         public string IslandsScriptPath { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Describes the Playwright-to-C# deserialization contract for the page-navigation active-link reveal probe.
+    /// </summary>
+    /// <remarks>
+    /// Values are sampled in the browser and must remain stable for deserialization. Future payload changes should
+    /// preserve these member names or update the browser evaluation script and assertions together.
+    /// </remarks>
+    private sealed class PageNavigationRevealProbe
+    {
+        /// <summary>
+        /// Gets or sets the reveal panel's <c>element.scrollTop</c>, sampled in CSS pixels.
+        /// </summary>
+        /// <remarks>The browser may report fractional scroll offsets, so the value is modeled as a <see cref="double" />.</remarks>
+        public double PanelScrollTop { get; set; }
+
+        /// <summary>
+        /// Gets or sets <c>window.scrollY</c> before the reveal action, sampled in CSS pixels.
+        /// </summary>
+        /// <remarks>The browser may report fractional scroll offsets, so the value is modeled as a <see cref="double" />.</remarks>
+        public double WindowScrollBefore { get; set; }
+
+        /// <summary>
+        /// Gets or sets <c>window.scrollY</c> after the reveal action, sampled in CSS pixels.
+        /// </summary>
+        /// <remarks>The browser may report fractional scroll offsets, so the value is modeled as a <see cref="double" />.</remarks>
+        public double WindowScrollAfter { get; set; }
     }
 
     private static async Task WaitForMessageAsync(IPage page, string token)
