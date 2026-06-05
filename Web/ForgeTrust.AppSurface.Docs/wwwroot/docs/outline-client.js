@@ -151,7 +151,8 @@
         }, outlineContextRollDurationMs);
     }
 
-    function setActiveLink(links, link, context) {
+    function setActiveLink(links, link, context, options = {}) {
+        const reveal = options.reveal !== false;
         const activeIndex = link ? links.indexOf(link) : -1;
 
         for (const candidate of links) {
@@ -167,7 +168,9 @@
 
         setOutlineContext(context, links, activeIndex);
 
-        keepOutlineLinkVisible(link);
+        if (reveal) {
+            keepOutlineLinkVisible(link);
+        }
     }
 
     function keepOutlineLinkVisible(link) {
@@ -235,6 +238,14 @@
                 return target ? { link, target } : null;
             })
             .filter(entry => entry !== null);
+    }
+
+    function getOutlineEntryForLink(entries, link) {
+        return entries.find(entry => entry.link === link) ?? null;
+    }
+
+    function isPlainLeftClick(event) {
+        return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
     }
 
     function buildSectionUrl(targetId) {
@@ -679,19 +690,23 @@
         if (razorWireManaged) {
             addLifecycleEventListener(shell, "razorwire:page-nav:active-change", event => {
                 const link = event.detail?.link;
-                setActiveLink(links, links.includes(link) ? link : null, outlineContext);
+                setActiveLink(links, links.includes(link) ? link : null, outlineContext, { reveal: false });
             });
         }
 
         for (const link of links) {
             addLifecycleEventListener(link, "click", event => {
-                if (!razorWireManaged
-                    || event.defaultPrevented
-                    || event.button !== 0
-                    || event.metaKey
-                    || event.ctrlKey
-                    || event.shiftKey
-                    || event.altKey) {
+                if (event.defaultPrevented || !isPlainLeftClick(event) || !getOutlineEntryForLink(entries, link)) {
+                    return;
+                }
+
+                if (razorWireManaged) {
+                    setActiveLink(links, link, outlineContext, { reveal: false });
+
+                    if (compactMedia?.matches) {
+                        setExpanded(shell, toggle, false);
+                    }
+
                     return;
                 }
 
@@ -706,7 +721,15 @@
         setActiveLink(
             links,
             razorWireManaged ? getRazorWireActiveLink(links) ?? getInitialActiveLink(entries) : getInitialActiveLink(entries),
-            outlineContext);
+            outlineContext,
+            { reveal: !razorWireManaged });
+
+        if (!razorWireManaged) {
+            addLifecycleEventListener(window, "hashchange", () => {
+                setActiveLink(links, getActiveEntryFromHash(entries)?.link ?? null, outlineContext);
+            });
+        }
+
     }
 
     window[clientKey] = {

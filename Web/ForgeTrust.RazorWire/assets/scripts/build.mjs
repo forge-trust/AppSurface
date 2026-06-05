@@ -31,8 +31,10 @@ const generatedOutputs = [
     output: path.join(outputRoot, 'page-navigation.js'),
     label: 'page-navigation.js',
     banner: 'Generated from assets/src/page-navigation.ts. Do not edit wwwroot/razorwire/page-navigation.js by hand.',
-    rawBytes: 9_000,
-    gzipBytes: 3_000
+    // #485 added active-link reveal, resize sync, and ResizeObserver resync to the
+    // page-nav contract; keep the budget close to the generated asset plus headroom.
+    rawBytes: 12_550,
+    gzipBytes: 3_700
   }
 ];
 

@@ -576,6 +576,16 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              */
 
             /**
+             * Stable CSS property hook.
+             * @public
+             * @namespace RazorWire
+             * @cssHook scroll-padding-block
+             * @hookKind css-property
+             * @target generated form failure UI
+             * @stability stable
+             */
+
+            /**
              * Missing hook kind.
              * @public
              * @namespace RazorWire
@@ -593,6 +603,16 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * @target generated form failure UI
              * @stability stable
              */
+
+            /**
+             * Invalid CSS property hook.
+             * @public
+             * @namespace RazorWire
+             * @cssHook form .too-broad
+             * @hookKind css-property
+             * @target generated form failure UI
+             * @stability stable
+             */
             """);
         var harvester = CreateHarvester(CreateEnabledOptions("src/browser-contracts.js"));
 
@@ -600,11 +620,12 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
         Assert.Contains(docs, doc => doc.Path.EndsWith("#css-hook-part-error", StringComparison.Ordinal));
         Assert.Contains(docs, doc => doc.Path.EndsWith("#css-hook-state-invalid", StringComparison.Ordinal));
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#css-hook-scroll-padding-block", StringComparison.Ordinal));
         Assert.Equal(
-            2,
+            3,
             GetDiagnostics(harvester).Count(
                 diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
-                              && diagnostic.Cause == "A public JavaScript CSS hook doclet must use a supported @hookKind and a narrow selector value."));
+                              && diagnostic.Cause == "A public JavaScript CSS hook doclet must use a supported @hookKind and a stable selector or CSS property name."));
     }
 
     [Fact]
