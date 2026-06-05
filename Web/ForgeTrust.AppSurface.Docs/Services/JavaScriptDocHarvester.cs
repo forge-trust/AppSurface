@@ -726,7 +726,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             diagnostics.Add(MalformedDoclet(
                 relativePath,
                 line,
-                "A public JavaScript CSS hook doclet must use a supported @hookKind and a narrow selector value."));
+                "A public JavaScript CSS hook doclet must use a supported @hookKind and a stable selector or CSS property name."));
             return false;
         }
 
@@ -750,9 +750,15 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 RegexOptions.CultureInvariant),
             "part" => Regex.IsMatch(selector, @"^::part\([A-Za-z_][A-Za-z0-9_-]*\)$", RegexOptions.CultureInvariant),
             "state" => Regex.IsMatch(selector, @"^:state\([A-Za-z_][A-Za-z0-9_-]*\)$", RegexOptions.CultureInvariant),
+            "css-property" => IsStableCssPropertyHook(selector),
             "selector" => IsStableNarrowSelector(selector, doclet),
             _ => false
         };
+    }
+
+    private static bool IsStableCssPropertyHook(string selector)
+    {
+        return Regex.IsMatch(selector, @"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", RegexOptions.CultureInvariant);
     }
 
     private static bool IsStableNarrowSelector(string selector, JavaScriptDoclet doclet)

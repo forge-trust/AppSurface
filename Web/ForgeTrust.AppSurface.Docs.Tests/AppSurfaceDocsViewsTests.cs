@@ -511,6 +511,11 @@ public class AppSurfaceDocsViewsTests
         Assert.True(sectionCopyScanCall < decorateSectionCopyCall);
         Assert.DoesNotContain("navigator.clipboard.writeText", outlineClient);
         Assert.DoesNotContain("data-doc-section-copy", outlineClient);
+        Assert.Contains("function keepOutlineLinkVisible", outlineClient);
+        Assert.Contains("const reveal = options.reveal !== false;", outlineClient);
+        Assert.Contains("setActiveLink(links, links.includes(link) ? link : null, outlineContext, { reveal: false });", outlineClient);
+        Assert.Contains("setActiveLink(links, link, outlineContext, { reveal: false });", outlineClient);
+        Assert.Contains("{ reveal: !razorWireManaged }", outlineClient);
     }
 
     [Fact]

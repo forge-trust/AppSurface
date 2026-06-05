@@ -32,6 +32,7 @@ type PageNavigationScrollRoot = Window | Element;
         controllers = new Map<Element, PageNavigationController>();
         diagnostics: PageNavigationDiagnostic[] = [];
         isStarted = false;
+        resizeListener = () => this.scheduleActiveLinkVisibilitySync();
 
         start() {
             if (this.isStarted) return;
@@ -42,6 +43,7 @@ type PageNavigationScrollRoot = Window | Element;
             document.addEventListener('turbo:frame-load', () => this.scan());
             window.addEventListener?.('hashchange', () => this.refreshActiveFromHash());
             window.addEventListener?.('popstate', () => this.refreshActiveFromHash());
+            window.addEventListener?.('resize', this.resizeListener);
         }
 
         scan() {
@@ -78,6 +80,18 @@ type PageNavigationScrollRoot = Window | Element;
             }
         }
 
+        syncActiveLinkVisibility() {
+            for (const controller of this.controllers.values()) {
+                controller.syncActiveLinkVisibility();
+            }
+        }
+
+        scheduleActiveLinkVisibilitySync() {
+            for (const controller of this.controllers.values()) {
+                controller.scheduleActiveLinkVisibilitySync();
+            }
+        }
+
         getDiagnostics() {
             return [...this.diagnostics];
         }
@@ -111,9 +125,13 @@ type PageNavigationScrollRoot = Window | Element;
         activeLink: Element | null = null;
         scrollRoot: PageNavigationScrollRoot | null = null;
         activeLinkAnimationFrame = 0;
+        activeLinkVisibilityAnimationFrame = 0;
+        activeLinkVisibilityContainer: Element | null = null;
+        activeLinkVisibilityObserver: ResizeObserver | null = null;
         rootClickListener = (event: Event) => this.handleRootClick(event);
         toggleClickListener = (event: Event) => this.handleToggleClick(event);
         scrollListener = () => this.scheduleActiveRefresh();
+        activeLinkVisibilityResizeListener = () => this.scheduleActiveLinkVisibilitySync();
 
         constructor(
             private readonly root: Element,
@@ -133,6 +151,8 @@ type PageNavigationScrollRoot = Window | Element;
             this.root.removeEventListener?.('click', this.toggleClickListener);
             this.unbindScrollRoot();
             this.cancelActiveRefresh();
+            this.cancelActiveLinkVisibilitySync();
+            this.unbindActiveLinkVisibilityObserver();
         }
 
         refresh() {
@@ -143,6 +163,7 @@ type PageNavigationScrollRoot = Window | Element;
             this.bindScrollRoot();
             this.syncPanelState();
             this.refreshActiveFromHash() || this.refreshActiveFromViewport();
+            this.scheduleActiveLinkVisibilitySync();
         }
 
         refreshActiveFromHash() {
@@ -188,7 +209,11 @@ type PageNavigationScrollRoot = Window | Element;
         }
 
         setActiveLink(link: Element | null) {
-            if (this.activeLink === link) return;
+            if (this.activeLink === link) {
+                this.scheduleActiveLinkVisibilitySync();
+                return;
+            }
+
             for (const entry of this.entries) {
                 entry.link.removeAttribute('aria-current');
                 entry.link.removeAttribute('data-rw-page-nav-active');
@@ -201,6 +226,7 @@ type PageNavigationScrollRoot = Window | Element;
                 bubbles: true,
                 detail: { link }
             }));
+            this.scheduleActiveLinkVisibilitySync();
         }
 
         handleRootClick(event: Event) {
@@ -259,6 +285,149 @@ type PageNavigationScrollRoot = Window | Element;
             const cancelFrame = window.cancelAnimationFrame?.bind(window) ?? window.clearTimeout?.bind(window) ?? clearTimeout;
             cancelFrame(this.activeLinkAnimationFrame);
             this.activeLinkAnimationFrame = 0;
+        }
+
+        scheduleActiveLinkVisibilitySync() {
+            if (this.activeLinkVisibilityAnimationFrame !== 0) return;
+            const requestFrame = window.requestAnimationFrame?.bind(window)
+                ?? ((callback: FrameRequestCallback) => window.setTimeout?.(() => callback(Date.now()), 16) ?? setTimeout(() => callback(Date.now()), 16));
+            this.activeLinkVisibilityAnimationFrame = requestFrame(() => {
+                this.activeLinkVisibilityAnimationFrame = 0;
+                this.syncActiveLinkVisibility();
+            });
+        }
+
+        cancelActiveLinkVisibilitySync() {
+            if (this.activeLinkVisibilityAnimationFrame === 0) return;
+            const cancelFrame = window.cancelAnimationFrame?.bind(window) ?? window.clearTimeout?.bind(window) ?? clearTimeout;
+            cancelFrame(this.activeLinkVisibilityAnimationFrame);
+            this.activeLinkVisibilityAnimationFrame = 0;
+        }
+
+        syncActiveLinkVisibility() {
+            if (!this.activeLink) {
+                this.unbindActiveLinkVisibilityObserver();
+                return;
+            }
+
+            const container = this.resolveActiveLinkRevealContainer();
+            this.bindActiveLinkVisibilityObserver(container);
+            if (!container) return;
+
+            const containerRect = container.getBoundingClientRect?.();
+            const linkRect = this.activeLink.getBoundingClientRect?.();
+            if (!containerRect || !linkRect) return;
+
+            const style = typeof window.getComputedStyle === 'function' ? window.getComputedStyle(container) : null;
+            const topInset = this.getScrollPadding(style, 'top');
+            const bottomInset = this.getScrollPadding(style, 'bottom');
+            const currentTop = container.scrollTop ?? 0;
+            const maxTop = Math.max(0, (container.scrollHeight ?? 0) - (container.clientHeight ?? 0));
+            let nextTop = currentTop;
+
+            if (linkRect.top < containerRect.top + topInset) {
+                nextTop += linkRect.top - containerRect.top - topInset;
+            } else if (linkRect.bottom > containerRect.bottom - bottomInset) {
+                nextTop += linkRect.bottom - containerRect.bottom + bottomInset;
+            } else {
+                return;
+            }
+
+            nextTop = Math.min(maxTop, Math.max(0, nextTop));
+            if (Math.abs(nextTop - currentTop) < 1) return;
+
+            container.scrollTop = nextTop;
+        }
+
+        resolveActiveLinkRevealContainer(): Element | null {
+            const link = this.activeLink;
+            if (!link || !this.root.contains(link) || !this.isRenderedElement(link)) return null;
+
+            let current = link.parentElement;
+            while (current) {
+                if (this.isHiddenElement(current) || this.isClippedNonScrollableElement(current)) return null;
+                if (this.root.contains(current) && this.isRenderedElement(current) && this.isVerticalRevealContainer(current)) {
+                    return current;
+                }
+
+                if (current === this.root) break;
+                current = current.parentElement;
+            }
+
+            return null;
+        }
+
+        isVerticalRevealContainer(element: Element) {
+            const style = typeof window.getComputedStyle === 'function' ? window.getComputedStyle(element) : null;
+            const overflowY = style?.overflowY || style?.overflow || '';
+
+            return /(auto|scroll|overlay)/.test(overflowY)
+                && element.clientHeight > 0
+                && element.scrollHeight > element.clientHeight;
+        }
+
+        isClippedNonScrollableElement(element: Element) {
+            const style = typeof window.getComputedStyle === 'function' ? window.getComputedStyle(element) : null;
+            const overflowY = style?.overflowY || style?.overflow || '';
+
+            return /(hidden|clip)/.test(overflowY) && element.scrollHeight > element.clientHeight;
+        }
+
+        isHiddenElement(element: Element) {
+            const style = typeof window.getComputedStyle === 'function' ? window.getComputedStyle(element) : null;
+
+            return style?.display === 'none'
+                || style?.visibility === 'hidden'
+                || style?.contentVisibility === 'hidden';
+        }
+
+        isRenderedElement(element: Element) {
+            if (this.isHiddenElement(element)) return false;
+
+            const rect = element.getBoundingClientRect?.();
+            if (!rect) return false;
+            const width = rect.width ?? rect.right - rect.left;
+            const height = rect.height ?? rect.bottom - rect.top;
+
+            return width > 0 && height > 0;
+        }
+
+        getScrollPadding(style: CSSStyleDeclaration | null, edge: 'top' | 'bottom') {
+            const blockValue = edge === 'top'
+                ? style?.scrollPaddingBlockStart
+                : style?.scrollPaddingBlockEnd;
+            const physicalValue = edge === 'top'
+                ? style?.scrollPaddingTop
+                : style?.scrollPaddingBottom;
+            const shorthandValue = this.getScrollPaddingBlock(style?.scrollPaddingBlock, edge);
+            const value = Number.parseFloat(blockValue || physicalValue || shorthandValue || '');
+
+            return Number.isFinite(value) && value > 0 ? value : 0;
+        }
+
+        getScrollPaddingBlock(value: string | undefined, edge: 'top' | 'bottom') {
+            const parts = value?.trim().split(/\s+/) ?? [];
+
+            return edge === 'top' ? parts[0] ?? '' : parts[1] ?? parts[0] ?? '';
+        }
+
+        bindActiveLinkVisibilityObserver(container: Element | null) {
+            if (typeof ResizeObserver === 'undefined') return;
+            if (this.activeLinkVisibilityObserver && this.activeLinkVisibilityContainer === container) return;
+
+            this.unbindActiveLinkVisibilityObserver();
+            this.activeLinkVisibilityContainer = container;
+            this.activeLinkVisibilityObserver = new ResizeObserver(this.activeLinkVisibilityResizeListener);
+            this.activeLinkVisibilityObserver.observe(this.root);
+            if (container && container !== this.root) {
+                this.activeLinkVisibilityObserver.observe(container);
+            }
+        }
+
+        unbindActiveLinkVisibilityObserver() {
+            this.activeLinkVisibilityObserver?.disconnect();
+            this.activeLinkVisibilityObserver = null;
+            this.activeLinkVisibilityContainer = null;
         }
 
         bindScrollRoot() {
@@ -352,6 +521,7 @@ type PageNavigationScrollRoot = Window | Element;
             toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
             toggle.setAttribute('data-rw-page-nav-toggle-state', open ? 'open' : 'closed');
             panel.setAttribute('data-rw-page-nav-panel-state', open ? 'open' : 'closed');
+            if (open) this.scheduleActiveLinkVisibilitySync();
         }
 
         resolvePanel() {

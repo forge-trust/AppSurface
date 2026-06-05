@@ -120,7 +120,7 @@ Use RazorWire page navigation when a server-rendered page needs same-page sectio
 <section id="pricing" style="scroll-margin-top: 6rem">...</section>
 ```
 
-RazorWire renders stable `data-rw-page-nav*` attributes, updates `aria-current="location"` on the active link, mirrors panel state through `data-rw-page-nav-panel-state`, and leaves all layout and styling to the host application. This replaces common brochure-site hooks such as `.page-scroll`, `data-bs-spy`, active classes, and `.navbar-collapse` close scripts. See the full contract and migration table in [Page Navigation](Docs/page-navigation.md), or run the MVC sample and visit `/Navigation/PageNavigation`.
+RazorWire renders stable `data-rw-page-nav*` attributes, updates `aria-current="location"` on the active link, reveals the active link inside visible overflowing vertical nav surfaces, mirrors panel state through `data-rw-page-nav-panel-state`, and leaves all layout and styling to the host application. This replaces common brochure-site hooks such as `.page-scroll`, `data-bs-spy`, active classes, and `.navbar-collapse` close scripts. See the full contract and migration table in [Page Navigation](Docs/page-navigation.md), or run the MVC sample and visit `/Navigation/PageNavigation`.
 
 ## Section Copy in 3 Minutes
 
