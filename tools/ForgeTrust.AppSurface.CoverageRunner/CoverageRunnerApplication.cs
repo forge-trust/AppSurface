@@ -678,10 +678,28 @@ internal sealed class CoverageRunnerApplication
     }
 
     private static bool DirectoriesOverlap(string left, string right)
+        => DirectoriesOverlap(left, right, GetPathComparison());
+
+    /// <summary>
+    /// Gets whether two directory paths are equal or have an ancestor/descendant relationship
+    /// after absolute-path normalization.
+    /// </summary>
+    /// <param name="left">First directory path to compare.</param>
+    /// <param name="right">Second directory path to compare.</param>
+    /// <param name="comparison">
+    /// String comparison that models the target filesystem's case sensitivity. Production callers
+    /// use <see cref="GetPathComparison"/>; tests can pass a deterministic comparison to verify
+    /// case-sensitive and case-insensitive behavior without depending on the CI filesystem.
+    /// </param>
+    /// <returns>
+    /// <c>true</c> when the normalized directories are equal, when <paramref name="left"/>
+    /// contains <paramref name="right"/>, or when <paramref name="right"/> contains
+    /// <paramref name="left"/>; otherwise <c>false</c>.
+    /// </returns>
+    internal static bool DirectoriesOverlap(string left, string right, StringComparison comparison)
     {
         var normalizedLeft = Normalize(Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)));
         var normalizedRight = Normalize(Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)));
-        var comparison = GetPathComparison();
 
         return string.Equals(normalizedLeft, normalizedRight, comparison)
             || IsDirectoryAncestor(normalizedLeft, normalizedRight, comparison)

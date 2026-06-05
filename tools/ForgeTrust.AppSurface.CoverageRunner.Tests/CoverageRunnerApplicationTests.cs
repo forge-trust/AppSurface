@@ -587,30 +587,20 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
-    public async Task RunAsync_ShouldRejectMergeOnlyWhenCaseVariantSourceMatchesOutputOnCaseInsensitiveFileSystems()
+    public void DirectoriesOverlap_ShouldRespectPathComparison()
     {
         using var workspace = TestRepo.Create();
         var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
-        var coverageFile = Path.Join(outputDirectory, "projects", "Sample.Tests", "coverage.cobertura.xml");
-        Directory.CreateDirectory(Path.GetDirectoryName(coverageFile)!);
-        File.WriteAllText(coverageFile, "<coverage />");
-
         var caseVariantOutputDirectory = Path.Join(workspace.Root, "testresults", "coverage-merged");
-        if (!Directory.Exists(caseVariantOutputDirectory))
-        {
-            return;
-        }
 
-        var runner = new RecordingCommandRunner(workspace);
-        var app = CreateApp(runner);
-
-        var exitCode = await app.RunAsync(
-            ["--merge-only", caseVariantOutputDirectory, "--output", outputDirectory],
-            workspace.Root,
-            new Dictionary<string, string?>());
-
-        Assert.Equal(2, exitCode);
-        Assert.True(File.Exists(coverageFile));
+        Assert.True(CoverageRunnerApplication.DirectoriesOverlap(
+            caseVariantOutputDirectory,
+            outputDirectory,
+            StringComparison.OrdinalIgnoreCase));
+        Assert.False(CoverageRunnerApplication.DirectoriesOverlap(
+            caseVariantOutputDirectory,
+            outputDirectory,
+            StringComparison.Ordinal));
     }
 
     [Fact]
@@ -679,7 +669,9 @@ public sealed class CoverageRunnerApplicationTests
         public string ReportGeneratorCoverageText { get; init; } =
             "<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />";
 
-        public int MaxConcurrentTests { get; private set; }
+        private int _maxConcurrentTests;
+
+        public int MaxConcurrentTests => Volatile.Read(ref _maxConcurrentTests);
 
         public ConcurrentBag<IReadOnlyList<string>> BuildCommands { get; } = [];
 
@@ -739,7 +731,7 @@ public sealed class CoverageRunnerApplicationTests
                 var project = arguments[1];
                 TestArguments.Add(arguments.ToArray());
                 var active = Interlocked.Increment(ref _activeTests);
-                MaxConcurrentTests = Math.Max(MaxConcurrentTests, active);
+                RecordMaxConcurrentTests(active);
                 TestCommands.Add(project);
                 TestSnapshots.Add(new TestSnapshot(project, active));
                 try
@@ -775,6 +767,19 @@ public sealed class CoverageRunnerApplicationTests
             }
 
             return new CommandResult(0, "");
+        }
+
+        private void RecordMaxConcurrentTests(int active)
+        {
+            while (true)
+            {
+                var current = Volatile.Read(ref _maxConcurrentTests);
+                var next = Math.Max(current, active);
+                if (next == current || Interlocked.CompareExchange(ref _maxConcurrentTests, next, current) == current)
+                {
+                    return;
+                }
+            }
         }
     }
 

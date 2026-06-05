@@ -50,6 +50,7 @@ internal sealed class ProcessCommandRunner : ICommandRunner
             WorkingDirectory = workingDirectory,
             RedirectStandardError = true,
             RedirectStandardOutput = true,
+            UseShellExecute = false,
         };
 
         foreach (var argument in arguments)
