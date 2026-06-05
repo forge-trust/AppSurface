@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 20
     env:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+      TailwindRuntimeBinaryResolutionEnabled: "false"
 
     steps:
       - name: Checkout code

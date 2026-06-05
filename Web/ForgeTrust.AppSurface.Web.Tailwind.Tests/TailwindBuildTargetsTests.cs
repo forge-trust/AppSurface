@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using CliWrap;
@@ -276,6 +278,178 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             "!Exists('$(_TailwindTaskAssemblySource)')",
             bootstrapTarget.Attribute("Condition")?.Value,
             StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("true")]
+    [InlineData("false")]
+    public void TailwindProject_KeepsRuntimeProjectReferencesUnconditional(string? propertyValue)
+    {
+        var document = XDocument.Load(GetTailwindProjectPath());
+        var runtimeReferences = document
+            .Descendants("ProjectReference")
+            .Where(element => element.Attribute("Include")?.Value.Contains("/runtimes/", StringComparison.OrdinalIgnoreCase) is true ||
+                element.Attribute("Include")?.Value.Contains("\\runtimes\\", StringComparison.OrdinalIgnoreCase) is true ||
+                element.Attribute("Include")?.Value.StartsWith("runtimes/", StringComparison.OrdinalIgnoreCase) is true)
+            .ToArray();
+
+        Assert.Equal(5, runtimeReferences.Length);
+        Assert.All(runtimeReferences, reference => Assert.Null(reference.Attribute("Condition")));
+        Assert.DoesNotContain(
+            "TailwindRuntimeBinaryResolutionEnabled",
+            document.ToString(SaveOptions.DisableFormatting),
+            StringComparison.Ordinal);
+
+        _ = propertyValue;
+    }
+
+    [Fact]
+    public void RuntimeTargets_DefaultsBinaryResolutionEnabledAndGatesOnlyResolveTarget()
+    {
+        var document = XDocument.Load(GetTailwindRuntimeTargetsPath());
+        var defaultProperty = Assert.Single(
+            document.Descendants("TailwindRuntimeBinaryResolutionEnabled"),
+            element => element.Attribute("Condition")?.Value == "'$(TailwindRuntimeBinaryResolutionEnabled)' == ''");
+        var resolveTarget = Assert.Single(
+            document.Descendants("Target"),
+            element => element.Attribute("Name")?.Value == "ResolveTailwindBinary");
+        var packageTarget = Assert.Single(
+            document.Descendants("Target"),
+            element => element.Attribute("Name")?.Value == "AddTailwindRuntimeBinaryToPackage");
+
+        Assert.Equal("true", defaultProperty.Value);
+        Assert.Equal("'$(_TailwindRuntimeBinaryResolutionEnabledNormalized)' == 'true'", resolveTarget.Attribute("Condition")?.Value);
+        Assert.Null(packageTarget.Attribute("Condition"));
+        Assert.Contains(
+            "ErrorIfTailwindRuntimePackageCreatedWithoutBinaryResolution",
+            packageTarget.Attribute("DependsOnTargets")?.Value,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RuntimeBinaryResolution_FailsWithDiagnostic_WhenPropertyValueIsInvalid()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "runtime-invalid-property");
+        var projectPath = await CreateRuntimeProjectAsync(projectDirectory);
+
+        var result = await RunDotNetBuildAsync(
+            projectPath,
+            projectDirectory,
+            ("TailwindRuntimeBinaryResolutionEnabled", "treu"));
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("ASTW009", combinedOutput, StringComparison.Ordinal);
+        Assert.Contains("TailwindRuntimeBinaryResolutionEnabled", combinedOutput, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Join(projectDirectory, "obj", "Runtime", CurrentConfiguration, "net10.0", "tailwind-4.1.18")));
+    }
+
+    [Fact]
+    public async Task RuntimeBinaryResolution_SkipsDownloadWork_WhenDisabledForBuild()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "runtime-disabled-build");
+        var projectPath = await CreateRuntimeProjectAsync(projectDirectory);
+
+        var result = await RunDotNetBuildAsync(
+            projectPath,
+            projectDirectory,
+            ("TailwindRuntimeBinaryResolutionEnabled", "false"));
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Tailwind runtime binary resolution is disabled for this build", combinedOutput, StringComparison.Ordinal);
+        Assert.False(File.Exists(GetRuntimeBinaryPath(projectDirectory, CurrentConfiguration)));
+        Assert.False(File.Exists(Path.Join(Path.GetDirectoryName(GetRuntimeBinaryPath(projectDirectory, CurrentConfiguration))!, "sha256sums.txt")));
+    }
+
+    [Fact]
+    public async Task RuntimePackageCreation_Fails_WhenBinaryResolutionIsDisabled()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "runtime-disabled-pack");
+        var projectPath = await CreateRuntimeProjectAsync(projectDirectory);
+        var restoreResult = await RunDotNetAsync(["restore", projectPath, "-v:minimal"], projectDirectory);
+        Assert.Equal(0, restoreResult.ExitCode);
+
+        var result = await RunDotNetAsync(
+            ["pack", projectPath, "--no-build", "-c", "Release", "-v:minimal", "-p:TailwindRuntimeBinaryResolutionEnabled=false"],
+            projectDirectory);
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("ASTW010", combinedOutput, StringComparison.Ordinal);
+        Assert.Contains("cannot be packed without its native Tailwind binary", combinedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RuntimePackageCreation_Fails_WhenBinaryResolutionIsDisabledEvenWithCachedBinary()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "runtime-disabled-pack-cached");
+        var projectPath = await CreateRuntimeProjectAsync(projectDirectory);
+        var runtimeBinaryPath = GetRuntimeBinaryPath(projectDirectory, "Release");
+        Directory.CreateDirectory(Path.GetDirectoryName(runtimeBinaryPath)!);
+        await File.WriteAllTextAsync(runtimeBinaryPath, "cached", Encoding.UTF8);
+        var restoreResult = await RunDotNetAsync(["restore", projectPath, "-v:minimal"], projectDirectory);
+        Assert.Equal(0, restoreResult.ExitCode);
+
+        var result = await RunDotNetAsync(
+            ["pack", projectPath, "--no-build", "-c", "Release", "-v:minimal", "-p:TailwindRuntimeBinaryResolutionEnabled=false"],
+            projectDirectory);
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("ASTW010", combinedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RuntimePackageCreation_WithNoBuild_IncludesRuntimeBinary_WhenBinaryResolutionIsEnabled()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "runtime-enabled-pack-no-build");
+        var projectPath = await CreateRuntimeProjectAsync(projectDirectory);
+        var packageDirectory = Path.Join(projectDirectory, "packages");
+        Directory.CreateDirectory(packageDirectory);
+        await WriteRuntimeBinaryCacheAsync(projectDirectory, "Release");
+        var restoreResult = await RunDotNetAsync(["restore", projectPath, "-v:minimal"], projectDirectory);
+        Assert.Equal(0, restoreResult.ExitCode);
+
+        var result = await RunDotNetAsync(
+            [
+                "pack",
+                projectPath,
+                "--no-build",
+                "-c",
+                "Release",
+                "-v:minimal",
+                "--output",
+                packageDirectory,
+                "-p:PackageVersion=0.0.0-test.1",
+                "-p:TailwindRuntimeBinaryResolutionEnabled=true"
+            ],
+            projectDirectory);
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.Equal(0, result.ExitCode);
+        var packagePath = Path.Join(packageDirectory, "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.0.0.0-test.1.nupkg");
+        Assert.True(File.Exists(packagePath), combinedOutput);
+        using var archive = System.IO.Compression.ZipFile.OpenRead(packagePath);
+        Assert.Contains(
+            archive.Entries,
+            entry => entry.FullName == "runtimes/linux-x64/native/tailwindcss-linux-x64");
+    }
+
+    [Fact]
+    public void RuntimeTargets_DefinesMissingPayloadDiagnostic()
+    {
+        var document = XDocument.Load(GetTailwindRuntimeTargetsPath());
+        var packageTarget = Assert.Single(
+            document.Descendants("Target"),
+            element => element.Attribute("Name")?.Value == "AddTailwindRuntimeBinaryToPackage");
+        var missingPayloadError = Assert.Single(
+            packageTarget.Descendants("Error"),
+            element => element.Attribute("Code")?.Value == "ASTW011");
+
+        Assert.Contains("Resolved Tailwind runtime binary is missing", missingPayloadError.Attribute("Text")?.Value, StringComparison.Ordinal);
+        Assert.Equal("!Exists('$(_TailwindBinaryPath)')", missingPayloadError.Attribute("Condition")?.Value);
     }
 
     [Fact]
@@ -859,6 +1033,37 @@ public sealed class TailwindBuildTargetsTests : IDisposable
                 "ForgeTrust.AppSurface.Web.Tailwind.targets"));
     }
 
+    private static string GetTailwindRuntimeTargetsPath()
+    {
+        return Path.GetFullPath(
+            Path.Join(
+                AppContext.BaseDirectory,
+                "..",
+                "..",
+                "..",
+                "..",
+                "..",
+                "Web",
+                "ForgeTrust.AppSurface.Web.Tailwind",
+                "runtimes",
+                "Tailwind.Runtime.Common.targets"));
+    }
+
+    private static string GetTailwindProjectPath()
+    {
+        return Path.GetFullPath(
+            Path.Join(
+                AppContext.BaseDirectory,
+                "..",
+                "..",
+                "..",
+                "..",
+                "..",
+                "Web",
+                "ForgeTrust.AppSurface.Web.Tailwind",
+                "ForgeTrust.AppSurface.Web.Tailwind.csproj"));
+    }
+
     private static string GetRepositoryRoot()
     {
         return Path.GetFullPath(
@@ -921,6 +1126,62 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             .Replace("\"", "&quot;", StringComparison.Ordinal)
             .Replace("<", "&lt;", StringComparison.Ordinal)
             .Replace(">", "&gt;", StringComparison.Ordinal);
+    }
+
+    private static async Task<string> CreateRuntimeProjectAsync(string projectDirectory)
+    {
+        Directory.CreateDirectory(projectDirectory);
+        await File.WriteAllTextAsync(
+            Path.Join(projectDirectory, "Directory.Build.props"),
+            """
+            <Project>
+              <PropertyGroup>
+                <BaseIntermediateOutputPath>obj/Runtime/</BaseIntermediateOutputPath>
+              </PropertyGroup>
+            </Project>
+            """,
+            Encoding.UTF8);
+        var projectPath = Path.Join(projectDirectory, "Runtime.csproj");
+        await File.WriteAllTextAsync(
+            projectPath,
+            $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TailwindRid>linux-x64</TailwindRid>
+                <PackageId>ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64</PackageId>
+              </PropertyGroup>
+
+              <Import Project="{{EscapeForXml(GetTailwindRuntimeTargetsPath())}}" />
+            </Project>
+            """,
+            Encoding.UTF8);
+
+        return projectPath;
+    }
+
+    private static string GetRuntimeBinaryPath(string projectDirectory, string configuration)
+    {
+        return Path.Join(
+            projectDirectory,
+            "obj",
+            "Runtime",
+            configuration,
+            "net10.0",
+            "tailwind-4.1.18",
+            "tailwindcss-linux-x64");
+    }
+
+    private static async Task WriteRuntimeBinaryCacheAsync(string projectDirectory, string configuration)
+    {
+        var runtimeBinaryPath = GetRuntimeBinaryPath(projectDirectory, configuration);
+        Directory.CreateDirectory(Path.GetDirectoryName(runtimeBinaryPath)!);
+        var binaryBytes = Encoding.UTF8.GetBytes("cached-tailwind-binary");
+        await File.WriteAllBytesAsync(runtimeBinaryPath, binaryBytes);
+        var hash = Convert.ToHexString(SHA256.HashData(binaryBytes)).ToLowerInvariant();
+        await File.WriteAllTextAsync(
+            Path.Join(Path.GetDirectoryName(runtimeBinaryPath)!, "sha256sums.txt"),
+            $"{hash}  tailwindcss-linux-x64{Environment.NewLine}",
+            Encoding.UTF8);
     }
 
     private RunTailwindBuildTask CreateBuildTask(string directoryName, Action<RunTailwindBuildTask>? configure = null)

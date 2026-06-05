@@ -82,6 +82,7 @@ Build mode uses a compiled MSBuild task instead of `<Exec>`. The task receives s
 | `TailwindOutputPath` | `wwwroot/css/site.gen.css` | Generated CSS path, resolved relative to the project directory. Keep it under `wwwroot/` for static web asset registration. |
 | `TailwindCliPath` | empty | Explicit build-time Tailwind CLI path. Relative paths resolve from the project directory. Build mode does not fall back to `PATH`. |
 | `TailwindVersion` | from `build/tailwind.version` | Tailwind standalone CLI version used by runtime packages. Override only when testing a coordinated runtime-package change. |
+| `TailwindRuntimeBinaryResolutionEnabled` | `true` | Maintainer/CI-only. Set to `false` only in non-package restore/build/test jobs that must skip runtime binary downloads. Do not use it for consumer builds or package creation; see [`eng/ci-critical-path.md`](../../eng/ci-critical-path.md#tailwind-runtime-binary-resolution-in-ci). |
 
 ### Runtime option reference
 
@@ -97,6 +98,8 @@ Build mode uses a compiled MSBuild task instead of `<Exec>`. The task receives s
 `ForgeTrust.AppSurface.Web.Tailwind` hooks into the normal `dotnet build` and `dotnet publish` pipeline through MSBuild targets, so the default integration does not require a separate `npm install` or `npm run build` step in CI.
 
 Runtime packages download the official Tailwind checksum file and standalone binary during build or publish, then verify the binary with SHA-256 before packaging it. These downloads retry transient network failures by default, which keeps CI resilient to brief GitHub release CDN 5xx responses and timeouts without weakening checksum validation.
+
+Maintainers can set `TailwindRuntimeBinaryResolutionEnabled=false` only for fast CI jobs that restore, build, or test without producing package artifacts. Package validation, `dotnet pack`, and release workflows must leave the property enabled or pass `/p:TailwindRuntimeBinaryResolutionEnabled=true`. The authoritative CI matrix and copy-paste examples live in [`eng/ci-critical-path.md`](../../eng/ci-critical-path.md#tailwind-runtime-binary-resolution-in-ci).
 
 The retry behavior is configurable with MSBuild properties:
 
@@ -144,6 +147,9 @@ Every build-task diagnostic includes a stable code, problem, cause, fix, and thi
 | `ASTW006` | Tailwind exited with a non-zero code. | Read the captured output tail, fix the CSS/configuration error, and run the build again. |
 | `ASTW007` | MSBuild canceled the Tailwind task. | Re-run the build if cancellation was unintentional. |
 | `ASTW008` | Input and output resolve to the same file. | Set `TailwindOutputPath` to a generated file distinct from `TailwindInputPath`. |
+| `ASTW009` | `TailwindRuntimeBinaryResolutionEnabled` has an unsupported value. | Use `true` or `false`; unset defaults to `true`. |
+| `ASTW010` | Runtime package creation was attempted with Tailwind runtime binary resolution disabled. | Rerun package validation, restore, build, and pack with `/p:TailwindRuntimeBinaryResolutionEnabled=true`. |
+| `ASTW011` | The resolved runtime package payload file is missing. | Rerun package validation with binary resolution enabled, delete stale `obj` output if needed, and verify `TailwindBaseUrl`/`TailwindSumsUrl`. |
 
 If an error mentions `build/tasks`, inspect the packed package. A valid package contains `build/ForgeTrust.AppSurface.Web.Tailwind.targets`, `build/tailwind.version`, `build/tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.dll`, and `build/tasks/CliWrap.dll`.
 

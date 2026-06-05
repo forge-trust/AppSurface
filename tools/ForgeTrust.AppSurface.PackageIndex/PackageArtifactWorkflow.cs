@@ -57,7 +57,8 @@ internal sealed class PackageArtifactWorkflow
             [
                 "restore",
                 "ForgeTrust.AppSurface.slnx",
-                "/p:ContinuousIntegrationBuild=true"
+                "/p:ContinuousIntegrationBuild=true",
+                "/p:TailwindRuntimeBinaryResolutionEnabled=true"
             ],
             "dotnet restore",
             "repository",
@@ -76,7 +77,8 @@ internal sealed class PackageArtifactWorkflow
                 "--no-restore",
                 $"/p:Version={request.PackageVersion}",
                 $"/p:PackageVersion={request.PackageVersion}",
-                "/p:ContinuousIntegrationBuild=true"
+                "/p:ContinuousIntegrationBuild=true",
+                "/p:TailwindRuntimeBinaryResolutionEnabled=true"
             ],
             "dotnet build",
             "repository",
@@ -100,7 +102,8 @@ internal sealed class PackageArtifactWorkflow
                     request.ArtifactsOutputPath,
                     $"/p:Version={request.PackageVersion}",
                     $"/p:PackageVersion={request.PackageVersion}",
-                    "/p:ContinuousIntegrationBuild=true"
+                    "/p:ContinuousIntegrationBuild=true",
+                    "/p:TailwindRuntimeBinaryResolutionEnabled=true"
                 ],
                 "dotnet pack",
                 entry.ProjectPath,

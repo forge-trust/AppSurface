@@ -23,3 +23,13 @@ Most consumers should install only `ForgeTrust.AppSurface.Web.Tailwind`. These r
 Install one directly only if you have a specialized packaging or build scenario that requires explicit control over the Tailwind CLI binary payload.
 
 During build and pack, each runtime project downloads the official Tailwind checksum file and matching standalone binary, then verifies the binary hash before adding it to the package. The download step retries transient network failures by default using `TailwindDownloadRetries` and `TailwindDownloadRetryDelayMilliseconds`. Keep those defaults for normal CI; tune them only when your build environment needs more patience for GitHub release asset downloads or intentionally wants fail-fast behavior.
+
+## Maintainer CI behavior
+
+`TailwindRuntimeBinaryResolutionEnabled` is an internal maintainer switch for repository CI. It defaults to `true`. Non-package restore/build/test jobs may set it to `false` to skip runtime binary download and checksum work, but runtime package creation fails when it is disabled. Package validation, release packaging, and manual `dotnet pack` commands must use `/p:TailwindRuntimeBinaryResolutionEnabled=true`.
+
+Use `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version <prerelease>` as the primary package proof path. That workflow forces runtime binary resolution on before packing. Raw `dotnet pack` commands are advanced/manual and must pass `/p:TailwindRuntimeBinaryResolutionEnabled=true`.
+
+Supported packaging overrides are `TailwindBaseUrl`, `TailwindSumsUrl`, `TailwindDownloadRetries`, and `TailwindDownloadRetryDelayMilliseconds`. Offline runtime packaging is not supported by setting `TailwindRuntimeBinaryResolutionEnabled=false`; use a reachable mirror URL and checksum URL, or retry package validation after the upstream download path recovers.
+
+See [`eng/ci-critical-path.md`](../../../eng/ci-critical-path.md#tailwind-runtime-binary-resolution-in-ci) for the workflow matrix and copy-paste CI examples.

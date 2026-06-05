@@ -1705,20 +1705,40 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Equal(["dotnet restore", "dotnet build", "dotnet pack"], commandRunner.OperationNames);
         var restoreCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet restore");
         Assert.Contains("/p:ContinuousIntegrationBuild=true", restoreCommand.Arguments);
+        Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", restoreCommand.Arguments);
         var packCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet pack");
         Assert.Contains("--no-restore", packCommand.Arguments);
         Assert.Contains("--no-build", packCommand.Arguments);
         Assert.Contains($"/p:Version={PackageVersion}", packCommand.Arguments);
         Assert.Contains($"/p:PackageVersion={PackageVersion}", packCommand.Arguments);
         Assert.Contains("/p:ContinuousIntegrationBuild=true", packCommand.Arguments);
+        Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", packCommand.Arguments);
         var buildCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet build");
         Assert.Contains($"/p:Version={PackageVersion}", buildCommand.Arguments);
         Assert.Contains($"/p:PackageVersion={PackageVersion}", buildCommand.Arguments);
         Assert.Contains("/p:ContinuousIntegrationBuild=true", buildCommand.Arguments);
+        Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", buildCommand.Arguments);
         Assert.False(File.Exists(stalePackage));
         Assert.False(File.Exists(staleSymbolPackage));
         Assert.True(File.Exists(reportPath), $"Expected report at {reportPath}.");
         Assert.True(File.Exists(artifactManifestPath), $"Expected artifact manifest at {artifactManifestPath}.");
+    }
+
+    [Fact]
+    public async Task TailwindRuntimeBinaryResolutionWorkflowPolicy_SeparatesFastCiFromPackageValidation()
+    {
+        var repositoryRoot = GetRepositoryRoot();
+        var buildWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "build.yml"));
+        var codeQualityWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "code-quality.yml"));
+        var packageGateWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-gate.yml"));
+        var packageArtifactsWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-artifacts.yml"));
+
+        Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"false\"", buildWorkflow, StringComparison.Ordinal);
+        Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"false\"", codeQualityWorkflow, StringComparison.Ordinal);
+        Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"true\"", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled: \"false\"", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled: \"false\"", packageArtifactsWorkflow, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3187,6 +3207,18 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var fullPath = TestPathUtils.PathUnder(_repositoryRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
+    }
+
+    private static string GetRepositoryRoot()
+    {
+        return Path.GetFullPath(
+            Path.Join(
+                AppContext.BaseDirectory,
+                "..",
+                "..",
+                "..",
+                "..",
+                ".."));
     }
 
     public void Dispose()
