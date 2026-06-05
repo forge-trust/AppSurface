@@ -218,7 +218,7 @@ window.RazorWire = window.RazorWire || {};
  * @attribute data-rw-section-copy-target
  * @target h1, h2, h3, h4, h5, h6, header, section, div
  * @type {"true"}
- * @related id
+ * @requires id
  */
 
 /**
