@@ -1,108 +1,114 @@
 using ForgeTrust.AppSurface.Flow;
 using Microsoft.Extensions.Options;
 
-var definition = GeneratedApprovalFlow.BuildDefinition(
+var request = new ApprovalRequest("APR-1001", "andrew", "Approve the generated authoring sample.");
+var inferredDefinition = GeneratedApprovalFlow.BuildDefinition(
+    new GeneratedApprovalFlow.IntakeNode(),
+    new GeneratedApprovalFlow.ReviewNode());
+var explicitDefinition = GeneratedApprovalFlow.BuildDefinition(
     graph => graph
-        .MapStartNodeApprovedToReviewNode()
-        .MarkStartNodeApprovalSubmittedTerminal()
-        .MarkStartNodeApprovalTimeoutTerminal()
-        .MarkStartNodeDeniedTerminal()
-        .MapReviewNodeAgainToReviewNode()
-        .MarkReviewNodeDoneTerminal(),
-    new GeneratedApprovalFlow.StartNode(),
+        .MapIntakeNodeReadyForReviewToReviewNode()
+        .MarkIntakeNodeApprovalSubmittedTerminal()
+        .MarkIntakeNodeApprovalTimeoutTerminal()
+        .MarkIntakeNodeDeniedTerminal()
+        .MapReviewNodeRetryToReviewNode()
+        .MarkReviewNodeApprovedTerminal(),
+    new GeneratedApprovalFlow.IntakeNode(),
     new GeneratedApprovalFlow.ReviewNode());
 var runner = new InMemoryFlowRunner<GeneratedApprovalFlow.GeneratedApprovalFlowContext>(
     Options.Create(new AppSurfaceFlowOptions()));
 
 var waiting = await runner.RunAsync(
-    definition,
-    GeneratedApprovalFlow.CreateStartContext(new StartState("created")));
+    inferredDefinition,
+    GeneratedApprovalFlow.CreateStartContext(new ApprovalOpened(request, "created")));
 Console.WriteLine($"Waiting: {waiting.WaitingEventName}, timeout: {waiting.Timeout?.Duration.TotalMinutes:0}m");
 
 var completed = await runner.ResumeAsync(
-    definition,
-    "start",
+    inferredDefinition,
+    "intake",
     waiting.Context!,
     new FlowResumeEvent("approval-submitted", "approved"));
-Console.WriteLine($"Completed after re-entry: {completed.Context?.DoneState?.Status}");
+Console.WriteLine($"Completed after re-entry: {completed.Context?.ApprovalCompleted?.Decision}");
 
 var faulted = await runner.ResumeAsync(
-    definition,
-    "start",
-    GeneratedApprovalFlow.CreateStartContext(new StartState("waiting")),
+    explicitDefinition,
+    "intake",
+    GeneratedApprovalFlow.CreateStartContext(new ApprovalOpened(request, "waiting")),
     new FlowResumeEvent("approval-submitted", "denied"));
 Console.WriteLine($"Faulted: {faulted.Fault?.Code}");
 
 var timedOut = await runner.ResumeAsync(
-    definition,
-    "start",
-    GeneratedApprovalFlow.CreateStartContext(new StartState("waiting")),
+    explicitDefinition,
+    "intake",
+    GeneratedApprovalFlow.CreateStartContext(new ApprovalOpened(request, "waiting")),
     new FlowResumeEvent("approval-timeout", isTimeout: true));
-Console.WriteLine($"Timed out: {timedOut.Context?.StartState?.Status}");
+Console.WriteLine($"Timed out: {timedOut.Context?.ApprovalOpened?.Status}");
 
 [FlowAuthoring("generated-approval")]
 internal partial class GeneratedApprovalFlow
 {
     [FlowStart]
-    [FlowNode("start", typeof(StartState))]
-    [FlowOutcome("approved", FlowOutcomeKind.Next, typeof(ReviewState))]
-    [FlowOutcome("approval-submitted", FlowOutcomeKind.Wait, typeof(StartState))]
-    [FlowOutcome("approval-timeout", FlowOutcomeKind.TimedOut, typeof(StartState))]
+    [FlowNode("intake", typeof(ApprovalOpened))]
+    [FlowOutcome("ready-for-review", FlowOutcomeKind.Next, typeof(ReviewRequested))]
+    [FlowOutcome("approval-submitted", FlowOutcomeKind.Wait, typeof(ApprovalOpened))]
+    [FlowOutcome("approval-timeout", FlowOutcomeKind.TimedOut, typeof(ApprovalOpened))]
     [FlowOutcome("denied", FlowOutcomeKind.Fault, typeof(FlowFault))]
-    internal partial class StartNode : IFlowTransformerNode<StartState, StartNodeOutcomes>
+    internal partial class IntakeNode : IFlowTransformerNode<ApprovalOpened, IntakeNodeOutcomes>
     {
-        public ValueTask<StartNodeOutcomes> ExecuteAsync(
-            FlowTransformerContext<StartState> context,
+        public ValueTask<IntakeNodeOutcomes> ExecuteAsync(
+            FlowTransformerContext<ApprovalOpened> context,
             CancellationToken cancellationToken = default)
         {
             if (context.ResumeEvent?.EventName == "approval-timeout")
             {
-                return ValueTask.FromResult<StartNodeOutcomes>(
-                    StartNodeOutcomes.ApprovalTimeout(context.State with { Status = "timed-out" }));
+                return ValueTask.FromResult<IntakeNodeOutcomes>(
+                    IntakeNodeOutcomes.ApprovalTimeout(context.State with { Status = "timed-out" }));
             }
 
             if (context.ResumeEvent is null)
             {
-                return ValueTask.FromResult<StartNodeOutcomes>(
-                    StartNodeOutcomes.ApprovalSubmitted(
+                return ValueTask.FromResult<IntakeNodeOutcomes>(
+                    IntakeNodeOutcomes.ApprovalSubmitted(
                         context.State with { Status = "waiting" },
                         new FlowTimeout(TimeSpan.FromMinutes(5))));
             }
 
             if (string.Equals(context.ResumeEvent.Payload?.ToString(), "denied", StringComparison.Ordinal))
             {
-                return ValueTask.FromResult<StartNodeOutcomes>(
-                    StartNodeOutcomes.Denied(new FlowFault("approval.denied", "The approval request was denied.")));
+                return ValueTask.FromResult<IntakeNodeOutcomes>(
+                    IntakeNodeOutcomes.Denied(new FlowFault("approval.denied", "The approval request was denied.")));
             }
 
-            return ValueTask.FromResult<StartNodeOutcomes>(
-                StartNodeOutcomes.Approved(new ReviewState(0, "reviewing")));
+            return ValueTask.FromResult<IntakeNodeOutcomes>(
+                IntakeNodeOutcomes.ReadyForReview(new ReviewRequested(context.State.Request, Attempt: 0)));
         }
     }
 
-    [FlowNode("review", typeof(ReviewState))]
-    [FlowOutcome("again", FlowOutcomeKind.Next, typeof(ReviewState))]
-    [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(DoneState))]
-    internal partial class ReviewNode : IFlowTransformerNode<ReviewState, ReviewNodeOutcomes>
+    [FlowNode("review", typeof(ReviewRequested))]
+    [FlowOutcome("retry", FlowOutcomeKind.Next, typeof(ReviewRequested))]
+    [FlowOutcome("approved", FlowOutcomeKind.Complete, typeof(ApprovalCompleted))]
+    internal partial class ReviewNode : IFlowTransformerNode<ReviewRequested, ReviewNodeOutcomes>
     {
         public ValueTask<ReviewNodeOutcomes> ExecuteAsync(
-            FlowTransformerContext<ReviewState> context,
+            FlowTransformerContext<ReviewRequested> context,
             CancellationToken cancellationToken = default)
         {
-            if (context.State.Count == 0)
+            if (context.State.Attempt == 0)
             {
                 return ValueTask.FromResult<ReviewNodeOutcomes>(
-                    ReviewNodeOutcomes.Again(context.State with { Count = 1 }));
+                    ReviewNodeOutcomes.Retry(context.State with { Attempt = 1 }));
             }
 
             return ValueTask.FromResult<ReviewNodeOutcomes>(
-                ReviewNodeOutcomes.Done(new DoneState("approved")));
+                ReviewNodeOutcomes.Approved(new ApprovalCompleted(context.State.Request, Decision: "approved")));
         }
     }
 }
 
-internal sealed record StartState(string Status);
+internal sealed record ApprovalRequest(string Id, string RequestedBy, string Summary);
 
-internal sealed record ReviewState(int Count, string Status);
+internal sealed record ApprovalOpened(ApprovalRequest Request, string Status);
 
-internal sealed record DoneState(string Status);
+internal sealed record ReviewRequested(ApprovalRequest Request, int Attempt);
+
+internal sealed record ApprovalCompleted(ApprovalRequest Request, string Decision);

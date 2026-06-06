@@ -28,51 +28,76 @@ AppSurface has cut the first coordinated `v0.1.0` release candidate. Before inst
 
 ### Generated authoring
 
-Generated authoring is the package-first path when transition coverage should fail at build time.
+Generated authoring is the package-first path when transition coverage should fail at build time. Think of context types as typed ports: a node declares the input port it accepts, and each outcome declares the output port it emits. The generator connects a `Next` outcome to the node whose input port has the same nominal type.
 
 ```csharp
 [FlowAuthoring("approval")]
 public partial class ApprovalFlow
 {
     [FlowStart]
-    [FlowNode("start", typeof(ApprovalState))]
-    [FlowOutcome("submitted", FlowOutcomeKind.Wait, typeof(ApprovalState))]
-    [FlowOutcome("approved", FlowOutcomeKind.Complete, typeof(ApprovalState))]
-    public partial class ReviewNode : IFlowTransformerNode<ApprovalState, ReviewNodeOutcomes>
+    [FlowNode("intake", typeof(ApprovalOpened))]
+    [FlowOutcome("ready-for-review", FlowOutcomeKind.Next, typeof(ReviewRequested))]
+    [FlowOutcome("approval-submitted", FlowOutcomeKind.Wait, typeof(ApprovalOpened))]
+    public partial class IntakeNode : IFlowTransformerNode<ApprovalOpened, IntakeNodeOutcomes>
     {
-        public ValueTask<ReviewNodeOutcomes> ExecuteAsync(
-            FlowTransformerContext<ApprovalState> context,
+        public ValueTask<IntakeNodeOutcomes> ExecuteAsync(
+            FlowTransformerContext<ApprovalOpened> context,
             CancellationToken cancellationToken = default)
         {
             if (context.ResumeEvent is null)
             {
-                return ValueTask.FromResult<ReviewNodeOutcomes>(
-                    ReviewNodeOutcomes.Submitted(context.State));
+                return ValueTask.FromResult<IntakeNodeOutcomes>(
+                    IntakeNodeOutcomes.ApprovalSubmitted(context.State));
             }
 
-            return ValueTask.FromResult<ReviewNodeOutcomes>(
-                ReviewNodeOutcomes.Approved(context.State with { Status = "approved" }));
+            return ValueTask.FromResult<IntakeNodeOutcomes>(
+                IntakeNodeOutcomes.ReadyForReview(new ReviewRequested(context.State.RequestId)));
         }
+    }
+
+    [FlowNode("review", typeof(ReviewRequested))]
+    [FlowOutcome("approved", FlowOutcomeKind.Complete, typeof(ApprovalCompleted))]
+    public partial class ReviewNode : IFlowTransformerNode<ReviewRequested, ReviewNodeOutcomes>
+    {
+        public ValueTask<ReviewNodeOutcomes> ExecuteAsync(
+            FlowTransformerContext<ReviewRequested> context,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<ReviewNodeOutcomes>(
+                ReviewNodeOutcomes.Approved(new ApprovalCompleted(context.State.RequestId)));
     }
 }
 
-var definition = ApprovalFlow.BuildDefinition(new ApprovalFlow.ReviewNode());
-var result = await runner.RunAsync(definition, ApprovalFlow.CreateStartContext(new ApprovalState("created")));
+public sealed record ApprovalOpened(string RequestId);
+public sealed record ReviewRequested(string RequestId);
+public sealed record ApprovalCompleted(string RequestId);
 ```
 
-The generator emits outcome records such as `ReviewNodeOutcomes.SubmittedOutcome`, one serializable envelope context such as `ApprovalFlowContext`, adapter nodes that implement `IFlowNode<ApprovalFlowContext>`, a `GraphBuilder` helper, and `BuildDefinition(...)` helpers that lower the authored graph into the existing runtime contract.
+Then build a definition from node instances:
 
-The compact `BuildDefinition(nodeInstances...)` overload applies the generated default graph configuration. Use the explicit overload when you want the graph mapping visible at the call site:
+```csharp
+var definition = ApprovalFlow.BuildDefinition(
+    new ApprovalFlow.IntakeNode(),
+    new ApprovalFlow.ReviewNode());
+var result = await runner.RunAsync(definition, ApprovalFlow.CreateStartContext(new ApprovalOpened("APR-1001")));
+```
+
+The compact `BuildDefinition(nodeInstances...)` overload applies the generated default graph configuration. This works when each `Next` outcome output port has exactly one compatible node input port. In the example, `ready-for-review` emits `ReviewRequested`, and only `ReviewNode` accepts `ReviewRequested`, so the generator can infer that transition.
+
+Use the explicit overload when you want the graph mapping visible at the call site:
 
 ```csharp
 var definition = ApprovalFlow.BuildDefinition(
     graph => graph
-        .MarkReviewNodeSubmittedTerminal()
+        .MapIntakeNodeReadyForReviewToReviewNode()
+        .MarkIntakeNodeApprovalSubmittedTerminal()
         .MarkReviewNodeApprovedTerminal(),
+    new ApprovalFlow.IntakeNode(),
     new ApprovalFlow.ReviewNode());
 ```
 
 The explicit overload must receive an inline lambda. Delegate variables and method groups are rejected so analyzer coverage works even when the flow spec is compiled in a reusable library and the host project consumes the generated public builder.
+
+The generator emits outcome records such as `IntakeNodeOutcomes.ReadyForReviewOutcome`, one serializable envelope context such as `ApprovalFlowContext`, adapter nodes that implement `IFlowNode<ApprovalFlowContext>`, a `GraphBuilder` helper, and `BuildDefinition(...)` helpers that lower the authored graph into the existing runtime contract.
 
 Use generated authoring for application workflows, package samples, and public APIs where missing transitions should break the build. Use the low-level runtime shape below for tiny tests, custom graph construction, or hand-authored nodes that intentionally own all runtime behavior.
 
@@ -112,8 +137,12 @@ public sealed class ApprovalReviewNode : IFlowNode<ApprovalState>
 ## Decisions And Pitfalls
 
 - Flow ids, versions, and node ids are durable identifiers. Treat them like persisted schema once real instances exist.
+- Generated authoring uses nominal context types as typed ports. Two record types with the same properties are different ports; one record type reused in multiple places is the same port.
 - Generated authoring resolves `Next` targets by matching an outcome output context type to exactly one declared node input context, then exposes that transition through a generated `GraphBuilder.Map...To...` method. If no node or multiple nodes match, the generator reports an error.
-- The explicit `BuildDefinition(graph => ..., nodeInstances...)` overload requires every declared outcome to be mapped or marked terminal. `Complete`, `Fault`, `Wait`, and `TimedOut` outcomes use generated `Mark...Terminal()` methods because they do not declare `FlowNext<TContext>` targets in the low-level graph.
+- If two nodes can accept the same kind of work, give the branches distinct nominal port types unless the graph really should be ambiguous. The generator does not guess between two nodes with the same input context type.
+- `Wait` and `TimedOut` outcomes resume the same node, so their output port must be the node input port. `Fault` outcomes must carry `FlowFault`.
+- The compact `BuildDefinition(nodeInstances...)` overload calls the generated default graph mapping. Prefer it when the typed ports make every `Next` transition unambiguous.
+- The explicit `BuildDefinition(graph => ..., nodeInstances...)` overload requires every declared outcome to be mapped or marked terminal. Use it when graph visibility matters. `Complete`, `Fault`, `Wait`, and `TimedOut` outcomes use generated `Mark...Terminal()` methods because they do not declare `FlowNext<TContext>` targets in the low-level graph.
 - Generated envelopes include concrete nullable context slots and a public serializer constructor so Durable Task JSON round-trip validation can inspect them.
 - Declare every `Next` target in `AddNode`. The builder validates missing targets, and runners reject undeclared runtime targets.
 - The in-memory runner stops at waits. It does not persist state, deliver events, or create timers.
