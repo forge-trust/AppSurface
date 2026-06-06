@@ -472,6 +472,21 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PreparedEvidenceValidationHandlesMissingReleasesDirectory()
+    {
+        var result = await ReleaseEvidence.ValidatePreparedAsync(
+            new ReleaseWorkspace(_repositoryRoot),
+            SemVer.Parse("0.1.0-preview.1"),
+            "prerelease",
+            "abc123",
+            CancellationToken.None);
+
+        Assert.Null(result.Summary);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-missing");
+        Assert.DoesNotContain(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-duplicate");
+    }
+
+    [Fact]
     public async Task CheckRejectsMalformedPreparedReleaseEvidence()
     {
         await SeedRepositoryAsync();
@@ -596,6 +611,29 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void ReleaseEvidenceBuildDraftOrdersPackageUpdatesByProject()
+    {
+        var evidence = ReleaseEvidence.BuildDraft(
+            new ReleaseWorkspace(_repositoryRoot),
+            SemVer.Parse("0.1.0-preview.1"),
+            "prerelease",
+            new DateOnly(2026, 5, 25),
+            "abc123",
+            TaggedReleaseNoteContent,
+            TaggedReleaseSidecarContent,
+            CreateReleaseManifestJson(),
+            [
+                new PackagePathUpdate("Web/ForgeTrust.AppSurface.Web.csproj", "releases/unreleased.md", "releases/v0.1.0-preview.1.md"),
+                new PackagePathUpdate("Core/ForgeTrust.AppSurface.Core.csproj", "releases/unreleased.md", "releases/v0.1.0-preview.1.md")
+            ]);
+
+        Assert.Collection(
+            evidence.PackageReleaseNotePaths,
+            package => Assert.Equal("Core/ForgeTrust.AppSurface.Core.csproj", package.Project),
+            package => Assert.Equal("Web/ForgeTrust.AppSurface.Web.csproj", package.Project));
+    }
+
+    [Fact]
     public void ReleaseEvidenceValidationRejectsDocsCatalogMismatch()
     {
         var version = SemVer.Parse("0.1.0-preview.1");
@@ -611,6 +649,38 @@ public sealed class ReleaseToolTests : IDisposable
                 ReleaseManifestSchema: "appsurface-docs-release-manifest-v1",
                 FileCount: 1,
                 CatalogEntry: new ReleaseEvidenceCatalogEntry("releases/other", manifestDigest)),
+            Subject = bundle.Subject with { Sha256 = new string('b', 64) }
+        };
+
+        var result = ReleaseEvidence.ValidateTag(
+            version,
+            "prerelease",
+            "v0.1.0-preview.1",
+            "abc123",
+            TaggedReleaseNoteContent,
+            TaggedReleaseSidecarContent,
+            releaseManifest,
+            ReleaseEvidence.Serialize(mismatched));
+
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-catalog-entry-mismatch");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-subject-digest-mismatch");
+    }
+
+    [Fact]
+    public void ReleaseEvidenceValidationRejectsDocsCatalogDigestMismatch()
+    {
+        var version = SemVer.Parse("0.1.0-preview.1");
+        var releaseManifest = CreateReleaseManifestJson();
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(CreateReleaseEvidenceJson(releaseManifest), ReleaseJson.Options)!;
+        var mismatched = bundle with
+        {
+            DocsArchive = new ReleaseEvidenceDocsArchive(
+                "catalogPinned",
+                ExactTreePath: "releases/0.1.0-preview.1",
+                ReleaseManifestSha256: new string('a', 64),
+                ReleaseManifestSchema: "appsurface-docs-release-manifest-v1",
+                FileCount: 1,
+                CatalogEntry: new ReleaseEvidenceCatalogEntry("releases/0.1.0-preview.1", new string('c', 64))),
             Subject = bundle.Subject with { Sha256 = new string('b', 64) }
         };
 
@@ -885,6 +955,38 @@ public sealed class ReleaseToolTests : IDisposable
                 "catalogPinned",
                 ExactTreePath: "releases/0.1.0-preview.1",
                 ReleaseManifestSha256: null,
+                ReleaseManifestSchema: "appsurface-docs-release-manifest-v1",
+                FileCount: 1,
+                CatalogEntry: null),
+            Subject = bundle.Subject with { Sha256 = new string('b', 64) }
+        };
+
+        var result = ReleaseEvidence.ValidateTag(
+            version,
+            "prerelease",
+            "v0.1.0-preview.1",
+            "abc123",
+            TaggedReleaseNoteContent,
+            TaggedReleaseSidecarContent,
+            releaseManifest,
+            ReleaseEvidence.Serialize(mismatched));
+
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-docs-manifest-digest-mismatch");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-subject-digest-mismatch");
+    }
+
+    [Fact]
+    public void ReleaseEvidenceValidationRejectsDocsArchiveMissingExactTreePath()
+    {
+        var version = SemVer.Parse("0.1.0-preview.1");
+        var releaseManifest = CreateReleaseManifestJson();
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(CreateReleaseEvidenceJson(releaseManifest), ReleaseJson.Options)!;
+        var mismatched = bundle with
+        {
+            DocsArchive = new ReleaseEvidenceDocsArchive(
+                "catalogPinned",
+                ExactTreePath: null,
+                ReleaseManifestSha256: new string('a', 64),
                 ReleaseManifestSchema: "appsurface-docs-release-manifest-v1",
                 FileCount: 1,
                 CatalogEntry: null),
@@ -1403,6 +1505,21 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("stdout failure", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishReportsGitBlobCommandStdoutWhenStderrIsEmpty()
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulPublishRunner();
+        runner.Add("git show v0.1.0-preview.1:releases/v0.1.0-preview.1.evidence.json", new CommandResult(1, "blob stdout failure", ""));
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("blob stdout failure", result.Stderr, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -123,7 +123,6 @@ internal static class ReleaseEvidence
                     version,
                     releaseClassification,
                     contentSourceCommit,
-                    expectedTagCommit: null,
                     bundle,
                     cancellationToken));
             }
@@ -253,7 +252,6 @@ internal static class ReleaseEvidence
         SemVer version,
         string releaseClassification,
         string? contentSourceCommit,
-        string? expectedTagCommit,
         ReleaseEvidenceBundle bundle,
         CancellationToken cancellationToken)
     {
@@ -268,17 +266,6 @@ internal static class ReleaseEvidence
                 $"Evidence release-preparation commit `{bundle.Commits.ReleasePreparationCommit}` does not match current commit `{contentSourceCommit ?? "unknown"}`.",
                 "Regenerate release evidence from the current reviewed release state.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
-        }
-
-        if (!string.IsNullOrWhiteSpace(expectedTagCommit)
-            && !string.Equals(bundle.Commits.TagCommit, expectedTagCommit, StringComparison.Ordinal))
-        {
-            diagnostics.Add(ReleaseDiagnostic.Error(
-                "release-evidence-tag-commit-mismatch",
-                "Release evidence does not match the expected tag commit.",
-                $"Evidence tag commit `{bundle.Commits.TagCommit ?? "pending"}` does not match `{expectedTagCommit}`.",
-                "Regenerate or finalize release evidence from the reviewed tag commit before publishing.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
         }
 
         var releaseManifestPath = workspace.ReleaseManifestPath(version);
@@ -627,11 +614,6 @@ internal static class ReleaseEvidence
         var fileName = Path.GetFileName(path);
         const string prefix = "v";
         const string suffix = ".evidence.json";
-        if (!fileName.StartsWith(prefix, StringComparison.Ordinal) || !fileName.EndsWith(suffix, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
         var versionText = fileName[prefix.Length..^suffix.Length];
         try
         {
