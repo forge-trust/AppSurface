@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
@@ -54,6 +55,64 @@ public sealed class CoverageGateTests
         Assert.Contains("branches 90.00% >= 80%", output, StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Join(temp.Path, "coverage-gate.json")));
         Assert.True(File.Exists(Path.Join(temp.Path, "coverage-gate.md")));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WritesPatchLineAndBranchThresholds_WhenDiffBaseIsConfigured()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        Directory.CreateDirectory(Path.Join(temp.Path, "src"));
+        File.WriteAllText(Path.Join(temp.Path, "src", "Foo.cs"), "base" + Environment.NewLine);
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "base");
+        await File.AppendAllTextAsync(Path.Join(temp.Path, "src", "Foo.cs"), "changed" + Environment.NewLine);
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "change");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="2" branches-valid="2">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="2" hits="1" branch="true" condition-coverage="100% (2/2)" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var previous = Directory.GetCurrentDirectory();
+        try
+        {
+            Directory.SetCurrentDirectory(temp.Path);
+            var command = new CoverageGateCommand
+            {
+                CoveragePath = coverage,
+                OutputDirectory = temp.Path,
+                MinLine = 100,
+                MinBranch = 100,
+                DiffBase = "HEAD~1",
+                MinPatchLine = 100,
+                MinPatchBranch = 100,
+                NoGithubSummary = true
+            };
+            using var console = new FakeInMemoryConsole();
+
+            await command.ExecuteAsync(console, CancellationToken.None);
+
+            var output = console.ReadOutputString();
+            Assert.Contains("patch lines 100.00% >= 100%", output, StringComparison.Ordinal);
+            Assert.Contains("patch branches 100.00% >= 100%", output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(previous);
+        }
     }
 
     [Fact]
@@ -159,6 +218,34 @@ public sealed class CoverageGateTests
 
         Assert.Contains("ASCOV007", exception.Message, StringComparison.Ordinal);
         Assert.Contains("--min-patch-line", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(-0.01)]
+    [InlineData(100.01)]
+    public async Task ExecuteAsync_RejectsInvalidPatchBranchThresholds_WithDiagnostic(decimal threshold)
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            MinLine = 0,
+            MinBranch = 0,
+            DiffBase = "origin/main",
+            MinPatchBranch = threshold,
+            NoGithubSummary = true
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV007", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--min-patch-branch", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -280,6 +367,241 @@ public sealed class CoverageGateTests
         Assert.Contains("| Patch lines | 66.67% (2/3 measurable, 5 changed) | 50% | pass |", markdown, StringComparison.Ordinal);
         Assert.Contains("\"patchLine\": 50", json, StringComparison.Ordinal);
         Assert.Contains("\"measurable\": 3", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_ComputesPatchLineAndBranchCoverage_ConsistentWithFullCoverage()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="3" lines-valid="4" branches-covered="3" branches-valid="4">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="1" hits="1" branch="true" condition-coverage="100% (2/2)" />
+                        <line number="2" hits="0" branch="true" condition-coverage="50% (1/2)" />
+                        <line number="3" hits="1" />
+                        <line number="4" hits="1" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            75,
+            75,
+            false,
+            null,
+            new CoveragePatchRequest(
+                temp.Path,
+                "origin/main",
+                75,
+                _ => Task.FromResult("""
+                    diff --git a/src/Foo.cs b/src/Foo.cs
+                    index 0000000..1111111 100644
+                    --- a/src/Foo.cs
+                    +++ b/src/Foo.cs
+                    @@ -0,0 +1,4 @@
+                    +covered branch line
+                    +uncovered branch line
+                    +covered line
+                    +covered line
+                    diff --git a/README.md b/README.md
+                    index 0000000..1111111 100644
+                    --- a/README.md
+                    +++ b/README.md
+                    @@ -0,0 +1,1 @@
+                    +docs
+                    """),
+                MinPatchBranchPercent: 75));
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+        var markdown = CoverageGateReportWriter.RenderMarkdown(result);
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        Assert.True(result.Passed);
+        Assert.Equal(result.LineCoverage.Percent, result.PatchLineCoverage?.Percent);
+        Assert.Equal(result.BranchCoverage.Percent, result.PatchBranchCoverage?.Percent);
+        Assert.Equal(5, result.PatchLineCoverage?.ChangedLines);
+        Assert.Equal(4, result.PatchLineCoverage?.MeasurableLines);
+        Assert.Equal(3, result.PatchLineCoverage?.CoveredLines);
+        Assert.Equal(4, result.PatchBranchCoverage?.MeasurableBranches);
+        Assert.Equal(3, result.PatchBranchCoverage?.CoveredBranches);
+        Assert.Contains("| Patch lines | 75.00% (3/4 measurable, 5 changed) | 75% | pass |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Patch branches | 75.00% (3/4 measurable, 5 changed) | 75% | pass |", markdown, StringComparison.Ordinal);
+
+        var json = File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json"));
+        Assert.Contains("\"patchLine\": 75", json, StringComparison.Ordinal);
+        Assert.Contains("\"patchBranch\": 75", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_FailsGate_WhenPatchBranchCoverageIsBelowThreshold()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="10" lines-valid="10" branches-covered="10" branches-valid="10">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="1" hits="1" branch="true" condition-coverage="50% (1/2)" />
+                        <line number="2" hits="1" branch="true" condition-coverage="0% (0/2)" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            100,
+            100,
+            false,
+            null,
+            new CoveragePatchRequest(
+                temp.Path,
+                "origin/main",
+                100,
+                _ => Task.FromResult("""
+                    diff --git a/src/Foo.cs b/src/Foo.cs
+                    index 0000000..1111111 100644
+                    --- a/src/Foo.cs
+                    +++ b/src/Foo.cs
+                    @@ -0,0 +1,2 @@
+                    +covered line with partial branch
+                    +covered line with uncovered branches
+                    """),
+                MinPatchBranchPercent: 50));
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+        var markdown = CoverageGateReportWriter.RenderMarkdown(result);
+
+        Assert.False(result.Passed);
+        Assert.Equal(100, result.PatchLineCoverage?.Percent);
+        Assert.Equal(25, result.PatchBranchCoverage?.Percent);
+        Assert.Contains("| Patch lines | 100.00% (2/2 measurable, 2 changed) | 100% | pass |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Patch branches | 25.00% (1/4 measurable, 2 changed) | 50% | fail |", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_MergesDuplicateCoberturaLines_ForPatchLineAndBranchCoverage()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="3" lines-valid="4" branches-covered="6" branches-valid="8">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="7" hits="0" />
+                        <line number="8" hits="1" branch="true" condition-coverage="100% (2/2)" />
+                        <line number="9" hits="0" />
+                        <line number="10" hits="0" branch="true" condition-coverage="50% (1/2)" />
+                      </lines>
+                    </class>
+                    <class name="Example.Foo.Partial" filename="src/Foo.cs">
+                      <lines>
+                        <line number="7" hits="1" branch="true" condition-coverage="50% (1/2)" />
+                        <line number="8" hits="0" />
+                        <line number="9" hits="0" />
+                        <line number="10" hits="1" branch="true" condition-coverage="100% (2/2)" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            75,
+            75,
+            false,
+            null,
+            new CoveragePatchRequest(
+                temp.Path,
+                "origin/main",
+                75,
+                _ => Task.FromResult("""
+                    diff --git a/src/Foo.cs b/src/Foo.cs
+                    index 0000000..1111111 100644
+                    --- a/src/Foo.cs
+                    +++ b/src/Foo.cs
+                    @@ -0,0 +7,4 @@
+                    +line seven
+                    +line eight
+                    +line nine
+                    +line ten
+                    """),
+                MinPatchBranchPercent: 75));
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        Assert.True(result.Passed);
+        Assert.Equal(4, result.PatchLineCoverage?.MeasurableLines);
+        Assert.Equal(3, result.PatchLineCoverage?.CoveredLines);
+        Assert.Equal(75, result.PatchLineCoverage?.Percent);
+        Assert.Equal(8, result.PatchBranchCoverage?.MeasurableBranches);
+        Assert.Equal(6, result.PatchBranchCoverage?.CoveredBranches);
+        Assert.Equal(75, result.PatchBranchCoverage?.Percent);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_RejectsMalformedLineConditionCoverage_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="1" hits="1" branch="true" condition-coverage="100% (2)" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            0,
+            0,
+            false,
+            null,
+            new CoveragePatchRequest(
+                temp.Path,
+                "origin/main",
+                null,
+                _ => Task.FromResult("""
+                    diff --git a/src/Foo.cs b/src/Foo.cs
+                    index 0000000..1111111 100644
+                    --- a/src/Foo.cs
+                    +++ b/src/Foo.cs
+                    @@ -0,0 +1,1 @@
+                    +changed
+                    """)));
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None));
+
+        Assert.Contains("ASCOV006", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("condition coverage", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -497,7 +819,7 @@ public sealed class CoverageGateTests
     [Fact]
     public void ParseChangedLines_TracksContextLinesAndIgnoresDeletedFiles()
     {
-        var changedLines = PatchLineCoverageEvaluator.ParseChangedLines("""
+        var changedLines = PatchCoverageEvaluator.ParseChangedLines("""
             diff --git a/src/Foo.cs b/src/Foo.cs
             index 0000000..1111111 100644
             --- a/src/Foo.cs
@@ -537,6 +859,7 @@ public sealed class CoverageGateTests
             MinLine = 0,
             MinBranch = 0,
             MinPatchLine = 85,
+            MinPatchBranch = 85,
             NoGithubSummary = true
         };
         using var console = new FakeInMemoryConsole();
@@ -545,7 +868,7 @@ public sealed class CoverageGateTests
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV007", exception.Message, StringComparison.Ordinal);
-        Assert.Contains("requires --diff-base", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("require --diff-base", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -617,6 +940,34 @@ public sealed class CoverageGateTests
 
         Assert.Contains("ASCOV007", exception.Message, StringComparison.Ordinal);
         Assert.Contains("--min-patch-line", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_RejectsInvalidPatchBranchThresholdInRequest_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            0,
+            0,
+            false,
+            null,
+            new CoveragePatchRequest(
+                temp.Path,
+                "origin/main",
+                null,
+                _ => Task.FromResult(string.Empty),
+                MinPatchBranchPercent: 101));
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None));
+
+        Assert.Contains("ASCOV007", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--min-patch-branch", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -828,6 +1179,30 @@ public sealed class CoverageGateTests
 
         Assert.Contains("ASCOV009", exception.Message, StringComparison.Ordinal);
         Assert.Contains("must not contain", exception.Message, StringComparison.Ordinal);
+    }
+
+    private static async Task RunGitAsync(string workingDirectory, params string[] arguments)
+    {
+        var startInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start git.");
+        var standardError = await process.StandardError.ReadToEndAsync();
+        await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"git {string.Join(' ', arguments)} failed: {standardError}");
+        }
     }
 
     private sealed class TempDirectory : IDisposable
