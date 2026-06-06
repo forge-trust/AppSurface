@@ -412,6 +412,35 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
+    public async Task WriteSummaryAsync_ShouldIncludeProvidedDiagnosticsMetadata()
+    {
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(
+            Path.Join(outputDirectory, "coverage.cobertura.xml"),
+            "<coverage lines-covered=\"9\" lines-valid=\"10\" branches-covered=\"7\" branches-valid=\"8\" />");
+        var output = new StringWriter();
+        var app = CreateApp(new RecordingCommandRunner(workspace), output);
+        var options = CreateCoverageOptions(workspace.Root, outputDirectory);
+        var diagnostics = new SlowTestDiagnosticsRun(
+            Path.Join(outputDirectory, "custom-diagnostics.md"),
+            Path.Join(outputDirectory, "custom-diagnostics.json"),
+            AggregationSeconds: 3,
+            AggregationPercent: 12.5m,
+            WarningCount: 2,
+            MetadataComplete: true);
+
+        var result = await app.WriteSummaryAsync(options, diagnostics, CancellationToken.None);
+
+        Assert.True(result);
+        var summary = File.ReadAllText(Path.Join(outputDirectory, "summary.txt"));
+        Assert.Contains("Slow test diagnostics: " + diagnostics.MarkdownPath, summary, StringComparison.Ordinal);
+        Assert.Contains("Diagnostic aggregation overhead: 3s (12.50% of total runner time)", summary, StringComparison.Ordinal);
+        Assert.Contains("Diagnostic warnings: 2", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldWriteZeroRatesWhenCoverageDenominatorsAreZero()
     {
         using var workspace = TestRepo.Create();
@@ -482,6 +511,23 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldReportZeroDiagnosticsPercentWhenTotalTimerHasNotAdvanced()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var output = new StringWriter();
+        var app = CreateApp(new RecordingCommandRunner(workspace), output, clock: new ZeroClock());
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Diagnostic aggregation overhead: 0s (0.00% of total runner time)", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SlowTestDiagnosticsWriter_ShouldUsePostWriteOverheadInArtifacts()
     {
         using var workspace = TestRepo.Create();
@@ -546,6 +592,21 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldIgnoreCopiedJunitFallbackWhenOutputDirectoryIsMissing()
+    {
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "missing-output");
+        var options = CreateCoverageOptions(workspace.Root, outputDirectory);
+
+        var report = await SlowTestDiagnosticsWriter.CollectAsync(options, [], CancellationToken.None);
+
+        Assert.Equal(0, report.JunitFileCount);
+        Assert.Empty(report.TestCases);
+        var warning = Assert.Single(report.Warnings);
+        Assert.Contains("No JUnit files were available", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SlowTestDiagnosticsWriter_ShouldWriteArtifactsWhenJunitCannotBeOpened()
     {
         using var workspace = TestRepo.Create();
@@ -581,6 +642,39 @@ public sealed class CoverageRunnerApplicationTests
         Assert.Equal(1, json.RootElement.GetProperty("totals").GetProperty("warnings").GetInt32());
         Assert.Equal(0, json.RootElement.GetProperty("totals").GetProperty("testCases").GetInt32());
         Assert.Contains("Failed to read JUnit XML", File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.md")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldClassifyCopiedJunitFallbackWithoutProjectMetadata()
+    {
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Join(outputDirectory, "junit-all-1-Fallback.Tests.xml"), """
+            <testsuite>
+              <testcase classname="Playwright.FileCoverageTests" name="StartsDotnetProcessFromTempArtifact" time="2.75" />
+            </testsuite>
+            """);
+        var options = CreateCoverageOptions(workspace.Root, outputDirectory);
+
+        var report = await SlowTestDiagnosticsWriter.CollectAsync(options, [], CancellationToken.None);
+        await SlowTestDiagnosticsWriter.WriteAsync(
+            options,
+            report,
+            getAggregationSeconds: () => 1,
+            calculateAggregationPercent: seconds => seconds,
+            CancellationToken.None);
+
+        var test = Assert.Single(report.TestCases);
+        Assert.Null(test.Project);
+        Assert.Contains(test.EvidenceCategories, category => category.Category == "browser-or-integration" && category.Confidence == "medium");
+        Assert.Contains(test.EvidenceCategories, category => category.Category == "process-startup");
+        Assert.Contains(test.EvidenceCategories, category => category.Category == "filesystem-artifacts");
+        Assert.Contains(test.EvidenceCategories, category => category.Category == "coverage-tooling");
+        Assert.Contains(
+            "| Playwright.FileCoverageTests.StartsDotnetProcessFromTempArtifact | 2.75 | passed | unknown |",
+            File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.md")),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1058,11 +1152,12 @@ public sealed class CoverageRunnerApplicationTests
     private static CoverageRunnerApplication CreateApp(
         ICommandRunner commandRunner,
         TextWriter? standardOut = null,
-        TextWriter? standardError = null)
+        TextWriter? standardError = null,
+        IClock? clock = null)
     {
         return new CoverageRunnerApplication(
             commandRunner,
-            new FakeClock(),
+            clock ?? new FakeClock(),
             standardOut ?? TextWriter.Synchronized(new StringWriter()),
             standardError ?? TextWriter.Synchronized(new StringWriter()));
     }
@@ -1293,6 +1388,16 @@ public sealed class CoverageRunnerApplicationTests
         private sealed class FakeTimer : ITimer
         {
             public long ElapsedSeconds => 1;
+        }
+    }
+
+    private sealed class ZeroClock : IClock
+    {
+        public ITimer StartTimer() => new ZeroTimer();
+
+        private sealed class ZeroTimer : ITimer
+        {
+            public long ElapsedSeconds => 0;
         }
     }
 }
