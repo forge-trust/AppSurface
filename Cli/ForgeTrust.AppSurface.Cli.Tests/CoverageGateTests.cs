@@ -5,6 +5,12 @@ using ForgeTrust.AppSurface.Cli;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
+[CollectionDefinition("CoverageGate process state", DisableParallelization = true)]
+public sealed class CoverageGateProcessStateCollection
+{
+}
+
+[Collection("CoverageGate process state")]
 public sealed class CoverageGateTests
 {
     [Fact]
@@ -139,6 +145,26 @@ public sealed class CoverageGateTests
         Assert.Contains("Coverage gate FAIL", console.ReadOutputString(), StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Join(temp.Path, "coverage-gate.json")));
         Assert.True(File.Exists(Path.Join(temp.Path, "coverage-gate.md")));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RejectsBlankCoveragePath_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = "  ",
+            OutputDirectory = temp.Path,
+            MinLine = 0,
+            MinBranch = 0,
+            NoGithubSummary = true
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV001", exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1081,7 +1107,9 @@ public sealed class CoverageGateTests
         await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
 
         var text = File.ReadAllText(summary);
+        Assert.Contains("Cobertura: coverage\\|with\\`markdown.cobertura.xml", text, StringComparison.Ordinal);
         Assert.Contains("coverage\\|with\\`markdown.cobertura.xml", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Cobertura: `", text, StringComparison.Ordinal);
         Assert.DoesNotContain('\u0001', text);
     }
 
@@ -1153,6 +1181,21 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public void ValidateReportOutput_RejectsExistingFile_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
+        var output = Path.Join(temp.Path, "coverage-output");
+        File.WriteAllText(output, string.Empty);
+
+        var exception = Assert.Throws<CommandException>(
+            () => CoverageOutputPathPolicy.ValidateReportOutput(coverage, output));
+
+        Assert.Contains("ASCOV009", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("coverage report directory", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ValidateReportOutput_RejectsFilesystemRoot_WithDiagnostic()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");
@@ -1196,9 +1239,11 @@ public sealed class CoverageGateTests
         }
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start git.");
-        var standardError = await process.StandardError.ReadToEndAsync();
-        await process.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        var waitTask = process.WaitForExitAsync();
+        await Task.WhenAll(standardOutputTask, standardErrorTask, waitTask);
+        var standardError = await standardErrorTask;
         if (process.ExitCode != 0)
         {
             throw new InvalidOperationException($"git {string.Join(' ', arguments)} failed: {standardError}");

@@ -90,6 +90,12 @@ internal sealed partial class CoverageGateCommand : ICommand
         await ExecuteAsync(console, console.RegisterCancellationHandler());
     }
 
+    /// <summary>
+    /// Executes the coverage gate with an explicit cancellation token.
+    /// </summary>
+    /// <param name="console">CliFx console used for command output.</param>
+    /// <param name="cancellationToken">Cancellation token for evaluator and report IO.</param>
+    /// <returns>A task that completes after report files are written and gate outcome is emitted.</returns>
     internal async ValueTask ExecuteAsync(IConsole console, CancellationToken cancellationToken)
     {
         var request = CreateRequest();
@@ -133,7 +139,12 @@ internal sealed partial class CoverageGateCommand : ICommand
             throw new CommandException("ASCOV007 patch coverage thresholds require --diff-base.");
         }
 
-        var coveragePath = Path.GetFullPath(CoveragePath);
+        if (string.IsNullOrWhiteSpace(CoveragePath))
+        {
+            throw new CommandException("ASCOV001 --coverage must point to a Cobertura XML file.");
+        }
+
+        var coveragePath = Path.GetFullPath(CoveragePath.Trim());
         var outputDirectory = string.IsNullOrWhiteSpace(OutputDirectory)
             ? Path.GetDirectoryName(coveragePath) ?? Directory.GetCurrentDirectory()
             : Path.GetFullPath(OutputDirectory);
@@ -1000,7 +1011,7 @@ internal static class CoverageGateReportWriter
         var builder = new StringBuilder();
         builder.AppendLine($"# Coverage Gate: {status}");
         builder.AppendLine();
-        builder.AppendLine($"Cobertura: `{EscapeMarkdownCell(result.CoveragePath)}`");
+        builder.AppendLine($"Cobertura: {EscapeMarkdownCell(result.CoveragePath)}");
         builder.AppendLine();
         builder.AppendLine("| Metric | Coverage | Threshold | Result |");
         builder.AppendLine("| --- | ---: | ---: | --- |");
@@ -1163,7 +1174,13 @@ internal static class CoverageOutputPathPolicy
             throw new CommandException("ASCOV009 --output must point to a coverage report directory.");
         }
 
-        var fullOutput = NormalizeMacPrivateVar(Path.GetFullPath(outputDirectory));
+        var fullOutputRaw = Path.GetFullPath(outputDirectory);
+        if (File.Exists(fullOutputRaw))
+        {
+            throw new CommandException($"ASCOV009 --output must point to a coverage report directory: {fullOutputRaw}");
+        }
+
+        var fullOutput = NormalizeMacPrivateVar(fullOutputRaw);
         var fullCoverage = NormalizeMacPrivateVar(Path.GetFullPath(coveragePath));
         var comparison = GetPathComparison();
         var outputRoot = Path.GetPathRoot(fullOutput);
