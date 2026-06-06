@@ -15,6 +15,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - AppSurface CI coverage now runs through a dedicated `ForgeTrust.AppSurface.CoverageRunner` tool behind the stable `scripts/coverage-solution.sh` entrypoint, preserving Codecov artifact paths while adding bounded same-job coverage scheduling.
+- Coverage runs now write slow-test diagnostics in Markdown and JSON, including project timings, parsed JUnit test-case evidence, best-effort parser warnings, and diagnostic aggregation overhead in seconds and as a percent of runner time.
 - RazorWire CLI static export now materializes the lazy page-navigation runtime emitted by AppSurface Docs outlines, so CDN exports succeed and publish consistently when the shared navigation script is required.
 - RazorWire now ships a lazy section-copy runtime with generated package assets, public `data-rw-section-copy*` hooks, static export materialization, and AppSurface Docs adoption for outline/content section links.
 - CI now includes a measured NuGet cache rollout for selected build, docs export, and code-quality jobs while keeping package-gate restores isolated.
