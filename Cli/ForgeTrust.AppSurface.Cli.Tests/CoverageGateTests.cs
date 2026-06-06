@@ -408,8 +408,7 @@ public sealed class CoverageGateTests
 
         public string WriteCoverage(string contents)
         {
-            var fileName = System.IO.Path.GetFileName("coverage.cobertura.xml");
-            var path = System.IO.Path.Join(Path, fileName);
+            var path = System.IO.Path.Join(Path, "coverage.cobertura.xml");
             File.WriteAllText(path, contents);
             return path;
         }
