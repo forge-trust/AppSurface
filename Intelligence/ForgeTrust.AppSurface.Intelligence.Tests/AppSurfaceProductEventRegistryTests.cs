@@ -327,14 +327,16 @@ public sealed class AppSurfaceProductEventRegistryTests
             new Dictionary<string, string>
             {
                 ["surface"] = "search_page",
-                ["rank"] = "1",
+                ["result_rank"] = "1",
                 ["result_kind"] = "javascript-api"
             });
 
         var result = AppSurfaceProductEventRegistry.Validate(productEvent);
 
         Assert.True(result.IsValid);
+        Assert.Equal("1", result.SanitizedProperties["result_rank"]);
         Assert.Equal("javascript-api", result.SanitizedProperties["result_kind"]);
+        Assert.DoesNotContain("result_rank", result.RejectedProperties);
         Assert.DoesNotContain("result_kind", result.RejectedProperties);
     }
 
@@ -361,6 +363,8 @@ public sealed class AppSurfaceProductEventRegistryTests
 
     [Theory]
     [InlineData("-1")]
+    [InlineData("+1")]
+    [InlineData("1,000")]
     [InlineData("tenant-42")]
     public void Validate_DropsInvalidIntegerProperties(string rawValue)
     {

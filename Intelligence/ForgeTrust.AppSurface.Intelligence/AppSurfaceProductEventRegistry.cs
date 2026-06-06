@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace ForgeTrust.AppSurface.Intelligence;
 
 /// <summary>
@@ -171,7 +173,7 @@ public static class AppSurfaceProductEventRegistry
             "Short framework-quality retention; avoid retaining host form identifiers.",
             [
                 Property("failure_mode", "Whether RazorWire handled the failure response before surfacing failure UX.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: RazorWireFailureModes),
-                Property("http_status", "HTTP status family or status code when available.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low),
+                Property("http_status", "HTTP status code when available.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low),
                 Property("response_kind", "Normalized response kind such as turbo-stream, html, json, unknown, or network.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: RazorWireResponseKinds),
                 Property("failure_ui", "Failure UX outcome such as generated, handled, suppressed, or disabled.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: RazorWireFailureUi)
             ],
@@ -340,13 +342,13 @@ public static class AppSurfaceProductEventRegistry
 
         if (IsNonNegativeIntegerProperty(property.Name))
         {
-            if (!int.TryParse(value, out var parsed) || parsed < 0)
+            if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) || parsed < 0)
             {
                 diagnostic = $"Property '{property.Name}' must be a non-negative integer.";
                 return false;
             }
 
-            sanitizedValue = parsed.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            sanitizedValue = parsed.ToString(CultureInfo.InvariantCulture);
             return true;
         }
 
