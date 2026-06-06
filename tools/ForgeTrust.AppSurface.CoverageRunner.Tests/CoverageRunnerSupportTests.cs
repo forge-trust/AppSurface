@@ -1,7 +1,35 @@
+using System.Collections;
+using System.Collections.Specialized;
+
 namespace ForgeTrust.AppSurface.CoverageRunner.Tests;
 
 public sealed class CoverageRunnerSupportTests
 {
+    [Fact]
+    public void Program_ShouldCreateCaseInsensitiveEnvironmentSnapshot()
+    {
+        var variables = new Hashtable { ["build_configuration"] = "Release" };
+
+        var environment = Program.CreateEnvironmentSnapshot(variables);
+
+        Assert.Equal("Release", environment["BUILD_CONFIGURATION"]);
+    }
+
+    [Fact]
+    public void Program_ShouldTolerateDuplicateEnvironmentKeysWithDifferentCasing()
+    {
+        var variables = new ListDictionary
+        {
+            { "TEST_GROUP", "all" },
+            { "test_group", "tools" },
+        };
+
+        var environment = Program.CreateEnvironmentSnapshot(variables);
+
+        Assert.Single(environment);
+        Assert.Equal("tools", environment["TEST_GROUP"]);
+    }
+
     [Fact]
     public async Task ProgramMain_ShouldListGroups()
     {
