@@ -17,6 +17,10 @@ public class TailwindCliManagerTests : IDisposable
     private readonly string _tempPath;
     private readonly string? _originalPath;
     private readonly string? _originalPathExt;
+    private readonly string? _originalXdgCacheHome;
+    private readonly string? _originalLocalAppData;
+    private readonly string? _originalHome;
+    private readonly string? _originalUserProfile;
     private readonly ILogger<TailwindCliManager> _logger;
     private readonly TailwindCliManager _manager;
     private readonly string _binaryName;
@@ -38,12 +42,20 @@ public class TailwindCliManagerTests : IDisposable
         _manager.RidOverride = _currentHostRid;
         _originalPath = Environment.GetEnvironmentVariable("PATH");
         _originalPathExt = Environment.GetEnvironmentVariable("PATHEXT");
+        _originalXdgCacheHome = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
+        _originalLocalAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        _originalHome = Environment.GetEnvironmentVariable("HOME");
+        _originalUserProfile = Environment.GetEnvironmentVariable("USERPROFILE");
     }
 
     public void Dispose()
     {
         Environment.SetEnvironmentVariable("PATH", _originalPath);
         Environment.SetEnvironmentVariable("PATHEXT", _originalPathExt);
+        Environment.SetEnvironmentVariable("XDG_CACHE_HOME", _originalXdgCacheHome);
+        Environment.SetEnvironmentVariable("LOCALAPPDATA", _originalLocalAppData);
+        Environment.SetEnvironmentVariable("HOME", _originalHome);
+        Environment.SetEnvironmentVariable("USERPROFILE", _originalUserProfile);
         TailwindCliManager.IsOSPlatformOverride = null;
         TailwindCliManager.ProcessArchitectureOverride = null;
 
@@ -229,6 +241,47 @@ public class TailwindCliManagerTests : IDisposable
     }
 
     [Fact]
+    public void GetTailwindPath_ReturnsSharedDownloadCachePath_FromDefaultRootWhenOverrideIsUnavailable()
+    {
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(baseDir, "assembly-shadow");
+        Directory.CreateDirectory(baseDir);
+        _manager.BaseDirectoryOverride = baseDir;
+        _manager.AssemblyDirectoryOverride = assemblyDir;
+        _manager.DownloadCacheRootOverride = null;
+
+        var xdgCacheHome = Path.Join(_tempPath, "xdg-cache-home");
+        SetCacheRootEnvironment(xdgCacheHome: xdgCacheHome);
+        var cacheRoot = Path.Join(xdgCacheHome, "forgetrust", "appsurface", "tailwind");
+        var expectedPath = TailwindDownloadCache.GetRuntimeBinaryPath(
+            cacheRoot,
+            "4.1.18",
+            _currentHostRid,
+            _currentHostRuntimeProjectBinaryName);
+        Directory.CreateDirectory(Path.GetDirectoryName(expectedPath)!);
+        File.WriteAllText(expectedPath, "dummy");
+
+        var result = _manager.GetTailwindPath();
+
+        Assert.Equal(expectedPath, result);
+    }
+
+    [Fact]
+    public void GetTailwindPath_ThrowsFileNotFoundException_WhenNoDefaultDownloadCacheRootExists()
+    {
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(baseDir, "assembly-shadow");
+        Directory.CreateDirectory(baseDir);
+        _manager.BaseDirectoryOverride = baseDir;
+        _manager.AssemblyDirectoryOverride = assemblyDir;
+        _manager.DownloadCacheRootOverride = null;
+        SetCacheRootEnvironment();
+        Environment.SetEnvironmentVariable("PATH", string.Empty);
+
+        Assert.Throws<FileNotFoundException>(() => _manager.GetTailwindPath());
+    }
+
+    [Fact]
     public void GetTailwindPath_ReturnsVersionedSharedDownloadCachePath_WhenPinnedCacheCandidateIsMissing()
     {
         var baseDir = GetSampleAppBaseDirectory();
@@ -257,6 +310,23 @@ public class TailwindCliManagerTests : IDisposable
         var result = _manager.GetTailwindPath();
 
         Assert.Equal(newestPath, result);
+    }
+
+    [Fact]
+    public void GetTailwindPath_ThrowsFileNotFoundException_WhenSharedDownloadCacheContainsOnlyMissingVersionedCandidates()
+    {
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(baseDir, "assembly-shadow");
+        Directory.CreateDirectory(baseDir);
+        _manager.BaseDirectoryOverride = baseDir;
+        _manager.AssemblyDirectoryOverride = assemblyDir;
+
+        var cacheRoot = Path.Join(_tempPath, "shared-tailwind-cache");
+        _manager.DownloadCacheRootOverride = cacheRoot;
+        Directory.CreateDirectory(Path.Join(cacheRoot, "tailwind-5.0.0", _currentHostRid));
+        Environment.SetEnvironmentVariable("PATH", string.Empty);
+
+        Assert.Throws<FileNotFoundException>(() => _manager.GetTailwindPath());
     }
 
     [Fact]
@@ -711,6 +781,18 @@ public class TailwindCliManagerTests : IDisposable
                 version);
 
         return TestPathUtils.PathUnder(_tempPath, relativePath);
+    }
+
+    private static void SetCacheRootEnvironment(
+        string? xdgCacheHome = null,
+        string? localAppData = null,
+        string? home = null,
+        string? userProfile = null)
+    {
+        Environment.SetEnvironmentVariable("XDG_CACHE_HOME", xdgCacheHome);
+        Environment.SetEnvironmentVariable("LOCALAPPDATA", localAppData);
+        Environment.SetEnvironmentVariable("HOME", home);
+        Environment.SetEnvironmentVariable("USERPROFILE", userProfile);
     }
 
     private static string EnsureFileName(string value)
