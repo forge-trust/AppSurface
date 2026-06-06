@@ -436,6 +436,24 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckRejectsMissingPreparedReleaseArtifactBytes()
+    {
+        await SeedRepositoryAsync();
+        var prepare = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+        Assert.Equal(0, prepare.ExitCode);
+        File.Delete(RepositoryPath("releases/v0.1.0-preview.1.md.yml"));
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1", "--allow-existing-targets"],
+            FakeCommandRunner.WithSourceCommit("release-prep-commit"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-evidence-artifact-digest-mismatch", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CheckRejectsMissingPreparedReleaseEvidence()
     {
         await SeedRepositoryAsync();
@@ -676,6 +694,73 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
     }
 
+    [Theory]
+    [InlineData("schema")]
+    [InlineData("version")]
+    [InlineData("tag")]
+    [InlineData("releaseClassification")]
+    [InlineData("releaseNotePath")]
+    [InlineData("releaseSidecarPath")]
+    [InlineData("releaseManifestPath")]
+    [InlineData("evidencePath")]
+    [InlineData("releaseManifestDigest")]
+    [InlineData("releaseArtifactDigests")]
+    [InlineData("packageReleaseNotePaths")]
+    [InlineData("docsArchive")]
+    [InlineData("commits")]
+    [InlineData("generatedBy")]
+    [InlineData("generatedAtUtc")]
+    [InlineData("subject")]
+    public void ReleaseEvidenceValidationRejectsEveryMissingTopLevelField(string propertyName)
+    {
+        var releaseManifest = CreateReleaseManifestJson();
+        var malformedEvidence = CreateReleaseEvidenceJsonWithNull(releaseManifest, propertyName);
+
+        var result = ReleaseEvidence.ValidateTag(
+            SemVer.Parse("0.1.0-preview.1"),
+            "prerelease",
+            "v0.1.0-preview.1",
+            "abc123",
+            TaggedReleaseNoteContent,
+            TaggedReleaseSidecarContent,
+            releaseManifest,
+            malformedEvidence);
+
+        Assert.Null(result.Summary);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
+    }
+
+    [Theory]
+    [InlineData("releaseManifestDigest.algorithm")]
+    [InlineData("releaseManifestDigest.value")]
+    [InlineData("releaseArtifactDigests.0.path")]
+    [InlineData("releaseArtifactDigests.0.algorithm")]
+    [InlineData("releaseArtifactDigests.0.value")]
+    [InlineData("docsArchive.status")]
+    [InlineData("generatedBy.tool")]
+    [InlineData("subject.name")]
+    [InlineData("subject.sha256")]
+    [InlineData("packageReleaseNotePaths.0.project")]
+    [InlineData("packageReleaseNotePaths.0.releaseNotesPath")]
+    public void ReleaseEvidenceValidationRejectsEveryMissingNestedField(string path)
+    {
+        var releaseManifest = CreateReleaseManifestJson();
+        var malformedEvidence = CreateReleaseEvidenceJsonWithNull(releaseManifest, path.Split('.'));
+
+        var result = ReleaseEvidence.ValidateTag(
+            SemVer.Parse("0.1.0-preview.1"),
+            "prerelease",
+            "v0.1.0-preview.1",
+            "abc123",
+            TaggedReleaseNoteContent,
+            TaggedReleaseSidecarContent,
+            releaseManifest,
+            malformedEvidence);
+
+        Assert.Null(result.Summary);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
+    }
+
     [Fact]
     public void ReleaseEvidenceValidationRejectsTagAndTagCommitMismatch()
     {
@@ -854,6 +939,39 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void ReleaseEvidenceValidationAcceptsCompleteDocsArchiveFieldsWithoutCatalogEntry()
+    {
+        var version = SemVer.Parse("0.1.0-preview.1");
+        var releaseManifest = CreateReleaseManifestJson();
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(CreateReleaseEvidenceJson(releaseManifest), ReleaseJson.Options)!;
+        var mismatched = bundle with
+        {
+            DocsArchive = new ReleaseEvidenceDocsArchive(
+                "catalogPinned",
+                ExactTreePath: "releases/0.1.0-preview.1",
+                ReleaseManifestSha256: new string('a', 64),
+                ReleaseManifestSchema: "appsurface-docs-release-manifest-v1",
+                FileCount: 1,
+                CatalogEntry: null),
+            Subject = bundle.Subject with { Sha256 = new string('b', 64) }
+        };
+
+        var result = ReleaseEvidence.ValidateTag(
+            version,
+            "prerelease",
+            "v0.1.0-preview.1",
+            "abc123",
+            TaggedReleaseNoteContent,
+            TaggedReleaseSidecarContent,
+            releaseManifest,
+            ReleaseEvidence.Serialize(mismatched));
+
+        Assert.DoesNotContain(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-catalog-entry-mismatch");
+        Assert.DoesNotContain(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-docs-manifest-digest-mismatch");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-subject-digest-mismatch");
+    }
+
+    [Fact]
     public void ReleaseEvidenceSummaryReportsOptionalAttestationMode()
     {
         var releaseManifest = CreateReleaseManifestJson();
@@ -865,6 +983,33 @@ public sealed class ReleaseToolTests : IDisposable
         }).ToSummary("validated");
 
         Assert.Equal("github-artifact-attestation", summary.Attestation);
+    }
+
+    [Fact]
+    public void ReleaseReportRendererPrintsNonPendingEvidenceSummaryFields()
+    {
+        var result = new ReleaseCheckResult(
+            "0.1.0-preview.1",
+            "prerelease",
+            "abc123",
+            ["releases/v0.1.0-preview.1.evidence.json"],
+            new ReleaseEvidenceSummary(
+                "releases/v0.1.0-preview.1.evidence.json",
+                "appsurface-release-evidence-bundle-v1",
+                "tag-bound evidence validated for publish",
+                new string('a', 64),
+                new string('b', 64),
+                "releases/0.1.0-preview.1",
+                "tag-commit",
+                "not required"),
+            [],
+            []);
+
+        var report = ReleaseReportRenderer.RenderCheck(result);
+
+        Assert.Contains("- Docs archive manifest SHA-256: `" + new string('b', 64) + "`", report, StringComparison.Ordinal);
+        Assert.Contains("- Catalog exact tree path: `releases/0.1.0-preview.1`", report, StringComparison.Ordinal);
+        Assert.Contains("- Tag commit: `tag-commit`", report, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1540,6 +1685,21 @@ public sealed class ReleaseToolTests : IDisposable
             releaseManifestJson,
             [new PackagePathUpdate("Core/ForgeTrust.AppSurface.Core.csproj", "releases/unreleased.md", "releases/v0.1.0-preview.1.md")]);
         return ReleaseEvidence.Serialize(evidence);
+    }
+
+    private static string CreateReleaseEvidenceJsonWithNull(string releaseManifestJson, params string[] path)
+    {
+        var root = System.Text.Json.Nodes.JsonNode.Parse(CreateReleaseEvidenceJson(releaseManifestJson))!.AsObject();
+        System.Text.Json.Nodes.JsonNode current = root;
+        for (var index = 0; index < path.Length - 1; index++)
+        {
+            current = int.TryParse(path[index], out var arrayIndex)
+                ? current.AsArray()[arrayIndex]!
+                : current[path[index]]!;
+        }
+
+        current.AsObject()[path[^1]] = null;
+        return root.ToJsonString(ReleaseJson.Options) + Environment.NewLine;
     }
 
     private sealed record CliResult(int ExitCode, string Stdout, string Stderr);
