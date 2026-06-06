@@ -11,6 +11,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ### Release and docs surface
 
 - AppSurface CI coverage now runs through a dedicated `ForgeTrust.AppSurface.CoverageRunner` tool behind the stable `scripts/coverage-solution.sh` entrypoint. The runner writes independent per-project coverage/JUnit artifacts, captures stable per-project logs, supports `COVERAGE_PARALLELISM` for bounded same-job test concurrency, and keeps the merged Cobertura output path used by Codecov.
+- The AppSurface CLI now includes `appsurface coverage gate` for private Cobertura threshold enforcement. The command writes `coverage-gate.json` and `coverage-gate.md`, optionally appends the Markdown result to GitHub Actions step summaries, uses `ASCOV###` diagnostics for CI failures, and keeps coverage upload/trend/dashboard behavior out of the v1 gate.
 - RazorWire CLI static export now recognizes the inline autoload marker that AppSurface Docs outlines emit for page navigation and materializes `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js` in CDN exports. AppSurface Docs now mirrors the shared `razorwire:page-nav:active-change` event instead of owning duplicate outline scroll/hash tracking, so published docs rely on the same navigation runtime as package consumers.
 - RazorWire now has first-class section copy for long-form documentation and reference pages. Authored buttons use `data-rw-section-copy`, generated buttons opt in with `data-rw-section-copy-target`, the lazy `section-copy.js` runtime owns clipboard success/fallback state through stable `data-rw-section-copy*` hooks, and static export materializes the runtime even when pages rely on lazy `<rw:scripts/>` detection.
 - AppSurface Web browser status-page re-execution now preserves the original `401`, `403`, or `404` response status while rendering conventional browser recovery pages, so standalone docs 404 recovery keeps `NotFound` semantics across supported runtimes.
@@ -24,6 +25,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - PackageIndex verification now ignores hidden local cache directories such as `.pnpm-store` and workspace `.nuget/packages` so local cache contents do not require package manifest entries.
 - Fast non-package CI that does not compile Tailwind-consuming projects can now skip Tailwind runtime binary resolution while package validation and release paths force binary resolution on and fail before creating an empty runtime package.
 - PackageIndex workflow policy tests now reject additional `TailwindRuntimeBinaryResolutionEnabled=false` forms, including long MSBuild property switches, semicolon property lists, and shell environment assignments.
+- Tailwind runtime source builds now cache downloaded standalone CLI binaries in a shared user-level cache by default instead of each worktree's `obj` tree. Set `TailwindDownloadCacheRoot` to choose a CI cache volume or isolate a build.
 
 ### RazorWire package guidance
 
@@ -32,6 +34,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### AppSurface Docs product example
 
+- AppSurface adds an experimental `ForgeTrust.AppSurface.Intelligence` package with typed product-intelligence event contracts, privacy validation, no-op default registration, and host-owned sink hooks. AppSurface Docs and RazorWire now dogfood the experimental contracts for safe docs search, recovery-link, form-failure, form-recovery, and stream-admission signals while keeping PostHog as a recipe rather than a package dependency.
 - AppSurface Docs JavaScript public API harvesting now recognizes documented CSS property hooks such as RazorWire page-navigation scroll-padding contracts, so generated API references can describe browser styling insets without malformed-doclet diagnostics.
 
 ## Migration watch

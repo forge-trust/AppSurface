@@ -20,7 +20,13 @@
     <TailwindRuntimeBinaryResolutionEnabled Condition="'$(TailwindRuntimeBinaryResolutionEnabled)' == ''">true</TailwindRuntimeBinaryResolutionEnabled>
     <_TailwindRuntimeBinaryResolutionEnabledNormalized>$(TailwindRuntimeBinaryResolutionEnabled.Trim().ToLowerInvariant())</_TailwindRuntimeBinaryResolutionEnabledNormalized>
     <_TailwindRuntimeBinaryResolutionEnabledNormalized Condition="'$(_TailwindRuntimeBinaryResolutionEnabledNormalized)' == ''">true</_TailwindRuntimeBinaryResolutionEnabledNormalized>
-    <_TailwindCacheDir>$(BaseIntermediateOutputPath)$(Configuration)/$(TargetFramework)/tailwind-$(TailwindVersion)/</_TailwindCacheDir>
+    <TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' == '' AND '$(XDG_CACHE_HOME)' != ''">$(XDG_CACHE_HOME)/forgetrust/appsurface/tailwind</TailwindDownloadCacheRoot>
+    <TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' == '' AND '$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)/ForgeTrust/AppSurface/Tailwind</TailwindDownloadCacheRoot>
+    <TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' == '' AND '$(HOME)' != ''">$(HOME)/.cache/forgetrust/appsurface/tailwind</TailwindDownloadCacheRoot>
+    <TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' == '' AND '$(USERPROFILE)' != ''">$(USERPROFILE)/.cache/forgetrust/appsurface/tailwind</TailwindDownloadCacheRoot>
+    <_TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' != ''">$([MSBuild]::EnsureTrailingSlash('$(TailwindDownloadCacheRoot)'))</_TailwindDownloadCacheRoot>
+    <_TailwindCacheDir Condition="'$(_TailwindDownloadCacheRoot)' != ''">$(_TailwindDownloadCacheRoot)tailwind-$(TailwindVersion)/$(TailwindRid)/</_TailwindCacheDir>
+    <_TailwindCacheDir Condition="'$(_TailwindCacheDir)' == ''">$(BaseIntermediateOutputPath)$(Configuration)/$(TargetFramework)/tailwind-$(TailwindVersion)/</_TailwindCacheDir>
     <_TailwindBinaryPath>$(_TailwindCacheDir)$(TailwindBinaryName)</_TailwindBinaryPath>
     <ChecksumFile>$(_TailwindCacheDir)sha256sums.txt</ChecksumFile>
     <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddTailwindRuntimeBinaryToPackage</TargetsForTfmSpecificContentInPackage>

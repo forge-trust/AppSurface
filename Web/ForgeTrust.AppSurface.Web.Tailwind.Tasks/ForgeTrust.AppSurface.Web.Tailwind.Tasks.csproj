@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <DefineConstants>$(DefineConstants);APP_SURFACE_TAILWIND_TASKS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

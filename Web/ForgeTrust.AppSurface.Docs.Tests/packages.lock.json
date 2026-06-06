@@ -440,6 +440,7 @@
           "Acornima": "[1.6.2, )",
           "ForgeTrust.AppSurface.Caching": "[0.1.0, )",
           "ForgeTrust.AppSurface.Config": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Intelligence": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web.Tailwind": "[0.1.0, )",
           "ForgeTrust.RazorWire": "[0.1.0, )",
           "HtmlSanitizer": "[9.0.892, )",
@@ -454,6 +455,13 @@
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Docs": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.intelligence": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "Microsoft.Extensions.Options": "[10.0.8, )"
         }
       },
       "forgetrust.appsurface.testing": {
@@ -495,6 +503,7 @@
       "forgetrust.razorwire": {
         "type": "Project",
         "dependencies": {
+          "ForgeTrust.AppSurface.Intelligence": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
         }

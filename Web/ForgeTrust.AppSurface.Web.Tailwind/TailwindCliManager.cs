@@ -13,6 +13,8 @@ namespace ForgeTrust.AppSurface.Web.Tailwind;
 /// </summary>
 public class TailwindCliManager
 {
+    private const string TailwindCacheDirectoryPrefix = "tailwind-";
+
     /// <summary>
     /// Represents the concrete process invocation required to launch the resolved Tailwind CLI.
     /// </summary>
@@ -48,6 +50,11 @@ public class TailwindCliManager
     internal string? RidOverride { get; set; }
 
     /// <summary>
+    /// Gets or sets a Tailwind download cache root override for tests and source-tree watch-mode probing.
+    /// </summary>
+    internal string? DownloadCacheRootOverride { get; set; }
+
+    /// <summary>
     /// Gets or sets an operating-system detector override for tests that need deterministic platform simulation.
     /// </summary>
     internal static Func<OSPlatform, bool>? IsOSPlatformOverride { get; set; }
@@ -66,7 +73,7 @@ public class TailwindCliManager
     /// <list type="number">
     /// <item><description>RID-specific runtime assets under <see cref="AppContext.BaseDirectory"/>.</description></item>
     /// <item><description>A flat binary next to the application under <see cref="AppContext.BaseDirectory"/>.</description></item>
-    /// <item><description>RID-specific runtime assets relative to this assembly, including local development runtime build outputs when running inside this repository.</description></item>
+    /// <item><description>RID-specific runtime assets relative to this assembly, including shared and local development runtime build outputs when running inside this repository.</description></item>
     /// <item><description>The system <c>PATH</c> as an escape hatch for custom or Node-managed Tailwind setups, including Windows shell shims such as <c>.cmd</c> and <c>.ps1</c>.</description></item>
     /// </list>
     /// If none of these locations contain a compatible binary, the method throws <see cref="FileNotFoundException"/>.
@@ -127,6 +134,12 @@ public class TailwindCliManager
                     {
                         _logger.LogDebug("Found Tailwind CLI at development runtime project path: {Path}", devRuntimeProjectPath);
                         return devRuntimeProjectPath;
+                    }
+
+                    foreach (var downloadCachePath in EnumerateDownloadCachePaths(rid).Where(File.Exists))
+                    {
+                        _logger.LogDebug("Found Tailwind CLI at shared download cache path: {Path}", downloadCachePath);
+                        return downloadCachePath;
                     }
                 }
             }
@@ -245,6 +258,64 @@ public class TailwindCliManager
         }
 
         return null;
+    }
+
+    private IEnumerable<string> EnumerateDownloadCachePaths(string rid)
+    {
+        var binaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid);
+        if (string.IsNullOrEmpty(binaryName) || !IsFileName(binaryName))
+        {
+            yield break;
+        }
+
+        var cacheRoot = DownloadCacheRootOverride;
+        if (string.IsNullOrWhiteSpace(cacheRoot))
+        {
+            yield break;
+        }
+
+        yield return TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, "4.1.18", rid, binaryName);
+
+        if (!Directory.Exists(cacheRoot))
+        {
+            yield break;
+        }
+
+        foreach (var versionDirectory in EnumerateVersionedDownloadCacheDirectories(cacheRoot))
+        {
+            yield return Path.Join(versionDirectory, rid, binaryName);
+        }
+    }
+
+    private static IEnumerable<string> EnumerateVersionedDownloadCacheDirectories(string cacheRoot)
+    {
+        return Directory
+            .EnumerateDirectories(cacheRoot, $"{TailwindCacheDirectoryPrefix}*")
+            .Select(static path => (Path: path, Version: ParseTailwindCacheVersion(path)))
+            .Where(static entry => entry.Version > new Version(0, 0, 0))
+            .OrderByDescending(static entry => entry.Version)
+            .ThenByDescending(static entry => entry.Path, StringComparer.Ordinal)
+            .Select(static entry => entry.Path);
+    }
+
+    /// <summary>
+    /// Parses the semantic version suffix from a Tailwind shared-cache directory name.
+    /// </summary>
+    /// <param name="path">The cache directory path or file name to parse.</param>
+    /// <returns>The parsed version, or <c>0.0.0</c> when the directory is malformed.</returns>
+    internal static Version ParseTailwindCacheVersion(string? path)
+    {
+        var name = Path.GetFileName(path);
+        if (string.IsNullOrEmpty(name))
+        {
+            return new Version(0, 0, 0);
+        }
+
+        var versionText = name.StartsWith(TailwindCacheDirectoryPrefix, StringComparison.Ordinal)
+            ? name.Substring(TailwindCacheDirectoryPrefix.Length)
+            : name;
+
+        return Version.TryParse(versionText, out var version) ? version : new Version(0, 0, 0);
     }
 
     private static bool IsFileName(string value)

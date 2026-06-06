@@ -402,6 +402,13 @@
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.intelligence": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "Microsoft.Extensions.Options": "[10.0.8, )"
+        }
+      },
       "forgetrust.appsurface.testing": {
         "type": "Project"
       },
@@ -414,6 +421,7 @@
       "forgetrust.razorwire": {
         "type": "Project",
         "dependencies": {
+          "ForgeTrust.AppSurface.Intelligence": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
         }
