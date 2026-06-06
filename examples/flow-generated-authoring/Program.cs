@@ -1,5 +1,8 @@
+using System.Diagnostics.CodeAnalysis;
 using ForgeTrust.AppSurface.Flow;
 using Microsoft.Extensions.Options;
+
+[assembly: ExcludeFromCodeCoverage(Justification = "Executable sample is validated by example runs and snippet tests; Flow runtime and generator behavior are covered by package tests.")]
 
 var request = new ApprovalRequest("APR-1001", "andrew", "Approve the generated authoring sample.");
 var inferredDefinition = GeneratedApprovalFlow.BuildDefinition(
