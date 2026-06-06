@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using CliWrap;
@@ -279,6 +281,288 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     }
 
     [Fact]
+    public void TailwindTargets_PassesDownloadCacheRootToBuildTask()
+    {
+        var document = XDocument.Load(GetTailwindTargetsPath());
+        var task = Assert.Single(
+            document.Descendants("ForgeTrust.AppSurface.Web.Tailwind.Tasks.RunTailwindBuildTask"));
+
+        Assert.Equal("$(TailwindDownloadCacheRoot)", task.Attribute("TailwindDownloadCacheRoot")?.Value);
+    }
+
+    [Fact]
+    public void TailwindTargets_DefaultsDownloadCacheRootFromUserCacheEnvironment()
+    {
+        var document = XDocument.Load(GetTailwindTargetsPath());
+        var defaultElements = document
+            .Descendants("TailwindDownloadCacheRoot")
+            .Where(element => element.Attribute("Condition")?.Value.Contains("$(_TailwindIsSourceTreeImport)", StringComparison.Ordinal) is true)
+            .ToArray();
+        var defaults = defaultElements
+            .Select(element => element.Value)
+            .ToArray();
+
+        Assert.Contains("$(XDG_CACHE_HOME)/forgetrust/appsurface/tailwind", defaults);
+        Assert.Contains("$(HOME)/.cache/forgetrust/appsurface/tailwind", defaults);
+        Assert.All(
+            defaultElements,
+            element => Assert.Contains(
+                "'$(_TailwindIsSourceTreeImport)' == 'true'",
+                element.Attribute("Condition")?.Value,
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RuntimeTargets_NormalizesDownloadCacheRootWithMsbuildEnsureTrailingSlash()
+    {
+        var document = XDocument.Load(GetTailwindRuntimeTargetsPath());
+        var normalizedRoot = Assert.Single(document.Descendants("_TailwindDownloadCacheRoot"));
+
+        Assert.Equal("'$(TailwindDownloadCacheRoot)' != ''", normalizedRoot.Attribute("Condition")?.Value);
+        Assert.Equal(
+            "$([MSBuild]::EnsureTrailingSlash('$(TailwindDownloadCacheRoot)'))",
+            normalizedRoot.Value);
+    }
+
+    [Fact]
+    public void TailwindProject_KeepsRuntimeProjectReferencesUnconditional()
+    {
+        var document = XDocument.Load(GetTailwindProjectPath());
+        var runtimeReferences = document
+            .Descendants("ProjectReference")
+            .Where(element => element.Attribute("Include")?.Value.Contains("/runtimes/", StringComparison.OrdinalIgnoreCase) is true ||
+                element.Attribute("Include")?.Value.Contains("\\runtimes\\", StringComparison.OrdinalIgnoreCase) is true ||
+                element.Attribute("Include")?.Value.StartsWith("runtimes/", StringComparison.OrdinalIgnoreCase) is true)
+            .ToArray();
+
+        Assert.Equal(5, runtimeReferences.Length);
+        Assert.All(runtimeReferences, reference => Assert.Null(reference.Attribute("Condition")));
+        Assert.DoesNotContain(
+            "TailwindRuntimeBinaryResolutionEnabled",
+            document.ToString(SaveOptions.DisableFormatting),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RuntimeTargets_DefaultsBinaryResolutionEnabledAndGatesOnlyResolveTarget()
+    {
+        var document = XDocument.Load(GetTailwindRuntimeTargetsPath());
+        var defaultProperty = Assert.Single(
+            document.Descendants("TailwindRuntimeBinaryResolutionEnabled"),
+            element => element.Attribute("Condition")?.Value == "'$(TailwindRuntimeBinaryResolutionEnabled)' == ''");
+        var resolveTarget = Assert.Single(
+            document.Descendants("Target"),
+            element => element.Attribute("Name")?.Value == "ResolveTailwindBinary");
+        var packageTarget = Assert.Single(
+            document.Descendants("Target"),
+            element => element.Attribute("Name")?.Value == "AddTailwindRuntimeBinaryToPackage");
+
+        Assert.Equal("true", defaultProperty.Value);
+        Assert.Equal("'$(_TailwindRuntimeBinaryResolutionEnabledNormalized)' == 'true'", resolveTarget.Attribute("Condition")?.Value);
+        Assert.Null(packageTarget.Attribute("Condition"));
+        Assert.Contains(
+            "ErrorIfTailwindRuntimePackageCreatedWithoutBinaryResolution",
+            packageTarget.Attribute("DependsOnTargets")?.Value,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RuntimeBinaryResolution_FailsWithDiagnostic_WhenPropertyValueIsInvalid()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "runtime-invalid-property");
+        var projectPath = await CreateRuntimeProjectAsync(projectDirectory);
+
+        var result = await RunDotNetBuildAsync(
+            projectPath,
+            projectDirectory,
+            ("TailwindRuntimeBinaryResolutionEnabled", "treu"));
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("ASTW009", combinedOutput, StringComparison.Ordinal);
+        Assert.Contains("TailwindRuntimeBinaryResolutionEnabled", combinedOutput, StringComparison.Ordinal);
+        Assert.False(File.Exists(GetRuntimeBinaryPath(projectDirectory, CurrentConfiguration)));
+        Assert.False(File.Exists(Path.Join(Path.GetDirectoryName(GetRuntimeBinaryPath(projectDirectory, CurrentConfiguration))!, "sha256sums.txt")));
+    }
+
+    [Fact]
+    public async Task RuntimeBinaryResolution_TreatsWhitespacePropertyValueAsUnset()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "runtime-whitespace-property");
+        var projectPath = await CreateRuntimeProjectAsync(projectDirectory);
+        await WriteRuntimeBinaryCacheAsync(projectDirectory, CurrentConfiguration);
+
+        var result = await RunDotNetBuildAsync(
+            projectPath,
+            projectDirectory,
+            ("TailwindRuntimeBinaryResolutionEnabled", "   "));
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.True(result.ExitCode == 0, combinedOutput);
+        Assert.DoesNotContain("ASTW009", combinedOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("Tailwind runtime binary resolution is disabled for this build", combinedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RuntimeBinaryResolution_SkipsDownloadWork_WhenDisabledForBuild()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "runtime-disabled-build");
+        var projectPath = await CreateRuntimeProjectAsync(projectDirectory);
+
+        var result = await RunDotNetBuildAsync(
+            projectPath,
+            projectDirectory,
+            ("TailwindRuntimeBinaryResolutionEnabled", "false"));
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Tailwind runtime binary resolution is disabled for this build", combinedOutput, StringComparison.Ordinal);
+        Assert.False(File.Exists(GetRuntimeBinaryPath(projectDirectory, CurrentConfiguration)));
+        Assert.False(File.Exists(Path.Join(Path.GetDirectoryName(GetRuntimeBinaryPath(projectDirectory, CurrentConfiguration))!, "sha256sums.txt")));
+    }
+
+    [Fact]
+    public async Task RuntimePackageCreation_Fails_WhenBinaryResolutionIsDisabled()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "runtime-disabled-pack");
+        var projectPath = await CreateRuntimeProjectAsync(projectDirectory);
+        var restoreResult = await RunDotNetAsync(["restore", projectPath, "-v:minimal"], projectDirectory);
+        Assert.Equal(0, restoreResult.ExitCode);
+
+        var result = await RunDotNetAsync(
+            ["pack", projectPath, "--no-build", "-c", "Release", "-v:minimal", "-p:TailwindRuntimeBinaryResolutionEnabled=false"],
+            projectDirectory);
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("ASTW010", combinedOutput, StringComparison.Ordinal);
+        Assert.Contains("cannot be packed without its native Tailwind binary", combinedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RuntimePackageCreation_Fails_WhenBinaryResolutionIsDisabledEvenWithCachedBinary()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "runtime-disabled-pack-cached");
+        var projectPath = await CreateRuntimeProjectAsync(projectDirectory);
+        var runtimeBinaryPath = GetRuntimeBinaryPath(projectDirectory, "Release");
+        Directory.CreateDirectory(Path.GetDirectoryName(runtimeBinaryPath)!);
+        await File.WriteAllTextAsync(runtimeBinaryPath, "cached", Encoding.UTF8);
+        var restoreResult = await RunDotNetAsync(["restore", projectPath, "-v:minimal"], projectDirectory);
+        Assert.Equal(0, restoreResult.ExitCode);
+
+        var result = await RunDotNetAsync(
+            ["pack", projectPath, "--no-build", "-c", "Release", "-v:minimal", "-p:TailwindRuntimeBinaryResolutionEnabled=false"],
+            projectDirectory);
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("ASTW010", combinedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RuntimePackageCreation_WithNoBuild_IncludesRuntimeBinary_WhenBinaryResolutionIsEnabled()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "runtime-enabled-pack-no-build");
+        var projectPath = await CreateRuntimeProjectAsync(projectDirectory);
+        var packageDirectory = Path.Join(projectDirectory, "packages");
+        Directory.CreateDirectory(packageDirectory);
+        await WriteRuntimeBinaryCacheAsync(projectDirectory, "Release");
+        var restoreResult = await RunDotNetAsync(["restore", projectPath, "-v:minimal"], projectDirectory);
+        Assert.Equal(0, restoreResult.ExitCode);
+
+        var result = await RunDotNetAsync(
+            [
+                "pack",
+                projectPath,
+                "--no-build",
+                "-c",
+                "Release",
+                "-v:minimal",
+                "--output",
+                packageDirectory,
+                "-p:PackageVersion=0.0.0-test.1",
+                "-p:TailwindRuntimeBinaryResolutionEnabled=true"
+            ],
+            projectDirectory);
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.Equal(0, result.ExitCode);
+        var packagePath = Path.Join(packageDirectory, "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.0.0.0-test.1.nupkg");
+        Assert.True(File.Exists(packagePath), combinedOutput);
+        using var archive = System.IO.Compression.ZipFile.OpenRead(packagePath);
+        Assert.Contains(
+            archive.Entries,
+            entry => entry.FullName == "runtimes/linux-x64/native/tailwindcss-linux-x64");
+    }
+
+    [Fact]
+    public void RuntimeTargets_DefinesMissingPayloadDiagnostic()
+    {
+        var document = XDocument.Load(GetTailwindRuntimeTargetsPath());
+        var packageTarget = Assert.Single(
+            document.Descendants("Target"),
+            element => element.Attribute("Name")?.Value == "AddTailwindRuntimeBinaryToPackage");
+        var missingPayloadError = Assert.Single(
+            packageTarget.Descendants("Error"),
+            element => element.Attribute("Code")?.Value == "ASTW011");
+
+        Assert.Contains("Resolved Tailwind runtime binary is missing", missingPayloadError.Attribute("Text")?.Value, StringComparison.Ordinal);
+        Assert.Equal("!Exists('$(_TailwindBinaryPath)')", missingPayloadError.Attribute("Condition")?.Value);
+    }
+
+    [Fact]
+    public async Task RunTailwindBuild_DoesNotUseImplicitUserCache_WhenPackagedRuntimeIsMissing()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var projectDirectory = Path.Join(_tempRoot, "sample-packaged-target-no-implicit-cache");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        await File.WriteAllTextAsync(
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
+            "@import \"tailwindcss\";" + Environment.NewLine);
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        var fakeHomeDirectory = Path.Join(projectDirectory, "fake-home");
+        var fakeCacheRoot = Path.Join(fakeHomeDirectory, ".cache", "forgetrust", "appsurface", "tailwind");
+        var ambientCacheRuntimePath = TailwindDownloadCache.GetRuntimeBinaryPath(fakeCacheRoot, "4.1.18", rid, runtimeBinaryName);
+        await CreateRuntimeTailwindCliStubAsync(projectDirectory, ambientCacheRuntimePath);
+
+        var projectPath = Path.Join(projectDirectory, "Sample.csproj");
+        var targetsPath = await CreatePackagedTargetsCopyAsync(projectDirectory);
+        await File.WriteAllTextAsync(
+            projectPath,
+            $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <TailwindInputPath>wwwroot/css/app.css</TailwindInputPath>
+                <TailwindOutputPath>wwwroot/css/site.gen.css</TailwindOutputPath>
+              </PropertyGroup>
+
+              <Import Project="{{EscapeForXml(targetsPath)}}" />
+            </Project>
+            """);
+
+        var result = await RunDotNetBuildAsync(
+            projectPath,
+            projectDirectory,
+            ("HOME", fakeHomeDirectory),
+            ("XDG_CACHE_HOME", string.Empty),
+            ("LOCALAPPDATA", string.Empty),
+            ("USERPROFILE", string.Empty));
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("ASTW004", combinedOutput, StringComparison.Ordinal);
+        Assert.False(File.Exists(GetRuntimeSelectionMarkerPath(ambientCacheRuntimePath)));
+    }
+
+    [Fact]
     public async Task RunTailwindBuild_DoesNotUsePathFallback_WhenBuildCliIsMissing()
     {
         var projectDirectory = Path.Join(Path.GetFullPath(_tempRoot), "sample-no-path-fallback");
@@ -301,6 +585,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
                 <TargetFramework>net10.0</TargetFramework>
                 <TailwindInputPath>wwwroot/css/app.css</TailwindInputPath>
                 <TailwindOutputPath>wwwroot/css/site.gen.css</TailwindOutputPath>
+                <TailwindDownloadCacheRoot>{{EscapeForXml(Path.Join(projectDirectory, "empty-download-cache"))}}</TailwindDownloadCacheRoot>
               </PropertyGroup>
 
               <Import Project="{{EscapeForXml(targetsPath)}}" />
@@ -619,6 +904,172 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     }
 
     [Fact]
+    public async Task RunTailwindBuildTask_UsesSharedDownloadCacheCandidate_WhenPresent()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        var cacheRoot = Path.Join(_tempRoot, "tailwind-download-cache");
+        var runtimePath = TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, "4.1.18", rid, runtimeBinaryName);
+        var task = CreateBuildTask("sample-shared-runtime-cache", task =>
+        {
+            task.TailwindTargetRid = rid;
+            task.TailwindVersion = "4.1.18";
+            task.TailwindDownloadCacheRoot = cacheRoot;
+        });
+        await CreateRuntimeTailwindCliStubAsync(task.ProjectDirectory, runtimePath);
+        await WriteRuntimeChecksumAsync(runtimePath, runtimeBinaryName);
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.True(result);
+        Assert.True(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
+        Assert.Empty(buildEngine.Errors);
+        Assert.Empty(buildEngine.Warnings);
+        Assert.Equal(runtimePath, await File.ReadAllTextAsync(GetRuntimeSelectionMarkerPath(runtimePath)));
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_UsesSharedDownloadCacheCandidate_WhenChecksumUsesRelativeFileToken()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        var cacheRoot = Path.Join(_tempRoot, "tailwind-download-cache-relative-checksum");
+        var runtimePath = TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, "4.1.18", rid, runtimeBinaryName);
+        var task = CreateBuildTask("sample-shared-runtime-cache-relative-checksum", task =>
+        {
+            task.TailwindTargetRid = rid;
+            task.TailwindVersion = "4.1.18";
+            task.TailwindDownloadCacheRoot = cacheRoot;
+        });
+        await CreateRuntimeTailwindCliStubAsync(task.ProjectDirectory, runtimePath);
+        await WriteRuntimeChecksumAsync(runtimePath, runtimeBinaryName, $"./{runtimeBinaryName}");
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.True(result);
+        Assert.True(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
+        Assert.Empty(buildEngine.Errors);
+        Assert.Empty(buildEngine.Warnings);
+        Assert.Equal(runtimePath, await File.ReadAllTextAsync(GetRuntimeSelectionMarkerPath(runtimePath)));
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_SkipsSharedDownloadCacheCandidate_WhenChecksumIsMissing()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        var cacheRoot = Path.Join(_tempRoot, "tailwind-download-cache-missing-checksum");
+        var runtimePath = TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, "4.1.18", rid, runtimeBinaryName);
+        var task = CreateBuildTask("sample-shared-runtime-cache-missing-checksum", task =>
+        {
+            task.TailwindTargetRid = rid;
+            task.TailwindVersion = "4.1.18";
+            task.TailwindDownloadCacheRoot = cacheRoot;
+        });
+        await CreateRuntimeTailwindCliStubAsync(task.ProjectDirectory, runtimePath);
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.False(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
+        Assert.Contains(buildEngine.Warnings, warning => warning.Message?.Contains("does not contain a checksum", StringComparison.Ordinal) is true);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) is true);
+        Assert.False(File.Exists(GetRuntimeSelectionMarkerPath(runtimePath)));
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_SkipsSharedDownloadCacheCandidate_WhenChecksumHasNoRuntimeEntry()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        var cacheRoot = Path.Join(_tempRoot, "tailwind-download-cache-no-runtime-entry");
+        var runtimePath = TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, "4.1.18", rid, runtimeBinaryName);
+        var task = CreateBuildTask("sample-shared-runtime-cache-no-runtime-entry", task =>
+        {
+            task.TailwindTargetRid = rid;
+            task.TailwindVersion = "4.1.18";
+            task.TailwindDownloadCacheRoot = cacheRoot;
+        });
+        await CreateRuntimeTailwindCliStubAsync(task.ProjectDirectory, runtimePath);
+        await File.WriteAllTextAsync(
+            Path.Join(Path.GetDirectoryName(runtimePath)!, "sha256sums.txt"),
+            "malformed-checksum-line" + Environment.NewLine +
+            "0000000000000000000000000000000000000000000000000000000000000000  ./not-the-runtime" + Environment.NewLine,
+            Encoding.UTF8);
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.False(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
+        Assert.Contains(buildEngine.Warnings, warning => warning.Message?.Contains("does not contain a checksum", StringComparison.Ordinal) is true);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) is true);
+        Assert.False(File.Exists(GetRuntimeSelectionMarkerPath(runtimePath)));
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_SkipsSharedDownloadCacheCandidate_WhenChecksumDoesNotMatch()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        var cacheRoot = Path.Join(_tempRoot, "tailwind-download-cache-bad-checksum");
+        var runtimePath = TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, "4.1.18", rid, runtimeBinaryName);
+        var task = CreateBuildTask("sample-shared-runtime-cache-bad-checksum", task =>
+        {
+            task.TailwindTargetRid = rid;
+            task.TailwindVersion = "4.1.18";
+            task.TailwindDownloadCacheRoot = cacheRoot;
+        });
+        await CreateRuntimeTailwindCliStubAsync(task.ProjectDirectory, runtimePath);
+        await File.WriteAllTextAsync(
+            Path.Join(Path.GetDirectoryName(runtimePath)!, "sha256sums.txt"),
+            $"0000000000000000000000000000000000000000000000000000000000000000  {runtimeBinaryName}{Environment.NewLine}",
+            Encoding.UTF8);
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.False(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
+        Assert.Contains(buildEngine.Warnings, warning => warning.Message?.Contains("checksum does not match", StringComparison.Ordinal) is true);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) is true);
+        Assert.False(File.Exists(GetRuntimeSelectionMarkerPath(runtimePath)));
+    }
+
+    [Fact]
     public async Task RunTailwindBuildTask_UsesSiblingRuntimePackageCandidate_WhenPresent()
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -859,6 +1310,42 @@ public sealed class TailwindBuildTargetsTests : IDisposable
                 "ForgeTrust.AppSurface.Web.Tailwind.targets"));
     }
 
+    private static string GetTailwindRuntimeTargetsPath()
+    {
+        return Path.GetFullPath(
+            Path.Join(
+                AppContext.BaseDirectory,
+                "..",
+                "..",
+                "..",
+                "..",
+                "..",
+                "Web",
+                "ForgeTrust.AppSurface.Web.Tailwind",
+                "runtimes",
+                "Tailwind.Runtime.Common.targets"));
+    }
+
+    private static string GetTailwindProjectPath()
+    {
+        return Path.GetFullPath(
+            Path.Join(
+                AppContext.BaseDirectory,
+                "..",
+                "..",
+                "..",
+                "..",
+                "..",
+                "Web",
+                "ForgeTrust.AppSurface.Web.Tailwind",
+                "ForgeTrust.AppSurface.Web.Tailwind.csproj"));
+    }
+
+    private static string GetTailwindVersion()
+    {
+        return File.ReadAllText(Path.Join(Path.GetDirectoryName(GetTailwindProjectPath())!, "tailwind.version")).Trim();
+    }
+
     private static string GetRepositoryRoot()
     {
         return Path.GetFullPath(
@@ -923,6 +1410,62 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             .Replace(">", "&gt;", StringComparison.Ordinal);
     }
 
+    private static async Task<string> CreateRuntimeProjectAsync(string projectDirectory)
+    {
+        Directory.CreateDirectory(projectDirectory);
+        await File.WriteAllTextAsync(
+            Path.Join(projectDirectory, "Directory.Build.props"),
+            """
+            <Project>
+              <PropertyGroup>
+                <BaseIntermediateOutputPath>obj/Runtime/</BaseIntermediateOutputPath>
+              </PropertyGroup>
+            </Project>
+            """,
+            Encoding.UTF8);
+        var projectPath = Path.Join(projectDirectory, "Runtime.csproj");
+        await File.WriteAllTextAsync(
+            projectPath,
+            $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TailwindRid>linux-x64</TailwindRid>
+                <PackageId>ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64</PackageId>
+              </PropertyGroup>
+
+              <Import Project="{{EscapeForXml(GetTailwindRuntimeTargetsPath())}}" />
+            </Project>
+            """,
+            Encoding.UTF8);
+
+        return projectPath;
+    }
+
+    private static string GetRuntimeBinaryPath(string projectDirectory, string configuration)
+    {
+        return Path.Join(
+            projectDirectory,
+            "obj",
+            "Runtime",
+            configuration,
+            "net10.0",
+            $"tailwind-{GetTailwindVersion()}",
+            "tailwindcss-linux-x64");
+    }
+
+    private static async Task WriteRuntimeBinaryCacheAsync(string projectDirectory, string configuration)
+    {
+        var runtimeBinaryPath = GetRuntimeBinaryPath(projectDirectory, configuration);
+        Directory.CreateDirectory(Path.GetDirectoryName(runtimeBinaryPath)!);
+        var binaryBytes = Encoding.UTF8.GetBytes("cached-tailwind-binary");
+        await File.WriteAllBytesAsync(runtimeBinaryPath, binaryBytes);
+        var hash = Convert.ToHexString(SHA256.HashData(binaryBytes)).ToLowerInvariant();
+        await File.WriteAllTextAsync(
+            Path.Join(Path.GetDirectoryName(runtimeBinaryPath)!, "sha256sums.txt"),
+            $"{hash}  tailwindcss-linux-x64{Environment.NewLine}",
+            Encoding.UTF8);
+    }
+
     private RunTailwindBuildTask CreateBuildTask(string directoryName, Action<RunTailwindBuildTask>? configure = null)
     {
         var projectDirectory = Path.Join(_tempRoot, directoryName);
@@ -984,6 +1527,19 @@ exit 0
             UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
         File.SetUnixFileMode(runtimePath, executableMode);
         return runtimePath;
+    }
+
+    private static async Task WriteRuntimeChecksumAsync(
+        string runtimePath,
+        string runtimeBinaryName,
+        string? checksumFileToken = null)
+    {
+        var binaryBytes = await File.ReadAllBytesAsync(runtimePath);
+        var hash = Convert.ToHexString(SHA256.HashData(binaryBytes)).ToLowerInvariant();
+        await File.WriteAllTextAsync(
+            Path.Join(Path.GetDirectoryName(runtimePath)!, "sha256sums.txt"),
+            $"{hash}  {checksumFileToken ?? runtimeBinaryName}{Environment.NewLine}",
+            Encoding.UTF8);
     }
 
     private static string GetRuntimeSelectionMarkerPath(string runtimePath)

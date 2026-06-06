@@ -93,6 +93,7 @@ public class DocAggregatorTests : IDisposable
     [Fact]
     public async Task GetDocsAsync_ShouldServeStaleSnapshotWhileRevalidatingExpiredCache()
     {
+        var cacheExpiration = TimeSpan.FromSeconds(3);
         var harvester = A.Fake<IDocHarvester>();
         var harvestCount = 0;
         var secondHarvestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -118,7 +119,7 @@ public class DocAggregatorTests : IDisposable
             [harvester],
             new AppSurfaceDocsOptions
             {
-                CacheExpirationMinutes = AppSurfaceDocsOptions.MinCacheExpirationMinutes,
+                CacheExpirationMinutes = cacheExpiration.TotalMinutes,
                 Source = new AppSurfaceDocsSourceOptions
                 {
                     RepositoryRoot = Path.GetTempPath()
@@ -130,7 +131,7 @@ public class DocAggregatorTests : IDisposable
             _loggerFake);
 
         var first = await aggregator.GetDocsAsync();
-        await Task.Delay(TimeSpan.FromMilliseconds(1100));
+        await Task.Delay(cacheExpiration.Add(TimeSpan.FromMilliseconds(100)));
         var second = await aggregator.GetDocsAsync();
 
         Assert.Equal("Harvest 1", Assert.Single(first).Title);
