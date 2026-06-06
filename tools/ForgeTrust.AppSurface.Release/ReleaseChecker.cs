@@ -32,6 +32,7 @@ internal sealed class ReleaseChecker
         var errors = new List<ReleaseDiagnostic>();
         var warnings = new List<ReleaseDiagnostic>();
         var generatedFiles = GeneratedFiles(options.Version);
+        ReleaseEvidenceSummary? evidenceSummary = null;
 
         foreach (var requiredPath in RequiredPaths().Where(requiredPath => !File.Exists(requiredPath)))
         {
@@ -131,11 +132,24 @@ internal sealed class ReleaseChecker
         }
 
         var sourceCommit = await TryGetSourceCommitAsync(cancellationToken);
+        if (options.AllowExistingTargets && string.Equals(options.Command, "check", StringComparison.Ordinal))
+        {
+            var evidence = await ReleaseEvidence.ValidatePreparedAsync(
+                _workspace,
+                options.Version,
+                options.Version.IsStable ? "stable" : "prerelease",
+                sourceCommit,
+                cancellationToken);
+            evidenceSummary = evidence.Summary;
+            errors.AddRange(evidence.Diagnostics);
+        }
+
         return new ReleaseCheckResult(
             options.Version.ToString(),
             options.Version.IsStable ? "stable" : "prerelease",
             sourceCommit,
             generatedFiles.Select(_workspace.DisplayPath).ToArray(),
+            evidenceSummary,
             errors,
             warnings);
     }
@@ -158,7 +172,8 @@ internal sealed class ReleaseChecker
         [
             _workspace.ReleaseNotePath(version),
             _workspace.ReleaseSidecarPath(version),
-            _workspace.ReleaseManifestPath(version)
+            _workspace.ReleaseManifestPath(version),
+            _workspace.ReleaseEvidencePath(version)
         ];
     }
 

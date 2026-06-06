@@ -139,7 +139,8 @@ jobs:
           mapfile -t release_artifacts < <(git diff --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- \
             ':(glob)releases/v*.md' \
             ':(glob)releases/v*.md.yml' \
-            ':(glob)releases/v*.release.json')
+            ':(glob)releases/v*.release.json' \
+            ':(glob)releases/v*.evidence.json')
           if [[ "${#release_artifacts[@]}" -eq 0 ]]; then
             echo "No versioned release artifacts changed; validating release tooling instead."
             dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
@@ -151,6 +152,16 @@ jobs:
             echo "Expected exactly one added or modified release manifest in this release preparation pull request; found ${#manifests[@]}." >&2
             exit 1
           fi
+          mapfile -t evidence_files < <(git diff --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.evidence.json')
+          if [[ "${#evidence_files[@]}" -ne 1 ]]; then
+            echo "Expected exactly one added or modified release evidence bundle in this release preparation pull request; found ${#evidence_files[@]}." >&2
+            exit 1
+          fi
           manifest="${manifests[0]}"
           version="$(jq -r '.version' "${manifest}")"
+          expected_evidence="releases/v${version}.evidence.json"
+          if [[ "${evidence_files[0]}" != "${expected_evidence}" ]]; then
+            echo "Release evidence bundle ${evidence_files[0]} does not match release manifest version ${version}; expected ${expected_evidence}." >&2
+            exit 1
+          fi
           ./eng/release check --version "${version}" --fail-on-warnings --allow-existing-targets

@@ -49,8 +49,6 @@ internal sealed class ReleasePublishing
         await ValidatePackagePublishingSucceededAsync(options.Version, tag, tagCommit, cancellationToken);
         await ValidateGitHubReleaseDoesNotExistAsync(tag, cancellationToken);
 
-        var notePathInTag = $"releases/v{options.Version}.md";
-        var note = await RequireCommandOutputAsync("git", ["show", $"{tag}:{notePathInTag}"], "release-note-missing-from-tag", cancellationToken);
         var safeTagSegment = Path.GetFileName(tag);
         if (string.IsNullOrWhiteSpace(safeTagSegment))
         {
@@ -60,6 +58,28 @@ internal sealed class ReleasePublishing
                 "The tag does not contain a file-name-safe segment for the temporary release notes path.",
                 "Use the canonical release tag form `v{version}` and retry.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+        }
+
+        var notePathInTag = $"releases/v{options.Version}.md";
+        var note = await RequireGitBlobOutputAsync(tag, notePathInTag, "release-note-missing-from-tag", cancellationToken);
+        var sidecarPathInTag = $"releases/v{options.Version}.md.yml";
+        var sidecar = await RequireGitBlobOutputAsync(tag, sidecarPathInTag, "release-sidecar-missing-from-tag", cancellationToken);
+        var releaseManifestPathInTag = $"releases/v{options.Version}.release.json";
+        var releaseManifest = await RequireGitBlobOutputAsync(tag, releaseManifestPathInTag, "release-manifest-missing-from-tag", cancellationToken);
+        var evidencePathInTag = $"releases/v{options.Version}.evidence.json";
+        var evidenceJson = await RequireGitBlobOutputAsync(tag, evidencePathInTag, "release-evidence-missing", cancellationToken);
+        var evidence = ReleaseEvidence.ValidateTag(
+            options.Version,
+            options.Version.IsStable ? "stable" : "prerelease",
+            tag,
+            tagCommit.Trim(),
+            note,
+            sidecar,
+            releaseManifest,
+            evidenceJson);
+        if (evidence.Diagnostics.Count > 0)
+        {
+            throw new ReleaseToolException(evidence.Diagnostics[0]);
         }
 
         var tempDirectory = Path.Join(Path.GetTempPath(), "appsurface-release", safeTagSegment);
@@ -74,6 +94,10 @@ internal sealed class ReleasePublishing
             notePathInTag,
             notesFile,
             options.Version.IsStable ? "stable" : "prerelease",
+            evidencePathInTag,
+            evidence.Summary!.SubjectSha256,
+            tagCommit.Trim(),
+            evidence.Summary.DocsReleaseManifestSha256,
             !options.Version.IsStable,
             options.DryRun);
     }
@@ -114,6 +138,10 @@ internal sealed class ReleasePublishing
         AppendOutput(builder, "note_path", outputs.NotePath);
         AppendOutput(builder, "notes_file", outputs.NotesFile);
         AppendOutput(builder, "release_classification", outputs.ReleaseClassification);
+        AppendOutput(builder, "evidence_path", outputs.EvidencePath);
+        AppendOutput(builder, "evidence_subject_sha256", outputs.EvidenceSubjectSha256);
+        AppendOutput(builder, "evidence_tag_commit", outputs.EvidenceTagCommit);
+        AppendOutput(builder, "docs_release_manifest_sha256", outputs.DocsReleaseManifestSha256 ?? "");
         AppendOutput(builder, "prerelease", outputs.Prerelease ? "true" : "false");
         await File.AppendAllTextAsync(options.GitHubOutputPath, builder.ToString(), cancellationToken);
     }
@@ -220,6 +248,26 @@ internal sealed class ReleasePublishing
         }
 
         return result.StandardOutput.TrimEnd('\r', '\n');
+    }
+
+    private async Task<string> RequireGitBlobOutputAsync(
+        string tag,
+        string pathInTag,
+        string code,
+        CancellationToken cancellationToken)
+    {
+        var result = await _commandRunner.RunAsync(new CommandInvocation("git", ["show", $"{tag}:{pathInTag}"], _workspace.RepositoryRoot), cancellationToken);
+        if (result.ExitCode != 0)
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                code,
+                $"Command `git show {tag}:{pathInTag}` failed.",
+                string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput.Trim() : result.StandardError.Trim(),
+                "Fetch tags and main, verify the release artifact exists at the tag commit, then retry.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+        }
+
+        return result.StandardOutput;
     }
 
     private static void AppendOutput(StringBuilder builder, string name, string value)

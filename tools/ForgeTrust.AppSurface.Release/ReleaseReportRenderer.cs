@@ -30,6 +30,7 @@ internal static class ReleaseReportRenderer
             builder.AppendLine($"- `{path}`");
         }
 
+        AppendEvidenceSummary(builder, result.EvidenceSummary);
         AppendDiagnostics(builder, "Errors", result.Errors);
         AppendDiagnostics(builder, "Warnings", result.Warnings);
         return builder.ToString();
@@ -53,6 +54,7 @@ internal static class ReleaseReportRenderer
         builder.AppendLine("- Stop at this release pull request for maintainer review and manual merge.");
         builder.AppendLine("- Do not create the annotated tag or start publish workflows until a maintainer gives an explicit post-review instruction.");
         builder.AppendLine();
+        AppendEvidenceSummary(builder, result.EvidenceSummary ?? result.Check.EvidenceSummary);
         builder.AppendLine(result.DryRun ? "## Dry-run plan" : "## Files written");
         foreach (var path in result.PlannedOrWrittenFiles)
         {
@@ -60,6 +62,25 @@ internal static class ReleaseReportRenderer
         }
 
         return builder.ToString();
+    }
+
+    private static void AppendEvidenceSummary(StringBuilder builder, ReleaseEvidenceSummary? summary)
+    {
+        if (summary is null)
+        {
+            return;
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## Release evidence bundle");
+        builder.AppendLine($"- Path: `{summary.Path}`");
+        builder.AppendLine($"- Schema: `{summary.Schema}`");
+        builder.AppendLine($"- Status: {summary.Status}");
+        builder.AppendLine($"- Subject SHA-256: `{summary.SubjectSha256}`");
+        builder.AppendLine($"- Docs archive manifest SHA-256: `{summary.DocsReleaseManifestSha256 ?? "pending"}`");
+        builder.AppendLine($"- Catalog exact tree path: `{summary.CatalogExactTreePath ?? "pending"}`");
+        builder.AppendLine($"- Tag commit: `{summary.TagCommit ?? "pending until publish validation"}`");
+        builder.AppendLine($"- Attestation: {summary.Attestation}");
     }
 
     private static void AppendDiagnostics(StringBuilder builder, string heading, IReadOnlyList<ReleaseDiagnostic> diagnostics)
