@@ -103,6 +103,42 @@ public sealed class AppSurfaceProductEventRegistryTests
     }
 
     [Fact]
+    public void Constructors_RejectEmptyRequiredText()
+    {
+        Assert.Throws<ArgumentException>(() => new AppSurfaceProductEvent(
+            " ",
+            DateTimeOffset.UnixEpoch));
+
+        Assert.Throws<ArgumentException>(() => new AppSurfaceProductEventPropertyContract(
+            "surface",
+            " ",
+            AppSurfaceProductEventSensitivity.Operational,
+            AppSurfaceProductEventCardinality.Low));
+
+        Assert.Throws<ArgumentException>(() => new AppSurfaceProductEventPropertyContract(
+            "surface",
+            "Search surface.",
+            AppSurfaceProductEventSensitivity.Operational,
+            AppSurfaceProductEventCardinality.Low,
+            allowedValues: ["search_page", " "]));
+
+        Assert.Throws<ArgumentException>(() => new AppSurfaceProductEventContract(
+            "docs.search.blank",
+            AppSurfaceProductEventLifecycle.Experimental,
+            "Prove required text validation.",
+            "Tests",
+            "Discard during tests.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    "surface",
+                    "Search surface.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low)
+            ],
+            ["raw query", " "]));
+    }
+
+    [Fact]
     public void All_DoesNotContainDuplicateEventNames()
     {
         var duplicate = AppSurfaceProductEventRegistry.All
@@ -362,6 +398,28 @@ public sealed class AppSurfaceProductEventRegistryTests
     }
 
     [Theory]
+    [InlineData(AppSurfaceProductEventRegistry.DocsSearchSubmitted, "active_filter_count")]
+    [InlineData(AppSurfaceProductEventRegistry.DocsSearchSubmitted, "query_length")]
+    [InlineData(AppSurfaceProductEventRegistry.DocsSearchSubmitted, "result_count")]
+    [InlineData(AppSurfaceProductEventRegistry.DocsSearchResultSelected, "result_rank")]
+    [InlineData(AppSurfaceProductEventRegistry.RazorWireFormFailed, "http_status")]
+    [InlineData(AppSurfaceProductEventRegistry.RazorWireFormFailureRecovered, "attempt_count")]
+    public void Validate_NormalizesEveryIntegerPropertyName(string eventName, string propertyName)
+    {
+        var properties = CreateValidProperties(eventName);
+        properties[propertyName] = " 0042 ";
+        var productEvent = new AppSurfaceProductEvent(
+            eventName,
+            DateTimeOffset.UnixEpoch,
+            properties);
+
+        var result = AppSurfaceProductEventRegistry.Validate(productEvent);
+
+        Assert.True(result.IsValid);
+        Assert.Equal("42", result.SanitizedProperties[propertyName]);
+    }
+
+    [Theory]
     [InlineData("-1")]
     [InlineData("+1")]
     [InlineData("1,000")]
@@ -383,5 +441,33 @@ public sealed class AppSurfaceProductEventRegistryTests
         Assert.True(result.IsValid);
         Assert.Contains("current_count", result.RejectedProperties);
         Assert.DoesNotContain(rawValue, result.SanitizedProperties.Values);
+    }
+
+    private static Dictionary<string, string> CreateValidProperties(string eventName)
+    {
+        return eventName switch
+        {
+            AppSurfaceProductEventRegistry.DocsSearchSubmitted => new Dictionary<string, string>
+            {
+                ["surface"] = "search_page",
+                ["result_count"] = "1"
+            },
+            AppSurfaceProductEventRegistry.DocsSearchResultSelected => new Dictionary<string, string>
+            {
+                ["surface"] = "search_page",
+                ["result_kind"] = "guide"
+            },
+            AppSurfaceProductEventRegistry.RazorWireFormFailed => new Dictionary<string, string>
+            {
+                ["failure_mode"] = "handled",
+                ["response_kind"] = "html",
+                ["failure_ui"] = "generated"
+            },
+            AppSurfaceProductEventRegistry.RazorWireFormFailureRecovered => new Dictionary<string, string>
+            {
+                ["recovery_action"] = "retry_submit"
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(eventName), eventName, "Unexpected event name.")
+        };
     }
 }

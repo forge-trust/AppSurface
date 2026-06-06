@@ -8,6 +8,16 @@ namespace ForgeTrust.AppSurface.Intelligence.Tests;
 
 public sealed class AppSurfaceProductIntelligenceDispatcherTests
 {
+    public static TheoryData<string> UnsafeRoutes => new()
+    {
+        new string('a', 161),
+        "https://example.test/docs",
+        "//example.test/docs",
+        "/docs/search?query=raw",
+        "/docs/search#results",
+        "/docs/search/{slug}@"
+    };
+
     [Fact]
     public void Constructor_RejectsMissingDependencies()
     {
@@ -107,6 +117,60 @@ public sealed class AppSurfaceProductIntelligenceDispatcherTests
         Assert.DoesNotContain("secret-session", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("abc123", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("tenant-secret-42", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_EnabledExperimentalEvents_DropsOverlongEnvelopeValues()
+    {
+        var sink = new RecordingSink();
+        using var provider = CreateServices(
+            services => services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink),
+            options => options.EnableExperimentalEvents());
+        var intelligence = provider.GetRequiredService<IAppSurfaceProductIntelligence>();
+
+        await intelligence.CaptureAsync(
+            new AppSurfaceProductEvent(
+                AppSurfaceProductEventRegistry.RazorWireStreamAdmissionRejected,
+                DateTimeOffset.UnixEpoch,
+                new Dictionary<string, string>
+                {
+                    ["rejection_reason"] = "TooManyLiveChannels",
+                    ["limit_name"] = "max_live_channels",
+                    ["current_count"] = "1"
+                },
+                actorId: new string('a', 129),
+                sessionId: "session+unsafe",
+                correlationId: "trace 1"));
+
+        var captured = Assert.Single(sink.Events);
+        Assert.Null(captured.ActorId);
+        Assert.Null(captured.SessionId);
+        Assert.Null(captured.CorrelationId);
+    }
+
+    [Theory]
+    [MemberData(nameof(UnsafeRoutes))]
+    public async Task CaptureAsync_EnabledExperimentalEvents_DropsUnsafeRoutes(string route)
+    {
+        var sink = new RecordingSink();
+        using var provider = CreateServices(
+            services => services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink),
+            options => options.EnableExperimentalEvents());
+        var intelligence = provider.GetRequiredService<IAppSurfaceProductIntelligence>();
+
+        await intelligence.CaptureAsync(
+            new AppSurfaceProductEvent(
+                AppSurfaceProductEventRegistry.DocsSearchSubmitted,
+                DateTimeOffset.UnixEpoch,
+                new Dictionary<string, string>
+                {
+                    ["surface"] = "search_page",
+                    ["result_count"] = "1"
+                },
+                route: route));
+
+        var captured = Assert.Single(sink.Events);
+        Assert.Null(captured.Route);
     }
 
     [Fact]
