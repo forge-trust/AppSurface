@@ -290,11 +290,12 @@ internal static class CoverageGateEvaluator
                 var patchCoverage = request.PatchCoverage is null
                     ? null
                     : await PatchLineCoverageEvaluator.EvaluateAsync(request.CoveragePath, request.PatchCoverage, cancellationToken);
+                var patchLineThreshold = request.PatchCoverage?.MinPatchLinePercent;
                 var passed = lineCoverage.Percent >= request.MinLinePercent
                     && branchCoverage.Percent >= request.MinBranchPercent
                     && (patchCoverage is null
-                        || request.PatchCoverage?.MinPatchLinePercent is null
-                        || patchCoverage.Percent >= request.PatchCoverage.MinPatchLinePercent.Value);
+                        || patchLineThreshold is null
+                        || patchCoverage.Percent >= patchLineThreshold.Value);
                 return new CoverageGateResult(
                     request.CoveragePath,
                     lineCoverage,
