@@ -229,6 +229,37 @@ public class TailwindCliManagerTests : IDisposable
     }
 
     [Fact]
+    public void GetTailwindPath_ReturnsVersionedSharedDownloadCachePath_WhenPinnedCacheCandidateIsMissing()
+    {
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(baseDir, "assembly-shadow");
+        Directory.CreateDirectory(baseDir);
+        _manager.BaseDirectoryOverride = baseDir;
+        _manager.AssemblyDirectoryOverride = assemblyDir;
+
+        var cacheRoot = Path.Join(_tempPath, "shared-tailwind-cache");
+        _manager.DownloadCacheRootOverride = cacheRoot;
+        var olderPath = TailwindDownloadCache.GetRuntimeBinaryPath(
+            cacheRoot,
+            "4.2.0",
+            _currentHostRid,
+            _currentHostRuntimeProjectBinaryName);
+        var newestPath = TailwindDownloadCache.GetRuntimeBinaryPath(
+            cacheRoot,
+            "5.0.0",
+            _currentHostRid,
+            _currentHostRuntimeProjectBinaryName);
+        Directory.CreateDirectory(Path.GetDirectoryName(olderPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(newestPath)!);
+        File.WriteAllText(olderPath, "older");
+        File.WriteAllText(newestPath, "newest");
+
+        var result = _manager.GetTailwindPath();
+
+        Assert.Equal(newestPath, result);
+    }
+
+    [Fact]
     public void DownloadCache_DefaultRoot_UsesXdgCacheHomeBeforeHome()
     {
         var result = TailwindDownloadCache.GetDefaultRoot(name => name switch
@@ -239,6 +270,64 @@ public class TailwindCliManagerTests : IDisposable
         });
 
         Assert.Equal(Path.Join(_tempPath, "xdg", "forgetrust", "appsurface", "tailwind"), result);
+    }
+
+    [Fact]
+    public void DownloadCache_DefaultRoot_UsesLocalAppDataWhenXdgCacheHomeIsUnavailable()
+    {
+        var result = TailwindDownloadCache.GetDefaultRoot(name => name switch
+        {
+            "LOCALAPPDATA" => Path.Join(_tempPath, "local-app-data"),
+            "HOME" => Path.Join(_tempPath, "home"),
+            _ => null
+        });
+
+        Assert.Equal(Path.Join(_tempPath, "local-app-data", "ForgeTrust", "AppSurface", "Tailwind"), result);
+    }
+
+    [Fact]
+    public void DownloadCache_DefaultRoot_UsesHomeWhenDesktopCacheVariablesAreUnavailable()
+    {
+        var result = TailwindDownloadCache.GetDefaultRoot(name => name switch
+        {
+            "HOME" => Path.Join(_tempPath, "home"),
+            "USERPROFILE" => Path.Join(_tempPath, "user-profile"),
+            _ => null
+        });
+
+        Assert.Equal(Path.Join(_tempPath, "home", ".cache", "forgetrust", "appsurface", "tailwind"), result);
+    }
+
+    [Fact]
+    public void DownloadCache_DefaultRoot_UsesUserProfileWhenHomeIsUnavailable()
+    {
+        var result = TailwindDownloadCache.GetDefaultRoot(name => name switch
+        {
+            "USERPROFILE" => Path.Join(_tempPath, "user-profile"),
+            _ => null
+        });
+
+        Assert.Equal(Path.Join(_tempPath, "user-profile", ".cache", "forgetrust", "appsurface", "tailwind"), result);
+    }
+
+    [Fact]
+    public void DownloadCache_DefaultRoot_ReturnsNullWhenNoUserCacheEnvironmentExists()
+    {
+        var result = TailwindDownloadCache.GetDefaultRoot(_ => null);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void DownloadCache_GetRuntimeBinaryPath_BuildsVersionAndRidScopedPath()
+    {
+        var result = TailwindDownloadCache.GetRuntimeBinaryPath(
+            Path.Join(_tempPath, "cache-root"),
+            "4.1.18",
+            "linux-x64",
+            "tailwindcss-linux-x64");
+
+        Assert.Equal(Path.Join(_tempPath, "cache-root", "tailwind-4.1.18", "linux-x64", "tailwindcss-linux-x64"), result);
     }
 
     [Fact]
