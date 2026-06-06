@@ -39,6 +39,70 @@ public sealed class AppSurfaceProductEventRegistryTests
     }
 
     [Fact]
+    public void EventContract_RejectsDuplicatePropertyContracts()
+    {
+        var duplicateProperties = new[]
+        {
+            new AppSurfaceProductEventPropertyContract(
+                "surface",
+                "Search surface.",
+                AppSurfaceProductEventSensitivity.Operational,
+                AppSurfaceProductEventCardinality.Low),
+            new AppSurfaceProductEventPropertyContract(
+                "surface",
+                "Duplicate search surface.",
+                AppSurfaceProductEventSensitivity.Operational,
+                AppSurfaceProductEventCardinality.Low)
+        };
+
+        var exception = Assert.Throws<ArgumentException>(() => new AppSurfaceProductEventContract(
+            "docs.search.duplicate",
+            AppSurfaceProductEventLifecycle.Experimental,
+            "Prove duplicate property validation.",
+            "Tests",
+            "Discard during tests.",
+            duplicateProperties,
+            ["raw query"]));
+
+        Assert.Contains("surface", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EventContract_RejectsEmptyPropertyContracts()
+    {
+        var exception = Assert.Throws<ArgumentException>(() => new AppSurfaceProductEventContract(
+            "docs.search.empty",
+            AppSurfaceProductEventLifecycle.Experimental,
+            "Prove empty property validation.",
+            "Tests",
+            "Discard during tests.",
+            [],
+            ["raw query"]));
+
+        Assert.Contains("At least one property contract", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PropertyContract_RejectsInvalidLimitsAndAllowedValues()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceProductEventPropertyContract(
+            "surface",
+            "Search surface.",
+            AppSurfaceProductEventSensitivity.Operational,
+            AppSurfaceProductEventCardinality.Low,
+            maxLength: 0));
+
+        var duplicateAllowedValue = Assert.Throws<ArgumentException>(() => new AppSurfaceProductEventPropertyContract(
+            "surface",
+            "Search surface.",
+            AppSurfaceProductEventSensitivity.Operational,
+            AppSurfaceProductEventCardinality.Low,
+            allowedValues: ["search_page", "search_page"]));
+
+        Assert.Contains("search_page", duplicateAllowedValue.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void All_DoesNotContainDuplicateEventNames()
     {
         var duplicate = AppSurfaceProductEventRegistry.All
@@ -155,6 +219,46 @@ public sealed class AppSurfaceProductEventRegistryTests
         Assert.False(result.IsValid);
         Assert.Contains("link_kind", result.RejectedProperties);
         Assert.DoesNotContain("https://example.test/customer/123", result.SanitizedProperties.Values);
+    }
+
+    [Fact]
+    public void Validate_DropsLowCardinalityValuesWithUnsafeCharacters()
+    {
+        var productEvent = new AppSurfaceProductEvent(
+            AppSurfaceProductEventRegistry.DocsSearchSubmitted,
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["surface"] = "search page",
+                ["result_count"] = "1"
+            });
+
+        var result = AppSurfaceProductEventRegistry.Validate(productEvent);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("surface", result.RejectedProperties);
+        Assert.DoesNotContain("search page", result.SanitizedProperties.Values);
+    }
+
+    [Fact]
+    public void Validate_DropsPropertyValuesThatExceedRegisteredMaximumLength()
+    {
+        var productEvent = new AppSurfaceProductEvent(
+            AppSurfaceProductEventRegistry.RazorWireFormFailed,
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["failure_mode"] = "handled",
+                ["response_kind"] = "html",
+                ["http_status"] = "422",
+                ["failure_ui"] = new string('a', 65)
+            });
+
+        var result = AppSurfaceProductEventRegistry.Validate(productEvent);
+
+        Assert.True(result.IsValid);
+        Assert.Contains("failure_ui", result.RejectedProperties);
+        Assert.DoesNotContain(new string('a', 65), result.SanitizedProperties.Values);
     }
 
     [Fact]

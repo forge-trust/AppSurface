@@ -41,7 +41,7 @@ public sealed class AppSurfaceProductIntelligenceDependencyGuardTests
     [Fact]
     public void RegistryExamplesAndDocs_DoNotContainForbiddenSecrets()
     {
-        var readme = File.ReadAllText(Path.Combine(
+        var readme = File.ReadAllText(TestPathUtils.PathUnder(
             TestPathUtils.FindRepoRoot(AppContext.BaseDirectory),
             "Intelligence",
             "ForgeTrust.AppSurface.Intelligence",

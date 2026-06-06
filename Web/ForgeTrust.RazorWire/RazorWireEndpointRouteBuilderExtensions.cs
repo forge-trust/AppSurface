@@ -396,7 +396,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
                     route: "/_rw/streams/{channel}"),
                 context.RequestAborted).ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or InvalidOperationException)
         {
             // Product-intelligence dogfood must not change stream admission behavior.
         }

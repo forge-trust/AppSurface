@@ -1,5 +1,7 @@
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Intelligence;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.AppSurface.Intelligence.Tests;
 
@@ -95,6 +97,30 @@ public sealed class AppSurfaceProductIntelligenceDispatcherTests
     }
 
     [Fact]
+    public async Task CaptureAsync_EnabledExperimentalEvents_PreservesSafeOptionalRouteTemplate()
+    {
+        var sink = new RecordingSink();
+        using var provider = CreateServices(
+            services => services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink),
+            options => options.EnableExperimentalEvents());
+        var intelligence = provider.GetRequiredService<IAppSurfaceProductIntelligence>();
+
+        await intelligence.CaptureAsync(
+            new AppSurfaceProductEvent(
+                AppSurfaceProductEventRegistry.DocsSearchSubmitted,
+                DateTimeOffset.UnixEpoch,
+                new Dictionary<string, string>
+                {
+                    ["surface"] = "search_page",
+                    ["result_count"] = "1"
+                },
+                route: "/docs/{slug?}"));
+
+        var captured = Assert.Single(sink.Events);
+        Assert.Equal("/docs/{slug?}", captured.Route);
+    }
+
+    [Fact]
     public async Task CaptureAsync_UnknownEvent_DoesNotEmit()
     {
         var sink = new RecordingSink();
@@ -124,6 +150,25 @@ public sealed class AppSurfaceProductIntelligenceDispatcherTests
         await intelligence.CaptureAsync(CreateStreamRejectedEvent());
 
         Assert.Single(recordingSink.Events);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_SinkCancelsRequestedToken_ThrowsAndStopsEmission()
+    {
+        var recordingSink = new RecordingSink();
+        using var cts = new CancellationTokenSource();
+        using var provider = CreateServices(
+            services =>
+            {
+                services.AddSingleton<IAppSurfaceProductIntelligenceSink>(new CancelingSink(cts));
+                services.AddSingleton<IAppSurfaceProductIntelligenceSink>(recordingSink);
+            },
+            options => options.EnableExperimentalEvents());
+        var intelligence = provider.GetRequiredService<IAppSurfaceProductIntelligence>();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            async () => await intelligence.CaptureAsync(CreateStreamRejectedEvent(), cts.Token));
+        Assert.Empty(recordingSink.Events);
     }
 
     [Fact]
@@ -163,6 +208,28 @@ public sealed class AppSurfaceProductIntelligenceDispatcherTests
 
         var sink = (ScopedSink)scope.ServiceProvider.GetRequiredService<IAppSurfaceProductIntelligenceSink>();
         Assert.Single(sink.Events);
+    }
+
+    [Fact]
+    public void Module_ConfigureServices_RegistersPassiveDispatcherWithoutDependencies()
+    {
+        var module = new AppSurfaceProductIntelligenceModule();
+        var services = new ServiceCollection();
+        var dependencies = new ModuleDependencyBuilder();
+
+        module.RegisterDependentModules(dependencies);
+        module.ConfigureServices(new StartupContext([], new TestHostModule()), services);
+
+        using var provider = services.BuildServiceProvider(
+            new ServiceProviderOptions
+            {
+                ValidateOnBuild = true,
+                ValidateScopes = true
+            });
+        Assert.Empty(dependencies.Modules);
+        using var scope = provider.CreateScope();
+        Assert.IsType<AppSurfaceProductIntelligenceDispatcher>(
+            scope.ServiceProvider.GetRequiredService<IAppSurfaceProductIntelligence>());
     }
 
     private static ServiceProvider CreateServices(
@@ -211,6 +278,17 @@ public sealed class AppSurfaceProductIntelligenceDispatcherTests
         }
     }
 
+    private sealed class CancelingSink(CancellationTokenSource cancellationTokenSource) : IAppSurfaceProductIntelligenceSink
+    {
+        public ValueTask CaptureAsync(
+            AppSurfaceProductEvent productEvent,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationTokenSource.Cancel();
+            throw new OperationCanceledException(cancellationToken);
+        }
+    }
+
     private sealed class ScopedMarker
     {
     }
@@ -226,6 +304,25 @@ public sealed class AppSurfaceProductIntelligenceDispatcherTests
             Assert.NotNull(marker);
             Events.Add(productEvent);
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class TestHostModule : IAppSurfaceHostModule
+    {
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
         }
     }
 }

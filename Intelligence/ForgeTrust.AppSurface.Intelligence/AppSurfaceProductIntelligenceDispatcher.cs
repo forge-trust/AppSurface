@@ -54,7 +54,7 @@ public sealed class AppSurfaceProductIntelligenceDispatcher : IAppSurfaceProduct
             {
                 throw;
             }
-            catch
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
             {
                 // Product-intelligence sinks are host-owned and must not break request paths.
             }
