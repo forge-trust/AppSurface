@@ -18,7 +18,7 @@
     <TailwindDownloadRetries Condition="'$(TailwindDownloadRetries)' == ''">4</TailwindDownloadRetries>
     <TailwindDownloadRetryDelayMilliseconds Condition="'$(TailwindDownloadRetryDelayMilliseconds)' == ''">5000</TailwindDownloadRetryDelayMilliseconds>
     <TailwindRuntimeBinaryResolutionEnabled Condition="'$(TailwindRuntimeBinaryResolutionEnabled)' == ''">true</TailwindRuntimeBinaryResolutionEnabled>
-    <_TailwindRuntimeBinaryResolutionEnabledNormalized>$([System.String]::Copy('$(TailwindRuntimeBinaryResolutionEnabled)').Trim().ToLowerInvariant())</_TailwindRuntimeBinaryResolutionEnabledNormalized>
+    <_TailwindRuntimeBinaryResolutionEnabledNormalized>$(TailwindRuntimeBinaryResolutionEnabled.Trim().ToLowerInvariant())</_TailwindRuntimeBinaryResolutionEnabledNormalized>
     <_TailwindRuntimeBinaryResolutionEnabledNormalized Condition="'$(_TailwindRuntimeBinaryResolutionEnabledNormalized)' == ''">true</_TailwindRuntimeBinaryResolutionEnabledNormalized>
     <_TailwindCacheDir>$(BaseIntermediateOutputPath)$(Configuration)/$(TargetFramework)/tailwind-$(TailwindVersion)/</_TailwindCacheDir>
     <_TailwindBinaryPath>$(_TailwindCacheDir)$(TailwindBinaryName)</_TailwindBinaryPath>

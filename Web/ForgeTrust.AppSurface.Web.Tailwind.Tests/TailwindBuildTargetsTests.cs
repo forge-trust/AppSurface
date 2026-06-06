@@ -280,11 +280,8 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             StringComparison.Ordinal);
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("true")]
-    [InlineData("false")]
-    public void TailwindProject_KeepsRuntimeProjectReferencesUnconditional(string? propertyValue)
+    [Fact]
+    public void TailwindProject_KeepsRuntimeProjectReferencesUnconditional()
     {
         var document = XDocument.Load(GetTailwindProjectPath());
         var runtimeReferences = document
@@ -300,8 +297,6 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             "TailwindRuntimeBinaryResolutionEnabled",
             document.ToString(SaveOptions.DisableFormatting),
             StringComparison.Ordinal);
-
-        _ = propertyValue;
     }
 
     [Fact]
@@ -342,7 +337,8 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("ASTW009", combinedOutput, StringComparison.Ordinal);
         Assert.Contains("TailwindRuntimeBinaryResolutionEnabled", combinedOutput, StringComparison.Ordinal);
-        Assert.False(Directory.Exists(Path.Join(projectDirectory, "obj", "Runtime", CurrentConfiguration, "net10.0", "tailwind-4.1.18")));
+        Assert.False(File.Exists(GetRuntimeBinaryPath(projectDirectory, CurrentConfiguration)));
+        Assert.False(File.Exists(Path.Join(Path.GetDirectoryName(GetRuntimeBinaryPath(projectDirectory, CurrentConfiguration))!, "sha256sums.txt")));
     }
 
     [Fact]

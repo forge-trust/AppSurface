@@ -1732,13 +1732,14 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var codeQualityWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "code-quality.yml"));
         var packageGateWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-gate.yml"));
         var packageArtifactsWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-artifacts.yml"));
+        const string disabledRuntimeResolutionYaml = """(?im)^\s*TailwindRuntimeBinaryResolutionEnabled:\s*(?:"false"|'false'|false)\s*$""";
 
-        Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled: \"false\"", buildWorkflow, StringComparison.Ordinal);
-        Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled: \"false\"", codeQualityWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotMatch(disabledRuntimeResolutionYaml, buildWorkflow);
+        Assert.DoesNotMatch(disabledRuntimeResolutionYaml, codeQualityWorkflow);
         Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"true\"", packageArtifactsWorkflow, StringComparison.Ordinal);
-        Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled: \"false\"", packageGateWorkflow, StringComparison.Ordinal);
-        Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled: \"false\"", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotMatch(disabledRuntimeResolutionYaml, packageGateWorkflow);
+        Assert.DoesNotMatch(disabledRuntimeResolutionYaml, packageArtifactsWorkflow);
     }
 
     [Fact]
@@ -3211,14 +3212,19 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
     private static string GetRepositoryRoot()
     {
-        return Path.GetFullPath(
-            Path.Join(
-                AppContext.BaseDirectory,
-                "..",
-                "..",
-                "..",
-                "..",
-                ".."));
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Join(current.FullName, "ForgeTrust.AppSurface.slnx")) &&
+                Directory.Exists(Path.Join(current.FullName, ".github", "workflows")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new InvalidOperationException("Could not locate repository root from test base directory.");
     }
 
     public void Dispose()
