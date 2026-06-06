@@ -39,7 +39,9 @@ jobs:
           dotnet-version: |
             10.0.x
           cache: true
-          cache-dependency-path: '**/packages.lock.json'
+          cache-dependency-path: |
+            **/packages.lock.json
+            **/packages.*.lock.json
 
       - name: Restore .NET packages (locked, cache-aware)
         run: |
@@ -56,7 +58,7 @@ jobs:
             echo "| --- | --- |"
             echo "| Workflow job | build.yml / build |"
             echo "| Cache hit | ${{ steps.setup-dotnet.outputs.cache-hit }} |"
-            echo "| Cache dependency path | \`**/packages.lock.json\` |"
+            echo "| Cache dependency path | \`**/packages.lock.json\`, \`**/packages.*.lock.json\` |"
             echo "| NUGET_PACKAGES | \`$NUGET_PACKAGES\` |"
             echo "| Package folder size | ${package_size:-unknown} |"
             echo "| Locked restore duration | ${restore_seconds}s |"
@@ -136,7 +138,9 @@ jobs:
           dotnet-version: |
             10.0.x
           cache: true
-          cache-dependency-path: '**/packages.lock.json'
+          cache-dependency-path: |
+            **/packages.lock.json
+            **/packages.*.lock.json
 
       - name: Restore AppSurface CLI packages (locked, cache-aware)
         run: |
@@ -153,7 +157,7 @@ jobs:
             echo "| --- | --- |"
             echo "| Workflow job | build.yml / export-appsurface-docs |"
             echo "| Cache hit | ${{ steps.setup-dotnet.outputs.cache-hit }} |"
-            echo "| Cache dependency path | \`**/packages.lock.json\` |"
+            echo "| Cache dependency path | \`**/packages.lock.json\`, \`**/packages.*.lock.json\` |"
             echo "| NUGET_PACKAGES | \`$NUGET_PACKAGES\` |"
             echo "| Package folder size | ${package_size:-unknown} |"
             echo "| Locked restore duration | ${restore_seconds}s |"
