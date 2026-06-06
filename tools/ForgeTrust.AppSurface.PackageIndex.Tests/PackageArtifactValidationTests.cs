@@ -1739,7 +1739,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, buildWorkflow);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, codeQualityWorkflow);
         Assert.Matches(disabledRuntimeResolutionSetting, vcsIgnoreParityWorkflow);
-        Assert.Contains("TailwindEnabled: \"false\"", vcsIgnoreParityWorkflow, StringComparison.Ordinal);
+        Assert.Contains("ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj", vcsIgnoreParityWorkflow, StringComparison.Ordinal);
         Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"true\"", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageGateWorkflow);
