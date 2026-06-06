@@ -12,6 +12,8 @@ appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 
 `appsurface docs` runs the same AppSurface Docs standalone host used by CI and integration tests. It forwards AppSurface Docs configuration into that host instead of duplicating harvesting, routing, static web asset, or MVC setup in the CLI. `appsurface docs export` starts that same host in-process, binds an internal loopback listener, and delegates static crawling plus CDN validation to the RazorWire export engine. `appsurface docs verify-archive` checks one catalog-pinned exact release tree locally before deploy.
 
+The CLI also includes the first stable coverage command, `appsurface coverage gate`, for private-by-default CI coverage enforcement. It evaluates a local Cobertura XML file, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service.
+
 ## Release Guidance
 
 AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 2 release note](../../releases/v0.1.0-rc.2.md) for current release risk, migration guidance, and package readiness.
@@ -45,6 +47,7 @@ dotnet new tool-manifest
 dotnet tool install ForgeTrust.AppSurface.Cli --prerelease
 dotnet tool run appsurface --version
 dotnet tool run appsurface docs --repo .
+dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --min-patch-branch 85
 ```
 
 Update the repo-scoped tool version with:
@@ -55,6 +58,112 @@ dotnet tool run appsurface --version
 ```
 
 ## Commands
+
+### `appsurface coverage gate`
+
+Enforce a private coverage quality gate from an existing Cobertura XML file.
+
+```bash
+appsurface coverage gate \
+  --coverage ./TestResults/coverage-merged/coverage.cobertura.xml \
+  --min-line 95 \
+  --min-branch 85 \
+  --diff-base origin/main \
+  --min-patch-line 95 \
+  --min-patch-branch 85
+```
+
+`coverage gate` is the stable v1 coverage API. It does not run tests, merge shards, upload coverage, call GitHub APIs, or store trends. It reads one Cobertura file, evaluates line and branch percentages, optionally estimates changed-line and changed-branch coverage from `git diff`, writes `coverage-gate.json` and `coverage-gate.md`, prints the result, and exits nonzero when any configured threshold fails. When `$GITHUB_STEP_SUMMARY` is set, the Markdown report is appended by default so GitHub Actions logs show the gate result without requiring Codecov or another hosted dashboard. Use `--no-github-summary` when a workflow wants only file artifacts.
+
+Options:
+
+- `--coverage`: Cobertura XML file to evaluate. Defaults to `TestResults/coverage-merged/coverage.cobertura.xml`.
+- `--min-line`: Minimum line coverage percentage from `0` through `100`. Defaults to `0`.
+- `--min-branch`: Minimum branch coverage percentage from `0` through `100`. Defaults to `0`.
+- `--diff-base`: Git ref or commit compared with `HEAD` for patch coverage. When set, the command runs `git diff --unified=0 --no-ext-diff --relative <base>...HEAD --` from the current directory.
+- `--min-patch-line`: Minimum changed-line coverage percentage from `0` through `100`. Requires `--diff-base`. Omit it to report changed-line coverage without gating on it.
+- `--min-patch-branch`: Minimum changed-branch coverage percentage from `0` through `100`. Requires `--diff-base`. Omit it to report changed-branch coverage without gating on it.
+- `--output`: Directory for `coverage-gate.json` and `coverage-gate.md`. Defaults to the coverage file directory.
+- `--github-summary`: Append Markdown to `$GITHUB_STEP_SUMMARY` when it is set. Enabled by default.
+- `--no-github-summary`: Suppress GitHub step summary output.
+
+The command accepts Cobertura root attributes such as `line-rate`, `branch-rate`, `lines-covered`, `lines-valid`, `branches-covered`, and `branches-valid`. XML parsing disables DTD processing and external resolution. Coverage counts must be non-negative, covered counts cannot exceed valid counts, rates must be from `0` through `1`, and zero valid line or branch counts fail with `ASCOV006` because a quality gate with no measurable denominator is misleading.
+
+Patch coverage counts added or modified diff lines, intersects those lines with Cobertura `<class filename>` and `<line number hits>` entries, and reports covered/measurable lines. Changed lines that do not appear in the Cobertura line map are ignored for the denominator, which keeps docs, project files, generated artifacts, and other non-coverable edits from failing the patch gate. Changed-branch coverage uses Cobertura line-level `condition-coverage` counts on those same changed measurable lines, so ordinary changed statements without branch conditions do not inflate the branch denominator. When a diff has no measurable changed lines or no measurable changed branches, the corresponding patch metric reports `100%` and says so explicitly in Markdown.
+
+Reports are private local artifacts:
+
+```json
+{
+  "passed": false,
+  "coverage": "/repo/TestResults/coverage-merged/coverage.cobertura.xml",
+  "thresholds": {
+    "line": 95,
+    "branch": 85,
+    "patchLine": 95,
+    "patchBranch": 85
+  },
+  "line": {
+    "covered": 80,
+    "valid": 100,
+    "percent": 80
+  },
+  "branch": {
+    "covered": 30,
+    "valid": 50,
+    "percent": 60
+  },
+  "patchLine": {
+    "diffBase": "origin/main",
+    "changed": 28,
+    "measurable": 20,
+    "covered": 18,
+    "percent": 90
+  },
+  "patchBranch": {
+    "diffBase": "origin/main",
+    "changed": 28,
+    "measurable": 8,
+    "covered": 7,
+    "percent": 87.5
+  }
+}
+```
+
+Use this GitHub Actions shape when your repo already produces the AppSurface merged Cobertura artifact:
+
+```yaml
+- uses: actions/setup-dotnet@v5
+  with:
+    dotnet-version: 10.0.x
+- run: git fetch --no-tags --depth=1 origin main
+- run: dotnet tool restore
+- run: ./scripts/coverage-solution.sh
+- run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --min-patch-branch 85
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: coverage-gate
+    path: |
+      TestResults/coverage-merged/coverage-gate.json
+      TestResults/coverage-merged/coverage-gate.md
+```
+
+For other repositories, replace `./scripts/coverage-solution.sh` and the `--coverage` path with the command and Cobertura file path your test setup actually produces.
+
+Diagnostics use `ASCOV###` codes so CI logs are searchable:
+
+| Code | Meaning | Fix |
+| --- | --- | --- |
+| `ASCOV001` | The Cobertura file is missing or `--coverage` is blank. | Produce coverage first or pass the correct file path. |
+| `ASCOV006` | The Cobertura file is malformed or has unsupported/misleading metrics. | Regenerate coverage and verify counts/rates on the root `<coverage>` element. |
+| `ASCOV007` | A threshold is outside the `0` through `100` range or a patch threshold is missing `--diff-base`. | Correct `--min-line`, `--min-branch`, `--min-patch-line`, `--min-patch-branch`, or `--diff-base`. |
+| `ASCOV008` | GitHub step summary could not be written. | Check `$GITHUB_STEP_SUMMARY` permissions or add `--no-github-summary`. |
+| `ASCOV009` | The report output path is unsafe. | Use a dedicated artifact directory, not a filesystem root or working directory. |
+| `ASCOV010` | The command could not run or read `git diff` for changed-line coverage. | Fetch the diff base or pass a valid local commit/ref to `--diff-base`. |
+| `ASCOV020` | The gate ran successfully and coverage is below threshold. | Raise coverage or lower the threshold intentionally in source control. |
+
+`appsurface coverage gate` intentionally does not expose run or merge orchestration yet. In this repository, use `./scripts/coverage-solution.sh` for AppSurface-specific run and merge orchestration until the shared runner engine is extracted into a package-owned implementation.
 
 ### `appsurface export`
 

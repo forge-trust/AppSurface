@@ -82,6 +82,8 @@ Build mode uses a compiled MSBuild task instead of `<Exec>`. The task receives s
 | `TailwindOutputPath` | `wwwroot/css/site.gen.css` | Generated CSS path, resolved relative to the project directory. Keep it under `wwwroot/` for static web asset registration. |
 | `TailwindCliPath` | empty | Explicit build-time Tailwind CLI path. Relative paths resolve from the project directory. Build mode does not fall back to `PATH`. |
 | `TailwindVersion` | from `build/tailwind.version` | Tailwind standalone CLI version used by runtime packages. Override only when testing a coordinated runtime-package change. |
+| `TailwindRuntimeBinaryResolutionEnabled` | `true` | Maintainer/CI-only. Set to `false` only in non-package jobs that skip runtime binary downloads and do not build Tailwind-consuming projects, unless the job also intentionally sets `TailwindEnabled=false`. Do not use it for consumer builds or package creation; see [`eng/ci-critical-path.md`](../../eng/ci-critical-path.md#tailwind-runtime-binary-resolution-in-ci). |
+| `TailwindDownloadCacheRoot` | source-tree user cache; empty for packed consumers unless set | Shared source-tree download cache used while building Tailwind runtime packages. Source-tree imports default to `$XDG_CACHE_HOME/forgetrust/appsurface/tailwind`, `%LOCALAPPDATA%/ForgeTrust/AppSurface/Tailwind`, `$HOME/.cache/forgetrust/appsurface/tailwind`, or `%USERPROFILE%/.cache/forgetrust/appsurface/tailwind`, in that order. |
 
 ### Runtime option reference
 
@@ -98,16 +100,23 @@ Build mode uses a compiled MSBuild task instead of `<Exec>`. The task receives s
 
 Runtime packages download the official Tailwind checksum file and standalone binary during build or publish, then verify the binary with SHA-256 before packaging it. These downloads retry transient network failures by default, which keeps CI resilient to brief GitHub release CDN 5xx responses and timeouts without weakening checksum validation.
 
+Maintainers can set `TailwindRuntimeBinaryResolutionEnabled=false` only for fast CI jobs that restore, build, or test without producing package artifacts and without compiling Tailwind-consuming projects. Jobs that intentionally skip CSS generation can pair it with `TailwindEnabled=false`, but solution builds should leave runtime binary resolution enabled. Package validation, `dotnet pack`, and release workflows must leave the property enabled or pass `/p:TailwindRuntimeBinaryResolutionEnabled=true`. The authoritative CI matrix and copy-paste examples live in [`eng/ci-critical-path.md`](../../eng/ci-critical-path.md#tailwind-runtime-binary-resolution-in-ci).
+
+Source-tree builds cache downloaded Tailwind executables outside the worktree by default so multiple local worktrees reuse the same binary copy. The cache is versioned and RID-scoped under `TailwindDownloadCacheRoot`, for example `$HOME/.cache/forgetrust/appsurface/tailwind/tailwind-4.1.18/osx-arm64/tailwindcss-macos-arm64`. Packed NuGet consumers normally use NuGet's global package cache instead. Build-time shared-cache probing happens only when `TailwindDownloadCacheRoot` is explicitly set by MSBuild targets or project configuration, and development watch mode does not read the ambient user cache. Missing runtime-package dependencies therefore fail cleanly on developer machines and CI unless the build opts into a cache root or an explicit CLI path is configured.
+
+Build-time shared-cache candidates are used only when the same directory contains `sha256sums.txt` with a matching hash for the Tailwind binary name. A missing or mismatched checksum causes the candidate to be skipped and the normal runtime-package fallback chain to continue. Malformed version directories such as `tailwind-not-a-version` are ignored during versioned shared-cache fallback scans.
+
 The retry behavior is configurable with MSBuild properties:
 
 ```xml
 <PropertyGroup>
+  <TailwindDownloadCacheRoot>/mnt/ci-cache/appsurface-tailwind</TailwindDownloadCacheRoot>
   <TailwindDownloadRetries>4</TailwindDownloadRetries>
   <TailwindDownloadRetryDelayMilliseconds>5000</TailwindDownloadRetryDelayMilliseconds>
 </PropertyGroup>
 ```
 
-Raise these values for slower CI networks. Lower them only when you prefer fail-fast behavior and have another way to provide the Tailwind CLI, such as `TailwindCliPath`.
+Point `TailwindDownloadCacheRoot` at a durable CI cache volume when build agents reuse caches between jobs. Raise the retry values for slower CI networks. Lower them only when you prefer fail-fast behavior and have another way to provide the Tailwind CLI, such as `TailwindCliPath`.
 
 If you need to suppress the package-driven build temporarily, set `TailwindEnabled=false` in MSBuild, for example with `dotnet build -p:TailwindEnabled=false` or a project-level `<TailwindEnabled>false</TailwindEnabled>` property.
 
@@ -144,6 +153,9 @@ Every build-task diagnostic includes a stable code, problem, cause, fix, and thi
 | `ASTW006` | Tailwind exited with a non-zero code. | Read the captured output tail, fix the CSS/configuration error, and run the build again. |
 | `ASTW007` | MSBuild canceled the Tailwind task. | Re-run the build if cancellation was unintentional. |
 | `ASTW008` | Input and output resolve to the same file. | Set `TailwindOutputPath` to a generated file distinct from `TailwindInputPath`. |
+| `ASTW009` | `TailwindRuntimeBinaryResolutionEnabled` has an unsupported value. | Use `true` or `false`; unset defaults to `true`. |
+| `ASTW010` | Runtime package creation was attempted with Tailwind runtime binary resolution disabled. | Rerun package validation, restore, build, and pack with `/p:TailwindRuntimeBinaryResolutionEnabled=true`. |
+| `ASTW011` | The resolved runtime package payload file is missing. | Rerun package validation with binary resolution enabled, delete stale `obj` output if needed, and verify `TailwindBaseUrl`/`TailwindSumsUrl`. |
 
 If an error mentions `build/tasks`, inspect the packed package. A valid package contains `build/ForgeTrust.AppSurface.Web.Tailwind.targets`, `build/tailwind.version`, `build/tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.dll`, and `build/tasks/CliWrap.dll`.
 
@@ -162,5 +174,6 @@ The v0.1 integration intentionally does not expose separate MSBuild knobs for mi
 - The generated CSS file is intended to be build output and is commonly ignored in source control.
 - Generated CSS outside `wwwroot/` still builds locally, but it is not exposed automatically through the static web asset pipeline.
 - The platform-specific `ForgeTrust.AppSurface.Web.Tailwind.Runtime.*` packages are support packages consumed transitively by this package and are not usually installed directly.
+- `TailwindDownloadCacheRoot` affects source-tree runtime downloads, not normal generated CSS output. Delete that cache when you intentionally want to force runtime package projects to re-download and re-verify the standalone Tailwind binaries.
 - Tailwind CLI selection follows the current build host, not `RuntimeIdentifier`, because the standalone CLI runs during the build. Cross-targeted builds still execute the host-compatible binary.
 - Windows Arm64 hosts intentionally use the `win-x64` runtime under emulation. There is no `ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-arm64` package because Tailwind `v4.1.18` does not ship a native Windows Arm64 standalone CLI.
