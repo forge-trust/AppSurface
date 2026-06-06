@@ -1,6 +1,6 @@
 # Aspire Projects
 
-Modular integration for .NET Aspire distributed applications.
+Local AppHost composition for .NET Aspire applications.
 
 ## Contents
 

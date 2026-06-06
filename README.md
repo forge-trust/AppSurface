@@ -95,7 +95,7 @@ This approach aims to:
 
 ### [Aspire](./Aspire/README.md)
 
-- [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Integration with .NET Aspire to provide a modular approach to defining distributed applications and service defaults.
+- [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Local .NET Aspire AppHost composition with AppSurface modules, CLI-selectable profiles, and reusable Aspire components.
 
 These packages are designed to work together so that features can be shared
 across different application types while maintaining a consistent startup
@@ -219,6 +219,8 @@ how to use this project.
 - [Console app example](examples/console-app/README.md) – builds a simple command line
   application using [CliFx](https://github.com/Tyrrrz/CliFx) source-generated command
   descriptors.
+- [Aspire AppHost example](examples/aspire-apphost/README.md) – shows local Aspire AppHost
+  composition with AppSurface profiles and reusable Aspire components.
 - [Web app example](examples/web-app/README.md) – shows a minimal ASP.NET Core app that
   composes middleware and endpoints from modules.
 - [Web error-page proof](examples/web-error-pages/README.md) – runs a one-command verifier
