@@ -262,6 +262,26 @@ public sealed class AppSurfaceProductEventRegistryTests
     }
 
     [Fact]
+    public void Validate_PreservesUnhandledRazorWireFailureMode()
+    {
+        var productEvent = new AppSurfaceProductEvent(
+            AppSurfaceProductEventRegistry.RazorWireFormFailed,
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["failure_mode"] = "unhandled",
+                ["response_kind"] = "network",
+                ["failure_ui"] = "generated"
+            });
+
+        var result = AppSurfaceProductEventRegistry.Validate(productEvent);
+
+        Assert.True(result.IsValid);
+        Assert.Equal("unhandled", result.SanitizedProperties["failure_mode"]);
+        Assert.Equal("network", result.SanitizedProperties["response_kind"]);
+    }
+
+    [Fact]
     public void Validate_PreservesRegisteredDocsResultKind()
     {
         var productEvent = new AppSurfaceProductEvent(

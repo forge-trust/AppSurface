@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const runtimePath = new URL('../wwwroot/razorwire/razorwire.js', import.meta.url);
+const runtimeSourcePath = new URL('../assets/src/razorwire.ts', import.meta.url);
 const islandsPath = new URL('../wwwroot/razorwire/razorwire.islands.js', import.meta.url);
 const pageNavigationPath = new URL('../wwwroot/razorwire/page-navigation.js', import.meta.url);
 const sectionCopyPath = new URL('../wwwroot/razorwire/section-copy.js', import.meta.url);
@@ -33,6 +34,13 @@ test('generated runtime outputs keep provenance banners and public package paths
   assert.match(pageNavigation, /data-rw-page-nav/);
   assert.match(sectionCopy, /sectionCopyManager/);
   assert.match(sectionCopy, /data-rw-section-copy/);
+});
+
+test('authored form failure product event keeps failure mode separate from response kind', () => {
+  const source = readFileSync(runtimeSourcePath, 'utf8');
+
+  assert.match(source, /failure_mode:\s*detail\.handled \? 'handled' : 'unhandled'/);
+  assert.match(source, /response_kind:\s*detail\.responseKind \|\| 'unknown'/);
 });
 
 test('public contract manifest includes page navigation and section copy hooks', () => {

@@ -2,11 +2,24 @@ using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Intelligence;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Intelligence.Tests;
 
 public sealed class AppSurfaceProductIntelligenceDispatcherTests
 {
+    [Fact]
+    public void Constructor_RejectsMissingDependencies()
+    {
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceProductIntelligenceDispatcher(
+            null!,
+            Array.Empty<IAppSurfaceProductIntelligenceSink>()));
+
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceProductIntelligenceDispatcher(
+            Options.Create(new AppSurfaceProductIntelligenceOptions()),
+            null!));
+    }
+
     [Fact]
     public async Task CaptureAsync_DefaultExperimentalEventsDisabled_DoesNotEmit()
     {

@@ -87,7 +87,7 @@ public static class AppSurfaceProductEventRegistry
 
     private static readonly string[] DocsRecoveryLinkKinds = ["api-reference", "example", "fallback", "guide", "server_fallback"];
     private static readonly string[] DocsRecoverySourceStates = ["loading", "no_results", "unavailable"];
-    private static readonly string[] RazorWireFailureModes = ["handled", "html", "json", "network", "turbo-stream", "unknown"];
+    private static readonly string[] RazorWireFailureModes = ["handled", "unhandled"];
     private static readonly string[] RazorWireResponseKinds = ["html", "json", "network", "turbo-stream", "unknown"];
     private static readonly string[] RazorWireFailureUi = ["disabled", "generated", "handled", "suppressed"];
     private static readonly string[] RazorWireRecoveryActions = ["next_success", "retry_submit"];
@@ -170,7 +170,7 @@ public static class AppSurfaceProductEventRegistry
             "ForgeTrust.RazorWire",
             "Short framework-quality retention; avoid retaining host form identifiers.",
             [
-                Property("failure_mode", "Normalized failure mode such as handled, network, html, json, turbo-stream, or unknown.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: RazorWireFailureModes),
+                Property("failure_mode", "Whether RazorWire handled the failure response before surfacing failure UX.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: RazorWireFailureModes),
                 Property("http_status", "HTTP status family or status code when available.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low),
                 Property("response_kind", "Normalized response kind such as turbo-stream, html, json, unknown, or network.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: RazorWireResponseKinds),
                 Property("failure_ui", "Failure UX outcome such as generated, handled, suppressed, or disabled.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: RazorWireFailureUi)

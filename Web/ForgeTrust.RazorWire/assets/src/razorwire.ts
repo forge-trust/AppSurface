@@ -1482,7 +1482,7 @@ declare const Turbo: TurboRuntime | undefined;
             const nextCount = this.getFailureAttemptCount(form) + 1;
             form.setAttribute('data-rw-form-failure-count', String(nextCount));
             this.dispatchProductIntelligenceEvent('razorwire.form.failed', {
-                failure_mode: detail.handled ? 'handled' : (detail.responseKind || 'unknown'),
+                failure_mode: detail.handled ? 'handled' : 'unhandled',
                 http_status: detail.statusCode === null || detail.statusCode === undefined
                     ? ''
                     : String(detail.statusCode),

@@ -356,6 +356,33 @@ public class RazorWireEndpointAuthorizationTests
     }
 
     [Fact]
+    public async Task StreamEndpoint_AdmissionRejection_ProductIntelligenceCaptureIsTimeBound()
+    {
+        var sink = new ProductIntelligenceBlockingSink();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Production,
+            services =>
+            {
+                services.AddAppSurfaceProductIntelligence(options => options.EnableExperimentalEvents());
+                services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink);
+                services.Configure<RazorWireOptions>(options =>
+                {
+                    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+                    options.Streams.MaxLiveChannels = 1;
+                });
+            });
+
+        using var accepted = await fixture.Client.GetAsync(
+            "/_rw/streams/tenant-secret-42",
+            HttpCompletionOption.ResponseHeadersRead);
+        using var rejected = await fixture.Client.GetAsync("/_rw/streams/other-secret-99");
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        await WaitUntilAsync(() => sink.CancellationObserved);
+    }
+
+    [Fact]
     public async Task StreamEndpoint_SubscribeThrow_ReleasesAdmissionCapacity()
     {
         var hub = new TrackingStreamHub { ThrowOnSubscribe = true };
@@ -522,6 +549,28 @@ public class RazorWireEndpointAuthorizationTests
         {
             _events.Enqueue(productEvent);
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class ProductIntelligenceBlockingSink : IAppSurfaceProductIntelligenceSink
+    {
+        private int _cancellationObserved;
+
+        public bool CancellationObserved => Volatile.Read(ref _cancellationObserved) == 1;
+
+        public async ValueTask CaptureAsync(
+            AppSurfaceProductEvent productEvent,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                Volatile.Write(ref _cancellationObserved, 1);
+                throw;
+            }
         }
     }
 

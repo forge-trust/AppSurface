@@ -387,6 +387,8 @@ public static class RazorWireEndpointRouteBuilderExtensions
 
         try
         {
+            using var captureCts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+            captureCts.CancelAfter(TimeSpan.FromMilliseconds(100));
             await intelligence.CaptureAsync(
                 new AppSurfaceProductEvent(
                     AppSurfaceProductEventRegistry.RazorWireStreamAdmissionRejected,
@@ -394,7 +396,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
                     properties,
                     correlationId: Activity.Current?.Id,
                     route: "/_rw/streams/{channel}"),
-                context.RequestAborted).ConfigureAwait(false);
+                captureCts.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or InvalidOperationException)
         {

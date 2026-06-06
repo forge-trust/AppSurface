@@ -550,13 +550,20 @@ declare global {
     return normalizePageTypeAlias(doc?.pageType) || 'unknown';
   }
 
-  function recordSearchOutcome(surface, query, resultCount, activeFilterCount) {
+  function getActiveFilterSignature(activeFilters) {
+    return (activeFilters || [])
+      .map((filter) => `${normalizeFacetValue(filter?.key)}:${normalizeFacetValue(filter?.value)}`)
+      .sort()
+      .join('|');
+  }
+
+  function recordSearchOutcome(surface, query, resultCount, activeFilterCount, filterSignature = '') {
     const normalized = normalizeQuery(query);
     if (!normalized) {
       return;
     }
 
-    const key = `${normalized}:${resultCount}:${activeFilterCount}`;
+    const key = `${normalized}:${resultCount}:${activeFilterCount}:${filterSignature}`;
     if (productIntelligenceState.lastSearchKeys.get(surface) === key) {
       return;
     }
@@ -2078,7 +2085,8 @@ declare global {
       'search_page',
       view.normalizedQuery,
       view.resultDocs.length,
-      view.activeFilters.length);
+      view.activeFilters.length,
+      getActiveFilterSignature(view.activeFilters));
     renderSearchPageFilters(page, view);
     renderSearchPageActiveFilters(page, view);
     renderSearchPageStarterDocs(page, view);

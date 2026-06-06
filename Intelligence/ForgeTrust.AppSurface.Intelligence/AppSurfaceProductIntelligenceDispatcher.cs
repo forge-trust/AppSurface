@@ -19,11 +19,22 @@ public sealed class AppSurfaceProductIntelligenceDispatcher : IAppSurfaceProduct
         IOptions<AppSurfaceProductIntelligenceOptions> options,
         IEnumerable<IAppSurfaceProductIntelligenceSink> sinks)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(sinks);
+
         _options = options;
         _sinks = sinks;
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Invalid events are discarded silently after <see cref="AppSurfaceProductEventRegistry.Validate(AppSurfaceProductEvent)" />.
+    /// Experimental contracts are also ignored unless <see cref="AppSurfaceProductIntelligenceOptions.ExperimentalEventsEnabled" />
+    /// is enabled for the current options instance. Registered sinks run sequentially, and non-cancellation sink failures
+    /// are swallowed so product-intelligence capture cannot break request paths. Callers should treat this method as
+    /// best-effort delivery and should not rely on it to surface sink errors or guarantee that a downstream analytics
+    /// provider accepted the event.
+    /// </remarks>
     public async ValueTask CaptureAsync(AppSurfaceProductEvent productEvent, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(productEvent);
