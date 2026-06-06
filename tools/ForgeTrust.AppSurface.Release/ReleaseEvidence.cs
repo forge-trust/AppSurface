@@ -477,19 +477,17 @@ internal static class ReleaseEvidence
             return;
         }
 
-        foreach (var digest in bundle.ReleaseArtifactDigests)
+        foreach (var digest in bundle.ReleaseArtifactDigests.Where(digest =>
+            !string.Equals(digest.Algorithm, "sha256", StringComparison.Ordinal)
+            || !artifactContents.TryGetValue(digest.Path, out var content)
+            || !string.Equals(digest.Value, ComputeSha256Hex(content), StringComparison.Ordinal)))
         {
-            if (!string.Equals(digest.Algorithm, "sha256", StringComparison.Ordinal)
-                || !artifactContents.TryGetValue(digest.Path, out var content)
-                || !string.Equals(digest.Value, ComputeSha256Hex(content), StringComparison.Ordinal))
-            {
-                diagnostics.Add(ReleaseDiagnostic.Error(
-                    "release-evidence-artifact-digest-mismatch",
-                    "Release evidence bundle does not match the release artifact bytes.",
-                    $"Artifact `{digest.Path}` recorded `{digest.Value}` but current bytes do not match.",
-                    "Regenerate release evidence after changing release notes, sidecars, or release JSON.",
-                    docsPath));
-            }
+            diagnostics.Add(ReleaseDiagnostic.Error(
+                "release-evidence-artifact-digest-mismatch",
+                "Release evidence bundle does not match the release artifact bytes.",
+                $"Artifact `{digest.Path}` recorded `{digest.Value}` but current bytes do not match.",
+                "Regenerate release evidence after changing release notes, sidecars, or release JSON.",
+                docsPath));
         }
     }
 
