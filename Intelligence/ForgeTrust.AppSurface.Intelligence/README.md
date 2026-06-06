@@ -83,7 +83,7 @@ Treat event names like browser event names or data attributes: once promoted bey
 
 ## Privacy Defaults
 
-The dispatcher validates against the registry before invoking host sinks. Unregistered properties are dropped. Globally risky property names such as `token`, `cookie`, `secret`, `password`, `body`, `stack`, and raw `query` are blocked unless a future contract explicitly classifies and governs them.
+The dispatcher validates against the registry before invoking host sinks. Unregistered properties are dropped. Globally risky property names such as `token`, `cookie`, `secret`, `password`, `body`, `stack`, and raw `query` are always blocked in this package version, even if a property schema accidentally registers one of those names.
 
 Registered property values are also normalized before emission. Low-cardinality dimensions use bounded token values or explicit allowed-value sets, numeric properties must parse as non-negative integers, and values that look like secrets, bearer headers, cookies, connection strings, or stack traces are rejected before sinks run.
 

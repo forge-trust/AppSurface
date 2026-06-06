@@ -72,6 +72,21 @@ public sealed class AppSurfaceProductEvent
     /// </summary>
     public string? Route { get; }
 
+    /// <summary>
+    /// Creates a new event with sanitized envelope metadata and replacement properties.
+    /// </summary>
+    /// <remarks>
+    /// This internal API does not mutate the current event. The supplied <paramref name="properties"/> replace the
+    /// original property set, while <see cref="ActorId"/>, <see cref="SessionId"/>, and <see cref="CorrelationId"/> are
+    /// filtered through <see cref="AppSurfaceProductEventMetadata.SanitizeEnvelopeIdentifier"/> and <see cref="Route"/>
+    /// is filtered through <see cref="AppSurfaceProductEventMetadata.SanitizeRoute"/>. Sanitization may drop optional
+    /// envelope values by returning <see langword="null"/> when they are too long, contain unsafe characters, or look
+    /// like secrets, PII, bearer headers, query strings, fragments, full URLs, or concrete high-cardinality route
+    /// values. Callers must supply an already-sanitized property dictionary and must not assume original envelope values
+    /// survive this step.
+    /// </remarks>
+    /// <param name="properties">Replacement event properties that have already passed registry sanitization.</param>
+    /// <returns>A new event with sanitized envelope metadata.</returns>
     internal AppSurfaceProductEvent WithSanitizedEnvelope(IReadOnlyDictionary<string, string> properties)
     {
         return new AppSurfaceProductEvent(

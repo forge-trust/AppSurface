@@ -306,21 +306,22 @@ public class RazorWireEndpointAuthorizationTests
                 services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink);
                 services.Configure<RazorWireOptions>(options =>
                 {
+                    options.Streams.BasePath = "/custom-streams";
                     options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
                     options.Streams.MaxLiveChannels = 1;
                 });
             });
 
         using var accepted = await fixture.Client.GetAsync(
-            "/_rw/streams/tenant-secret-42",
+            "/custom-streams/tenant-secret-42",
             HttpCompletionOption.ResponseHeadersRead);
-        using var rejected = await fixture.Client.GetAsync("/_rw/streams/other-secret-99");
+        using var rejected = await fixture.Client.GetAsync("/custom-streams/other-secret-99");
 
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
         Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
         var productEvent = Assert.Single(sink.Events);
         Assert.Equal(AppSurfaceProductEventRegistry.RazorWireStreamAdmissionRejected, productEvent.Name);
-        Assert.Equal("/_rw/streams/{channel}", productEvent.Route);
+        Assert.Equal("/custom-streams/{channel}", productEvent.Route);
         Assert.Equal("TooManyLiveChannels", productEvent.Properties["rejection_reason"]);
         Assert.Equal("max_live_channels", productEvent.Properties["limit_name"]);
         Assert.Equal("AllowAll", productEvent.Properties["authorization_mode"]);

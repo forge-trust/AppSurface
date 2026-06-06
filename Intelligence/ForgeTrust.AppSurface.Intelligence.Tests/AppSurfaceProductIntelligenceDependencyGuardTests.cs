@@ -51,7 +51,7 @@ public sealed class AppSurfaceProductIntelligenceDependencyGuardTests
             AppSurfaceProductEventRegistry.All.SelectMany(contract => contract.ForbiddenExamples));
 
         Assert.DoesNotContain("sk_", readme, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("requestToken", readme, StringComparison.Ordinal);
+        Assert.DoesNotContain("requestToken", readme, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("stack trace value", renderedContracts, StringComparison.OrdinalIgnoreCase);
     }
 }

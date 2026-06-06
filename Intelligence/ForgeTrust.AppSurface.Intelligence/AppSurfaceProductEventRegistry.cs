@@ -6,37 +6,37 @@ namespace ForgeTrust.AppSurface.Intelligence;
 public static class AppSurfaceProductEventRegistry
 {
     /// <summary>
-    /// Stable event name for docs search submissions.
+    /// Event name for docs search submissions.
     /// </summary>
     public const string DocsSearchSubmitted = "docs.search.submitted";
 
     /// <summary>
-    /// Stable event name for docs searches with no matching result.
+    /// Event name for docs searches with no matching result.
     /// </summary>
     public const string DocsSearchReturnedZeroResults = "docs.search.returned_zero_results";
 
     /// <summary>
-    /// Stable event name for selected docs search results.
+    /// Event name for selected docs search results.
     /// </summary>
     public const string DocsSearchResultSelected = "docs.search.result_selected";
 
     /// <summary>
-    /// Stable event name for docs recovery links selected after search or load friction.
+    /// Event name for docs recovery links selected after search or load friction.
     /// </summary>
     public const string DocsRecoveryLinkSelected = "docs.recovery_link.selected";
 
     /// <summary>
-    /// Stable event name for RazorWire form failures.
+    /// Event name for RazorWire form failures.
     /// </summary>
     public const string RazorWireFormFailed = "razorwire.form.failed";
 
     /// <summary>
-    /// Stable event name for RazorWire form failure recovery.
+    /// Event name for RazorWire form failure recovery.
     /// </summary>
     public const string RazorWireFormFailureRecovered = "razorwire.form.failure_recovered";
 
     /// <summary>
-    /// Stable event name for RazorWire stream admission rejections.
+    /// Event name for RazorWire stream admission rejections.
     /// </summary>
     public const string RazorWireStreamAdmissionRejected = "razorwire.stream.admission_rejected";
 
@@ -211,12 +211,13 @@ public static class AppSurfaceProductEventRegistry
     /// <summary>
     /// Gets every registered AppSurface product event contract.
     /// </summary>
-    public static IReadOnlyList<AppSurfaceProductEventContract> All { get; } = Contracts;
+    public static IReadOnlyList<AppSurfaceProductEventContract> All { get; } = Array.AsReadOnly(Contracts);
 
     /// <summary>
-    /// Gets globally forbidden property names that are dropped unless the registry explicitly classifies them.
+    /// Gets globally forbidden property names that are always dropped from emitted payloads.
     /// </summary>
-    public static IReadOnlySet<string> ForbiddenProperties { get; } = ForbiddenPropertyNames;
+    public static IReadOnlySet<string> ForbiddenProperties =>
+        new HashSet<string>(ForbiddenPropertyNames, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Finds a registered contract by event name.

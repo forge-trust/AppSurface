@@ -136,6 +136,7 @@ public sealed class AppSurfaceProductEventRegistryTests
     [Theory]
     [InlineData("query")]
     [InlineData("token")]
+    [InlineData("Token")]
     [InlineData("cookie")]
     [InlineData("secret")]
     [InlineData("password")]
@@ -238,6 +239,42 @@ public sealed class AppSurfaceProductEventRegistryTests
         Assert.False(result.IsValid);
         Assert.Contains("surface", result.RejectedProperties);
         Assert.DoesNotContain("search page", result.SanitizedProperties.Values);
+    }
+
+    [Fact]
+    public void RegistryCollections_DoNotExposeMutableBackingState()
+    {
+        var contracts = Assert.IsAssignableFrom<IList<AppSurfaceProductEventContract>>(AppSurfaceProductEventRegistry.All);
+        var forbidden = Assert.IsAssignableFrom<ISet<string>>(AppSurfaceProductEventRegistry.ForbiddenProperties);
+
+        Assert.Throws<NotSupportedException>(() => contracts.Clear());
+        Assert.True(forbidden.Remove("token"));
+        Assert.Contains("token", AppSurfaceProductEventRegistry.ForbiddenProperties);
+    }
+
+    [Fact]
+    public void ProductEventAndValidationResults_DoNotExposeMutableBackingState()
+    {
+        var properties = new Dictionary<string, string>
+        {
+            ["surface"] = "search_page",
+            ["result_count"] = "1"
+        };
+        var productEvent = new AppSurfaceProductEvent(
+            AppSurfaceProductEventRegistry.DocsSearchSubmitted,
+            DateTimeOffset.UnixEpoch,
+            properties);
+
+        properties["surface"] = "sidebar";
+        Assert.Equal("search_page", productEvent.Properties["surface"]);
+        Assert.Throws<NotSupportedException>(() => ((IDictionary<string, string>)productEvent.Properties).Clear());
+
+        var result = AppSurfaceProductEventRegistry.Validate(productEvent);
+
+        Assert.True(result.IsValid);
+        Assert.Throws<NotSupportedException>(() => ((IDictionary<string, string>)result.SanitizedProperties).Clear());
+        Assert.Throws<NotSupportedException>(() => ((IList<string>)result.RejectedProperties).Clear());
+        Assert.Throws<NotSupportedException>(() => ((IList<string>)result.Diagnostics).Clear());
     }
 
     [Fact]

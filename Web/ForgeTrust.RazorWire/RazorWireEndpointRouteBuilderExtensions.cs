@@ -249,7 +249,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
         var reason = result.RejectionReason!.Value;
 
         LogRejectedAdmission(context, options.Streams.AuthorizationMode, authorizerType, result);
-        await CaptureStreamAdmissionRejectedAsync(context, options.Streams.AuthorizationMode, result);
+        await CaptureStreamAdmissionRejectedAsync(context, options.Streams, result);
 
         context.Response.StatusCode = GetAdmissionRejectionStatusCode(reason);
         if (IsDevelopment(context))
@@ -368,7 +368,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
 
     private static async ValueTask CaptureStreamAdmissionRejectedAsync(
         HttpContext context,
-        RazorWireStreamAuthorizationMode authorizationMode,
+        RazorWireStreamOptions streamOptions,
         RazorWireStreamAdmissionResult result)
     {
         var intelligence = context.RequestServices.GetService<IAppSurfaceProductIntelligence>();
@@ -382,7 +382,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
             ["rejection_reason"] = reason.ToString(),
             ["limit_name"] = GetAdmissionLimitName(reason),
             ["current_count"] = result.Current.ToString(CultureInfo.InvariantCulture),
-            ["authorization_mode"] = authorizationMode.ToString()
+            ["authorization_mode"] = streamOptions.AuthorizationMode.ToString()
         };
 
         try
@@ -395,7 +395,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
                     DateTimeOffset.UtcNow,
                     properties,
                     correlationId: Activity.Current?.Id,
-                    route: "/_rw/streams/{channel}"),
+                    route: $"{streamOptions.BasePath}/{{channel}}"),
                 captureCts.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or InvalidOperationException)
