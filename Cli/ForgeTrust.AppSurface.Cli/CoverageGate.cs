@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -448,12 +449,9 @@ internal static class CoverageGateReportWriter
     private static string StripControls(string value)
     {
         var builder = new StringBuilder(value.Length);
-        foreach (var ch in value)
+        foreach (var ch in value.Where(ch => !char.IsControl(ch) || ch is '\r' or '\n' or '\t'))
         {
-            if (!char.IsControl(ch) || ch is '\r' or '\n' or '\t')
-            {
-                builder.Append(ch);
-            }
+            builder.Append(ch);
         }
 
         return builder.ToString();
