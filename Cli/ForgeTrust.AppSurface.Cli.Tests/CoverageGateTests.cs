@@ -167,6 +167,49 @@ public sealed class CoverageGateTests
         Assert.Contains("ASCOV001", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_RejectsInvalidCoveragePath_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = "coverage\0.cobertura.xml",
+            OutputDirectory = temp.Path,
+            MinLine = 0,
+            MinBranch = 0,
+            NoGithubSummary = true
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV001", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RejectsInvalidOutputPath_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = "coverage-output\0",
+            MinLine = 0,
+            MinBranch = 0,
+            NoGithubSummary = true
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV009", exception.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(-0.01)]
     [InlineData(100.01)]
@@ -1086,6 +1129,21 @@ public sealed class CoverageGateTests
         var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
 
         Assert.True(result.Passed);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_ObservesCancellationWhileReadingCoverage()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var request = new CoverageGateRequest(coverage, temp.Path, 0, 0, false, null);
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => CoverageGateEvaluator.EvaluateAsync(request, cancellation.Token));
     }
 
     [Fact]

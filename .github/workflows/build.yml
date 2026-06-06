@@ -101,7 +101,7 @@ jobs:
 
       - name: Gate coverage with AppSurface CLI
         run: |
-          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build --no-restore -- \
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-restore -- \
             coverage gate \
             --coverage TestResults/coverage-merged/coverage.cobertura.xml \
             --min-line 95 \

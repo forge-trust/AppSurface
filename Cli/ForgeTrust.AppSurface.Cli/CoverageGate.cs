@@ -144,10 +144,14 @@ internal sealed partial class CoverageGateCommand : ICommand
             throw new CommandException("ASCOV001 --coverage must point to a Cobertura XML file.");
         }
 
-        var coveragePath = Path.GetFullPath(CoveragePath.Trim());
+        var coveragePath = GetFullPathOrThrow(
+            CoveragePath.Trim(),
+            "ASCOV001 --coverage must point to a Cobertura XML file.");
         var outputDirectory = string.IsNullOrWhiteSpace(OutputDirectory)
             ? Path.GetDirectoryName(coveragePath) ?? Directory.GetCurrentDirectory()
-            : Path.GetFullPath(OutputDirectory);
+            : GetFullPathOrThrow(
+                OutputDirectory,
+                "ASCOV009 --output must point to a coverage report directory.");
         var patchCoverage = string.IsNullOrWhiteSpace(DiffBase)
             ? null
             : new CoveragePatchRequest(
@@ -164,6 +168,18 @@ internal sealed partial class CoverageGateCommand : ICommand
             GithubSummary && !NoGithubSummary,
             Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY"),
             patchCoverage);
+    }
+
+    private static string GetFullPathOrThrow(string path, string diagnostic)
+    {
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new CommandException(diagnostic);
+        }
     }
 
     private static string RenderConsoleSummary(
@@ -343,8 +359,15 @@ internal static class CoverageGateEvaluator
         {
             await using var stream = File.OpenRead(request.CoveragePath);
             using var reader = XmlReader.Create(stream, ReaderSettings);
-            while (await reader.ReadAsync())
+            while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!await reader.ReadAsync())
+                {
+                    break;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
                 if (reader.NodeType != XmlNodeType.Element || !string.Equals(reader.Name, "coverage", StringComparison.Ordinal))
                 {
                     continue;
