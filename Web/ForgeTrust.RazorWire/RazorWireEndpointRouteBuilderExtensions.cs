@@ -1,4 +1,7 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Threading.Channels;
+using ForgeTrust.AppSurface.Intelligence;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
@@ -246,6 +249,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
         var reason = result.RejectionReason!.Value;
 
         LogRejectedAdmission(context, options.Streams.AuthorizationMode, authorizerType, result);
+        await CaptureStreamAdmissionRejectedAsync(context, options.Streams.AuthorizationMode, result);
 
         context.Response.StatusCode = GetAdmissionRejectionStatusCode(reason);
         if (IsDevelopment(context))
@@ -360,6 +364,55 @@ public static class RazorWireEndpointRouteBuilderExtensions
             result.Snapshot.LiveSubscriptions,
             result.Snapshot.LiveChannels,
             result.ChannelLength);
+    }
+
+    private static async ValueTask CaptureStreamAdmissionRejectedAsync(
+        HttpContext context,
+        RazorWireStreamAuthorizationMode authorizationMode,
+        RazorWireStreamAdmissionResult result)
+    {
+        var intelligence = context.RequestServices.GetService<IAppSurfaceProductIntelligence>();
+        if (intelligence is null || result.RejectionReason is not { } reason)
+        {
+            return;
+        }
+
+        var properties = new Dictionary<string, string>
+        {
+            ["rejection_reason"] = reason.ToString(),
+            ["limit_name"] = GetAdmissionLimitName(reason),
+            ["current_count"] = result.Current.ToString(CultureInfo.InvariantCulture),
+            ["authorization_mode"] = authorizationMode.ToString()
+        };
+
+        try
+        {
+            await intelligence.CaptureAsync(
+                new AppSurfaceProductEvent(
+                    AppSurfaceProductEventRegistry.RazorWireStreamAdmissionRejected,
+                    DateTimeOffset.UtcNow,
+                    properties,
+                    correlationId: Activity.Current?.Id,
+                    route: "/_rw/streams/{channel}"),
+                context.RequestAborted).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Product-intelligence dogfood must not change stream admission behavior.
+        }
+    }
+
+    private static string GetAdmissionLimitName(RazorWireStreamAdmissionRejectionReason reason)
+    {
+        return reason switch
+        {
+            RazorWireStreamAdmissionRejectionReason.InvalidChannelName => "channel_name",
+            RazorWireStreamAdmissionRejectionReason.ChannelNameTooLong => "channel_name_length",
+            RazorWireStreamAdmissionRejectionReason.TooManyLiveSubscriptions => "max_live_subscriptions",
+            RazorWireStreamAdmissionRejectionReason.TooManyLiveSubscriptionsPerChannel => "max_live_subscriptions_per_channel",
+            RazorWireStreamAdmissionRejectionReason.TooManyLiveChannels => "max_live_channels",
+            _ => "unknown"
+        };
     }
 
     private static bool IsReplayRequested(IQueryCollection query)

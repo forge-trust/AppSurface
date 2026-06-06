@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj" />
   </ItemGroup>
 

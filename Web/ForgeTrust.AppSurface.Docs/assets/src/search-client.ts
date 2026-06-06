@@ -20,6 +20,7 @@ declare global {
 
 (() => {
   const rawConfig = window.__appSurfaceDocsConfig || {};
+  const productIntelligenceEnabled = Boolean(rawConfig.productIntelligenceEnabled);
   const docsRootPath = normalizeDocsRootPath(rawConfig.docsRootPath || '/docs');
   const docsArchiveRootPath = rawConfig.docsArchiveRootPath ? normalizeDocsRootPath(rawConfig.docsArchiveRootPath) : '';
   const docsSearchUrl = rawConfig.docsSearchUrl || joinDocsPath(docsRootPath, 'search');
@@ -47,6 +48,15 @@ declare global {
   const popstateBoundFlag = '__rwDocsSearchPopstateBound';
   const mobileFilterListenerBoundFlag = '__rwDocsSearchMobileFilterListenerBound';
   const mobileFilterMedia = window.matchMedia ? window.matchMedia('(max-width: 767px)') : null;
+  const productEventNames = {
+    docsSearchSubmitted: 'docs.search.submitted',
+    docsSearchReturnedZeroResults: 'docs.search.returned_zero_results',
+    docsSearchResultSelected: 'docs.search.result_selected',
+    docsRecoveryLinkSelected: 'docs.recovery_link.selected'
+  };
+  const productIntelligenceState = {
+    lastSearchKeys: new Map()
+  };
   const pageTypeSort = new Map([
     ['guide', 0],
     ['concept', 1],
@@ -514,6 +524,71 @@ declare global {
     if (node) {
       node.textContent = text;
     }
+  }
+
+  function dispatchProductIntelligenceEvent(name, properties) {
+    if (!productIntelligenceEnabled) {
+      return;
+    }
+
+    const safeProperties = {};
+    Object.entries(properties || {}).forEach(([key, value]) => {
+      safeProperties[key] = String(value ?? '');
+    });
+
+    document.dispatchEvent(new CustomEvent('appsurface:product-intelligence:event', {
+      bubbles: false,
+      cancelable: false,
+      detail: {
+        name,
+        properties: safeProperties
+      }
+    }));
+  }
+
+  function getSearchResultKind(doc) {
+    return normalizePageTypeAlias(doc?.pageType) || 'unknown';
+  }
+
+  function recordSearchOutcome(surface, query, resultCount, activeFilterCount) {
+    const normalized = normalizeQuery(query);
+    if (!normalized) {
+      return;
+    }
+
+    const key = `${normalized}:${resultCount}:${activeFilterCount}`;
+    if (productIntelligenceState.lastSearchKeys.get(surface) === key) {
+      return;
+    }
+
+    productIntelligenceState.lastSearchKeys.set(surface, key);
+    dispatchProductIntelligenceEvent(productEventNames.docsSearchSubmitted, {
+      surface,
+      query_length: normalized.length,
+      result_count: resultCount,
+      active_filter_count: activeFilterCount
+    });
+
+    if (resultCount === 0) {
+      dispatchProductIntelligenceEvent(productEventNames.docsSearchReturnedZeroResults, {
+        surface,
+        query_length: normalized.length,
+        active_filter_count: activeFilterCount
+      });
+    }
+  }
+
+  function inferRecoveryLinkKind(link) {
+    const explicit = normalizeFacetValue(link?.dataset?.rwRecoveryLinkKind);
+    if (explicit) {
+      return explicit;
+    }
+
+    const title = String(link?.textContent ?? '').toLowerCase();
+    if (title.includes('api')) return 'api-reference';
+    if (title.includes('example')) return 'example';
+    if (title.includes('guide')) return 'guide';
+    return 'fallback';
   }
 
   function isVisibleInteractiveElement(element) {
@@ -1025,6 +1100,18 @@ declare global {
     const link = createElement('a', 'docs-search-result-link');
     link.href = doc.path;
     link.setAttribute('aria-label', createSearchResultLinkLabel(doc));
+    if (!options.starter) {
+      link.dataset.rwProductResultRank = String(options.rank || 0);
+      link.dataset.rwProductResultKind = getSearchResultKind(doc);
+      link.dataset.rwProductResultSurface = options.surface || 'search_page';
+      link.addEventListener('click', () => {
+        dispatchProductIntelligenceEvent(productEventNames.docsSearchResultSelected, {
+          surface: link.dataset.rwProductResultSurface || 'search_page',
+          result_rank: link.dataset.rwProductResultRank || '0',
+          result_kind: link.dataset.rwProductResultKind || 'unknown'
+        });
+      });
+    }
     applyDocsNavigationTarget(link, doc.path);
 
     const breadcrumbs = buildBreadcrumbLabels(doc);
@@ -1119,6 +1206,8 @@ declare global {
     view.recoveryLinks.forEach((link) => {
       const anchor = createElement('a', 'docs-search-page-no-results-link', link.title);
       anchor.href = link.href;
+      anchor.dataset.rwRecoveryLinkKind = inferRecoveryLinkKind(anchor);
+      anchor.dataset.rwRecoverySourceState = 'no_results';
       applyDocsNavigationTarget(anchor, link.href);
       links.append(anchor);
     });
@@ -1582,8 +1671,9 @@ declare global {
       const selected = index === activeIndex ? 'true' : 'false';
       const pageTypeBadge = renderPageTypeBadge(item);
       const navigationAttributes = getDocsNavigationAttributes(item.path);
+      const resultKind = getSearchResultKind(item);
       return `<li id="docs-search-option-${index}" role="option" aria-selected="${selected}" tabindex="-1" class="docs-search-option" data-href="${escapeHtml(item.path)}">
-        <a href="${escapeHtml(item.path)}"${navigationAttributes}>
+        <a href="${escapeHtml(item.path)}"${navigationAttributes} data-rw-product-result-rank="${index + 1}" data-rw-product-result-kind="${escapeHtml(resultKind)}" data-rw-product-result-surface="sidebar">
           <span class="docs-search-option-title-row">
             <span class="docs-search-option-title">${escapeHtml(item.title)}</span>
             ${pageTypeBadge}
@@ -1653,6 +1743,7 @@ declare global {
         const queryResults = runRankedSearch(query, createEmptyFacetValues(), topResults);
         activeIndex = queryResults.length > 0 ? 0 : -1;
         renderSidebarResults(sidebar, queryResults, query, activeIndex);
+        recordSearchOutcome('sidebar', query, queryResults.length, 0);
         lastRenderedQuery = query;
       } catch (error) {
         activeIndex = -1;
@@ -1704,6 +1795,24 @@ declare global {
       } else if (event.key === 'Escape') {
         clearSidebarResults(sidebar);
       }
+    });
+
+    results.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      const link = target.closest('[data-rw-product-result-rank][data-rw-product-result-kind][data-rw-product-result-surface]');
+      if (!(link instanceof HTMLElement)) {
+        return;
+      }
+
+      dispatchProductIntelligenceEvent(productEventNames.docsSearchResultSelected, {
+        surface: link.dataset.rwProductResultSurface || 'sidebar',
+        result_rank: link.dataset.rwProductResultRank || '0',
+        result_kind: link.dataset.rwProductResultKind || 'unknown'
+      });
     });
   }
 
@@ -1899,8 +2008,11 @@ declare global {
     }
 
     const fragment = document.createDocumentFragment();
-    view.resultDocs.forEach((doc) => {
-      const article = createSearchResultArticle(doc, queryTokens);
+    view.resultDocs.forEach((doc, index) => {
+      const article = createSearchResultArticle(doc, queryTokens, {
+        rank: index + 1,
+        surface: 'search_page'
+      });
       if (article) {
         fragment.append(article);
       }
@@ -1962,6 +2074,11 @@ declare global {
     }
 
     const view = buildSearchView();
+    recordSearchOutcome(
+      'search_page',
+      view.normalizedQuery,
+      view.resultDocs.length,
+      view.activeFilters.length);
     renderSearchPageFilters(page, view);
     renderSearchPageActiveFilters(page, view);
     renderSearchPageStarterDocs(page, view);
@@ -2105,12 +2222,40 @@ declare global {
         return;
       }
 
+      const recoveryLink = target.closest('.docs-search-page-no-results-link');
+      if (recoveryLink instanceof HTMLElement) {
+        dispatchProductIntelligenceEvent(productEventNames.docsRecoveryLinkSelected, {
+          surface: 'search_page',
+          link_kind: inferRecoveryLinkKind(recoveryLink),
+          source_state: recoveryLink.dataset.rwRecoverySourceState || 'no_results'
+        });
+        return;
+      }
+
       const button = target.closest('[data-rw-clear-all-filters]');
       if (!(button instanceof HTMLButtonElement)) {
         return;
       }
 
       setSearchPageState({ pageType: '', component: '', language: '', audience: '', status: '' }, 'push');
+    });
+
+    root.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      const recoveryLink = target.closest('.docs-search-page-recovery-link');
+      if (!(recoveryLink instanceof HTMLElement)) {
+        return;
+      }
+
+      dispatchProductIntelligenceEvent(productEventNames.docsRecoveryLinkSelected, {
+        surface: 'search_page',
+        link_kind: inferRecoveryLinkKind(recoveryLink),
+        source_state: recoveryLink.dataset.rwRecoverySourceState || 'loading'
+      });
     });
 
     failure.addEventListener('click', (event) => {
