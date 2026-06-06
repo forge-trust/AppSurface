@@ -141,6 +141,70 @@ Use `scroll-padding-top` / `scroll-padding-bottom` or logical `scroll-padding-bl
 
 The manager also exposes `window.RazorWire.pageNavigationManager.syncActiveLinkVisibility()` for advanced integrations that perform custom DOM replacement or layout work outside Turbo. It re-checks the current active link without changing active state and scrolls only the eligible nav container when needed.
 
+## Compact Section Context
+
+Long technical pages sometimes need a compact reader context that shows the previous, current, and next section while the full outline stays tucked behind a mobile panel. RazorWire already provides the reusable primitive for this: it owns active-link state and dispatches `razorwire:page-nav:active-change` when the current section changes. Your app owns the context labels, selectors, layout, animation, and visual treatment.
+
+This pattern is not a RazorWire component and does not add a `data-rw-*` API. Treat any context selectors as app-owned recipe selectors. AppSurface Docs uses this shape for its production page outline: RazorWire supplies active section changes, and the docs chrome derives compact previous/current/next labels from the outline links.
+
+Example markup:
+
+```html
+<nav data-rw-page-nav aria-label="Page sections">
+  <button type="button"
+          data-rw-page-nav-toggle
+          aria-controls="page-sections-panel"
+          aria-expanded="false">
+    <span data-page-nav-context>
+      <span data-page-nav-context-previous hidden></span>
+      <span data-page-nav-context-current>Page sections</span>
+      <span data-page-nav-context-next hidden></span>
+    </span>
+  </button>
+
+  <div id="page-sections-panel" data-rw-page-nav-panel>
+    <a href="#overview" data-rw-page-nav-link>Overview</a>
+    <a href="#install" data-rw-page-nav-link>Install</a>
+    <a href="#configure" data-rw-page-nav-link>Configure</a>
+  </div>
+</nav>
+```
+
+Example enhancement:
+
+```js
+document.querySelectorAll("[data-rw-page-nav]").forEach(nav => {
+  const previous = nav.querySelector("[data-page-nav-context-previous]");
+  const current = nav.querySelector("[data-page-nav-context-current]");
+  const next = nav.querySelector("[data-page-nav-context-next]");
+
+  function setContext(row, text) {
+    if (!row) return;
+    row.textContent = text;
+    row.hidden = text.length === 0;
+  }
+
+  nav.addEventListener("razorwire:page-nav:active-change", event => {
+    const links = Array.from(
+      nav.querySelectorAll("a[data-rw-page-nav-link]"));
+    const link = event.detail?.link;
+    const index = link ? links.indexOf(link) : -1;
+    const labelAt = candidateIndex =>
+      (links[candidateIndex]?.textContent ?? "").trim();
+
+    setContext(previous, index > 0 ? labelAt(index - 1) : "");
+    setContext(current, index >= 0 ? labelAt(index) : "Page sections");
+    setContext(next, index >= 0 && index < links.length - 1
+      ? labelAt(index + 1)
+      : "");
+  });
+});
+```
+
+Keep the full outline reachable without JavaScript. The compact context is progressive enhancement; without the event handler, readers should still see or open ordinary same-page links. Do not duplicate scroll tracking in the app script. Use RazorWire's active link and event as the source of truth so hash navigation, scroll updates, panel close behavior, and lifecycle rebinding stay aligned.
+
+Previous and next labels should read as orientation text unless you deliberately render them as real links. Avoid `aria-live` by default because scroll-driven section changes can be noisy for assistive technology users. If you animate the labels, keep the current section understandable without motion and respect `prefers-reduced-motion`.
+
 ## Accessibility and Navigation Rules
 
 | Surface | Requirement |

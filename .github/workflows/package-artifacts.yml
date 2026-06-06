@@ -25,6 +25,8 @@ jobs:
   package-artifacts:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      TailwindRuntimeBinaryResolutionEnabled: "true"
 
     steps:
       - name: Checkout code

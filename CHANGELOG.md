@@ -16,10 +16,12 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - AppSurface CI coverage now runs through a dedicated `ForgeTrust.AppSurface.CoverageRunner` tool behind the stable `scripts/coverage-solution.sh` entrypoint, preserving Codecov artifact paths while adding bounded same-job coverage scheduling.
 - Coverage runs now write slow-test diagnostics in Markdown and JSON, including project timings, parsed JUnit test-case evidence, best-effort parser warnings, and diagnostic aggregation overhead in seconds and as a percent of runner time.
+- AppSurface CLI now includes `appsurface coverage gate` for private Cobertura line, branch, and optional changed-line threshold enforcement with local JSON/Markdown reports, GitHub Actions step-summary output, and `ASCOV###` diagnostics.
 - RazorWire CLI static export now materializes the lazy page-navigation runtime emitted by AppSurface Docs outlines, so CDN exports succeed and publish consistently when the shared navigation script is required.
 - RazorWire now ships a lazy section-copy runtime with generated package assets, public `data-rw-section-copy*` hooks, static export materialization, and AppSurface Docs adoption for outline/content section links.
 - CI now includes a measured NuGet cache rollout for selected build, docs export, and code-quality jobs while keeping package-gate restores isolated.
 - PackageIndex verification now ignores hidden local cache directories such as `.pnpm-store` and workspace `.nuget/packages` so local cache contents do not require package manifest entries.
+- Fast non-package CI that does not compile Tailwind-consuming projects can now skip Tailwind runtime binary resolution while package validation and release paths force binary resolution on and fail before creating an empty runtime package.
 - RazorWire and AppSurface CLI exports now accept explicit `--publish-root-extras` manifests for single-file publish-root deployment extras such as GitHub Pages `CNAME`, while AppSurface Docs exact archive exports stay immutable and reject that deployment-owned surface.
 - AppSurface Web browser status-page re-execution now preserves original browser error status codes while direct reserved preview routes continue to render normally.
 - Package consumers now have a package-first AppSurface Web quickstart that starts from `dotnet new web`, installs `ForgeTrust.AppSurface.Web`, and verifies the first route without cloning the repository.
