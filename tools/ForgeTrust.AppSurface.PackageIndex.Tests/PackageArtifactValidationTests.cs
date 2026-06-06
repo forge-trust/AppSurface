@@ -1744,6 +1744,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"true\"", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageGateWorkflow);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageArtifactsWorkflow);
+        Assert.Matches(disabledRuntimeResolutionSetting, "-p:TailwindRuntimeBinaryResolutionEnabled=false");
         Assert.Matches(disabledRuntimeResolutionSetting, "/property:TailwindRuntimeBinaryResolutionEnabled=false");
         Assert.Matches(disabledRuntimeResolutionSetting, "-property:TailwindRuntimeBinaryResolutionEnabled=false");
         Assert.Matches(disabledRuntimeResolutionSetting, "/p:Configuration=Debug;TailwindRuntimeBinaryResolutionEnabled=false");
