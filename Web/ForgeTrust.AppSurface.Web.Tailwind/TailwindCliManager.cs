@@ -13,6 +13,8 @@ namespace ForgeTrust.AppSurface.Web.Tailwind;
 /// </summary>
 public class TailwindCliManager
 {
+    private const string TailwindCacheDirectoryPrefix = "tailwind-";
+
     /// <summary>
     /// Represents the concrete process invocation required to launch the resolved Tailwind CLI.
     /// </summary>
@@ -288,19 +290,29 @@ public class TailwindCliManager
     private static IEnumerable<string> EnumerateVersionedDownloadCacheDirectories(string cacheRoot)
     {
         return Directory
-            .EnumerateDirectories(cacheRoot, "tailwind-*")
+            .EnumerateDirectories(cacheRoot, $"{TailwindCacheDirectoryPrefix}*")
             .Select(static path => (Path: path, Version: ParseTailwindCacheVersion(path)))
             .OrderByDescending(static entry => entry.Version)
             .ThenByDescending(static entry => entry.Path, StringComparer.Ordinal)
             .Select(static entry => entry.Path);
     }
 
-    private static Version ParseTailwindCacheVersion(string path)
+    /// <summary>
+    /// Parses the semantic version suffix from a Tailwind shared-cache directory name.
+    /// </summary>
+    /// <param name="path">The cache directory path or file name to parse.</param>
+    /// <returns>The parsed version, or <c>0.0.0</c> when the directory is malformed.</returns>
+    internal static Version ParseTailwindCacheVersion(string? path)
     {
         var name = Path.GetFileName(path);
-        var versionText = name.StartsWith("tailwind-", StringComparison.Ordinal)
-            ? name["tailwind-".Length..]
-            : string.Empty;
+        if (string.IsNullOrEmpty(name))
+        {
+            return new Version(0, 0, 0);
+        }
+
+        var versionText = name.StartsWith(TailwindCacheDirectoryPrefix, StringComparison.Ordinal)
+            ? name.Substring(TailwindCacheDirectoryPrefix.Length)
+            : name;
 
         return Version.TryParse(versionText, out var version) ? version : new Version(0, 0, 0);
     }

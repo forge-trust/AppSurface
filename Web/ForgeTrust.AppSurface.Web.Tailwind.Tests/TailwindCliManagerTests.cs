@@ -303,6 +303,8 @@ public class TailwindCliManagerTests : IDisposable
             _currentHostRuntimeProjectBinaryName);
         Directory.CreateDirectory(Path.GetDirectoryName(olderPath)!);
         Directory.CreateDirectory(Path.GetDirectoryName(newestPath)!);
+        Directory.CreateDirectory(Path.Join(cacheRoot, "tailwind-", _currentHostRid));
+        Directory.CreateDirectory(Path.Join(cacheRoot, "tailwind-not-a-version", _currentHostRid));
         File.WriteAllText(olderPath, "older");
         File.WriteAllText(newestPath, "newest");
 
@@ -428,6 +430,20 @@ public class TailwindCliManagerTests : IDisposable
             "tailwindcss-linux-x64");
 
         Assert.Equal(Path.Join(_tempPath, "cache-root", "tailwind-4.1.18", "linux-x64", "tailwindcss-linux-x64"), result);
+    }
+
+    [Theory]
+    [InlineData("tailwind-4.10.0", "4.10.0")]
+    [InlineData("4.10.0", "4.10.0")]
+    [InlineData("tailwind-", "0.0.0")]
+    [InlineData("tailwind-not-a-version", "0.0.0")]
+    [InlineData("", "0.0.0")]
+    [InlineData(null, "0.0.0")]
+    public void ParseTailwindCacheVersion_ReturnsParsedVersionOrZeroVersion(string? path, string expectedVersion)
+    {
+        var result = TailwindCliManager.ParseTailwindCacheVersion(path);
+
+        Assert.Equal(Version.Parse(expectedVersion), result);
     }
 
     [Fact]
