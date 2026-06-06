@@ -47,7 +47,7 @@ dotnet new tool-manifest
 dotnet tool install ForgeTrust.AppSurface.Cli --prerelease
 dotnet tool run appsurface --version
 dotnet tool run appsurface docs --repo .
-dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 85 --min-patch-branch 85
+dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --min-patch-branch 85
 ```
 
 Update the repo-scoped tool version with:
@@ -69,7 +69,7 @@ appsurface coverage gate \
   --min-line 95 \
   --min-branch 85 \
   --diff-base origin/main \
-  --min-patch-line 85 \
+  --min-patch-line 95 \
   --min-patch-branch 85
 ```
 
@@ -100,7 +100,7 @@ Reports are private local artifacts:
   "thresholds": {
     "line": 95,
     "branch": 85,
-    "patchLine": 85,
+    "patchLine": 95,
     "patchBranch": 85
   },
   "line": {
@@ -139,7 +139,7 @@ Use this GitHub Actions shape when your repo already produces the AppSurface mer
 - run: git fetch --no-tags --depth=1 origin main
 - run: dotnet tool restore
 - run: ./scripts/coverage-solution.sh
-- run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 85 --min-patch-branch 85
+- run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --min-patch-branch 85
 - uses: actions/upload-artifact@v4
   if: always()
   with:

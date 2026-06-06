@@ -146,7 +146,7 @@ Run merged solution coverage (product assemblies only):
 
 ```bash
 ./scripts/coverage-solution.sh
-dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- coverage gate --coverage TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 85 --min-patch-branch 85
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- coverage gate --coverage TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --min-patch-branch 85
 ```
 
 This command:

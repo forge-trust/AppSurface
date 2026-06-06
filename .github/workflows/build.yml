@@ -107,7 +107,7 @@ jobs:
             --min-line 95 \
             --min-branch 85 \
             --diff-base origin/main \
-            --min-patch-line 85 \
+            --min-patch-line 95 \
             --min-patch-branch 85
 
       - name: Upload coverage reports to Codecov
