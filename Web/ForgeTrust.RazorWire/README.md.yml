@@ -4,5 +4,7 @@ related_pages:
   - Web/ForgeTrust.RazorWire/DESIGN.md
   - examples/razorwire-mvc/README.md
   - Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md
+  - Web/ForgeTrust.RazorWire/Docs/page-navigation.md
+  - Web/ForgeTrust.RazorWire/Docs/section-copy.md
   - Web/ForgeTrust.RazorWire/Docs/form-failures.md
   - Web/ForgeTrust.RazorWire/Docs/antiforgery.md

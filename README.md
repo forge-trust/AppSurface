@@ -127,10 +127,10 @@ bash examples/web-error-pages/verify.sh
 
 That proof starts a local production-mode web app, checks conventional browser `401`, `403`, `404`, and `500` pages, and verifies API requests do not receive surprise browser HTML.
 
-If you are evaluating packages from your own app project rather than running this repo, start with the generated package chooser in [packages/README.md](./packages/README.md). Use the package matrix to pick the module your app actually needs, then run the matching install command from your app project, for example:
+If you are evaluating packages from your own app project rather than running this repo, use the [package-first path](./start-here/first-success-path.md#package-first-path) to create a fresh ASP.NET Core app, install `ForgeTrust.AppSurface.Web`, and verify the first route. Run the package command from the app project directory, or pass the project path explicitly. The generated package chooser in [packages/README.md](./packages/README.md) is the install map for picking optional modules after that first proof.
 
 ```bash
-dotnet add package ForgeTrust.AppSurface.Web --project <path-to-your-app.csproj>
+dotnet package add ForgeTrust.AppSurface.Web
 ```
 
 Add optional modules only when the generated chooser points you to them.
@@ -154,6 +154,22 @@ This command:
 - Excludes test modules (`*.Tests` and `*.IntegrationTests`) from coverage.
 - Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
 - Writes a summary to `TestResults/coverage-merged/summary.txt`.
+- Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
+- Restores the pinned local ReportGenerator .NET tool when coverage files need to be merged.
+
+The script also supports bounded test groups for local or CI experiments:
+
+```bash
+BUILD_CONFIGURATION=Release BUILD_SOLUTION=false ./scripts/coverage-solution.sh --group web --output TestResults/coverage-groups/web
+./scripts/coverage-solution.sh --list-groups
+./scripts/coverage-solution.sh --merge-only TestResults/coverage-groups --output TestResults/coverage-merged
+```
+
+Available bounded groups are `core`, `tools`, `web`, `docs`, `razorwire`, and `integration`.
+
+Default PR validation keeps solution coverage in one lane until measured group runs prove they reduce total GitHub Actions minutes, not just wall-clock time.
+
+The current CI critical-path policy and timing baseline live in [eng/ci-critical-path.md](./eng/ci-critical-path.md).
 
 When tests need to launch child processes, prefer CliWrap-backed helpers over raw `System.Diagnostics.Process` setup. Keep process-output capture in the helper result so CI failures include stdout and stderr, and reserve raw `Process` usage for tests that intentionally exercise process-wrapper behavior.
 

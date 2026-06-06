@@ -132,6 +132,7 @@ test('visible strategy waits for intersection before hydrating', async () => {
   });
 
   assert.equal(island.hasAttribute('data-rw-hydrated'), false);
+  await waitForCondition(() => observers.length === 1);
   observers[0].callback([{ isIntersecting: true }]);
   await flushHydration();
 

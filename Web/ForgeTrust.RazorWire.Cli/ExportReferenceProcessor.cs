@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text;
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
@@ -17,6 +18,17 @@ namespace ForgeTrust.RazorWire.Cli;
 internal sealed partial class ExportReferenceProcessor
 {
     private const string ExportIgnoreAttributeName = "data-rw-export-ignore";
+
+    /// <summary>
+    /// Managed runtime path for the RazorWire section-copy client script: <c>/_content/ForgeTrust.RazorWire/razorwire/section-copy.js</c>.
+    /// </summary>
+    /// <remarks>
+    /// Static export uses this package-relative path only for internal synthetic script registration when section-copy markup
+    /// exists without an explicit runtime script reference. The value must match the RazorWire static web asset and embedded
+    /// fallback route; callers should not rewrite it at runtime or use it as an application-specific override point.
+    /// </remarks>
+    private const string SectionCopyRuntimePath = "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js";
+
     private static readonly Uri ManagedUrlBase = new("http://dummy");
 
     private static readonly HashSet<string> SourceNavigationAnchorExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -39,11 +51,77 @@ internal sealed partial class ExportReferenceProcessor
     {
         "stylesheet",
         "icon",
+        "modulepreload",
         "preload",
         "prefetch",
         "dns-prefetch",
         "canonical",
     };
+
+    private static readonly HashSet<string> StaticAssetLinkRelTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "stylesheet",
+        "icon",
+        "modulepreload",
+    };
+
+    private static readonly HashSet<string> MetadataLinkRelTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "canonical",
+        "dns-prefetch",
+    };
+
+    private static readonly HashSet<string> StaticAssetHintRelTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "preload",
+        "prefetch",
+    };
+
+    private static readonly HashSet<string> StaticAssetHintAsTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "audio",
+        "font",
+        "image",
+        "script",
+        "style",
+        "track",
+        "video",
+        "worker",
+    };
+
+    private static readonly HashSet<string> StaticAssetPathExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".avif",
+        ".css",
+        ".eot",
+        ".gif",
+        ".ico",
+        ".jpeg",
+        ".jpg",
+        ".js",
+        ".json",
+        ".map",
+        ".mjs",
+        ".mp3",
+        ".mp4",
+        ".ogg",
+        ".otf",
+        ".png",
+        ".svg",
+        ".ttf",
+        ".wasm",
+        ".wav",
+        ".webm",
+        ".webp",
+        ".woff",
+        ".woff2",
+    };
+
+    private const string RazorWirePageNavigationRuntimeMarker = "data-rw-page-navigation-runtime";
+    private const string RazorWirePageNavigationSelectorMarker = "[data-rw-page-nav]";
+    private const string RazorWireSectionCopyRuntimeMarker = "data-rw-section-copy-runtime";
+    private const string RazorWireSectionCopyButtonSelectorMarker = "[data-rw-section-copy]";
+    private const string RazorWireSectionCopyTargetSelectorMarker = "[data-rw-section-copy-target]";
 
     private readonly HtmlParser _htmlParser = new();
     private readonly ILogger _logger;
@@ -223,10 +301,21 @@ internal sealed partial class ExportReferenceProcessor
             AddReference(references, element.GetAttribute("src") ?? string.Empty, ExportReferenceKind.ScriptSrc, currentRoute, CreateHtmlProvenance(element, "src", attributeLookup));
         }
 
+        AddRazorWirePageNavigationAutoloadReferences(references, document, currentRoute);
+
         foreach (var element in document.QuerySelectorAll("link[href]")
             .Where(element => IsSupportedLinkRel(element.GetAttribute("rel") ?? string.Empty)))
         {
-            AddReference(references, element.GetAttribute("href") ?? string.Empty, ExportReferenceKind.LinkHref, currentRoute, CreateHtmlProvenance(element, "href", attributeLookup));
+            var rel = element.GetAttribute("rel") ?? string.Empty;
+            var asValue = element.GetAttribute("as");
+            AddReference(
+                references,
+                element.GetAttribute("href") ?? string.Empty,
+                ExportReferenceKind.LinkHref,
+                currentRoute,
+                CreateHtmlProvenance(element, "href", attributeLookup),
+                path => ClassifyLinkReference(rel, asValue, path),
+                new ExportReferenceLinkMetadata(rel, asValue));
         }
 
         foreach (var element in document.QuerySelectorAll("img[src]"))
@@ -252,7 +341,107 @@ internal sealed partial class ExportReferenceProcessor
             references.AddRange(ExtractCssReferences(element.GetAttribute("style") ?? string.Empty, currentRoute, "style", element.LocalName, "style"));
         }
 
+        AddRazorWireSectionCopyAutoloadReferences(references, document, currentRoute, attributeLookup);
+
         return references;
+    }
+
+    private void AddRazorWirePageNavigationAutoloadReferences(
+        ICollection<ExportReference> references,
+        IDocument document,
+        string currentRoute)
+    {
+        foreach (var script in document.QuerySelectorAll("script:not([src])").Select(element => element.TextContent))
+        {
+            if (!script.Contains(RazorWirePageNavigationRuntimeMarker, StringComparison.Ordinal)
+                || !script.Contains(RazorWirePageNavigationSelectorMarker, StringComparison.Ordinal)
+                || !TryExtractJavaScriptStringAssignment(script, "source", out var source))
+            {
+                continue;
+            }
+
+            AddReference(
+                references,
+                source,
+                ExportReferenceKind.ScriptSrc,
+                currentRoute,
+                CreateInlineScriptProvenance("RazorWire page-navigation autoload source"));
+        }
+    }
+
+    /// <summary>
+    /// Adds the section-copy runtime script reference required by lazy RazorWire section-copy markup.
+    /// </summary>
+    /// <param name="references">The export reference collection that receives the runtime script reference.</param>
+    /// <param name="document">The parsed HTML document being scanned for section-copy markers and autoload scripts.</param>
+    /// <param name="currentRoute">The route whose HTML owns any generated provenance for the injected reference.</param>
+    /// <param name="attributeLookup">Source span lookup used to attach HTML provenance to synthetic marker-based references.</param>
+    /// <remarks>
+    /// The export pipeline needs a concrete <see cref="ExportReferenceKind.ScriptSrc"/> reference even when a host relies on
+    /// the <c>&lt;rw:scripts /&gt;</c> lazy detector instead of rendering <c>section-copy.js</c> eagerly. This method first
+    /// skips documents that already reference <c>/razorwire/section-copy.js</c> in any script <c>src</c>, using
+    /// case-insensitive matching so versioned or path-base-qualified runtime URLs are treated as already materialized.
+    /// It then looks for <c>data-rw-section-copy</c> or <c>data-rw-section-copy-target</c> markers, prefers the autoload
+    /// script's own encoded <c>source</c> assignment when present, and otherwise injects the default RazorWire runtime path
+    /// with HTML provenance from the first marker.
+    /// </remarks>
+    /// <remarks>
+    /// The marker fallback is intentionally synthetic: static export has to copy assets before client-side lazy detection can
+    /// run. Attribute provenance prefers <c>data-rw-section-copy</c> when the first marker has both button and target
+    /// attributes; otherwise it records <c>data-rw-section-copy-target</c>. Only the first matching marker is used, so pages
+    /// with multiple markers still get one runtime reference. This method runs after direct script extraction, and before the
+    /// normal de-duplication stage turns repeated runtime discoveries into a single queued asset.
+    /// </remarks>
+    private void AddRazorWireSectionCopyAutoloadReferences(
+        ICollection<ExportReference> references,
+        IDocument document,
+        string currentRoute,
+        IReadOnlyDictionary<HtmlAttributeLookupKey, HtmlAttributeSpan> attributeLookup)
+    {
+        var hasSectionCopyRuntime = document.QuerySelectorAll("script[src]")
+            .Any(element => (element.GetAttribute("src") ?? string.Empty)
+                .Contains("/razorwire/section-copy.js", StringComparison.OrdinalIgnoreCase));
+        if (hasSectionCopyRuntime)
+        {
+            return;
+        }
+
+        var marker = document.QuerySelector("[data-rw-section-copy], [data-rw-section-copy-target]");
+        if (marker is null)
+        {
+            return;
+        }
+
+        foreach (var match in document.QuerySelectorAll("script:not([src])")
+            .Select(element => element.TextContent)
+            .Select(script =>
+            {
+                var hasSource = TryExtractJavaScriptStringAssignment(script, "source", out var source);
+                return new { Script = script, HasSource = hasSource, Source = source };
+            })
+            .Where(match => match.Script.Contains(RazorWireSectionCopyRuntimeMarker, StringComparison.Ordinal)
+                            && match.Script.Contains(RazorWireSectionCopyButtonSelectorMarker, StringComparison.Ordinal)
+                            && match.Script.Contains(RazorWireSectionCopyTargetSelectorMarker, StringComparison.Ordinal)
+                            && match.HasSource))
+        {
+            AddReference(
+                references,
+                match.Source,
+                ExportReferenceKind.ScriptSrc,
+                currentRoute,
+                CreateInlineScriptProvenance("RazorWire section-copy autoload source"));
+            return;
+        }
+
+        var attributeName = marker.HasAttribute("data-rw-section-copy")
+            ? "data-rw-section-copy"
+            : "data-rw-section-copy-target";
+        AddReference(
+            references,
+            SectionCopyRuntimePath,
+            ExportReferenceKind.ScriptSrc,
+            currentRoute,
+            CreateHtmlProvenance(marker, attributeName, attributeLookup));
     }
 
     private IReadOnlyList<ExportReference> ExtractCssReferences(
@@ -282,9 +471,11 @@ internal sealed partial class ExportReferenceProcessor
         string rawValue,
         ExportReferenceKind kind,
         string currentRoute,
-        ExportReferenceProvenance provenance)
+        ExportReferenceProvenance provenance,
+        Func<string, ExportReferenceRole>? roleSelector = null,
+        ExportReferenceLinkMetadata? linkMetadata = null)
     {
-        var reference = CreateReference(rawValue.Trim(), kind, currentRoute, provenance);
+        var reference = CreateReference(rawValue.Trim(), kind, currentRoute, provenance, roleSelector, linkMetadata);
         if (reference is not null)
         {
             references.Add(reference);
@@ -295,7 +486,9 @@ internal sealed partial class ExportReferenceProcessor
         string rawValue,
         ExportReferenceKind kind,
         string currentRoute,
-        ExportReferenceProvenance provenance)
+        ExportReferenceProvenance provenance,
+        Func<string, ExportReferenceRole>? roleSelector = null,
+        ExportReferenceLinkMetadata? linkMetadata = null)
     {
         if (IsHashOnlyReference(rawValue))
         {
@@ -308,7 +501,8 @@ internal sealed partial class ExportReferenceProcessor
             return null;
         }
 
-        return new ExportReference(currentRoute, kind, rawValue, resolved, path, query, fragment, provenance);
+        var role = roleSelector?.Invoke(path) ?? GetDefaultReferenceRole(kind);
+        return new ExportReference(currentRoute, kind, role, rawValue, resolved, path, query, fragment, provenance, linkMetadata);
     }
 
     private string RewriteHtmlReferences(string html, string currentRoute, Func<ExportReference, string?> resolveArtifactUrl)
@@ -1016,6 +1210,54 @@ internal sealed partial class ExportReferenceProcessor
         return SourceNavigationAnchorExtensions.Contains(Path.GetExtension(pathOnly));
     }
 
+    private static ExportReferenceRole GetDefaultReferenceRole(ExportReferenceKind kind)
+    {
+        return kind switch
+        {
+            ExportReferenceKind.AnchorHref => ExportReferenceRole.PageRoute,
+            ExportReferenceKind.TurboFrameSrc => ExportReferenceRole.LiveRoute,
+            ExportReferenceKind.ScriptSrc => ExportReferenceRole.StaticAsset,
+            ExportReferenceKind.LinkHref => ExportReferenceRole.StaticAsset,
+            ExportReferenceKind.ImgSrc => ExportReferenceRole.StaticAsset,
+            ExportReferenceKind.ImgSrcSet => ExportReferenceRole.StaticAsset,
+            ExportReferenceKind.CssUrl => ExportReferenceRole.StaticAsset,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled export reference kind.")
+        };
+    }
+
+    private static ExportReferenceRole ClassifyLinkReference(string rel, string? asValue, string path)
+    {
+        var relTokens = rel.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (relTokens.Any(StaticAssetLinkRelTokens.Contains))
+        {
+            return ExportReferenceRole.StaticAsset;
+        }
+
+        if (relTokens.Any(StaticAssetHintRelTokens.Contains))
+        {
+            return IsStaticAssetHint(asValue, path)
+                ? ExportReferenceRole.StaticAsset
+                : ExportReferenceRole.PageRoute;
+        }
+
+        if (relTokens.Any(MetadataLinkRelTokens.Contains))
+        {
+            return ExportReferenceRole.Metadata;
+        }
+
+        return ExportReferenceRole.PageRoute;
+    }
+
+    private static bool IsStaticAssetHint(string? asValue, string path)
+    {
+        if (!string.IsNullOrWhiteSpace(asValue) && StaticAssetHintAsTokens.Contains(asValue.Trim()))
+        {
+            return true;
+        }
+
+        return StaticAssetPathExtensions.Contains(Path.GetExtension(path));
+    }
+
     private static bool IsSupportedLinkRel(string rel)
     {
         return rel.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
@@ -1210,6 +1452,17 @@ internal sealed partial class ExportReferenceProcessor
             attribute.Line);
     }
 
+    private static ExportReferenceProvenance CreateInlineScriptProvenance(string tokenType)
+    {
+        return new ExportReferenceProvenance(
+            "html",
+            "script",
+            null,
+            tokenType,
+            null,
+            null);
+    }
+
     private static ExportReferenceProvenance CreateCssProvenance(
         string css,
         string surface,
@@ -1224,6 +1477,142 @@ internal sealed partial class ExportReferenceProcessor
             token.TokenType,
             token.ValueStart,
             CalculateLine(css, token.ValueStart));
+    }
+
+    private static bool TryExtractJavaScriptStringAssignment(string script, string variableName, out string value)
+    {
+        value = string.Empty;
+        var searchIndex = 0;
+
+        while (searchIndex < script.Length)
+        {
+            var variableIndex = script.IndexOf(variableName, searchIndex, StringComparison.Ordinal);
+            if (variableIndex < 0)
+            {
+                return false;
+            }
+
+            searchIndex = variableIndex + variableName.Length;
+            if ((variableIndex > 0 && IsJavaScriptIdentifierChar(script[variableIndex - 1]))
+                || (searchIndex < script.Length && IsJavaScriptIdentifierChar(script[searchIndex])))
+            {
+                continue;
+            }
+
+            var index = SkipJavaScriptWhitespace(script, searchIndex);
+            if (index >= script.Length || script[index] != '=')
+            {
+                continue;
+            }
+
+            index = SkipJavaScriptWhitespace(script, index + 1);
+            if (index >= script.Length || script[index] is not ('"' or '\''))
+            {
+                continue;
+            }
+
+            return TryReadJavaScriptStringLiteral(script, index, out value);
+        }
+
+        return false;
+    }
+
+    private static bool TryReadJavaScriptStringLiteral(string script, int quoteIndex, out string value)
+    {
+        value = string.Empty;
+        var quote = script[quoteIndex];
+        var builder = new StringBuilder();
+
+        for (var index = quoteIndex + 1; index < script.Length; index++)
+        {
+            var ch = script[index];
+            if (ch == quote)
+            {
+                value = builder.ToString();
+                return true;
+            }
+
+            if (ch != '\\')
+            {
+                builder.Append(ch);
+                continue;
+            }
+
+            if (++index >= script.Length)
+            {
+                return false;
+            }
+
+            var escaped = script[index];
+            switch (escaped)
+            {
+                case 'u' when TryReadHexEscape(script, index + 1, 4, out var unicodeValue):
+                    builder.Append((char)unicodeValue);
+                    index += 4;
+                    break;
+                case 'x' when TryReadHexEscape(script, index + 1, 2, out var hexValue):
+                    builder.Append((char)hexValue);
+                    index += 2;
+                    break;
+                case 'n':
+                    builder.Append('\n');
+                    break;
+                case 'r':
+                    builder.Append('\r');
+                    break;
+                case 't':
+                    builder.Append('\t');
+                    break;
+                default:
+                    builder.Append(escaped);
+                    break;
+            }
+        }
+
+        return false;
+    }
+
+    private static int SkipJavaScriptWhitespace(string script, int index)
+    {
+        while (index < script.Length && char.IsWhiteSpace(script[index]))
+        {
+            index++;
+        }
+
+        return index;
+    }
+
+    private static bool IsJavaScriptIdentifierChar(char ch)
+        => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '$';
+
+    private static bool TryReadHexEscape(string value, int start, int length, out int result)
+    {
+        result = 0;
+        if (start + length > value.Length)
+        {
+            return false;
+        }
+
+        for (var index = start; index < start + length; index++)
+        {
+            var ch = value[index];
+            var digit = ch switch
+            {
+                >= '0' and <= '9' => ch - '0',
+                >= 'a' and <= 'f' => ch - 'a' + 10,
+                >= 'A' and <= 'F' => ch - 'A' + 10,
+                _ => -1
+            };
+
+            if (digit < 0)
+            {
+                return false;
+            }
+
+            result = (result * 16) + digit;
+        }
+
+        return true;
     }
 
     private static HtmlAttributeSpan? FindHtmlAttribute(

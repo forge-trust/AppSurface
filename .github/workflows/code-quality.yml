@@ -20,6 +20,8 @@ jobs:
   dotnet-format:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
     steps:
       - name: Checkout code
@@ -28,13 +30,34 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET SDK
+        id: setup-dotnet
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
           dotnet-version: |
             10.0.x
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
 
-      - name: Restore packages
-        run: dotnet restore ForgeTrust.AppSurface.slnx --locked-mode
+      - name: Restore packages (locked, cache-aware)
+        run: |
+          start_seconds="$(date +%s)"
+          dotnet nuget locals global-packages --list
+          dotnet restore ForgeTrust.AppSurface.slnx --locked-mode
+          restore_seconds="$(( $(date +%s) - start_seconds ))"
+          package_size="$(du -sh "$NUGET_PACKAGES" 2>/dev/null | cut -f1 || true)"
+
+          {
+            echo "### NuGet cache summary"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Workflow job | code-quality.yml / dotnet-format |"
+            echo "| Cache hit | ${{ steps.setup-dotnet.outputs.cache-hit }} |"
+            echo "| Cache dependency path | \`**/packages.lock.json\` |"
+            echo "| NUGET_PACKAGES | \`$NUGET_PACKAGES\` |"
+            echo "| Package folder size | ${package_size:-unknown} |"
+            echo "| Locked restore duration | ${restore_seconds}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build project
         run: dotnet build ForgeTrust.AppSurface.slnx --configuration Release --no-restore

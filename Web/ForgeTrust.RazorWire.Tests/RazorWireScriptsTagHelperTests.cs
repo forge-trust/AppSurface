@@ -58,6 +58,14 @@ public class RazorWireScriptsTagHelperTests
                 "/my-app",
                 "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js"))
             .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js?v=456");
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789");
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc");
 
         // Act
         _helper.Process(_context, _output);
@@ -79,6 +87,75 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains(
             "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js?v=456\"",
             content);
+        Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789\"", content);
+        Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc\"", content);
+        Assert.Contains("const selectors = [\"rw-page-nav\", \"[data-rw-page-nav]\"];", content);
+        Assert.Contains("data-rw-page-navigation-runtime", content);
+        Assert.Contains("RazorWirePageNavigationInitialized", content);
+        Assert.Contains("data-rw-section-copy-runtime", content);
+        Assert.Contains("RazorWireSectionCopyInitialized", content);
+        Assert.Contains("\"[data-rw-section-copy]\", \"[data-rw-section-copy-target]\"", content);
+        Assert.Contains("turbo:frame-load", content);
+    }
+
+    [Fact]
+    public void Process_WhenPageNavigationEnabled_RendersEagerScript()
+    {
+        // Arrange
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider)
+        {
+            ViewContext = _viewContext,
+            PageNavigation = true
+        };
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789");
+
+        // Act
+        helper.Process(_context, _output);
+
+        // Assert
+        var content = _output.Content.GetContent();
+        Assert.Contains(
+            "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789\"",
+            content);
+        Assert.Contains("data-rw-page-navigation-runtime=\"eager\"", content);
+        Assert.DoesNotContain("const selectors = [\"rw-page-nav\", \"[data-rw-page-nav]\"];", content);
+        Assert.Contains("data-rw-section-copy-runtime", content);
+    }
+
+    [Fact]
+    public void Process_WhenSectionCopyEnabled_RendersEagerScript()
+    {
+        // Arrange
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider)
+        {
+            ViewContext = _viewContext,
+            SectionCopy = true
+        };
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc");
+
+        // Act
+        helper.Process(_context, _output);
+
+        // Assert
+        var content = _output.Content.GetContent();
+        Assert.Contains(
+            "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc\"",
+            content);
+        Assert.Contains("data-rw-section-copy-runtime=\"eager\"", content);
+        Assert.DoesNotContain("\"[data-rw-section-copy]\", \"[data-rw-section-copy-target]\"", content);
+        Assert.Contains("data-rw-page-navigation-runtime", content);
     }
 
     [Fact]
@@ -96,6 +173,7 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("VerifyRazorWireGeneratedAssetsBeforePack", project, StringComparison.Ordinal);
         Assert.Contains("assets:razorwire:verify", project, StringComparison.Ordinal);
         Assert.Contains("RWPACK001", project, StringComparison.Ordinal);
+        Assert.Contains("razorwire\\section-copy.js", project, StringComparison.Ordinal);
         Assert.Contains("""<Content Remove="assets\**\*" />""", project, StringComparison.Ordinal);
         Assert.Contains("""<None Remove="assets\**\*" />""", project, StringComparison.Ordinal);
     }

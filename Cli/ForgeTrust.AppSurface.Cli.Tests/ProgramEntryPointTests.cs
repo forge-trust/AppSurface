@@ -418,6 +418,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("netlify", result.AllText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("--seeds", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--strict", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("--publish-root-extras", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--port", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--urls", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--all-hosts", result.AllText, StringComparison.Ordinal);
@@ -1033,6 +1034,18 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task EntryPoint_Should_Print_AppSurface_Export_Help_With_PublishRootExtras()
+    {
+        var result = await InvokeEntryPointAsync(["export", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Export an AppSurface/RazorWire application to static or hybrid files.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--publish-root-extras", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--seeds", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--public-origin", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AppSurfaceExportCommand_Should_Run_Generic_Hybrid_Export()
     {
         using var output = TempDirectory.Create("appsurface-export-output-");
@@ -1056,6 +1069,40 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("data-rw-live-origin=\"https://api.example.com\"", html);
         Assert.Contains("action=\"https://api.example.com/profile/save\"", html);
         Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+    }
+
+    [Fact]
+    public async Task AppSurfaceExportCommand_Should_Copy_PublishRootExtrasManifest_Files()
+    {
+        using var output = TempDirectory.Create("appsurface-export-output-");
+        using var deploy = TempDirectory.Create("appsurface-export-deploy-");
+        using var handler = new AppSurfaceExportHttpMessageHandler();
+        await File.WriteAllTextAsync(Path.Join(deploy.Path, "CNAME"), "docs.example.com");
+        var manifestPath = Path.Join(deploy.Path, "export-extras.yml");
+        await File.WriteAllTextAsync(
+            manifestPath,
+            """
+            version: 1
+            extras:
+              - source: CNAME
+                publishPath: /CNAME
+            """);
+
+        var result = await InvokeProgramEntryPointAsync(
+            [
+                "export",
+                "--url", "http://localhost:5000",
+                "--output", output.Path,
+                "--publish-root-extras", manifestPath,
+                "--mode", "hybrid",
+                "--public-origin", "https://www.example.com",
+                "--live-origin", "https://api.example.com"
+            ],
+            options => options.CustomRegistrations.Add(
+                services => services.AddSingleton<IHttpClientFactory>(new FixedHttpClientFactory(handler))));
+
+        Assert.True(result.ExitCode == 0, result.AllText);
+        Assert.Equal("docs.example.com", await File.ReadAllTextAsync(Path.Join(output.Path, "CNAME")));
     }
 
     [Fact]
@@ -2939,7 +2986,10 @@ public sealed class ProgramEntryPointTests
 
     private sealed class AppSurfaceExportHttpMessageHandler : HttpMessageHandler
     {
+        private const string RazorWireRuntimePath = "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js";
+
         private readonly Queue<HttpResponseMessage> _okResponses;
+        private readonly Queue<HttpResponseMessage> _assetResponses;
         private readonly Queue<HttpResponseMessage> _notFoundResponses;
         private readonly List<HttpResponseMessage> _responses;
 
@@ -2947,9 +2997,13 @@ public sealed class ProgramEntryPointTests
         {
             _responses = Enumerable.Range(0, 8)
                 .Select(_ => CreateOkResponse())
+                .Concat(Enumerable.Range(0, 8).Select(_ => CreateAssetResponse()))
                 .Concat(Enumerable.Range(0, 8).Select(_ => new HttpResponseMessage(HttpStatusCode.NotFound)))
                 .ToList();
-            _okResponses = new Queue<HttpResponseMessage>(_responses.Where(response => response.StatusCode == HttpStatusCode.OK));
+            _okResponses = new Queue<HttpResponseMessage>(
+                _responses.Where(response => response.Content?.Headers.ContentType?.MediaType == "text/html"));
+            _assetResponses = new Queue<HttpResponseMessage>(
+                _responses.Where(response => response.Content?.Headers.ContentType?.MediaType == "text/javascript"));
             _notFoundResponses = new Queue<HttpResponseMessage>(_responses.Where(response => response.StatusCode == HttpStatusCode.NotFound));
         }
 
@@ -2959,6 +3013,11 @@ public sealed class ProgramEntryPointTests
             if (path == "/" || path == "/index")
             {
                 return Task.FromResult(DequeueOrThrow(_okResponses, HttpStatusCode.OK, path));
+            }
+
+            if (path == RazorWireRuntimePath)
+            {
+                return Task.FromResult(DequeueOrThrow(_assetResponses, HttpStatusCode.OK, path));
             }
 
             return Task.FromResult(DequeueOrThrow(_notFoundResponses, HttpStatusCode.NotFound, path));
@@ -3011,6 +3070,17 @@ public sealed class ProgramEntryPointTests
                     """,
                     System.Text.Encoding.UTF8,
                     "text/html")
+            };
+        }
+
+        private static HttpResponseMessage CreateAssetResponse()
+        {
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "window.RazorWire = window.RazorWire || {};",
+                    System.Text.Encoding.UTF8,
+                    "text/javascript")
             };
         }
     }

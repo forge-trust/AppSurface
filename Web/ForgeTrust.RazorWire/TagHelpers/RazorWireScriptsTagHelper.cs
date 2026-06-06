@@ -42,6 +42,30 @@ public class RazorWireScriptsTagHelper : TagHelper
     public ViewContext ViewContext { get; set; } = default!;
 
     /// <summary>
+    /// Gets or sets a value indicating whether the page-navigation runtime should be eagerly rendered after the core runtime.
+    /// </summary>
+    /// <remarks>
+    /// Page navigation is split out of the core runtime to keep the default startup path lightweight. Plain
+    /// <c>&lt;rw:scripts /&gt;</c> emits a small usage detector that loads the runtime only when the rendered page contains
+    /// <c>rw-page-nav</c> / <c>data-rw-page-nav</c> markup. Set this attribute to <c>true</c> only when a host wants to
+    /// eagerly fetch the page-navigation asset before the detector runs.
+    /// </remarks>
+    [HtmlAttributeName("page-navigation")]
+    public bool PageNavigation { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the section-copy runtime should be eagerly rendered after the core runtime.
+    /// </summary>
+    /// <remarks>
+    /// Section copy is split out of the core runtime so plain RazorWire pages do not pay for clipboard behavior they do not
+    /// use. Plain <c>&lt;rw:scripts /&gt;</c> emits a small usage detector that loads the runtime only when the rendered page
+    /// contains <c>data-rw-section-copy</c> or <c>data-rw-section-copy-target</c> markup. Set this attribute to
+    /// <c>true</c> when a host wants to eagerly fetch the section-copy asset before the detector runs.
+    /// </remarks>
+    [HtmlAttributeName("section-copy")]
+    public bool SectionCopy { get; set; }
+
+    /// <summary>
     /// Renders the client-side script tags required by RazorWire and removes the wrapper element so no enclosing tag is emitted.
     /// </summary>
     /// <param name="context">The current tag helper context.</param>
@@ -72,6 +96,12 @@ public class RazorWireScriptsTagHelper : TagHelper
         var islandsJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js");
+        var pageNavigationJs = _fileVersionProvider.AddFileVersionToPath(
+            pathBase,
+            "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js");
+        var sectionCopyJs = _fileVersionProvider.AddFileVersionToPath(
+            pathBase,
+            "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
 
         var diagnosticsEnabled = _options.Forms.EnableFailureUx
                                  && _options.Forms.EnableDevelopmentDiagnostics
@@ -90,12 +120,82 @@ public class RazorWireScriptsTagHelper : TagHelper
             pathBase.Add(new PathString(_options.Forms.Antiforgery.TokenEndpointPath)).Value!);
 
         // This includes Turbo.js and the custom RazorWire island loader.
-        output.Content.SetHtmlContent(
-            $@"
+        var scripts = $@"
 <script src=""https://cdn.jsdelivr.net/npm/@hotwired/turbo@8.0.12/dist/turbo.es2017-umd.js"" integrity=""sha256-1evN/OxCRDJtuVCzQ3gklVq8LzN6qhCm7x/sbawknOk="" crossorigin=""anonymous""></script>
 <script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}"" data-rw-live-origin=""{liveOrigin}"" data-rw-hybrid-credentials=""{credentialsMode}"" data-rw-antiforgery-endpoint=""{antiforgeryEndpoint}""></script>
 <script src=""{islandsJs}""></script>
-");
+";
+
+        if (PageNavigation)
+        {
+            scripts += $@"<script src=""{pageNavigationJs}"" data-rw-page-navigation-runtime=""eager""></script>
+";
+        }
+        else
+        {
+            scripts += BuildAutoloadScript(
+                pageNavigationJs,
+                "data-rw-page-navigation-runtime",
+                "RazorWirePageNavigationInitialized",
+                ["rw-page-nav", "[data-rw-page-nav]"]);
+        }
+
+        if (SectionCopy)
+        {
+            scripts += $@"<script src=""{sectionCopyJs}"" data-rw-section-copy-runtime=""eager""></script>
+";
+        }
+        else
+        {
+            scripts += BuildAutoloadScript(
+                sectionCopyJs,
+                "data-rw-section-copy-runtime",
+                "RazorWireSectionCopyInitialized",
+                ["[data-rw-section-copy]", "[data-rw-section-copy-target]"]);
+        }
+
+        output.Content.SetHtmlContent(scripts);
+    }
+
+    private static string BuildAutoloadScript(
+        string scriptSource,
+        string marker,
+        string initializedFlag,
+        IReadOnlyList<string> selectors)
+    {
+        var encodedSource = JavaScriptEncoder.Default.Encode(scriptSource);
+        var encodedMarker = JavaScriptEncoder.Default.Encode(marker);
+        var encodedInitializedFlag = JavaScriptEncoder.Default.Encode(initializedFlag);
+        var encodedSelectorList = string.Join(
+            ", ",
+            selectors.Select(selector => $"\"{JavaScriptEncoder.Default.Encode(selector)}\""));
+
+        return $@"<script>
+(() => {{
+  const source = ""{encodedSource}"";
+  const marker = ""{encodedMarker}"";
+  const initializedFlag = ""{encodedInitializedFlag}"";
+  const selectors = [{encodedSelectorList}];
+  const hasMarkup = () => selectors.some(selector => document.querySelector(selector));
+  const load = () => {{
+    if (window[initializedFlag] || document.querySelector(`script[${{marker}}]`) || !hasMarkup()) return;
+    const script = document.createElement(""script"");
+    script.src = source;
+    script.defer = true;
+    script.setAttribute(marker, ""auto"");
+    document.head.appendChild(script);
+  }};
+  if (document.readyState === ""loading"") {{
+    document.addEventListener(""DOMContentLoaded"", load, {{ once: true }});
+  }} else {{
+    load();
+  }}
+  document.addEventListener(""turbo:render"", load);
+  document.addEventListener(""turbo:load"", load);
+  document.addEventListener(""turbo:frame-load"", load);
+}})();
+</script>
+";
     }
 
     private static string ResolveHybridCredentialsAttribute(RazorWireOptions options, string? normalizedLiveOrigin)

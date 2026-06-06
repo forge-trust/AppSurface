@@ -105,14 +105,14 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
 
         Assert.Equal("Releases", (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("Release contract", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("v0.1.0 RC 1", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("v0.1.0 RC 2", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Unreleased", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("living proof artifact", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
 
-        await page.Locator(".docs-content a[href='/docs/releases/v0.1.0-rc.1']").First.ClickAsync();
-        await WaitForPathAsync(page, "/docs/releases/v0.1.0-rc.1");
+        await page.Locator(".docs-content a[href='/docs/releases/v0.1.0-rc.2']").First.ClickAsync();
+        await WaitForPathAsync(page, "/docs/releases/v0.1.0-rc.2");
         await page.WaitForFunctionAsync(
-            "() => document.querySelector('h1')?.textContent?.trim() === 'AppSurface 0.1.0 RC 1'",
+            "() => document.querySelector('h1')?.textContent?.trim() === 'Release 0.1.0-rc.2'",
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
         await page.WaitForSelectorAsync(".docs-trust-bar", new PageWaitForSelectorOptions
@@ -121,12 +121,12 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
             State = WaitForSelectorState.Visible
         });
 
-        Assert.Equal("AppSurface 0.1.0 RC 1", (await page.TextContentAsync("h1"))?.Trim());
+        Assert.Equal("Release 0.1.0-rc.2", (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("Tagged", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
 
         await page.GotoAsync($"{_fixture.DocsUrl}/releases/v0.1-preview");
-        await WaitForPathAsync(page, "/docs/releases/v0.1.0-rc.1");
-        Assert.Equal("AppSurface 0.1.0 RC 1", (await page.TextContentAsync("h1"))?.Trim());
+        await WaitForPathAsync(page, "/docs/releases/v0.1.0-rc.2");
+        Assert.Equal("Release 0.1.0-rc.2", (await page.TextContentAsync("h1"))?.Trim());
 
         await page.GotoAsync($"{_fixture.DocsUrl}/releases");
         await page.Locator(".docs-content a[href='/docs/releases/unreleased']").First.ClickAsync();

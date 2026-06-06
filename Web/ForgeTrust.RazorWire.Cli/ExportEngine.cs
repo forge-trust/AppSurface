@@ -111,6 +111,7 @@ public class ExportEngine
             context.BaseUrl,
             context.OutputPath);
 
+        ValidateDeploymentExtrasReleaseArchivePreflight(context);
         await QueueSeedRoutesAsync(context, cancellationToken);
 
         _logger.LogInformation(
@@ -140,6 +141,7 @@ public class ExportEngine
         ValidateExport(context);
         await MaterializeTextRoutesAsync(context, cancellationToken);
         await MaterializeRedirectsAsync(context, cancellationToken);
+        await MaterializeDeploymentExtrasAsync(context, cancellationToken);
         if (context.ReleaseArchiveManifestEnabled)
         {
             context.ReleaseArchiveManifest = await ReleaseArchiveManifestWriter.WriteAsync(context.OutputPath, cancellationToken);
@@ -163,6 +165,19 @@ public class ExportEngine
 
         sw.Stop();
         _logger.LogInformation("Export completed in {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
+    }
+
+    private static void ValidateDeploymentExtrasReleaseArchivePreflight(ExportContext context)
+    {
+        if (context.DeploymentExtras.Count == 0 || !context.ReleaseArchiveManifestEnabled)
+        {
+            return;
+        }
+
+        throw ExportDeploymentExtras.CreateException(
+            "release-archive-incompatible",
+            "Publish-root deployment extras cannot be copied into an exact AppSurface Docs release archive. Fix: export the archive to a clean directory without extras, then copy deployment files into the surrounding publish root.",
+            ExportDeploymentExtras.RouteFallback);
     }
 
     /// <summary>
@@ -385,6 +400,184 @@ public class ExportEngine
                 break;
             default:
                 throw new InvalidOperationException($"Unsupported redirect strategy '{context.RedirectStrategy}'.");
+        }
+    }
+
+    private async Task MaterializeDeploymentExtrasAsync(ExportContext context, CancellationToken cancellationToken)
+    {
+        if (context.DeploymentExtras.Count == 0)
+        {
+            return;
+        }
+
+        var inventory = BuildOwnedPublishPathInventory(context);
+        var diagnostics = new List<ExportDiagnostic>();
+        foreach (var extra in context.DeploymentExtras)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var targetPath = ExportDeploymentExtras.MapPublishPathToFilePath(context.OutputPath, extra.PublishPath);
+            try
+            {
+                ExportDeploymentExtras.ValidateTargetParentPath(context.OutputPath, targetPath, extra.PublishPath);
+            }
+            catch (ExportValidationException ex)
+            {
+                diagnostics.AddRange(ex.Diagnostics);
+                continue;
+            }
+
+            if (inventory.TryGetOwner(targetPath, out var owner))
+            {
+                diagnostics.Add(
+                    ExportDeploymentExtras.CreateDiagnostic(
+                        "target-generated-collision",
+                        $"Publish-root deployment extra target '{extra.PublishPath}' would overwrite exporter-owned output '{owner}'. Fix: choose a different publishPath or remove the generated route/provider output.",
+                        extra.PublishPath));
+                continue;
+            }
+
+            if (File.Exists(targetPath) || Directory.Exists(targetPath))
+            {
+                diagnostics.Add(
+                    ExportDeploymentExtras.CreateDiagnostic(
+                        "target-exists",
+                        $"Publish-root deployment extra target '{extra.PublishPath}' already exists at '{targetPath}'. Fix: export to a clean output directory or choose a different publishPath; deployment extras never overwrite existing files.",
+                        extra.PublishPath));
+            }
+        }
+
+        if (diagnostics.Count > 0)
+        {
+            throw new ExportValidationException(diagnostics);
+        }
+
+        foreach (var extra in context.DeploymentExtras)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await CopyDeploymentExtraAsync(context.OutputPath, extra, cancellationToken);
+        }
+    }
+
+    private static async Task CopyDeploymentExtraAsync(
+        string outputPath,
+        ExportDeploymentExtra extra,
+        CancellationToken cancellationToken)
+    {
+        var targetPath = ExportDeploymentExtras.MapPublishPathToFilePath(outputPath, extra.PublishPath);
+        // Keep the copy helper defensive if future call paths bypass the batch preflight.
+        ExportDeploymentExtras.ValidateTargetParentPath(outputPath, targetPath, extra.PublishPath);
+        var targetDirectory = Path.GetDirectoryName(targetPath);
+        if (!string.IsNullOrWhiteSpace(targetDirectory))
+        {
+            Directory.CreateDirectory(targetDirectory);
+        }
+
+        var tempPath = Path.Join(
+            targetDirectory ?? Path.GetFullPath(outputPath),
+            $".{Path.GetFileName(targetPath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await using (var source = new FileStream(
+                             extra.SourcePath,
+                             FileMode.Open,
+                             FileAccess.Read,
+                             FileShare.Read,
+                             bufferSize: 128 * 1024,
+                             useAsync: true))
+            await using (var destination = new FileStream(
+                             tempPath,
+                             FileMode.CreateNew,
+                             FileAccess.Write,
+                             FileShare.None,
+                             bufferSize: 128 * 1024,
+                             useAsync: true))
+            {
+                await source.CopyToAsync(destination, cancellationToken);
+            }
+
+            File.Move(tempPath, targetPath, overwrite: false);
+        }
+        catch (OperationCanceledException)
+        {
+            DeleteTempFile(tempPath);
+            throw;
+        }
+        catch (Exception ex) when (IsNonFatal(ex))
+        {
+            DeleteTempFile(tempPath);
+            throw ExportDeploymentExtras.CreateException(
+                "copy-failed",
+                $"Publish-root deployment extra '{extra.PublishPath}' could not be copied from '{extra.SourcePath}' to '{targetPath}': {ex.Message}. Fix: verify file permissions and export to a clean output directory.",
+                extra.PublishPath);
+        }
+    }
+
+    private static void DeleteTempFile(string tempPath)
+    {
+        try
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+        catch (Exception ex) when (IsNonFatal(ex))
+        {
+            // Best-effort cleanup; the original copy/cancellation failure is more useful to callers.
+        }
+    }
+
+    private ExportOwnedPublishPathInventory BuildOwnedPublishPathInventory(ExportContext context)
+    {
+        var inventory = new ExportOwnedPublishPathInventory();
+        foreach (var outcome in context.RouteOutcomes.Values.Where(outcome => outcome.Succeeded && outcome.ArtifactPath is not null))
+        {
+            inventory.Add(outcome.ArtifactPath!, $"route '{outcome.Route}'");
+            if (outcome.IsHtml && context.PartialArtifactUrls.ContainsKey(outcome.Route))
+            {
+                inventory.Add(MapHtmlFilePathToPartialPath(outcome.ArtifactPath!), $"docs partial for route '{outcome.Route}'");
+            }
+        }
+
+        inventory.Add(Path.Join(context.OutputPath, "404.html"), "conventional 404 artifact");
+        inventory.Add(Path.Join(context.OutputPath, "_redirects"), "provider redirect artifact");
+        inventory.Add(Path.Join(context.OutputPath, "_headers"), "provider headers artifact");
+        inventory.Add(Path.Join(context.OutputPath, ".appsurface-docs-route-manifest.json"), "AppSurface Docs route manifest");
+        inventory.Add(Path.Join(context.OutputPath, ReleaseArchiveManifestWriter.FileName), "AppSurface Docs release archive manifest");
+
+        foreach (var artifact in context.RedirectArtifacts)
+        {
+            if (context.RedirectStrategy == ExportRedirectStrategy.Html)
+            {
+                inventory.Add(
+                    MapRouteToFilePath(artifact.AliasRoute, context.OutputPath, isHtml: true),
+                    $"redirect alias '{artifact.AliasRoute}'");
+            }
+        }
+
+        return inventory;
+    }
+
+    private static bool IsNonFatal(Exception ex)
+    {
+        return ex is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException
+            and not ThreadAbortException;
+    }
+
+    private sealed class ExportOwnedPublishPathInventory
+    {
+        private readonly Dictionary<string, string> _owners = new(StringComparer.OrdinalIgnoreCase);
+
+        internal void Add(string path, string owner)
+        {
+            _owners.TryAdd(NormalizeArtifactPath(path), owner);
+        }
+
+        internal bool TryGetOwner(string path, [NotNullWhen(true)] out string? owner)
+        {
+            return _owners.TryGetValue(NormalizeArtifactPath(path), out owner);
         }
     }
 
@@ -1015,6 +1208,10 @@ public class ExportEngine
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         ValidateRedirectArtifacts(context, seen);
+        if (context.Mode == ExportMode.Hybrid)
+        {
+            ValidateRequiredStaticAssets(context, seen);
+        }
 
         if (context.Mode != ExportMode.Cdn)
         {
@@ -1070,6 +1267,17 @@ public class ExportEngine
         if (context.Diagnostics.Count > 0)
         {
             throw new ExportValidationException(context.Diagnostics);
+        }
+    }
+
+    private void ValidateRequiredStaticAssets(ExportContext context, ISet<string> seen)
+    {
+        foreach (var reference in context.References.Where(reference => reference.RequiresStaticMaterialization(context.Mode)))
+        {
+            if (!TryResolveReferenceArtifactUrl(reference, context, out _))
+            {
+                AddMissingReferenceDiagnostic(context, seen, reference);
+            }
         }
     }
 
@@ -1319,16 +1527,25 @@ public class ExportEngine
         var sourceDescription = provenance is null
             ? $"from '{reference.SourceRoute}'"
             : $"from {provenance.DisplaySource} on '{reference.SourceRoute}'";
+        var linkDescription = reference.LinkMetadata is null
+            ? string.Empty
+            : $" ({reference.LinkMetadata.Display})";
         var positionDescription = provenance?.Line is null
             ? string.Empty
             : $" near line {provenance.Line.Value}";
+        var validationTarget = context.Mode == ExportMode.Hybrid
+            ? "during hybrid export"
+            : "to an emitted static export artifact";
+        var fix = context.Mode == ExportMode.Hybrid && code == "RWEXPORT003"
+            ? "Hybrid export can leave page routes, frames, forms, streams, and islands to live infrastructure, but browser-delivered assets requested by HTML or CSS must be emitted by the export or made external/data/hash-only. Add or copy the asset, correct path casing, make the URL external/data/hash-only, or remove the browser dependency."
+            : "Add the route or asset to the export, make the reference external/data/hash-only, or use hybrid mode when a live server owns it.";
 
         AddDiagnostic(
             context,
             seen,
             new ExportDiagnostic(
                 code,
-                $"The {description} '{reference.RawValue}' {sourceDescription}{positionDescription} did not map to an emitted CDN artifact. Normalized path: '{reference.Path}'. Add the route or asset to the export, make the reference external/data/hash-only, or use hybrid mode when a live server owns it.",
+                $"The {description} '{reference.RawValue}' {sourceDescription}{linkDescription}{positionDescription} did not resolve {validationTarget}. Normalized path: '{reference.Path}'. {fix}",
                 reference.SourceRoute,
             reference));
     }

@@ -25,6 +25,24 @@ const generatedOutputs = [
     banner: 'Generated from assets/src/razorwire.islands.ts. Do not edit wwwroot/razorwire/razorwire.islands.js by hand.',
     rawBytes: 9_000,
     gzipBytes: 3_500
+  },
+  {
+    entry: path.join(assetRoot, 'src', 'page-navigation.ts'),
+    output: path.join(outputRoot, 'page-navigation.js'),
+    label: 'page-navigation.js',
+    banner: 'Generated from assets/src/page-navigation.ts. Do not edit wwwroot/razorwire/page-navigation.js by hand.',
+    // #485 added active-link reveal, resize sync, and ResizeObserver resync to the
+    // page-nav contract; keep the budget close to the generated asset plus headroom.
+    rawBytes: 12_550,
+    gzipBytes: 3_700
+  },
+  {
+    entry: path.join(assetRoot, 'src', 'section-copy.ts'),
+    output: path.join(outputRoot, 'section-copy.js'),
+    label: 'section-copy.js',
+    banner: 'Generated from assets/src/section-copy.ts. Do not edit wwwroot/razorwire/section-copy.js by hand.',
+    rawBytes: 12_000,
+    gzipBytes: 4_000
   }
 ];
 

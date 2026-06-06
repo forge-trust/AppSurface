@@ -60,6 +60,44 @@ public class ExportCommandTests
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_Should_Copy_PublishRootExtrasManifest_Files()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-command-").FullName;
+        var deployDir = Directory.CreateTempSubdirectory("razorwire-export-deploy-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(deployDir, "CNAME"), "docs.example.com");
+            var manifestPath = Path.Join(deployDir, "export-extras.yml");
+            await File.WriteAllTextAsync(
+                manifestPath,
+                """
+                version: 1
+                extras:
+                  - source: CNAME
+                    publishPath: /CNAME
+                """);
+            var command = CreateCommand("http://localhost:5001", null, null, tempDir);
+            command.PublishRootExtrasPath = manifestPath;
+
+            await command.ExecuteAsync(A.Fake<IConsole>());
+
+            Assert.Equal("docs.example.com", await File.ReadAllTextAsync(Path.Join(tempDir, "CNAME")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(deployDir))
+            {
+                Directory.Delete(deployDir, true);
+            }
+        }
+    }
+
     public static IEnumerable<object[]> UnsupportedArchivePaths()
     {
         yield return [".nojekyll", "/.nojekyll"];
@@ -209,7 +247,7 @@ public class ExportCommandTests
 
             var ex = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(A.Fake<IConsole>()));
 
-            Assert.Contains("CDN export validation failed", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("Export validation failed", ex.Message, StringComparison.Ordinal);
             Assert.Contains("RWEXPORT003", ex.Message, StringComparison.Ordinal);
             Assert.Contains("/missing.png", ex.Message, StringComparison.Ordinal);
         }

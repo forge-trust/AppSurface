@@ -4,6 +4,12 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
 public sealed class PackageIndexGeneratorTests : IDisposable
 {
+    private const string FirstSuccessPathMarkdown = """
+        # First Success Path
+
+        ## Package-First Path
+        """;
+
     private readonly string _repositoryRoot;
 
     public PackageIndexGeneratorTests()
@@ -701,6 +707,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/README.md", "# RazorWire CLI");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
@@ -756,7 +763,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("# AppSurface v0.1 package chooser", markdown, StringComparison.Ordinal);
         Assert.Contains("```bash", markdown, StringComparison.Ordinal);
         Assert.Contains("dotnet package add ForgeTrust.AppSurface.Web", markdown, StringComparison.Ordinal);
-        Assert.Contains("[examples/web-app/README.md](../examples/web-app/README.md)", markdown, StringComparison.Ordinal);
+        Assert.Contains("[Package-first quickstart](../start-here/first-success-path.md#package-first-path)", markdown, StringComparison.Ordinal);
         Assert.Contains("[v0.1.0 Release Preview](../releases/v0.1-preview.md)", markdown, StringComparison.Ordinal);
         Assert.Contains("| `ForgeTrust.AppSurface.Web` |", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain('\r', markdown);
@@ -839,6 +846,84 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerateAsync_ThrowsWhenWebPackageQuickstartFragmentTargetIsMissing()
+    {
+        await WriteProgramRepoAsync();
+        await WriteFileAsync(
+            "start-here/first-success-path.md",
+            """
+            # First Success Path
+
+            ## Fresh App Path
+            """);
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
+
+        Assert.Contains("start-here/first-success-path.md#package-first-path", error.Message, StringComparison.Ordinal);
+        Assert.Contains("fragment target", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("""
+        # First Success Path
+
+        ## Fresh App Path {#package-first-path}
+        """)]
+    [InlineData("""
+        # First Success Path
+
+        ## Package-First Path ##
+        """)]
+    [InlineData("""
+        # First Success Path
+
+        ## Package First Path -
+        """)]
+    [InlineData("""
+        <a id="package-first-path"></a>
+
+        # First Success Path
+        """)]
+    [InlineData("""
+        <a id='package-first-path'></a>
+
+        # First Success Path
+        """)]
+    [InlineData("""
+        <a name="package-first-path"></a>
+
+        # First Success Path
+        """)]
+    [InlineData("""
+        <a name='package-first-path'></a>
+
+        # First Success Path
+        """)]
+    public async Task GenerateAsync_AcceptsExplicitWebPackageQuickstartFragmentTargets(string quickstartMarkdown)
+    {
+        await WriteProgramRepoAsync();
+        await WriteFileAsync("start-here/first-success-path.md", quickstartMarkdown);
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web")
+        });
+
+        var markdown = await generator.GenerateAsync(CreateRequest());
+
+        Assert.Contains("[Package-first quickstart](../start-here/first-success-path.md#package-first-path)", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GenerateAsync_ThrowsWhenDeclaredReleaseNotesPathIsMissing()
     {
         await WriteProgramRepoAsync(releaseNotesPath: "releases/v0.1-preview.md");
@@ -901,6 +986,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web.Tailwind/README.md", "# Tailwind");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
@@ -955,7 +1041,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         var markdown = await generator.GenerateAsync(CreateRequest("docs/guides/README.md"));
 
-        Assert.Contains("[examples/web-app/README.md](../../examples/web-app/README.md)", markdown, StringComparison.Ordinal);
+        Assert.Contains("[Package-first quickstart](../../start-here/first-success-path.md#package-first-path)", markdown, StringComparison.Ordinal);
         Assert.Contains("[Package README](../../Web/ForgeTrust.AppSurface.Web/README.md)", markdown, StringComparison.Ordinal);
         Assert.Contains("[Release hub](../../releases/README.md)", markdown, StringComparison.Ordinal);
     }
@@ -992,6 +1078,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj", "<Project />");
         await WriteFileAsync("Console/ForgeTrust.AppSurface.Console/README.md", "# Console");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
         await WriteFileAsync("CHANGELOG.md", "# Changelog");
@@ -2462,10 +2549,32 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     public void IsCandidateProject_ExcludesGeneratedAndToolingPaths()
     {
         Assert.False(PackageProjectScanner.IsCandidateProject("tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Web/bin/Release/net10.0/Generated.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Web/obj/Release/net10.0/Generated.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("node_modules/package/Generated.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("examples/web-app/WebAppExample.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("Config/ForgeTrust.AppSurface.Config.Tests/ForgeTrust.AppSurface.Config.Tests.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("tests/Fixture/Fixture.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("src/BenchmarkHarness.Benchmarks.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("src/FixtureTests.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject(".pnpm-store/v11/projects/cache-key/Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject(".nuget/packages/example/1.0.0/contentFiles/any/net10.0/CachedProject.csproj"));
+        Assert.True(PackageProjectScanner.IsCandidateProject("RootPackage.csproj"));
         Assert.True(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj"));
+    }
+
+    [Fact]
+    public async Task DiscoverProjects_PrunesHiddenCacheDirectories()
+    {
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync(".pnpm-store/v11/projects/cache-key/Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync(".nuget/packages/example/1.0.0/contentFiles/any/net10.0/CachedProject.csproj", "<Project />");
+
+        var projects = new PackageProjectScanner().DiscoverProjects(_repositoryRoot);
+
+        Assert.Equal(["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"], projects);
     }
 
     [Fact]
@@ -2767,7 +2876,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         return new PackageIndexRequest(
             _repositoryRoot,
             Path.Combine(_repositoryRoot, "packages", "package-index.yml"),
-            Path.Combine(_repositoryRoot, outputRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+            TestPathUtils.PathUnder(_repositoryRoot, outputRelativePath));
     }
 
     private async Task WriteCommonChooserFilesAsync(bool includeUnreleased)
@@ -2837,6 +2946,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/README.md", "# RazorWire CLI");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
@@ -2889,6 +2999,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             """);
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/unreleased.md", "# Unreleased");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
@@ -2943,7 +3054,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
     private async Task WriteFileAsync(string relativePath, string content)
     {
-        var fullPath = Path.Combine(_repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        var fullPath = TestPathUtils.PathUnder(_repositoryRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
     }

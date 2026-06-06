@@ -50,6 +50,199 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task PageNavigationSample_TracksHashActiveStateAndClosesMobilePanel()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Navigation/PageNavigation#workflow");
+        await page.WaitForFunctionAsync(
+            """
+            () => window.RazorWire?.pageNavigationManager
+              && document.querySelector('.brochure-page-nav a[href="#workflow"]')?.getAttribute('aria-current') === 'location'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        Assert.True(await page.Locator("script[src*='/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js']").CountAsync() > 0);
+        Assert.Equal("false", await page.GetAttributeAsync(".brochure-page-nav [data-rw-page-nav-toggle]", "aria-expanded"));
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const active = document.querySelector('.brochure-page-nav a[href="#workflow"]');
+              const panel = document.getElementById('brochure-sections-panel');
+              const activeStyle = active ? getComputedStyle(active) : null;
+              return panel?.getAttribute('data-rw-page-nav-panel-state') === 'closed'
+                && active?.textContent?.trim() === 'Buyer Workflow'
+                && activeStyle?.display !== 'none'
+                && activeStyle?.boxShadow === 'none';
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await page.ClickAsync(".brochure-page-nav [data-rw-page-nav-toggle]");
+        await page.WaitForFunctionAsync(
+            """
+            () => document.querySelector('.brochure-page-nav [data-rw-page-nav-toggle]')?.getAttribute('aria-expanded') === 'true'
+              && document.getElementById('brochure-sections-panel')?.getAttribute('data-rw-page-nav-panel-state') === 'open'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await page.ClickAsync(".brochure-page-nav a[href='#replacement']");
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const active = document.querySelector('.brochure-page-nav a[href="#replacement"]');
+              const toggle = document.querySelector('.brochure-page-nav [data-rw-page-nav-toggle]');
+              const panel = document.getElementById('brochure-sections-panel');
+              const panelStyle = panel ? getComputedStyle(panel) : null;
+              return window.location.hash === '#replacement'
+                && active?.getAttribute('aria-current') === 'location'
+                && active?.getAttribute('data-rw-page-nav-active') === 'true'
+                && active?.textContent?.trim() === 'Runtime Ownership'
+                && toggle?.getAttribute('aria-expanded') === 'false'
+                && panel?.getAttribute('data-rw-page-nav-panel-state') === 'closed'
+                && panelStyle?.overflow === 'hidden'
+                && getComputedStyle(active).display !== 'none'
+                && getComputedStyle(active).boxShadow === 'none';
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+    }
+
+    [Fact]
+    public async Task PageNavigationSample_UpdatesActiveStateWhileScrolling()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1280,
+                Height = 720
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Navigation/PageNavigation");
+        await page.WaitForFunctionAsync(
+            """
+            () => window.RazorWire?.pageNavigationManager
+              && document.querySelector('.brochure-page-nav a[href="#trust"]')?.getAttribute('aria-current') === 'location'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await page.EvaluateAsync("() => document.getElementById('state')?.scrollIntoView({ block: 'start' })");
+        await page.WaitForFunctionAsync(
+            """
+            () => document.querySelector('.brochure-page-nav a[href="#state"]')?.getAttribute('aria-current') === 'location'
+              && document.querySelector('.brochure-page-nav a[href="#state"]')?.getAttribute('data-rw-page-nav-active') === 'true'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await page.EvaluateAsync("() => document.getElementById('handoff')?.scrollIntoView({ block: 'start' })");
+        await page.WaitForFunctionAsync(
+            """
+            () => document.querySelector('.brochure-page-nav a[href="#handoff"]')?.getAttribute('aria-current') === 'location'
+              && document.querySelectorAll('.brochure-page-nav [data-rw-page-nav-active="true"]').length === 1
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+    }
+
+    [Fact]
+    public async Task PageNavigationSample_RevealsActiveLinkInsideScrollableNavWithoutMovingDocument()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1280,
+                Height = 720
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Navigation/PageNavigation#replacement");
+        await page.WaitForFunctionAsync(
+            """
+            () => window.RazorWire?.pageNavigationManager
+              && document.querySelector('.brochure-page-nav a[href="#replacement"]')?.getAttribute('aria-current') === 'location'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var probe = await page.EvaluateAsync<PageNavigationRevealProbe>(
+            """
+            () => {
+                const panel = document.getElementById('brochure-sections-panel');
+                const links = [...document.querySelectorAll('.brochure-page-nav [data-rw-page-nav-link]')];
+                if (!panel) throw new Error('Missing page-navigation panel.');
+
+                panel.style.maxHeight = '96px';
+                panel.style.overflowY = 'auto';
+                panel.style.scrollPaddingTop = '12px';
+                panel.style.scrollPaddingBottom = '12px';
+                panel.scrollTop = 0;
+                for (const link of links) {
+                    link.style.display = 'block';
+                    link.style.minHeight = '48px';
+                }
+
+                window.scrollTo(0, 240);
+                const windowScrollBefore = window.scrollY;
+                window.RazorWire.pageNavigationManager.syncActiveLinkVisibility();
+
+                return {
+                    PanelScrollTop: panel.scrollTop,
+                    WindowScrollBefore: windowScrollBefore,
+                    WindowScrollAfter: window.scrollY
+                };
+            }
+            """);
+
+        Assert.True(probe.PanelScrollTop > 0);
+        Assert.InRange(Math.Abs(probe.WindowScrollAfter - probe.WindowScrollBefore), 0, 0.5);
+    }
+
+    [Fact]
+    public async Task PageNavigationSample_NoJavaScriptFallbackAnchorsWork()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            JavaScriptEnabled = false,
+            ViewportSize = new ViewportSize
+            {
+                Width = 1280,
+                Height = 720
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Navigation/PageNavigation");
+
+        Assert.Equal(1, await page.Locator(".brochure-page-nav a[href='#workflow']").CountAsync());
+        Assert.Equal(1, await page.Locator("#workflow").CountAsync());
+
+        await page.ClickAsync(".brochure-page-nav a[href='#replacement']");
+
+        Assert.EndsWith("#replacement", page.Url, StringComparison.Ordinal);
+        Assert.Equal(1, await page.Locator("#replacement").CountAsync());
+        Assert.Equal(0, await page.Locator(".brochure-page-nav [data-rw-page-nav-active='true']").CountAsync());
+    }
+
+    [Fact]
     public async Task RuntimeIslands_OnlyStrategyHydratesClientModuleAndClearsServerContent()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
@@ -573,6 +766,34 @@ public sealed class RazorWireMvcPlaywrightTests
         public string IslandsScriptPath { get; set; } = string.Empty;
     }
 
+    /// <summary>
+    /// Describes the Playwright-to-C# deserialization contract for the page-navigation active-link reveal probe.
+    /// </summary>
+    /// <remarks>
+    /// Values are sampled in the browser and must remain stable for deserialization. Future payload changes should
+    /// preserve these member names or update the browser evaluation script and assertions together.
+    /// </remarks>
+    private sealed class PageNavigationRevealProbe
+    {
+        /// <summary>
+        /// Gets or sets the reveal panel's <c>element.scrollTop</c>, sampled in CSS pixels.
+        /// </summary>
+        /// <remarks>The browser may report fractional scroll offsets, so the value is modeled as a <see cref="double" />.</remarks>
+        public double PanelScrollTop { get; set; }
+
+        /// <summary>
+        /// Gets or sets <c>window.scrollY</c> before the reveal action, sampled in CSS pixels.
+        /// </summary>
+        /// <remarks>The browser may report fractional scroll offsets, so the value is modeled as a <see cref="double" />.</remarks>
+        public double WindowScrollBefore { get; set; }
+
+        /// <summary>
+        /// Gets or sets <c>window.scrollY</c> after the reveal action, sampled in CSS pixels.
+        /// </summary>
+        /// <remarks>The browser may report fractional scroll offsets, so the value is modeled as a <see cref="double" />.</remarks>
+        public double WindowScrollAfter { get; set; }
+    }
+
     private static async Task WaitForMessageAsync(IPage page, string token)
     {
         await page.WaitForFunctionAsync(
@@ -1014,7 +1235,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
     {
         const string readmeProjectPath = "examples/razorwire-mvc/RazorWireWebExample.csproj";
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        var projectPath = Path.Combine(repoRoot, readmeProjectPath.Replace('/', Path.DirectorySeparatorChar));
+        var projectPath = TestPathUtils.PathUnder(repoRoot, readmeProjectPath);
 
         if (!File.Exists(projectPath))
         {

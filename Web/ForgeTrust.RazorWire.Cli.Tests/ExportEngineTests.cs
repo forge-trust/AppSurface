@@ -204,6 +204,70 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractAssets_Should_Find_RazorWire_PageNavigation_Autoload_Source()
+    {
+        var html = """
+            <script src="/_content/ForgeTrust.RazorWire/razorwire/razorwire.js"></script>
+            <script>
+            (() => {
+              const source = "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js";
+              const marker = "data-rw-page-navigation-runtime";
+              const selector = "[data-rw-page-nav]";
+              const load = () => {
+                if (!document.querySelector(selector)) return;
+                const script = document.createElement("script");
+                script.src = source;
+              };
+            })();
+            </script>
+            """;
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        _sut.ExtractAssets(html, "/", context);
+
+        Assert.Contains("/_content/ForgeTrust.RazorWire/razorwire/razorwire.js", context.Queue);
+        Assert.Contains("/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js", context.Queue);
+    }
+
+    [Fact]
+    public void ExtractAssets_Should_Find_RazorWire_PageNavigation_Autoload_Source_When_Source_Is_Escaped()
+    {
+        var html = """
+            <script>
+            (() => {
+              const source = '\x2f_content\u002fForgeTrust.RazorWire/razorwire/page-navigation.js';
+              const marker = "data-rw-page-navigation-runtime";
+              const selector = "[data-rw-page-nav]";
+              const load = () => document.querySelector(selector) && marker && source;
+            })();
+            </script>
+            """;
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        _sut.ExtractAssets(html, "/", context);
+
+        Assert.Contains("/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js", context.Queue);
+    }
+
+    [Fact]
+    public void ExtractAssets_Should_Ignore_RazorWire_PageNavigation_Autoload_Source_When_Markers_Are_Missing()
+    {
+        var html = """
+            <script>
+            (() => {
+              const source = "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js";
+              const load = () => source;
+            })();
+            </script>
+            """;
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        _sut.ExtractAssets(html, "/", context);
+
+        Assert.DoesNotContain("/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js", context.Queue);
+    }
+
+    [Fact]
     public void ExtractAssets_Should_Find_Link_Href_For_Stylesheets_Only()
     {
         // Arrange
@@ -613,6 +677,201 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_Should_Copy_Deployment_Extra_After_Export()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var sourceRoot = CreateSafeTempDirectory("razorwire-export-extra-source-");
+        try
+        {
+            var sourcePath = Path.Join(sourceRoot, "CNAME");
+            await File.WriteAllTextAsync(sourcePath, "docs.example.com");
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            context.AddDeploymentExtra(sourcePath, "/CNAME");
+
+            await _sut.RunAsync(context);
+
+            var targetPath = Path.Join(tempDir, "CNAME");
+            Assert.True(File.Exists(targetPath));
+            Assert.Equal("docs.example.com", await File.ReadAllTextAsync(targetPath));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fail_When_Deployment_Extra_Targets_Generated_Output()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var sourceRoot = CreateSafeTempDirectory("razorwire-export-extra-source-");
+        try
+        {
+            var sourcePath = Path.Join(sourceRoot, "index.html");
+            await File.WriteAllTextAsync(sourcePath, "<html>extra</html>");
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            context.AddDeploymentExtra(sourcePath, "/index.html");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT007", diagnostic.Code);
+            Assert.Contains("[target-generated-collision]", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fail_Before_Crawl_When_ReleaseArchive_Has_Deployment_Extras()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var sourceRoot = CreateSafeTempDirectory("razorwire-export-extra-source-");
+        try
+        {
+            var sourcePath = Path.Join(sourceRoot, "CNAME");
+            await File.WriteAllTextAsync(sourcePath, "docs.example.com");
+            using var handler = new CountingHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            context.AddDeploymentExtra(sourcePath, "/CNAME");
+            context.EnableReleaseArchiveManifest();
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT007", diagnostic.Code);
+            Assert.Contains("[release-archive-incompatible]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Equal(0, handler.RequestCount);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fail_When_Deployment_Extra_Target_Already_Exists()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var sourceRoot = CreateSafeTempDirectory("razorwire-export-extra-source-");
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(tempDir, "CNAME"), "existing.example.com");
+            var sourcePath = Path.Join(sourceRoot, "CNAME");
+            await File.WriteAllTextAsync(sourcePath, "docs.example.com");
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            context.AddDeploymentExtra(sourcePath, "/CNAME");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT007", diagnostic.Code);
+            Assert.Contains("[target-exists]", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Validate_All_Deployment_Extra_Target_Parents_Before_Copying()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var sourceRoot = CreateSafeTempDirectory("razorwire-export-extra-source-");
+        var outsideRoot = Directory.CreateTempSubdirectory("razorwire-export-extra-outside-").FullName;
+        try
+        {
+            var cnameSourcePath = Path.Join(sourceRoot, "CNAME");
+            await File.WriteAllTextAsync(cnameSourcePath, "docs.example.com");
+            var securitySourcePath = Path.Join(sourceRoot, "security.txt");
+            await File.WriteAllTextAsync(securitySourcePath, "Contact: mailto:security@example.com");
+            var linkedParent = Path.Join(tempDir, "linked");
+            if (!TryCreateDirectorySymlink(linkedParent, outsideRoot))
+            {
+                throw new InvalidOperationException(
+                    $"Symlink creation failed; cannot verify target-parent-symlink validation from '{linkedParent}' to '{outsideRoot}'.");
+            }
+
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            context.AddDeploymentExtra(cnameSourcePath, "/CNAME");
+            context.AddDeploymentExtra(securitySourcePath, "/linked/security.txt");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT007", diagnostic.Code);
+            Assert.Contains("[target-parent-symlink]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(tempDir, "CNAME")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+
+            if (Directory.Exists(outsideRoot))
+            {
+                Directory.Delete(outsideRoot, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Write_404Html_When_ReservedRoute_ReturnsHtml()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
@@ -633,6 +892,8 @@ public class ExportEngineTests
             var decodedHtml = Uri.UnescapeDataString(html);
             Assert.Contains("Exported 404 page", html);
             Assert.Contains("href=\"/about.html\"", html);
+            Assert.Contains("href=\"/docs/sections/start-here\" data-rw-export-ignore=\"true\"", html);
+            Assert.Contains("href=\"/docs/sections/packages\" data-rw-export-ignore=\"true\"", html);
             Assert.Contains("src=\"/img/error.png\"", html);
             Assert.DoesNotContain("Diagnostics", html, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("_health", decodedHtml, StringComparison.OrdinalIgnoreCase);
@@ -643,6 +904,16 @@ public class ExportEngineTests
             Assert.False(File.Exists(Path.Join(tempDir, "401.html")));
             Assert.False(File.Exists(Path.Join(tempDir, "403.html")));
             Assert.True(File.Exists(Path.Join(tempDir, "about.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "docs", "sections", "start-here.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "docs", "sections", "packages.html")));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/docs/sections/start-here", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/docs/sections/packages", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/401", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/401.html", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/403", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/403.html", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/404", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/404.html", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -821,6 +1092,37 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_Should_Export_SectionCopy_Runtime_When_Lazy_Markup_Is_Present()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new SectionCopyRuntimeHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var scriptPath = Path.Join(
+                tempDir,
+                "_content",
+                "ForgeTrust.RazorWire",
+                "razorwire",
+                "section-copy.js");
+            Assert.True(File.Exists(scriptPath), "RazorWire section-copy runtime should be exported for lazy section-copy markup.");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Export_Redirected_Stylesheet_To_Original_Route_Path()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
@@ -892,6 +1194,7 @@ public class ExportEngineTests
             var css = await File.ReadAllTextAsync(Path.Join(tempDir, "css", "site.css"));
             Assert.Contains("url('/img/bg.png?v=1')", css);
             Assert.True(File.Exists(Path.Join(tempDir, "_content", "pkg", "app.js")));
+            Assert.True(File.Exists(Path.Join(tempDir, "_content", "ForgeTrust.RazorWire", "razorwire", "page-navigation.js")));
             Assert.True(File.Exists(Path.Join(tempDir, "img", "bg.png")));
             Assert.True(File.Exists(Path.Join(tempDir, "img", "hero.avif")));
             Assert.True(File.Exists(Path.Join(tempDir, "img", "hero.webp")));
@@ -1731,6 +2034,114 @@ public class ExportEngineTests
             var ex = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
 
             Assert.Contains("RWEXPORT003", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_Should_Fail_When_Required_Asset_Is_Missing()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new MissingAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
+            var ex = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains("RWEXPORT003", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("Hybrid export can leave page routes", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("/missing.js", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("use hybrid mode", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_Should_Fail_When_Css_References_Missing_Image()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new MissingCssImageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
+            var ex = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains("RWEXPORT003", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("stylesheet url()", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("/img/map-image.png", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_Should_Fail_When_ModulePreload_Asset_Is_Missing()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new MissingModulePreloadHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
+            var ex = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains("RWEXPORT003", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("<link href>", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("rel 'modulepreload'", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("/assets/app.js", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_Should_Tolerate_Page_Metadata_And_Ambiguous_Hints()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridToleratedReferenceHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
         }
         finally
         {
@@ -2925,6 +3336,94 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractReferences_Should_Classify_Link_Roles_For_Static_Validation()
+    {
+        var html = """
+            <link rel="stylesheet" href="/styles/site.css">
+            <link rel="icon" href="/favicon.ico">
+            <link rel="modulepreload" href="/assets/module.js">
+            <link rel=" preload " as=" script " href="/assets/app">
+            <link rel="prefetch" href="/assets/app.js">
+            <link rel="prefetch" href="/next-page">
+            <link rel="preload" as="fetch" href="/api/bootstrap">
+            <link rel="canonical" href="/docs/start">
+            <link rel="dns-prefetch" href="/dns">
+            """;
+
+        var references = _sut.ExtractReferences(html, "/", htmlScope: true);
+
+        Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/styles/site.css").Role);
+        Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/favicon.ico").Role);
+        Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/assets/module.js").Role);
+        var preloadReference = Assert.Single(references, reference => reference.Path == "/assets/app");
+        Assert.Equal(ExportReferenceRole.StaticAsset, preloadReference.Role);
+        Assert.Equal("rel 'preload', as 'script'", preloadReference.LinkMetadata?.Display);
+        Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/assets/app.js").Role);
+        Assert.Equal(ExportReferenceRole.PageRoute, Assert.Single(references, reference => reference.Path == "/next-page").Role);
+        Assert.Equal(ExportReferenceRole.PageRoute, Assert.Single(references, reference => reference.Path == "/api/bootstrap").Role);
+        Assert.Equal(ExportReferenceRole.Metadata, Assert.Single(references, reference => reference.Path == "/docs/start").Role);
+        Assert.Equal(ExportReferenceRole.Metadata, Assert.Single(references, reference => reference.Path == "/dns").Role);
+    }
+
+    [Fact]
+    public void ExtractReferences_Should_Add_SectionCopy_Runtime_For_Lazy_Markup()
+    {
+        var html = """
+            <script>
+            (() => {
+              const source = "/app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc";
+              const marker = "data-rw-section-copy-runtime";
+              const selectors = ["[data-rw-section-copy]", "[data-rw-section-copy-target]"];
+            })();
+            </script>
+            <main>
+              <h2 id="intro" data-rw-section-copy-target="true">Intro</h2>
+              <button type="button" data-rw-section-copy="#intro">Copy</button>
+            </main>
+            """;
+
+        var reference = Assert.Single(
+            _sut.ExtractReferences(html, "/docs/start", htmlScope: true),
+            reference => reference.Path == "/app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
+
+        Assert.Equal(ExportReferenceKind.ScriptSrc, reference.Kind);
+        Assert.Equal(ExportReferenceRole.StaticAsset, reference.Role);
+        Assert.Equal("?v=abc", reference.Query);
+        Assert.Equal("<script>", reference.Provenance?.DisplaySource);
+        Assert.Equal("RazorWire section-copy autoload source", reference.Provenance?.TokenType);
+
+        var withExplicitScript = """
+            <script src="/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc"></script>
+            <button type="button" data-rw-section-copy="intro">Copy</button>
+            """;
+
+        var explicitReferences = _sut.ExtractReferences(withExplicitScript, "/docs/start", htmlScope: true)
+            .Where(reference => reference.Path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js")
+            .ToArray();
+        Assert.Single(explicitReferences);
+        Assert.Equal("?v=abc", explicitReferences[0].Query);
+
+    }
+
+    [Fact]
+    public void ExtractReferences_Should_Add_SectionCopy_Runtime_For_Button_Only_Lazy_Markup()
+    {
+        var html = """
+            <main>
+              <button type="button" data-rw-section-copy="#intro">Copy</button>
+            </main>
+            """;
+
+        var reference = Assert.Single(
+            _sut.ExtractReferences(html, "/docs/start", htmlScope: true),
+            reference => reference.Path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
+
+        Assert.Equal(ExportReferenceKind.ScriptSrc, reference.Kind);
+        Assert.Equal(ExportReferenceRole.StaticAsset, reference.Role);
+        Assert.Equal("<button data-rw-section-copy>", reference.Provenance?.DisplaySource);
+    }
+
+    [Fact]
     public void ExtractReferences_Should_Ignore_Hash_Only_Css_References()
     {
         var css = """
@@ -3319,6 +3818,18 @@ public class ExportEngineTests
                         <a href="/docs/start#intro">Docs</a>
                         <turbo-frame id="doc-content" src="/docs/start"></turbo-frame>
                         <script src="/_content/pkg/app.js?v=abc123"></script>
+                        <script>
+                        (() => {
+                          const source = "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js";
+                          const marker = "data-rw-page-navigation-runtime";
+                          const selector = "[data-rw-page-nav]";
+                          const load = () => {
+                            if (!document.querySelector(selector)) return;
+                            const script = document.createElement("script");
+                            script.src = source;
+                          };
+                        })();
+                        </script>
                         <picture><source data-copy="img/hero.avif 1x, img/hero.webp 2x" srcset="img/hero.avif 1x, img/hero.webp 2x" type="image/avif"></picture>
                         <img src="/img/logo.png" srcset="/img/logo-2x.png 2x, /img/logo-small.png 300w">
                         <img srcset="img/a.png 1x, img/a.png?version=1 2x">
@@ -3352,6 +3863,11 @@ public class ExportEngineTests
             if (path is "/_content/pkg/app.js")
             {
                 return Text("console.log('cdn');", "text/javascript");
+            }
+
+            if (path is "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js")
+            {
+                return Text("console.log('page nav');", "text/javascript");
             }
 
             if (path.StartsWith("/img/", StringComparison.Ordinal))
@@ -3568,6 +4084,11 @@ public class ExportEngineTests
                     """);
             }
 
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
+            }
+
             return NotFound();
         }
     }
@@ -3593,6 +4114,11 @@ public class ExportEngineTests
                     """);
             }
 
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
+            }
+
             return NotFound();
         }
     }
@@ -3614,6 +4140,12 @@ public class ExportEngineTests
                       </body>
                     </html>
                     """);
+            }
+
+            if (path is "/app/_content/ForgeTrust.RazorWire/razorwire/razorwire.js"
+                or "/app/app/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
             }
 
             return NotFound();
@@ -3705,6 +4237,11 @@ public class ExportEngineTests
                     """);
             }
 
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
+            }
+
             return NotFound();
         }
     }
@@ -3726,6 +4263,11 @@ public class ExportEngineTests
                       </body>
                     </html>
                     """);
+            }
+
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
             }
 
             return NotFound();
@@ -3863,6 +4405,11 @@ public class ExportEngineTests
                     """);
             }
 
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
+            }
+
             return NotFound();
         }
     }
@@ -3921,7 +4468,56 @@ public class ExportEngineTests
             var path = request.RequestUri?.AbsolutePath ?? "/";
             return path == "/" || path == "/index"
                 ? Html("""<html><body><script src="/missing.js"></script></body></html>""")
-                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+                : NotFound();
+        }
+    }
+
+    private sealed class MissingCssImageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path switch
+            {
+                "/" or "/index" => Html("""<html><head><link rel="stylesheet" href="/styles/site.css"></head><body></body></html>"""),
+                "/styles/site.css" => Text(".map { background-image: url('/img/map-image.png'); }", "text/css"),
+                _ => NotFound()
+            };
+        }
+    }
+
+    private sealed class MissingModulePreloadHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path == "/" || path == "/index"
+                ? Html("""<html><head><link rel="modulepreload" href="/assets/app.js"></head><body></body></html>""")
+                : NotFound();
+        }
+    }
+
+    private sealed class HybridToleratedReferenceHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path == "/" || path == "/index"
+                ? Html("""
+                    <html>
+                      <head>
+                        <link rel="canonical" href="/missing-canonical">
+                        <link rel="dns-prefetch" href="/dns">
+                        <link rel="prefetch" href="/next-page">
+                        <link rel="preload" as="fetch" href="/api/bootstrap">
+                      </head>
+                      <body>
+                        <a href="/missing-page">Missing page</a>
+                        <turbo-frame src="/missing-frame"></turbo-frame>
+                      </body>
+                    </html>
+                    """)
+                : NotFound();
         }
     }
 
@@ -4039,7 +4635,12 @@ public class ExportEngineTests
 
     private static Task<HttpResponseMessage> Bytes(string mediaType)
     {
-        var content = new ByteArrayContent([0x01, 0x02, 0x03]);
+        return Bytes(mediaType, [0x01, 0x02, 0x03]);
+    }
+
+    private static Task<HttpResponseMessage> Bytes(string mediaType, byte[] bytes)
+    {
+        var content = new ByteArrayContent(bytes);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
     }
@@ -4059,25 +4660,20 @@ public class ExportEngineTests
                         <img src=""image.png"">
                     </body>
                 </html>";
-                var content = new StringContent(html, Encoding.UTF8, "text/html");
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+                return Text(html, "text/html");
             }
 
             if (path == "/style.css")
             {
-                var content = new StringContent("body { background: white; }", Encoding.UTF8, "text/css");
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+                return Text("body { background: white; }", "text/css");
             }
 
             if (path == "/image.png")
             {
-                var bytes = new byte[] { 0x01, 0x02, 0x03, 0x04 };
-                var byteContent = new ByteArrayContent(bytes);
-                byteContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = byteContent });
+                return Bytes("image/png", [0x01, 0x02, 0x03, 0x04]);
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            return NotFound();
         }
     }
 
@@ -4165,6 +4761,31 @@ public class ExportEngineTests
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class SectionCopyRuntimeHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Text("""
+                    <html>
+                      <body>
+                        <h2 id="intro" data-rw-section-copy-target="true">Intro</h2>
+                      </body>
+                    </html>
+                    """, "text/html");
+            }
+
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
+            }
+
+            return NotFound();
         }
     }
 
@@ -4340,6 +4961,8 @@ public class ExportEngineTests
                             </details>
                             <a href="/about">About</a>
                             <a href="/docs/search">Search documentation</a>
+                            <a href="/docs/sections/start-here" data-rw-export-ignore="true">Start Here</a>
+                            <a href="/docs/sections/packages" data-rw-export-ignore="true">Packages</a>
                             <img src="/img/error.png">
                           </body>
                         </html>
@@ -4559,6 +5182,45 @@ public class ExportEngineTests
                     Location = new Uri("/loop", UriKind.Relative)
                 }
             });
+        }
+    }
+
+    private sealed class CountingHandler : HttpMessageHandler
+    {
+        public int RequestCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            return Task.FromException<HttpResponseMessage>(new InvalidOperationException("Release archive extras preflight should fail before crawl."));
+        }
+    }
+
+    private static string CreateSafeTempDirectory(string prefix)
+    {
+        var baseDirectory = Path.Join(AppContext.BaseDirectory, "test-temp");
+        Directory.CreateDirectory(baseDirectory);
+        return Directory.CreateDirectory(Path.Join(baseDirectory, $"{prefix}{Guid.NewGuid():N}")).FullName;
+    }
+
+    private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
         }
     }
 

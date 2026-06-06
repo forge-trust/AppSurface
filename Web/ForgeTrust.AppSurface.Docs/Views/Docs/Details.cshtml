@@ -470,6 +470,7 @@
         <aside id="docs-page-outline"
                class="docs-outline-shell"
                data-doc-outline="true"
+               data-rw-page-nav="true"
                data-outline-expanded="true">
             <button class="docs-outline-toggle"
                     type="button"
@@ -501,7 +502,7 @@
                  class="docs-outline-panel"
                  aria-label="On this page">
                 <div class="docs-outline-label">On this page</div>
-                <span class="docs-section-copy-status" data-doc-section-copy-status aria-live="polite"></span>
+                <span class="docs-section-copy-status" data-rw-section-copy-status="true" aria-live="polite"></span>
                 <ol class="docs-outline-list">
                     @foreach (var item in outlineItems)
                     {
@@ -511,13 +512,14 @@
                         <li class="docs-outline-item">
                             <a href="#@item.Id"
                                data-doc-outline-link="true"
+                               data-rw-page-nav-link="true"
                                class="@linkClass">
                                 @item.Title
                             </a>
                             <button type="button"
                                     class="docs-section-copy docs-outline-copy"
-                                    data-doc-section-copy="@item.Id"
-                                    data-doc-section-copy-title="@item.Title"
+                                    data-rw-section-copy="@item.Id"
+                                    data-rw-section-copy-title="@item.Title"
                                     aria-label="Copy link to @item.Title">
                                 <svg class="docs-section-copy-icon"
                                      aria-hidden="true"

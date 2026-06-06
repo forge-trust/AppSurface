@@ -345,7 +345,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var exception = await Assert.ThrowsAsync<ArgumentException>(
             () => WriteAsync("../escaped.js", "export const escaped = true;"));
 
-        Assert.Contains("Test fixture paths must stay under the test root.", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("parent traversal", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -576,6 +576,16 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              */
 
             /**
+             * Stable CSS property hook.
+             * @public
+             * @namespace RazorWire
+             * @cssHook scroll-padding-block
+             * @hookKind css-property
+             * @target generated form failure UI
+             * @stability stable
+             */
+
+            /**
              * Missing hook kind.
              * @public
              * @namespace RazorWire
@@ -593,6 +603,16 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * @target generated form failure UI
              * @stability stable
              */
+
+            /**
+             * Invalid CSS property hook.
+             * @public
+             * @namespace RazorWire
+             * @cssHook form .too-broad
+             * @hookKind css-property
+             * @target generated form failure UI
+             * @stability stable
+             */
             """);
         var harvester = CreateHarvester(CreateEnabledOptions("src/browser-contracts.js"));
 
@@ -600,11 +620,12 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
         Assert.Contains(docs, doc => doc.Path.EndsWith("#css-hook-part-error", StringComparison.Ordinal));
         Assert.Contains(docs, doc => doc.Path.EndsWith("#css-hook-state-invalid", StringComparison.Ordinal));
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#css-hook-scroll-padding-block", StringComparison.Ordinal));
         Assert.Equal(
-            2,
+            3,
             GetDiagnostics(harvester).Count(
                 diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
-                              && diagnostic.Cause == "A public JavaScript CSS hook doclet must use a supported @hookKind and a narrow selector value."));
+                              && diagnostic.Cause == "A public JavaScript CSS hook doclet must use a supported @hookKind and a stable selector or CSS property name."));
     }
 
     [Fact]
@@ -2573,29 +2594,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
     private async Task WriteAsync(string relativePath, string content)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
-
-        var normalizedRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
-        if (Path.IsPathRooted(normalizedRelativePath))
-        {
-            throw new ArgumentException("Test fixture paths must be relative.", nameof(relativePath));
-        }
-
-        var safeRelativePath = normalizedRelativePath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var fullRoot = Path.GetFullPath(_testRoot);
-        var fullPath = Path.GetFullPath(Path.Join(fullRoot, safeRelativePath));
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        var rootPrefix = fullRoot.EndsWith(Path.DirectorySeparatorChar)
-            ? fullRoot
-            : fullRoot + Path.DirectorySeparatorChar;
-        if (!fullPath.Equals(fullRoot, comparison)
-            && !fullPath.StartsWith(rootPrefix, comparison))
-        {
-            throw new ArgumentException("Test fixture paths must stay under the test root.", nameof(relativePath));
-        }
-
+        var fullPath = TestPathUtils.PathUnder(_testRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllTextAsync(fullPath, content);
     }
