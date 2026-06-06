@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.CoverageRunner.Tests;
@@ -558,6 +559,215 @@ public sealed class CoverageRunnerApplicationTests
         Assert.Equal(0, diagnostics.RootElement.GetProperty("totals").GetProperty("testCases").GetInt32());
     }
 
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldWriteArtifactsWhenJunitCannotBeOpened()
+    {
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(outputDirectory);
+        var junitPath = Path.Join(outputDirectory, "junit-tools-1-Sample.Tests.xml");
+        File.WriteAllText(junitPath, "<testsuite />");
+        var logPath = Path.Join(outputDirectory, "projects", "Sample.Tests", "dotnet-test.log");
+        var options = new CoverageRunnerOptions
+        {
+            RepositoryRoot = workspace.Root,
+            SolutionPath = Path.Join(workspace.Root, "ForgeTrust.AppSurface.slnx"),
+            OutputDirectory = outputDirectory,
+            GroupName = "tools",
+            BuildConfiguration = "Release",
+            BuildSolution = false,
+            BuildNoRestore = false,
+            IncludeFilter = "[ForgeTrust.AppSurface.*]*",
+            ExcludeFilter = "[*.Tests]*%2c[*.IntegrationTests]*",
+            Parallelism = 1,
+            MergeOnly = false,
+            ListGroups = false,
+        };
+        var project = new TestProject(
+            "tools/Sample.Tests/Sample.Tests.csproj",
+            Path.Join(workspace.Root, "tools", "Sample.Tests", "Sample.Tests.csproj"),
+            "tools",
+            "Sample.Tests",
+            IsExclusive: false);
+        var result = new ProjectRunResult(0, project, 3, 0, junitPath, logPath);
+
+        var report = await SlowTestDiagnosticsWriter.CollectAsync(
+            options,
+            [result],
+            openJunitStream: _ => throw new IOException("simulated read failure"),
+            CancellationToken.None);
+        var diagnostics = await SlowTestDiagnosticsWriter.WriteAsync(
+            options,
+            report,
+            getAggregationSeconds: () => 1,
+            calculateAggregationPercent: seconds => seconds,
+            CancellationToken.None);
+
+        Assert.Equal(1, diagnostics.WarningCount);
+        Assert.True(File.Exists(Path.Join(outputDirectory, "slow-test-diagnostics.md")));
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.json")));
+        Assert.Equal(1, json.RootElement.GetProperty("totals").GetProperty("warnings").GetInt32());
+        Assert.Equal(0, json.RootElement.GetProperty("totals").GetProperty("testCases").GetInt32());
+        Assert.Contains("Failed to read JUnit XML", File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.md")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldReportParserEdgesAndCategoryFallbacks()
+    {
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(outputDirectory);
+        var edgeJunit = Path.Join(outputDirectory, "junit-tools-1-Plain.Tests.xml");
+        File.WriteAllText(edgeJunit, """
+            <testsuite>
+              <testcase classname="" name="MissingClassAndTime" />
+              <testcase classname="Plain.Tests" name="" time="-1"><error /></testcase>
+              <testcase classname="Plain.FileTests" name="WritesTempArtifact" time="0.5"><skipped /></testcase>
+            </testsuite>
+            """);
+        var exclusiveJunit = Path.Join(outputDirectory, "junit-tools-2-Exclusive.Tests.xml");
+        File.WriteAllText(exclusiveJunit, """
+            <testsuite>
+              <testcase classname="Plain.SlowTests" name="RunsAlone" time="4" />
+            </testsuite>
+            """);
+        var options = CreateCoverageOptions(workspace.Root, outputDirectory);
+        var plainProject = new TestProject(
+            "tools/Plain.Tests/Plain.Tests.csproj",
+            Path.Join(workspace.Root, "tools", "Plain.Tests", "Plain.Tests.csproj"),
+            "tools",
+            "Plain.Tests",
+            IsExclusive: false);
+        var exclusiveProject = new TestProject(
+            "tools/Exclusive.Tests/Exclusive.Tests.csproj",
+            Path.Join(workspace.Root, "tools", "Exclusive.Tests", "Exclusive.Tests.csproj"),
+            "tools",
+            "Exclusive.Tests",
+            IsExclusive: true);
+
+        var report = await SlowTestDiagnosticsWriter.CollectAsync(
+            options,
+            [
+                new ProjectRunResult(0, plainProject, 2, 0, edgeJunit, Path.Join(outputDirectory, "plain.log")),
+                new ProjectRunResult(1, exclusiveProject, 4, 0, exclusiveJunit, Path.Join(outputDirectory, "exclusive.log")),
+            ],
+            CancellationToken.None);
+        var diagnostics = await SlowTestDiagnosticsWriter.WriteAsync(
+            options,
+            report,
+            getAggregationSeconds: () => 1,
+            calculateAggregationPercent: seconds => seconds,
+            CancellationToken.None);
+
+        Assert.Equal(4, report.TestCases.Count);
+        Assert.Equal(4, diagnostics.WarningCount);
+        Assert.Contains(report.TestCases, test => test.Status == "error");
+        Assert.Contains(report.TestCases, test => test.Status == "skipped");
+        Assert.Contains(report.Categories, category => category.Category == "unit-test-execution" && category.Confidence == "low");
+        Assert.Contains(report.Categories, category => category.Category == "filesystem-artifacts" && category.Confidence == "medium");
+        Assert.Contains(report.Categories, category => category.Category == "browser-or-integration" && category.Confidence == "high");
+        Assert.Contains(
+            "missing classname",
+            File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.md")),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldKeepArtifactsWhenJunitAccessIsDenied()
+    {
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(outputDirectory);
+        var junitPath = Path.Join(outputDirectory, "junit-tools-1-Sample.Tests.xml");
+        File.WriteAllText(junitPath, "<testsuite />");
+        var options = CreateCoverageOptions(workspace.Root, outputDirectory);
+        var project = new TestProject(
+            "tools/Sample.Tests/Sample.Tests.csproj",
+            Path.Join(workspace.Root, "tools", "Sample.Tests", "Sample.Tests.csproj"),
+            "tools",
+            "Sample.Tests",
+            IsExclusive: false);
+
+        var report = await SlowTestDiagnosticsWriter.CollectAsync(
+            options,
+            [new ProjectRunResult(0, project, 3, 0, junitPath, Path.Join(outputDirectory, "sample.log"))],
+            openJunitStream: _ => throw new UnauthorizedAccessException("simulated access failure"),
+            CancellationToken.None);
+        await SlowTestDiagnosticsWriter.WriteAsync(
+            options,
+            report,
+            getAggregationSeconds: () => 1,
+            calculateAggregationPercent: seconds => seconds,
+            CancellationToken.None);
+
+        Assert.Contains(
+            "Failed to access JUnit XML",
+            File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.md")),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldKeepDiagnosticsMetadataWhenStatusWriteFails()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var error = new StringWriter();
+        var app = CreateApp(
+            new RecordingCommandRunner(workspace),
+            new ThrowingTextWriter("Slow-test diagnostics:", new IOException("simulated terminal failure")),
+            error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Slow-test diagnostics status output failed", error.ToString(), StringComparison.Ordinal);
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Assert.True(File.Exists(Path.Join(outputDirectory, "slow-test-diagnostics.md")));
+        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(outputDirectory, "timings.json")));
+        Assert.True(timings.RootElement.GetProperty("diagnostics").GetProperty("metadataComplete").GetBoolean());
+        Assert.Equal(0, timings.RootElement.GetProperty("diagnostics").GetProperty("warningCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldKeepDiagnosticsBestEffortWhenDiagnosticsArtifactCannotBeWritten()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(Path.Join(outputDirectory, "slow-test-diagnostics.json"));
+        var error = new StringWriter();
+        var app = CreateApp(new RecordingCommandRunner(workspace), standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Slow-test diagnostics failed after", error.ToString(), StringComparison.Ordinal);
+        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(outputDirectory, "timings.json")));
+        Assert.False(timings.RootElement.GetProperty("diagnostics").GetProperty("metadataComplete").GetBoolean());
+        Assert.Equal(1, timings.RootElement.GetProperty("diagnostics").GetProperty("warningCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldPreserveDiagnosticCancellation()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var app = CreateApp(
+            new RecordingCommandRunner(workspace),
+            new ThrowingTextWriter("Slow-test diagnostics:", new OperationCanceledException()));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>()));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData(" ")]
@@ -852,8 +1062,46 @@ public sealed class CoverageRunnerApplicationTests
         return new CoverageRunnerApplication(
             commandRunner,
             new FakeClock(),
-            standardOut ?? new StringWriter(),
-            standardError ?? new StringWriter());
+            standardOut ?? TextWriter.Synchronized(new StringWriter()),
+            standardError ?? TextWriter.Synchronized(new StringWriter()));
+    }
+
+    private static CoverageRunnerOptions CreateCoverageOptions(string repositoryRoot, string outputDirectory)
+    {
+        return new CoverageRunnerOptions
+        {
+            RepositoryRoot = repositoryRoot,
+            SolutionPath = Path.Join(repositoryRoot, "ForgeTrust.AppSurface.slnx"),
+            OutputDirectory = outputDirectory,
+            GroupName = "tools",
+            BuildConfiguration = "Release",
+            BuildSolution = false,
+            BuildNoRestore = false,
+            IncludeFilter = "[ForgeTrust.AppSurface.*]*",
+            ExcludeFilter = "[*.Tests]*%2c[*.IntegrationTests]*",
+            Parallelism = 1,
+            MergeOnly = false,
+            ListGroups = false,
+        };
+    }
+
+    private sealed class ThrowingTextWriter : StringWriter
+    {
+        private readonly string _throwWhenValueContains;
+        private readonly Exception _exception;
+
+        public ThrowingTextWriter(string throwWhenValueContains, Exception exception)
+        {
+            _throwWhenValueContains = throwWhenValueContains;
+            _exception = exception;
+        }
+
+        public override Task WriteLineAsync(string? value)
+        {
+            return value?.Contains(_throwWhenValueContains, StringComparison.Ordinal) == true
+                ? Task.FromException(_exception)
+                : base.WriteLineAsync(value);
+        }
     }
 
     private sealed class RecordingCommandRunner : ICommandRunner

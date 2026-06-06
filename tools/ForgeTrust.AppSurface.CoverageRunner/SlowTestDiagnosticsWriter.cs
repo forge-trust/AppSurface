@@ -39,6 +39,23 @@ internal static class SlowTestDiagnosticsWriter
         IReadOnlyList<ProjectRunResult> results,
         CancellationToken cancellationToken)
     {
+        return await CollectAsync(options, results, File.OpenRead, cancellationToken);
+    }
+
+    /// <summary>
+    /// Parses JUnit artifacts with a caller-provided stream opener for deterministic failure testing.
+    /// </summary>
+    /// <param name="options">Coverage runner options that locate the output directory and selected group.</param>
+    /// <param name="results">Project run results from a normal run.</param>
+    /// <param name="openJunitStream">Opens a JUnit artifact path for reading.</param>
+    /// <param name="cancellationToken">Cancellation token used while opening XML artifacts.</param>
+    /// <returns>A report model that can be written once measured aggregation overhead is known.</returns>
+    internal static async Task<SlowTestDiagnosticsReport> CollectAsync(
+        CoverageRunnerOptions options,
+        IReadOnlyList<ProjectRunResult> results,
+        Func<string, Stream> openJunitStream,
+        CancellationToken cancellationToken)
+    {
         var warnings = new List<string>();
         var projectEntries = results
             .OrderBy(result => result.Index)
@@ -60,7 +77,7 @@ internal static class SlowTestDiagnosticsWriter
         foreach (var input in junitInputs)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            testCases.AddRange(await ReadJunitFileAsync(input, warnings, cancellationToken));
+            testCases.AddRange(await ReadJunitFileAsync(input, warnings, openJunitStream, cancellationToken));
         }
 
         if (junitInputs.Length == 0)
@@ -112,7 +129,7 @@ internal static class SlowTestDiagnosticsWriter
     /// Writes Markdown and JSON diagnostics with measured aggregation overhead.
     /// </summary>
     /// <param name="options">Coverage runner options that locate the output directory.</param>
-    /// <param name="report">Diagnostic report model returned by <see cref="CollectAsync"/>.</param>
+    /// <param name="report">Diagnostic report model returned by the collection step.</param>
     /// <param name="getAggregationSeconds">Reads whole seconds spent collecting and writing diagnostics.</param>
     /// <param name="calculateAggregationPercent">Calculates diagnostic seconds as a percent of runner time.</param>
     /// <param name="cancellationToken">Cancellation token used for artifact writes.</param>
@@ -260,6 +277,7 @@ internal static class SlowTestDiagnosticsWriter
     private static async Task<IReadOnlyList<SlowTestCaseEntry>> ReadJunitFileAsync(
         JunitInput input,
         List<string> warnings,
+        Func<string, Stream> openJunitStream,
         CancellationToken cancellationToken)
     {
         if (!File.Exists(input.JunitFile))
@@ -268,16 +286,15 @@ internal static class SlowTestDiagnosticsWriter
             return [];
         }
 
-        await using var stream = File.OpenRead(input.JunitFile);
-        var settings = new XmlReaderSettings
-        {
-            Async = true,
-            DtdProcessing = DtdProcessing.Prohibit,
-            XmlResolver = null,
-        };
-
         try
         {
+            await using var stream = openJunitStream(input.JunitFile);
+            var settings = new XmlReaderSettings
+            {
+                Async = true,
+                DtdProcessing = DtdProcessing.Prohibit,
+                XmlResolver = null,
+            };
             using var reader = XmlReader.Create(stream, settings);
             return await ReadTestCasesAsync(reader, input, warnings, cancellationToken);
         }

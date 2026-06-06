@@ -830,8 +830,7 @@ internal sealed class CoverageRunnerApplication
                 aggregationSeconds => CalculateAggregationPercent(aggregationSeconds, totalSeconds),
                 cancellationToken);
 
-            await _standardOut.WriteLineAsync(FormattableString.Invariant(
-                $"Slow-test diagnostics: {diagnostics.MarkdownPath} ({diagnostics.AggregationSeconds}s, {diagnostics.AggregationPercent:0.00}% overhead)"));
+            await WriteSlowTestDiagnosticsStatusAsync(diagnostics);
             return diagnostics;
         }
         catch (OperationCanceledException)
@@ -851,6 +850,23 @@ internal sealed class CoverageRunnerApplication
             await _standardError.WriteLineAsync(FormattableString.Invariant(
                 $"Slow-test diagnostics failed after {diagnostics.AggregationSeconds}s ({diagnostics.AggregationPercent:0.00}% overhead): {ex.Message}"));
             return diagnostics;
+        }
+    }
+
+    private async Task WriteSlowTestDiagnosticsStatusAsync(SlowTestDiagnosticsRun diagnostics)
+    {
+        try
+        {
+            await _standardOut.WriteLineAsync(FormattableString.Invariant(
+                $"Slow-test diagnostics: {diagnostics.MarkdownPath} ({diagnostics.AggregationSeconds}s, {diagnostics.AggregationPercent:0.00}% overhead)"));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await _standardError.WriteLineAsync($"Slow-test diagnostics status output failed: {ex.Message}");
         }
     }
 
