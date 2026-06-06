@@ -24,6 +24,9 @@ jobs:
     name: VCS ignore parity (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    env:
+      TailwindEnabled: "false"
+      TailwindRuntimeBinaryResolutionEnabled: "false"
     strategy:
       fail-fast: false
       matrix:

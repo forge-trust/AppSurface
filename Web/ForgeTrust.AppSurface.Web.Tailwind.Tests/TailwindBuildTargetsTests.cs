@@ -1078,6 +1078,11 @@ public sealed class TailwindBuildTargetsTests : IDisposable
                 "ForgeTrust.AppSurface.Web.Tailwind.csproj"));
     }
 
+    private static string GetTailwindVersion()
+    {
+        return File.ReadAllText(Path.Join(Path.GetDirectoryName(GetTailwindProjectPath())!, "tailwind.version")).Trim();
+    }
+
     private static string GetRepositoryRoot()
     {
         return Path.GetFullPath(
@@ -1181,7 +1186,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             "Runtime",
             configuration,
             "net10.0",
-            "tailwind-4.1.18",
+            $"tailwind-{GetTailwindVersion()}",
             "tailwindcss-linux-x64");
     }
 

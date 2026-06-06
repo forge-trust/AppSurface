@@ -64,16 +64,18 @@ Tailwind runtime package references must stay visible in every build graph. `Tai
 | --- | --- | --- | --- |
 | `build.yml` / `build` | No | default `true` | Leave unset because the solution build compiles Tailwind-consuming projects |
 | `code-quality.yml` / `dotnet-format` | No | default `true` | Leave unset because the pre-format build compiles Tailwind-consuming projects |
+| `vcs-ignore-parity.yml` / `parity` | No | `false` with `TailwindEnabled=false` | Job-level `env`; this narrow test job does not validate generated CSS or package contents |
 | `package-gate.yml` / `package-gate` | Yes | `true` | Pass `/p:TailwindRuntimeBinaryResolutionEnabled=true` on restore/build/pack |
 | `package-artifacts.yml` / `package-artifacts` | Yes | `true` | Job-level `env`, plus `verify-packages` forces `true` internally |
 | `nuget-prerelease-publish.yml` package verification | Yes | `true` | Use `verify-packages`; do not override to `false` |
 
-Fast CI example for a graph that does not run Tailwind-consuming project builds:
+Fast CI example for a graph that does not run Tailwind-consuming project builds, or for a narrow test job that intentionally disables generated CSS:
 
 ```yaml
 jobs:
   restore-or-test-non-tailwind-graph:
     env:
+      TailwindEnabled: "false"
       TailwindRuntimeBinaryResolutionEnabled: "false"
 ```
 

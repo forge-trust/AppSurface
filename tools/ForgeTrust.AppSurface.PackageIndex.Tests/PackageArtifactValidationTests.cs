@@ -1730,16 +1730,20 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var repositoryRoot = GetRepositoryRoot();
         var buildWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "build.yml"));
         var codeQualityWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "code-quality.yml"));
+        var vcsIgnoreParityWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "vcs-ignore-parity.yml"));
         var packageGateWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-gate.yml"));
         var packageArtifactsWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-artifacts.yml"));
-        const string disabledRuntimeResolutionYaml = """(?im)^\s*TailwindRuntimeBinaryResolutionEnabled:\s*(?:"false"|'false'|false)\s*$""";
+        const string disabledRuntimeResolutionSetting =
+            """(?im)(?:^\s*TailwindRuntimeBinaryResolutionEnabled:\s*(?:"false"|'false'|false)\s*$|/p:TailwindRuntimeBinaryResolutionEnabled=false\b)""";
 
-        Assert.DoesNotMatch(disabledRuntimeResolutionYaml, buildWorkflow);
-        Assert.DoesNotMatch(disabledRuntimeResolutionYaml, codeQualityWorkflow);
+        Assert.DoesNotMatch(disabledRuntimeResolutionSetting, buildWorkflow);
+        Assert.DoesNotMatch(disabledRuntimeResolutionSetting, codeQualityWorkflow);
+        Assert.Matches(disabledRuntimeResolutionSetting, vcsIgnoreParityWorkflow);
+        Assert.Contains("TailwindEnabled: \"false\"", vcsIgnoreParityWorkflow, StringComparison.Ordinal);
         Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"true\"", packageArtifactsWorkflow, StringComparison.Ordinal);
-        Assert.DoesNotMatch(disabledRuntimeResolutionYaml, packageGateWorkflow);
-        Assert.DoesNotMatch(disabledRuntimeResolutionYaml, packageArtifactsWorkflow);
+        Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageGateWorkflow);
+        Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageArtifactsWorkflow);
     }
 
     [Fact]
