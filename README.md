@@ -146,7 +146,7 @@ Run merged solution coverage (product assemblies only):
 
 ```bash
 ./scripts/coverage-solution.sh
-dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- coverage gate --coverage TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- coverage gate --coverage TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 85
 ```
 
 This command:
@@ -158,7 +158,7 @@ This command:
 - Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
 - Restores the pinned local ReportGenerator .NET tool when coverage files need to be merged.
 
-The `appsurface coverage gate` command evaluates the merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line or branch coverage is below threshold. The gate is intentionally private-by-default: it does not upload coverage, call GitHub APIs, store trends, or replace the script's AppSurface-specific test scheduling.
+The `appsurface coverage gate` command evaluates the merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured changed-line coverage is below threshold. Changed-line coverage is enabled with `--diff-base` and estimates Codecov-style patch coverage from the same merged Cobertura file. The gate is intentionally private-by-default: it does not upload coverage, call GitHub APIs, store trends, or replace the script's AppSurface-specific test scheduling.
 
 The script also supports bounded test groups for local or CI experiments:
 

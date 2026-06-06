@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
@@ -42,6 +44,18 @@ internal sealed partial class CoverageGateCommand : ICommand
     public decimal MinBranch { get; set; }
 
     /// <summary>
+    /// Gets or sets the git ref or commit used to compute changed-line coverage.
+    /// </summary>
+    [CommandOption("diff-base", Description = "Git ref or commit used with HEAD to estimate changed-line coverage.")]
+    public string? DiffBase { get; set; }
+
+    /// <summary>
+    /// Gets or sets the minimum changed-line coverage percentage from 0 to 100.
+    /// </summary>
+    [CommandOption("min-patch-line", Description = "Minimum changed-line coverage percentage from 0 to 100. Requires --diff-base.")]
+    public decimal? MinPatchLine { get; set; }
+
+    /// <summary>
     /// Gets or sets the directory where coverage-gate.json and coverage-gate.md are written.
     /// </summary>
     [CommandOption("output", Description = "Output directory for coverage-gate.json and coverage-gate.md.")]
@@ -77,9 +91,7 @@ internal sealed partial class CoverageGateCommand : ICommand
         await CoverageGateReportWriter.WriteAsync(result, request, cancellationToken);
 
         var status = result.Passed ? "PASS" : "FAIL";
-        await console.Output.WriteLineAsync(
-            FormattableString.Invariant(
-                $"Coverage gate {status}: lines {result.LineCoverage.Percent:0.00}% >= {request.MinLinePercent:0.##}%, branches {result.BranchCoverage.Percent:0.00}% >= {request.MinBranchPercent:0.##}%."));
+        await console.Output.WriteLineAsync(RenderConsoleSummary(status, result, request));
         await console.Output.WriteLineAsync($"Reports: {result.JsonReportPath} and {result.MarkdownReportPath}");
 
         if (!result.Passed)
@@ -100,10 +112,23 @@ internal sealed partial class CoverageGateCommand : ICommand
             throw new CommandException("ASCOV007 --min-branch must be between 0 and 100.");
         }
 
+        if (MinPatchLine.HasValue && !CoverageGateEvaluator.IsPercentInRange(MinPatchLine.Value))
+        {
+            throw new CommandException("ASCOV007 --min-patch-line must be between 0 and 100.");
+        }
+
+        if (MinPatchLine.HasValue && string.IsNullOrWhiteSpace(DiffBase))
+        {
+            throw new CommandException("ASCOV007 --min-patch-line requires --diff-base.");
+        }
+
         var coveragePath = Path.GetFullPath(CoveragePath);
         var outputDirectory = string.IsNullOrWhiteSpace(OutputDirectory)
             ? Path.GetDirectoryName(coveragePath) ?? Directory.GetCurrentDirectory()
             : Path.GetFullPath(OutputDirectory);
+        var patchCoverage = string.IsNullOrWhiteSpace(DiffBase)
+            ? null
+            : new CoveragePatchRequest(Path.GetFullPath(Directory.GetCurrentDirectory()), DiffBase.Trim(), MinPatchLine);
 
         return new CoverageGateRequest(
             coveragePath,
@@ -111,7 +136,30 @@ internal sealed partial class CoverageGateCommand : ICommand
             MinLine,
             MinBranch,
             GithubSummary && !NoGithubSummary,
-            Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY"));
+            Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY"),
+            patchCoverage);
+    }
+
+    private static string RenderConsoleSummary(
+        string status,
+        CoverageGateResult result,
+        CoverageGateRequest request)
+    {
+        var builder = new StringBuilder();
+        builder.Append(FormattableString.Invariant(
+            $"Coverage gate {status}: lines {result.LineCoverage.Percent:0.00}% >= {request.MinLinePercent:0.##}%, branches {result.BranchCoverage.Percent:0.00}% >= {request.MinBranchPercent:0.##}%"));
+
+        if (result.PatchLineCoverage is { } patchCoverage)
+        {
+            builder.Append(FormattableString.Invariant($", patch lines {patchCoverage.Percent:0.00}%"));
+            if (request.PatchCoverage?.MinPatchLinePercent is { } threshold)
+            {
+                builder.Append(FormattableString.Invariant($" >= {threshold:0.##}%"));
+            }
+        }
+
+        builder.Append('.');
+        return builder.ToString();
     }
 }
 
@@ -124,13 +172,28 @@ internal sealed partial class CoverageGateCommand : ICommand
 /// <param name="MinBranchPercent">Minimum accepted branch coverage percentage.</param>
 /// <param name="WriteGithubSummary">Whether to append Markdown output to <paramref name="GithubStepSummaryPath"/>.</param>
 /// <param name="GithubStepSummaryPath">Optional GitHub step summary file path.</param>
+/// <param name="PatchCoverage">Optional changed-line coverage request.</param>
 internal sealed record CoverageGateRequest(
     string CoveragePath,
     string OutputDirectory,
     decimal MinLinePercent,
     decimal MinBranchPercent,
     bool WriteGithubSummary,
-    string? GithubStepSummaryPath);
+    string? GithubStepSummaryPath,
+    CoveragePatchRequest? PatchCoverage = null);
+
+/// <summary>
+/// Request for estimating coverage on lines changed by a git diff.
+/// </summary>
+/// <param name="RepositoryRoot">Repository root used for git diff and path normalization.</param>
+/// <param name="DiffBase">Git ref or commit compared with HEAD.</param>
+/// <param name="MinPatchLinePercent">Optional changed-line threshold.</param>
+/// <param name="DiffProvider">Optional test seam for supplying unified diff text without invoking git.</param>
+internal sealed record CoveragePatchRequest(
+    string RepositoryRoot,
+    string DiffBase,
+    decimal? MinPatchLinePercent,
+    Func<CancellationToken, Task<string>>? DiffProvider = null);
 
 /// <summary>
 /// Result of evaluating coverage against line and branch thresholds.
@@ -143,6 +206,8 @@ internal sealed record CoverageGateRequest(
 /// <param name="Passed">Whether both metrics met their thresholds.</param>
 /// <param name="JsonReportPath">JSON report path.</param>
 /// <param name="MarkdownReportPath">Markdown report path.</param>
+/// <param name="MinPatchLinePercent">Optional minimum accepted changed-line coverage percentage.</param>
+/// <param name="PatchLineCoverage">Optional changed-line coverage metric.</param>
 internal sealed record CoverageGateResult(
     string CoveragePath,
     CoverageMetric LineCoverage,
@@ -151,7 +216,9 @@ internal sealed record CoverageGateResult(
     decimal MinBranchPercent,
     bool Passed,
     string JsonReportPath,
-    string MarkdownReportPath);
+    string MarkdownReportPath,
+    decimal? MinPatchLinePercent = null,
+    PatchLineCoverageMetric? PatchLineCoverage = null);
 
 /// <summary>
 /// One Cobertura coverage metric expressed as optional covered/valid counts and a percentage.
@@ -160,6 +227,21 @@ internal sealed record CoverageGateResult(
 /// <param name="Valid">Valid line or branch count, when Cobertura provides it.</param>
 /// <param name="Percent">Coverage percentage from 0 to 100.</param>
 internal sealed record CoverageMetric(int? Covered, int? Valid, decimal Percent);
+
+/// <summary>
+/// Coverage estimate for changed lines from a git diff.
+/// </summary>
+/// <param name="DiffBase">Git ref or commit compared with HEAD.</param>
+/// <param name="ChangedLines">Total added or modified lines in the diff.</param>
+/// <param name="MeasurableLines">Changed lines present in the Cobertura line map.</param>
+/// <param name="CoveredLines">Measurable changed lines with at least one hit.</param>
+/// <param name="Percent">Changed-line coverage percentage.</param>
+internal sealed record PatchLineCoverageMetric(
+    string DiffBase,
+    int ChangedLines,
+    int MeasurableLines,
+    int CoveredLines,
+    decimal Percent);
 
 /// <summary>
 /// Parses Cobertura XML and evaluates coverage thresholds.
@@ -205,7 +287,14 @@ internal static class CoverageGateEvaluator
 
                 var lineCoverage = ReadMetric(reader, "line", "lines-covered", "lines-valid", "line-rate");
                 var branchCoverage = ReadMetric(reader, "branch", "branches-covered", "branches-valid", "branch-rate");
-                var passed = lineCoverage.Percent >= request.MinLinePercent && branchCoverage.Percent >= request.MinBranchPercent;
+                var patchCoverage = request.PatchCoverage is null
+                    ? null
+                    : await PatchLineCoverageEvaluator.EvaluateAsync(request.CoveragePath, request.PatchCoverage, cancellationToken);
+                var passed = lineCoverage.Percent >= request.MinLinePercent
+                    && branchCoverage.Percent >= request.MinBranchPercent
+                    && (patchCoverage is null
+                        || request.PatchCoverage?.MinPatchLinePercent is null
+                        || patchCoverage.Percent >= request.PatchCoverage.MinPatchLinePercent.Value);
                 return new CoverageGateResult(
                     request.CoveragePath,
                     lineCoverage,
@@ -214,7 +303,9 @@ internal static class CoverageGateEvaluator
                     request.MinBranchPercent,
                     passed,
                     Path.Join(request.OutputDirectory, "coverage-gate.json"),
-                    Path.Join(request.OutputDirectory, "coverage-gate.md"));
+                    Path.Join(request.OutputDirectory, "coverage-gate.md"),
+                    request.PatchCoverage?.MinPatchLinePercent,
+                    patchCoverage);
             }
         }
         catch (XmlException ex)
@@ -252,6 +343,12 @@ internal static class CoverageGateEvaluator
         if (!IsPercentInRange(request.MinBranchPercent))
         {
             throw new CommandException("ASCOV007 --min-branch must be between 0 and 100.");
+        }
+
+        if (request.PatchCoverage is { MinPatchLinePercent: { } minPatchLinePercent }
+            && !IsPercentInRange(minPatchLinePercent))
+        {
+            throw new CommandException("ASCOV007 --min-patch-line must be between 0 and 100.");
         }
 
         CoverageOutputPathPolicy.ValidateReportOutput(request.CoveragePath, request.OutputDirectory);
@@ -326,6 +423,351 @@ internal static class CoverageGateEvaluator
 }
 
 /// <summary>
+/// Estimates line coverage for lines added or modified by a git diff.
+/// </summary>
+internal static class PatchLineCoverageEvaluator
+{
+    private static readonly XmlReaderSettings ReaderSettings = new()
+    {
+        Async = true,
+        DtdProcessing = DtdProcessing.Ignore,
+        XmlResolver = null,
+    };
+
+    /// <summary>
+    /// Evaluates changed-line coverage by reading <c>git diff</c> and the Cobertura line map.
+    /// </summary>
+    /// <param name="coveragePath">Cobertura XML file.</param>
+    /// <param name="request">Changed-line coverage request.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Changed-line coverage metric.</returns>
+    public static async Task<PatchLineCoverageMetric> EvaluateAsync(
+        string coveragePath,
+        CoveragePatchRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.DiffBase))
+        {
+            throw new CommandException("ASCOV007 --diff-base must not be blank.");
+        }
+
+        var diffText = request.DiffProvider is null
+            ? await GitDiffReader.ReadDiffAsync(request.RepositoryRoot, request.DiffBase, cancellationToken)
+            : await request.DiffProvider(cancellationToken);
+        return await EvaluateAsync(coveragePath, request, diffText, cancellationToken);
+    }
+
+    /// <summary>
+    /// Evaluates changed-line coverage from supplied git diff text.
+    /// </summary>
+    /// <param name="coveragePath">Cobertura XML file.</param>
+    /// <param name="request">Changed-line coverage request.</param>
+    /// <param name="diffText">Unified git diff text.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Changed-line coverage metric.</returns>
+    public static async Task<PatchLineCoverageMetric> EvaluateAsync(
+        string coveragePath,
+        CoveragePatchRequest request,
+        string diffText,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var changedLines = ParseChangedLines(diffText);
+        var lineHits = await ReadLineHitsAsync(coveragePath, request.RepositoryRoot, cancellationToken);
+        var changedLineCount = 0;
+        var measurableLineCount = 0;
+        var coveredLineCount = 0;
+
+        foreach (var (file, lines) in changedLines)
+        {
+            changedLineCount += lines.Count;
+            if (!lineHits.TryGetValue(file, out var fileHits))
+            {
+                continue;
+            }
+
+            foreach (var line in lines)
+            {
+                if (!fileHits.TryGetValue(line, out var covered))
+                {
+                    continue;
+                }
+
+                measurableLineCount++;
+                if (covered)
+                {
+                    coveredLineCount++;
+                }
+            }
+        }
+
+        var percent = measurableLineCount == 0
+            ? 100m
+            : Math.Round(coveredLineCount * 100m / measurableLineCount, 4, MidpointRounding.AwayFromZero);
+        return new PatchLineCoverageMetric(
+            request.DiffBase,
+            changedLineCount,
+            measurableLineCount,
+            coveredLineCount,
+            percent);
+    }
+
+    internal static IReadOnlyDictionary<string, IReadOnlySet<int>> ParseChangedLines(string diffText)
+    {
+        var changedLines = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
+        string? currentFile = null;
+        int? currentNewLine = null;
+
+        foreach (var line in SplitLines(diffText))
+        {
+            if (line.StartsWith("+++ ", StringComparison.Ordinal))
+            {
+                currentFile = NormalizeDiffPath(line["+++ ".Length..]);
+                currentNewLine = null;
+                continue;
+            }
+
+            if (line.StartsWith("@@ ", StringComparison.Ordinal))
+            {
+                currentNewLine = TryReadNewHunkStart(line, out var start) ? start : null;
+                continue;
+            }
+
+            if (currentFile is null || currentNewLine is null)
+            {
+                continue;
+            }
+
+            if (line.StartsWith("+", StringComparison.Ordinal))
+            {
+                AddChangedLine(changedLines, currentFile, currentNewLine.Value);
+                currentNewLine++;
+                continue;
+            }
+
+            if (line.StartsWith(" ", StringComparison.Ordinal))
+            {
+                currentNewLine++;
+            }
+        }
+
+        return changedLines.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlySet<int>)pair.Value,
+            StringComparer.Ordinal);
+    }
+
+    private static async Task<Dictionary<string, Dictionary<int, bool>>> ReadLineHitsAsync(
+        string coveragePath,
+        string repositoryRoot,
+        CancellationToken cancellationToken)
+    {
+        var lineHits = new Dictionary<string, Dictionary<int, bool>>(StringComparer.Ordinal);
+
+        try
+        {
+            await using var stream = File.OpenRead(coveragePath);
+            using var reader = XmlReader.Create(stream, ReaderSettings);
+            string? currentFile = null;
+
+            while (await reader.ReadAsync())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (reader.NodeType == XmlNodeType.Element
+                    && string.Equals(reader.Name, "class", StringComparison.Ordinal))
+                {
+                    currentFile = NormalizeCoveragePath(reader.GetAttribute("filename"), repositoryRoot);
+                    continue;
+                }
+
+                if (reader.NodeType == XmlNodeType.EndElement
+                    && string.Equals(reader.Name, "class", StringComparison.Ordinal))
+                {
+                    currentFile = null;
+                    continue;
+                }
+
+                if (currentFile is null
+                    || reader.NodeType != XmlNodeType.Element
+                    || !string.Equals(reader.Name, "line", StringComparison.Ordinal)
+                    || !int.TryParse(reader.GetAttribute("number"), NumberStyles.None, CultureInfo.InvariantCulture, out var lineNumber)
+                    || !int.TryParse(reader.GetAttribute("hits"), NumberStyles.None, CultureInfo.InvariantCulture, out var hits))
+                {
+                    continue;
+                }
+
+                if (!lineHits.TryGetValue(currentFile, out var fileHits))
+                {
+                    fileHits = new Dictionary<int, bool>();
+                    lineHits.Add(currentFile, fileHits);
+                }
+
+                fileHits[lineNumber] = hits > 0 || (fileHits.TryGetValue(lineNumber, out var existing) && existing);
+            }
+        }
+        catch (XmlException ex)
+        {
+            throw new CommandException($"ASCOV006 Failed to parse Cobertura XML '{coveragePath}': {ex.Message}");
+        }
+
+        return lineHits;
+    }
+
+    private static IEnumerable<string> SplitLines(string text)
+    {
+        using var reader = new StringReader(text);
+        while (reader.ReadLine() is { } line)
+        {
+            yield return line;
+        }
+    }
+
+    private static string? NormalizeDiffPath(string value)
+    {
+        var path = value.Trim();
+        if (string.Equals(path, "/dev/null", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        if (path.StartsWith("b/", StringComparison.Ordinal) || path.StartsWith("a/", StringComparison.Ordinal))
+        {
+            path = path[2..];
+        }
+
+        return NormalizeRelativePath(path);
+    }
+
+    private static string? NormalizeCoveragePath(string? value, string repositoryRoot)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var path = value.Trim();
+        if (Path.IsPathFullyQualified(path))
+        {
+            var relative = Path.GetRelativePath(repositoryRoot, path);
+            if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathFullyQualified(relative))
+            {
+                return NormalizeRelativePath(path);
+            }
+
+            path = relative;
+        }
+
+        return NormalizeRelativePath(path);
+    }
+
+    private static string NormalizeRelativePath(string path)
+    {
+        path = path.Replace('\\', '/').TrimStart('/');
+        while (path.StartsWith("./", StringComparison.Ordinal))
+        {
+            path = path[2..];
+        }
+
+        return path;
+    }
+
+    private static bool TryReadNewHunkStart(string header, out int start)
+    {
+        start = 0;
+        var plusIndex = header.IndexOf('+', StringComparison.Ordinal);
+        if (plusIndex < 0)
+        {
+            return false;
+        }
+
+        var endIndex = plusIndex + 1;
+        while (endIndex < header.Length && header[endIndex] != ' ' && header[endIndex] != ',')
+        {
+            endIndex++;
+        }
+
+        return int.TryParse(
+            header.AsSpan(plusIndex + 1, endIndex - plusIndex - 1),
+            NumberStyles.None,
+            CultureInfo.InvariantCulture,
+            out start);
+    }
+
+    private static void AddChangedLine(
+        Dictionary<string, HashSet<int>> changedLines,
+        string file,
+        int lineNumber)
+    {
+        if (!changedLines.TryGetValue(file, out var lines))
+        {
+            lines = [];
+            changedLines.Add(file, lines);
+        }
+
+        lines.Add(lineNumber);
+    }
+}
+
+/// <summary>
+/// Reads changed lines from git.
+/// </summary>
+internal static class GitDiffReader
+{
+    /// <summary>
+    /// Reads a zero-context diff between <paramref name="diffBase"/> and <c>HEAD</c>.
+    /// </summary>
+    /// <param name="repositoryRoot">Repository root where git should run.</param>
+    /// <param name="diffBase">Git ref or commit compared with HEAD.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Unified diff text.</returns>
+    public static async Task<string> ReadDiffAsync(
+        string repositoryRoot,
+        string diffBase,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = repositoryRoot,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add("diff");
+        startInfo.ArgumentList.Add("--unified=0");
+        startInfo.ArgumentList.Add("--no-ext-diff");
+        startInfo.ArgumentList.Add("--relative");
+        startInfo.ArgumentList.Add($"{diffBase}...HEAD");
+        startInfo.ArgumentList.Add("--");
+
+        try
+        {
+            using var process = Process.Start(startInfo)
+                ?? throw new CommandException("ASCOV010 Failed to start git diff.");
+            var standardOutput = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var standardError = await process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+
+            if (process.ExitCode != 0)
+            {
+                var details = string.IsNullOrWhiteSpace(standardError) ? standardOutput.Trim() : standardError.Trim();
+                throw new CommandException(
+                    $"ASCOV010 Failed to read git diff from '{diffBase}' to HEAD: {details}");
+            }
+
+            return standardOutput;
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        {
+            throw new CommandException($"ASCOV010 Failed to run git diff: {ex.Message}");
+        }
+    }
+}
+
+/// <summary>
 /// Writes private coverage gate report artifacts.
 /// </summary>
 internal static class CoverageGateReportWriter
@@ -364,9 +806,11 @@ internal static class CoverageGateReportWriter
                 {
                     line = result.MinLinePercent,
                     branch = result.MinBranchPercent,
+                    patchLine = result.MinPatchLinePercent,
                 },
                 line = ToJson(result.LineCoverage),
                 branch = ToJson(result.BranchCoverage),
+                patchLine = ToJson(result.PatchLineCoverage),
             },
             JsonOptions);
         await File.WriteAllTextAsync(result.JsonReportPath, json + Environment.NewLine, cancellationToken);
@@ -397,6 +841,11 @@ internal static class CoverageGateReportWriter
         builder.AppendLine("| --- | ---: | ---: | --- |");
         AppendMetric(builder, "Lines", result.LineCoverage, result.MinLinePercent);
         AppendMetric(builder, "Branches", result.BranchCoverage, result.MinBranchPercent);
+        if (result.PatchLineCoverage is { } patchCoverage)
+        {
+            AppendPatchMetric(builder, patchCoverage, result.MinPatchLinePercent);
+        }
+
         return builder.ToString();
     }
 
@@ -407,6 +856,23 @@ internal static class CoverageGateReportWriter
         percent = metric.Percent,
     };
 
+    private static object? ToJson(PatchLineCoverageMetric? metric)
+    {
+        if (metric is null)
+        {
+            return null;
+        }
+
+        return new
+        {
+            diffBase = metric.DiffBase,
+            changed = metric.ChangedLines,
+            measurable = metric.MeasurableLines,
+            covered = metric.CoveredLines,
+            percent = metric.Percent,
+        };
+    }
+
     private static void AppendMetric(StringBuilder builder, string label, CoverageMetric metric, decimal threshold)
     {
         var result = metric.Percent >= threshold ? "pass" : "fail";
@@ -414,6 +880,21 @@ internal static class CoverageGateReportWriter
             ? FormattableString.Invariant($"{metric.Percent:0.00}% ({metric.Covered}/{metric.Valid})")
             : FormattableString.Invariant($"{metric.Percent:0.00}% (count unavailable)");
         builder.AppendLine(FormattableString.Invariant($"| {label} | {coverage} | {threshold:0.##}% | {result} |"));
+    }
+
+    private static void AppendPatchMetric(
+        StringBuilder builder,
+        PatchLineCoverageMetric metric,
+        decimal? threshold)
+    {
+        var outcome = threshold is null ? "reported" : metric.Percent >= threshold ? "pass" : "fail";
+        var thresholdText = threshold is null
+            ? "report"
+            : FormattableString.Invariant($"{threshold:0.##}%");
+        var coverage = metric.MeasurableLines == 0
+            ? FormattableString.Invariant($"{metric.Percent:0.00}% (no measurable changed lines, {metric.ChangedLines} changed)")
+            : FormattableString.Invariant($"{metric.Percent:0.00}% ({metric.CoveredLines}/{metric.MeasurableLines} measurable, {metric.ChangedLines} changed)");
+        builder.AppendLine(FormattableString.Invariant($"| Patch lines | {coverage} | {thresholdText} | {outcome} |"));
     }
 
     private static async Task AppendGithubSummaryAsync(
