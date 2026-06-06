@@ -838,7 +838,7 @@ internal sealed class CoverageRunnerApplication
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
         {
             var aggregationSeconds = diagnosticTimer.ElapsedSeconds;
             var diagnostics = new SlowTestDiagnosticsRun(
