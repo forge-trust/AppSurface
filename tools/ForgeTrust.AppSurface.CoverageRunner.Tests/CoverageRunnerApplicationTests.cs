@@ -150,6 +150,8 @@ public sealed class CoverageRunnerApplicationTests
         File.WriteAllText(Path.Join(outputDirectory, "coverage.cobertura.xml"), "<old />");
         File.WriteAllText(Path.Join(outputDirectory, "summary.txt"), "old");
         File.WriteAllText(Path.Join(outputDirectory, "timings.json"), "{}");
+        File.WriteAllText(Path.Join(outputDirectory, "slow-test-diagnostics.md"), "STALE-SLOW-DIAGNOSTICS");
+        File.WriteAllText(Path.Join(outputDirectory, "slow-test-diagnostics.json"), "{\"stale\":true}");
         File.WriteAllText(Path.Join(outputDirectory, "junit-old.xml"), "<old />");
         Directory.CreateDirectory(Path.Join(outputDirectory, "projects", "Old.Tests"));
         File.WriteAllText(Path.Join(outputDirectory, "projects", "Old.Tests", "old.txt"), "old");
@@ -169,6 +171,8 @@ public sealed class CoverageRunnerApplicationTests
         Assert.False(File.Exists(Path.Join(outputDirectory, "reportgenerator", "old.txt")));
         Assert.True(File.Exists(Path.Join(outputDirectory, "summary.txt")));
         Assert.True(File.Exists(Path.Join(outputDirectory, "timings.json")));
+        Assert.DoesNotContain("STALE-SLOW-DIAGNOSTICS", File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.md")), StringComparison.Ordinal);
+        Assert.Contains("\"schemaVersion\": 1", File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.json")), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -235,6 +239,9 @@ public sealed class CoverageRunnerApplicationTests
         Assert.True(File.Exists(Path.Join(outputDirectory, "coverage.cobertura.xml")));
         Assert.True(File.Exists(Path.Join(outputDirectory, "summary.txt")));
         Assert.True(File.Exists(Path.Join(outputDirectory, "timings.json")));
+        Assert.True(File.Exists(Path.Join(outputDirectory, "slow-test-diagnostics.md")));
+        using var diagnostics = JsonDocument.Parse(File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.json")));
+        Assert.False(diagnostics.RootElement.GetProperty("metadataComplete").GetBoolean());
         Assert.True(File.Exists(Path.Join(outputDirectory, "junit-tools-1-Sample.Tests.xml")));
     }
 
@@ -424,6 +431,131 @@ public sealed class CoverageRunnerApplicationTests
         Assert.Equal(0, exitCode);
         Assert.Contains("Line coverage: 0.00% (0/0)", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("Branch coverage: 0.00% (0/0)", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldWriteSlowTestDiagnosticsAndOverhead()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            JunitText = """
+                <testsuites>
+                  <testsuite>
+                    <testcase classname="Sample.CoverageTests" name="UsesReportGenerator" time="2.5">
+                      <failure />
+                    </testcase>
+                    <testcase classname="Sample.ProcessTests" name="StartsDotnet" time="1.25" />
+                  </testsuite>
+                </testsuites>
+                """,
+        };
+        var output = new StringWriter();
+        var app = CreateApp(runner, output);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        var markdown = File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.md"));
+        Assert.Contains("Diagnostic aggregation overhead: 1s (100.00% of total runner time)", markdown, StringComparison.Ordinal);
+        Assert.Contains("coverage-tooling", markdown, StringComparison.Ordinal);
+        Assert.Contains("process-startup", markdown, StringComparison.Ordinal);
+
+        using var diagnostics = JsonDocument.Parse(File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.json")));
+        Assert.True(diagnostics.RootElement.GetProperty("metadataComplete").GetBoolean());
+        Assert.Equal(1, diagnostics.RootElement.GetProperty("overhead").GetProperty("aggregationSeconds").GetInt64());
+        Assert.Equal(100, diagnostics.RootElement.GetProperty("overhead").GetProperty("aggregationPercent").GetDecimal());
+        Assert.Equal(2, diagnostics.RootElement.GetProperty("totals").GetProperty("testCases").GetInt32());
+
+        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(outputDirectory, "timings.json")));
+        Assert.Equal(1, timings.RootElement.GetProperty("durations").GetProperty("diagnosticAggregationSeconds").GetInt64());
+        Assert.Equal(100, timings.RootElement.GetProperty("durations").GetProperty("diagnosticAggregationPercent").GetDecimal());
+        var project = Assert.Single(timings.RootElement.GetProperty("projects").EnumerateArray());
+        Assert.Contains("junit-tools-1-Sample.Tests.xml", project.GetProperty("junit").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Diagnostic aggregation overhead: 1s (100.00% of total runner time)", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldUsePostWriteOverheadInArtifacts()
+    {
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(outputDirectory);
+        var options = new CoverageRunnerOptions
+        {
+            RepositoryRoot = workspace.Root,
+            SolutionPath = Path.Join(workspace.Root, "ForgeTrust.AppSurface.slnx"),
+            OutputDirectory = outputDirectory,
+            GroupName = "tools",
+            BuildConfiguration = "Release",
+            BuildSolution = false,
+            BuildNoRestore = false,
+            IncludeFilter = "[ForgeTrust.AppSurface.*]*",
+            ExcludeFilter = "[*.Tests]*%2c[*.IntegrationTests]*",
+            Parallelism = 1,
+            MergeOnly = false,
+            ListGroups = false,
+        };
+        var report = new SlowTestDiagnosticsReport(
+            SlowTestDiagnosticsWriter.SchemaVersion,
+            DateTimeOffset.UnixEpoch,
+            "tools",
+            MetadataComplete: true,
+            JunitFileCount: 0,
+            Projects: [],
+            TestCases: [],
+            Categories: [],
+            Warnings: []);
+        var elapsedReads = 0;
+
+        var diagnostics = await SlowTestDiagnosticsWriter.WriteAsync(
+            options,
+            report,
+            getAggregationSeconds: () => ++elapsedReads,
+            calculateAggregationPercent: seconds => seconds * 10m,
+            CancellationToken.None);
+
+        Assert.Equal(2, diagnostics.AggregationSeconds);
+        Assert.Equal(20, diagnostics.AggregationPercent);
+        Assert.Contains(
+            "Diagnostic aggregation overhead: 2s (20.00% of total runner time)",
+            File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.md")),
+            StringComparison.Ordinal);
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.json")));
+        Assert.Equal(2, json.RootElement.GetProperty("overhead").GetProperty("aggregationSeconds").GetInt64());
+        Assert.Equal(20, json.RootElement.GetProperty("overhead").GetProperty("aggregationPercent").GetDecimal());
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldKeepDiagnosticsBestEffortWhenJunitCannotBeParsed()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            JunitText = """
+                <!DOCTYPE testsuite [
+                  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+                ]>
+                <testsuite><testcase classname="Sample.Tests" name="BlockedDtd" time="1" /></testsuite>
+                """,
+        };
+        var app = CreateApp(runner);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        using var diagnostics = JsonDocument.Parse(File.ReadAllText(Path.Join(workspace.Root, "TestResults", "coverage-merged", "slow-test-diagnostics.json")));
+        Assert.True(diagnostics.RootElement.GetProperty("totals").GetProperty("warnings").GetInt32() > 0);
+        Assert.Equal(0, diagnostics.RootElement.GetProperty("totals").GetProperty("testCases").GetInt32());
     }
 
     [Theory]
@@ -759,6 +891,8 @@ public sealed class CoverageRunnerApplicationTests
         public string ReportGeneratorCoverageText { get; init; } =
             "<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />";
 
+        public string JunitText { get; init; } = "<testsuite />";
+
         private int _maxConcurrentTests;
 
         public int MaxConcurrentTests => Volatile.Read(ref _maxConcurrentTests);
@@ -852,7 +986,7 @@ public sealed class CoverageRunnerApplicationTests
                     }
 
                     var junit = arguments.Single(argument => argument.StartsWith("--logger:junit;LogFilePath=", StringComparison.Ordinal))["--logger:junit;LogFilePath=".Length..];
-                    File.WriteAllText(junit, "<testsuite />");
+                    File.WriteAllText(junit, JunitText);
 
                     if (FailingProject is not null && project.EndsWith(FailingProject, StringComparison.Ordinal))
                     {

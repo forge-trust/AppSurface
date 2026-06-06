@@ -12,8 +12,10 @@ namespace ForgeTrust.AppSurface.CoverageRunner;
 /// projects with <c>dotnet sln list</c>, optionally build the solution, run selected test projects,
 /// replay captured logs in solution order, merge Cobertura files with ReportGenerator, and write
 /// <c>coverage.cobertura.xml</c>, <c>summary.txt</c>, <c>timings.json</c>, top-level
-/// <c>junit-*.xml</c> files, and per-project <c>dotnet-test.log</c> files under the output
-/// directory. Merge-only runs skip discovery/build/test and only merge an existing artifact tree.
+/// <c>junit-*.xml</c> files, <c>slow-test-diagnostics.md</c>,
+/// <c>slow-test-diagnostics.json</c>, and per-project <c>dotnet-test.log</c> files under the
+/// output directory. Merge-only runs skip discovery/build/test and only merge an existing artifact
+/// tree before writing a partial diagnostic report from copied JUnit files.
 /// </remarks>
 internal sealed class CoverageRunnerApplication
 {
@@ -173,12 +175,14 @@ internal sealed class CoverageRunnerApplication
 
         var junitCount = CopyJunitFiles(options.MergeSourceDirectory, options.OutputDirectory);
         var coverageCount = CoverageFileCountForMerge(options.MergeSourceDirectory);
-        if (!await WriteSummaryAsync(options, cancellationToken))
+        var totalSeconds = totalTimer.ElapsedSeconds;
+        var diagnostics = await RunSlowTestDiagnosticsAsync(options, [], totalSeconds, cancellationToken);
+        if (!await WriteSummaryAsync(options, diagnostics, cancellationToken))
         {
             return 1;
         }
 
-        await WriteTimingsAsync(options, totalTimer.ElapsedSeconds, 0, mergeSeconds, mergeExit, junitCount, coverageCount, [], cancellationToken);
+        await WriteTimingsAsync(options, totalSeconds, 0, mergeSeconds, mergeExit, junitCount, coverageCount, [], diagnostics, cancellationToken);
         return 0;
     }
 
@@ -209,13 +213,15 @@ internal sealed class CoverageRunnerApplication
         var mergeSeconds = mergeTimer.ElapsedSeconds;
         var junitCount = Directory.EnumerateFiles(options.OutputDirectory, "junit-*.xml", SearchOption.TopDirectoryOnly).Count();
         var coverageCount = Directory.EnumerateFiles(projectsOutputDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories).Count();
+        var totalSeconds = totalTimer.ElapsedSeconds;
+        var diagnostics = await RunSlowTestDiagnosticsAsync(options, results, totalSeconds, cancellationToken);
         var summaryExit = 0;
-        if (mergeExit == 0 && !await WriteSummaryAsync(options, cancellationToken))
+        if (mergeExit == 0 && !await WriteSummaryAsync(options, diagnostics, cancellationToken))
         {
             summaryExit = 1;
         }
 
-        await WriteTimingsAsync(options, totalTimer.ElapsedSeconds, buildSeconds, mergeSeconds, mergeExit, junitCount, coverageCount, results, cancellationToken);
+        await WriteTimingsAsync(options, totalSeconds, buildSeconds, mergeSeconds, mergeExit, junitCount, coverageCount, results, diagnostics, cancellationToken);
 
         var failures = results.Where(result => result.ExitCode != 0).ToArray();
         if (failures.Length == 0 && mergeExit == 0 && summaryExit == 0)
@@ -384,7 +390,7 @@ internal sealed class CoverageRunnerApplication
             await _standardError.WriteLineAsync($"Test run failed for {project.RelativePath} (exit {result.ExitCode})");
         }
 
-        return new ProjectRunResult(index, project, seconds, result.ExitCode, logFile);
+        return new ProjectRunResult(index, project, seconds, result.ExitCode, junitFile, logFile);
     }
 
     private async Task<CommandResult> RunProjectCommandAsync(
@@ -556,6 +562,9 @@ internal sealed class CoverageRunnerApplication
     /// Writes the human-readable coverage summary from the merged Cobertura artifact.
     /// </summary>
     /// <param name="options">Runner options that identify the output directory and group.</param>
+    /// <param name="diagnostics">
+    /// Optional slow-test diagnostics metadata included for discoverability and overhead accounting.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token used for summary file reads and writes.</param>
     /// <returns>
     /// <c>true</c> when the summary was written; <c>false</c> when the merged coverage artifact is
@@ -565,7 +574,10 @@ internal sealed class CoverageRunnerApplication
     /// This method is internal so tests can verify summary failure behavior without depending on a
     /// failing ReportGenerator invocation that would stop before summary generation.
     /// </remarks>
-    internal async Task<bool> WriteSummaryAsync(CoverageRunnerOptions options, CancellationToken cancellationToken)
+    internal async Task<bool> WriteSummaryAsync(
+        CoverageRunnerOptions options,
+        SlowTestDiagnosticsRun? diagnostics,
+        CancellationToken cancellationToken)
     {
         var coveragePath = Path.Join(options.OutputDirectory, "coverage.cobertura.xml");
         if (!File.Exists(coveragePath))
@@ -587,6 +599,10 @@ internal sealed class CoverageRunnerApplication
         var lineRate = linesValid == 0 ? 0 : linesCovered * 100m / linesValid;
         var branchRate = branchesValid == 0 ? 0 : branchesCovered * 100m / branchesValid;
         var timingsPath = Path.Join(options.OutputDirectory, "timings.json");
+        var diagnosticsPath = diagnostics?.MarkdownPath ?? Path.Join(options.OutputDirectory, SlowTestDiagnosticsWriter.MarkdownFileName);
+        var diagnosticsSeconds = diagnostics?.AggregationSeconds ?? 0;
+        var diagnosticsPercent = diagnostics?.AggregationPercent ?? 0;
+        var diagnosticsWarnings = diagnostics?.WarningCount ?? 0;
         var summary = FormattableString.Invariant($"""
             Solution coverage summary
             Group: {options.GroupName}
@@ -594,10 +610,18 @@ internal sealed class CoverageRunnerApplication
             Branch coverage: {branchRate:0.00}% ({branchesCovered}/{branchesValid})
             Cobertura: {coveragePath}
             Timings: {timingsPath}
+            Slow test diagnostics: {diagnosticsPath}
+            Diagnostic aggregation overhead: {diagnosticsSeconds}s ({diagnosticsPercent:0.00}% of total runner time)
+            Diagnostic warnings: {diagnosticsWarnings}
             """);
         await File.WriteAllTextAsync(Path.Join(options.OutputDirectory, "summary.txt"), summary, cancellationToken);
         await _standardOut.WriteLineAsync(summary);
         return true;
+    }
+
+    internal Task<bool> WriteSummaryAsync(CoverageRunnerOptions options, CancellationToken cancellationToken)
+    {
+        return WriteSummaryAsync(options, diagnostics: null, cancellationToken);
     }
 
     private static bool TryReadIntAttribute(string text, string attributeName, out int value)
@@ -624,6 +648,7 @@ internal sealed class CoverageRunnerApplication
         int junitCount,
         int coverageCount,
         IReadOnlyList<ProjectRunResult> results,
+        SlowTestDiagnosticsRun diagnostics,
         CancellationToken cancellationToken)
     {
         var payload = new
@@ -637,6 +662,8 @@ internal sealed class CoverageRunnerApplication
             {
                 solutionBuildSeconds = buildSeconds,
                 coverageMergeSeconds = mergeSeconds,
+                diagnosticAggregationSeconds = diagnostics.AggregationSeconds,
+                diagnosticAggregationPercent = diagnostics.AggregationPercent,
                 totalSeconds,
             },
             merge = new
@@ -648,6 +675,18 @@ internal sealed class CoverageRunnerApplication
                 junitFiles = junitCount,
                 coverageFiles = coverageCount,
                 cobertura = Path.Join(options.OutputDirectory, "coverage.cobertura.xml"),
+                slowTestDiagnosticsMarkdown = diagnostics.MarkdownPath,
+                slowTestDiagnosticsJson = diagnostics.JsonPath,
+            },
+            diagnostics = new
+            {
+                schemaVersion = SlowTestDiagnosticsWriter.SchemaVersion,
+                warningCount = diagnostics.WarningCount,
+                metadataComplete = diagnostics.MetadataComplete,
+                aggregationSeconds = diagnostics.AggregationSeconds,
+                aggregationPercent = diagnostics.AggregationPercent,
+                markdown = diagnostics.MarkdownPath,
+                json = diagnostics.JsonPath,
             },
             projects = results
                 .OrderBy(result => result.Index)
@@ -658,6 +697,7 @@ internal sealed class CoverageRunnerApplication
                     seconds = result.Seconds,
                     exitCode = result.ExitCode,
                     exclusive = result.Project.IsExclusive,
+                    junit = result.JunitFile,
                     log = result.LogFile,
                 }),
         };
@@ -673,6 +713,8 @@ internal sealed class CoverageRunnerApplication
         DeleteFileIfExists(Path.Join(options.OutputDirectory, "coverage.cobertura.xml"));
         DeleteFileIfExists(Path.Join(options.OutputDirectory, "summary.txt"));
         DeleteFileIfExists(Path.Join(options.OutputDirectory, "timings.json"));
+        DeleteFileIfExists(Path.Join(options.OutputDirectory, SlowTestDiagnosticsWriter.MarkdownFileName));
+        DeleteFileIfExists(Path.Join(options.OutputDirectory, SlowTestDiagnosticsWriter.JsonFileName));
         foreach (var junitFile in Directory.EnumerateFiles(options.OutputDirectory, "junit-*.xml", SearchOption.TopDirectoryOnly))
         {
             File.Delete(junitFile);
@@ -770,6 +812,52 @@ internal sealed class CoverageRunnerApplication
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
     }
+
+    private async Task<SlowTestDiagnosticsRun> RunSlowTestDiagnosticsAsync(
+        CoverageRunnerOptions options,
+        IReadOnlyList<ProjectRunResult> results,
+        long totalSeconds,
+        CancellationToken cancellationToken)
+    {
+        var diagnosticTimer = _clock.StartTimer();
+        try
+        {
+            var report = await SlowTestDiagnosticsWriter.CollectAsync(options, results, cancellationToken);
+            var diagnostics = await SlowTestDiagnosticsWriter.WriteAsync(
+                options,
+                report,
+                () => diagnosticTimer.ElapsedSeconds,
+                aggregationSeconds => CalculateAggregationPercent(aggregationSeconds, totalSeconds),
+                cancellationToken);
+
+            await _standardOut.WriteLineAsync(FormattableString.Invariant(
+                $"Slow-test diagnostics: {diagnostics.MarkdownPath} ({diagnostics.AggregationSeconds}s, {diagnostics.AggregationPercent:0.00}% overhead)"));
+            return diagnostics;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var aggregationSeconds = diagnosticTimer.ElapsedSeconds;
+            var diagnostics = new SlowTestDiagnosticsRun(
+                Path.Join(options.OutputDirectory, SlowTestDiagnosticsWriter.MarkdownFileName),
+                Path.Join(options.OutputDirectory, SlowTestDiagnosticsWriter.JsonFileName),
+                aggregationSeconds,
+                CalculateAggregationPercent(aggregationSeconds, totalSeconds),
+                WarningCount: 1,
+                MetadataComplete: false);
+            await _standardError.WriteLineAsync(FormattableString.Invariant(
+                $"Slow-test diagnostics failed after {diagnostics.AggregationSeconds}s ({diagnostics.AggregationPercent:0.00}% overhead): {ex.Message}"));
+            return diagnostics;
+        }
+    }
+
+    private static decimal CalculateAggregationPercent(long aggregationSeconds, long totalSeconds)
+    {
+        return totalSeconds <= 0 ? 0 : aggregationSeconds * 100m / totalSeconds;
+    }
 }
 
 /// <summary>
@@ -812,5 +900,9 @@ internal sealed record TestProject(string RelativePath, string FullPath, string 
 /// Exit code returned by <c>dotnet test</c>. Non-zero values are recorded and reported after all
 /// selected projects have been scheduled; they do not stop remaining projects from running.
 /// </param>
+/// <param name="JunitFile">
+/// Full path to the project JUnit XML artifact. Diagnostics join on this recorded path instead of
+/// reconstructing filenames from project slugs.
+/// </param>
 /// <param name="LogFile">Full path to the per-project <c>dotnet-test.log</c> file.</param>
-internal sealed record ProjectRunResult(int Index, TestProject Project, long Seconds, int ExitCode, string LogFile);
+internal sealed record ProjectRunResult(int Index, TestProject Project, long Seconds, int ExitCode, string JunitFile, string LogFile);

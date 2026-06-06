@@ -155,6 +155,9 @@ This command:
 - Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
 - Writes a summary to `TestResults/coverage-merged/summary.txt`.
 - Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
+- Writes slow-test diagnostics to `TestResults/coverage-merged/slow-test-diagnostics.md` and
+  `TestResults/coverage-merged/slow-test-diagnostics.json`, including diagnostic aggregation
+  overhead in seconds and as a percent of total runner time.
 - Restores the pinned local ReportGenerator .NET tool when coverage files need to be merged.
 
 The script also supports bounded test groups for local or CI experiments:
