@@ -1734,7 +1734,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var packageGateWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-gate.yml"));
         var packageArtifactsWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-artifacts.yml"));
         const string disabledRuntimeResolutionSetting =
-            """(?im)(?:^\s*TailwindRuntimeBinaryResolutionEnabled:\s*(?:"false"|'false'|false)\s*$|(?:/p:|-p:)TailwindRuntimeBinaryResolutionEnabled=false\b)""";
+            """(?im)(?:^\s*TailwindRuntimeBinaryResolutionEnabled:\s*(?:"false"|'false'|false)\s*$|(?:^|\s)(?:env\s+)?TailwindRuntimeBinaryResolutionEnabled=false\b|(?:/p:|-p:|/property:|-property:)(?:[^\s'"]*;)*TailwindRuntimeBinaryResolutionEnabled=false\b)""";
 
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, buildWorkflow);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, codeQualityWorkflow);
@@ -1744,6 +1744,12 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"true\"", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageGateWorkflow);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageArtifactsWorkflow);
+        Assert.Matches(disabledRuntimeResolutionSetting, "/property:TailwindRuntimeBinaryResolutionEnabled=false");
+        Assert.Matches(disabledRuntimeResolutionSetting, "-property:TailwindRuntimeBinaryResolutionEnabled=false");
+        Assert.Matches(disabledRuntimeResolutionSetting, "/p:Configuration=Debug;TailwindRuntimeBinaryResolutionEnabled=false");
+        Assert.Matches(disabledRuntimeResolutionSetting, "-property:Configuration=Debug;TailwindRuntimeBinaryResolutionEnabled=false");
+        Assert.Matches(disabledRuntimeResolutionSetting, "TailwindRuntimeBinaryResolutionEnabled=false dotnet build");
+        Assert.Matches(disabledRuntimeResolutionSetting, "env TailwindRuntimeBinaryResolutionEnabled=false dotnet build");
     }
 
     [Fact]
