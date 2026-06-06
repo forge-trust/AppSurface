@@ -241,7 +241,7 @@ public class TailwindCliManagerTests : IDisposable
     }
 
     [Fact]
-    public void GetTailwindPath_ReturnsSharedDownloadCachePath_FromDefaultRootWhenOverrideIsUnavailable()
+    public void GetTailwindPath_DoesNotProbeDefaultDownloadCacheRoot_WhenOverrideIsUnavailable()
     {
         var baseDir = GetSampleAppBaseDirectory();
         var assemblyDir = Path.Join(baseDir, "assembly-shadow");
@@ -260,10 +260,9 @@ public class TailwindCliManagerTests : IDisposable
             _currentHostRuntimeProjectBinaryName);
         Directory.CreateDirectory(Path.GetDirectoryName(expectedPath)!);
         File.WriteAllText(expectedPath, "dummy");
+        Environment.SetEnvironmentVariable("PATH", string.Empty);
 
-        var result = _manager.GetTailwindPath();
-
-        Assert.Equal(expectedPath, result);
+        Assert.Throws<FileNotFoundException>(() => _manager.GetTailwindPath());
     }
 
     [Fact]
@@ -300,6 +299,37 @@ public class TailwindCliManagerTests : IDisposable
         var newestPath = TailwindDownloadCache.GetRuntimeBinaryPath(
             cacheRoot,
             "5.0.0",
+            _currentHostRid,
+            _currentHostRuntimeProjectBinaryName);
+        Directory.CreateDirectory(Path.GetDirectoryName(olderPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(newestPath)!);
+        File.WriteAllText(olderPath, "older");
+        File.WriteAllText(newestPath, "newest");
+
+        var result = _manager.GetTailwindPath();
+
+        Assert.Equal(newestPath, result);
+    }
+
+    [Fact]
+    public void GetTailwindPath_ReturnsSemanticallyNewestVersionedSharedDownloadCachePath_WhenPinnedCacheCandidateIsMissing()
+    {
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(baseDir, "assembly-shadow");
+        Directory.CreateDirectory(baseDir);
+        _manager.BaseDirectoryOverride = baseDir;
+        _manager.AssemblyDirectoryOverride = assemblyDir;
+
+        var cacheRoot = Path.Join(_tempPath, "shared-tailwind-cache");
+        _manager.DownloadCacheRootOverride = cacheRoot;
+        var olderPath = TailwindDownloadCache.GetRuntimeBinaryPath(
+            cacheRoot,
+            "4.9.0",
+            _currentHostRid,
+            _currentHostRuntimeProjectBinaryName);
+        var newestPath = TailwindDownloadCache.GetRuntimeBinaryPath(
+            cacheRoot,
+            "4.10.0",
             _currentHostRid,
             _currentHostRuntimeProjectBinaryName);
         Directory.CreateDirectory(Path.GetDirectoryName(olderPath)!);

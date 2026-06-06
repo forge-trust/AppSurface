@@ -266,9 +266,7 @@ public class TailwindCliManager
             yield break;
         }
 
-        var cacheRoot = string.IsNullOrWhiteSpace(DownloadCacheRootOverride)
-            ? TailwindDownloadCache.GetDefaultRoot()
-            : DownloadCacheRootOverride;
+        var cacheRoot = DownloadCacheRootOverride;
         if (string.IsNullOrWhiteSpace(cacheRoot))
         {
             yield break;
@@ -281,10 +279,30 @@ public class TailwindCliManager
             yield break;
         }
 
-        foreach (var versionDirectory in Directory.EnumerateDirectories(cacheRoot, "tailwind-*").OrderByDescending(static path => path, StringComparer.Ordinal))
+        foreach (var versionDirectory in EnumerateVersionedDownloadCacheDirectories(cacheRoot))
         {
             yield return Path.Join(versionDirectory, rid, binaryName);
         }
+    }
+
+    private static IEnumerable<string> EnumerateVersionedDownloadCacheDirectories(string cacheRoot)
+    {
+        return Directory
+            .EnumerateDirectories(cacheRoot, "tailwind-*")
+            .Select(static path => (Path: path, Version: ParseTailwindCacheVersion(path)))
+            .OrderByDescending(static entry => entry.Version)
+            .ThenByDescending(static entry => entry.Path, StringComparer.Ordinal)
+            .Select(static entry => entry.Path);
+    }
+
+    private static Version ParseTailwindCacheVersion(string path)
+    {
+        var name = Path.GetFileName(path);
+        var versionText = name.StartsWith("tailwind-", StringComparison.Ordinal)
+            ? name["tailwind-".Length..]
+            : string.Empty;
+
+        return Version.TryParse(versionText, out var version) ? version : new Version(0, 0, 0);
     }
 
     private static bool IsFileName(string value)
