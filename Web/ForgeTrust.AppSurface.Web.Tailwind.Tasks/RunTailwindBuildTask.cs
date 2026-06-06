@@ -1,8 +1,8 @@
+using System.Security.Cryptography;
+using System.Text;
 using ForgeTrust.AppSurface.Web.Tailwind.Internal;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace ForgeTrust.AppSurface.Web.Tailwind.Tasks;
 
