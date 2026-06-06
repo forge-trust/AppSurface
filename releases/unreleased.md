@@ -18,6 +18,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - `razorwire export` and `appsurface export` now accept `--publish-root-extras <manifest>` for explicit single-file publish-root extras such as GitHub Pages `CNAME`, with `RWEXPORT007` validation for schema, symlink, reserved provider file, generated-output collision, existing-target, and exact release archive incompatibility failures. `appsurface docs export` remains intentionally clean and does not expose the option for exact docs archive artifacts.
 - Package consumers can now follow a package-first AppSurface Web quickstart from a fresh `dotnet new web` app, install `ForgeTrust.AppSurface.Web`, and verify the first route before choosing optional modules.
 - AppSurface Docs Turbo-frame navigation now preserves cross-page heading fragments, so generated package chooser links land directly on the package-first quickstart section instead of the top of the target page.
+- `ForgeTrust.AppSurface.Aspire` now includes a runnable local Aspire AppHost example at `examples/aspire-apphost`, stronger package guidance for profile and component composition, and explicit troubleshooting for `-- local`, generated `Projects.*` references, duplicate resources, and unsupported deployment/pass-through arguments.
 
 ### CI and package validation
 
