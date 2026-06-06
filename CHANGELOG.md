@@ -19,6 +19,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - RazorWire now ships a lazy section-copy runtime with generated package assets, public `data-rw-section-copy*` hooks, static export materialization, and AppSurface Docs adoption for outline/content section links.
 - CI now includes a measured NuGet cache rollout for selected build, docs export, and code-quality jobs while keeping package-gate restores isolated.
 - PackageIndex verification now ignores hidden local cache directories such as `.pnpm-store` and workspace `.nuget/packages` so local cache contents do not require package manifest entries.
+- Fast non-package CI that does not compile Tailwind-consuming projects can now skip Tailwind runtime binary resolution while package validation and release paths force binary resolution on and fail before creating an empty runtime package.
 - RazorWire and AppSurface CLI exports now accept explicit `--publish-root-extras` manifests for single-file publish-root deployment extras such as GitHub Pages `CNAME`, while AppSurface Docs exact archive exports stay immutable and reject that deployment-owned surface.
 - AppSurface Web browser status-page re-execution now preserves original browser error status codes while direct reserved preview routes continue to render normally.
 - Package consumers now have a package-first AppSurface Web quickstart that starts from `dotnet new web`, installs `ForgeTrust.AppSurface.Web`, and verifies the first route without cloning the repository.

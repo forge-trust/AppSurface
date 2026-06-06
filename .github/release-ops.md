@@ -58,6 +58,13 @@ payloads. It intentionally rejects stable versions and SemVer build metadata
 because this path is for prerelease package identity that NuGet will preserve
 exactly.
 
+`verify-packages` is the primary package-proof path for Tailwind runtime packages.
+It forces `TailwindRuntimeBinaryResolutionEnabled=true` during restore, build, and
+pack so runtime `.nupkg` files cannot be created without their native Tailwind
+binary payload. Do not set `TailwindRuntimeBinaryResolutionEnabled=false` for
+release package validation; that switch is only for non-package CI restore,
+build, and test jobs that do not compile Tailwind-consuming projects.
+
 Tracked follow-up for actual publishing: #253, "Add protected NuGet prerelease publish workflow after rename pass".
 
 ## Protected NuGet prerelease publish
