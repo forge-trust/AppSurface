@@ -487,21 +487,7 @@ public sealed class CoverageRunnerApplicationTests
         using var workspace = TestRepo.Create();
         var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
         Directory.CreateDirectory(outputDirectory);
-        var options = new CoverageRunnerOptions
-        {
-            RepositoryRoot = workspace.Root,
-            SolutionPath = Path.Join(workspace.Root, "ForgeTrust.AppSurface.slnx"),
-            OutputDirectory = outputDirectory,
-            GroupName = "tools",
-            BuildConfiguration = "Release",
-            BuildSolution = false,
-            BuildNoRestore = false,
-            IncludeFilter = "[ForgeTrust.AppSurface.*]*",
-            ExcludeFilter = "[*.Tests]*%2c[*.IntegrationTests]*",
-            Parallelism = 1,
-            MergeOnly = false,
-            ListGroups = false,
-        };
+        var options = CreateCoverageOptions(workspace.Root, outputDirectory);
         var report = new SlowTestDiagnosticsReport(
             SlowTestDiagnosticsWriter.SchemaVersion,
             DateTimeOffset.UnixEpoch,
@@ -568,21 +554,7 @@ public sealed class CoverageRunnerApplicationTests
         var junitPath = Path.Join(outputDirectory, "junit-tools-1-Sample.Tests.xml");
         File.WriteAllText(junitPath, "<testsuite />");
         var logPath = Path.Join(outputDirectory, "projects", "Sample.Tests", "dotnet-test.log");
-        var options = new CoverageRunnerOptions
-        {
-            RepositoryRoot = workspace.Root,
-            SolutionPath = Path.Join(workspace.Root, "ForgeTrust.AppSurface.slnx"),
-            OutputDirectory = outputDirectory,
-            GroupName = "tools",
-            BuildConfiguration = "Release",
-            BuildSolution = false,
-            BuildNoRestore = false,
-            IncludeFilter = "[ForgeTrust.AppSurface.*]*",
-            ExcludeFilter = "[*.Tests]*%2c[*.IntegrationTests]*",
-            Parallelism = 1,
-            MergeOnly = false,
-            ListGroups = false,
-        };
+        var options = CreateCoverageOptions(workspace.Root, outputDirectory);
         var project = new TestProject(
             "tools/Sample.Tests/Sample.Tests.csproj",
             Path.Join(workspace.Root, "tools", "Sample.Tests", "Sample.Tests.csproj"),
@@ -704,6 +676,35 @@ public sealed class CoverageRunnerApplicationTests
             "Failed to access JUnit XML",
             File.ReadAllText(Path.Join(outputDirectory, "slow-test-diagnostics.md")),
             StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("file")]
+    [InlineData("directory")]
+    public async Task SlowTestDiagnosticsWriter_ShouldWarnWhenJunitPathIsMissing(string missingKind)
+    {
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(outputDirectory);
+        var options = CreateCoverageOptions(workspace.Root, outputDirectory);
+        var project = new TestProject(
+            "tools/Missing.Tests/Missing.Tests.csproj",
+            Path.Join(workspace.Root, "tools", "Missing.Tests", "Missing.Tests.csproj"),
+            "tools",
+            "Missing.Tests",
+            IsExclusive: false);
+        Exception exception = missingKind == "file"
+            ? new FileNotFoundException("simulated missing file")
+            : new DirectoryNotFoundException("simulated missing directory");
+
+        var report = await SlowTestDiagnosticsWriter.CollectAsync(
+            options,
+            [new ProjectRunResult(0, project, 1, 0, Path.Join(outputDirectory, "missing.xml"), Path.Join(outputDirectory, "missing.log"))],
+            openJunitStream: _ => throw exception,
+            CancellationToken.None);
+
+        var warning = Assert.Single(report.Warnings);
+        Assert.Contains("JUnit file was not created", warning, StringComparison.Ordinal);
     }
 
     [Fact]

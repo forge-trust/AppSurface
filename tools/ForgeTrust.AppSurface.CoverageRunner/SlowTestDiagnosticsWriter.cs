@@ -16,8 +16,22 @@ namespace ForgeTrust.AppSurface.CoverageRunner;
 /// </remarks>
 internal static class SlowTestDiagnosticsWriter
 {
+    /// <summary>
+    /// Schema version written into slow-test diagnostics artifacts for machine consumers.
+    /// </summary>
+    /// <remarks>
+    /// Increment this value when the JSON or Markdown artifact contract changes incompatibly.
+    /// </remarks>
     public const int SchemaVersion = 1;
+
+    /// <summary>
+    /// File name of the human-readable Markdown slow-test diagnostics artifact.
+    /// </summary>
     public const string MarkdownFileName = "slow-test-diagnostics.md";
+
+    /// <summary>
+    /// File name of the machine-readable JSON slow-test diagnostics artifact.
+    /// </summary>
     public const string JsonFileName = "slow-test-diagnostics.json";
 
     private const int MaxTopTests = 20;
@@ -280,12 +294,6 @@ internal static class SlowTestDiagnosticsWriter
         Func<string, Stream> openJunitStream,
         CancellationToken cancellationToken)
     {
-        if (!File.Exists(input.JunitFile))
-        {
-            AddWarning(warnings, $"JUnit file was not created: {input.JunitFile}");
-            return [];
-        }
-
         try
         {
             await using var stream = openJunitStream(input.JunitFile);
@@ -297,6 +305,16 @@ internal static class SlowTestDiagnosticsWriter
             };
             using var reader = XmlReader.Create(stream, settings);
             return await ReadTestCasesAsync(reader, input, warnings, cancellationToken);
+        }
+        catch (FileNotFoundException)
+        {
+            AddWarning(warnings, $"JUnit file was not created: {input.JunitFile}");
+            return [];
+        }
+        catch (DirectoryNotFoundException)
+        {
+            AddWarning(warnings, $"JUnit file was not created: {input.JunitFile}");
+            return [];
         }
         catch (XmlException ex)
         {

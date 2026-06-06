@@ -175,8 +175,8 @@ internal sealed class CoverageRunnerApplication
 
         var junitCount = CopyJunitFiles(options.MergeSourceDirectory, options.OutputDirectory);
         var coverageCount = CoverageFileCountForMerge(options.MergeSourceDirectory);
+        var diagnostics = await RunSlowTestDiagnosticsAsync(options, [], () => totalTimer.ElapsedSeconds, cancellationToken);
         var totalSeconds = totalTimer.ElapsedSeconds;
-        var diagnostics = await RunSlowTestDiagnosticsAsync(options, [], totalSeconds, cancellationToken);
         if (!await WriteSummaryAsync(options, diagnostics, cancellationToken))
         {
             return 1;
@@ -213,8 +213,8 @@ internal sealed class CoverageRunnerApplication
         var mergeSeconds = mergeTimer.ElapsedSeconds;
         var junitCount = Directory.EnumerateFiles(options.OutputDirectory, "junit-*.xml", SearchOption.TopDirectoryOnly).Count();
         var coverageCount = Directory.EnumerateFiles(projectsOutputDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories).Count();
+        var diagnostics = await RunSlowTestDiagnosticsAsync(options, results, () => totalTimer.ElapsedSeconds, cancellationToken);
         var totalSeconds = totalTimer.ElapsedSeconds;
-        var diagnostics = await RunSlowTestDiagnosticsAsync(options, results, totalSeconds, cancellationToken);
         var summaryExit = 0;
         if (mergeExit == 0 && !await WriteSummaryAsync(options, diagnostics, cancellationToken))
         {
@@ -619,6 +619,12 @@ internal sealed class CoverageRunnerApplication
         return true;
     }
 
+    /// <summary>
+    /// Writes the coverage summary without slow-test diagnostic metadata.
+    /// </summary>
+    /// <param name="options">Runner options that identify the output directory and group.</param>
+    /// <param name="cancellationToken">Cancellation token used for summary file reads and writes.</param>
+    /// <returns><c>true</c> when the summary was written; otherwise <c>false</c>.</returns>
     internal Task<bool> WriteSummaryAsync(CoverageRunnerOptions options, CancellationToken cancellationToken)
     {
         return WriteSummaryAsync(options, diagnostics: null, cancellationToken);
@@ -816,7 +822,7 @@ internal sealed class CoverageRunnerApplication
     private async Task<SlowTestDiagnosticsRun> RunSlowTestDiagnosticsAsync(
         CoverageRunnerOptions options,
         IReadOnlyList<ProjectRunResult> results,
-        long totalSeconds,
+        Func<long> getTotalSeconds,
         CancellationToken cancellationToken)
     {
         var diagnosticTimer = _clock.StartTimer();
@@ -827,7 +833,7 @@ internal sealed class CoverageRunnerApplication
                 options,
                 report,
                 () => diagnosticTimer.ElapsedSeconds,
-                aggregationSeconds => CalculateAggregationPercent(aggregationSeconds, totalSeconds),
+                aggregationSeconds => CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
                 cancellationToken);
 
             await WriteSlowTestDiagnosticsStatusAsync(diagnostics);
@@ -844,7 +850,7 @@ internal sealed class CoverageRunnerApplication
                 Path.Join(options.OutputDirectory, SlowTestDiagnosticsWriter.MarkdownFileName),
                 Path.Join(options.OutputDirectory, SlowTestDiagnosticsWriter.JsonFileName),
                 aggregationSeconds,
-                CalculateAggregationPercent(aggregationSeconds, totalSeconds),
+                CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
                 WarningCount: 1,
                 MetadataComplete: false);
             await _standardError.WriteLineAsync(FormattableString.Invariant(
