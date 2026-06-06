@@ -263,26 +263,23 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                 flow.FlowId));
         }
 
-        foreach (var memberName in new[] { "BuildDefinition", "CreateStartContext", ConfigureDefaultGraphMethodName })
+        foreach (var memberName in new[] { "BuildDefinition", "CreateStartContext", ConfigureDefaultGraphMethodName }
+            .Where(memberName => flow.Symbol.GetMembers(memberName)
+                .Any(member => member.DeclaringSyntaxReferences.Length > 0)))
         {
-            if (flow.Symbol.GetMembers(memberName).Any(member => member.DeclaringSyntaxReferences.Length > 0))
-            {
-                ReportError(
-                    InvalidDeclaration,
-                    flow.Declaration.Identifier.GetLocation(),
-                    $"Flow '{flow.FlowId}' already declares member '{memberName}', which conflicts with generated authoring helpers.");
-            }
+            ReportError(
+                InvalidDeclaration,
+                flow.Declaration.Identifier.GetLocation(),
+                $"Flow '{flow.FlowId}' already declares member '{memberName}', which conflicts with generated authoring helpers.");
         }
 
-        foreach (var typeName in GeneratedNestedTypeNames(flow))
+        foreach (var typeName in GeneratedNestedTypeNames(flow)
+            .Where(typeName => flow.Symbol.GetTypeMembers(typeName).Any()))
         {
-            if (flow.Symbol.GetTypeMembers(typeName).Any())
-            {
-                ReportError(
-                    InvalidDeclaration,
-                    flow.Declaration.Identifier.GetLocation(),
-                    $"Flow '{flow.FlowId}' already declares nested type '{typeName}', which conflicts with generated authoring output.");
-            }
+            ReportError(
+                InvalidDeclaration,
+                flow.Declaration.Identifier.GetLocation(),
+                $"Flow '{flow.FlowId}' already declares nested type '{typeName}', which conflicts with generated authoring output.");
         }
 
         foreach (var duplicate in flow.Nodes.GroupBy(node => node.NodeId, StringComparer.Ordinal).Where(group => group.Count() > 1))
@@ -390,15 +387,13 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                     $"Flow node '{node.Symbol.Name}' input context '{node.InputContext.ToDisplayString()}' must be at least as accessible as generated helpers for flow '{flow.FlowId}'.");
             }
 
-            foreach (var outcome in node.Outcomes.Where(outcome => outcome.OutputContext is not null))
+            foreach (var outcome in node.Outcomes.Where(outcome =>
+                outcome.OutputContext is not null && !IsExposableFromFlow(outcome.OutputContext, flow.Symbol)))
             {
-                if (!IsExposableFromFlow(outcome.OutputContext!, flow.Symbol))
-                {
-                    ReportError(
-                        InvalidDeclaration,
-                        node.Symbol.Locations.FirstOrDefault(),
-                        $"Outcome '{outcome.Name}' on node '{node.NodeId}' carries context '{outcome.OutputContext!.ToDisplayString()}', which is less accessible than generated helpers for flow '{flow.FlowId}'.");
-                }
+                ReportError(
+                    InvalidDeclaration,
+                    node.Symbol.Locations.FirstOrDefault(),
+                    $"Outcome '{outcome.Name}' on node '{node.NodeId}' carries context '{outcome.OutputContext!.ToDisplayString()}', which is less accessible than generated helpers for flow '{flow.FlowId}'.");
             }
 
             if (node.Outcomes.Count == 0)
@@ -484,28 +479,25 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
             }
 
             foreach (var outcome in node.Outcomes.Where(outcome =>
-                string.Equals(outcome.Kind, "Wait", StringComparison.Ordinal) ||
-                string.Equals(outcome.Kind, "TimedOut", StringComparison.Ordinal)))
+                (string.Equals(outcome.Kind, "Wait", StringComparison.Ordinal) ||
+                string.Equals(outcome.Kind, "TimedOut", StringComparison.Ordinal)) &&
+                node.InputContext is not null &&
+                !SymbolEqualityComparer.Default.Equals(node.InputContext, outcome.OutputContext)))
             {
-                if (node.InputContext is not null &&
-                    !SymbolEqualityComparer.Default.Equals(node.InputContext, outcome.OutputContext))
-                {
-                    ReportError(
-                        InvalidDeclaration,
-                        node.Symbol.Locations.FirstOrDefault(),
-                        $"Outcome '{outcome.Name}' on node '{node.NodeId}' must carry the node input context '{node.InputContext.ToDisplayString()}' because {outcome.Kind} resumes the same node.");
-                }
+                ReportError(
+                    InvalidDeclaration,
+                    node.Symbol.Locations.FirstOrDefault(),
+                    $"Outcome '{outcome.Name}' on node '{node.NodeId}' must carry the node input context '{node.InputContext!.ToDisplayString()}' because {outcome.Kind} resumes the same node.");
             }
 
-            foreach (var outcome in node.Outcomes.Where(outcome => string.Equals(outcome.Kind, "Fault", StringComparison.Ordinal)))
+            foreach (var outcome in node.Outcomes.Where(outcome =>
+                string.Equals(outcome.Kind, "Fault", StringComparison.Ordinal) &&
+                !string.Equals(outcome.OutputContext?.ToDisplayString(), FlowFaultName, StringComparison.Ordinal)))
             {
-                if (!string.Equals(outcome.OutputContext?.ToDisplayString(), FlowFaultName, StringComparison.Ordinal))
-                {
-                    ReportError(
-                        InvalidDeclaration,
-                        node.Symbol.Locations.FirstOrDefault(),
-                        $"Outcome '{outcome.Name}' on node '{node.NodeId}' must carry FlowFault because the low-level runtime fault contract stores code and message.");
-                }
+                ReportError(
+                    InvalidDeclaration,
+                    node.Symbol.Locations.FirstOrDefault(),
+                    $"Outcome '{outcome.Name}' on node '{node.NodeId}' must carry FlowFault because the low-level runtime fault contract stores code and message.");
             }
         }
 
