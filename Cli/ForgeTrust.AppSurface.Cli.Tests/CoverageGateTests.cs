@@ -1,0 +1,228 @@
+using CliFx;
+using ForgeTrust.AppSurface.Cli;
+
+namespace ForgeTrust.AppSurface.Cli.Tests;
+
+public sealed class CoverageGateTests
+{
+    [Fact]
+    public async Task EvaluateAsync_Passes_WhenCoverageMeetsThresholds()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <coverage lines-covered="90" lines-valid="100" branches-covered="45" branches-valid="50" />
+            """);
+        var request = new CoverageGateRequest(coverage, temp.Path, 85, 80, false, null);
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        Assert.True(result.Passed);
+        Assert.Equal(90, result.LineCoverage.Covered);
+        Assert.Equal(100, result.LineCoverage.Valid);
+        Assert.Equal(90, result.LineCoverage.Percent);
+        Assert.Equal(90, result.BranchCoverage.Percent);
+        Assert.True(File.Exists(Path.Join(temp.Path, "coverage-gate.json")));
+        Assert.True(File.Exists(Path.Join(temp.Path, "coverage-gate.md")));
+        Assert.Contains("\"passed\": true", File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_FailsGate_WhenCoverageIsBelowThreshold()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage line-rate="0.745" branch-rate="0.5" lines-covered="149" lines-valid="200" branches-covered="1" branches-valid="2" />
+            """);
+        var request = new CoverageGateRequest(coverage, temp.Path, 75, 40, false, null);
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+        var markdown = CoverageGateReportWriter.RenderMarkdown(result);
+
+        Assert.False(result.Passed);
+        Assert.Equal(74.5m, result.LineCoverage.Percent);
+        Assert.Contains("# Coverage Gate: FAIL", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Lines | 74.50% (149/200) | 75% | fail |", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_UsesCounts_WhenRateAndCountsDisagree()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage line-rate="0.9" branch-rate="0.9" lines-covered="1" lines-valid="100" branches-covered="1" branches-valid="10" />
+            """);
+        var request = new CoverageGateRequest(coverage, temp.Path, 85, 75, false, null);
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+        var markdown = CoverageGateReportWriter.RenderMarkdown(result);
+
+        Assert.False(result.Passed);
+        Assert.Equal(1, result.LineCoverage.Percent);
+        Assert.Equal(10, result.BranchCoverage.Percent);
+        Assert.Contains("| Lines | 1.00% (1/100) | 85% | fail |", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_RateOnlyCoverage_RendersCountsAsUnavailable()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage line-rate="0.9" branch-rate="0.8" />
+            """);
+        var request = new CoverageGateRequest(coverage, temp.Path, 85, 75, false, null);
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+        var markdown = CoverageGateReportWriter.RenderMarkdown(result);
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        Assert.True(result.Passed);
+        Assert.Null(result.LineCoverage.Covered);
+        Assert.Null(result.LineCoverage.Valid);
+        Assert.Equal(90, result.LineCoverage.Percent);
+        Assert.Contains("| Lines | 90.00% (count unavailable) | 85% | pass |", markdown, StringComparison.Ordinal);
+        Assert.Contains("\"covered\": null", File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_RejectsMissingCoverageFile_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var request = new CoverageGateRequest(Path.Join(temp.Path, "missing.xml"), temp.Path, 0, 0, false, null);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None));
+
+        Assert.Contains("ASCOV001", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_RejectsZeroValidCoverage_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="0" lines-valid="0" branches-covered="0" branches-valid="1" />
+            """);
+        var request = new CoverageGateRequest(coverage, temp.Path, 0, 0, false, null);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None));
+
+        Assert.Contains("ASCOV006", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("zero valid", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_IgnoresCoberturaDtd_WhenCoverageUsesReportGeneratorHeader()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <!DOCTYPE coverage SYSTEM "http://cobertura.sourceforge.net/xml/coverage-04.dtd">
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var request = new CoverageGateRequest(coverage, temp.Path, 0, 0, false, null);
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        Assert.True(result.Passed);
+    }
+
+    [Fact]
+    public async Task WriteAsync_AppendsSanitizedGithubSummary()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var summary = Path.Join(temp.Path, "github-step-summary.md");
+        var request = new CoverageGateRequest(Path.Join(temp.Path, "coverage.cobertura.xml"), temp.Path, 50, 50, true, summary);
+        var result = new CoverageGateResult(
+            "coverage|with`markdown\u0001.cobertura.xml",
+            new CoverageMetric(8, 10, 80),
+            new CoverageMetric(7, 10, 70),
+            50,
+            50,
+            true,
+            Path.Join(temp.Path, "coverage-gate.json"),
+            Path.Join(temp.Path, "coverage-gate.md"));
+
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        var text = File.ReadAllText(summary);
+        Assert.Contains("coverage\\|with\\`markdown.cobertura.xml", text, StringComparison.Ordinal);
+        Assert.DoesNotContain('\u0001', text);
+    }
+
+    [Fact]
+    public void ValidateReportOutput_AllowsCoverageDirectory_WhenItIsCurrentDirectory()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var previous = Directory.GetCurrentDirectory();
+        try
+        {
+            Directory.SetCurrentDirectory(temp.Path);
+            var coverage = temp.WriteCoverage("<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
+
+            CoverageOutputPathPolicy.ValidateReportOutput(coverage, temp.Path);
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(previous);
+        }
+    }
+
+    [Fact]
+    public void ValidateReportOutput_RejectsCurrentDirectory_WhenItIsNotCoverageDirectory()
+    {
+        using var cwd = TempDirectory.Create("appsurface-coverage-cwd-");
+        using var coverageDirectory = TempDirectory.Create("appsurface-coverage-input-");
+        var previous = Directory.GetCurrentDirectory();
+        try
+        {
+            Directory.SetCurrentDirectory(cwd.Path);
+            var coverage = coverageDirectory.WriteCoverage("<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
+
+            var exception = Assert.Throws<CommandException>(
+                () => CoverageOutputPathPolicy.ValidateReportOutput(coverage, cwd.Path));
+
+            Assert.Contains("ASCOV009", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(previous);
+        }
+    }
+
+    private sealed class TempDirectory : IDisposable
+    {
+        private TempDirectory(string path)
+        {
+            Path = path;
+        }
+
+        public string Path { get; }
+
+        public static TempDirectory Create(string prefix)
+        {
+            var path = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(),
+                prefix + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(path);
+            return new TempDirectory(path);
+        }
+
+        public string WriteCoverage(string contents)
+        {
+            var path = System.IO.Path.Combine(Path, "coverage.cobertura.xml");
+            File.WriteAllText(path, contents);
+            return path;
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+        }
+    }
+}
