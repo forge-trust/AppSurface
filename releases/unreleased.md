@@ -27,6 +27,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ### RazorWire package guidance
 
 - RazorWire page navigation now keeps the active same-page link perceivable inside visible overflowing vertical nav surfaces, using the nav container's `scroll-padding-block` / `scroll-padding-top` / `scroll-padding-bottom` values as reveal insets while preserving document scroll.
+- RazorWire page-navigation docs now include a compact section-context recipe that derives previous/current/next labels from the existing `razorwire:page-nav:active-change` event while keeping the labels and chrome app-owned.
 
 ### AppSurface Docs product example
 
