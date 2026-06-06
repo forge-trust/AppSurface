@@ -32,7 +32,9 @@ The root `assets:typecheck`, `assets:test`, `assets:build`, and `assets:verify` 
 
 - `assets/src/razorwire.ts` is the authored source for the core runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`.
 - `assets/src/razorwire.islands.ts` is the authored source for the island loader exposed at `/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js`.
-- `wwwroot/razorwire/razorwire.js` and `wwwroot/razorwire/razorwire.islands.js` are generated, minified, committed package outputs. Do not edit them by hand.
+- `assets/src/page-navigation.ts` is the authored source for the lazy page-navigation runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js`.
+- `assets/src/section-copy.ts` is the authored source for the lazy section-copy runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`.
+- `wwwroot/razorwire/razorwire.js`, `wwwroot/razorwire/razorwire.islands.js`, `wwwroot/razorwire/page-navigation.js`, and `wwwroot/razorwire/section-copy.js` are generated, minified, committed package outputs. Do not edit them by hand.
 - `assets/contracts/razorwire-public-contracts.js` is a docs-only manifest for AppSurface Docs JavaScript API harvesting. It documents browser contracts without forcing the harvester to parse generated runtime bundles.
 - `wwwroot/razorwire/exampleJsInterop.js` remains hand-authored, demo-only JavaScript. It is not part of the generated runtime pipeline.
 
@@ -42,12 +44,12 @@ Generated outputs stay committed because Razor Class Library static web assets, 
 
 The TypeScript migration preserves the public browser surface:
 
-- Script paths: `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js` and `/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js`.
-- Tag helper output: `<rw:scripts />`, Turbo attributes, optional Turbo CDN URL, SRI, and `crossorigin`.
-- Global state: `window.RazorWire`, `window.RazorWire.config`, `connectionManager`, `localTimeFormatter`, and `formFailureManager`.
+- Script paths: `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`, `/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js`, `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js`, and `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`.
+- Tag helper output: `<rw:scripts />`, Turbo attributes, optional Turbo CDN URL, SRI, `crossorigin`, and lazy/eager split-runtime detectors.
+- Global state: `window.RazorWire`, `window.RazorWire.config`, `connectionManager`, `localTimeFormatter`, `formFailureManager`, `pageNavigationManager`, and `sectionCopyManager`.
 - Form events: `razorwire:form:submit-start`, `razorwire:form:failure`, `razorwire:form:diagnostic`, and `razorwire:form:submit-end`.
-- DOM hooks: `data-rw-*` form and island attributes, including generated failure UI markers.
-- CSS hooks: RazorWire form failure variables and generated form error attributes.
+- DOM hooks: `data-rw-*` form, island, page-navigation, and section-copy attributes, including generated failure UI and section-copy fallback markers.
+- CSS hooks: RazorWire form failure variables, generated form error attributes, page-navigation state attributes, and section-copy state/fallback attributes.
 - Island strategies: `load`, `idle`, `visible`, and `only`. Use `only` for client-only islands; `immediate` is intentionally not a public strategy name.
 
 No consumer migration is required for the TypeScript asset pipeline. Hosts should keep using `<rw:scripts />` unless they already have a deliberate custom script loading path.
@@ -86,3 +88,4 @@ Treat that property as an incident escape hatch. Re-run the asset verifier and r
 - Do not enable source maps by default. Package consumers should receive compact runtime assets without source-map sidecars.
 - Do not move AppSurface Docs harvesting back to minified runtime outputs. Update `assets/contracts/razorwire-public-contracts.js` when the public JavaScript contract changes.
 - Do not treat `exampleJsInterop.js` as a runtime source file. It exists for demos and examples only.
+- Do not add app-specific classes, icons, or layout assumptions to generated section-copy buttons or fallback UI. Hosts should decorate stable `data-rw-section-copy*` hooks outside the package runtime.

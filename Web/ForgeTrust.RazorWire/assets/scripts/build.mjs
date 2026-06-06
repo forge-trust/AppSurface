@@ -35,6 +35,14 @@ const generatedOutputs = [
     // page-nav contract; keep the budget close to the generated asset plus headroom.
     rawBytes: 12_550,
     gzipBytes: 3_700
+  },
+  {
+    entry: path.join(assetRoot, 'src', 'section-copy.ts'),
+    output: path.join(outputRoot, 'section-copy.js'),
+    label: 'section-copy.js',
+    banner: 'Generated from assets/src/section-copy.ts. Do not edit wwwroot/razorwire/section-copy.js by hand.',
+    rawBytes: 12_000,
+    gzipBytes: 4_000
   }
 ];
 

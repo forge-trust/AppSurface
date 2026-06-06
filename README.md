@@ -165,6 +165,7 @@ The script also supports bounded test groups for local or CI experiments:
 
 ```bash
 BUILD_CONFIGURATION=Release BUILD_SOLUTION=false ./scripts/coverage-solution.sh --group web --output TestResults/coverage-groups/web
+./scripts/coverage-solution.sh --list-groups
 ./scripts/coverage-solution.sh --merge-only TestResults/coverage-groups --output TestResults/coverage-merged
 ```
 

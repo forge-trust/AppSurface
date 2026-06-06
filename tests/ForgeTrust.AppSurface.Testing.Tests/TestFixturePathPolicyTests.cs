@@ -183,6 +183,44 @@ public sealed class TestFixturePathPolicyTests
     }
 
     [Fact]
+    public void ScanRepository_ShouldIgnoreLocalDependencyCacheCopies()
+    {
+        var repositoryRoot = TestPathUtils.PathUnder(Path.GetTempPath(), "path-policy-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var cachedSource = TestPathUtils.PathUnder(
+                repositoryRoot,
+                ".pnpm-store",
+                "v11",
+                "projects",
+                "cache",
+                "Sample.Tests",
+                "CachedTests.cs");
+            Directory.CreateDirectory(Path.GetDirectoryName(cachedSource)!);
+            File.WriteAllText(
+                cachedSource,
+                """
+                public sealed class CachedTests
+                {
+                    public void Test(string root, string relativePath)
+                    {
+                        var path = Path.Combine(root, relativePath);
+                    }
+                }
+                """);
+
+            Assert.Empty(TestPathPolicyScanner.ScanRepository(repositoryRoot));
+        }
+        finally
+        {
+            if (Directory.Exists(repositoryRoot))
+            {
+                Directory.Delete(repositoryRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void FailureFormatter_ShouldDescribeReplacementAndAllowlistFlow()
     {
         var violation = new PathPolicyViolation(
@@ -399,6 +437,7 @@ internal static class TestPathPolicyScanner
             && !normalized.Contains("/obj/", StringComparison.Ordinal)
             && !normalized.Contains("/.git/", StringComparison.Ordinal)
             && !normalized.Contains("/.gstack/", StringComparison.Ordinal)
+            && !normalized.Contains("/.pnpm-store/", StringComparison.Ordinal)
             && (normalized.Contains(".Tests/", StringComparison.Ordinal)
                 || normalized.Contains("/IntegrationTests/", StringComparison.Ordinal)
                 || normalized.Contains("/tests/", StringComparison.Ordinal)
