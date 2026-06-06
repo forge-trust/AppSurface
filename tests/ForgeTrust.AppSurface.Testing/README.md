@@ -62,3 +62,5 @@ Intentional platform-path behavior tests may still use `Path.Join` or `Path.Comb
 ## Policy failures
 
 The policy test reports the violation kind, file, line and column, risky argument, reason, replacement guidance, and allowlist path. If a direct `Path.Join` or `Path.Combine` call is intentional, add a reasoned entry to `tests/ForgeTrust.AppSurface.Testing/path-policy-allowlist.yml`.
+
+Repository scans ignore generated build output, Git metadata, gstack artifacts, and local dependency cache copies such as `.pnpm-store` so restored tooling snapshots do not create unrelated policy failures.

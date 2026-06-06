@@ -51,6 +51,8 @@
     <Project Path="examples/razorwire-mvc/RazorWireWebExample.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/ForgeTrust.AppSurface.CoverageRunner.Tests/ForgeTrust.AppSurface.CoverageRunner.Tests.csproj" />
+    <Project Path="tools/ForgeTrust.AppSurface.CoverageRunner/ForgeTrust.AppSurface.CoverageRunner.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.MarkdownSnippets.Tests/ForgeTrust.AppSurface.MarkdownSnippets.Tests.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj" />
