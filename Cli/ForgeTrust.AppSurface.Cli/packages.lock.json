@@ -381,7 +381,8 @@
           "CliWrap": "[3.10.1, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
-          "ForgeTrust.RazorWire": "[0.1.0, )"
+          "ForgeTrust.RazorWire": "[0.1.0, )",
+          "YamlDotNet": "[18.0.0, )"
         }
       },
       "Acornima": {
