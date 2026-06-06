@@ -151,7 +151,10 @@ Example markup:
 
 ```html
 <nav data-rw-page-nav aria-label="Page sections">
-  <button type="button" data-rw-page-nav-toggle aria-expanded="false">
+  <button type="button"
+          data-rw-page-nav-toggle
+          aria-controls="page-sections-panel"
+          aria-expanded="false">
     <span data-page-nav-context>
       <span data-page-nav-context-previous hidden></span>
       <span data-page-nav-context-current>Page sections</span>
@@ -159,7 +162,7 @@ Example markup:
     </span>
   </button>
 
-  <div data-rw-page-nav-panel>
+  <div id="page-sections-panel" data-rw-page-nav-panel>
     <a href="#overview" data-rw-page-nav-link>Overview</a>
     <a href="#install" data-rw-page-nav-link>Install</a>
     <a href="#configure" data-rw-page-nav-link>Configure</a>
@@ -170,31 +173,31 @@ Example markup:
 Example enhancement:
 
 ```js
-const nav = document.querySelector("[data-rw-page-nav]");
-const links = nav
-  ? Array.from(nav.querySelectorAll("a[data-rw-page-nav-link]"))
-  : [];
-const previous = nav?.querySelector("[data-page-nav-context-previous]");
-const current = nav?.querySelector("[data-page-nav-context-current]");
-const next = nav?.querySelector("[data-page-nav-context-next]");
+document.querySelectorAll("[data-rw-page-nav]").forEach(nav => {
+  const previous = nav.querySelector("[data-page-nav-context-previous]");
+  const current = nav.querySelector("[data-page-nav-context-current]");
+  const next = nav.querySelector("[data-page-nav-context-next]");
 
-function setContext(row, text) {
-  if (!row) return;
-  row.textContent = text;
-  row.hidden = text.length === 0;
-}
+  function setContext(row, text) {
+    if (!row) return;
+    row.textContent = text;
+    row.hidden = text.length === 0;
+  }
 
-nav?.addEventListener("razorwire:page-nav:active-change", event => {
-  const link = event.detail.link;
-  const index = links.indexOf(link);
-  const labelAt = candidateIndex =>
-    (links[candidateIndex]?.textContent ?? "").trim();
+  nav.addEventListener("razorwire:page-nav:active-change", event => {
+    const links = Array.from(
+      nav.querySelectorAll("a[data-rw-page-nav-link]"));
+    const link = event.detail?.link;
+    const index = link ? links.indexOf(link) : -1;
+    const labelAt = candidateIndex =>
+      (links[candidateIndex]?.textContent ?? "").trim();
 
-  setContext(previous, index > 0 ? labelAt(index - 1) : "");
-  setContext(current, index >= 0 ? labelAt(index) : "Page sections");
-  setContext(next, index >= 0 && index < links.length - 1
-    ? labelAt(index + 1)
-    : "");
+    setContext(previous, index > 0 ? labelAt(index - 1) : "");
+    setContext(current, index >= 0 ? labelAt(index) : "Page sections");
+    setContext(next, index >= 0 && index < links.length - 1
+      ? labelAt(index + 1)
+      : "");
+  });
 });
 ```
 
