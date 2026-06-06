@@ -936,6 +936,38 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     }
 
     [Fact]
+    public async Task RunTailwindBuildTask_UsesSharedDownloadCacheCandidate_WhenChecksumUsesRelativeFileToken()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        var cacheRoot = Path.Join(_tempRoot, "tailwind-download-cache-relative-checksum");
+        var runtimePath = TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, "4.1.18", rid, runtimeBinaryName);
+        var task = CreateBuildTask("sample-shared-runtime-cache-relative-checksum", task =>
+        {
+            task.TailwindTargetRid = rid;
+            task.TailwindVersion = "4.1.18";
+            task.TailwindDownloadCacheRoot = cacheRoot;
+        });
+        await CreateRuntimeTailwindCliStubAsync(task.ProjectDirectory, runtimePath);
+        await WriteRuntimeChecksumAsync(runtimePath, runtimeBinaryName, $"./{runtimeBinaryName}");
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.True(result);
+        Assert.True(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
+        Assert.Empty(buildEngine.Errors);
+        Assert.Empty(buildEngine.Warnings);
+        Assert.Equal(runtimePath, await File.ReadAllTextAsync(GetRuntimeSelectionMarkerPath(runtimePath)));
+    }
+
+    [Fact]
     public async Task RunTailwindBuildTask_SkipsSharedDownloadCacheCandidate_WhenChecksumIsMissing()
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -955,6 +987,42 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             task.TailwindDownloadCacheRoot = cacheRoot;
         });
         await CreateRuntimeTailwindCliStubAsync(task.ProjectDirectory, runtimePath);
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.False(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
+        Assert.Contains(buildEngine.Warnings, warning => warning.Message?.Contains("does not contain a checksum", StringComparison.Ordinal) is true);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) is true);
+        Assert.False(File.Exists(GetRuntimeSelectionMarkerPath(runtimePath)));
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_SkipsSharedDownloadCacheCandidate_WhenChecksumHasNoRuntimeEntry()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        var cacheRoot = Path.Join(_tempRoot, "tailwind-download-cache-no-runtime-entry");
+        var runtimePath = TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, "4.1.18", rid, runtimeBinaryName);
+        var task = CreateBuildTask("sample-shared-runtime-cache-no-runtime-entry", task =>
+        {
+            task.TailwindTargetRid = rid;
+            task.TailwindVersion = "4.1.18";
+            task.TailwindDownloadCacheRoot = cacheRoot;
+        });
+        await CreateRuntimeTailwindCliStubAsync(task.ProjectDirectory, runtimePath);
+        await File.WriteAllTextAsync(
+            Path.Join(Path.GetDirectoryName(runtimePath)!, "sha256sums.txt"),
+            "malformed-checksum-line" + Environment.NewLine +
+            "0000000000000000000000000000000000000000000000000000000000000000  ./not-the-runtime" + Environment.NewLine,
+            Encoding.UTF8);
 
         var result = task.Execute();
         var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
@@ -1461,13 +1529,16 @@ exit 0
         return runtimePath;
     }
 
-    private static async Task WriteRuntimeChecksumAsync(string runtimePath, string runtimeBinaryName)
+    private static async Task WriteRuntimeChecksumAsync(
+        string runtimePath,
+        string runtimeBinaryName,
+        string? checksumFileToken = null)
     {
         var binaryBytes = await File.ReadAllBytesAsync(runtimePath);
         var hash = Convert.ToHexString(SHA256.HashData(binaryBytes)).ToLowerInvariant();
         await File.WriteAllTextAsync(
             Path.Join(Path.GetDirectoryName(runtimePath)!, "sha256sums.txt"),
-            $"{hash}  {runtimeBinaryName}{Environment.NewLine}",
+            $"{hash}  {checksumFileToken ?? runtimeBinaryName}{Environment.NewLine}",
             Encoding.UTF8);
     }
 
