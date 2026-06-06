@@ -104,6 +104,8 @@ Maintainers can set `TailwindRuntimeBinaryResolutionEnabled=false` only for fast
 
 Source-tree builds cache downloaded Tailwind executables outside the worktree by default so multiple local worktrees reuse the same binary copy. The cache is versioned and RID-scoped under `TailwindDownloadCacheRoot`, for example `$HOME/.cache/forgetrust/appsurface/tailwind/tailwind-4.1.18/osx-arm64/tailwindcss-macos-arm64`. Packed NuGet consumers normally use NuGet's global package cache instead. Build-time shared-cache probing happens only when `TailwindDownloadCacheRoot` is explicitly set by MSBuild targets or project configuration, and development watch mode does not read the ambient user cache. Missing runtime-package dependencies therefore fail cleanly on developer machines and CI unless the build opts into a cache root or an explicit CLI path is configured.
 
+Build-time shared-cache candidates are used only when the same directory contains `sha256sums.txt` with a matching hash for the Tailwind binary name. A missing or mismatched checksum causes the candidate to be skipped and the normal runtime-package fallback chain to continue. Malformed version directories such as `tailwind-not-a-version` are ignored during versioned shared-cache fallback scans.
+
 The retry behavior is configurable with MSBuild properties:
 
 ```xml

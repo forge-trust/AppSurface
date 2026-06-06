@@ -303,14 +303,34 @@ public class TailwindCliManagerTests : IDisposable
             _currentHostRuntimeProjectBinaryName);
         Directory.CreateDirectory(Path.GetDirectoryName(olderPath)!);
         Directory.CreateDirectory(Path.GetDirectoryName(newestPath)!);
-        Directory.CreateDirectory(Path.Join(cacheRoot, "tailwind-", _currentHostRid));
-        Directory.CreateDirectory(Path.Join(cacheRoot, "tailwind-not-a-version", _currentHostRid));
+        var malformedPath = Path.Join(cacheRoot, "tailwind-not-a-version", _currentHostRid, _currentHostRuntimeProjectBinaryName);
+        Directory.CreateDirectory(Path.GetDirectoryName(malformedPath)!);
         File.WriteAllText(olderPath, "older");
         File.WriteAllText(newestPath, "newest");
+        File.WriteAllText(malformedPath, "malformed");
 
         var result = _manager.GetTailwindPath();
 
         Assert.Equal(newestPath, result);
+    }
+
+    [Fact]
+    public void GetTailwindPath_IgnoresMalformedVersionedSharedDownloadCachePath_WhenBinaryExists()
+    {
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(baseDir, "assembly-shadow");
+        Directory.CreateDirectory(baseDir);
+        _manager.BaseDirectoryOverride = baseDir;
+        _manager.AssemblyDirectoryOverride = assemblyDir;
+
+        var cacheRoot = Path.Join(_tempPath, "shared-tailwind-cache");
+        _manager.DownloadCacheRootOverride = cacheRoot;
+        var malformedPath = Path.Join(cacheRoot, "tailwind-not-a-version", _currentHostRid, _currentHostRuntimeProjectBinaryName);
+        Directory.CreateDirectory(Path.GetDirectoryName(malformedPath)!);
+        File.WriteAllText(malformedPath, "malformed");
+        Environment.SetEnvironmentVariable("PATH", string.Empty);
+
+        Assert.Throws<FileNotFoundException>(() => _manager.GetTailwindPath());
     }
 
     [Fact]

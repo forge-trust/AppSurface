@@ -1,6 +1,8 @@
 using ForgeTrust.AppSurface.Web.Tailwind.Internal;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ForgeTrust.AppSurface.Web.Tailwind.Tasks;
 
@@ -316,11 +318,15 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
 
         if (!string.IsNullOrWhiteSpace(TailwindDownloadCacheRoot))
         {
-            yield return Path.GetFullPath(TailwindDownloadCache.GetRuntimeBinaryPath(
+            var sharedCacheCandidate = Path.GetFullPath(TailwindDownloadCache.GetRuntimeBinaryPath(
                 TailwindDownloadCacheRoot,
                 TailwindVersion!,
                 rid,
                 runtimeBinaryName));
+            if (IsVerifiedSharedDownloadCacheCandidate(sharedCacheCandidate, runtimeBinaryName))
+            {
+                yield return sharedCacheCandidate;
+            }
         }
 
         var localBinaryName = TailwindRuntimeMap.GetLocalBinaryName();
@@ -350,6 +356,68 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
             configuration,
             targetFramework,
             runtimeBinaryName));
+    }
+
+    private bool IsVerifiedSharedDownloadCacheCandidate(string candidatePath, string runtimeBinaryName)
+    {
+        if (!File.Exists(candidatePath))
+        {
+            return false;
+        }
+
+        var checksumFile = Path.Join(Path.GetDirectoryName(candidatePath), "sha256sums.txt");
+        var expectedHash = TryReadExpectedChecksum(checksumFile, runtimeBinaryName);
+        if (expectedHash == null)
+        {
+            Log.LogWarning(
+                "Skipping Tailwind shared-cache candidate '{0}' because '{1}' does not contain a checksum for '{2}'.",
+                candidatePath,
+                checksumFile,
+                runtimeBinaryName);
+            return false;
+        }
+
+        var computedHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(candidatePath))).ToLowerInvariant();
+        if (!string.Equals(expectedHash, computedHash, StringComparison.OrdinalIgnoreCase))
+        {
+            Log.LogWarning(
+                "Skipping Tailwind shared-cache candidate '{0}' because its checksum does not match '{1}'.",
+                candidatePath,
+                checksumFile);
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string? TryReadExpectedChecksum(string checksumFile, string runtimeBinaryName)
+    {
+        if (!File.Exists(checksumFile))
+        {
+            return null;
+        }
+
+        foreach (var line in File.ReadLines(checksumFile, Encoding.UTF8))
+        {
+            var tokens = line.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length < 2)
+            {
+                continue;
+            }
+
+            var fileToken = tokens[1].TrimStart('*');
+            if (fileToken.StartsWith("./", StringComparison.Ordinal))
+            {
+                fileToken = fileToken.Substring(2);
+            }
+
+            if (string.Equals(fileToken, runtimeBinaryName, StringComparison.Ordinal))
+            {
+                return tokens[0].ToLowerInvariant();
+            }
+        }
+
+        return null;
     }
 
     private static IEnumerable<string> EnumerateSiblingRuntimePackageCandidates(

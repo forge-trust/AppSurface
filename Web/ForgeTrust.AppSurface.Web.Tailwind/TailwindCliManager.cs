@@ -292,6 +292,7 @@ public class TailwindCliManager
         return Directory
             .EnumerateDirectories(cacheRoot, $"{TailwindCacheDirectoryPrefix}*")
             .Select(static path => (Path: path, Version: ParseTailwindCacheVersion(path)))
+            .Where(static entry => entry.Version > new Version(0, 0, 0))
             .OrderByDescending(static entry => entry.Version)
             .ThenByDescending(static entry => entry.Path, StringComparer.Ordinal)
             .Select(static entry => entry.Path);

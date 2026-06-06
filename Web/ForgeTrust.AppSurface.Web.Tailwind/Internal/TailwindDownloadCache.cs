@@ -5,6 +5,7 @@ namespace ForgeTrust.AppSurface.Web.Tailwind.Internal;
 /// </summary>
 internal static class TailwindDownloadCache
 {
+#if !APP_SURFACE_TAILWIND_TASKS
     /// <summary>
     /// Gets the default shared cache root for the current user.
     /// </summary>
@@ -47,6 +48,7 @@ internal static class TailwindDownloadCache
 
         return null;
     }
+#endif
 
     /// <summary>
     /// Gets the cached runtime binary path for a Tailwind version and host runtime identifier.
