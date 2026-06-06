@@ -293,9 +293,7 @@ internal static class CoverageGateEvaluator
                 var patchLineThreshold = request.PatchCoverage?.MinPatchLinePercent;
                 var passed = lineCoverage.Percent >= request.MinLinePercent
                     && branchCoverage.Percent >= request.MinBranchPercent
-                    && (patchCoverage is null
-                        || patchLineThreshold is null
-                        || patchCoverage.Percent >= patchLineThreshold.Value);
+                    && IsPatchCoveragePassing(patchCoverage, patchLineThreshold);
                 return new CoverageGateResult(
                     request.CoveragePath,
                     lineCoverage,
@@ -315,6 +313,16 @@ internal static class CoverageGateEvaluator
         }
 
         throw new CommandException($"ASCOV006 Cobertura file does not contain a <coverage> root element: {request.CoveragePath}");
+    }
+
+    private static bool IsPatchCoveragePassing(PatchLineCoverageMetric? patchCoverage, decimal? patchLineThreshold)
+    {
+        if (patchCoverage is null || patchLineThreshold is not { } threshold)
+        {
+            return true;
+        }
+
+        return patchCoverage.Percent >= threshold;
     }
 
     /// <summary>
