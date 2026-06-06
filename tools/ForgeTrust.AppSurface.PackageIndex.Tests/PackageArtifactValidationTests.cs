@@ -1734,7 +1734,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var packageGateWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-gate.yml"));
         var packageArtifactsWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-artifacts.yml"));
         const string disabledRuntimeResolutionSetting =
-            """(?im)(?:^\s*TailwindRuntimeBinaryResolutionEnabled:\s*(?:"false"|'false'|false)\s*$|/p:TailwindRuntimeBinaryResolutionEnabled=false\b)""";
+            """(?im)(?:^\s*TailwindRuntimeBinaryResolutionEnabled:\s*(?:"false"|'false'|false)\s*$|(?:/p:|-p:)TailwindRuntimeBinaryResolutionEnabled=false\b)""";
 
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, buildWorkflow);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, codeQualityWorkflow);
