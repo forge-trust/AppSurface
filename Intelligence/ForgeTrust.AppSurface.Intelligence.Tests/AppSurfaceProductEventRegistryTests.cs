@@ -157,6 +157,26 @@ public sealed class AppSurfaceProductEventRegistryTests
         Assert.DoesNotContain("https://example.test/customer/123", result.SanitizedProperties.Values);
     }
 
+    [Fact]
+    public void Validate_PreservesRegisteredDocsResultKind()
+    {
+        var productEvent = new AppSurfaceProductEvent(
+            AppSurfaceProductEventRegistry.DocsSearchResultSelected,
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["surface"] = "search_page",
+                ["rank"] = "1",
+                ["result_kind"] = "javascript-api"
+            });
+
+        var result = AppSurfaceProductEventRegistry.Validate(productEvent);
+
+        Assert.True(result.IsValid);
+        Assert.Equal("javascript-api", result.SanitizedProperties["result_kind"]);
+        Assert.DoesNotContain("result_kind", result.RejectedProperties);
+    }
+
     [Theory]
     [InlineData(" 0032 ", "32")]
     [InlineData("0", "0")]
