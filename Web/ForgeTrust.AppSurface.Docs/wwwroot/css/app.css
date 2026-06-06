@@ -841,8 +841,8 @@ body {
 
 .docs-section-copy:hover,
 .docs-section-copy:focus-visible,
-.docs-section-copy[data-copy-state="copied"],
-.docs-section-copy[data-copy-state="fallback"] {
+.docs-section-copy[data-rw-section-copy-state="copied"],
+.docs-section-copy[data-rw-section-copy-state="fallback"] {
     color: var(--docs-color-accent-soft);
     opacity: 1;
 }
@@ -852,13 +852,15 @@ body {
     outline-offset: 2px;
 }
 
-.docs-section-copy[data-doc-section-copy-message]::after {
-    content: attr(data-doc-section-copy-message);
+.docs-section-copy[data-rw-section-copy-message]::after {
+    content: attr(data-rw-section-copy-message);
     position: absolute;
     right: 0;
     bottom: calc(100% + 0.35rem);
     z-index: 30;
-    min-width: max-content;
+    width: max-content;
+    max-width: min(22rem, calc(100vw - 2rem));
+    box-sizing: border-box;
     padding: 0.28rem 0.45rem;
     border: 1px solid var(--docs-color-border-accent-active);
     border-radius: 0.45rem;
@@ -868,6 +870,8 @@ body {
     font-size: 0.72rem;
     font-weight: 700;
     line-height: 1.1;
+    overflow-wrap: break-word;
+    white-space: normal;
     pointer-events: none;
 }
 
@@ -882,9 +886,11 @@ body {
     position: relative;
 }
 
-.docs-section-copy-fallback {
+[data-rw-section-copy-fallback="true"] {
     position: absolute;
     right: 0;
+    display: grid;
+    gap: 0.55rem;
     z-index: 40;
     width: min(22rem, calc(100vw - 2rem));
     margin-top: 0.45rem;
@@ -895,15 +901,7 @@ body {
     box-shadow: var(--docs-shadow-copy-fallback);
 }
 
-.docs-section-copy-fallback-label {
-    display: grid;
-    gap: 0.35rem;
-    color: var(--docs-color-text-muted);
-    font-size: 0.76rem;
-    font-weight: 700;
-}
-
-.docs-section-copy-fallback-input {
+[data-rw-section-copy-fallback="true"] input {
     width: 100%;
     min-width: 0;
     padding: 0.48rem 0.55rem;
@@ -915,13 +913,13 @@ body {
     font-size: 0.78rem;
 }
 
-.docs-section-copy-fallback-input:focus-visible {
+[data-rw-section-copy-fallback="true"] input:focus-visible {
     outline: var(--docs-focus-outline);
     outline-offset: 2px;
 }
 
-.docs-section-copy-fallback-close {
-    margin-top: 0.55rem;
+[data-rw-section-copy-fallback="true"] button {
+    justify-self: start;
     padding: 0.42rem 0.65rem;
     border: 1px solid var(--docs-color-border-default);
     border-radius: 0.42rem;
@@ -933,8 +931,8 @@ body {
     font-weight: 700;
 }
 
-.docs-section-copy-fallback-close:hover,
-.docs-section-copy-fallback-close:focus-visible {
+[data-rw-section-copy-fallback="true"] button:hover,
+[data-rw-section-copy-fallback="true"] button:focus-visible {
     border-color: var(--docs-color-border-accent-strong);
     color: var(--docs-color-accent-soft);
 }

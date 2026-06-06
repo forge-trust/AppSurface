@@ -1092,6 +1092,37 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_Should_Export_SectionCopy_Runtime_When_Lazy_Markup_Is_Present()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new SectionCopyRuntimeHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var scriptPath = Path.Join(
+                tempDir,
+                "_content",
+                "ForgeTrust.RazorWire",
+                "razorwire",
+                "section-copy.js");
+            Assert.True(File.Exists(scriptPath), "RazorWire section-copy runtime should be exported for lazy section-copy markup.");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Export_Redirected_Stylesheet_To_Original_Route_Path()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
@@ -3335,6 +3366,64 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractReferences_Should_Add_SectionCopy_Runtime_For_Lazy_Markup()
+    {
+        var html = """
+            <script>
+            (() => {
+              const source = "/app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc";
+              const marker = "data-rw-section-copy-runtime";
+              const selectors = ["[data-rw-section-copy]", "[data-rw-section-copy-target]"];
+            })();
+            </script>
+            <main>
+              <h2 id="intro" data-rw-section-copy-target="true">Intro</h2>
+              <button type="button" data-rw-section-copy="#intro">Copy</button>
+            </main>
+            """;
+
+        var reference = Assert.Single(
+            _sut.ExtractReferences(html, "/docs/start", htmlScope: true),
+            reference => reference.Path == "/app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
+
+        Assert.Equal(ExportReferenceKind.ScriptSrc, reference.Kind);
+        Assert.Equal(ExportReferenceRole.StaticAsset, reference.Role);
+        Assert.Equal("?v=abc", reference.Query);
+        Assert.Equal("<script>", reference.Provenance?.DisplaySource);
+        Assert.Equal("RazorWire section-copy autoload source", reference.Provenance?.TokenType);
+
+        var withExplicitScript = """
+            <script src="/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc"></script>
+            <button type="button" data-rw-section-copy="intro">Copy</button>
+            """;
+
+        var explicitReferences = _sut.ExtractReferences(withExplicitScript, "/docs/start", htmlScope: true)
+            .Where(reference => reference.Path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js")
+            .ToArray();
+        Assert.Single(explicitReferences);
+        Assert.Equal("?v=abc", explicitReferences[0].Query);
+
+    }
+
+    [Fact]
+    public void ExtractReferences_Should_Add_SectionCopy_Runtime_For_Button_Only_Lazy_Markup()
+    {
+        var html = """
+            <main>
+              <button type="button" data-rw-section-copy="#intro">Copy</button>
+            </main>
+            """;
+
+        var reference = Assert.Single(
+            _sut.ExtractReferences(html, "/docs/start", htmlScope: true),
+            reference => reference.Path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
+
+        Assert.Equal(ExportReferenceKind.ScriptSrc, reference.Kind);
+        Assert.Equal(ExportReferenceRole.StaticAsset, reference.Role);
+        Assert.Equal("<button data-rw-section-copy>", reference.Provenance?.DisplaySource);
+    }
+
+    [Fact]
     public void ExtractReferences_Should_Ignore_Hash_Only_Css_References()
     {
         var css = """
@@ -4546,7 +4635,12 @@ public class ExportEngineTests
 
     private static Task<HttpResponseMessage> Bytes(string mediaType)
     {
-        var content = new ByteArrayContent([0x01, 0x02, 0x03]);
+        return Bytes(mediaType, [0x01, 0x02, 0x03]);
+    }
+
+    private static Task<HttpResponseMessage> Bytes(string mediaType, byte[] bytes)
+    {
+        var content = new ByteArrayContent(bytes);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
     }
@@ -4566,25 +4660,20 @@ public class ExportEngineTests
                         <img src=""image.png"">
                     </body>
                 </html>";
-                var content = new StringContent(html, Encoding.UTF8, "text/html");
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+                return Text(html, "text/html");
             }
 
             if (path == "/style.css")
             {
-                var content = new StringContent("body { background: white; }", Encoding.UTF8, "text/css");
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+                return Text("body { background: white; }", "text/css");
             }
 
             if (path == "/image.png")
             {
-                var bytes = new byte[] { 0x01, 0x02, 0x03, 0x04 };
-                var byteContent = new ByteArrayContent(bytes);
-                byteContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = byteContent });
+                return Bytes("image/png", [0x01, 0x02, 0x03, 0x04]);
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            return NotFound();
         }
     }
 
@@ -4672,6 +4761,31 @@ public class ExportEngineTests
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class SectionCopyRuntimeHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Text("""
+                    <html>
+                      <body>
+                        <h2 id="intro" data-rw-section-copy-target="true">Intro</h2>
+                      </body>
+                    </html>
+                    """, "text/html");
+            }
+
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
+            }
+
+            return NotFound();
         }
     }
 

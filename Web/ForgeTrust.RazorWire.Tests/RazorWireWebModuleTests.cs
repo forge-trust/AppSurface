@@ -233,6 +233,14 @@ public class RazorWireWebModuleTests
                 await pageNavigationResponse.Content.ReadAsStringAsync(),
                 StringComparison.Ordinal);
 
+            using var sectionCopyResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
+            Assert.Equal(HttpStatusCode.OK, sectionCopyResponse.StatusCode);
+            Assert.Equal("text/javascript", sectionCopyResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains(
+                "Generated from assets/src/section-copy.ts",
+                await sectionCopyResponse.Content.ReadAsStringAsync(),
+                StringComparison.Ordinal);
+
             using var imageResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/background.png");
             Assert.Equal(HttpStatusCode.OK, imageResponse.StatusCode);
             Assert.Equal("image/png", imageResponse.Content.Headers.ContentType?.MediaType);

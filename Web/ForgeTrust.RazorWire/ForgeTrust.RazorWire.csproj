@@ -29,6 +29,7 @@
     <EmbeddedResource Include="wwwroot\razorwire\page-navigation.js" LogicalName="RazorWireEmbeddedAssets/razorwire/page-navigation.js" />
     <EmbeddedResource Include="wwwroot\razorwire\razorwire.islands.js" LogicalName="RazorWireEmbeddedAssets/razorwire/razorwire.islands.js" />
     <EmbeddedResource Include="wwwroot\razorwire\razorwire.js" LogicalName="RazorWireEmbeddedAssets/razorwire/razorwire.js" />
+    <EmbeddedResource Include="wwwroot\razorwire\section-copy.js" LogicalName="RazorWireEmbeddedAssets/razorwire/section-copy.js" />
   </ItemGroup>
 
   <ItemGroup>
