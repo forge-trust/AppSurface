@@ -14,6 +14,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
+- Release preparation now generates per-version release evidence bundles at `releases/v{version}.evidence.json`; publish validation checks the bundle at the annotated tag commit before GitHub Release creation.
 - AppSurface CI coverage now runs through a dedicated `ForgeTrust.AppSurface.CoverageRunner` tool behind the stable `scripts/coverage-solution.sh` entrypoint, preserving Codecov artifact paths while adding bounded same-job coverage scheduling.
 - Coverage runs now write slow-test diagnostics in Markdown and JSON, including project timings, parsed JUnit test-case evidence, best-effort parser warnings, and diagnostic aggregation overhead in seconds and as a percent of runner time.
 - AppSurface CLI now includes `appsurface coverage gate` for private Cobertura line, branch, and optional changed-line threshold enforcement with local JSON/Markdown reports, GitHub Actions step-summary output, and `ASCOV###` diagnostics.

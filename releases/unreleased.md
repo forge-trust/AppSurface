@@ -10,6 +10,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- Release preparation now generates per-version release evidence bundles at `releases/v{version}.evidence.json`, and publish validation checks the bundle at the annotated tag commit before GitHub Release creation. The bundle proves repository release-artifact consistency; it is not a signature or hosted-build attestation.
 - AppSurface CI coverage now runs through a dedicated `ForgeTrust.AppSurface.CoverageRunner` tool behind the stable `scripts/coverage-solution.sh` entrypoint. The runner writes independent per-project coverage/JUnit artifacts, captures stable per-project logs, supports `COVERAGE_PARALLELISM` for bounded same-job test concurrency, and keeps the merged Cobertura output path used by Codecov.
 - Coverage runs now emit `slow-test-diagnostics.md` and `slow-test-diagnostics.json` next to the merged coverage artifacts. The diagnostics rank project and JUnit test-case timings, preserve best-effort parser warnings without changing coverage exit codes, and report diagnostic aggregation overhead in seconds and as a percent of total runner time.
 - The AppSurface CLI now includes `appsurface coverage gate` for private Cobertura threshold enforcement. The command writes `coverage-gate.json` and `coverage-gate.md`, optionally appends the Markdown result to GitHub Actions step summaries, uses `ASCOV###` diagnostics for CI failures, and keeps coverage upload/trend/dashboard behavior out of the v1 gate.
