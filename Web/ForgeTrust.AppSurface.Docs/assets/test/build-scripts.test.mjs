@@ -40,6 +40,22 @@ test('authored search client no longer owns harvest completion navigation', asyn
   assert.doesNotMatch(source, /harvestCompletionNavigationScheduled/);
 });
 
+test('authored search client emits product intelligence without raw query payloads', async () => {
+  const source = await readFile(repoPath('Web', 'ForgeTrust.AppSurface.Docs', 'assets', 'src', 'search-client.ts'), 'utf8');
+
+  assert.match(source, /productIntelligenceEnabled/);
+  assert.match(source, /docs\.search\.submitted/);
+  assert.match(source, /docs\.search\.returned_zero_results/);
+  assert.match(source, /docs\.search\.result_selected/);
+  assert.match(source, /docs\.recovery_link\.selected/);
+  assert.match(source, /query_length/);
+  assert.match(source, /getActiveFilterSignature/);
+  assert.match(source, /`\$\{normalized\}:\$\{resultCount\}:\$\{activeFilterCount\}:\$\{filterSignature\}`/);
+  assert.doesNotMatch(source, /raw_query/);
+  assert.doesNotMatch(source, /query:\s*normalized/);
+  assert.doesNotMatch(source, /query:\s*query/);
+});
+
 test('generated asset verification compares rebuilt outputs against git', async () => {
   const verifier = await readFile(repoPath('Web', 'ForgeTrust.AppSurface.Docs', 'assets', 'scripts', 'verify-generated.mjs'), 'utf8');
 

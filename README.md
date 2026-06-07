@@ -63,6 +63,10 @@ This approach aims to:
 
 - [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
 
+### [Intelligence](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md)
+
+- [**ForgeTrust.AppSurface.Intelligence**](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md) - Product-intelligence event contracts, lifecycle metadata, privacy validation, and host-owned sink hooks for forwarding sanitized AppSurface product events to systems such as PostHog without taking a vendor dependency.
+
 ### [Flow](./Flow/README.md)
 
 - [**ForgeTrust.AppSurface.Flow**](./Flow/ForgeTrust.AppSurface.Flow/README.md) – Typed long-running process contracts, generated-case authoring, graph validation, definition registry, and an in-memory runner for local tests and hello-world flows.

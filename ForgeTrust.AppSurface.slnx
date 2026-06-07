@@ -50,6 +50,10 @@
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj" />
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.DurableTask.Tests/ForgeTrust.AppSurface.Flow.DurableTask.Tests.csproj" />
   </Folder>
+  <Folder Name="/Intelligence/">
+    <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj" />
+    <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence.Tests/ForgeTrust.AppSurface.Intelligence.Tests.csproj" />
+  </Folder>
   <Folder Name="/Examples/razorwire-mvc/">
     <Project Path="examples/razorwire-mvc/RazorWireWebExample.csproj" />
   </Folder>

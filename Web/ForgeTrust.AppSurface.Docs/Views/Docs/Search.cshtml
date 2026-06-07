@@ -79,6 +79,8 @@
                 {
                     <a class="@FailureLinkClass docs-search-page-recovery-link"
                        href="@resolvedHref"
+                       data-rw-recovery-link-kind="server_fallback"
+                       data-rw-recovery-source-state="loading"
                        data-turbo-frame="doc-content"
                        data-turbo-action="advance">
                         <span class="text-[0.95rem] font-semibold text-[#14b8a6]">@link.Title</span>
@@ -89,6 +91,8 @@
                 {
                     <a class="@FailureLinkClass docs-search-page-recovery-link"
                        href="@resolvedHref"
+                       data-rw-recovery-link-kind="server_fallback"
+                       data-rw-recovery-source-state="loading"
                        data-turbo-frame="_top">
                         <span class="text-[0.95rem] font-semibold text-[#14b8a6]">@link.Title</span>
                         <span class="text-[0.82rem] leading-[1.45] text-slate-400">@link.Description</span>

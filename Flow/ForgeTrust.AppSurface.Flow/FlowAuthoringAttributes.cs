@@ -61,6 +61,11 @@ public sealed class FlowNodeAttribute : Attribute
 /// <summary>
 /// Marks one generated-authoring node as the flow start node.
 /// </summary>
+/// <remarks>
+/// Exactly one node per generated flow must be marked with <see cref="FlowStartAttribute"/>.
+/// If a flow declares zero or multiple start nodes, the generator reports diagnostic <c>ASFLOWA004</c>
+/// and does not produce the generated definition helpers for that invalid flow.
+/// </remarks>
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
 public sealed class FlowStartAttribute : Attribute
 {
@@ -69,6 +74,13 @@ public sealed class FlowStartAttribute : Attribute
 /// <summary>
 /// Declares one generated outcome case a transformer node can return.
 /// </summary>
+/// <remarks>
+/// Outcome contexts are nominal ports used by the generated graph validator. <see cref="FlowOutcomeKind.Next"/>
+/// must carry the input context type of exactly one target node. <see cref="FlowOutcomeKind.Wait"/> and
+/// <see cref="FlowOutcomeKind.TimedOut"/> resume the current node, so they must carry that node's input context
+/// type. <see cref="FlowOutcomeKind.Fault"/> must carry <see cref="FlowFault"/>. <see cref="FlowOutcomeKind.Complete"/>
+/// is terminal and does not require a target node.
+/// </remarks>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
 public sealed class FlowOutcomeAttribute : Attribute
 {
@@ -78,6 +90,8 @@ public sealed class FlowOutcomeAttribute : Attribute
     /// <param name="name">Stable outcome name.</param>
     /// <param name="kind">Outcome kind to lower into the runtime contract.</param>
     /// <param name="outputContextType">Context type carried by the outcome.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="name"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="outputContextType"/> is null.</exception>
     public FlowOutcomeAttribute(string name, FlowOutcomeKind kind, Type outputContextType)
     {
         Name = FlowDefinition<object>.RequireText(name, nameof(name));
@@ -105,6 +119,10 @@ public sealed class FlowOutcomeAttribute : Attribute
 /// Describes one generated graph mapping method for analyzer validation.
 /// </summary>
 /// <remarks>
+/// Do not apply this attribute manually. The generator emits it on generated <c>GraphBuilder</c> mapping methods
+/// so analyzers can validate explicit <c>BuildDefinition</c> lambda coverage. Manually applying it can make graph
+/// coverage diagnostics misleading.
+///
 /// This attribute is emitted by generated authoring code. Application code should use
 /// <see cref="FlowOutcomeAttribute"/> to declare outcomes instead of applying this attribute manually.
 /// </remarks>
@@ -117,6 +135,10 @@ public sealed class FlowGraphMappingAttribute : Attribute
     /// <param name="nodeId">Stable source node identifier.</param>
     /// <param name="outcomeName">Stable outcome name.</param>
     /// <param name="outputContextType">Context type carried by the mapped outcome.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> or <paramref name="outcomeName"/> is null, empty, or whitespace.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="outputContextType"/> is null.</exception>
     public FlowGraphMappingAttribute(string nodeId, string outcomeName, Type outputContextType)
     {
         NodeId = FlowDefinition<object>.RequireText(nodeId, nameof(nodeId));
@@ -174,6 +196,14 @@ public enum FlowOutcomeKind
 /// <summary>
 /// Executes one generated-authoring transformer node.
 /// </summary>
+/// <remarks>
+/// Implementations receive a <see cref="FlowTransformerContext{TInput}"/> and must return a non-null generated
+/// outcome case. The generated adapter lowers that case into the v1 runtime contract and the runner enforces
+/// the non-null outcome requirement. Exceptions thrown by an implementation propagate to the caller; use
+/// <see cref="FlowOutcomeKind.Fault"/> with <see cref="FlowFault"/> for expected process failures that should be
+/// represented as flow results. Nodes should honor cancellation and should keep externally visible side effects
+/// idempotent or guarded by a host-owned outbox when a durable host may retry or replay work.
+/// </remarks>
 /// <typeparam name="TInput">Typed input context consumed by the node.</typeparam>
 /// <typeparam name="TOutcome">Generated outcome union type returned by the node.</typeparam>
 public interface IFlowTransformerNode<TInput, TOutcome>
@@ -182,7 +212,9 @@ public interface IFlowTransformerNode<TInput, TOutcome>
     /// Executes the node and returns a generated outcome case.
     /// </summary>
     /// <param name="context">Typed authoring execution context.</param>
-    /// <param name="cancellationToken">Cancellation token supplied by the runner.</param>
+    /// <param name="cancellationToken">
+    /// Cancellation token supplied by the runner. The default value is provided for manual invocation convenience.
+    /// </param>
     /// <returns>A generated outcome case.</returns>
     ValueTask<TOutcome> ExecuteAsync(
         FlowTransformerContext<TInput> context,
@@ -192,6 +224,12 @@ public interface IFlowTransformerNode<TInput, TOutcome>
 /// <summary>
 /// Describes one generated-authoring transformer execution.
 /// </summary>
+/// <remarks>
+/// <see cref="FlowId"/>, <see cref="Version"/>, and <see cref="NodeId"/> identify the current definition and node
+/// being executed. <see cref="State"/> is the typed input context unwrapped from the generated envelope; the record
+/// does not validate it, and generated adapters assume it is non-null. <see cref="ResumeEvent"/> is null for initial
+/// execution and non-null when a node resumes after an external event or timeout.
+/// </remarks>
 /// <typeparam name="TInput">Typed input context consumed by the node.</typeparam>
 /// <param name="FlowId">Stable flow id.</param>
 /// <param name="Version">Flow graph version.</param>
