@@ -169,7 +169,8 @@ internal sealed partial class CoverageRunCommand : ICommand
                 "Coverage run failed.",
                 "One or more test, merge, or artifact steps returned a failure.",
                 "Open the per-project logs and timings.json listed above.",
-                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics",
+                result.FailureLogPath ?? result.CoveragePath);
         }
     }
 
@@ -244,7 +245,8 @@ internal sealed record CoverageRunRequest(
 /// <param name="Success">Whether all required test, merge, and artifact steps succeeded.</param>
 /// <param name="OutputDirectory">Absolute output directory.</param>
 /// <param name="CoveragePath">Absolute merged Cobertura path.</param>
-internal sealed record CoverageRunResult(bool Success, string OutputDirectory, string CoveragePath);
+/// <param name="FailureLogPath">Primary failing project log path, when a project failed.</param>
+internal sealed record CoverageRunResult(bool Success, string OutputDirectory, string CoveragePath, string? FailureLogPath = null);
 
 /// <summary>
 /// Coordinates public coverage run discovery, scheduling, test execution, merge, and artifacts.
@@ -373,7 +375,8 @@ internal sealed class CoverageRunWorkflow
         await console.Output.WriteLineAsync($"Coverage artifacts: {outputDirectory}");
         await console.Output.WriteLineAsync($"Next: appsurface coverage gate --coverage {mergedCoveragePath} --min-line <percent> --min-branch <percent>");
 
-        return new CoverageRunResult(projectResults.All(result => result.ExitCode == 0), outputDirectory, mergedCoveragePath);
+        var failureLogPath = projectResults.FirstOrDefault(result => result.ExitCode != 0)?.LogFile;
+        return new CoverageRunResult(projectResults.All(result => result.ExitCode == 0), outputDirectory, mergedCoveragePath, failureLogPath);
     }
 
     private async Task<CoverageProjectResolution> ResolveProjectsAsync(
@@ -1092,9 +1095,29 @@ internal interface IReportGeneratorPackageLocator
 internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLocator
 {
     internal const string Version = "5.5.10";
+    private readonly string _packageBaseDirectory;
+
+    public ReportGeneratorPackageLocator()
+        : this(AppContext.BaseDirectory)
+    {
+    }
+
+    internal ReportGeneratorPackageLocator(string packageBaseDirectory)
+    {
+        _packageBaseDirectory = packageBaseDirectory ?? throw new ArgumentNullException(nameof(packageBaseDirectory));
+    }
 
     public string ResolveReportGeneratorDll()
     {
+        foreach (var target in new[] { "net10.0", "net9.0", "net8.0" })
+        {
+            var packageOwned = Path.Join(_packageBaseDirectory, "reportgenerator", target, "ReportGenerator.dll");
+            if (File.Exists(packageOwned))
+            {
+                return packageOwned;
+            }
+        }
+
         var roots = new[]
             {
                 Environment.GetEnvironmentVariable("NUGET_PACKAGES"),
@@ -1106,7 +1129,7 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
 
         foreach (var root in roots)
         {
-            foreach (var target in new[] { "net10.0", "net8.0" })
+            foreach (var target in new[] { "net10.0", "net9.0", "net8.0" })
             {
                 var candidate = Path.Join(root, "reportgenerator", Version, "tools", target, "ReportGenerator.dll");
                 if (File.Exists(candidate))

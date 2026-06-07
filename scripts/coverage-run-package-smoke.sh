@@ -9,21 +9,26 @@ PACKAGE_VERSION="0.1.0-${PACKAGE_VERSION_SUFFIX}"
 WORK_DIR="${WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/appsurface-coverage-run-smoke.XXXXXX")}"
 PACKAGE_SOURCE="$WORK_DIR/packages"
 SMOKE_REPO="$WORK_DIR/repo"
+PACK_NUGET_PACKAGES="${PACK_NUGET_PACKAGES:-$WORK_DIR/pack-nuget}"
+SMOKE_NUGET_PACKAGES="${SMOKE_NUGET_PACKAGES:-$WORK_DIR/smoke-nuget}"
+SMOKE_DOTNET_CLI_HOME="${SMOKE_DOTNET_CLI_HOME:-$WORK_DIR/dotnet-home}"
 
-mkdir -p "$PACKAGE_SOURCE" "$SMOKE_REPO"
+mkdir -p "$PACKAGE_SOURCE" "$SMOKE_REPO" "$PACK_NUGET_PACKAGES" "$SMOKE_NUGET_PACKAGES" "$SMOKE_DOTNET_CLI_HOME"
 echo "Smoke workspace: $WORK_DIR"
 
 echo "Restoring ForgeTrust.AppSurface.Cli..."
-dotnet restore "$CLI_PROJECT"
+NUGET_PACKAGES="$PACK_NUGET_PACKAGES" dotnet restore "$CLI_PROJECT"
 
 echo "Packing ForgeTrust.AppSurface.Cli $PACKAGE_VERSION..."
-dotnet pack "$CLI_PROJECT" \
+NUGET_PACKAGES="$PACK_NUGET_PACKAGES" dotnet pack "$CLI_PROJECT" \
   --configuration "$BUILD_CONFIGURATION" \
   --no-restore \
   --output "$PACKAGE_SOURCE" \
   /p:VersionSuffix="$PACKAGE_VERSION_SUFFIX"
 
 cd "$SMOKE_REPO"
+export DOTNET_CLI_HOME="$SMOKE_DOTNET_CLI_HOME"
+export NUGET_PACKAGES="$SMOKE_NUGET_PACKAGES"
 dotnet new sln -n Smoke >/dev/null
 if [[ -f Smoke.slnx ]]; then
   SMOKE_SOLUTION="Smoke.slnx"

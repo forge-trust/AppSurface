@@ -706,6 +706,8 @@ public sealed class CoverageRunTests
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV120", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Log:", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("dotnet-test.log", exception.Message, StringComparison.Ordinal);
         var test = Assert.Single(runner.Commands, recorded => recorded.Arguments.FirstOrDefault() == "test");
         Assert.Contains("--configuration", test.Arguments);
         Assert.Contains("Release", test.Arguments);
@@ -785,6 +787,18 @@ public sealed class CoverageRunTests
         Assert.Contains("/packages/reportgenerator/ReportGenerator.dll", command.Arguments);
         Assert.Contains("-reports:a.xml;b.xml", command.Arguments);
         Assert.Contains($"-targetdir:{output}", command.Arguments);
+    }
+
+    [Fact]
+    public void ReportGeneratorPackageLocator_ShouldResolvePackagedDependency()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var dll = repo.WriteFile(Path.Join("reportgenerator", "net10.0", "ReportGenerator.dll"), "fake");
+        var locator = new ReportGeneratorPackageLocator(repo.Path);
+
+        var resolved = locator.ResolveReportGeneratorDll();
+
+        Assert.Equal(dll, resolved);
     }
 
     [Fact]

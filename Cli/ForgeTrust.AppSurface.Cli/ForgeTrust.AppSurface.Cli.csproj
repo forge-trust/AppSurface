@@ -28,7 +28,25 @@
   <ItemGroup>
     <PackageReference Include="CliFx" />
     <PackageReference Include="CliWrap" />
-    <PackageReference Include="ReportGenerator" />
+    <PackageReference Include="ReportGenerator" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(PkgReportGenerator)' != ''">
+    <None Include="$(PkgReportGenerator)/tools/net10.0/**/*"
+          Pack="true"
+          PackagePath="tools/$(TargetFramework)/any/reportgenerator/net10.0/%(RecursiveDir)%(Filename)%(Extension)"
+          Visible="false"
+          Condition="Exists('$(PkgReportGenerator)/tools/net10.0')" />
+    <None Include="$(PkgReportGenerator)/tools/net9.0/**/*"
+          Pack="true"
+          PackagePath="tools/$(TargetFramework)/any/reportgenerator/net9.0/%(RecursiveDir)%(Filename)%(Extension)"
+          Visible="false"
+          Condition="Exists('$(PkgReportGenerator)/tools/net9.0')" />
+    <None Include="$(PkgReportGenerator)/tools/net8.0/**/*"
+          Pack="true"
+          PackagePath="tools/$(TargetFramework)/any/reportgenerator/net8.0/%(RecursiveDir)%(Filename)%(Extension)"
+          Visible="false"
+          Condition="Exists('$(PkgReportGenerator)/tools/net8.0')" />
   </ItemGroup>
 
 </Project>
