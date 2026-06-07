@@ -1206,9 +1206,9 @@ internal static class CoverageRunOutputGuard
 
         foreach (var projectDirectory in projects
             .Select(project => Path.GetDirectoryName(project.FullPath))
-            .Where(projectDirectory => projectDirectory is not null))
+            .OfType<string>())
         {
-            if (string.Equals(trimmedOutput, Trim(projectDirectory!), comparison))
+            if (string.Equals(trimmedOutput, Trim(projectDirectory), comparison))
             {
                 throw UnsafeOutput("--output must not be a test project directory.");
             }
