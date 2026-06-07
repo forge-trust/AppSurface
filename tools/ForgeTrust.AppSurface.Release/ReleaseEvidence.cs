@@ -204,6 +204,7 @@ internal static class ReleaseEvidence
                 }
 
                 ValidateReleaseManifestDigest(bundle, releaseManifestJson, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#publish");
+                ValidateReleaseManifestSourceCommit(bundle, releaseManifestJson, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#publish");
                 ValidateArtifactDigests(bundle, releaseNoteJson, releaseSidecarJson, releaseManifestJson, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#publish");
                 ValidatePackagePaths(version, bundle, diagnostics);
                 ValidateSubject(bundle, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#publish");
@@ -286,6 +287,7 @@ internal static class ReleaseEvidence
         {
             var releaseManifestJson = await File.ReadAllTextAsync(releaseManifestPath, cancellationToken);
             ValidateReleaseManifestDigest(bundle, releaseManifestJson, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle");
+            ValidateReleaseManifestSourceCommit(bundle, releaseManifestJson, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle");
         }
 
         await ValidatePreparedArtifactDigestsAsync(workspace, version, bundle, diagnostics, cancellationToken);
@@ -405,6 +407,50 @@ internal static class ReleaseEvidence
                 "Release evidence bundle does not match the release manifest bytes.",
                 $"Evidence recorded `{bundle.ReleaseManifestDigest.Value}` but the release manifest hashes to `{actualDigest}`.",
                 "Regenerate release evidence after changing release JSON or generated file lists.",
+                docsPath));
+        }
+    }
+
+    private static void ValidateReleaseManifestSourceCommit(
+        ReleaseEvidenceBundle bundle,
+        string releaseManifestJson,
+        List<ReleaseDiagnostic> diagnostics,
+        string docsPath)
+    {
+        ReleaseManifest? manifest;
+        try
+        {
+            manifest = JsonSerializer.Deserialize<ReleaseManifest>(releaseManifestJson, ReleaseJson.Options);
+        }
+        catch (JsonException ex)
+        {
+            diagnostics.Add(ReleaseDiagnostic.Error(
+                "release-evidence-release-manifest-schema-invalid",
+                "Release evidence could not parse the release manifest.",
+                ex.Message,
+                "Regenerate the release JSON with the release tool instead of hand-editing it.",
+                docsPath));
+            return;
+        }
+
+        if (manifest is null)
+        {
+            diagnostics.Add(ReleaseDiagnostic.Error(
+                "release-evidence-release-manifest-schema-invalid",
+                "Release evidence could not parse the release manifest.",
+                "Release manifest JSON must be an object, not the JSON literal `null`.",
+                "Regenerate the release JSON with the release tool instead of hand-editing it.",
+                docsPath));
+            return;
+        }
+
+        if (!string.Equals(bundle.Commits.ContentSourceCommit, manifest.SourceCommit, StringComparison.Ordinal))
+        {
+            diagnostics.Add(ReleaseDiagnostic.Error(
+                "release-evidence-content-source-commit-mismatch",
+                "Release evidence content source commit does not match the release manifest.",
+                $"Evidence content source commit `{bundle.Commits.ContentSourceCommit ?? "unknown"}` does not match release manifest source commit `{manifest.SourceCommit ?? "unknown"}`.",
+                "Regenerate release evidence and release JSON from the same reviewed release state.",
                 docsPath));
         }
     }

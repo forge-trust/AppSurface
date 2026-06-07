@@ -419,6 +419,44 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckRejectsPreparedReleaseEvidenceWithMismatchedContentSourceCommit()
+    {
+        await SeedRepositoryAsync();
+        var prepare = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+        Assert.Equal(0, prepare.ExitCode);
+
+        var version = SemVer.Parse("0.1.0-preview.1");
+        var releaseNote = await ReadFileAsync("releases/v0.1.0-preview.1.md");
+        var releaseSidecar = await ReadFileAsync("releases/v0.1.0-preview.1.md.yml");
+        var releaseManifest = (await ReadFileAsync("releases/v0.1.0-preview.1.release.json")).Replace(
+            "\"sourceCommit\": \"abc123\"",
+            "\"sourceCommit\": \"other-content-source\"",
+            StringComparison.Ordinal);
+        await WriteFileAsync("releases/v0.1.0-preview.1.release.json", releaseManifest);
+        var evidence = ReleaseEvidence.BuildDraft(
+            new ReleaseWorkspace(_repositoryRoot),
+            version,
+            "prerelease",
+            new DateOnly(2026, 5, 25),
+            "abc123",
+            releaseNote,
+            releaseSidecar,
+            releaseManifest,
+            [new PackagePathUpdate("Core/ForgeTrust.AppSurface.Core.csproj", "releases/unreleased.md", "releases/v0.1.0-preview.1.md")]);
+        await WriteFileAsync("releases/v0.1.0-preview.1.evidence.json", ReleaseEvidence.Serialize(evidence));
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1", "--allow-existing-targets"],
+            FakeCommandRunner.WithSourceCommit("release-prep-commit"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-evidence-content-source-commit-mismatch", result.Stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("release-evidence-subject-digest-mismatch", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CheckRejectsStalePreparedReleaseArtifactBytes()
     {
         await SeedRepositoryAsync();
@@ -924,6 +962,36 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-release-manifest-digest-mismatch");
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-subject-digest-mismatch");
+    }
+
+    [Fact]
+    public void ReleaseEvidenceValidationRejectsContentSourceCommitMismatch()
+    {
+        var version = SemVer.Parse("0.1.0-preview.1");
+        var releaseManifest = CreateReleaseManifestJson("other-content-source");
+        var evidence = ReleaseEvidence.BuildDraft(
+            new ReleaseWorkspace(Path.Join(Path.GetTempPath(), "ReleaseToolEvidenceFixtures")),
+            version,
+            "prerelease",
+            new DateOnly(2026, 5, 25),
+            "abc123",
+            TaggedReleaseNoteContent,
+            TaggedReleaseSidecarContent,
+            releaseManifest,
+            [new PackagePathUpdate("Core/ForgeTrust.AppSurface.Core.csproj", "releases/unreleased.md", "releases/v0.1.0-preview.1.md")]);
+
+        var result = ReleaseEvidence.ValidateTag(
+            version,
+            "prerelease",
+            "v0.1.0-preview.1",
+            "abc123",
+            TaggedReleaseNoteContent,
+            TaggedReleaseSidecarContent,
+            releaseManifest,
+            ReleaseEvidence.Serialize(evidence));
+
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-content-source-commit-mismatch");
+        Assert.DoesNotContain(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-subject-digest-mismatch");
     }
 
     [Fact]
@@ -1821,7 +1889,7 @@ public sealed class ReleaseToolTests : IDisposable
         return runner;
     }
 
-    private static string CreateReleaseManifestJson()
+    private static string CreateReleaseManifestJson(string? sourceCommit = "abc123")
     {
         var version = SemVer.Parse("0.1.0-preview.1");
         var manifest = new ReleaseManifest(
@@ -1829,7 +1897,7 @@ public sealed class ReleaseToolTests : IDisposable
             version.ToString(),
             version.TagName,
             "2026-05-25",
-            "abc123",
+            sourceCommit,
             "prerelease",
             [
                 "releases/v0.1.0-preview.1.md",

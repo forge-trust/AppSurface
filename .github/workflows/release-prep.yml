@@ -164,4 +164,22 @@ jobs:
             echo "Release evidence bundle ${evidence_files[0]} does not match release manifest version ${version}; expected ${expected_evidence}." >&2
             exit 1
           fi
+          expected_artifacts=(
+            "releases/v${version}.md"
+            "releases/v${version}.md.yml"
+            "releases/v${version}.release.json"
+            "releases/v${version}.evidence.json"
+          )
+          mapfile -t sorted_release_artifacts < <(printf '%s\n' "${release_artifacts[@]}" | sort)
+          mapfile -t sorted_expected_artifacts < <(printf '%s\n' "${expected_artifacts[@]}" | sort)
+          if [[ "${#sorted_release_artifacts[@]}" -ne "${#sorted_expected_artifacts[@]}" ]]; then
+            echo "Release preparation pull requests must change exactly the four generated artifacts for v${version}; found: ${sorted_release_artifacts[*]}." >&2
+            exit 1
+          fi
+          for index in "${!sorted_expected_artifacts[@]}"; do
+            if [[ "${sorted_release_artifacts[$index]}" != "${sorted_expected_artifacts[$index]}" ]]; then
+              echo "Release preparation pull requests must change exactly the four generated artifacts for v${version}; found: ${sorted_release_artifacts[*]}." >&2
+              exit 1
+            fi
+          done
           ./eng/release check --version "${version}" --fail-on-warnings --allow-existing-targets
