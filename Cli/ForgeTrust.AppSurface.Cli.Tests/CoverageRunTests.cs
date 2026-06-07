@@ -181,6 +181,48 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldDiscoverSingleImplicitSolution()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var solution = repo.WriteFile("Sample.slnx", "<Solution />");
+        repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            SlnListOutput = """
+                Project(s)
+                ----------
+                tests/Sample.Tests/Sample.Tests.csproj
+                """
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(NoBuild: true);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var list = Assert.Single(runner.Commands, command => command.Arguments.FirstOrDefault() == "sln");
+        Assert.EndsWith("Sample.slnx", list.Arguments[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_NoDiscoverExclusive_ShouldLeavePlaywrightProjectParallel()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Browser.Tests/Browser.Tests.csproj", "<Project><PackageReference Include=\"Microsoft.Playwright\" /></Project>");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(TestProjects: [project], DryRun: true, NoDiscoverExclusive: true);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("include parallel", console.ReadOutputString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldCleanOwnedOutputByDefault()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -368,6 +410,30 @@ public sealed class CoverageRunTests
         await AssertUnsafeOutputAsync(workflow, console, project, outputFile, "points to a file");
         await AssertUnsafeOutputAsync(workflow, console, project, Path.GetDirectoryName(project)!, "test project directory");
         await AssertUnsafeOutputAsync(workflow, console, project, Path.GetPathRoot(repo.Path)!, "filesystem root");
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(home) && !string.Equals(Path.GetPathRoot(home), home, StringComparison.Ordinal))
+        {
+            var homeException = Assert.Throws<CommandException>(() => CoverageRunOutputGuard.Validate(home, solutionDirectory, []));
+            Assert.Contains("ASCOV109", homeException.Message, StringComparison.Ordinal);
+            Assert.Contains("user home directory", homeException.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldRejectInvalidOutputPath()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(TestProjects: [project], OutputDirectory: "bad\0path");
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Path value is invalid", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -565,6 +631,32 @@ public sealed class CoverageRunTests
         Assert.True(tests[2].StartedAt >= tests[0].FinishedAt);
         Assert.True(tests[2].StartedAt >= tests[1].FinishedAt);
         Assert.Contains("(exclusive)", console.ReadOutputString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldDrainParallelBatchWhenParallelismLimitIsReached()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var first = repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
+        var second = repo.WriteFile("tests/Second.Tests/Second.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            TestDelays =
+            {
+                [first] = TimeSpan.FromMilliseconds(40),
+            },
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(TestProjects: [first, second], Parallelism: 1);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
+        Assert.Equal([first, second], tests.Select(command => command.Arguments[1]).ToArray());
+        Assert.True(tests[1].StartedAt >= tests[0].FinishedAt);
     }
 
     [Fact]
