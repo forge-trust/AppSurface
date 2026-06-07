@@ -1096,15 +1096,22 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
 {
     internal const string Version = "5.5.10";
     private readonly string _packageBaseDirectory;
+    private readonly IReadOnlyList<string?> _packageRoots;
 
     public ReportGeneratorPackageLocator()
-        : this(AppContext.BaseDirectory)
+        : this(AppContext.BaseDirectory, ResolvePackageRoots())
     {
     }
 
     internal ReportGeneratorPackageLocator(string packageBaseDirectory)
+        : this(packageBaseDirectory, ResolvePackageRoots())
+    {
+    }
+
+    internal ReportGeneratorPackageLocator(string packageBaseDirectory, IReadOnlyList<string?> packageRoots)
     {
         _packageBaseDirectory = packageBaseDirectory ?? throw new ArgumentNullException(nameof(packageBaseDirectory));
+        _packageRoots = packageRoots ?? throw new ArgumentNullException(nameof(packageRoots));
     }
 
     public string ResolveReportGeneratorDll()
@@ -1118,11 +1125,7 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
             }
         }
 
-        var roots = new[]
-            {
-                Environment.GetEnvironmentVariable("NUGET_PACKAGES"),
-                Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages"),
-            }
+        var roots = _packageRoots
             .Where(root => !string.IsNullOrWhiteSpace(root))
             .Select(root => root!)
             .Distinct(StringComparer.OrdinalIgnoreCase);
@@ -1145,6 +1148,15 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
             $"Expected ReportGenerator {Version} under the NuGet package cache.",
             "Restore or reinstall ForgeTrust.AppSurface.Cli so its package-owned dependencies are present.",
             "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+    }
+
+    private static string?[] ResolvePackageRoots()
+    {
+        return
+        [
+            Environment.GetEnvironmentVariable("NUGET_PACKAGES"),
+            Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages"),
+        ];
     }
 }
 

@@ -802,27 +802,42 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public void ReportGeneratorPackageLocator_ShouldResolvePackagedFallbackTarget()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var dll = repo.WriteFile(Path.Join("reportgenerator", "net9.0", "ReportGenerator.dll"), "fake");
+        var locator = new ReportGeneratorPackageLocator(repo.Path, []);
+
+        var resolved = locator.ResolveReportGeneratorDll();
+
+        Assert.Equal(dll, resolved);
+    }
+
+    [Fact]
     public void ReportGeneratorPackageLocator_ShouldResolveNuGetPackageCacheDependency()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         var dll = repo.WriteFile(
             Path.Join("reportgenerator", ReportGeneratorPackageLocator.Version, "tools", "net8.0", "ReportGenerator.dll"),
             "fake");
-        var previous = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+        var locator = new ReportGeneratorPackageLocator("/missing-package-base", [repo.Path]);
 
-        try
-        {
-            Environment.SetEnvironmentVariable("NUGET_PACKAGES", repo.Path);
-            var locator = new ReportGeneratorPackageLocator();
+        var resolved = locator.ResolveReportGeneratorDll();
 
-            var resolved = locator.ResolveReportGeneratorDll();
+        Assert.Equal(dll, resolved);
+    }
 
-            Assert.Equal(dll, resolved);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("NUGET_PACKAGES", previous);
-        }
+    [Fact]
+    public void ReportGeneratorPackageLocator_ShouldThrowDiagnosticWhenDependencyIsMissing()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        using var cache = TempDirectory.Create("appsurface-coverage-run-cache-");
+        var locator = new ReportGeneratorPackageLocator(repo.Path, [cache.Path]);
+
+        var exception = Assert.Throws<CommandException>(locator.ResolveReportGeneratorDll);
+
+        Assert.Contains("ASCOV114", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ReportGenerator package dependency was not found", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
