@@ -1168,6 +1168,12 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         source.AppendLine("                typedState,");
         source.AppendLine("                context.ResumeEvent);");
         source.AppendLine("            var outcome = await _node.ExecuteAsync(transformerContext, cancellationToken).ConfigureAwait(false);");
+        source.AppendLine("            if (outcome is null)");
+        source.AppendLine("            {");
+        source.Append("                throw new global::ForgeTrust.AppSurface.Flow.FlowDefinitionException(\"Generated flow node '")
+            .Append(Escape(node.NodeId)).AppendLine("' returned null.\");");
+        source.AppendLine("            }");
+
         source.AppendLine("            return outcome switch");
         source.AppendLine("            {");
         foreach (var outcome in node.Outcomes)

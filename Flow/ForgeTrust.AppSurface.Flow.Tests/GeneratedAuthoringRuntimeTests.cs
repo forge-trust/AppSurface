@@ -91,6 +91,37 @@ public partial class GeneratedApprovalFlow
 }
 
 /// <summary>
+/// Test-only generated flow whose start node intentionally violates the generated outcome contract.
+/// </summary>
+/// <remarks>
+/// The fixture keeps null-outcome adapter diagnostics covered through the public in-memory runner without changing the
+/// main approval flow's happy-path behavior.
+/// </remarks>
+[FlowAuthoring("generated-null-outcome", Version = "2026-06-07")]
+public partial class GeneratedNullOutcomeFlow
+{
+    /// <summary>
+    /// Start node that returns <c>null</c> so the generated adapter can report the contract violation.
+    /// </summary>
+    [FlowStart]
+    [FlowNode("start", typeof(GeneratedStartState))]
+    [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(GeneratedDoneState))]
+    public partial class StartNode : IFlowTransformerNode<GeneratedStartState, StartNodeOutcomes>
+    {
+        /// <summary>
+        /// Executes the null-outcome branch used by regression tests.
+        /// </summary>
+        /// <param name="context">Typed execution context supplied by the generated adapter.</param>
+        /// <param name="cancellationToken">Cancellation token supplied by the runner.</param>
+        /// <returns>A null generated outcome, intentionally violating the authoring contract.</returns>
+        public ValueTask<StartNodeOutcomes> ExecuteAsync(
+            FlowTransformerContext<GeneratedStartState> context,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<StartNodeOutcomes>(null!);
+    }
+}
+
+/// <summary>
 /// Start-node input state used by generated runtime tests.
 /// </summary>
 /// <param name="Status">Current approval status such as <c>created</c>, <c>waiting</c>, or <c>timed-out</c>.</param>
@@ -249,5 +280,20 @@ public sealed class GeneratedAuthoringRuntimeTests
                 _ => throw new InvalidOperationException($"Unknown scenario '{scenario}'."),
             };
         });
+    }
+
+    [Fact]
+    public async Task GeneratedDefinition_WhenTransformerReturnsNull_ThrowsSpecificFlowDefinitionException()
+    {
+        var definition = GeneratedNullOutcomeFlow.BuildDefinition(new GeneratedNullOutcomeFlow.StartNode());
+        var runner = new InMemoryFlowRunner<GeneratedNullOutcomeFlow.GeneratedNullOutcomeFlowContext>(
+            Options.Create(new AppSurfaceFlowOptions()));
+
+        var exception = await Assert.ThrowsAsync<FlowDefinitionException>(async () =>
+            await runner.RunAsync(
+                definition,
+                GeneratedNullOutcomeFlow.CreateStartContext(new GeneratedStartState("created"))));
+
+        Assert.Contains("Generated flow node 'start' returned null.", exception.Message, StringComparison.Ordinal);
     }
 }

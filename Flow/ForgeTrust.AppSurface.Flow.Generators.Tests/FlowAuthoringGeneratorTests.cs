@@ -105,6 +105,8 @@ public sealed class FlowAuthoringGeneratorTests
         Assert.Contains("FlowNodeOutcome<ApprovalFlowContext>.TimedOut(\"expired\"", generated, StringComparison.Ordinal);
         Assert.Contains("FlowNodeOutcome<ApprovalFlowContext>.Fault(typed.Context.Code, typed.Context.Message)", generated, StringComparison.Ordinal);
         Assert.Contains("FlowTimeout? Timeout = null", generated, StringComparison.Ordinal);
+        Assert.Contains("if (outcome is null)", generated, StringComparison.Ordinal);
+        Assert.Contains("Generated flow node 'start' returned null.", generated, StringComparison.Ordinal);
         Assert.Contains("private static TContext RequireContext<TContext>(TContext context)", generated, StringComparison.Ordinal);
         Assert.Contains("Context { get; } = RequireContext(Context);", generated, StringComparison.Ordinal);
         Assert.DoesNotContain("Context { get; init; } = RequireContext(Context);", generated, StringComparison.Ordinal);

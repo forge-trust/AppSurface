@@ -44,7 +44,7 @@ var timedOut = await runner.ResumeAsync(
     explicitDefinition,
     "intake",
     GeneratedApprovalFlow.CreateStartContext(new ApprovalOpened(request, "waiting")),
-    new FlowResumeEvent("approval-timeout", isTimeout: true));
+    FlowResumeEvent.Timeout("approval-timeout"));
 Console.WriteLine($"Timed out: {timedOut.Context?.ApprovalOpened?.Status}");
 
 /// <summary>

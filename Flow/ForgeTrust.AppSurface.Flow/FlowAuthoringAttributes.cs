@@ -180,6 +180,9 @@ public sealed class FlowGraphMappingAttribute : Attribute
 /// <summary>
 /// Runtime outcome kinds supported by generated AppSurface Flow authoring.
 /// </summary>
+/// <remarks>
+/// The numeric values are part of the public compatibility contract. Do not renumber or reorder existing values.
+/// </remarks>
 public enum FlowOutcomeKind
 {
     /// <summary>
