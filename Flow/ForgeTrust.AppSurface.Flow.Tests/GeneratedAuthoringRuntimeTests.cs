@@ -206,4 +206,48 @@ public sealed class GeneratedAuthoringRuntimeTests
         Assert.Equal("approval-timeout", result.TimedOutEventName);
         Assert.Equal("timed-out", result.Context?.GeneratedStartState?.Status);
     }
+
+    [Theory]
+    [InlineData("next")]
+    [InlineData("wait")]
+    [InlineData("timedOut")]
+    [InlineData("complete")]
+    [InlineData("fault")]
+    public void GeneratedOutcomeFactories_WithNullContext_ThrowArgumentNullException(string scenario)
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            _ = scenario switch
+            {
+                "next" => (object)GeneratedApprovalFlow.StartNodeOutcomes.Approved(null!),
+                "wait" => GeneratedApprovalFlow.StartNodeOutcomes.ApprovalSubmitted(null!),
+                "timedOut" => GeneratedApprovalFlow.StartNodeOutcomes.ApprovalTimeout(null!),
+                "complete" => GeneratedApprovalFlow.ReviewNodeOutcomes.Done(null!),
+                "fault" => GeneratedApprovalFlow.StartNodeOutcomes.Denied(null!),
+                _ => throw new InvalidOperationException($"Unknown scenario '{scenario}'."),
+            };
+        });
+    }
+
+    [Theory]
+    [InlineData("next")]
+    [InlineData("wait")]
+    [InlineData("timedOut")]
+    [InlineData("complete")]
+    [InlineData("fault")]
+    public void GeneratedOutcomeConstructors_WithNullContext_ThrowArgumentNullException(string scenario)
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            _ = scenario switch
+            {
+                "next" => (object)new GeneratedApprovalFlow.StartNodeOutcomes.ApprovedOutcome(null!),
+                "wait" => new GeneratedApprovalFlow.StartNodeOutcomes.ApprovalSubmittedOutcome(null!),
+                "timedOut" => new GeneratedApprovalFlow.StartNodeOutcomes.ApprovalTimeoutOutcome(null!),
+                "complete" => new GeneratedApprovalFlow.ReviewNodeOutcomes.DoneOutcome(null!),
+                "fault" => new GeneratedApprovalFlow.StartNodeOutcomes.DeniedOutcome(null!),
+                _ => throw new InvalidOperationException($"Unknown scenario '{scenario}'."),
+            };
+        });
+    }
 }

@@ -1085,6 +1085,11 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         source.Append("    public abstract partial record ").Append(outcomeType).AppendLine();
         source.AppendLine("    {");
         source.Append("        private ").Append(outcomeType).AppendLine("() { }");
+        source.AppendLine("        private static TContext RequireContext<TContext>(TContext context)");
+        source.AppendLine("        {");
+        source.AppendLine("            global::System.ArgumentNullException.ThrowIfNull(context);");
+        source.AppendLine("            return context;");
+        source.AppendLine("        }");
         source.AppendLine();
         foreach (var outcome in node.Outcomes)
         {
@@ -1092,24 +1097,42 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
             if (string.Equals(outcome.Kind, "Fault", StringComparison.Ordinal))
             {
                 source.Append("        public sealed record ").Append(caseName).Append("Outcome(").Append(TypeName(outcome.OutputContext!))
-                    .Append(" Context) : ").Append(outcomeType).AppendLine(";");
+                    .Append(" Context) : ").Append(outcomeType).AppendLine();
+                source.AppendLine("        {");
+                source.Append("            public ").Append(TypeName(outcome.OutputContext!))
+                    .Append(" Context { get; } = RequireContext(Context);")
+                    .AppendLine();
+                source.AppendLine("        }");
                 source.Append("        public static ").Append(caseName).Append("Outcome ").Append(caseName)
-                    .Append("(").Append(TypeName(outcome.OutputContext!)).Append(" context) => new(context);").AppendLine();
+                    .Append("(").Append(TypeName(outcome.OutputContext!)).Append(" context) => new(RequireContext(context));")
+                    .AppendLine();
             }
             else if (string.Equals(outcome.Kind, "Wait", StringComparison.Ordinal))
             {
                 source.Append("        public sealed record ").Append(caseName).Append("Outcome(").Append(TypeName(outcome.OutputContext!))
-                    .Append(" Context, global::ForgeTrust.AppSurface.Flow.FlowTimeout? Timeout = null) : ").Append(outcomeType).AppendLine(";");
+                    .Append(" Context, global::ForgeTrust.AppSurface.Flow.FlowTimeout? Timeout = null) : ").Append(outcomeType).AppendLine();
+                source.AppendLine("        {");
+                source.Append("            public ").Append(TypeName(outcome.OutputContext!))
+                    .Append(" Context { get; } = RequireContext(Context);")
+                    .AppendLine();
+                source.AppendLine("        }");
                 source.Append("        public static ").Append(caseName).Append("Outcome ").Append(caseName).Append("(")
-                    .Append(TypeName(outcome.OutputContext!)).Append(" context, global::ForgeTrust.AppSurface.Flow.FlowTimeout? timeout = null) => new(context, timeout);")
+                    .Append(TypeName(outcome.OutputContext!))
+                    .Append(" context, global::ForgeTrust.AppSurface.Flow.FlowTimeout? timeout = null) => new(RequireContext(context), timeout);")
                     .AppendLine();
             }
             else
             {
                 source.Append("        public sealed record ").Append(caseName).Append("Outcome(").Append(TypeName(outcome.OutputContext!))
-                    .Append(" Context) : ").Append(outcomeType).AppendLine(";");
+                    .Append(" Context) : ").Append(outcomeType).AppendLine();
+                source.AppendLine("        {");
+                source.Append("            public ").Append(TypeName(outcome.OutputContext!))
+                    .Append(" Context { get; } = RequireContext(Context);")
+                    .AppendLine();
+                source.AppendLine("        }");
                 source.Append("        public static ").Append(caseName).Append("Outcome ").Append(caseName).Append("(")
-                    .Append(TypeName(outcome.OutputContext!)).Append(" context) => new(context);").AppendLine();
+                    .Append(TypeName(outcome.OutputContext!)).Append(" context) => new(RequireContext(context));")
+                    .AppendLine();
             }
 
             source.AppendLine();

@@ -105,9 +105,44 @@ public sealed class FlowAuthoringGeneratorTests
         Assert.Contains("FlowNodeOutcome<ApprovalFlowContext>.TimedOut(\"expired\"", generated, StringComparison.Ordinal);
         Assert.Contains("FlowNodeOutcome<ApprovalFlowContext>.Fault(typed.Context.Code, typed.Context.Message)", generated, StringComparison.Ordinal);
         Assert.Contains("FlowTimeout? Timeout = null", generated, StringComparison.Ordinal);
+        Assert.Contains("private static TContext RequireContext<TContext>(TContext context)", generated, StringComparison.Ordinal);
+        Assert.Contains("Context { get; } = RequireContext(Context);", generated, StringComparison.Ordinal);
+        Assert.DoesNotContain("Context { get; init; } = RequireContext(Context);", generated, StringComparison.Ordinal);
         Assert.Contains("MarkStartNodeSubmittedTerminal", generated, StringComparison.Ordinal);
         Assert.Contains("MarkStartNodeExpiredTerminal", generated, StringComparison.Ordinal);
         Assert.Contains("MarkStartNodeDeniedTerminal", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Generator_WithValueTypeContext_EmitsCompilableOutcomeGuards()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("counter")]
+            public partial class CounterFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(CounterState))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(CounterState))]
+                public partial class StartNode : IFlowTransformerNode<CounterState, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<CounterState> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<StartNodeOutcomes>(StartNodeOutcomes.Done(context.State));
+                }
+            }
+
+            public readonly record struct CounterState(int Value);
+            """;
+
+        var (output, diagnostics, generated) = RunGenerator(source);
+
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.DoesNotContain(output.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.Contains("public global::CounterState Context { get; } = RequireContext(Context);", generated, StringComparison.Ordinal);
+        Assert.Contains("Done(global::CounterState context) => new(RequireContext(context));", generated, StringComparison.Ordinal);
     }
 
     [Fact]
