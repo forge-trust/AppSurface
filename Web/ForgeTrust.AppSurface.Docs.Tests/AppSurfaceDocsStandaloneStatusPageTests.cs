@@ -24,13 +24,9 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
     {
         await using var runningHost = await StartStandaloneHostAsync();
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/docs/missing-page");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
+        var (statusCode, html) = await GetBrowserHtmlAfterHarvestAsync(runningHost.Client, "/docs/missing-page");
 
-        using var response = await runningHost.Client.SendAsync(request);
-        var html = await response.Content.ReadAsStringAsync();
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, statusCode);
         Assert.Contains("Documentation page not found", html);
         Assert.Contains("Browse trusted entry points", html);
         Assert.Contains("Search documentation", html);
@@ -47,13 +43,9 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
     {
         await using var runningHost = await StartStandaloneHostAsync(args: ["--environment", "Development"]);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/docs/missing-page");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
+        var (statusCode, html) = await GetBrowserHtmlAfterHarvestAsync(runningHost.Client, "/docs/missing-page");
 
-        using var response = await runningHost.Client.SendAsync(request);
-        var html = await response.Content.ReadAsStringAsync();
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, statusCode);
         Assert.Contains("Documentation page not found", html);
         Assert.Contains("href=\"/docs/search\"", html);
     }
@@ -257,13 +249,11 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
     {
         await using var runningHost = await StartStandaloneHostAsync();
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/docs/%3Cscript%3Ealert(1)%3Cscript%3E%22quote");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
+        var (statusCode, html) = await GetBrowserHtmlAfterHarvestAsync(
+            runningHost.Client,
+            "/docs/%3Cscript%3Ealert(1)%3Cscript%3E%22quote");
 
-        using var response = await runningHost.Client.SendAsync(request);
-        var html = await response.Content.ReadAsStringAsync();
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, statusCode);
         Assert.Contains("&lt;script&gt;alert(1)&lt;script&gt;&quot;quote", html);
         Assert.DoesNotContain("<script>alert(1)<script>\"quote", html);
     }
@@ -341,6 +331,41 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
             This source tree exists so the standalone host can harvest a small documentation snapshot.
             """);
         return repositoryRoot;
+    }
+
+    private static async Task<(HttpStatusCode StatusCode, string Html)> GetBrowserHtmlAfterHarvestAsync(
+        HttpClient client,
+        string path)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        HttpStatusCode? lastStatusCode = null;
+        string? lastHtml = null;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, path);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
+
+            using var response = await client.SendAsync(request);
+            var html = await response.Content.ReadAsStringAsync();
+            if (!IsHarvestingPlaceholder(response.StatusCode, html))
+            {
+                return (response.StatusCode, html);
+            }
+
+            lastStatusCode = response.StatusCode;
+            lastHtml = html;
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+
+        throw new TimeoutException(
+            $"Timed out waiting for docs harvest to complete before asserting missing-route status. Last response: {(lastStatusCode?.ToString() ?? "none")}; body length: {(lastHtml?.Length ?? 0).ToString(CultureInfo.InvariantCulture)}.");
+    }
+
+    private static bool IsHarvestingPlaceholder(HttpStatusCode statusCode, string html)
+    {
+        return statusCode == HttpStatusCode.OK
+               && html.Contains("id=\"docs-harvest-page\"", StringComparison.Ordinal);
     }
 
     private static Process StartStandaloneExecutable(int port, string repositoryRoot)

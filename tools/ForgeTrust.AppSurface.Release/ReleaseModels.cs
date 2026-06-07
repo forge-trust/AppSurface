@@ -26,6 +26,7 @@ internal sealed record ReleaseCheckResult(
     string ReleaseClassification,
     string? SourceCommit,
     IReadOnlyList<string> GeneratedFiles,
+    ReleaseEvidenceSummary? EvidenceSummary,
     IReadOnlyList<ReleaseDiagnostic> Errors,
     IReadOnlyList<ReleaseDiagnostic> Warnings)
 {
@@ -41,12 +42,14 @@ internal sealed record ReleaseCheckResult(
 internal sealed record ReleasePreparationResult(
     ReleaseCheckResult Check,
     IReadOnlyList<string> PlannedOrWrittenFiles,
-    bool DryRun);
+    bool DryRun,
+    ReleaseEvidenceSummary? EvidenceSummary);
 
 /// <summary>
 /// Machine-readable release manifest.
 /// </summary>
 internal sealed record ReleaseManifest(
+    string Schema,
     string Version,
     string Tag,
     string Date,
@@ -101,5 +104,30 @@ internal sealed record PublishOutputs(
     string NotePath,
     string NotesFile,
     string ReleaseClassification,
+    string EvidencePath,
+    string EvidenceSubjectSha256,
+    string EvidenceTagCommit,
+    string? DocsReleaseManifestSha256,
     bool Prerelease,
     bool DryRun);
+
+/// <summary>
+/// Maintainer-facing release evidence summary rendered in command reports and workflow outputs.
+/// </summary>
+/// <param name="Path">Repository-relative evidence bundle path.</param>
+/// <param name="Schema">Evidence bundle schema.</param>
+/// <param name="Status">Draft or tag-bound validation status.</param>
+/// <param name="SubjectSha256">Stable subject digest for the evidence bundle.</param>
+/// <param name="DocsReleaseManifestSha256">Optional AppSurface Docs archive manifest digest referenced by the evidence bundle.</param>
+/// <param name="CatalogExactTreePath">Optional catalog exact tree path referenced by the evidence bundle.</param>
+/// <param name="TagCommit">Optional tag commit validated at publish time.</param>
+/// <param name="Attestation">Attestation requirement state.</param>
+internal sealed record ReleaseEvidenceSummary(
+    string Path,
+    string Schema,
+    string Status,
+    string SubjectSha256,
+    string? DocsReleaseManifestSha256,
+    string? CatalogExactTreePath,
+    string? TagCommit,
+    string Attestation);

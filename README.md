@@ -160,6 +160,9 @@ This command:
 - Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
 - Writes a summary to `TestResults/coverage-merged/summary.txt`.
 - Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
+- Writes slow-test diagnostics to `TestResults/coverage-merged/slow-test-diagnostics.md` and
+  `TestResults/coverage-merged/slow-test-diagnostics.json`, including diagnostic aggregation
+  overhead in seconds and as a percent of total runner time.
 - Restores the pinned local ReportGenerator .NET tool when coverage files need to be merged.
 
 The `appsurface coverage gate` command evaluates the merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage is enabled with `--diff-base` and estimates Codecov-style changed-line and changed-branch coverage from the same merged Cobertura file. The gate is intentionally private-by-default: it does not upload coverage, call GitHub APIs, store trends, or replace the script's AppSurface-specific test scheduling.

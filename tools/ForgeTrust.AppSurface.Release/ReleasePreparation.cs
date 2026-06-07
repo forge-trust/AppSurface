@@ -42,7 +42,7 @@ internal sealed class ReleasePreparation
         var check = await _checker.CheckAsync(options, cancellationToken);
         if (check.HasErrors)
         {
-            return new ReleasePreparationResult(check, [], options.DryRun);
+            return new ReleasePreparationResult(check, [], options.DryRun, EvidenceSummary: null);
         }
 
         var date = options.Date ?? _clock.TodayUtc();
@@ -53,11 +53,16 @@ internal sealed class ReleasePreparation
         var releaseNotePath = _workspace.ReleaseNotePath(options.Version);
         var releaseSidecarPath = _workspace.ReleaseSidecarPath(options.Version);
         var releaseManifestPath = _workspace.ReleaseManifestPath(options.Version);
+        var releaseEvidencePath = _workspace.ReleaseEvidencePath(options.Version);
         var releasePath = $"releases/v{options.Version}.md";
 
         var releaseNote = ReleaseNoteBuilder.Build(options.Version, date, unreleased);
         var releaseSidecar = sidecar.ToTaggedRelease(options.Version, date);
+        var packagePathUpdates = packageSummary.PublicPublishedPackages
+            .Select(package => new PackagePathUpdate(package.Project, package.ReleaseNotesPath, releasePath))
+            .ToArray();
         var manifest = new ReleaseManifest(
+            "appsurface-release-manifest-v1",
             options.Version.ToString(),
             options.Version.TagName,
             date.ToString("yyyy-MM-dd"),
@@ -65,9 +70,21 @@ internal sealed class ReleasePreparation
             check.ReleaseClassification,
             check.GeneratedFiles,
             packageSummary.PublicPublishedPackages.Select(package => package.Project).ToArray(),
-            packageSummary.PublicPublishedPackages.Select(package => new PackagePathUpdate(package.Project, package.ReleaseNotesPath, releasePath)).ToArray(),
+            packagePathUpdates,
             check.Errors.Concat(check.Warnings).Select(ReleaseDiagnosticRecord.FromDiagnostic).ToArray(),
             check.Warnings.Select(warning => warning.Code).ToArray());
+        var releaseManifestContent = JsonSerializer.Serialize(manifest, ReleaseJson.Options) + Environment.NewLine;
+        var evidence = ReleaseEvidence.BuildDraft(
+            _workspace,
+            options.Version,
+            check.ReleaseClassification,
+            date,
+            check.SourceCommit,
+            releaseNote,
+            releaseSidecar,
+            releaseManifestContent,
+            packagePathUpdates);
+        var releaseEvidenceContent = ReleaseEvidence.Serialize(evidence);
 
         var changelog = await File.ReadAllTextAsync(_workspace.ChangelogPath, cancellationToken);
         var packageIndex = await File.ReadAllTextAsync(_workspace.PackageIndexPath, cancellationToken);
@@ -77,7 +94,8 @@ internal sealed class ReleasePreparation
         {
             [releaseNotePath] = releaseNote,
             [releaseSidecarPath] = releaseSidecar,
-            [releaseManifestPath] = JsonSerializer.Serialize(manifest, ReleaseJson.Options) + Environment.NewLine,
+            [releaseManifestPath] = releaseManifestContent,
+            [releaseEvidencePath] = releaseEvidenceContent,
             [_workspace.ChangelogPath] = ChangelogEditor.RollForward(changelog, options.Version, date, releasePath),
             [_workspace.PackageIndexPath] = PackageIndexEditor.UpdatePublicPublishedReleaseNotes(packageIndex, releasePath),
             [_workspace.UnreleasedPath] = nextUnreleased,
@@ -98,6 +116,6 @@ internal sealed class ReleasePreparation
             generatedPaths.AddRange(writes.Keys.Select(_workspace.DisplayPath));
         }
 
-        return new ReleasePreparationResult(check, generatedPaths, options.DryRun);
+        return new ReleasePreparationResult(check, generatedPaths, options.DryRun, evidence.ToSummary("draft evidence for release-prep review"));
     }
 }

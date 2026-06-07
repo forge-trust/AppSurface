@@ -88,6 +88,7 @@ Swipe to compare package details on narrow screens.
 
 - Edit `packages/package-index.yml` when the public package story changes.
 - Review [package readiness evidence](readiness.md) when deciding whether the package manifest, release metadata, blockers, and dependency evidence are ready for release review.
+- Package readiness evidence is package-index review evidence. Per-version release consistency lives in `releases/v{version}.evidence.json` and is validated by the release cockpit.
 - Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.
 - Keep `tool_command_name` aligned with each public .NET tool project's `ToolCommandName` so package validation and post-publish smoke tests run the command users will type. Tool smoke tests install the package, run `--help`, then require `--version` to match the package SemVer exactly, including prerelease labels and excluding any leading `v` or build metadata. The command name value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, trailing periods, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.
 - Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications, package READMEs, product families, readiness blockers, or readiness notes.

@@ -37,9 +37,16 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj", prep, StringComparison.Ordinal);
         Assert.Contains("git diff --name-only --diff-filter=AM", prep, StringComparison.Ordinal);
         Assert.Contains("releases/v*.release.json", prep, StringComparison.Ordinal);
+        Assert.Contains("releases/v*.evidence.json", prep, StringComparison.Ordinal);
         Assert.Contains("Expected exactly one added or modified release manifest", prep, StringComparison.Ordinal);
+        Assert.Contains("Expected exactly one added or modified release evidence bundle", prep, StringComparison.Ordinal);
+        Assert.Contains("Release preparation pull requests must change exactly the four generated artifacts", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("find releases -maxdepth 1 -name 'v*.release.json'", prep, StringComparison.Ordinal);
         Assert.Contains("--github-output", publish, StringComparison.Ordinal);
+        Assert.Contains("Validate tag-bound release evidence", publish, StringComparison.Ordinal);
+        Assert.Contains("evidence_path", await ReadRepositoryFileAsync("tools/ForgeTrust.AppSurface.Release/ReleasePublishing.cs"), StringComparison.Ordinal);
+        Assert.DoesNotContain("id-token: write", publish, StringComparison.Ordinal);
+        Assert.DoesNotContain("attestations: write", publish, StringComparison.Ordinal);
     }
 
     [Fact]

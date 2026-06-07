@@ -139,7 +139,8 @@ jobs:
           mapfile -t release_artifacts < <(git diff --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- \
             ':(glob)releases/v*.md' \
             ':(glob)releases/v*.md.yml' \
-            ':(glob)releases/v*.release.json')
+            ':(glob)releases/v*.release.json' \
+            ':(glob)releases/v*.evidence.json')
           if [[ "${#release_artifacts[@]}" -eq 0 ]]; then
             echo "No versioned release artifacts changed; validating release tooling instead."
             dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
@@ -151,6 +152,34 @@ jobs:
             echo "Expected exactly one added or modified release manifest in this release preparation pull request; found ${#manifests[@]}." >&2
             exit 1
           fi
+          mapfile -t evidence_files < <(git diff --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.evidence.json')
+          if [[ "${#evidence_files[@]}" -ne 1 ]]; then
+            echo "Expected exactly one added or modified release evidence bundle in this release preparation pull request; found ${#evidence_files[@]}." >&2
+            exit 1
+          fi
           manifest="${manifests[0]}"
           version="$(jq -r '.version' "${manifest}")"
+          expected_evidence="releases/v${version}.evidence.json"
+          if [[ "${evidence_files[0]}" != "${expected_evidence}" ]]; then
+            echo "Release evidence bundle ${evidence_files[0]} does not match release manifest version ${version}; expected ${expected_evidence}." >&2
+            exit 1
+          fi
+          expected_artifacts=(
+            "releases/v${version}.md"
+            "releases/v${version}.md.yml"
+            "releases/v${version}.release.json"
+            "releases/v${version}.evidence.json"
+          )
+          mapfile -t sorted_release_artifacts < <(printf '%s\n' "${release_artifacts[@]}" | sort)
+          mapfile -t sorted_expected_artifacts < <(printf '%s\n' "${expected_artifacts[@]}" | sort)
+          if [[ "${#sorted_release_artifacts[@]}" -ne "${#sorted_expected_artifacts[@]}" ]]; then
+            echo "Release preparation pull requests must change exactly the four generated artifacts for v${version}; found: ${sorted_release_artifacts[*]}." >&2
+            exit 1
+          fi
+          for index in "${!sorted_expected_artifacts[@]}"; do
+            if [[ "${sorted_release_artifacts[$index]}" != "${sorted_expected_artifacts[$index]}" ]]; then
+              echo "Release preparation pull requests must change exactly the four generated artifacts for v${version}; found: ${sorted_release_artifacts[*]}." >&2
+              exit 1
+            fi
+          done
           ./eng/release check --version "${version}" --fail-on-warnings --allow-existing-targets
