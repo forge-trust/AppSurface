@@ -14,6 +14,12 @@
         "resolved": "3.10.1",
         "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
       },
+      "ReportGenerator": {
+        "type": "Direct",
+        "requested": "[5.5.10, )",
+        "resolved": "5.5.10",
+        "contentHash": "jtYGRv212OcCa6NUmHGEGcB3I8OBSpBjeywrivOWUG/VC1/Wb/v1GNP2Larx6yOUIulQveQ27U1R6nSuUSLXrw=="
+      },
       "AngleSharp.Css": {
         "type": "Transitive",
         "resolved": "0.17.0",

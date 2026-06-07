@@ -83,7 +83,7 @@ This approach aims to:
 
 ### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
 
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including `appsurface docs` preview/export workflows and `appsurface coverage gate` private Cobertura threshold enforcement.
+- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including `appsurface docs` preview/export workflows, `appsurface coverage run` private test orchestration, and `appsurface coverage gate` local Cobertura threshold enforcement.
 
 ### [Dependency](./Dependency/README.md)
 
@@ -142,7 +142,7 @@ dotnet build
 dotnet test --no-build
 ```
 
-Run merged solution coverage (product assemblies only):
+Run merged solution coverage for this repository's AppSurface-specific validation lane:
 
 ```bash
 ./scripts/coverage-solution.sh
@@ -156,9 +156,16 @@ This command:
 - Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
 - Writes a summary to `TestResults/coverage-merged/summary.txt`.
 - Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
-- Restores the pinned local ReportGenerator .NET tool when coverage files need to be merged.
+- Restores the pinned local ReportGenerator .NET tool used by the repository script when coverage files need to be merged.
 
-The `appsurface coverage gate` command evaluates the merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage is enabled with `--diff-base` and estimates Codecov-style changed-line and changed-branch coverage from the same merged Cobertura file. The gate is intentionally private-by-default: it does not upload coverage, call GitHub APIs, store trends, or replace the script's AppSurface-specific test scheduling.
+Private package-consuming repositories should use the public CLI runner instead of this repository's script:
+
+```bash
+dotnet tool run appsurface coverage run --solution ./MyApp.slnx
+dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75
+```
+
+The `appsurface coverage run` command discovers `.sln`/`.slnx` test projects or accepts repeated `--test-project` values, runs Coverlet-instrumented projects, writes private local artifacts under `TestResults/coverage-merged`, and merges Cobertura through the CLI package's ReportGenerator dependency without reading the consumer repo's tool manifest. The `appsurface coverage gate` command evaluates the merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage is enabled with `--diff-base` and estimates Codecov-style changed-line and changed-branch coverage from the same merged Cobertura file. The coverage commands are intentionally private-by-default: they do not upload coverage, call GitHub APIs, or store trends.
 
 The script also supports bounded test groups for local or CI experiments:
 

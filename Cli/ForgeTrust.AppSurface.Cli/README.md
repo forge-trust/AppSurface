@@ -12,7 +12,7 @@ appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 
 `appsurface docs` runs the same AppSurface Docs standalone host used by CI and integration tests. It forwards AppSurface Docs configuration into that host instead of duplicating harvesting, routing, static web asset, or MVC setup in the CLI. `appsurface docs export` starts that same host in-process, binds an internal loopback listener, and delegates static crawling plus CDN validation to the RazorWire export engine. `appsurface docs verify-archive` checks one catalog-pinned exact release tree locally before deploy.
 
-The CLI also includes the first stable coverage command, `appsurface coverage gate`, for private-by-default CI coverage enforcement. It evaluates a local Cobertura XML file, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service.
+The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service.
 
 ## Release Guidance
 
@@ -47,6 +47,8 @@ dotnet new tool-manifest
 dotnet tool install ForgeTrust.AppSurface.Cli --prerelease
 dotnet tool run appsurface --version
 dotnet tool run appsurface docs --repo .
+dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run
+dotnet tool run appsurface coverage run --solution ./MyApp.slnx
 dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --min-patch-branch 85
 ```
 
@@ -58,6 +60,116 @@ dotnet tool run appsurface --version
 ```
 
 ## Commands
+
+### `appsurface coverage run`
+
+Run instrumented .NET test projects and merge private Cobertura artifacts.
+
+```bash
+appsurface coverage run \
+  --solution ./MyApp.slnx \
+  --output ./TestResults/coverage-merged
+```
+
+`coverage run` is the public package-consumer coverage orchestrator for private .NET repositories. It supports `.sln` and `.slnx` discovery, repeated `--test-project` selection, a default output directory that matches `coverage gate`, bounded parallel scheduling, per-project logs, stable per-project artifact directories, safe cleanup of AppSurface-owned outputs, and a package-owned ReportGenerator merge. It does not mutate consumer projects, install tools into the consumer repo, read the consumer `.config/dotnet-tools.json`, upload coverage, call GitHub APIs, or store trends.
+
+The v1 contract assumes selected test projects are already instrumented with Coverlet. JUnit or other loggers are best-effort pass-throughs via `--logger`; coverage artifacts and `dotnet-test.log` files are the stable AppSurface-owned outputs.
+
+#### Already Has Coverlet
+
+```bash
+dotnet new tool-manifest
+dotnet tool install ForgeTrust.AppSurface.Cli --prerelease
+dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run
+dotnet tool run appsurface coverage run --solution ./MyApp.slnx
+dotnet tool run appsurface coverage gate --min-line 85 --min-branch 75
+```
+
+Use `--dry-run` before the first real CI run to confirm project discovery, exclusive scheduling, and artifact paths without running tests.
+
+#### Add Coverlet First
+
+```bash
+dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.msbuild
+dotnet tool run appsurface coverage run --test-project tests/MyApp.Tests/MyApp.Tests.csproj
+dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75
+```
+
+Add `coverlet.msbuild` to every selected test project that should contribute coverage. `coverage run` passes Coverlet MSBuild properties to `dotnet test`, but it intentionally does not edit project files or add packages on the consumer's behalf.
+
+Options:
+
+- `--solution`: Solution file used for discovery. Supports `.sln` and `.slnx`. When omitted, the current directory must contain exactly one `.sln` or `.slnx`.
+- `--test-project`: Repeatable explicit test project path. Supplying one or more values skips solution discovery.
+- `--output`: Coverage output directory. Defaults to `TestResults/coverage-merged`.
+- `--configuration`: Build/test configuration. Defaults to `Debug`.
+- `--parallelism`: Positive integer for non-exclusive test project concurrency. Defaults to `1`.
+- `--no-restore`: Passes `--no-restore` to build and test commands.
+- `--build`: Builds the solution once before tests, including explicit-project runs.
+- `--no-build`: Skips the solution build before tests.
+- `--include`: Coverlet include filter. Omit it to use Coverlet's project defaults.
+- `--exclude`: Coverlet exclude filter. Defaults to `[*.Tests]*,[*.IntegrationTests]*`.
+- `--dry-run`: Prints discovery, scheduling, and artifact paths without running tests.
+- `--list-projects`: Lists selected and skipped projects without running tests.
+- `--no-discover-exclusive`: Disables automatic exclusive classification for integration or Playwright-shaped projects.
+- `--exclusive-test-project`: Repeatable project path or file name that should run exclusively.
+- `--logger`: Repeatable `dotnet test` logger value forwarded as `--logger:<value>`.
+- `--test-argument`: Repeatable extra argument token appended to every `dotnet test` invocation.
+- `--no-clean`: Preserves existing AppSurface-owned output instead of cleaning known coverage artifacts first.
+- `--verbosity`: `dotnet test` verbosity. Defaults to `minimal`.
+
+Artifacts are local and private by default:
+
+- `coverage.cobertura.xml`: Merged Cobertura file consumed by `coverage gate`.
+- `summary.txt`: Human-readable merged line and branch coverage summary.
+- `timings.json`: Machine-readable build, test, merge, artifact, log, and exit-code data.
+- `reportgenerator-summary.txt`: Text summary from the package-owned ReportGenerator merge when available.
+- `projects/<project-name-hash>/coverage.cobertura.xml`: Per-project Coverlet Cobertura output.
+- `projects/<project-name-hash>/dotnet-test.log`: Full `dotnet test` output for that project.
+- `.appsurface-coverage-output`: Ownership marker that allows future runs to clean only known AppSurface-owned artifacts.
+
+`coverage run` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, the solution directory, test project directories, files, and populated directories that do not carry the AppSurface ownership marker. Use a dedicated artifact directory for CI, for example `TestResults/coverage-merged`.
+
+Use this GitHub Actions shape for a private repository that already has Coverlet instrumentation:
+
+```yaml
+- uses: actions/setup-dotnet@v5
+  with:
+    dotnet-version: 10.0.x
+- run: git fetch --no-tags --depth=1 origin main
+- run: dotnet tool restore
+- run: dotnet restore ./MyApp.slnx
+- run: dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore
+- run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75 --diff-base origin/main --min-patch-line 85 --min-patch-branch 75
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: coverage
+    path: |
+      TestResults/coverage-merged/coverage.cobertura.xml
+      TestResults/coverage-merged/summary.txt
+      TestResults/coverage-merged/timings.json
+      TestResults/coverage-merged/coverage-gate.json
+      TestResults/coverage-merged/coverage-gate.md
+      TestResults/coverage-merged/projects/**/dotnet-test.log
+```
+
+#### Coverage Run Diagnostics
+
+Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs anchor, and a log path when a project log is available.
+
+| Code | Meaning | Fix |
+| --- | --- | --- |
+| `ASCOV101` | A command option or project path is invalid. | Correct the option value, pass an existing test project, or use a valid dedicated output path. |
+| `ASCOV102` | Solution discovery or `dotnet sln <solution> list` failed. | Pass a valid `.sln`/`.slnx`, fix the solution file, or use repeated `--test-project`. |
+| `ASCOV103` | No Coverlet Cobertura files were produced. | Add `coverlet.msbuild` to each selected test project, then rerun `coverage run`. |
+| `ASCOV104` | ReportGenerator merge failed. | Inspect per-project Cobertura files and rerun with `--dry-run` to verify selected projects. |
+| `ASCOV105` | Discovery selected no test projects. | Rename test projects to match `*Tests.csproj`, or pass explicit `--test-project` values. |
+| `ASCOV106` | The merged Cobertura file is malformed. | Regenerate coverage and inspect ReportGenerator output. |
+| `ASCOV109` | The output path is unsafe or not AppSurface-owned. | Use a dedicated artifact directory such as `TestResults/coverage-merged`. |
+| `ASCOV110` | `dotnet build`, `dotnet test`, or process startup failed. | Fix the build/test failure and inspect the listed project log. |
+| `ASCOV114` | The package-owned ReportGenerator dependency was not found. | Restore or reinstall `ForgeTrust.AppSurface.Cli` so its package dependencies are present. |
+| `ASCOV120` | One or more test, merge, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix failing tests, then rerun. |
 
 ### `appsurface coverage gate`
 
@@ -130,7 +242,7 @@ Reports are private local artifacts:
 }
 ```
 
-Use this GitHub Actions shape when your repo already produces the AppSurface merged Cobertura artifact:
+Use `coverage gate` after `coverage run`, or after any other private coverage workflow that produces a local Cobertura file:
 
 ```yaml
 - uses: actions/setup-dotnet@v5
@@ -138,18 +250,23 @@ Use this GitHub Actions shape when your repo already produces the AppSurface mer
     dotnet-version: 10.0.x
 - run: git fetch --no-tags --depth=1 origin main
 - run: dotnet tool restore
-- run: ./scripts/coverage-solution.sh
+- run: dotnet restore ./MyApp.slnx
+- run: dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore
 - run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --min-patch-branch 85
 - uses: actions/upload-artifact@v4
   if: always()
   with:
-    name: coverage-gate
+    name: coverage
     path: |
+      TestResults/coverage-merged/coverage.cobertura.xml
+      TestResults/coverage-merged/summary.txt
+      TestResults/coverage-merged/timings.json
       TestResults/coverage-merged/coverage-gate.json
       TestResults/coverage-merged/coverage-gate.md
+      TestResults/coverage-merged/projects/**/dotnet-test.log
 ```
 
-For other repositories, replace `./scripts/coverage-solution.sh` and the `--coverage` path with the command and Cobertura file path your test setup actually produces.
+For repositories with an existing coverage producer, replace the `coverage run` step and the `--coverage` path with the command and Cobertura file path your test setup actually produces.
 
 Diagnostics use `ASCOV###` codes so CI logs are searchable:
 
@@ -162,8 +279,6 @@ Diagnostics use `ASCOV###` codes so CI logs are searchable:
 | `ASCOV009` | The report output path is unsafe. | Use a dedicated artifact directory, not a filesystem root or working directory. |
 | `ASCOV010` | The command could not run or read `git diff` for changed-line coverage. | Fetch the diff base or pass a valid local commit/ref to `--diff-base`. |
 | `ASCOV020` | The gate ran successfully and coverage is below threshold. | Raise coverage or lower the threshold intentionally in source control. |
-
-`appsurface coverage gate` intentionally does not expose run or merge orchestration yet. In this repository, use `./scripts/coverage-solution.sh` for AppSurface-specific run and merge orchestration until the shared runner engine is extracted into a package-owned implementation.
 
 ### `appsurface export`
 

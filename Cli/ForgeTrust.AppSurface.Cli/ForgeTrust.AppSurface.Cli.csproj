@@ -28,6 +28,7 @@
   <ItemGroup>
     <PackageReference Include="CliFx" />
     <PackageReference Include="CliWrap" />
+    <PackageReference Include="ReportGenerator" />
   </ItemGroup>
 
 </Project>
