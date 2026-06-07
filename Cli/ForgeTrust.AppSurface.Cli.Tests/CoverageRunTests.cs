@@ -184,7 +184,7 @@ public sealed class CoverageRunTests
     public async Task RunAsync_ShouldDiscoverSingleImplicitSolution()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
-        var solution = repo.WriteFile("Sample.slnx", "<Solution />");
+        repo.WriteFile("Sample.slnx", "<Solution />");
         repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
         using var current = PushCurrentDirectory(repo.Path);
         var runner = new RecordingCoverageRunProcessRunner
