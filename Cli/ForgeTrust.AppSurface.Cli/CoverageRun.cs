@@ -1137,13 +1137,28 @@ internal sealed class SystemCoverageRunProcessRunner : ICoverageRunProcessRunner
             startInfo.ArgumentList.Add(argument);
         }
 
-        using var process = Process.Start(startInfo)
-            ?? throw CoverageRunDiagnostics.Create(
+        Process process;
+        try
+        {
+            process = Process.Start(startInfo)
+                ?? throw CoverageRunDiagnostics.Create(
+                    "ASCOV110",
+                    "Failed to start dotnet.",
+                    $"Command: {fileName}.",
+                    "Verify the .NET SDK is installed and available on PATH.",
+                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            throw CoverageRunDiagnostics.Create(
                 "ASCOV110",
                 "Failed to start dotnet.",
-                $"Command: {fileName}.",
+                $"Command: {fileName}. {ex.Message}",
                 "Verify the .NET SDK is installed and available on PATH.",
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+        }
+
+        using var processScope = process;
         var standardOutputTask = process.StandardOutput.ReadToEndAsync();
         var standardErrorTask = process.StandardError.ReadToEndAsync();
         try
@@ -1332,7 +1347,10 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
         }
 
         foreach (var versionDirectory in Directory.EnumerateDirectories(packageDirectory)
-            .OrderByDescending(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+            .Select(path => new { Path = path, Name = Path.GetFileName(path) })
+            .OrderByDescending(item => ParsePackageVersionOrZero(item.Name))
+            .ThenByDescending(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(item => item.Path))
         {
             if (string.Equals(Path.GetFileName(versionDirectory), Version, StringComparison.OrdinalIgnoreCase))
             {
@@ -1344,6 +1362,11 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
                 yield return Path.Join(versionDirectory, "tools", target, "ReportGenerator.dll");
             }
         }
+    }
+
+    private static global::System.Version ParsePackageVersionOrZero(string? value)
+    {
+        return global::System.Version.TryParse(value, out var version) ? version : new global::System.Version(0, 0);
     }
 
     private static string?[] ResolvePackageRoots()
@@ -1512,10 +1535,10 @@ internal static class CoverageRunDiagnostics
         builder.Append(code).Append(' ').Append(problem);
         builder.Append(" Cause: ").Append(cause);
         builder.Append(" Fix: ").Append(fix);
-        builder.Append(" Docs: ").Append(docs).Append('.');
+        builder.Append(" Docs: ").Append(docs);
         if (!string.IsNullOrWhiteSpace(logPath))
         {
-            builder.Append(" Log: ").Append(logPath).Append('.');
+            builder.Append(" Log: ").Append(logPath);
         }
 
         return new CommandException(builder.ToString());

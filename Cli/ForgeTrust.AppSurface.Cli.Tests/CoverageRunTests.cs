@@ -763,6 +763,23 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public void CoverageRunDiagnostics_ShouldLeaveDocsAndLogPathsCopyable()
+    {
+        var exception = CoverageRunDiagnostics.Create(
+            "ASCOV999",
+            "Problem.",
+            "Cause.",
+            "Fix.",
+            "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics",
+            "/tmp/appsurface/dotnet-test.log");
+
+        Assert.Contains("Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics Log:", exception.Message, StringComparison.Ordinal);
+        Assert.EndsWith("Log: /tmp/appsurface/dotnet-test.log", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("coverage-run-diagnostics.", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet-test.log.", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ShouldRejectConflictingBuildOptions()
     {
         var command = new CoverageRunCommand(CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator()))
@@ -882,6 +899,19 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public void ReportGeneratorPackageLocator_ShouldOrderUnpinnedNuGetVersionsSemantically()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        repo.WriteFile(Path.Join("reportgenerator", "5.5.9", "tools", "net9.0", "ReportGenerator.dll"), "fake");
+        var newer = repo.WriteFile(Path.Join("reportgenerator", "5.5.11", "tools", "net9.0", "ReportGenerator.dll"), "fake");
+        var locator = new ReportGeneratorPackageLocator("/missing-package-base", [repo.Path]);
+
+        var resolved = locator.ResolveReportGeneratorDll();
+
+        Assert.Equal(newer, resolved);
+    }
+
+    [Fact]
     public void ReportGeneratorPackageLocator_ShouldThrowDiagnosticWhenDependencyIsMissing()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -912,6 +942,20 @@ public sealed class CoverageRunTests
         Assert.Equal(0, result.ExitCode);
         Assert.False(string.IsNullOrWhiteSpace(result.Output));
         Assert.Equal(result.Output, File.ReadAllText(outputFile));
+    }
+
+    [Fact]
+    public async Task SystemCoverageRunProcessRunner_ShouldWrapStartFailureInDiagnostic()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var runner = new SystemCoverageRunProcessRunner();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => runner.RunAsync("definitely-not-a-real-dotnet-command", [], repo.Path, CancellationToken.None));
+
+        Assert.Contains("ASCOV110", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Failed to start dotnet", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("definitely-not-a-real-dotnet-command", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
