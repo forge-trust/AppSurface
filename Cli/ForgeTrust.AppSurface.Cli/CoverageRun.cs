@@ -220,6 +220,30 @@ internal sealed partial class CoverageRunCommand : ICommand
 /// <summary>
 /// Request for running and merging coverage from one or more .NET test projects.
 /// </summary>
+/// <remarks>
+/// The request is the internal contract behind the public <c>coverage run</c> command. Paths are
+/// interpreted relative to the current working directory for explicit-project runs, or relative to
+/// the solution directory after solution discovery. The workflow never mutates consumer projects:
+/// Coverlet must already be referenced by each selected test project, logger arguments are forwarded
+/// verbatim, and extra test arguments are appended after AppSurface's required coverage properties.
+/// </remarks>
+/// <param name="SolutionPath">Optional <c>.sln</c> or <c>.slnx</c> path used for discovery.</param>
+/// <param name="TestProjects">Explicit test project paths. Supplying at least one path skips solution discovery.</param>
+/// <param name="OutputDirectory">Coverage artifact directory. Existing content must be AppSurface-owned unless cleaning is disabled.</param>
+/// <param name="Configuration">Build and test configuration forwarded to <c>dotnet build</c> and <c>dotnet test</c>.</param>
+/// <param name="Parallelism">Maximum concurrent non-exclusive test projects.</param>
+/// <param name="NoRestore">Whether build and test commands should pass <c>--no-restore</c>.</param>
+/// <param name="Build">Whether to build once before tests, including explicit-project runs.</param>
+/// <param name="NoBuild">Whether to skip AppSurface's build phase and forward <c>--no-build</c> to <c>dotnet test</c>.</param>
+/// <param name="IncludeFilter">Optional Coverlet include filter.</param>
+/// <param name="ExcludeFilter">Coverlet exclude filter. Commas are escaped before forwarding to MSBuild.</param>
+/// <param name="DryRun">Whether to print discovery and artifact paths without running tests or cleaning output.</param>
+/// <param name="NoDiscoverExclusive">Whether automatic integration/Playwright exclusive classification is disabled.</param>
+/// <param name="ExclusiveTestProjects">Explicit project path or file-name matches that should run exclusively.</param>
+/// <param name="Loggers">Logger values forwarded to <c>dotnet test</c> as repeatable <c>--logger:</c> arguments.</param>
+/// <param name="TestArguments">Extra tokens appended to each <c>dotnet test</c> invocation.</param>
+/// <param name="Clean">Whether AppSurface-owned output is cleaned before writing new artifacts.</param>
+/// <param name="Verbosity">Verbosity forwarded to <c>dotnet test</c>.</param>
 internal sealed record CoverageRunRequest(
     string? SolutionPath,
     IReadOnlyList<string> TestProjects,
@@ -242,6 +266,12 @@ internal sealed record CoverageRunRequest(
 /// <summary>
 /// Result of a public coverage run.
 /// </summary>
+/// <remarks>
+/// A result is returned only after discovery, test execution, merge, summary, and timings steps have
+/// finished. Diagnostic failures throw <see cref="CommandException"/> before this result is created.
+/// When tests fail after writing coverage, <see cref="Success"/> is <see langword="false"/> while
+/// merged artifacts are still available for inspection.
+/// </remarks>
 /// <param name="Success">Whether all required test, merge, and artifact steps succeeded.</param>
 /// <param name="OutputDirectory">Absolute output directory.</param>
 /// <param name="CoveragePath">Absolute merged Cobertura path.</param>
@@ -307,8 +337,8 @@ internal sealed class CoverageRunWorkflow
 
         CoverageRunOutputGuard.Prepare(outputDirectory, resolution.SolutionDirectory, resolution.Projects, request.Clean);
         var runStarted = _timeProvider.GetTimestamp();
-        var buildSeconds = await BuildIfNeededAsync(request, resolution, console, cancellationToken);
-        var projectResults = await RunScheduledProjectsAsync(request, resolution, outputDirectory, console, cancellationToken);
+        var build = await BuildIfNeededAsync(request, resolution, console, cancellationToken);
+        var projectResults = await RunScheduledProjectsAsync(request, resolution, outputDirectory, build.TestsShouldSkipBuild, console, cancellationToken);
         await ReplayLogsAsync(projectResults, console, cancellationToken);
 
         var coverageFiles = Directory.Exists(Path.Join(outputDirectory, "projects"))
@@ -365,10 +395,11 @@ internal sealed class CoverageRunWorkflow
             resolution,
             outputDirectory,
             mergedCoveragePath,
-            buildSeconds,
+            build.Seconds,
             mergeSeconds,
             ElapsedSeconds(runStarted),
             merge.ExitCode,
+            coverageFiles.Length,
             projectResults,
             cancellationToken);
 
@@ -576,7 +607,7 @@ internal sealed class CoverageRunWorkflow
             || string.Equals(candidate, Path.GetFileName(fullPath), StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<long> BuildIfNeededAsync(
+    private async Task<CoverageRunBuildResult> BuildIfNeededAsync(
         CoverageRunRequest request,
         CoverageProjectResolution resolution,
         IConsole console,
@@ -585,13 +616,15 @@ internal sealed class CoverageRunWorkflow
         var shouldBuild = request.Build || (!request.NoBuild && resolution.SolutionPath is not null && request.TestProjects.Count == 0);
         if (!shouldBuild)
         {
-            await console.Output.WriteLineAsync("Build: skipped; test projects will build as needed.");
-            return 0;
+            await console.Output.WriteLineAsync(request.NoBuild
+                ? "Build: skipped by --no-build; test projects will run with --no-build."
+                : "Build: skipped; test projects will build as needed.");
+            return new CoverageRunBuildResult(0, request.NoBuild);
         }
 
         if (resolution.SolutionPath is null)
         {
-            return await BuildExplicitProjectsAsync(request, resolution, console, cancellationToken);
+            return new CoverageRunBuildResult(await BuildExplicitProjectsAsync(request, resolution, console, cancellationToken), TestsShouldSkipBuild: true);
         }
 
         await console.Output.WriteLineAsync($"Building {resolution.SolutionPath}...");
@@ -614,7 +647,7 @@ internal sealed class CoverageRunWorkflow
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
         }
 
-        return ElapsedSeconds(started);
+        return new CoverageRunBuildResult(ElapsedSeconds(started), TestsShouldSkipBuild: true);
     }
 
     private async Task<long> BuildExplicitProjectsAsync(
@@ -653,6 +686,7 @@ internal sealed class CoverageRunWorkflow
         CoverageRunRequest request,
         CoverageProjectResolution resolution,
         string outputDirectory,
+        bool skipBuildDuringTests,
         IConsole console,
         CancellationToken cancellationToken)
     {
@@ -665,7 +699,7 @@ internal sealed class CoverageRunWorkflow
             if (project.IsExclusive)
             {
                 await DrainActiveAsync(active, results);
-                results[i] = await RunProjectAsync(request, resolution, outputDirectory, project, i, console, cancellationToken);
+                results[i] = await RunProjectAsync(request, resolution, outputDirectory, project, i, skipBuildDuringTests, console, cancellationToken);
                 continue;
             }
 
@@ -674,7 +708,7 @@ internal sealed class CoverageRunWorkflow
                 await DrainOneAsync(active, results);
             }
 
-            active.Add(RunProjectAsync(request, resolution, outputDirectory, project, i, console, cancellationToken));
+            active.Add(RunProjectAsync(request, resolution, outputDirectory, project, i, skipBuildDuringTests, console, cancellationToken));
         }
 
         await DrainActiveAsync(active, results);
@@ -703,6 +737,7 @@ internal sealed class CoverageRunWorkflow
         string outputDirectory,
         CoverageRunProject project,
         int index,
+        bool skipBuildDuringTests,
         IConsole console,
         CancellationToken cancellationToken)
     {
@@ -714,7 +749,7 @@ internal sealed class CoverageRunWorkflow
         await console.Output.WriteLineAsync(
             $"[{index + 1}/{resolution.Projects.Count}] starting {project.RelativePath}{(project.IsExclusive ? " (exclusive)" : string.Empty)}");
 
-        var args = CreateTestArguments(request, project, projectOutputDirectory);
+        var args = CreateTestArguments(request, project, projectOutputDirectory, skipBuildDuringTests);
         var processResult = await _processRunner.RunAsync("dotnet", args, resolution.SolutionDirectory, cancellationToken, outputFile: logFile);
         var seconds = ElapsedSeconds(started);
 
@@ -731,7 +766,8 @@ internal sealed class CoverageRunWorkflow
     private static IReadOnlyList<string> CreateTestArguments(
         CoverageRunRequest request,
         CoverageRunProject project,
-        string projectOutputDirectory)
+        string projectOutputDirectory,
+        bool skipBuildDuringTests)
     {
         var args = new List<string>
         {
@@ -765,6 +801,11 @@ internal sealed class CoverageRunWorkflow
             args.Add("--no-restore");
         }
 
+        if (skipBuildDuringTests)
+        {
+            args.Add("--no-build");
+        }
+
         args.AddRange(request.TestArguments);
         return args;
     }
@@ -776,18 +817,42 @@ internal sealed class CoverageRunWorkflow
             await console.Output.WriteLineAsync($"--- BEGIN {result.Project.RelativePath} ---");
             if (File.Exists(result.LogFile))
             {
-                var log = await File.ReadAllTextAsync(result.LogFile, cancellationToken);
-                if (!string.IsNullOrEmpty(log))
+                const int maxReplayCharacters = 80_000;
+                var log = await ReadLogPrefixAsync(result.LogFile, maxReplayCharacters, cancellationToken);
+                if (!string.IsNullOrEmpty(log.Text))
                 {
-                    const int maxReplayCharacters = 80_000;
-                    await console.Output.WriteAsync(log.Length > maxReplayCharacters
-                        ? log[..maxReplayCharacters] + Environment.NewLine + "[log truncated; see full log on disk]" + Environment.NewLine
-                        : log);
+                    await console.Output.WriteAsync(log.Truncated
+                        ? log.Text + Environment.NewLine + "[log truncated; see full log on disk]" + Environment.NewLine
+                        : log.Text);
                 }
             }
 
             await console.Output.WriteLineAsync($"--- END {result.Project.RelativePath} (exit {result.ExitCode}) ---");
         }
+    }
+
+    private static async Task<CoverageLogPrefix> ReadLogPrefixAsync(
+        string logFile,
+        int maxCharacters,
+        CancellationToken cancellationToken)
+    {
+        using var stream = File.OpenRead(logFile);
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var buffer = new char[maxCharacters + 1];
+        var total = 0;
+        while (total < buffer.Length)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory(total, buffer.Length - total), cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+        }
+
+        var truncated = total > maxCharacters;
+        return new CoverageLogPrefix(new string(buffer, 0, Math.Min(total, maxCharacters)), truncated);
     }
 
     private static async Task PrintDiscoveryAsync(
@@ -873,6 +938,7 @@ internal sealed class CoverageRunWorkflow
         long mergeSeconds,
         long totalSeconds,
         int mergeExitCode,
+        int coverageFileCount,
         IReadOnlyList<CoverageProjectRunResult> projectResults,
         CancellationToken cancellationToken)
     {
@@ -894,7 +960,7 @@ internal sealed class CoverageRunWorkflow
             },
             artifacts = new
             {
-                coverageFiles = projectResults.Count,
+                coverageFiles = coverageFileCount,
                 cobertura = coveragePath,
             },
             projects = projectResults
@@ -945,20 +1011,47 @@ internal sealed class CoverageRunWorkflow
     private static string Normalize(string path) => path.Replace('\\', '/');
 }
 
+/// <summary>
+/// Resolved project set used by the coverage runner after discovery or explicit selection.
+/// </summary>
+/// <param name="SolutionPath">Absolute solution path when discovery was solution-based; otherwise <see langword="null"/>.</param>
+/// <param name="SolutionDirectory">Directory used as the working directory for build, test, and discovery commands.</param>
+/// <param name="Projects">Selected test projects in scheduled order.</param>
+/// <param name="SkippedProjects">Projects discovered from the solution but excluded from coverage execution.</param>
 internal sealed record CoverageProjectResolution(
     string? SolutionPath,
     string SolutionDirectory,
     IReadOnlyList<CoverageRunProject> Projects,
     IReadOnlyList<CoverageSkippedProject> SkippedProjects);
 
+/// <summary>
+/// Selected test project and scheduling metadata.
+/// </summary>
+/// <param name="RelativePath">Project path as displayed to users and recorded in timings.</param>
+/// <param name="FullPath">Absolute project path passed to <c>dotnet test</c>.</param>
+/// <param name="Slug">Stable artifact directory segment allocated from the project path.</param>
+/// <param name="IsExclusive">Whether the project must run outside parallel batches.</param>
 internal sealed record CoverageRunProject(
     string RelativePath,
     string FullPath,
     string Slug,
     bool IsExclusive);
 
+/// <summary>
+/// Project that solution discovery intentionally did not include.
+/// </summary>
+/// <param name="ProjectPath">Path reported by <c>dotnet sln list</c>.</param>
+/// <param name="Reason">Human-readable reason the project was skipped.</param>
 internal sealed record CoverageSkippedProject(string ProjectPath, string Reason);
 
+/// <summary>
+/// Per-project test execution result.
+/// </summary>
+/// <param name="Index">Original scheduled index.</param>
+/// <param name="Project">Project metadata.</param>
+/// <param name="Seconds">Elapsed whole seconds for the project test command.</param>
+/// <param name="ExitCode">Test process exit code.</param>
+/// <param name="LogFile">Per-project log file path.</param>
 internal sealed record CoverageProjectRunResult(
     int Index,
     CoverageRunProject Project,
@@ -967,13 +1060,38 @@ internal sealed record CoverageProjectRunResult(
     string LogFile);
 
 /// <summary>
+/// Build phase result used to coordinate later <c>dotnet test</c> arguments.
+/// </summary>
+/// <param name="Seconds">Elapsed whole seconds spent in the AppSurface build phase.</param>
+/// <param name="TestsShouldSkipBuild">Whether test commands should pass <c>--no-build</c>.</param>
+internal sealed record CoverageRunBuildResult(long Seconds, bool TestsShouldSkipBuild);
+
+/// <summary>
+/// Bounded prefix of a project log replayed to the console.
+/// </summary>
+/// <param name="Text">Log text prefix.</param>
+/// <param name="Truncated">Whether additional log content remains on disk.</param>
+internal sealed record CoverageLogPrefix(string Text, bool Truncated);
+
+/// <summary>
 /// Runs external processes for the coverage run workflow.
 /// </summary>
+/// <remarks>
+/// Implementations must preserve command output for diagnostics and honor cancellation promptly.
+/// Callers depend on <c>outputFile</c> containing the same captured output returned in
+/// <see cref="CoverageRunProcessResult.Output"/> when a path is supplied.
+/// </remarks>
 internal interface ICoverageRunProcessRunner
 {
     /// <summary>
     /// Runs a process and returns its exit code plus captured output.
     /// </summary>
+    /// <param name="fileName">Executable name or path.</param>
+    /// <param name="arguments">Argument tokens passed without shell interpolation.</param>
+    /// <param name="workingDirectory">Working directory for the child process.</param>
+    /// <param name="cancellationToken">Cancellation token that should terminate the process tree.</param>
+    /// <param name="outputFile">Optional log file that receives captured standard output and error.</param>
+    /// <returns>Process exit code and captured output.</returns>
     Task<CoverageRunProcessResult> RunAsync(
         string fileName,
         IReadOnlyList<string> arguments,
@@ -985,10 +1103,21 @@ internal interface ICoverageRunProcessRunner
 /// <summary>
 /// Result of running a coverage workflow process.
 /// </summary>
+/// <param name="ExitCode">Child process exit code.</param>
+/// <param name="Output">Captured standard output followed by captured standard error.</param>
 internal sealed record CoverageRunProcessResult(int ExitCode, string Output);
 
+/// <summary>
+/// Default process runner used by the public coverage command.
+/// </summary>
+/// <remarks>
+/// The runner does not invoke a shell, so arguments are passed as literal tokens. On cancellation it
+/// kills the entire child process tree before rethrowing, which avoids orphaned <c>dotnet test</c>
+/// processes and leaves any captured output available to the caller.
+/// </remarks>
 internal sealed class SystemCoverageRunProcessRunner : ICoverageRunProcessRunner
 {
+    /// <inheritdoc />
     public async Task<CoverageRunProcessResult> RunAsync(
         string fileName,
         IReadOnlyList<string> arguments,
@@ -1015,9 +1144,25 @@ internal sealed class SystemCoverageRunProcessRunner : ICoverageRunProcessRunner
                 $"Command: {fileName}.",
                 "Verify the .NET SDK is installed and available on PATH.",
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
-        var standardOutputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var standardErrorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
+        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
+            await process.WaitForExitAsync();
+            _ = await standardOutputTask;
+            _ = await standardErrorTask;
+            throw;
+        }
+
         var standardOutput = await standardOutputTask;
         var standardError = await standardErrorTask;
         var output = standardOutput + standardError;
@@ -1034,11 +1179,20 @@ internal sealed class SystemCoverageRunProcessRunner : ICoverageRunProcessRunner
 /// <summary>
 /// Runs AppSurface's package-owned ReportGenerator dependency.
 /// </summary>
+/// <remarks>
+/// The merge contract accepts one or more per-project Cobertura files and writes ReportGenerator
+/// output into a caller-owned directory. Implementations must not read consumer tool manifests or
+/// require repositories to install ReportGenerator themselves.
+/// </remarks>
 internal interface ICoverageRunReportGenerator
 {
     /// <summary>
     /// Merges Cobertura coverage files into one ReportGenerator output directory.
     /// </summary>
+    /// <param name="coverageFiles">Cobertura files emitted by instrumented test projects.</param>
+    /// <param name="outputDirectory">ReportGenerator output directory for this run.</param>
+    /// <param name="cancellationToken">Cancellation token for the merge process.</param>
+    /// <returns>Merge exit code plus expected Cobertura and text-summary paths.</returns>
     Task<CoverageRunMergeResult> MergeAsync(
         IReadOnlyList<string> coverageFiles,
         string outputDirectory,
@@ -1048,19 +1202,31 @@ internal interface ICoverageRunReportGenerator
 /// <summary>
 /// Result of a ReportGenerator merge.
 /// </summary>
+/// <param name="ExitCode">ReportGenerator process exit code.</param>
+/// <param name="CoberturaPath">Expected merged Cobertura file path.</param>
+/// <param name="SummaryPath">Expected ReportGenerator text summary path.</param>
 internal sealed record CoverageRunMergeResult(int ExitCode, string CoberturaPath, string SummaryPath);
 
+/// <summary>
+/// ReportGenerator-backed merge implementation for <c>coverage run</c>.
+/// </summary>
 internal sealed class CoverageRunReportGenerator : ICoverageRunReportGenerator
 {
     private readonly ICoverageRunProcessRunner _processRunner;
     private readonly IReportGeneratorPackageLocator _locator;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CoverageRunReportGenerator"/> class.
+    /// </summary>
+    /// <param name="processRunner">Process runner used to execute ReportGenerator through <c>dotnet</c>.</param>
+    /// <param name="locator">Locator for the AppSurface-owned ReportGenerator assembly.</param>
     public CoverageRunReportGenerator(ICoverageRunProcessRunner processRunner, IReportGeneratorPackageLocator locator)
     {
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
         _locator = locator ?? throw new ArgumentNullException(nameof(locator));
     }
 
+    /// <inheritdoc />
     public async Task<CoverageRunMergeResult> MergeAsync(
         IReadOnlyList<string> coverageFiles,
         string outputDirectory,
@@ -1084,6 +1250,11 @@ internal sealed class CoverageRunReportGenerator : ICoverageRunReportGenerator
 /// <summary>
 /// Locates the ReportGenerator package restored as a dependency of the AppSurface CLI package.
 /// </summary>
+/// <remarks>
+/// Packaged local tools carry ReportGenerator under the CLI base directory. Source and development
+/// runs may instead rely on NuGet's package cache, so the locator probes the pinned dependency first
+/// and then other installed ReportGenerator package versions as a compatibility fallback.
+/// </remarks>
 internal interface IReportGeneratorPackageLocator
 {
     /// <summary>
@@ -1095,6 +1266,7 @@ internal interface IReportGeneratorPackageLocator
 internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLocator
 {
     internal const string Version = "5.5.10";
+    private static readonly string[] TargetFrameworks = ["net10.0", "net9.0", "net8.0"];
     private readonly string _packageBaseDirectory;
     private readonly IReadOnlyList<string?> _packageRoots;
 
@@ -1116,7 +1288,7 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
 
     public string ResolveReportGeneratorDll()
     {
-        foreach (var target in new[] { "net10.0", "net9.0", "net8.0" })
+        foreach (var target in TargetFrameworks)
         {
             var packageOwned = Path.Join(_packageBaseDirectory, "reportgenerator", target, "ReportGenerator.dll");
             if (File.Exists(packageOwned))
@@ -1132,9 +1304,8 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
 
         foreach (var root in roots)
         {
-            foreach (var target in new[] { "net10.0", "net9.0", "net8.0" })
+            foreach (var candidate in EnumerateNuGetCacheCandidates(root))
             {
-                var candidate = Path.Join(root, "reportgenerator", Version, "tools", target, "ReportGenerator.dll");
                 if (File.Exists(candidate))
                 {
                     return candidate;
@@ -1148,6 +1319,34 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
             $"Expected ReportGenerator {Version} under the NuGet package cache.",
             "Restore or reinstall ForgeTrust.AppSurface.Cli so its package-owned dependencies are present.",
             "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+    }
+
+    private static IEnumerable<string> EnumerateNuGetCacheCandidates(string root)
+    {
+        foreach (var target in TargetFrameworks)
+        {
+            yield return Path.Join(root, "reportgenerator", Version, "tools", target, "ReportGenerator.dll");
+        }
+
+        var packageDirectory = Path.Join(root, "reportgenerator");
+        if (!Directory.Exists(packageDirectory))
+        {
+            yield break;
+        }
+
+        foreach (var versionDirectory in Directory.EnumerateDirectories(packageDirectory)
+            .OrderByDescending(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+        {
+            if (string.Equals(Path.GetFileName(versionDirectory), Version, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (var target in TargetFrameworks)
+            {
+                yield return Path.Join(versionDirectory, "tools", target, "ReportGenerator.dll");
+            }
+        }
     }
 
     private static string?[] ResolvePackageRoots()

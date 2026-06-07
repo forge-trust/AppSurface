@@ -6,12 +6,20 @@ CLI_PROJECT="$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.c
 BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-Release}"
 PACKAGE_VERSION_SUFFIX="${PACKAGE_VERSION_SUFFIX:-coverage-run-smoke}"
 PACKAGE_VERSION="0.1.0-${PACKAGE_VERSION_SUFFIX}"
-WORK_DIR="${WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/appsurface-coverage-run-smoke.XXXXXX")}"
+AUTO_WORK_DIR=0
+if [[ -z "${WORK_DIR:-}" ]]; then
+  WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/appsurface-coverage-run-smoke.XXXXXX")"
+  AUTO_WORK_DIR=1
+fi
 PACKAGE_SOURCE="$WORK_DIR/packages"
 SMOKE_REPO="$WORK_DIR/repo"
 PACK_NUGET_PACKAGES="${PACK_NUGET_PACKAGES:-$WORK_DIR/pack-nuget}"
 SMOKE_NUGET_PACKAGES="${SMOKE_NUGET_PACKAGES:-$WORK_DIR/smoke-nuget}"
 SMOKE_DOTNET_CLI_HOME="${SMOKE_DOTNET_CLI_HOME:-$WORK_DIR/dotnet-home}"
+
+if [[ "$AUTO_WORK_DIR" == "1" ]]; then
+  trap 'rm -rf "$WORK_DIR"' EXIT
+fi
 
 mkdir -p "$PACKAGE_SOURCE" "$SMOKE_REPO" "$PACK_NUGET_PACKAGES" "$SMOKE_NUGET_PACKAGES" "$SMOKE_DOTNET_CLI_HOME"
 echo "Smoke workspace: $WORK_DIR"

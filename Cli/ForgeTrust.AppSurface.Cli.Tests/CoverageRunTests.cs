@@ -78,6 +78,7 @@ public sealed class CoverageRunTests
         Assert.Contains("/p:Include=[Sample]*", testCommand.Arguments);
         Assert.Contains("/p:Exclude=[*.Tests]*%2c[*.IntegrationTests]*", testCommand.Arguments);
         Assert.Contains("--filter", testCommand.Arguments);
+        Assert.DoesNotContain("--no-build", testCommand.Arguments);
         Assert.DoesNotContain("[ForgeTrust.AppSurface.", string.Join(" ", testCommand.Arguments), StringComparison.Ordinal);
         Assert.DoesNotContain("build", runner.Commands.Select(command => command.Arguments.FirstOrDefault()));
     }
@@ -125,6 +126,7 @@ public sealed class CoverageRunTests
         Assert.Contains(project, buildCommand.Arguments);
         Assert.Contains("--no-restore", buildCommand.Arguments);
         Assert.Contains("--no-restore", testCommand.Arguments);
+        Assert.Contains("--no-build", testCommand.Arguments);
     }
 
     [Fact]
@@ -150,7 +152,8 @@ public sealed class CoverageRunTests
 
         Assert.True(result.Success);
         Assert.Contains(runner.Commands, command => command.Arguments.FirstOrDefault() == "sln");
-        Assert.Contains(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
+        var testCommand = Assert.Single(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
+        Assert.Contains("--no-build", testCommand.Arguments);
         Assert.DoesNotContain(runner.Commands, command => command.Arguments.FirstOrDefault() == "build");
     }
 
@@ -177,7 +180,31 @@ public sealed class CoverageRunTests
 
         Assert.True(result.Success);
         var buildCommand = Assert.Single(runner.Commands, command => command.Arguments.FirstOrDefault() == "build");
+        var testCommand = Assert.Single(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
         Assert.Contains(solution, buildCommand.Arguments);
+        Assert.Contains("--no-build", testCommand.Arguments);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldWriteActualCoverageFileCountToTimings()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var first = repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
+        var second = repo.WriteFile("tests/Second.Tests/Second.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            ProjectsWithoutCoverage = { second },
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(TestProjects: [first, second]);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var timings = File.ReadAllText(Path.Join(repo.Path, "TestResults", "coverage-merged", "timings.json"));
+        Assert.Contains("\"coverageFiles\": 1", timings, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -828,6 +855,33 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public void ReportGeneratorPackageLocator_ShouldPreferPinnedNuGetCacheDependency()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var pinned = repo.WriteFile(
+            Path.Join("reportgenerator", ReportGeneratorPackageLocator.Version, "tools", "net8.0", "ReportGenerator.dll"),
+            "fake");
+        repo.WriteFile(Path.Join("reportgenerator", "9.9.9", "tools", "net10.0", "ReportGenerator.dll"), "fake");
+        var locator = new ReportGeneratorPackageLocator("/missing-package-base", [repo.Path]);
+
+        var resolved = locator.ResolveReportGeneratorDll();
+
+        Assert.Equal(pinned, resolved);
+    }
+
+    [Fact]
+    public void ReportGeneratorPackageLocator_ShouldResolveUnpinnedNuGetCacheDependency()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var dll = repo.WriteFile(Path.Join("reportgenerator", "5.5.11", "tools", "net9.0", "ReportGenerator.dll"), "fake");
+        var locator = new ReportGeneratorPackageLocator("/missing-package-base", [repo.Path]);
+
+        var resolved = locator.ResolveReportGeneratorDll();
+
+        Assert.Equal(dll, resolved);
+    }
+
+    [Fact]
     public void ReportGeneratorPackageLocator_ShouldThrowDiagnosticWhenDependencyIsMissing()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -858,6 +912,22 @@ public sealed class CoverageRunTests
         Assert.Equal(0, result.ExitCode);
         Assert.False(string.IsNullOrWhiteSpace(result.Output));
         Assert.Equal(result.Output, File.ReadAllText(outputFile));
+    }
+
+    [Fact]
+    public async Task SystemCoverageRunProcessRunner_ShouldCancelAndKillProcessTree()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var runner = new SystemCoverageRunProcessRunner();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => runner.RunAsync("/bin/sh", ["-c", "sleep 30"], repo.Path, cancellation.Token));
     }
 
     private static async Task AssertUnsafeOutputAsync(
@@ -934,6 +1004,7 @@ public sealed class CoverageRunTests
         public int TestExitCode { get; init; }
         public string TestOutput { get; init; } = "test output";
         public Dictionary<string, TimeSpan> TestDelays { get; } = [];
+        public HashSet<string> ProjectsWithoutCoverage { get; } = [];
         public List<RecordedCommand> Commands { get; } = [];
 
         public async Task<CoverageRunProcessResult> RunAsync(
@@ -970,7 +1041,7 @@ public sealed class CoverageRunTests
                     await File.WriteAllTextAsync(outputFile, TestOutput, cancellationToken);
                 }
 
-                if (WriteCoverageFiles)
+                if (WriteCoverageFiles && !ProjectsWithoutCoverage.Contains(arguments[1]))
                 {
                     var coverletOutput = arguments.Single(argument => argument.StartsWith("/p:CoverletOutput=", StringComparison.Ordinal))["/p:CoverletOutput=".Length..];
                     var projectDirectory = Path.GetDirectoryName(coverletOutput)!;

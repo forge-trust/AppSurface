@@ -14,7 +14,7 @@ namespace ForgeTrust.AppSurface.Cli;
 /// merges local Cobertura artifacts, and <c>coverage gate</c>, which evaluates the merged coverage
 /// without requiring a hosted coverage service.
 /// </remarks>
-[Command("coverage", Description = "Inspect AppSurface coverage commands for private local coverage workflows.")]
+[Command("coverage", Description = "Inspect AppSurface coverage commands for local coverage execution and threshold enforcement.")]
 internal sealed partial class CoverageCommand : ICommand
 {
     /// <summary>
