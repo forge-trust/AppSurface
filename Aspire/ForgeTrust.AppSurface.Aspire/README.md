@@ -24,7 +24,7 @@ AppSurface has cut the first coordinated `v0.1.0` release candidate. Before inst
 dotnet add package ForgeTrust.AppSurface.Aspire
 ```
 
-## Runnable Example
+## Working Example
 
 The repository includes a local Aspire AppHost proof at [`examples/aspire-apphost`](../../examples/aspire-apphost/README.md). It composes the existing web example through two Aspire components so the resource graph is not just a direct `AddProject` call.
 

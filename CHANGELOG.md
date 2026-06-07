@@ -25,7 +25,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Web browser status-page re-execution now preserves original browser error status codes while direct reserved preview routes continue to render normally.
 - Package consumers now have a package-first AppSurface Web quickstart that starts from `dotnet new web`, installs `ForgeTrust.AppSurface.Web`, and verifies the first route without cloning the repository.
 - AppSurface Docs Turbo-frame navigation now preserves cross-page heading fragments, so generated package chooser links land directly on the intended quickstart section.
-- `ForgeTrust.AppSurface.Aspire` now has a runnable local Aspire AppHost example, richer package guidance, and an overridable `AspireProfile.PassThroughArgs` seam for profiles that intentionally pass known AppHost arguments.
+- `ForgeTrust.AppSurface.Aspire` now has a working local Aspire AppHost example, richer package guidance, and an overridable `AspireProfile.PassThroughArgs` seam for profiles that intentionally pass known AppHost arguments.
 
 ## 0.1.0-rc.2 - 2026-06-03
 
