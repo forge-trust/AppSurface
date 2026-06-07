@@ -26,9 +26,11 @@ internal sealed class ReleasePublishing
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Structured workflow outputs for GitHub Release creation.</returns>
     /// <remarks>
-    /// The publish path is create-only: it verifies annotated tag shape, reachability from <c>origin/main</c>, prerelease package publication,
-    /// absence of an existing GitHub Release, and presence of <c>releases/v{version}.md</c> in the tag commit. The method writes the tag's
-    /// release note to a temporary file so workflows can pass a stable notes path to GitHub's release action.
+    /// <see cref="PublishAsync"/> is create-only: it verifies annotated tag shape, reachability from <c>origin/main</c>, prerelease package
+    /// publication, absence of an existing GitHub Release, and presence of <c>releases/v{version}.md</c> in the tag commit. The tag commit
+    /// must also contain the release sidecar, release manifest, and release evidence bundle; missing or invalid tag-bound artifacts fail fast
+    /// before a GitHub Release is created. The method writes the tag's release note to a temporary file so workflows can pass a stable notes
+    /// path to GitHub's release action.
     /// </remarks>
     internal async Task<PublishOutputs> PublishAsync(ReleaseOptions options, CancellationToken cancellationToken)
     {
