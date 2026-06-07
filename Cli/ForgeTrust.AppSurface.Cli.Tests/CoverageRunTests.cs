@@ -105,6 +105,109 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task RunAsync_NoBuild_ShouldSkipSolutionBuildAndRunDiscoveredProjects()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var solution = repo.WriteFile("Sample.slnx", "<Solution />");
+        repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            SlnListOutput = """
+                Project(s)
+                ----------
+                tests/Sample.Tests/Sample.Tests.csproj
+                """
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(SolutionPath: solution, NoBuild: true);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains(runner.Commands, command => command.Arguments.FirstOrDefault() == "sln");
+        Assert.Contains(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
+        Assert.DoesNotContain(runner.Commands, command => command.Arguments.FirstOrDefault() == "build");
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldCleanOwnedOutputByDefault()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        repo.WriteFile("TestResults/coverage-merged/.appsurface-coverage-output", "AppSurface coverage output directory");
+        var oldCoverage = repo.WriteFile("TestResults/coverage-merged/coverage.cobertura.xml", "old coverage");
+        var oldJunit = repo.WriteFile("TestResults/coverage-merged/junit-old.xml", "old junit");
+        var oldProjectArtifact = repo.WriteFile("TestResults/coverage-merged/projects/old/coverage.cobertura.xml", "old project");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(TestProjects: [project]);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.False(File.Exists(oldJunit));
+        Assert.False(File.Exists(oldProjectArtifact));
+        Assert.NotEqual("old coverage", File.ReadAllText(oldCoverage));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldRejectMissingExplicitTestProject()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(TestProjects: ["tests/Missing.Tests/Missing.Tests.csproj"]);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Test project file not found", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldRejectCurrentDirectoryOutput()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(TestProjects: [project], OutputDirectory: ".");
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Empty(runner.Commands);
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("current working directory", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldReportMergeFailure()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(
+            new RecordingCoverageRunProcessRunner(),
+            new RecordingReportGenerator { ExitCode = 42, WriteMergedCoverage = false });
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(TestProjects: [project]);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV104", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ReportGenerator exit code: 42", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldRejectMissingCoverageWithFixAndLogPath()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -177,6 +280,23 @@ public sealed class CoverageRunTests
         Assert.Contains("Cause:", exception.Message, StringComparison.Ordinal);
         Assert.Contains("Fix:", exception.Message, StringComparison.Ordinal);
         Assert.Contains("Docs:", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRejectConflictingBuildOptions()
+    {
+        var command = new CoverageRunCommand(CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator()))
+        {
+            Build = true,
+            NoBuild = true
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--build and --no-build cannot be used together", exception.Message, StringComparison.Ordinal);
     }
 
     private static CoverageRunWorkflow CreateWorkflow(
@@ -277,6 +397,8 @@ public sealed class CoverageRunTests
     private sealed class RecordingReportGenerator : ICoverageRunReportGenerator
     {
         public List<string> CoverageFiles { get; } = [];
+        public int ExitCode { get; init; }
+        public bool WriteMergedCoverage { get; init; } = true;
 
         public async Task<CoverageRunMergeResult> MergeAsync(
             IReadOnlyList<string> coverageFiles,
@@ -287,12 +409,16 @@ public sealed class CoverageRunTests
             Directory.CreateDirectory(outputDirectory);
             var cobertura = Path.Join(outputDirectory, "Cobertura.xml");
             var summary = Path.Join(outputDirectory, "Summary.txt");
-            await File.WriteAllTextAsync(
-                cobertura,
-                "<coverage lines-covered=\"8\" lines-valid=\"10\" branches-covered=\"2\" branches-valid=\"4\" />",
-                cancellationToken);
+            if (WriteMergedCoverage)
+            {
+                await File.WriteAllTextAsync(
+                    cobertura,
+                    "<coverage lines-covered=\"8\" lines-valid=\"10\" branches-covered=\"2\" branches-valid=\"4\" />",
+                    cancellationToken);
+            }
+
             await File.WriteAllTextAsync(summary, "reportgenerator summary", cancellationToken);
-            return new CoverageRunMergeResult(0, cobertura, summary);
+            return new CoverageRunMergeResult(ExitCode, cobertura, summary);
         }
     }
 
