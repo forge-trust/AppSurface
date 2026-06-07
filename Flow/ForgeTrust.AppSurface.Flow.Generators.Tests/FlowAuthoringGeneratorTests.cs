@@ -1769,6 +1769,38 @@ public sealed class FlowAuthoringGeneratorTests
     }
 
     [Fact]
+    public void Generator_WithAliasedFlowFaultContext_DoesNotReportInvalidDeclaration()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using Failure = ForgeTrust.AppSurface.Flow.FlowFault;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("denied", FlowOutcomeKind.Fault, typeof(Failure))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<StartNodeOutcomes>(StartNodeOutcomes.Denied(new Failure("denied", "Denied.")));
+                }
+            }
+
+            public sealed record StartContext;
+            """;
+
+        var (output, diagnostics, generated) = RunGenerator(source);
+
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.DoesNotContain(output.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.Contains("FlowNodeOutcome<ApprovalFlowContext>.Fault(typed.Context.Code, typed.Context.Message)", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Generator_WithNodeWithoutOutcomes_ReportsInvalidDeclaration()
     {
         var source = """

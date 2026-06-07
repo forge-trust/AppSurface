@@ -4,8 +4,15 @@ namespace ForgeTrust.AppSurface.Flow;
 /// Marks a partial type as the generated authoring specification for an AppSurface Flow.
 /// </summary>
 /// <remarks>
-/// Generated authoring is additive. The generator lowers the annotated specification into the existing
-/// <see cref="FlowDefinition{TContext}"/> runtime contract without changing low-level flow APIs.
+/// Use generated authoring when a flow should be declared as typed transformer nodes with compile-time
+/// validation of outcome coverage. Use <see cref="FlowGraphBuilder{TContext}"/> directly when a host needs
+/// dynamic graph construction, low-level runtime control, or compatibility with hand-authored nodes.
+///
+/// The annotated type must be a non-generic partial class. Record and nested generated flow specifications are
+/// not supported. Generated authoring is additive: the generator lowers the annotated specification into the
+/// existing <see cref="FlowDefinition{TContext}"/> runtime contract without changing low-level flow APIs. Avoid
+/// mixing generated definition helpers with manual low-level node registration for the same flow because that
+/// makes mapping ownership unclear.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
 public sealed class FlowAuthoringAttribute : Attribute
@@ -14,6 +21,7 @@ public sealed class FlowAuthoringAttribute : Attribute
     /// Initializes a new instance of the <see cref="FlowAuthoringAttribute"/> class.
     /// </summary>
     /// <param name="flowId">Stable flow identifier.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="flowId"/> is null, empty, or whitespace.</exception>
     public FlowAuthoringAttribute(string flowId)
     {
         FlowId = FlowDefinition<object>.RequireText(flowId, nameof(flowId));
@@ -33,6 +41,11 @@ public sealed class FlowAuthoringAttribute : Attribute
 /// <summary>
 /// Marks a partial nested type as a generated-authoring flow node.
 /// </summary>
+/// <remarks>
+/// Apply this attribute to a partial class nested inside a <see cref="FlowAuthoringAttribute"/> flow type. The
+/// node class must implement <see cref="IFlowTransformerNode{TInput,TOutcome}"/> where <c>TInput</c> matches
+/// <see cref="InputContextType"/> and <c>TOutcome</c> is the generated outcome union for that node.
+/// </remarks>
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
 public sealed class FlowNodeAttribute : Attribute
 {
@@ -41,6 +54,8 @@ public sealed class FlowNodeAttribute : Attribute
     /// </summary>
     /// <param name="nodeId">Stable node identifier.</param>
     /// <param name="inputContextType">Context type consumed by the node.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="nodeId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="inputContextType"/> is null.</exception>
     public FlowNodeAttribute(string nodeId, Type inputContextType)
     {
         NodeId = FlowDefinition<object>.RequireText(nodeId, nameof(nodeId));
@@ -170,27 +185,27 @@ public enum FlowOutcomeKind
     /// <summary>
     /// Move to another generated-authoring node.
     /// </summary>
-    Next,
+    Next = 0,
 
     /// <summary>
     /// Wait at the current node for an external event.
     /// </summary>
-    Wait,
+    Wait = 1,
 
     /// <summary>
     /// Report that timeout handling completed.
     /// </summary>
-    TimedOut,
+    TimedOut = 2,
 
     /// <summary>
     /// Complete the flow successfully.
     /// </summary>
-    Complete,
+    Complete = 3,
 
     /// <summary>
     /// Fault the flow with a process-level error.
     /// </summary>
-    Fault,
+    Fault = 4,
 }
 
 /// <summary>

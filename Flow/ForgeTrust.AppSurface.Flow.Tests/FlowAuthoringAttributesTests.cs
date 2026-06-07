@@ -93,6 +93,16 @@ public sealed class FlowAuthoringAttributesTests
     }
 
     [Fact]
+    public void FlowOutcomeKind_ValuesRemainStable()
+    {
+        Assert.Equal(0, (int)FlowOutcomeKind.Next);
+        Assert.Equal(1, (int)FlowOutcomeKind.Wait);
+        Assert.Equal(2, (int)FlowOutcomeKind.TimedOut);
+        Assert.Equal(3, (int)FlowOutcomeKind.Complete);
+        Assert.Equal(4, (int)FlowOutcomeKind.Fault);
+    }
+
+    [Fact]
     public void FlowGraphMappingAttribute_WithNodeOutcomeAndOutputType_StoresMappingMetadata()
     {
         var attribute = new FlowGraphMappingAttribute("start", "done", typeof(DoneState));

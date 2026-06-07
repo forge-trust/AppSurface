@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <FlowAuthoringGeneratorPackageAsset>../ForgeTrust.AppSurface.Flow.Generators/bin/$(Configuration)/netstandard2.0/ForgeTrust.AppSurface.Flow.Generators.dll</FlowAuthoringGeneratorPackageAsset>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,13 +21,17 @@
     <PackageReference Include="Microsoft.Extensions.Options" />
   </ItemGroup>
 
+  <Target Name="ValidateFlowAuthoringGeneratorPackageAsset" BeforeTargets="_GetPackageFiles">
+    <Error Condition="!Exists('$(FlowAuthoringGeneratorPackageAsset)')"
+           Text="The Flow authoring generator asset '$(FlowAuthoringGeneratorPackageAsset)' is missing. Build ForgeTrust.AppSurface.Flow.Generators before packing ForgeTrust.AppSurface.Flow so the transitive analyzer is included." />
+  </Target>
+
   <Target Name="IncludeFlowAuthoringGeneratorInPackage" BeforeTargets="_GetPackageFiles">
     <ItemGroup>
-      <None Include="../ForgeTrust.AppSurface.Flow.Generators/bin/$(Configuration)/netstandard2.0/ForgeTrust.AppSurface.Flow.Generators.dll"
+      <None Include="$(FlowAuthoringGeneratorPackageAsset)"
             Pack="true"
             PackagePath="analyzers/dotnet/cs"
-            Visible="false"
-            Condition="Exists('../ForgeTrust.AppSurface.Flow.Generators/bin/$(Configuration)/netstandard2.0/ForgeTrust.AppSurface.Flow.Generators.dll')" />
+            Visible="false" />
     </ItemGroup>
   </Target>
 

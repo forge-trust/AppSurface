@@ -74,10 +74,18 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var flows = context.CompilationProvider.Select(
-            static (compilation, _) => new FlowGenerationInput(
-                compilation,
-                DiscoverFlows(compilation).ToImmutableArray()));
+        var flowSpecs = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                FlowAuthoringAttributeName,
+                static (node, _) => node is TypeDeclarationSyntax,
+                static (context, _) => CreateFlowSpec(context))
+            .Where(static flow => flow is not null)
+            .Select(static (flow, _) => flow!);
+
+        var flows = context.CompilationProvider.Combine(flowSpecs.Collect())
+            .Select(static (input, _) => new FlowGenerationInput(
+                input.Left,
+                DistinctFlowSpecs(input.Right)));
 
         context.RegisterSourceOutput(flows, static (context, input) =>
         {
@@ -101,29 +109,25 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         });
     }
 
-    private static IEnumerable<FlowSpec> DiscoverFlows(Compilation compilation)
+    private static FlowSpec? CreateFlowSpec(GeneratorAttributeSyntaxContext context)
+    {
+        if (context.TargetSymbol is not INamedTypeSymbol symbol ||
+            context.TargetNode is not TypeDeclarationSyntax declaration)
+        {
+            return null;
+        }
+
+        var attribute = context.Attributes.FirstOrDefault(attribute =>
+            string.Equals(attribute.AttributeClass?.ToDisplayString(), FlowAuthoringAttributeName, StringComparison.Ordinal));
+        return attribute is null ? null : CreateFlowSpec(symbol, declaration, attribute);
+    }
+
+    private static ImmutableArray<FlowSpec> DistinctFlowSpecs(ImmutableArray<FlowSpec> flows)
     {
         var seen = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
-        foreach (var tree in compilation.SyntaxTrees)
-        {
-            var semanticModel = compilation.GetSemanticModel(tree);
-            var root = tree.GetRoot();
-            foreach (var typeDeclaration in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
-            {
-                if (semanticModel.GetDeclaredSymbol(typeDeclaration) is not INamedTypeSymbol symbol ||
-                    GetAttribute(symbol, FlowAuthoringAttributeName) is not { } attribute)
-                {
-                    continue;
-                }
-
-                if (!seen.Add(symbol))
-                {
-                    continue;
-                }
-
-                yield return CreateFlowSpec(symbol, typeDeclaration, attribute);
-            }
-        }
+        return flows
+            .Where(flow => seen.Add(flow.Symbol))
+            .ToImmutableArray();
     }
 
     private static FlowSpec CreateFlowSpec(
@@ -249,6 +253,8 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                 flow.FlowId,
                 startCount);
         }
+
+        var flowFaultSymbol = compilation.GetTypeByMetadataName(FlowFaultName);
 
         foreach (var method in flow.Symbol.GetMembers("BuildDefinition").OfType<IMethodSymbol>())
         {
@@ -492,7 +498,8 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
 
             foreach (var outcome in node.Outcomes.Where(outcome =>
                 string.Equals(outcome.Kind, "Fault", StringComparison.Ordinal) &&
-                !string.Equals(outcome.OutputContext?.ToDisplayString(), FlowFaultName, StringComparison.Ordinal)))
+                (flowFaultSymbol is null ||
+                    !SymbolEqualityComparer.Default.Equals(outcome.OutputContext, flowFaultSymbol))))
             {
                 ReportError(
                     InvalidDeclaration,
