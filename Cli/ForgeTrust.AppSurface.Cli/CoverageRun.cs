@@ -1239,14 +1239,12 @@ internal static class CoverageRunOutputGuard
             throw UnsafeOutput("--output must not be the solution directory.");
         }
 
-        foreach (var projectDirectory in projects
+        if (projects
             .Select(project => Path.GetDirectoryName(project.FullPath))
-            .OfType<string>())
+            .OfType<string>()
+            .Any(projectDirectory => string.Equals(trimmedOutput, Trim(projectDirectory), comparison)))
         {
-            if (string.Equals(trimmedOutput, Trim(projectDirectory), comparison))
-            {
-                throw UnsafeOutput("--output must not be a test project directory.");
-            }
+            throw UnsafeOutput("--output must not be a test project directory.");
         }
 
         var marker = Path.Join(output, MarkerFileName);
