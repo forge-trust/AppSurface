@@ -109,6 +109,20 @@ jobs:
             TestResults/coverage-merged/slow-test-diagnostics.json
           if-no-files-found: warn
 
+      - name: Publish slow-test diagnostics summary
+        if: ${{ always() && !cancelled() }}
+        run: |
+          diagnostics_markdown="TestResults/coverage-merged/slow-test-diagnostics.md"
+          if [[ -f "$diagnostics_markdown" ]]; then
+            cat "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Slow-test diagnostics"
+              echo
+              echo "No slow-test diagnostics Markdown artifact was generated."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Gate coverage with AppSurface CLI
         run: |
           dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-restore -- \
