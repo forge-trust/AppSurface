@@ -1,10 +1,12 @@
 using System.Text.Encodings.Web;
+using ForgeTrust.AppSurface.Intelligence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.AspNetCore.Razor.TagHelpers;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.RazorWire.TagHelpers;
 
@@ -16,6 +18,7 @@ public class RazorWireScriptsTagHelper : TagHelper
 {
     private readonly IFileVersionProvider _fileVersionProvider;
     private readonly RazorWireOptions _options;
+    private readonly IOptions<AppSurfaceProductIntelligenceOptions>? _productIntelligenceOptions;
     private readonly IWebHostEnvironment? _environment;
 
     /// <summary>
@@ -24,13 +27,16 @@ public class RazorWireScriptsTagHelper : TagHelper
     /// <param name="fileVersionProvider">The file version provider used to append version hashes to script paths.</param>
     /// <param name="options">RazorWire options used to emit runtime configuration.</param>
     /// <param name="environment">The current web host environment.</param>
+    /// <param name="productIntelligenceOptions">Optional product-intelligence options used to enable experimental browser events.</param>
     public RazorWireScriptsTagHelper(
         IFileVersionProvider fileVersionProvider,
         RazorWireOptions? options = null,
-        IWebHostEnvironment? environment = null)
+        IWebHostEnvironment? environment = null,
+        IOptions<AppSurfaceProductIntelligenceOptions>? productIntelligenceOptions = null)
     {
         _fileVersionProvider = fileVersionProvider ?? throw new ArgumentNullException(nameof(fileVersionProvider));
         _options = options ?? RazorWireOptions.Default;
+        _productIntelligenceOptions = productIntelligenceOptions;
         _environment = environment;
     }
 
@@ -110,6 +116,9 @@ public class RazorWireScriptsTagHelper : TagHelper
             ? _options.Forms.FailureMode.ToString().ToLowerInvariant()
             : "off";
         var failureUxEnabled = _options.Forms.EnableFailureUx.ToString().ToLowerInvariant();
+        var productIntelligenceEnabled = (_productIntelligenceOptions?.Value.ExperimentalEventsEnabled == true)
+            .ToString()
+            .ToLowerInvariant();
         var defaultFailureMessage = HtmlEncoder.Default.Encode(_options.Forms.DefaultFailureMessage);
         var normalizedLiveOrigin = NormalizeOriginOrThrow(
             _options.Hybrid.LiveOrigin,
@@ -122,7 +131,7 @@ public class RazorWireScriptsTagHelper : TagHelper
         // This includes Turbo.js and the custom RazorWire island loader.
         var scripts = $@"
 <script src=""https://cdn.jsdelivr.net/npm/@hotwired/turbo@8.0.12/dist/turbo.es2017-umd.js"" integrity=""sha256-1evN/OxCRDJtuVCzQ3gklVq8LzN6qhCm7x/sbawknOk="" crossorigin=""anonymous""></script>
-<script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}"" data-rw-live-origin=""{liveOrigin}"" data-rw-hybrid-credentials=""{credentialsMode}"" data-rw-antiforgery-endpoint=""{antiforgeryEndpoint}""></script>
+<script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}"" data-rw-live-origin=""{liveOrigin}"" data-rw-hybrid-credentials=""{credentialsMode}"" data-rw-antiforgery-endpoint=""{antiforgeryEndpoint}"" data-rw-product-intelligence-enabled=""{productIntelligenceEnabled}""></script>
 <script src=""{islandsJs}""></script>
 ";
 

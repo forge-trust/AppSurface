@@ -1995,7 +1995,7 @@ public class AppSurfaceDocsWebModuleTests
                 {
                     EnvironmentName = environmentName
                 });
-            builder.WebHost.UseUrls("http://127.0.0.1:0");
+            builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
             configureServices(builder.Services);
             builder.Services.AddLogging();
             builder.Services.AddControllersWithViews();

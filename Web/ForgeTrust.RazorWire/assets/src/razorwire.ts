@@ -38,6 +38,7 @@ interface RuntimeConfig {
     liveOrigin: string;
     hybridCredentials: string;
     antiforgeryEndpoint: string;
+    productIntelligenceEnabled: boolean;
 }
 
 interface FormSubmitState {
@@ -879,13 +880,22 @@ declare const Turbo: TurboRuntime | undefined;
             const success = event.detail?.success === true;
             const formState = this.state.get(form) || {};
             const submitter = formState.submitter || event.detail?.formSubmission?.submitter || null;
+            const previousFailureCount = this.getFailureAttemptCount(form);
 
             this.finishSubmitting(form, formState);
 
             if (success) {
+                if (previousFailureCount > 0) {
+                    this.dispatchProductIntelligenceEvent('razorwire.form.failure_recovered', {
+                        recovery_action: 'next_success',
+                        attempt_count: previousFailureCount
+                    });
+                }
+
                 this.clearGeneratedFailure(form);
                 form.removeAttribute('data-rw-submit-status');
                 form.removeAttribute('data-rw-last-status');
+                form.removeAttribute('data-rw-form-failure-count');
                 this.dispatch(form, 'razorwire:form:submit-end', { form, submitter, success, statusCode, handled });
                 return;
             }
@@ -922,6 +932,9 @@ declare const Turbo: TurboRuntime | undefined;
                 this.renderFailure(form, target.element, failureDetail);
             }
 
+            this.recordFormFailure(form, failureDetail, handled
+                ? 'handled'
+                : (!failureEvent.defaultPrevented && this.getMode(form) === 'auto' ? 'generated' : 'suppressed'));
             this.dispatch(form, 'razorwire:form:submit-end', { form, submitter, success, statusCode, handled });
         }
 
@@ -959,6 +972,10 @@ declare const Turbo: TurboRuntime | undefined;
                 this.renderFailure(form, target.element, failureDetail);
             }
 
+            this.recordFormFailure(
+                form,
+                failureDetail,
+                !failureEvent.defaultPrevented && this.getMode(form) === 'auto' ? 'generated' : 'suppressed');
             this.dispatch(form, 'razorwire:form:submit-end', {
                 form,
                 submitter,
@@ -1455,6 +1472,44 @@ declare const Turbo: TurboRuntime | undefined;
             form.dispatchEvent(event);
             return event;
         }
+
+        getFailureAttemptCount(form) {
+            const value = Number.parseInt(form.getAttribute('data-rw-form-failure-count') || '0', 10);
+            return Number.isFinite(value) && value > 0 ? value : 0;
+        }
+
+        recordFormFailure(form, detail, failureUi) {
+            const nextCount = this.getFailureAttemptCount(form) + 1;
+            form.setAttribute('data-rw-form-failure-count', String(nextCount));
+            this.dispatchProductIntelligenceEvent('razorwire.form.failed', {
+                failure_mode: detail.handled ? 'handled' : 'unhandled',
+                http_status: detail.statusCode === null || detail.statusCode === undefined
+                    ? ''
+                    : String(detail.statusCode),
+                response_kind: detail.responseKind || 'unknown',
+                failure_ui: failureUi
+            });
+        }
+
+        dispatchProductIntelligenceEvent(name, properties) {
+            if (!this.config.productIntelligenceEnabled) {
+                return;
+            }
+
+            const safeProperties = {};
+            Object.entries(properties || {}).forEach(([key, value]) => {
+                safeProperties[key] = String(value ?? '');
+            });
+
+            document.dispatchEvent(new CustomEvent('appsurface:product-intelligence:event', {
+                bubbles: false,
+                cancelable: false,
+                detail: {
+                    name,
+                    properties: safeProperties
+                }
+            }));
+        }
     }
 
     function readRuntimeConfig() {
@@ -1470,7 +1525,8 @@ declare const Turbo: TurboRuntime | undefined;
             defaultFailureMessage: dataset.rwDefaultFailureMessage || 'We could not submit this form. Check your input and try again.',
             liveOrigin: normalizeOrigin(dataset.rwLiveOrigin || ''),
             hybridCredentials: dataset.rwHybridCredentials || 'auto',
-            antiforgeryEndpoint: dataset.rwAntiforgeryEndpoint || '/_rw/antiforgery/token'
+            antiforgeryEndpoint: dataset.rwAntiforgeryEndpoint || '/_rw/antiforgery/token',
+            productIntelligenceEnabled: dataset.rwProductIntelligenceEnabled === 'true'
         };
     }
 
