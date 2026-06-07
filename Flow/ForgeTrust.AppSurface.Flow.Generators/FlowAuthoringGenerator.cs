@@ -1158,11 +1158,7 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         var caseType = outcomeType + "." + CaseName(outcome) + "Outcome";
         if (string.Equals(outcome.Kind, "Next", StringComparison.Ordinal))
         {
-            var target = ResolveNextTarget(flow, outcome);
-            if (target is null)
-            {
-                return;
-            }
+            var target = ResolveNextTarget(flow, outcome)!;
 
             source.Append("                ").Append(caseType).Append(" typed => global::ForgeTrust.AppSurface.Flow.FlowNodeOutcome<")
                 .Append(envelopeName).Append(">.Next(\"").Append(Escape(target.NodeId)).Append("\", ")
@@ -1340,7 +1336,7 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                 .Append(Escape(node.NodeId)).AppendLine("\"));");
         }
 
-        var start = flow.Nodes.FirstOrDefault(node => node.IsStart) ?? flow.Nodes.First();
+        var start = flow.Nodes.First(node => node.IsStart);
         source.Append("        return builder.StartAt(\"").Append(Escape(start.NodeId)).AppendLine("\").Build();");
         source.AppendLine("    }");
         source.AppendLine();
@@ -1352,11 +1348,7 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
             {
                 if (string.Equals(outcome.Kind, "Next", StringComparison.Ordinal))
                 {
-                    var target = ResolveNextTarget(flow, outcome);
-                    if (target is null)
-                    {
-                        continue;
-                    }
+                    var target = ResolveNextTarget(flow, outcome)!;
 
                     source.Append("        graph.").Append(GraphBuilderNextMethodName(node, outcome, target)).AppendLine("();");
                 }
@@ -1695,11 +1687,6 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         accessibility switch
         {
             Accessibility.Public => "public",
-            Accessibility.Internal => "internal",
-            Accessibility.Private => "private",
-            Accessibility.Protected => "protected",
-            Accessibility.ProtectedAndInternal => "private protected",
-            Accessibility.ProtectedOrInternal => "protected internal",
             _ => "internal",
         };
 
@@ -1768,11 +1755,6 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
 
     private static bool ImplementsTransformerNode(NodeSpec node)
     {
-        if (node.InputContext is null)
-        {
-            return false;
-        }
-
         return node.Symbol.AllInterfaces.Any(candidate =>
             string.Equals(candidate.ConstructedFrom.Name, "IFlowTransformerNode", StringComparison.Ordinal) &&
             string.Equals(candidate.ConstructedFrom.ContainingNamespace.ToDisplayString(), FlowNamespace, StringComparison.Ordinal) &&

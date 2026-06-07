@@ -2680,6 +2680,266 @@ public sealed class FlowAuthoringGeneratorTests
         Assert.Contains("StartContextArray", generated, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Generator_WithNamedNonInlineLocalGraphConfiguration_ReportsInvalidDeclaration()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("review", FlowOutcomeKind.Next, typeof(ReviewContext))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<StartNodeOutcomes>(StartNodeOutcomes.Review(new ReviewContext()));
+                }
+
+                [FlowNode("review", typeof(ReviewContext))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(DoneContext))]
+                public partial class ReviewNode : IFlowTransformerNode<ReviewContext, ReviewNodeOutcomes>
+                {
+                    public ValueTask<ReviewNodeOutcomes> ExecuteAsync(FlowTransformerContext<ReviewContext> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<ReviewNodeOutcomes>(ReviewNodeOutcomes.Done(new DoneContext()));
+                }
+            }
+
+            public static class FlowFactory
+            {
+                public static object Create()
+                {
+                    Action<ApprovalFlow.GraphBuilder> configure = graph => graph
+                        .MapStartNodeReviewToReviewNode()
+                        .MarkReviewNodeDoneTerminal();
+
+                    return ApprovalFlow.BuildDefinition(
+                        configureGeneratedGraph: configure,
+                        startNode: new ApprovalFlow.StartNode(),
+                        reviewNode: new ApprovalFlow.ReviewNode());
+                }
+            }
+
+            public sealed record StartContext;
+            public sealed record ReviewContext;
+            public sealed record DoneContext;
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(source);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "ASFLOWA005");
+    }
+
+    [Fact]
+    public void Generator_WithInvalidLocalGraphLambdaParameterList_ReportsInvalidDeclaration()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("review", FlowOutcomeKind.Next, typeof(ReviewContext))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<StartNodeOutcomes>(StartNodeOutcomes.Review(new ReviewContext()));
+                }
+
+                [FlowNode("review", typeof(ReviewContext))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(DoneContext))]
+                public partial class ReviewNode : IFlowTransformerNode<ReviewContext, ReviewNodeOutcomes>
+                {
+                    public ValueTask<ReviewNodeOutcomes> ExecuteAsync(FlowTransformerContext<ReviewContext> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<ReviewNodeOutcomes>(ReviewNodeOutcomes.Done(new DoneContext()));
+                }
+            }
+
+            public static class FlowFactory
+            {
+                public static object Create() => ApprovalFlow.BuildDefinition(
+                    (first, second) => first.MapStartNodeReviewToReviewNode(),
+                    new ApprovalFlow.StartNode(),
+                    new ApprovalFlow.ReviewNode());
+            }
+
+            public sealed record StartContext;
+            public sealed record ReviewContext;
+            public sealed record DoneContext;
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(source);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "ASFLOWA005");
+    }
+
+    [Fact]
+    public void Generator_WithMappingNameOnTemporaryHelperObject_StillReportsMissingMapping()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("review", FlowOutcomeKind.Next, typeof(ReviewContext))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<StartNodeOutcomes>(StartNodeOutcomes.Review(new ReviewContext()));
+                }
+
+                [FlowNode("review", typeof(ReviewContext))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(DoneContext))]
+                public partial class ReviewNode : IFlowTransformerNode<ReviewContext, ReviewNodeOutcomes>
+                {
+                    public ValueTask<ReviewNodeOutcomes> ExecuteAsync(FlowTransformerContext<ReviewContext> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<ReviewNodeOutcomes>(ReviewNodeOutcomes.Done(new DoneContext()));
+                }
+            }
+
+            public static class FlowFactory
+            {
+                public static object Create() => ApprovalFlow.BuildDefinition(
+                    graph =>
+                    {
+                        graph.MapStartNodeReviewToReviewNode();
+                        new Helper().MarkReviewNodeDoneTerminal();
+                    },
+                    new ApprovalFlow.StartNode(),
+                    new ApprovalFlow.ReviewNode());
+            }
+
+            public sealed class Helper
+            {
+                public void MarkReviewNodeDoneTerminal() { }
+            }
+
+            public sealed record StartContext;
+            public sealed record ReviewContext;
+            public sealed record DoneContext;
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(source);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "ASFLOWA001");
+    }
+
+    [Fact]
+    public void Generator_WithUnqualifiedBuildDefinitionWithoutStaticUsing_IgnoresInvocation()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(StartContext))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<StartNodeOutcomes>(StartNodeOutcomes.Done(context.State));
+                }
+            }
+
+            public static class FlowFactory
+            {
+                public static object Create() => BuildDefinition();
+                private static object BuildDefinition() => new();
+            }
+
+            public sealed record StartContext;
+            """;
+
+        var (output, diagnostics, _) = RunGenerator(source);
+
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Id == "ASFLOWA001");
+        Assert.DoesNotContain(output.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Generator_WithTypeParameterContext_ReportsInvalidDeclaration()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(T))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(T))]
+                public partial class StartNode<T> : IFlowTransformerNode<T, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<T> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<StartNodeOutcomes>(StartNodeOutcomes.Done(context.State));
+                }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(source);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "ASFLOWA005");
+    }
+
+    [Fact]
+    public void Generator_WithNonPublicNestedContextAccessibility_ReportsInvalidDeclarations()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                private sealed record PrivateState;
+                protected sealed record ProtectedState;
+                private protected sealed record PrivateProtectedState;
+
+                [FlowStart]
+                [FlowNode("start", typeof(PrivateState))]
+                [FlowOutcome("protected", FlowOutcomeKind.Next, typeof(ProtectedState))]
+                public partial class StartNode : IFlowTransformerNode<PrivateState, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<PrivateState> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<StartNodeOutcomes>(StartNodeOutcomes.Protected(new ProtectedState()));
+                }
+
+                [FlowNode("protected", typeof(ProtectedState))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(PrivateProtectedState))]
+                public partial class ProtectedNode : IFlowTransformerNode<ProtectedState, ProtectedNodeOutcomes>
+                {
+                    public ValueTask<ProtectedNodeOutcomes> ExecuteAsync(FlowTransformerContext<ProtectedState> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<ProtectedNodeOutcomes>(ProtectedNodeOutcomes.Done(new PrivateProtectedState()));
+                }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(source);
+
+        Assert.True(diagnostics.Count(diagnostic => diagnostic.Id == "ASFLOWA005") >= 3);
+    }
+
     private static (Compilation Output, IReadOnlyList<Diagnostic> Diagnostics, string Generated) RunGenerator(
         string source,
         params MetadataReference[] additionalReferences)
