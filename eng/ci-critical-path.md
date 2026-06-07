@@ -50,7 +50,7 @@ Issue #479 treats NuGet package caching as a measured CI hygiene change, not as 
 - `build.yml` / `export-appsurface-docs`
 - `code-quality.yml` / `dotnet-format`
 
-Each cache-enabled job sets `NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages` at the job level before `actions/setup-dotnet`, then uses `setup-dotnet` with `cache: true` and `cache-dependency-path: '**/packages.lock.json'`. The broad lock-file path is intentional for this first rollout because the selected solution-shaped jobs restore project graphs spread across the repository. A dependency or lock-file change anywhere in that graph can invalidate the cache; that is expected and safer than silently omitting a restored project from the cache key. If future timing data shows lock-file churn dominates cache misses, split the cache dependency paths by job/project scope in a follow-up.
+Each cache-enabled job sets `NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages` at the job level before `actions/setup-dotnet`, then uses `setup-dotnet` with `cache: true` and cache dependency paths for both `**/packages.lock.json` and `**/packages.*.lock.json`. The broad lock-file paths are intentional for this first rollout because the selected solution-shaped jobs restore project graphs spread across the repository, including RID-specific AppHost lock files. A dependency or lock-file change anywhere in that graph can invalidate the cache; that is expected and safer than silently omitting a restored project from the cache key. If future timing data shows lock-file churn dominates cache misses, split the cache dependency paths by job/project scope in a follow-up.
 
 Cache-enabled build jobs should restore explicitly before later .NET commands. When `build.yml` runs `scripts/coverage-solution.sh` after that restore, it sets `BUILD_NO_RESTORE=true` so the script's solution build does not hide additional restore work inside the coverage timing.
 
@@ -115,7 +115,7 @@ Use the GitHub UI for action step duration and the job summary for cache-hit, pa
 
 Common restore failures:
 
-- A locked restore failure usually means package references or central package versions changed without updating `packages.lock.json`. Run `dotnet restore --force-evaluate`, commit the updated lock files, and rerun CI.
+- A locked restore failure usually means package references, central package versions, or RID-specific AppHost inputs changed without updating `packages.lock.json` or `packages.*.lock.json`. Run `dotnet restore --force-evaluate`, commit the updated lock files, and rerun CI.
 - `NU1403` after enabling setup-dotnet caching can happen because the action restores only the global packages folder. If CI hits this, add or test `DisableImplicitNuGetFallbackFolder` centrally before widening the cache rollout.
 
 Rollback is per job: remove `cache: true`, remove `cache-dependency-path`, and remove job-level `NUGET_PACKAGES` from the affected cache-enabled job. Leave package-gate's isolated temp `NUGET_PACKAGES` in place.

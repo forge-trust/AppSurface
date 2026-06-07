@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using ForgeTrust.AppSurface.Web.Tailwind.Internal;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
@@ -100,6 +102,18 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
     /// framework used to load the MSBuild task assembly.
     /// </remarks>
     public string? TargetFramework { get; set; }
+
+    /// <summary>
+    /// Gets or sets the shared source-tree Tailwind download cache root.
+    /// </summary>
+    /// <remarks>
+    /// Optional. The imported targets default this to a user-level cache such as
+    /// <c>$XDG_CACHE_HOME/forgetrust/appsurface/tailwind</c> or
+    /// <c>$HOME/.cache/forgetrust/appsurface/tailwind</c>. The task probes this cache so source-tree builds can
+    /// reuse runtime-project downloads across Git worktrees instead of copying every Tailwind executable under
+    /// each worktree's <c>obj</c> directory.
+    /// </remarks>
+    public string? TailwindDownloadCacheRoot { get; set; }
 
     /// <summary>
     /// Gets or sets an optional Tailwind RID override for tests.
@@ -302,6 +316,19 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
 
         yield return Path.GetFullPath(Path.Join(ProjectDirectory, "runtimes", rid, "native", runtimeBinaryName));
 
+        if (!string.IsNullOrWhiteSpace(TailwindDownloadCacheRoot))
+        {
+            var sharedCacheCandidate = Path.GetFullPath(TailwindDownloadCache.GetRuntimeBinaryPath(
+                TailwindDownloadCacheRoot,
+                TailwindVersion!,
+                rid,
+                runtimeBinaryName));
+            if (IsVerifiedSharedDownloadCacheCandidate(sharedCacheCandidate, runtimeBinaryName))
+            {
+                yield return sharedCacheCandidate;
+            }
+        }
+
         var localBinaryName = TailwindRuntimeMap.GetLocalBinaryName();
         if (IsFileName(localBinaryName))
         {
@@ -329,6 +356,68 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
             configuration,
             targetFramework,
             runtimeBinaryName));
+    }
+
+    private bool IsVerifiedSharedDownloadCacheCandidate(string candidatePath, string runtimeBinaryName)
+    {
+        if (!File.Exists(candidatePath))
+        {
+            return false;
+        }
+
+        var checksumFile = Path.Join(Path.GetDirectoryName(candidatePath), "sha256sums.txt");
+        var expectedHash = TryReadExpectedChecksum(checksumFile, runtimeBinaryName);
+        if (expectedHash == null)
+        {
+            Log.LogWarning(
+                "Skipping Tailwind shared-cache candidate '{0}' because '{1}' does not contain a checksum for '{2}'.",
+                candidatePath,
+                checksumFile,
+                runtimeBinaryName);
+            return false;
+        }
+
+        var computedHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(candidatePath))).ToLowerInvariant();
+        if (!string.Equals(expectedHash, computedHash, StringComparison.OrdinalIgnoreCase))
+        {
+            Log.LogWarning(
+                "Skipping Tailwind shared-cache candidate '{0}' because its checksum does not match '{1}'.",
+                candidatePath,
+                checksumFile);
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string? TryReadExpectedChecksum(string checksumFile, string runtimeBinaryName)
+    {
+        if (!File.Exists(checksumFile))
+        {
+            return null;
+        }
+
+        foreach (var line in File.ReadLines(checksumFile, Encoding.UTF8))
+        {
+            var tokens = line.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length < 2)
+            {
+                continue;
+            }
+
+            var fileToken = tokens[1].TrimStart('*');
+            if (fileToken.StartsWith("./", StringComparison.Ordinal))
+            {
+                fileToken = fileToken.Substring(2);
+            }
+
+            if (string.Equals(fileToken, runtimeBinaryName, StringComparison.Ordinal))
+            {
+                return tokens[0].ToLowerInvariant();
+            }
+        }
+
+        return null;
     }
 
     private static IEnumerable<string> EnumerateSiblingRuntimePackageCandidates(

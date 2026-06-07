@@ -35,6 +35,7 @@
     <Project Path="Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj" />
   </Folder>
   <Folder Name="/Examples/">
+    <Project Path="examples/aspire-apphost/AspireAppHostExample.csproj" />
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
     <Project Path="examples/flow-approval-local/FlowApprovalLocalExample.csproj" />
@@ -46,6 +47,10 @@
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.Tests/ForgeTrust.AppSurface.Flow.Tests.csproj" />
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj" />
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.DurableTask.Tests/ForgeTrust.AppSurface.Flow.DurableTask.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Intelligence/">
+    <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj" />
+    <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence.Tests/ForgeTrust.AppSurface.Intelligence.Tests.csproj" />
   </Folder>
   <Folder Name="/Examples/razorwire-mvc/">
     <Project Path="examples/razorwire-mvc/RazorWireWebExample.csproj" />

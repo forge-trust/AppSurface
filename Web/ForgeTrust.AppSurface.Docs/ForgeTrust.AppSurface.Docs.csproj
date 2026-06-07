@@ -14,6 +14,7 @@
     <ProjectReference Include="..\ForgeTrust.AppSurface.Web.Tailwind\ForgeTrust.AppSurface.Web.Tailwind.csproj" />
     <ProjectReference Include="..\..\Caching\ForgeTrust.AppSurface.Caching\ForgeTrust.AppSurface.Caching.csproj" />
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config\ForgeTrust.AppSurface.Config.csproj" />
+    <ProjectReference Include="..\..\Intelligence\ForgeTrust.AppSurface.Intelligence\ForgeTrust.AppSurface.Intelligence.csproj" />
   </ItemGroup>
 
   <Import Project="..\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets" Condition="Exists('..\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets')" />
