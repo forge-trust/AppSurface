@@ -1204,9 +1204,11 @@ internal static class CoverageRunOutputGuard
             throw UnsafeOutput("--output must not be the solution directory.");
         }
 
-        foreach (var projectDirectory in projects.Select(project => Path.GetDirectoryName(project.FullPath)))
+        foreach (var projectDirectory in projects
+            .Select(project => Path.GetDirectoryName(project.FullPath))
+            .Where(projectDirectory => projectDirectory is not null))
         {
-            if (projectDirectory is not null && string.Equals(trimmedOutput, Trim(projectDirectory), comparison))
+            if (string.Equals(trimmedOutput, Trim(projectDirectory!), comparison))
             {
                 throw UnsafeOutput("--output must not be a test project directory.");
             }
@@ -1228,12 +1230,10 @@ internal static class CoverageRunOutputGuard
     private static void DeleteKnownOutput(string output)
     {
         foreach (var path in new[] { "coverage.cobertura.xml", "coverage.json", "summary.txt", "timings.json", "reportgenerator-summary.txt" }
-            .Select(file => Path.Join(output, file)))
+            .Select(file => Path.Join(output, file))
+            .Where(File.Exists))
         {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
+            File.Delete(path);
         }
 
         foreach (var junitFile in Directory.EnumerateFiles(output, "junit-*.xml", SearchOption.TopDirectoryOnly))
@@ -1241,12 +1241,11 @@ internal static class CoverageRunOutputGuard
             File.Delete(junitFile);
         }
 
-        foreach (var path in new[] { "projects", "reportgenerator" }.Select(directory => Path.Join(output, directory)))
+        foreach (var path in new[] { "projects", "reportgenerator" }
+            .Select(directory => Path.Join(output, directory))
+            .Where(Directory.Exists))
         {
-            if (Directory.Exists(path))
-            {
-                Directory.Delete(path, recursive: true);
-            }
+            Directory.Delete(path, recursive: true);
         }
     }
 
