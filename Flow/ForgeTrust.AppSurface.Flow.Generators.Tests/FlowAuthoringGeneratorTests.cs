@@ -2940,6 +2940,59 @@ public sealed class FlowAuthoringGeneratorTests
         Assert.True(diagnostics.Count(diagnostic => diagnostic.Id == "ASFLOWA005") >= 3);
     }
 
+    [Fact]
+    public void Generator_WithReferencedFlowInvalidGraphLambdaParameterList_ReportsInvalidDeclaration()
+    {
+        var libraryReference = BuildReferencedApprovalFlowReference();
+        var hostSource = """
+            using Library;
+
+            public static class HostFlowFactory
+            {
+                public static object Create() => ApprovalFlow.BuildDefinition(
+                    (first, second) => first.MapStartNodeReviewToReviewNode(),
+                    new ApprovalFlow.StartNode(),
+                    new ApprovalFlow.ReviewNode());
+            }
+            """;
+
+        var (_, hostDiagnostics, _) = RunGenerator(hostSource, libraryReference);
+
+        Assert.Contains(hostDiagnostics, diagnostic => diagnostic.Id == "ASFLOWA005");
+    }
+
+    [Fact]
+    public void Generator_WithTopLevelUnqualifiedBuildDefinitionWithoutStaticUsing_IgnoresInvocation()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            BuildDefinition();
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(StartContext))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<StartNodeOutcomes>(StartNodeOutcomes.Done(context.State));
+                }
+            }
+
+            public sealed record StartContext;
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(source);
+
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Id == "ASFLOWA001");
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Id == "ASFLOWA005");
+    }
+
     private static (Compilation Output, IReadOnlyList<Diagnostic> Diagnostics, string Generated) RunGenerator(
         string source,
         params MetadataReference[] additionalReferences)

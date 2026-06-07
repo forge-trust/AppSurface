@@ -608,12 +608,7 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
             var root = tree.GetRoot();
             foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
-                if (semanticModel.GetSymbolInfo(invocation).Symbol is not IMethodSymbol method ||
-                    !string.Equals(method.Name, "BuildDefinition", StringComparison.Ordinal) ||
-                    method.Parameters.Length == 0 ||
-                    !string.Equals(method.Parameters[0].Name, ConfigureGeneratedGraphParameterName, StringComparison.Ordinal) ||
-                    method.ContainingType is null ||
-                    localFlowSymbols.Contains(method.ContainingType) ||
+                if (ReferencedBuildDefinitionMethod(semanticModel, invocation, localFlowSymbols) is not { } method ||
                     GraphBuilderType(method.Parameters[0].Type) is not { } graphBuilderType)
                 {
                     continue;
@@ -635,6 +630,24 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                 }
             }
         }
+    }
+
+    private static IMethodSymbol? ReferencedBuildDefinitionMethod(
+        SemanticModel semanticModel,
+        InvocationExpressionSyntax invocation,
+        HashSet<INamedTypeSymbol> localFlowSymbols)
+    {
+        var symbolInfo = semanticModel.GetSymbolInfo(invocation);
+        var candidates = symbolInfo.Symbol is IMethodSymbol symbol
+            ? new[] { symbol }
+            : symbolInfo.CandidateSymbols.OfType<IMethodSymbol>();
+
+        return candidates.FirstOrDefault(method =>
+            string.Equals(method.Name, "BuildDefinition", StringComparison.Ordinal) &&
+            method.Parameters.Length > 0 &&
+            string.Equals(method.Parameters[0].Name, ConfigureGeneratedGraphParameterName, StringComparison.Ordinal) &&
+            method.ContainingType is not null &&
+            !localFlowSymbols.Contains(method.ContainingType));
     }
 
     private static IEnumerable<Diagnostic> ExplicitGraphMappingDiagnosticsForInvocation(
