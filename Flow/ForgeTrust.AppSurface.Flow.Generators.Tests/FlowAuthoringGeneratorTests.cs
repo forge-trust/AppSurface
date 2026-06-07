@@ -2519,6 +2519,167 @@ public sealed class FlowAuthoringGeneratorTests
         Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "ASFLOWA005");
     }
 
+    [Fact]
+    public void Generator_WithReferencedFlowNamedNonInlineConfiguration_ReportsInvalidDeclaration()
+    {
+        var libraryReference = BuildReferencedApprovalFlowReference();
+        var hostSource = """
+            using Library;
+            using System;
+
+            public static class HostFlowFactory
+            {
+                public static object Create()
+                {
+                    Action<ApprovalFlow.GraphBuilder> configure = graph => graph
+                        .MapStartNodeReviewToReviewNode()
+                        .MarkReviewNodeDoneTerminal();
+
+                    return ApprovalFlow.BuildDefinition(
+                        configureGeneratedGraph: configure,
+                        startNode: new ApprovalFlow.StartNode(),
+                        reviewNode: new ApprovalFlow.ReviewNode());
+                }
+            }
+            """;
+
+        var (_, hostDiagnostics, _) = RunGenerator(hostSource, libraryReference);
+
+        Assert.Contains(hostDiagnostics, diagnostic => diagnostic.Id == "ASFLOWA005");
+    }
+
+    [Fact]
+    public void Generator_WithReferencedFlowParenthesizedNamedConfiguration_ValidatesMappings()
+    {
+        var libraryReference = BuildReferencedApprovalFlowReference();
+        var hostSource = """
+            using Library;
+
+            public static class HostFlowFactory
+            {
+                public static object Create() => ApprovalFlow.BuildDefinition(
+                    configureGeneratedGraph: (ApprovalFlow.GraphBuilder graph) => graph
+                        .MapStartNodeReviewToReviewNode()
+                        .MarkReviewNodeDoneTerminal(),
+                    startNode: new ApprovalFlow.StartNode(),
+                    reviewNode: new ApprovalFlow.ReviewNode());
+            }
+            """;
+
+        var (output, hostDiagnostics, _) = RunGenerator(hostSource, libraryReference);
+
+        Assert.DoesNotContain(hostDiagnostics, diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.DoesNotContain(output.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Generator_WithReferencedFlowNestedMappingChain_ReportsInvalidDeclaration()
+    {
+        var libraryReference = BuildReferencedApprovalFlowReference();
+        var hostSource = """
+            using Library;
+
+            public static class HostFlowFactory
+            {
+                public static object Create() => ApprovalFlow.BuildDefinition(
+                    graph =>
+                    {
+                        _ = (graph.MapStartNodeReviewToReviewNode()).MarkReviewNodeDoneTerminal();
+                    },
+                    new ApprovalFlow.StartNode(),
+                    new ApprovalFlow.ReviewNode());
+            }
+            """;
+
+        var (_, hostDiagnostics, _) = RunGenerator(hostSource, libraryReference);
+
+        Assert.Contains(hostDiagnostics, diagnostic => diagnostic.Id == "ASFLOWA005");
+    }
+
+    [Fact]
+    public void Generator_WithNamespaceStaticUsingForReferencedFlow_ValidatesExplicitMapping()
+    {
+        var libraryReference = BuildReferencedApprovalFlowReference();
+        var hostSource = """
+            namespace Host;
+
+            using Library;
+            using static Library.ApprovalFlow;
+
+            public static class HostFlowFactory
+            {
+                public static object Create() => BuildDefinition(
+                    graph => graph
+                        .MapStartNodeReviewToReviewNode()
+                        .MarkReviewNodeDoneTerminal(),
+                    new ApprovalFlow.StartNode(),
+                    new ApprovalFlow.ReviewNode());
+            }
+            """;
+
+        var (output, hostDiagnostics, _) = RunGenerator(hostSource, libraryReference);
+
+        Assert.DoesNotContain(hostDiagnostics, diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.DoesNotContain(output.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Generator_WithCompilationUnitStaticUsingForReferencedFlow_ValidatesExplicitMapping()
+    {
+        var libraryReference = BuildReferencedApprovalFlowReference();
+        var hostSource = """
+            using Library;
+            using static Library.ApprovalFlow;
+
+            public static class HostFlowFactory
+            {
+                public static object Create() => BuildDefinition(
+                    graph => graph
+                        .MapStartNodeReviewToReviewNode()
+                        .MarkReviewNodeDoneTerminal(),
+                    new ApprovalFlow.StartNode(),
+                    new ApprovalFlow.ReviewNode());
+            }
+            """;
+
+        var (output, hostDiagnostics, _) = RunGenerator(hostSource, libraryReference);
+
+        Assert.DoesNotContain(hostDiagnostics, diagnostic => diagnostic.Id == "ASFLOWA001");
+        Assert.DoesNotContain(hostDiagnostics, diagnostic => diagnostic.Id == "ASFLOWA005");
+        Assert.DoesNotContain(output.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Generator_WithArrayContext_EmitsArrayEnvelopeSlot()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext[]))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(StartContext[]))]
+                public partial class StartNode : IFlowTransformerNode<StartContext[], StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext[]> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<StartNodeOutcomes>(StartNodeOutcomes.Done(context.State));
+                }
+            }
+
+            public sealed record StartContext;
+            """;
+
+        var (output, diagnostics, generated) = RunGenerator(source);
+
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.DoesNotContain(output.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.Contains("StartContextArray", generated, StringComparison.Ordinal);
+    }
+
     private static (Compilation Output, IReadOnlyList<Diagnostic> Diagnostics, string Generated) RunGenerator(
         string source,
         params MetadataReference[] additionalReferences)
@@ -2549,6 +2710,46 @@ public sealed class FlowAuthoringGeneratorTests
         var result = compilation.Emit(stream);
         Assert.True(result.Success, string.Join(Environment.NewLine, result.Diagnostics));
         return MetadataReference.CreateFromImage(stream.ToArray());
+    }
+
+    private static MetadataReference BuildReferencedApprovalFlowReference()
+    {
+        var librarySource = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            namespace Library;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("review", FlowOutcomeKind.Next, typeof(ReviewContext))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<StartNodeOutcomes>(StartNodeOutcomes.Review(new ReviewContext()));
+                }
+
+                [FlowNode("review", typeof(ReviewContext))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(DoneContext))]
+                public partial class ReviewNode : IFlowTransformerNode<ReviewContext, ReviewNodeOutcomes>
+                {
+                    public ValueTask<ReviewNodeOutcomes> ExecuteAsync(FlowTransformerContext<ReviewContext> context, CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<ReviewNodeOutcomes>(ReviewNodeOutcomes.Done(new DoneContext()));
+                }
+            }
+
+            public sealed record StartContext;
+            public sealed record ReviewContext;
+            public sealed record DoneContext;
+            """;
+
+        var (libraryOutput, libraryDiagnostics, _) = RunGenerator(librarySource);
+        Assert.DoesNotContain(libraryDiagnostics, diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        return EmitReference(libraryOutput);
     }
 
     private static IEnumerable<MetadataReference> TrustedPlatformReferences()
