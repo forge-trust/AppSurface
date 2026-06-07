@@ -1304,12 +1304,9 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
 
         foreach (var root in roots)
         {
-            foreach (var candidate in EnumerateNuGetCacheCandidates(root))
+            foreach (var candidate in EnumerateNuGetCacheCandidates(root).Where(File.Exists))
             {
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
+                return candidate;
             }
         }
 
