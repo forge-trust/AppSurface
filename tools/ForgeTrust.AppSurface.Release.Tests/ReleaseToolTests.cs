@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Release;
@@ -505,6 +506,24 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckRejectsNullPreparedReleaseEvidence()
+    {
+        await SeedRepositoryAsync();
+        var prepare = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+        Assert.Equal(0, prepare.ExitCode);
+        await WriteFileAsync("releases/v0.1.0-preview.1.evidence.json", "null\n");
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1", "--allow-existing-targets"],
+            FakeCommandRunner.WithSourceCommit("release-prep-commit"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-evidence-schema-invalid", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CheckRejectsPreparedReleaseEvidenceWithMissingNestedFields()
     {
         await SeedRepositoryAsync();
@@ -594,6 +613,7 @@ public sealed class ReleaseToolTests : IDisposable
     [Fact]
     public void ReleaseEvidenceBuildDraftAllowsEmptyPackageUpdates()
     {
+        var before = DateTimeOffset.UtcNow.AddSeconds(-1);
         var evidence = ReleaseEvidence.BuildDraft(
             new ReleaseWorkspace(_repositoryRoot),
             SemVer.Parse("0.1.0-preview.1"),
@@ -608,6 +628,10 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Empty(evidence.PackageReleaseNotePaths);
         Assert.Equal("releases/v0.1.0-preview.1.evidence.json", evidence.Subject.Name);
         Assert.NotEmpty(evidence.Subject.Sha256);
+        Assert.NotEqual("2026-05-25T00:00:00Z", evidence.GeneratedAtUtc);
+
+        var generatedAt = DateTimeOffset.Parse(evidence.GeneratedAtUtc, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
+        Assert.InRange(generatedAt, before, DateTimeOffset.UtcNow.AddSeconds(1));
     }
 
     [Fact]
@@ -710,6 +734,23 @@ public sealed class ReleaseToolTests : IDisposable
             TaggedReleaseSidecarContent,
             CreateReleaseManifestJson(),
             "{");
+
+        Assert.Null(result.Summary);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
+    }
+
+    [Fact]
+    public void ReleaseEvidenceValidationRejectsNullTagEvidence()
+    {
+        var result = ReleaseEvidence.ValidateTag(
+            SemVer.Parse("0.1.0-preview.1"),
+            "prerelease",
+            "v0.1.0-preview.1",
+            "abc123",
+            TaggedReleaseNoteContent,
+            TaggedReleaseSidecarContent,
+            CreateReleaseManifestJson(),
+            "null\n");
 
         Assert.Null(result.Summary);
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
@@ -1520,6 +1561,22 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("blob stdout failure", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsNullTagEvidenceWithStructuredDiagnostic()
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulPublishRunner();
+        runner.Add("git show v0.1.0-preview.1:releases/v0.1.0-preview.1.evidence.json", new CommandResult(0, "null\n", ""));
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-evidence-schema-invalid", result.Stderr, StringComparison.Ordinal);
+        Assert.DoesNotContain("NullReferenceException", result.Stderr, StringComparison.Ordinal);
     }
 
     [Fact]

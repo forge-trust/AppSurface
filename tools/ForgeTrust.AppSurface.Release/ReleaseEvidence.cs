@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 
@@ -65,7 +66,7 @@ internal static class ReleaseEvidence
                 TagCommit: null,
                 WorkflowRunId: null),
             new ReleaseEvidenceGeneratedBy("./eng/release"),
-            $"{date:yyyy-MM-dd}T00:00:00Z",
+            DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
             new ReleaseEvidenceSubject("release-evidence", string.Empty),
             Attestation: null);
 
@@ -131,6 +132,12 @@ internal static class ReleaseEvidence
                 diagnostics.Add(InvalidShapeDiagnostic(issue, "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
                 bundle = null;
             }
+        }
+        else if (diagnostics.All(diagnostic => diagnostic.Code != "release-evidence-schema-invalid"))
+        {
+            diagnostics.Add(InvalidShapeDiagnostic(
+                "Release evidence JSON must be an object, not the JSON literal `null`.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
         }
 
         return new ReleaseEvidenceValidationResult(bundle?.ToSummary("draft evidence for release-prep review"), diagnostics);
@@ -202,6 +209,12 @@ internal static class ReleaseEvidence
                 ValidateSubject(bundle, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#publish");
                 ValidateDocsArchive(bundle, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#publish");
             }
+        }
+        else if (diagnostics.All(diagnostic => diagnostic.Code != "release-evidence-schema-invalid"))
+        {
+            diagnostics.Add(InvalidShapeDiagnostic(
+                "Release evidence JSON must be an object, not the JSON literal `null`.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
         }
 
         var summary = bundle is null

@@ -82,6 +82,16 @@ internal sealed class ReleasePublishing
             throw new ReleaseToolException(evidence.Diagnostics[0]);
         }
 
+        if (evidence.Summary is null)
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-evidence-schema-invalid",
+                "Release evidence did not produce a validation summary.",
+                "Publish requires tag-bound evidence to deserialize to a complete release evidence bundle.",
+                "Regenerate release evidence from the reviewed release state before publishing.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+        }
+
         var tempDirectory = Path.Join(Path.GetTempPath(), "appsurface-release", safeTagSegment);
         Directory.CreateDirectory(tempDirectory);
         var notesFile = Path.Join(tempDirectory, "release-notes.md");
@@ -95,7 +105,7 @@ internal sealed class ReleasePublishing
             notesFile,
             options.Version.IsStable ? "stable" : "prerelease",
             evidencePathInTag,
-            evidence.Summary!.SubjectSha256,
+            evidence.Summary.SubjectSha256,
             tagCommit.Trim(),
             evidence.Summary.DocsReleaseManifestSha256,
             !options.Version.IsStable,
