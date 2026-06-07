@@ -1,6 +1,7 @@
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -448,7 +449,7 @@ public sealed class CoverageRunTests
 
         public string WriteFile(string relativePath, string contents)
         {
-            var path = System.IO.Path.Join(Path, relativePath);
+            var path = TestPathUtils.PathUnder(Path, relativePath);
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
             File.WriteAllText(path, contents);
             return path;

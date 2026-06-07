@@ -1204,9 +1204,8 @@ internal static class CoverageRunOutputGuard
             throw UnsafeOutput("--output must not be the solution directory.");
         }
 
-        foreach (var project in projects)
+        foreach (var projectDirectory in projects.Select(project => Path.GetDirectoryName(project.FullPath)))
         {
-            var projectDirectory = Path.GetDirectoryName(project.FullPath);
             if (projectDirectory is not null && string.Equals(trimmedOutput, Trim(projectDirectory), comparison))
             {
                 throw UnsafeOutput("--output must not be a test project directory.");
@@ -1228,9 +1227,9 @@ internal static class CoverageRunOutputGuard
 
     private static void DeleteKnownOutput(string output)
     {
-        foreach (var file in new[] { "coverage.cobertura.xml", "coverage.json", "summary.txt", "timings.json", "reportgenerator-summary.txt" })
+        foreach (var path in new[] { "coverage.cobertura.xml", "coverage.json", "summary.txt", "timings.json", "reportgenerator-summary.txt" }
+            .Select(file => Path.Join(output, file)))
         {
-            var path = Path.Join(output, file);
             if (File.Exists(path))
             {
                 File.Delete(path);
@@ -1242,9 +1241,8 @@ internal static class CoverageRunOutputGuard
             File.Delete(junitFile);
         }
 
-        foreach (var directory in new[] { "projects", "reportgenerator" })
+        foreach (var path in new[] { "projects", "reportgenerator" }.Select(directory => Path.Join(output, directory)))
         {
-            var path = Path.Join(output, directory);
             if (Directory.Exists(path))
             {
                 Directory.Delete(path, recursive: true);
