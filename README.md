@@ -160,7 +160,10 @@ This command:
 - Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
 - Writes a summary to `TestResults/coverage-merged/summary.txt`.
 - Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
-- Restores the pinned local ReportGenerator .NET tool used by the repository script when coverage files need to be merged.
+- Writes slow-test diagnostics to `TestResults/coverage-merged/slow-test-diagnostics.md` and
+  `TestResults/coverage-merged/slow-test-diagnostics.json`, including diagnostic aggregation
+  overhead in seconds and as a percent of total runner time.
+- Restores the pinned local ReportGenerator .NET tool when coverage files need to be merged.
 
 Private package-consuming repositories should use the public CLI runner instead of this repository's script:
 
