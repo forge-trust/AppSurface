@@ -9,6 +9,37 @@ using Microsoft.Extensions.Logging;
 public partial class AspireProfileTests
 {
     [Fact]
+    public void PassThroughArgs_DefaultsToEmpty()
+    {
+        var profile = new TestProfile(A.Fake<ILogger<TestProfile>>(), [], []);
+
+        Assert.Empty(profile.PassThroughArgs);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UsesOverriddenPassThroughArgsForDistributedApplicationBuilder()
+    {
+        var capturedValue = default(string);
+        var component = new InspectingComponent(appBuilder =>
+        {
+            capturedValue = appBuilder.Configuration["appsurface-profile-test"];
+            throw new InvalidOperationException("Stop execution");
+        });
+        var console = A.Fake<IConsole>();
+
+        var profile = new TestProfile(
+            A.Fake<ILogger<TestProfile>>(),
+            [],
+            [component],
+            ["--appsurface-profile-test", "from-pass-through"]);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => profile.ExecuteAsync(console).AsTask());
+
+        Assert.Equal("Stop execution", exception.Message);
+        Assert.Equal("from-pass-through", capturedValue);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ResolvesDependenciesBeforeOwnComponents()
     {
         var callOrder = new List<string>();
@@ -80,20 +111,41 @@ public partial class AspireProfileTests
     {
         private readonly IReadOnlyList<AspireProfile>? _dependencies;
         private readonly IReadOnlyList<IAspireComponent>? _components;
+        private readonly string[]? _passThroughArgs;
 
         public TestProfile(
             ILogger<TestProfile> logger,
             IReadOnlyList<AspireProfile>? dependencies = null,
-            IReadOnlyList<IAspireComponent>? components = null) : base(logger)
+            IReadOnlyList<IAspireComponent>? components = null,
+            string[]? passThroughArgs = null) : base(logger)
         {
             _dependencies = dependencies;
             _components = components;
+            _passThroughArgs = passThroughArgs;
         }
+
+        public override string[] PassThroughArgs => _passThroughArgs ?? base.PassThroughArgs;
 
         public override IEnumerable<AspireProfile> GetDependencies() =>
             _dependencies ?? throw new InvalidOperationException("No dependencies configured.");
 
         public override IEnumerable<IAspireComponent> GetComponents() =>
             _components ?? throw new InvalidOperationException("No components configured.");
+    }
+
+    private sealed class InspectingComponent : IAspireComponent<IResource>
+    {
+        private readonly Action<IDistributedApplicationBuilder> _inspect;
+
+        public InspectingComponent(Action<IDistributedApplicationBuilder> inspect)
+        {
+            _inspect = inspect;
+        }
+
+        public IResourceBuilder<IResource> Generate(AspireStartupContext context, IDistributedApplicationBuilder appBuilder)
+        {
+            _inspect(appBuilder);
+            throw new InvalidOperationException("Stop execution");
+        }
     }
 }

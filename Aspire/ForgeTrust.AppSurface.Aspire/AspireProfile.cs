@@ -22,13 +22,15 @@ public abstract class AspireProfile : ICommand
         _logger = logger;
     }
 
-    // TODO: Need to implement this upstream: https://github.com/Tyrrrz/CliFx/issues/39
-    // It seems we need to be able to pass args upstream or this will cause
-    // problems trying to use deployments in Aspire.
     /// <summary>
     /// Gets the command-line arguments to pass through to the Aspire host.
     /// </summary>
-    public string[] PassThroughArgs => [];
+    /// <remarks>
+    /// Profiles default to an empty argument set so AppSurface command selection remains owned by CliFx. Override this
+    /// property when a profile intentionally needs to pass known AppHost arguments into
+    /// <see cref="DistributedApplicationBuilder"/>. Unknown command-line arguments are not forwarded automatically.
+    /// </remarks>
+    public virtual string[] PassThroughArgs => [];
 
     /// <summary>
     /// Gets the dependencies (other profiles) that this profile requires.
