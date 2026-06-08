@@ -341,11 +341,11 @@ packages:
     order: 120
     tool_command_name: appsurface
     use_when: Install this when you want repository-level AppSurface tooling from a global or local .NET tool command.
-    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, and `appsurface coverage gate` private Cobertura threshold enforcement.
-    does_not_include: App runtime packages, hosted coverage dashboards, coverage uploads, stable coverage run/merge orchestration, RazorWire-specific export workflows, or a replacement for project package references.
+    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface coverage run` private test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` private threshold enforcement.
+    does_not_include: App runtime packages, hosted coverage dashboards, coverage uploads, coverage trend storage, RazorWire-specific export workflows, or a replacement for project package references.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README
-    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs` workflows or a private `appsurface coverage gate` without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
+    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs` workflows or private `appsurface coverage run`, `coverage merge`, and `coverage gate` commands without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
     classification: excluded
     publish_decision: do_not_publish
