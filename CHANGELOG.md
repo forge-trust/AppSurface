@@ -31,6 +31,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs Turbo-frame navigation now preserves cross-page heading fragments, so generated package chooser links land directly on the intended quickstart section.
 - AppSurface Flow now includes generated-case authoring for typed long-running process graphs, with build-time diagnostics, generated adapters, serializable envelopes, package-transitive analyzer assets, local runner coverage, Durable Task serialization validation, and a generated-authoring approval example.
 - `ForgeTrust.AppSurface.Aspire` now has a working local Aspire AppHost example, richer package guidance, and an overridable `AspireProfile.PassThroughArgs` seam for profiles that intentionally pass known AppHost arguments.
+- AppSurface Docs search now keeps MiniSearch candidate matching while applying deterministic reader-intent ranking for exact lookups, aliases, entry points, broad task queries, explicit API/internal filters, and contributor/internal demotion.
 
 ## 0.1.0-rc.2 - 2026-06-03
 
