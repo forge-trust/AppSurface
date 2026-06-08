@@ -127,6 +127,7 @@ public class AppSurfaceDocsViewsTests
             CreateDocs(),
             configureServices: services =>
             {
+                // Bypass the normal options pattern so the layout sees a deliberately malformed metrics subsection shape.
                 services.RemoveAll<AppSurfaceDocsOptions>();
                 services.AddSingleton(
                     new AppSurfaceDocsOptions

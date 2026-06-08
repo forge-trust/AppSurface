@@ -961,11 +961,11 @@ public class AppSurfaceDocsWebModuleTests
     [InlineData(true, true, false, false)]
     [InlineData(true, false, true, false)]
     [InlineData(false, true, true, false)]
-    public void ConfigureEndpoints_ShouldMapSearchQualityReviewOnlyWhenHostedMetricsReviewIsEnabled(
+    public void ConfigureEndpoints_ShouldMapHostedMetricsRoutesWhenEnabled(
         bool metricsEnabled,
         bool hostedCollectionEnabled,
         bool hostedReviewEnabled,
-        bool shouldMap)
+        bool shouldMapSearchQuality)
     {
         var context = CreateStartupContext();
         var builder = WebApplication.CreateBuilder();
@@ -998,7 +998,8 @@ public class AppSurfaceDocsWebModuleTests
             .Select(endpoint => endpoint.RoutePattern.RawText?.TrimStart('/'))
             .ToArray();
 
-        Assert.Equal(shouldMap, routePatterns.Contains("docs/_search-quality"));
+        Assert.Equal(metricsEnabled && hostedCollectionEnabled, routePatterns.Contains("docs/_metrics/collect"));
+        Assert.Equal(shouldMapSearchQuality, routePatterns.Contains("docs/_search-quality"));
     }
 
     [Fact]

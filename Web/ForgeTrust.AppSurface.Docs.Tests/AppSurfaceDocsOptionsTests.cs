@@ -1067,6 +1067,7 @@ public sealed class AppSurfaceDocsOptionsTests
         var options = provider.GetRequiredService<IOptions<AppSurfaceProductIntelligenceOptions>>().Value;
 
         Assert.Equal(shouldEnableDocsEvents, options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchSubmitted));
+        Assert.Equal(shouldEnableDocsEvents, options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchFilterChanged));
         Assert.Equal(shouldEnableDocsEvents, options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchFrictionFeedbackSubmitted));
         Assert.False(options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.RazorWireFormFailed));
     }
