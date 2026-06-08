@@ -909,12 +909,8 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Equal(HttpMethods.Post, httpContext.Response.Headers.Allow);
     }
 
-    [Theory]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    public void ConfigureEndpoints_ShouldMapSearchQualityReviewOnlyWhenHostedMetricsReviewIsEnabled(
-        bool hostedReviewEnabled,
-        bool shouldMap)
+    [Fact]
+    public async Task MetricsCollectUnsupportedMethodEndpoint_ShouldReturnMethodNotAllowedWithoutStatusPagesFeature()
     {
         var context = CreateStartupContext();
         var builder = WebApplication.CreateBuilder();
@@ -929,6 +925,61 @@ public class AppSurfaceDocsWebModuleTests
                     HostedCollection = new AppSurfaceDocsHostedMetricsCollectionOptions
                     {
                         Enabled = true
+                    }
+                }
+            });
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var endpoint = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Single(
+                endpoint =>
+                {
+                    var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                    return endpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_metrics/collect"
+                        && methods is not null
+                        && methods.Contains(HttpMethods.Get)
+                        && !methods.Contains(HttpMethods.Post);
+                });
+        await using var responseBody = new MemoryStream();
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = responseBody;
+
+        await endpoint.RequestDelegate!(httpContext);
+        await httpContext.Response.StartAsync();
+
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, httpContext.Response.StatusCode);
+        Assert.Equal(HttpMethods.Post, httpContext.Response.Headers.Allow);
+    }
+
+    [Theory]
+    [InlineData(true, true, true, true)]
+    [InlineData(true, true, false, false)]
+    [InlineData(true, false, true, false)]
+    [InlineData(false, true, true, false)]
+    public void ConfigureEndpoints_ShouldMapSearchQualityReviewOnlyWhenHostedMetricsReviewIsEnabled(
+        bool metricsEnabled,
+        bool hostedCollectionEnabled,
+        bool hostedReviewEnabled,
+        bool shouldMap)
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Metrics = new AppSurfaceDocsMetricsOptions
+                {
+                    Enabled = metricsEnabled,
+                    HostedCollection = new AppSurfaceDocsHostedMetricsCollectionOptions
+                    {
+                        Enabled = hostedCollectionEnabled
                     },
                     HostedReview = new AppSurfaceDocsHostedMetricsReviewOptions
                     {
@@ -948,6 +999,29 @@ public class AppSurfaceDocsWebModuleTests
             .ToArray();
 
         Assert.Equal(shouldMap, routePatterns.Contains("docs/_search-quality"));
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotMapHostedMetricsRoutesWhenMetricsOptionsAreMissing()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        builder.Services.AddSingleton(new AppSurfaceDocsOptions { Metrics = null! });
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var routePatterns = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText?.TrimStart('/'))
+            .ToArray();
+
+        Assert.DoesNotContain("docs/_metrics/collect", routePatterns);
+        Assert.DoesNotContain("docs/_search-quality", routePatterns);
     }
 
     [Fact]

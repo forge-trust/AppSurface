@@ -1,7 +1,9 @@
+using System.Globalization;
 using System.Text;
 using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.AppSurface.Intelligence;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -1037,6 +1039,36 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.True(options.Metrics.HostedCollection.Enabled);
         Assert.True(options.Metrics.HostedReview.Enabled);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Metrics.HostedReview.Exposure);
+    }
+
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    public void AddAppSurfaceDocs_ShouldEnableDocsExperimentalEventsOnlyForHostedMetricsCollection(
+        bool metricsEnabled,
+        bool hostedCollectionEnabled,
+        bool shouldEnableDocsEvents)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Metrics:Enabled"] = metricsEnabled.ToString(CultureInfo.InvariantCulture),
+                        ["AppSurfaceDocs:Metrics:HostedCollection:Enabled"] = hostedCollectionEnabled.ToString(CultureInfo.InvariantCulture)
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceProductIntelligenceOptions>>().Value;
+
+        Assert.Equal(shouldEnableDocsEvents, options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchSubmitted));
+        Assert.Equal(shouldEnableDocsEvents, options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchFrictionFeedbackSubmitted));
+        Assert.False(options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.RazorWireFormFailed));
     }
 
     [Fact]

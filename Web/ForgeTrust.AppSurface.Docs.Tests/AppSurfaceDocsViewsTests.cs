@@ -120,6 +120,37 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("\"feedbackEnabled\":true", html);
     }
 
+    [Fact]
+    public async Task Layout_ShouldRenderDisabledMetrics_WhenMetricsSubsectionsAreNull()
+    {
+        using var services = CreateServiceProvider(
+            CreateDocs(),
+            configureServices: services =>
+            {
+                services.RemoveAll<AppSurfaceDocsOptions>();
+                services.AddSingleton(
+                    new AppSurfaceDocsOptions
+                    {
+                        Metrics = new AppSurfaceDocsMetricsOptions
+                        {
+                            BrowserCollector = null!,
+                            HostedCollection = null!,
+                            HostedReview = null!
+                        }
+                    });
+            });
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Search",
+            c => c.Search());
+
+        Assert.Contains("\"metrics\":{\"enabled\":false", html);
+        Assert.Contains("\"browserCollector\":{\"enabled\":false", html);
+        Assert.Contains("\"feedbackEnabled\":false", html);
+        Assert.DoesNotContain("\"hostedReview\"", html);
+    }
+
     [Theory]
     [InlineData(true, "Collecting")]
     [InlineData(false, "Paused")]
