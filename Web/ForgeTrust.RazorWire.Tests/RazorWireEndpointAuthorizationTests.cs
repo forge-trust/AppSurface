@@ -1,10 +1,14 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Security.Claims;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading.Channels;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Intelligence;
+using ForgeTrust.AppSurface.Web;
 using ForgeTrust.RazorWire.Streams;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -13,6 +17,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.RazorWire.Tests;
 
@@ -153,6 +158,23 @@ public class RazorWireEndpointAuthorizationTests
         Assert.Equal(0, hub.SubscribeCount);
         Assert.Contains(nameof(RazorWireStreamAdmissionRejectionReason.InvalidChannelName), body, StringComparison.Ordinal);
         Assert.DoesNotContain("tenant secret", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_AppSurfaceEndpointAwareMiddleware_PrincipalReachesAuthorizer()
+    {
+        RecordingAppSurfaceAuthorizer.Reset();
+        var root = new RazorWireEndpointAwareAuthModule();
+        var startup = new RazorWireEndpointAwareAuthStartup(root);
+
+        await using var fixture = await AppSurfaceRazorWireFixture.StartAsync(startup, root);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/_rw/streams/public");
+        request.Headers.Add(RazorWireHeaderAuthenticationHandler.UserHeaderName, "razorwire-user");
+        using var response = await fixture.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("razorwire-user", RecordingAppSurfaceAuthorizer.LastUserName);
     }
 
     [Fact]
@@ -493,6 +515,148 @@ public class RazorWireEndpointAuthorizationTests
             Client.Dispose();
             await App.StopAsync();
             await App.DisposeAsync();
+        }
+    }
+
+    private sealed class AppSurfaceRazorWireFixture : IAsyncDisposable
+    {
+        private readonly IHost _host;
+
+        private AppSurfaceRazorWireFixture(IHost host, HttpClient client)
+        {
+            _host = host;
+            Client = client;
+        }
+
+        public HttpClient Client { get; }
+
+        public static async Task<AppSurfaceRazorWireFixture> StartAsync<TModule>(
+            WebStartup<TModule> startup,
+            TModule root)
+            where TModule : IAppSurfaceWebModule, new()
+        {
+            var context = new StartupContext([], root);
+            var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+            builder.ConfigureWebHost(webHost => webHost.UseUrls("http://127.0.0.1:0"));
+
+            var host = builder.Build();
+            await host.StartAsync();
+
+            var server = host.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+            var client = new HttpClient
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            return new AppSurfaceRazorWireFixture(host, client);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Client.Dispose();
+            await _host.StopAsync();
+            _host.Dispose();
+        }
+    }
+
+    private sealed class RazorWireEndpointAwareAuthStartup : WebStartup<RazorWireEndpointAwareAuthModule>
+    {
+        private readonly RazorWireEndpointAwareAuthModule _module;
+
+        public RazorWireEndpointAwareAuthStartup(RazorWireEndpointAwareAuthModule module)
+        {
+            _module = module;
+        }
+
+        protected override RazorWireEndpointAwareAuthModule CreateRootModule() => _module;
+    }
+
+    private sealed class RazorWireEndpointAwareAuthModule : IAppSurfaceWebModule
+    {
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+            services
+                .AddAuthentication(RazorWireHeaderAuthenticationHandler.SchemeName)
+                .AddScheme<AuthenticationSchemeOptions, RazorWireHeaderAuthenticationHandler>(
+                    RazorWireHeaderAuthenticationHandler.SchemeName,
+                    _ => { });
+            services.AddAuthorization();
+            services.AddSingleton<IRazorWireChannelAuthorizer, RecordingAppSurfaceAuthorizer>();
+        }
+
+        public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+        {
+            app.UseAuthentication();
+            app.UseAuthorization();
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+            builder.AddModule<RazorWireWebModule>();
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+    }
+
+    private sealed class RecordingAppSurfaceAuthorizer : IRazorWireChannelAuthorizer
+    {
+        private static string? _lastUserName;
+
+        public static string? LastUserName => Volatile.Read(ref _lastUserName);
+
+        public static void Reset()
+        {
+            Volatile.Write(ref _lastUserName, null);
+        }
+
+        public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            Volatile.Write(ref _lastUserName, context.User.Identity?.Name);
+
+            return ValueTask.FromResult(context.User.Identity?.IsAuthenticated == true);
+        }
+    }
+
+    private sealed class RazorWireHeaderAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+    {
+        public const string SchemeName = "RazorWireHeaderTest";
+        public const string UserHeaderName = "X-Test-User";
+
+        public RazorWireHeaderAuthenticationHandler(
+            IOptionsMonitor<AuthenticationSchemeOptions> options,
+            ILoggerFactory logger,
+            UrlEncoder encoder)
+            : base(options, logger, encoder)
+        {
+        }
+
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        {
+            if (!Request.Headers.TryGetValue(UserHeaderName, out var userValues)
+                || string.IsNullOrWhiteSpace(userValues[0]))
+            {
+                return Task.FromResult(AuthenticateResult.NoResult());
+            }
+
+            var userName = userValues[0]!;
+            var identity = new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.Name, userName),
+                    new Claim(ClaimTypes.NameIdentifier, userName)
+                ],
+                SchemeName);
+            var principal = new ClaimsPrincipal(identity);
+            var ticket = new AuthenticationTicket(principal, SchemeName);
+
+            return Task.FromResult(AuthenticateResult.Success(ticket));
         }
     }
 

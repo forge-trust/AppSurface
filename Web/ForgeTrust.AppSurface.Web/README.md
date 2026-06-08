@@ -27,7 +27,8 @@ The primary entry point for web applications. It handles creating the internal s
 Modules that want to participate in the web startup lifecycle should implement this interface. It extends `IAppSurfaceHostModule` and adds web-specific hooks:
 
 *   **`ConfigureWebOptions`**: Modify the global `WebOptions` (e.g., enable MVC, configure CORS).
-*   **`ConfigureWebApplication`**: Register middleware using `IApplicationBuilder` (e.g., `app.UseAuthentication()`).
+*   **`ConfigureWebApplication`**: Register pre-routing middleware using `IApplicationBuilder` (e.g., exception handling or package-owned static-file middleware that must run before routing).
+*   **`ConfigureEndpointAwareMiddleware`**: Register middleware that must run after routing has selected an endpoint and before endpoints execute (e.g., root/host-owned `app.UseAuthentication()` and `app.UseAuthorization()`).
 *   **`ConfigureEndpoints`**: Map endpoints using `IEndpointRouteBuilder` (e.g., `endpoints.MapGet("/", ...)`).
 
 ### `WebStartup`
@@ -35,6 +36,37 @@ Modules that want to participate in the web startup lifecycle should implement t
 The base class for the application bootstrapping logic. While `WebApp` uses a generic version of this internally, you can extend it if you need deep customization of the host builder or service configuration logic.
 
 ## Features
+
+### Middleware Lifecycle
+
+AppSurface Web keeps middleware and endpoint mapping in three explicit phases:
+
+1. `ConfigureWebApplication` runs before static files, routing, AppSurface CORS, and endpoint execution. Use it for middleware that does not need endpoint metadata.
+2. `ConfigureEndpointAwareMiddleware` runs after `UseRouting()` and AppSurface-managed CORS, before endpoint execution. At request time, middleware here can inspect `HttpContext.GetEndpoint()`, route values, and endpoint metadata for matched endpoints.
+3. `ConfigureEndpoints` maps module endpoints. `WebOptions.MapEndpoints` maps direct host endpoints in the same endpoint-routing phase.
+
+Global ASP.NET Core authentication and authorization middleware should be registered once from the root or host integration module:
+
+```csharp
+public sealed class MyRootModule : IAppSurfaceWebModule
+{
+    public void ConfigureServices(StartupContext context, IServiceCollection services)
+    {
+        services.AddAuthentication(/* scheme configuration */);
+        services.AddAuthorization();
+    }
+
+    public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+    {
+        app.UseAuthentication();
+        app.UseAuthorization();
+    }
+}
+```
+
+The root/host module's endpoint-aware middleware runs before dependency feature modules, so feature middleware can rely on root-owned authentication having already run. Feature modules should only register endpoint-aware middleware they own; they should not each install global authentication or authorization middleware. Apps that need bespoke pipeline policy beyond AppSurface's module hooks can use a custom `WebStartup<TModule>`.
+
+Endpoint-aware middleware must tolerate `HttpContext.GetEndpoint()` being `null` for unmatched requests. Do not call `UseRouting`, `UseCors`, `UseEndpoints`, or map endpoints from this hook.
 
 ### MVC and Controllers
 
