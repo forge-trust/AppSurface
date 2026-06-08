@@ -406,7 +406,8 @@
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.Docs.Standalone": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
-          "ForgeTrust.RazorWire.Cli": "[0.1.0, )"
+          "ForgeTrust.RazorWire.Cli": "[0.1.0, )",
+          "ReportGenerator": "[5.5.10, )"
         }
       },
       "forgetrust.appsurface.config": {
@@ -460,6 +461,9 @@
           "ForgeTrust.AppSurface.Core": "[0.1.0, )",
           "Microsoft.Extensions.Options": "[10.0.8, )"
         }
+      },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
       },
       "forgetrust.appsurface.web": {
         "type": "Project",
@@ -673,6 +677,12 @@
           "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.8",
           "Microsoft.Extensions.Primitives": "10.0.8"
         }
+      },
+      "ReportGenerator": {
+        "type": "CentralTransitive",
+        "requested": "[5.5.10, )",
+        "resolved": "5.5.10",
+        "contentHash": "jtYGRv212OcCa6NUmHGEGcB3I8OBSpBjeywrivOWUG/VC1/Wb/v1GNP2Larx6yOUIulQveQ27U1R6nSuUSLXrw=="
       },
       "TextMateSharp": {
         "type": "CentralTransitive",
