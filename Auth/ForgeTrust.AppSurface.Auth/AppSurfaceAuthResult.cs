@@ -67,6 +67,11 @@ public enum AppSurfaceAuthReason
     MissingServices = 4,
 
     /// <summary>
+    /// The authenticated caller could not be mapped to a stable host-owned subject identifier.
+    /// </summary>
+    MissingSubject = 7,
+
+    /// <summary>
     /// A requested return or navigation target is unsafe.
     /// </summary>
     UnsafeReturnUrl = 5,
@@ -272,6 +277,26 @@ public sealed class AppSurfaceAuthResult
     }
 
     /// <summary>
+    /// Creates a setup-failure result for an authenticated caller that could not be mapped to a stable subject.
+    /// </summary>
+    /// <param name="context">Optional auth context that was evaluated.</param>
+    /// <param name="message">Optional display-safe message supplied by the host adapter.</param>
+    /// <param name="metadata">Optional display or diagnostic metadata copied with ordinal keys.</param>
+    /// <returns>A setup-failure auth result.</returns>
+    public static AppSurfaceAuthResult MissingSubject(
+        AppSurfaceAuthContext? context = null,
+        string? message = null,
+        IReadOnlyDictionary<string, string>? metadata = null)
+    {
+        return new AppSurfaceAuthResult(
+            AppSurfaceAuthOutcome.SetupFailure,
+            AppSurfaceAuthReason.MissingSubject,
+            context,
+            message,
+            metadata);
+    }
+
+    /// <summary>
     /// Creates a result for an unsafe return or navigation target.
     /// </summary>
     /// <param name="context">Optional auth context that was evaluated.</param>
@@ -319,7 +344,8 @@ public sealed class AppSurfaceAuthResult
             AppSurfaceAuthOutcome.Challenge => reason == AppSurfaceAuthReason.Unauthenticated,
             AppSurfaceAuthOutcome.Forbid => reason == AppSurfaceAuthReason.Forbidden,
             AppSurfaceAuthOutcome.SetupFailure => reason is AppSurfaceAuthReason.MissingPolicy
-                or AppSurfaceAuthReason.MissingServices,
+                or AppSurfaceAuthReason.MissingServices
+                or AppSurfaceAuthReason.MissingSubject,
             AppSurfaceAuthOutcome.UnsafeNavigation => reason == AppSurfaceAuthReason.UnsafeReturnUrl,
             AppSurfaceAuthOutcome.StaleOrUnknownSession => reason == AppSurfaceAuthReason.StaleOrUnknownSession,
             _ => false,

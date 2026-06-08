@@ -62,6 +62,7 @@ This approach aims to:
 ### [Auth](./Auth/ForgeTrust.AppSurface.Auth/README.md)
 
 - [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
+- [**ForgeTrust.AppSurface.Auth.AspNetCore**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) – ASP.NET Core adapter that maps existing host request auth context and named policies into AppSurface auth results without owning schemes, middleware, challenges, forbids, redirects, or identity-provider setup.
 
 ### [Flow](./Flow/README.md)
 
@@ -179,6 +180,7 @@ When tests need to launch child processes, prefer CliWrap-backed helpers over ra
 Check out the examples to see how modules are composed in practice:
 
 ```bash
+dotnet run --project examples/auth-aspnetcore-bridge
 dotnet run --project examples/console-app
 dotnet run --project examples/flow-approval-local/FlowApprovalLocalExample.csproj
 dotnet run --project examples/web-app
@@ -212,6 +214,7 @@ Do not file suspected vulnerabilities, leaked secrets, or exploit details in pub
 The [examples](examples/README.md) directory contains sample applications that demonstrate
 how to use this project.
 
+- [Auth ASP.NET Core bridge example](examples/auth-aspnetcore-bridge/README.md) – proves an ASP.NET Core host-owned auth stack can flow named policy results into AppSurface auth contracts.
 - [Console app example](examples/console-app/README.md) – builds a simple command line
   application using [CliFx](https://github.com/Tyrrrz/CliFx) source-generated command
   descriptors.

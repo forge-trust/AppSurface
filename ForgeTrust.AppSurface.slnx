@@ -4,6 +4,8 @@
     <Project Path="Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" />
   </Folder>
   <Folder Name="/Auth/">
+    <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Tests/ForgeTrust.AppSurface.Auth.AspNetCore.Tests.csproj" />
+    <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.Tests/ForgeTrust.AppSurface.Auth.Tests.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth/ForgeTrust.AppSurface.Auth.csproj" />
   </Folder>
@@ -35,6 +37,7 @@
     <Project Path="Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj" />
   </Folder>
   <Folder Name="/Examples/">
+    <Project Path="examples/auth-aspnetcore-bridge/AuthAspNetCoreBridgeExample.csproj" />
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
     <Project Path="examples/flow-approval-local/FlowApprovalLocalExample.csproj" />
