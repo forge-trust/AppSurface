@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLI_PROJECT="$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
 BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-Release}"
-PACKAGE_VERSION_SUFFIX="${PACKAGE_VERSION_SUFFIX:-coverage-run-smoke}"
+PACKAGE_VERSION_SUFFIX="${PACKAGE_VERSION_SUFFIX:-coverage-run-smoke.$(date +%Y%m%d%H%M%S)}"
 PACKAGE_VERSION="0.1.0-${PACKAGE_VERSION_SUFFIX}"
 AUTO_WORK_DIR=0
 if [[ -z "${WORK_DIR:-}" ]]; then
@@ -98,12 +98,25 @@ test -s ./TestResults/coverage-merged/summary.txt
 test -s ./TestResults/coverage-merged/timings.json
 test -s ./TestResults/coverage-merged/projects/Smoke.Tests-*/dotnet-test.log
 
+mkdir -p ./TestResults/coverage-shards/Smoke.Tests
+cp ./TestResults/coverage-merged/projects/Smoke.Tests-*/coverage.cobertura.xml \
+  ./TestResults/coverage-shards/Smoke.Tests/coverage.cobertura.xml
+
+dotnet tool run appsurface coverage merge \
+  --source ./TestResults/coverage-shards \
+  --output ./TestResults/coverage-fan-in
+
+test -s ./TestResults/coverage-fan-in/coverage.cobertura.xml
+test -s ./TestResults/coverage-fan-in/summary.txt
+test -s ./TestResults/coverage-fan-in/timings.json
+test -s ./TestResults/coverage-fan-in/reportgenerator-input/000001-*/coverage.cobertura.xml
+
 dotnet tool run appsurface coverage gate \
-  --coverage ./TestResults/coverage-merged/coverage.cobertura.xml \
+  --coverage ./TestResults/coverage-fan-in/coverage.cobertura.xml \
   --min-line 1 \
   --min-branch 0
 
-test -s ./TestResults/coverage-merged/coverage-gate.json
-test -s ./TestResults/coverage-merged/coverage-gate.md
+test -s ./TestResults/coverage-fan-in/coverage-gate.json
+test -s ./TestResults/coverage-fan-in/coverage-gate.md
 
-echo "Packed coverage run smoke passed. Workspace: $WORK_DIR"
+echo "Packed coverage run/merge smoke passed. Workspace: $WORK_DIR"

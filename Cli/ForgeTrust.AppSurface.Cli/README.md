@@ -12,7 +12,7 @@ appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 
 `appsurface docs` runs the same AppSurface Docs standalone host used by CI and integration tests. It forwards AppSurface Docs configuration into that host instead of duplicating harvesting, routing, static web asset, or MVC setup in the CLI. `appsurface docs export` starts that same host in-process, binds an internal loopback listener, and delegates static crawling plus CDN validation to the RazorWire export engine. `appsurface docs verify-archive` checks one catalog-pinned exact release tree locally before deploy.
 
-The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency in the same command. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service.
+The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency in the same command. `appsurface coverage merge` fans in existing Cobertura shards from matrix or custom test workflows without reading a consumer tool manifest. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service.
 
 ## Release Guidance
 
@@ -153,6 +153,102 @@ Use this GitHub Actions shape for a private repository that already has Coverlet
       TestResults/coverage-merged/coverage-gate.md
       TestResults/coverage-merged/projects/**/dotnet-test.log
 ```
+
+### `appsurface coverage merge`
+
+Merge existing Cobertura shards that another workflow already produced.
+
+```bash
+appsurface coverage merge \
+  --source ./TestResults/coverage-shards \
+  --output ./TestResults/coverage-merged
+```
+
+Use `coverage merge` when a CI matrix, custom test harness, or non-AppSurface test producer already writes Cobertura files and you only need AppSurface's package-owned fan-in plus `coverage gate` artifacts. Use `coverage run -> coverage gate` for normal package-consuming .NET repositories where AppSurface should discover projects, invoke `dotnet test`, and merge the Coverlet output. In this repository, keep `./scripts/coverage-solution.sh --merge-only` for the legacy grouped contributor flow until that script is retired by a separate coverage-runner cleanup.
+
+The v1 source contract is intentionally narrow. `--source` must point to an existing directory. The command recursively selects files named exactly `coverage.cobertura.xml`, sorts them by ordinal path, validates that each selected file has a Cobertura `<coverage>` root, and prints the discovered count plus the first few relative paths. A single shard is valid. Files named `Cobertura.xml`, arbitrary `*.xml`, or non-Cobertura XML are not accepted by v1; rename or copy producer artifacts to `coverage.cobertura.xml` before merging.
+
+Options:
+
+- `--source`: Required directory containing one or more `coverage.cobertura.xml` shard files.
+- `--output`: Coverage output directory. Defaults to `TestResults/coverage-merged`.
+
+Artifacts are local and private by default:
+
+- `coverage.cobertura.xml`: Merged Cobertura file consumed by `coverage gate`.
+- `summary.txt`: Human-readable merged line and branch coverage summary.
+- `timings.json`: Machine-readable merge duration, selected shard count, selected input paths, ReportGenerator exit code, and artifact paths.
+- `reportgenerator-summary.txt`: Text summary from the package-owned ReportGenerator merge when available.
+- `reportgenerator-input/`: AppSurface-owned staged copies of selected inputs, using deterministic sanitized shard directories.
+- `.appsurface-coverage-output`: Ownership marker that allows future merges to clean only known AppSurface-owned merge artifacts.
+
+`coverage merge` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, files, source/output overlap in either direction, and populated directories that do not carry the AppSurface ownership marker. Use separate shard and output directories, for example `TestResults/coverage-shards` and `TestResults/coverage-merged`.
+
+Use this GitHub Actions fan-in shape when matrix jobs upload Cobertura shard artifacts:
+
+```yaml
+jobs:
+  test:
+    strategy:
+      matrix:
+        shard: [unit, integration]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet restore ./MyApp.slnx
+      - run: dotnet test ./tests/${{ matrix.shard }} --collect:"XPlat Code Coverage"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.shard }}
+          path: '**/coverage.cobertura.xml'
+
+  coverage:
+    needs: test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - run: git fetch --no-tags --depth=1 origin main
+      - run: dotnet tool restore
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: ./TestResults/coverage-shards
+          merge-multiple: false
+      - run: dotnet tool run appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged
+      - run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75 --diff-base origin/main --min-patch-line 85 --min-patch-branch 75
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: |
+            TestResults/coverage-merged/coverage.cobertura.xml
+            TestResults/coverage-merged/summary.txt
+            TestResults/coverage-merged/timings.json
+            TestResults/coverage-merged/coverage-gate.json
+            TestResults/coverage-merged/coverage-gate.md
+```
+
+#### Coverage Merge Diagnostics
+
+Every merge diagnostic uses the `ASCOV130` through `ASCOV139` range and includes the problem, likely cause, exact fix, and docs anchor.
+
+| Code | Meaning | Fix |
+| --- | --- | --- |
+| `ASCOV130` | The required source path is missing, invalid, unreadable, or not a directory. | Pass `--source` with an existing readable directory that contains shard artifacts. |
+| `ASCOV131` | No `coverage.cobertura.xml` files were found. | Download or copy shard artifacts under `--source`, keeping the exact file name. |
+| `ASCOV132` | A selected input is malformed, unreadable, or not Cobertura XML. | Regenerate the shard or remove non-Cobertura files before rerunning. |
+| `ASCOV133` | Source and output overlap or alias each other. | Keep downloaded shards and merged artifacts in separate dedicated directories. |
+| `ASCOV134` | The package-owned ReportGenerator dependency was not found. | Restore or reinstall `ForgeTrust.AppSurface.Cli` so its package dependencies are present. |
+| `ASCOV135` | ReportGenerator failed, did not produce merged Cobertura, or produced malformed merged Cobertura. | Inspect selected shards and ReportGenerator output, then rerun after fixing the inputs. |
+| `ASCOV136` | The output path is unsafe or not AppSurface-owned. | Use a dedicated AppSurface-owned output directory. |
+| `ASCOV137` | Staging or artifact writes failed. | Use a writable dedicated output directory and rerun. |
+| `ASCOV138` | A source or output path shape could not be normalized safely. | Use ordinary directory paths without invalid characters or unsupported path forms. |
+| `ASCOV139` | AppSurface staging did not preserve every selected shard. | Clean the output directory or choose a fresh output path, then rerun. |
 
 #### Coverage Run Diagnostics
 

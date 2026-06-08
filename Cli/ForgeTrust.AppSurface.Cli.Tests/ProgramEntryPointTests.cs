@@ -47,6 +47,20 @@ public sealed class ProgramEntryPointTests
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task EntryPoint_Should_Print_Coverage_Merge_Help_With_Required_Source()
+    {
+        var result = await InvokeEntryPointAsync(["coverage", "merge", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Merge existing Cobertura shards into local AppSurface coverage artifacts.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--source", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Required directory containing coverage.cobertura.xml shard files to merge.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--output", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("0.1.0", "0.1.0")]
     [InlineData("0.1.0-rc.1", "0.1.0-rc.1")]
