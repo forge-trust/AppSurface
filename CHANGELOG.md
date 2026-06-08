@@ -31,6 +31,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Web browser status-page re-execution now preserves original browser error status codes while direct reserved preview routes continue to render normally.
 - Package consumers now have a package-first AppSurface Web quickstart that starts from `dotnet new web`, installs `ForgeTrust.AppSurface.Web`, and verifies the first route without cloning the repository.
 - AppSurface Docs Turbo-frame navigation now preserves cross-page heading fragments, so generated package chooser links land directly on the intended quickstart section.
+- AppSurface Docs now has opt-in dual-mode search-quality metrics for static collector forwarding, hosted registry validation, host-owned sink forwarding, bounded Search Quality diagnostics, and recovery-state reader feedback.
 - AppSurface Flow now includes generated-case authoring for typed long-running process graphs, with build-time diagnostics, generated adapters, serializable envelopes, package-transitive analyzer assets, local runner coverage, Durable Task serialization validation, and a generated-authoring approval example.
 - `ForgeTrust.AppSurface.Aspire` now has a working local Aspire AppHost example, richer package guidance, and an overridable `AspireProfile.PassThroughArgs` seam for profiles that intentionally pass known AppHost arguments.
 

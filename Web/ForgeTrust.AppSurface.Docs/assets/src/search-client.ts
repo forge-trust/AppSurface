@@ -14,13 +14,21 @@ declare global {
     MiniSearch?: any;
     __rwDocsSearchPopstateBound?: boolean;
     __rwDocsSearchMobileFilterListenerBound?: boolean;
+    __appSurfaceDocsMetricsCollectorBound?: boolean;
     Turbo?: any;
   }
 }
 
 (() => {
   const rawConfig = window.__appSurfaceDocsConfig || {};
-  const productIntelligenceEnabled = Boolean(rawConfig.productIntelligenceEnabled);
+  const metricsConfig = rawConfig.metrics || {};
+  const browserCollectorConfig = metricsConfig.browserCollector || {};
+  const browserCollectorEndpointUrl = normalizeCollectorEndpointUrl(browserCollectorConfig.endpointUrl);
+  const browserCollectorEnabled = Boolean(
+    metricsConfig.enabled && browserCollectorConfig.enabled && browserCollectorEndpointUrl
+  );
+  const productIntelligenceEnabled = Boolean(rawConfig.productIntelligenceEnabled || browserCollectorEnabled);
+  const frictionFeedbackEnabled = Boolean(metricsConfig.feedbackEnabled && browserCollectorEnabled);
   const docsRootPath = normalizeDocsRootPath(rawConfig.docsRootPath || '/docs');
   const docsArchiveRootPath = rawConfig.docsArchiveRootPath ? normalizeDocsRootPath(rawConfig.docsArchiveRootPath) : '';
   const docsSearchUrl = rawConfig.docsSearchUrl || joinDocsPath(docsRootPath, 'search');
@@ -52,8 +60,24 @@ declare global {
     docsSearchSubmitted: 'docs.search.submitted',
     docsSearchReturnedZeroResults: 'docs.search.returned_zero_results',
     docsSearchResultSelected: 'docs.search.result_selected',
-    docsRecoveryLinkSelected: 'docs.recovery_link.selected'
+    docsRecoveryLinkSelected: 'docs.recovery_link.selected',
+    docsSearchFilterChanged: 'docs.search.filter_changed',
+    docsSearchFrictionFeedbackSubmitted: 'docs.search.friction_feedback_submitted'
   };
+  const collectorAcceptedEventNames = new Set(Object.values(productEventNames));
+  const collectorAcceptedPropertyNames = new Set([
+    'active_filter_count',
+    'feedback_value',
+    'filter_action',
+    'filter_key',
+    'link_kind',
+    'query_length',
+    'result_count',
+    'result_kind',
+    'result_rank',
+    'source_state',
+    'surface'
+  ]);
   const productIntelligenceState = {
     lastSearchKeys: new Map()
   };
@@ -126,6 +150,28 @@ declare global {
   function joinDocsPath(root, leaf) {
     const normalizedLeaf = String(leaf || '').replace(/^\/+/, '');
     return root === '/' ? `/${normalizedLeaf}` : `${root}/${normalizedLeaf}`;
+  }
+
+  function normalizeCollectorEndpointUrl(endpointUrl) {
+    const value = String(endpointUrl || '').trim();
+    if (!value || value.includes('\\') || value.includes('?') || value.includes('#')) {
+      return '';
+    }
+
+    if (value.startsWith('/') && !value.startsWith('//')) {
+      return value;
+    }
+
+    try {
+      const url = new URL(value);
+      if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+        return '';
+      }
+
+      return url.toString().replace(/\/$/, '');
+    } catch {
+      return '';
+    }
   }
 
   function getSidebarSearchElements() {
@@ -546,6 +592,64 @@ declare global {
     }));
   }
 
+  function sanitizeCollectorProperties(properties) {
+    const safeProperties = {};
+    Object.entries(properties || {}).forEach(([key, value]) => {
+      if (!collectorAcceptedPropertyNames.has(key)) {
+        return;
+      }
+
+      const normalized = String(value ?? '').trim();
+      if (!normalized || normalized.length > 64 || /[\s"'<>\\]/.test(normalized)) {
+        return;
+      }
+
+      safeProperties[key] = normalized;
+    });
+
+    return safeProperties;
+  }
+
+  function sendCollectorEvent(name, properties) {
+    if (!browserCollectorEnabled || !browserCollectorEndpointUrl || !collectorAcceptedEventNames.has(name)) {
+      return;
+    }
+
+    const payload = JSON.stringify({
+      name,
+      properties: sanitizeCollectorProperties(properties),
+      timestamp: new Date().toISOString()
+    });
+
+    if (payload.length > 4096 || typeof fetch !== 'function') {
+      return;
+    }
+
+    fetch(browserCollectorEndpointUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: payload,
+      keepalive: true,
+      credentials: 'omit'
+    }).catch(() => {
+      // Metrics collection must never affect the reader experience.
+    });
+  }
+
+  function bindMetricsCollector() {
+    if (!browserCollectorEnabled || window.__appSurfaceDocsMetricsCollectorBound) {
+      return;
+    }
+
+    window.__appSurfaceDocsMetricsCollectorBound = true;
+    document.addEventListener('appsurface:product-intelligence:event', (event) => {
+      const detail = event instanceof CustomEvent ? event.detail : null;
+      sendCollectorEvent(String(detail?.name || ''), detail?.properties || {});
+    });
+  }
+
   function getSearchResultKind(doc) {
     return normalizePageTypeAlias(doc?.pageType) || 'unknown';
   }
@@ -583,6 +687,28 @@ declare global {
         active_filter_count: activeFilterCount
       });
     }
+  }
+
+  function countActiveFiltersFromState(state) {
+    return facetKeys.reduce((count, key) => count + (normalizeFacetValue(state[key]) ? 1 : 0), 0);
+  }
+
+  function recordFilterChanged(filterKey, filterAction, nextState = {}) {
+    if (!facetKeys.includes(filterKey)) {
+      return;
+    }
+
+    const state = {
+      ...searchPageState,
+      ...nextState
+    };
+    dispatchProductIntelligenceEvent(productEventNames.docsSearchFilterChanged, {
+      surface: 'search_page',
+      filter_key: filterKey,
+      filter_action: filterAction,
+      active_filter_count: countActiveFiltersFromState(state),
+      query_length: normalizeQuery(state.q).length
+    });
   }
 
   function inferRecoveryLinkKind(link) {
@@ -1219,7 +1345,42 @@ declare global {
       links.append(anchor);
     });
     container.append(links);
+    const feedback = createFrictionFeedbackControl('no_results', 'fallback');
+    if (feedback) {
+      container.append(feedback);
+    }
+
     return container;
+  }
+
+  function createFrictionFeedbackControl(sourceState, linkKind) {
+    if (!frictionFeedbackEnabled) {
+      return null;
+    }
+
+    const fieldset = createElement('fieldset', 'docs-search-page-feedback');
+    fieldset.dataset.rwFeedbackSourceState = sourceState;
+    fieldset.dataset.rwFeedbackLinkKind = linkKind;
+    const legend = createElement('legend', 'docs-search-page-feedback-legend', 'Did this recovery help?');
+    const row = createElement('div', 'docs-search-page-feedback-actions');
+    [
+      ['useful', 'Yes'],
+      ['not_useful', 'No']
+    ].forEach(([value, label]) => {
+      const button = createElement('button', 'docs-search-page-feedback-button', label);
+      button.type = 'button';
+      button.dataset.rwSearchFeedbackValue = value;
+      row.append(button);
+    });
+
+    fieldset.append(legend, row);
+    return fieldset;
+  }
+
+  function confirmFrictionFeedback(control) {
+    const confirmation = createElement('p', 'docs-search-page-feedback-confirmation', 'Thanks. Search quality feedback was recorded.');
+    confirmation.setAttribute('aria-live', 'polite');
+    control.replaceWith(confirmation);
   }
 
   function createLoadingSkeletons(count = 3) {
@@ -2193,6 +2354,7 @@ declare global {
       }
 
       const nextValue = normalizeFacetValue(searchPageState[key]) === value ? '' : value;
+      recordFilterChanged(key, nextValue ? 'selected' : 'cleared', { [key]: nextValue });
       setSearchPageState({ [key]: nextValue }, 'push');
     });
 
@@ -2202,7 +2364,11 @@ declare global {
         return;
       }
 
-      setSearchPageState({ [select.dataset.rwFacetKey]: normalizeFacetValue(select.value) }, 'push');
+      const nextValue = normalizeFacetValue(select.value);
+      recordFilterChanged(select.dataset.rwFacetKey, nextValue ? 'selected' : 'cleared', {
+        [select.dataset.rwFacetKey]: nextValue
+      });
+      setSearchPageState({ [select.dataset.rwFacetKey]: nextValue }, 'push');
     });
 
     activeFilters.addEventListener('click', (event) => {
@@ -2221,12 +2387,31 @@ declare global {
         return;
       }
 
+      recordFilterChanged(key, 'cleared', { [key]: '' });
       setSearchPageState({ [key]: '' }, 'push');
     });
 
     results?.addEventListener('click', (event) => {
       const target = event.target;
       if (!(target instanceof Element)) {
+        return;
+      }
+
+      const feedbackButton = target.closest('[data-rw-search-feedback-value]');
+      if (feedbackButton instanceof HTMLButtonElement) {
+        const control = feedbackButton.closest('[data-rw-feedback-source-state]');
+        if (control instanceof HTMLElement) {
+          dispatchProductIntelligenceEvent(productEventNames.docsSearchFrictionFeedbackSubmitted, {
+            surface: 'search_page',
+            source_state: control.dataset.rwFeedbackSourceState || 'no_results',
+            feedback_value: feedbackButton.dataset.rwSearchFeedbackValue || '',
+            active_filter_count: countActiveFiltersFromState(searchPageState),
+            query_length: normalizeQuery(searchPageState.q).length,
+            link_kind: control.dataset.rwFeedbackLinkKind || 'fallback'
+          });
+          confirmFrictionFeedback(control);
+        }
+
         return;
       }
 
@@ -2245,6 +2430,13 @@ declare global {
         return;
       }
 
+      recordFilterChanged('pageType', 'cleared_all', {
+        pageType: '',
+        component: '',
+        language: '',
+        audience: '',
+        status: ''
+      });
       setSearchPageState({ pageType: '', component: '', language: '', audience: '', status: '' }, 'push');
     });
 
@@ -2384,6 +2576,7 @@ declare global {
   }
 
   installDocsPartialHook();
+  bindMetricsCollector();
   const hasTurbo = typeof window !== 'undefined'
     && (Object.prototype.hasOwnProperty.call(window, 'Turbo')
       || typeof window.Turbo !== 'undefined'

@@ -464,6 +464,8 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var currentHealthJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthJsonUrl());
         var currentRouteInspectorPattern = TrimLeadingSlash(docsUrlBuilder.BuildRouteInspectorUrl());
         var currentRouteInspectorJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildRouteInspectorJsonUrl());
+        var currentMetricsCollectPattern = TrimLeadingSlash(docsUrlBuilder.BuildMetricsCollectUrl());
+        var currentSearchQualityPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchQualityUrl());
         var currentSectionPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "sections/{sectionSlug}"));
         var currentDetailsPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "{*path}"));
 
@@ -557,6 +559,43 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "RouteInspectorJson"
             });
+
+        if (ShouldMapHostedMetricsCollection(docsOptions))
+        {
+            endpoints.MapMethods(
+                currentMetricsCollectPattern,
+                [
+                    HttpMethods.Delete,
+                    HttpMethods.Get,
+                    HttpMethods.Head,
+                    HttpMethods.Options,
+                    HttpMethods.Patch,
+                    HttpMethods.Put
+                ],
+                RejectMetricsCollectUnsupportedMethodAsync);
+
+            endpoints.MapControllerRoute(
+                    name: "appsurfacedocs_metrics_collect",
+                    pattern: currentMetricsCollectPattern,
+                    defaults: new
+                    {
+                        controller = "Docs",
+                        action = "CollectMetrics"
+                    })
+                .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
+        }
+
+        if (ShouldMapHostedSearchQualityReview(docsOptions))
+        {
+            endpoints.MapControllerRoute(
+                name: "appsurfacedocs_search_quality",
+                pattern: currentSearchQualityPattern,
+                defaults: new
+                {
+                    controller = "Docs",
+                    action = "SearchQuality"
+                });
+        }
 
         endpoints.MapControllerRoute(
             name: "appsurfacedocs_section",
@@ -692,6 +731,39 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         context.Response.Headers["Allow"] = DocsUrlBuilder.SearchIndexRefreshMethod;
         context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
         return Task.CompletedTask;
+    }
+
+    private static Task RejectMetricsCollectUnsupportedMethodAsync(HttpContext context)
+    {
+        var statusCodePages = context.Features.Get<IStatusCodePagesFeature>();
+        if (statusCodePages is not null)
+        {
+            statusCodePages.Enabled = false;
+        }
+
+        context.Response.OnStarting(
+            static state =>
+            {
+                var httpContext = (HttpContext)state;
+                httpContext.Response.Headers["Allow"] = HttpMethods.Post;
+                return Task.CompletedTask;
+            },
+            context);
+        context.Response.Headers["Allow"] = HttpMethods.Post;
+        context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+        return Task.CompletedTask;
+    }
+
+    private static bool ShouldMapHostedMetricsCollection(AppSurfaceDocsOptions options)
+    {
+        return options.Metrics?.Enabled == true
+               && options.Metrics.HostedCollection?.Enabled == true;
+    }
+
+    private static bool ShouldMapHostedSearchQualityReview(AppSurfaceDocsOptions options)
+    {
+        return ShouldMapHostedMetricsCollection(options)
+               && options.Metrics?.HostedReview?.Enabled == true;
     }
 
     private static AppSurfaceDocsOptions ResolveOptions(IServiceProvider? services)
