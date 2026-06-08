@@ -305,20 +305,9 @@ internal sealed class CoverageMergeWorkflow
                 File.Copy(report, Path.Join(stagedDirectory, "coverage.cobertura.xml"), overwrite: true);
             }
 
-            var stagedReports = Directory.EnumerateFiles(stagingDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories).Count();
-            if (stagedReports != selectedReports.Count)
-            {
-                throw CoverageRunDiagnostics.Create(
-                    "ASCOV139",
-                    "Coverage merge staging did not preserve every selected shard.",
-                    $"Selected {selectedReports.Count.ToString(CultureInfo.InvariantCulture)} shard(s) but staged {stagedReports.ToString(CultureInfo.InvariantCulture)}.",
-                    "Clean the output directory or choose a new --output path, then rerun coverage merge.",
-                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-merge-diagnostics");
-            }
-        }
-        catch (CommandException)
-        {
-            throw;
+            CoverageMergeStaging.EnsurePreservedSelectedShardCount(
+                selectedReports.Count,
+                Directory.EnumerateFiles(stagingDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories).Count());
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
         {
@@ -718,24 +707,12 @@ internal static class CoverageMergePathSafety
     private static string ResolvePhysicalPath(string path, int depth)
     {
         var fullPath = Path.GetFullPath(path);
-        var root = Path.GetPathRoot(fullPath);
-        if (string.IsNullOrEmpty(root))
-        {
-            return fullPath;
-        }
-
-        var current = root;
-
+        var root = Path.GetPathRoot(fullPath)!;
         var relative = fullPath[root.Length..];
-        foreach (var segment in relative.Split(
-            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-            StringSplitOptions.RemoveEmptyEntries))
-        {
-            var next = Path.Join(current, segment);
-            current = ResolveExistingPathOrSelf(next, depth);
-        }
 
-        return current;
+        return relative
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries)
+            .Aggregate(root, (current, segment) => ResolveExistingPathOrSelf(Path.Join(current, segment), depth));
     }
 
     private static string ResolveExistingPathOrSelf(string path, int depth)
@@ -762,5 +739,31 @@ internal static class CoverageMergePathSafety
         }
 
         return ResolvePhysicalPath(target.FullName, depth + 1);
+    }
+}
+
+/// <summary>
+/// Validates that coverage merge staging preserved the selected shard set before ReportGenerator sees the glob.
+/// </summary>
+internal static class CoverageMergeStaging
+{
+    /// <summary>
+    /// Ensures that the staged ReportGenerator input tree contains one Cobertura file for each selected source shard.
+    /// </summary>
+    /// <param name="selectedReportCount">Number of source shards selected by discovery.</param>
+    /// <param name="stagedReportCount">Number of staged Cobertura files visible to the ReportGenerator glob.</param>
+    public static void EnsurePreservedSelectedShardCount(int selectedReportCount, int stagedReportCount)
+    {
+        if (stagedReportCount == selectedReportCount)
+        {
+            return;
+        }
+
+        throw CoverageRunDiagnostics.Create(
+            "ASCOV139",
+            "Coverage merge staging did not preserve every selected shard.",
+            $"Selected {selectedReportCount.ToString(CultureInfo.InvariantCulture)} shard(s) but staged {stagedReportCount.ToString(CultureInfo.InvariantCulture)}.",
+            "Clean the output directory or choose a new --output path, then rerun coverage merge.",
+            "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-merge-diagnostics");
     }
 }

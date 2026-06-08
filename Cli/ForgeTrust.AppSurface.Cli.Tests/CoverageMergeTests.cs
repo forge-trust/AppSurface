@@ -96,6 +96,25 @@ public sealed class CoverageMergeTests
     }
 
     [Fact]
+    public async Task MergeAsync_ShouldUseAbsoluteDisplayPathForOutputOutsideCurrentDirectory()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-merge-");
+        using var outputRoot = TempDirectory.Create("appsurface-coverage-output-");
+        repo.WriteFile("shards/coverage.cobertura.xml", "<coverage />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var outputDirectory = Path.Join(outputRoot.Path, "merged");
+        var workflow = CreateWorkflow(new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var result = await workflow.MergeAsync(new CoverageMergeRequest("shards", outputDirectory, Clean: true), console, CancellationToken.None);
+
+        Assert.Equal(outputDirectory, result.OutputDirectory);
+        var output = console.ReadOutputString();
+        Assert.Contains($"Output: {outputDirectory}", output, StringComparison.Ordinal);
+        Assert.Contains($"Coverage artifacts: {outputDirectory}", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task MergeAsync_ShouldCleanOwnedMergeArtifacts()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-merge-");
@@ -171,6 +190,11 @@ public sealed class CoverageMergeTests
             () => CreateWorkflow(new RecordingReportGenerator { MergedCoverage = "<not-coverage />" }).MergeAsync(new CoverageMergeRequest("good", "merged", Clean: true), console, CancellationToken.None));
         Assert.Contains("ASCOV135", badMerge.Message, StringComparison.Ordinal);
         Assert.Contains("Merged Cobertura file is malformed", badMerge.Message, StringComparison.Ordinal);
+
+        var malformedMerge = await Assert.ThrowsAsync<CommandException>(
+            () => CreateWorkflow(new RecordingReportGenerator { MergedCoverage = "<coverage" }).MergeAsync(new CoverageMergeRequest("good", "merged", Clean: true), console, CancellationToken.None));
+        Assert.Contains("ASCOV135", malformedMerge.Message, StringComparison.Ordinal);
+        Assert.Contains("malformed or unreadable", malformedMerge.Message, StringComparison.Ordinal);
 
         repo.WriteFile("malformed/coverage.cobertura.xml", "<coverage");
         var malformedInput = await Assert.ThrowsAsync<CommandException>(
@@ -266,6 +290,18 @@ public sealed class CoverageMergeTests
 
         Assert.Contains("ASCOV137", exception.Message, StringComparison.Ordinal);
         Assert.Contains("staging failed", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnsurePreservedSelectedShardCount_ShouldReportStagingCountMismatch()
+    {
+        CoverageMergeStaging.EnsurePreservedSelectedShardCount(selectedReportCount: 2, stagedReportCount: 2);
+
+        var exception = Assert.Throws<CommandException>(
+            () => CoverageMergeStaging.EnsurePreservedSelectedShardCount(selectedReportCount: 2, stagedReportCount: 1));
+
+        Assert.Contains("ASCOV139", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Selected 2 shard(s) but staged 1.", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
