@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 26
-- Evidence status: manifest evidence complete: 16; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
-- Product families: AppSurface: 15; Forge Trust: 2; Internal support: 7; RazorWire: 2
+- Packages: 27
+- Evidence status: manifest evidence complete: 17; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
+- Product families: AppSurface: 16; Forge Trust: 2; Internal support: 7; RazorWire: 2
 
 ## Package evidence matrix
 
@@ -18,9 +18,10 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Config` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Config/ForgeTrust.AppSurface.Config/README.md) | [notes](../releases/v0.1.0-rc.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Caching` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Caching/ForgeTrust.AppSurface.Caching/README.md) | [notes](../releases/v0.1.0-rc.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Auth/ForgeTrust.AppSurface.Auth/README.md) | [notes](../releases/v0.1.0-rc.2.md) |
+| AppSurface | `ForgeTrust.AppSurface.Auth.AspNetCore` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth` | [README](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) | [notes](../releases/v0.1.0-rc.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Intelligence` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Intelligence/ForgeTrust.AppSurface.Intelligence/README.md) | [notes](../releases/v0.1.0-rc.2.md) |
-| Internal support | `ForgeTrust.AppSurface.Flow.Generators` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Flow` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Flow/ForgeTrust.AppSurface.Flow/README.md) | [notes](../releases/v0.1.0-rc.2.md) |
+| Internal support | `ForgeTrust.AppSurface.Flow.Generators` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Flow.DurableTask` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Flow` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Flow` | [README](../Flow/ForgeTrust.AppSurface.Flow.DurableTask/README.md) | [notes](../releases/v0.1.0-rc.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Console` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Console/ForgeTrust.AppSurface.Console/README.md) | [notes](../releases/v0.1.0-rc.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Dependency.Autofac` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Core` | `ForgeTrust.AppSurface.Core` | [README](../Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) | [notes](../releases/v0.1.0-rc.2.md) |

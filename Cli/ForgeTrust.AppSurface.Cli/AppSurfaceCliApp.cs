@@ -76,6 +76,7 @@ internal static class AppSurfaceCliApp
         services.AddSingleton<ICoverageRunReportGenerator, CoverageRunReportGenerator>();
         services.AddSingleton(TimeProvider.System);
         services.AddTransient<CoverageRunWorkflow>();
+        services.AddTransient<CoverageMergeWorkflow>();
         services.AddSingleton<ExportEngine>();
         services.AddSingleton<ExportSourceRequestFactory>();
         services.AddSingleton<ExportSourceResolver>();

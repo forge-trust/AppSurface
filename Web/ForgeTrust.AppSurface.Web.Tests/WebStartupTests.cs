@@ -1,13 +1,23 @@
+using System.Net;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
 using ForgeTrust.AppSurface.Core;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Web.Tests;
 
@@ -598,6 +608,98 @@ public class WebStartupTests
     }
 
     [Fact]
+    public async Task ConfigureEndpointAwareMiddleware_SeesSelectedEndpointsAndToleratesNoMatch()
+    {
+        EndpointAwareLifecycleModule.Reset();
+        var root = new EndpointAwareLifecycleModule();
+        var startup = new ModuleWebStartup<EndpointAwareLifecycleModule>(root);
+        startup.WithOptions(o =>
+        {
+            o.MapEndpoints = endpoints =>
+            {
+                endpoints.MapGet(
+                        "/direct-aware",
+                        static async context =>
+                        {
+                            await context.Response.WriteAsync(
+                                (string?)context.Items[EndpointAwareLifecycleModule.EndpointAwareNameItemKey]
+                                ?? "<missing>");
+                        })
+                    .WithDisplayName("direct-aware endpoint")
+                    .WithMetadata(new EndpointAwareTestMetadata("direct-aware"));
+            };
+        });
+
+        await using var host = await StartedWebHost.StartAsync(startup, root);
+
+        Assert.Equal("module-aware", await host.Client.GetStringAsync("/module-aware"));
+        Assert.Equal("direct-aware", await host.Client.GetStringAsync("/direct-aware"));
+
+        using var missing = await host.Client.GetAsync("/not-mapped");
+
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        Assert.All(EndpointAwareLifecycleModule.PreRoutingEndpointNames, name => Assert.Equal("<null>", name));
+        Assert.Contains("module-aware", EndpointAwareLifecycleModule.EndpointAwareNames);
+        Assert.Contains("direct-aware", EndpointAwareLifecycleModule.EndpointAwareNames);
+        Assert.Contains("<null>", EndpointAwareLifecycleModule.EndpointAwareNames);
+    }
+
+    [Fact]
+    public async Task ConfigureEndpointAwareMiddleware_RunsRootFirstAndSupportsAuthorization()
+    {
+        EndpointAwareAuthRootModule.Reset();
+        var root = new EndpointAwareAuthRootModule();
+        var startup = new ModuleWebStartup<EndpointAwareAuthRootModule>(root);
+        startup.WithOptions(o =>
+        {
+            o.Cors.EnableCors = true;
+            o.Cors.AllowedOrigins = ["https://app.example.test"];
+        });
+
+        await using var host = await StartedWebHost.StartAsync(startup, root);
+
+        using var authorized = new HttpRequestMessage(HttpMethod.Get, "/ordered-auth");
+        authorized.Headers.Add("Origin", "https://app.example.test");
+        authorized.Headers.Add(HeaderAuthenticationHandler.UserHeaderName, "alice");
+        using var authorizedResponse = await host.Client.SendAsync(authorized);
+        var body = await authorizedResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, authorizedResponse.StatusCode);
+        Assert.Equal("alice", body);
+        Assert.Equal("https://app.example.test", Assert.Single(authorizedResponse.Headers.GetValues("Access-Control-Allow-Origin")));
+        Assert.Collection(
+            EndpointAwareAuthRootModule.Events,
+            first => Assert.Equal("root", first),
+            second => Assert.Equal("feature:True", second));
+
+        EndpointAwareAuthRootModule.ResetEvents();
+
+        using var unauthorized = new HttpRequestMessage(HttpMethod.Get, "/ordered-auth");
+        unauthorized.Headers.Add("Origin", "https://app.example.test");
+        using var unauthorizedResponse = await host.Client.SendAsync(unauthorized);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorizedResponse.StatusCode);
+        Assert.Equal("https://app.example.test", Assert.Single(unauthorizedResponse.Headers.GetValues("Access-Control-Allow-Origin")));
+    }
+
+    [Fact]
+    public async Task ConfigureEndpointAwareMiddleware_SupportsAuthorizedControllers()
+    {
+        var root = new EndpointAwareMvcAuthRootModule();
+        var startup = new ModuleWebStartup<EndpointAwareMvcAuthRootModule>(root);
+
+        await using var host = await StartedWebHost.StartAsync(startup, root);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/endpoint-aware-auth-controller");
+        request.Headers.Add(HeaderAuthenticationHandler.UserHeaderName, "controller-user");
+        using var response = await host.Client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("controller-user", body);
+    }
+
+    [Fact]
     public async Task ConfigureServices_Cors_WildcardInProduction_LogsWarning()
     {
         var previous = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
@@ -744,6 +846,62 @@ public class WebStartupTests
         protected override TestWebModuleNoApplicationPart CreateRootModule() => _module;
     }
 
+    private sealed class ModuleWebStartup<TModule> : WebStartup<TModule>
+        where TModule : IAppSurfaceWebModule, new()
+    {
+        private readonly TModule _module;
+
+        public ModuleWebStartup(TModule module)
+        {
+            _module = module;
+        }
+
+        protected override TModule CreateRootModule() => _module;
+    }
+
+    private sealed class StartedWebHost : IAsyncDisposable
+    {
+        private readonly IHost _host;
+
+        private StartedWebHost(IHost host, HttpClient client)
+        {
+            _host = host;
+            Client = client;
+        }
+
+        public HttpClient Client { get; }
+
+        public static async Task<StartedWebHost> StartAsync<TModule>(
+            WebStartup<TModule> startup,
+            TModule root)
+            where TModule : IAppSurfaceWebModule, new()
+        {
+            var context = new StartupContext([], root);
+            var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+            builder.ConfigureWebHost(webHost => webHost.UseUrls("http://127.0.0.1:0"));
+
+            var host = builder.Build();
+            await host.StartAsync();
+
+            var server = host.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+            var client = new HttpClient
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            return new StartedWebHost(host, client);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Client.Dispose();
+            await _host.StopAsync();
+            _host.Dispose();
+        }
+    }
+
     private class TestWebModule : IAppSurfaceWebModule
     {
         public MvcSupport MvcLevel { get; init; } = MvcSupport.None;
@@ -777,6 +935,253 @@ public class WebStartupTests
 
         public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
         {
+        }
+    }
+
+    private sealed class EndpointAwareLifecycleModule : IAppSurfaceWebModule
+    {
+        public const string EndpointAwareNameItemKey = "endpoint-aware-name";
+        private static readonly List<string> PreRoutingEndpoints = new();
+        private static readonly List<string> EndpointAwareEndpointNames = new();
+
+        public static IReadOnlyList<string> PreRoutingEndpointNames => PreRoutingEndpoints;
+
+        public static IReadOnlyList<string> EndpointAwareNames => EndpointAwareEndpointNames;
+
+        public static void Reset()
+        {
+            PreRoutingEndpoints.Clear();
+            EndpointAwareEndpointNames.Clear();
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void ConfigureWebApplication(StartupContext context, IApplicationBuilder app)
+        {
+            app.Use(
+                async (httpContext, next) =>
+                {
+                    PreRoutingEndpoints.Add(httpContext.GetEndpoint()?.DisplayName ?? "<null>");
+                    await next();
+                });
+        }
+
+        public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+        {
+            app.Use(
+                async (httpContext, next) =>
+                {
+                    var endpointName = httpContext
+                        .GetEndpoint()
+                        ?.Metadata
+                        .GetMetadata<EndpointAwareTestMetadata>()
+                        ?.Name
+                        ?? "<null>";
+                    EndpointAwareEndpointNames.Add(endpointName);
+                    httpContext.Items[EndpointAwareNameItemKey] = endpointName;
+
+                    await next();
+                });
+        }
+
+        public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+        {
+            endpoints.MapGet(
+                    "/module-aware",
+                    static async context =>
+                    {
+                        await context.Response.WriteAsync(
+                            (string?)context.Items[EndpointAwareNameItemKey] ?? "<missing>");
+                    })
+                .WithDisplayName("module-aware endpoint")
+                .WithMetadata(new EndpointAwareTestMetadata("module-aware"));
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+    }
+
+    private sealed record EndpointAwareTestMetadata(string Name);
+
+    private sealed class EndpointAwareAuthRootModule : IAppSurfaceWebModule
+    {
+        private static readonly List<string> RecordedEvents = new();
+
+        public static IReadOnlyList<string> Events => RecordedEvents;
+
+        public static void Reset()
+        {
+            ResetEvents();
+        }
+
+        public static void ResetEvents()
+        {
+            RecordedEvents.Clear();
+        }
+
+        public static void RecordEvent(string name)
+        {
+            RecordedEvents.Add(name);
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+            services
+                .AddAuthentication(HeaderAuthenticationHandler.SchemeName)
+                .AddScheme<AuthenticationSchemeOptions, HeaderAuthenticationHandler>(
+                    HeaderAuthenticationHandler.SchemeName,
+                    _ => { });
+            services.AddAuthorization();
+        }
+
+        public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+        {
+            app.Use(
+                async (_, next) =>
+                {
+                    RecordEvent("root");
+                    await next();
+                });
+            app.UseAuthentication();
+            app.UseAuthorization();
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+            builder.AddModule<EndpointAwareAuthFeatureModule>();
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+    }
+
+    private sealed class EndpointAwareAuthFeatureModule : IAppSurfaceWebModule
+    {
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+        {
+            app.Use(
+                async (httpContext, next) =>
+                {
+                    EndpointAwareAuthRootModule.RecordEvent(
+                        $"feature:{httpContext.User.Identity?.IsAuthenticated == true}");
+                    await next();
+                });
+        }
+
+        public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+        {
+            endpoints.MapGet(
+                    "/ordered-auth",
+                    static async context =>
+                    {
+                        await context.Response.WriteAsync(context.User.Identity?.Name ?? "<anonymous>");
+                    })
+                .RequireAuthorization();
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+    }
+
+    private sealed class EndpointAwareMvcAuthRootModule : IAppSurfaceWebModule
+    {
+        public bool IncludeAsApplicationPart => true;
+
+        public void ConfigureWebOptions(StartupContext context, WebOptions options)
+        {
+            options.Mvc = options.Mvc with { MvcSupportLevel = MvcSupport.Controllers };
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+            services
+                .AddAuthentication(HeaderAuthenticationHandler.SchemeName)
+                .AddScheme<AuthenticationSchemeOptions, HeaderAuthenticationHandler>(
+                    HeaderAuthenticationHandler.SchemeName,
+                    _ => { });
+            services.AddAuthorization();
+        }
+
+        public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+        {
+            app.UseAuthentication();
+            app.UseAuthorization();
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+    }
+
+    private sealed class HeaderAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+    {
+        public const string SchemeName = "HeaderTest";
+        public const string UserHeaderName = "X-Test-User";
+
+        public HeaderAuthenticationHandler(
+            IOptionsMonitor<AuthenticationSchemeOptions> options,
+            ILoggerFactory logger,
+            UrlEncoder encoder)
+            : base(options, logger, encoder)
+        {
+        }
+
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        {
+            if (!Request.Headers.TryGetValue(UserHeaderName, out var userValues)
+                || string.IsNullOrWhiteSpace(userValues[0]))
+            {
+                return Task.FromResult(AuthenticateResult.NoResult());
+            }
+
+            var userName = userValues[0]!;
+            var identity = new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.Name, userName),
+                    new Claim(ClaimTypes.NameIdentifier, userName)
+                ],
+                SchemeName);
+            var principal = new ClaimsPrincipal(identity);
+            var ticket = new AuthenticationTicket(principal, SchemeName);
+
+            return Task.FromResult(AuthenticateResult.Success(ticket));
         }
     }
 
@@ -1383,6 +1788,18 @@ public class WebStartupTests
         public void RegisterDependentModules(ModuleDependencyBuilder builder)
         {
         }
+    }
+}
+
+[ApiController]
+[Authorize]
+[Route("endpoint-aware-auth-controller")]
+public sealed class EndpointAwareAuthTestController : ControllerBase
+{
+    [HttpGet]
+    public string Get()
+    {
+        return User.Identity?.Name ?? "<anonymous>";
     }
 }
 

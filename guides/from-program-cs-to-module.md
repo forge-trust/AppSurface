@@ -84,6 +84,7 @@ For a single service, this is useful when the error posture is important enough 
 - Do not enable browser pages for API-only behavior that should stay JSON or Problem Details.
 - Do not expose exception details on production `500` pages.
 - Do not assume status-code pages catch thrown exceptions. They handle empty status responses; exception handling is a separate pipeline.
+- Do not put endpoint-aware middleware such as global authentication or authorization in `ConfigureWebApplication`. Use the root or host integration module's `ConfigureEndpointAwareMiddleware` hook so routing has selected endpoint metadata first.
 - Do not duplicate the full Web package reference here. Use the [AppSurface Web README](../Web/ForgeTrust.AppSurface.Web/README.md) for the full API shape.
 
 Next recovery path: [Troubleshoot Startup and Modules](../troubleshooting/startup-and-modules.md)

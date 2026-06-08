@@ -40,6 +40,24 @@ public interface IAppSurfaceWebModule : IAppSurfaceHostModule
     }
 
     /// <summary>
+    /// Configures middleware that can inspect endpoint routing metadata before endpoints execute.
+    /// </summary>
+    /// <remarks>
+    /// AppSurface invokes this hook after <c>UseRouting</c> and AppSurface-managed CORS middleware, and before
+    /// <c>UseEndpoints</c>. Middleware registered here can inspect <c>HttpContext.GetEndpoint()</c> at request time, but
+    /// unmatched requests can still have no selected endpoint. Root or host integration modules should register global
+    /// authentication and authorization middleware here before feature modules add endpoint-aware middleware they own. Do
+    /// not call <c>UseRouting</c>, <c>UseCors</c>, <c>UseEndpoints</c>, or map endpoints from this hook; use
+    /// <see cref="ConfigureEndpoints"/> for endpoint mapping.
+    /// </remarks>
+    /// <param name="context">Startup information and services available to the module during application initialization.</param>
+    /// <param name="app">The application's request pipeline builder used to register endpoint-aware middleware.</param>
+    void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+    {
+        // Default implementation does nothing, so existing web modules keep compiling and running unchanged.
+    }
+
+    /// <summary>
     /// Gets a value indicating whether this module's assembly should be searched for MVC application parts (controllers, views, etc.).
     /// Defaults to false.
     /// </summary>
