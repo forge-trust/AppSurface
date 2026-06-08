@@ -457,6 +457,22 @@ internal sealed class CoverageMergeWorkflow
 
 internal static class CoverageMergeSourceResolver
 {
+    /// <summary>
+    /// Discovers and validates Cobertura shard inputs for <c>coverage merge</c>.
+    /// </summary>
+    /// <param name="sourceDirectory">Existing readable directory searched recursively for files named exactly <c>coverage.cobertura.xml</c>.</param>
+    /// <param name="outputDirectory">Merge output directory whose resolved tree is excluded from discovery so reruns do not re-merge prior output.</param>
+    /// <returns>Absolute selected Cobertura report paths sorted by ordinal path.</returns>
+    /// <remarks>
+    /// <see cref="Resolve"/> expects the workflow to pass a non-empty existing <paramref name="sourceDirectory"/>
+    /// and a normalized <paramref name="outputDirectory"/>. It rejects empty discovery results with
+    /// <c>ASCOV131</c>, unreadable source traversal with <c>ASCOV130</c>, and malformed or unreadable
+    /// selected Cobertura files with <c>ASCOV132</c>. The resolver ignores reports under the resolved
+    /// output directory and any <c>reportgenerator-input</c> staging directory because those files are
+    /// AppSurface-owned implementation details, not user-supplied shards. Existing symlinked path
+    /// segments are compared through <see cref="CoverageMergePathSafety.ResolvePhysicalPath(string)"/>; callers
+    /// still need normal filesystem permissions, and concurrent writes can surface as IO diagnostics.
+    /// </remarks>
     public static IReadOnlyList<string> Resolve(string sourceDirectory, string outputDirectory)
     {
         try
@@ -565,6 +581,23 @@ internal static class CoverageMergeOutputGuard
 {
     private const string MarkerFileName = ".appsurface-coverage-output";
 
+    /// <summary>
+    /// Validates, creates, marks, and optionally cleans the coverage merge output directory.
+    /// </summary>
+    /// <param name="outputDirectory">Dedicated output directory for merged coverage artifacts.</param>
+    /// <param name="sourceDirectory">Directory containing user-supplied Cobertura shards.</param>
+    /// <param name="clean">Whether known AppSurface-owned merge artifacts should be removed before writing new output.</param>
+    /// <remarks>
+    /// <see cref="Prepare"/> rejects blank output paths, filesystem roots, the current working directory,
+    /// the user home directory, files, source/output overlap in either direction, and populated directories
+    /// that do not contain the <c>.appsurface-coverage-output</c> ownership marker. Missing or empty output
+    /// directories are allowed. Marked directories are treated as AppSurface-owned; when <paramref name="clean"/>
+    /// is true, only known merge artifacts and staging directories are deleted, while unrelated directories
+    /// such as legacy project coverage output are preserved. The method creates <paramref name="outputDirectory"/>
+    /// and writes the marker file as side effects, so callers need create/write/delete permissions and should
+    /// avoid concurrent writers. Source/output overlap checks resolve existing symlink segments through
+    /// <see cref="CoverageMergePathSafety.ResolvePhysicalPath(string)"/> to catch path aliases.
+    /// </remarks>
     public static void Prepare(string outputDirectory, string sourceDirectory, bool clean)
     {
         ValidateCore(outputDirectory, sourceDirectory);
@@ -701,6 +734,24 @@ internal static class CoverageMergeOutputGuard
 
 internal static class CoverageMergePathSafety
 {
+    /// <summary>
+    /// Resolves existing filesystem segments in a path to their physical targets for overlap checks.
+    /// </summary>
+    /// <param name="path">Path to normalize and resolve.</param>
+    /// <returns>
+    /// A full path where existing files, directories, and symlink targets have been resolved where possible;
+    /// missing trailing segments are preserved as full paths.
+    /// </returns>
+    /// <remarks>
+    /// <see cref="ResolvePhysicalPath(string)"/> is used by merge source/output exclusion and output-guard
+    /// overlap checks so aliases such as symlinked output directories are compared by physical location
+    /// instead of lexical spelling. It does not create files or directories. Callers must pass a non-null
+    /// path; invalid path shapes or inaccessible segments can raise platform filesystem exceptions before
+    /// higher-level callers translate them to <c>ASCOV138</c> or related diagnostics. Symlinks are resolved
+    /// with <see cref="FileSystemInfo.ResolveLinkTarget(bool)"/> using <c>returnFinalTarget: true</c>; if
+    /// no target is available, or if recursive target resolution reaches sixteen hops, the current full
+    /// path is returned to avoid unbounded loops.
+    /// </remarks>
     public static string ResolvePhysicalPath(string path)
         => ResolvePhysicalPath(path, depth: 0);
 

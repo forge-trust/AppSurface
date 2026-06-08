@@ -177,7 +177,7 @@ Artifacts are local and private by default:
 
 - `coverage.cobertura.xml`: Merged Cobertura file consumed by `coverage gate`.
 - `summary.txt`: Human-readable merged line and branch coverage summary.
-- `timings.json`: Machine-readable merge duration, selected shard count, selected input paths, ReportGenerator exit code, and artifact paths.
+- `timings.json`: Machine-readable merge duration, selected shard count, selected input paths, ReportGenerator exit code, and merged Cobertura path.
 - `reportgenerator-summary.txt`: Text summary from the package-owned ReportGenerator merge when available.
 - `reportgenerator-input/`: AppSurface-owned staged copies of selected inputs, using deterministic sanitized shard directories.
 - `.appsurface-coverage-output`: Ownership marker that allows future merges to clean only known AppSurface-owned merge artifacts.
