@@ -3138,7 +3138,7 @@ public class DocsControllerTests : IDisposable
         var readModel = new AppSurfaceDocsSearchQualityReadModel();
         var productIntelligence = A.Fake<IAppSurfaceProductIntelligence>();
         A.CallTo(() => productIntelligence.CaptureAsync(A<AppSurfaceProductEvent>._, A<CancellationToken>._))
-            .Throws(new ApplicationException("sink unavailable"));
+            .Throws(new InvalidOperationException("sink unavailable"));
         var options = CreateHostedMetricsOptions();
         var (controller, cache, memo) = CreateController(
             options,

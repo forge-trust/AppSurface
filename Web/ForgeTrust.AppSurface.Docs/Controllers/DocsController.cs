@@ -627,12 +627,15 @@ public class DocsController : Controller
     /// respectively without echoing submitted values.
     /// </returns>
     /// <remarks>
-    /// The request body uses a narrow DTO containing only <c>name</c>, <c>properties</c>, and an optional client
-    /// timestamp. Browser-supplied identity, route, URL, cookies, headers, and request metadata are not accepted into the
-    /// event envelope. Every submitted event is revalidated through <see cref="AppSurfaceProductEventRegistry"/> before
-    /// the process-local read model or host-owned product-intelligence sinks see it.
+    /// This endpoint intentionally opts out of antiforgery validation because it is an anonymous, low-trust JSON
+    /// collector for hosted docs and static exports rather than an authenticated state-changing form post. The request
+    /// body uses a narrow DTO containing only <c>name</c>, <c>properties</c>, and an optional client timestamp.
+    /// Browser-supplied identity, route, URL, cookies, headers, and request metadata are not accepted into the event
+    /// envelope. Every submitted event is revalidated through <see cref="AppSurfaceProductEventRegistry"/> before the
+    /// process-local read model or host-owned product-intelligence sinks see it.
     /// </remarks>
     [HttpPost]
+    [IgnoreAntiforgeryToken]
     public async Task<IActionResult> CollectMetrics()
     {
         if (_options.Metrics?.Enabled != true || _options.Metrics.HostedCollection?.Enabled != true)
@@ -1092,7 +1095,15 @@ public class DocsController : Controller
                     route: "appsurface_docs_metrics"),
                 captureCts.Token).ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (OperationCanceledException)
+        {
+            // Product-intelligence collection must not change reader request behavior.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Product-intelligence collection must not change reader request behavior.
+        }
+        catch (InvalidOperationException)
         {
             // Product-intelligence collection must not change reader request behavior.
         }
