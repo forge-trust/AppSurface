@@ -476,7 +476,7 @@ declare global {
     }
 
     const variant = getPageTypeBadgeVariant(item?.pageTypeVariant);
-    return `<span class="docs-page-badge docs-page-badge--${escapeHtml(variant)}">${escapeHtml(label)}</span>`;
+    return `<span class="docs-page-badge docs-page-badge--${escapeHtml(variant)} docs-search-option-badge">${escapeHtml(label)}</span>`;
   }
 
   function normalizeQuery(value) {

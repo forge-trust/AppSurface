@@ -113,7 +113,7 @@
     overflow-wrap: anywhere;
 }
 
-#docs-search-results .docs-page-badge {
+.docs-search-option-badge {
     flex-shrink: 0;
 }
 
