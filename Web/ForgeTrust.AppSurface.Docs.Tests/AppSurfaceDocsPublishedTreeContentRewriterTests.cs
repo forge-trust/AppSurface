@@ -159,6 +159,30 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
         Assert.DoesNotContain("\"endpointUrl\":\"/some-base/docs/_metrics/collect\"", rewritten);
     }
 
+    [Theory]
+    [InlineData("404")]
+    [InlineData("\"//cdn.example.com/docs\"")]
+    [InlineData("\"\"")]
+    public void RewriteHtml_ShouldUseDefaultDocsRoot_WhenConfigDocsRootIsNotLocalPath(string docsRootJson)
+    {
+        var html =
+            $$"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <script>window.__appSurfaceDocsConfig = {"docsRootPath":{{docsRootJson}},"docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","metrics":{"enabled":true,"browserCollector":{"enabled":true,"endpointUrl":"/docs/_metrics/collect"},"feedbackEnabled":true},"docsVersionsUrl":"/docs/versions"};</script>
+            </head>
+            <body></body>
+            </html>
+            """;
+
+        var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs/v/1.2.3");
+
+        Assert.Contains("\"docsRootPath\":\"/docs/v/1.2.3\"", rewritten);
+        Assert.Contains("\"endpointUrl\":\"/docs/v/1.2.3/_metrics/collect\"", rewritten);
+        Assert.DoesNotContain("docsVersionsUrl", rewritten);
+    }
+
     [Fact]
     public void RewriteHtml_ShouldPrefixPathBase_WhenRebasingSearchRecoveryAnchors()
     {

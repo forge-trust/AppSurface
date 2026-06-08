@@ -3358,6 +3358,77 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public void SearchQuality_ShouldReturnNotFound_WhenHostedReviewPrerequisitesAreMissing()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Metrics = new AppSurfaceDocsMetricsOptions
+            {
+                Enabled = true
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using (memo)
+        using (cache)
+        {
+            Assert.IsType<NotFoundResult>(controller.SearchQuality());
+
+            options.Metrics.HostedCollection = new AppSurfaceDocsHostedMetricsCollectionOptions
+            {
+                Enabled = true
+            };
+            options.Metrics.HostedReview = new AppSurfaceDocsHostedMetricsReviewOptions
+            {
+                Enabled = true,
+                Exposure = (AppSurfaceDocsHarvestHealthExposure)999
+            };
+
+            Assert.IsType<NotFoundResult>(controller.SearchQuality());
+        }
+    }
+
+    [Fact]
+    public void SearchQuality_ShouldRenderEmptySnapshot_WhenReadModelIsNotRegistered()
+    {
+        var options = CreateHostedMetricsOptions();
+        options.Metrics.HostedReview.Exposure = AppSurfaceDocsHarvestHealthExposure.Always;
+        var (controller, cache, memo) = CreateController(
+            options,
+            A.Fake<IDocHarvester>(),
+            Environments.Production);
+        using (memo)
+        using (cache)
+        {
+            var view = Assert.IsType<ViewResult>(controller.SearchQuality());
+            var model = Assert.IsType<AppSurfaceDocsSearchQualityResponse>(view.Model);
+
+            Assert.Equal(0, model.TotalAcceptedEvents);
+            Assert.True(model.Mode.HostedCollectionEnabled);
+            Assert.True(model.Mode.HostedReviewEnabled);
+        }
+    }
+
+    [Fact]
+    public void SearchQualityReadModel_ShouldSnapshotDisabledModeWhenMetricsOptionsAreMissing()
+    {
+        var readModel = new AppSurfaceDocsSearchQualityReadModel();
+        var contract = AppSurfaceProductEventRegistry.Find(AppSurfaceProductEventRegistry.DocsSearchFrictionFeedbackSubmitted);
+        Assert.NotNull(contract);
+
+        readModel.Record(contract, new Dictionary<string, string>());
+
+        var model = readModel.GetSnapshot(new AppSurfaceDocsOptions { Metrics = null! });
+
+        Assert.Equal(1, model.TotalAcceptedEvents);
+        Assert.Equal(1, model.FeedbackSubmissions);
+        Assert.False(model.Mode.BrowserCollectorEnabled);
+        Assert.False(model.Mode.HostedCollectionEnabled);
+        Assert.False(model.Mode.HostedReviewEnabled);
+        Assert.Contains(model.FeedbackBuckets, bucket => bucket.Name == "Useful recovery feedback" && bucket.Count == 0);
+        Assert.Contains(model.FeedbackBuckets, bucket => bucket.Name == "Not-useful recovery feedback" && bucket.Count == 0);
+    }
+
+    [Fact]
     public void SearchQualityReadModel_ShouldAggregateKnownEventsAndEvictOldestEntries()
     {
         var readModel = new AppSurfaceDocsSearchQualityReadModel();
