@@ -5,6 +5,7 @@ using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
+[Collection("CoverageGate process state")]
 public sealed class CoverageRunTests
 {
     [Fact]

@@ -75,11 +75,32 @@ The first dogfood events are all `Experimental`:
 - `docs.search.returned_zero_results`
 - `docs.search.result_selected`
 - `docs.recovery_link.selected`
+- `docs.search.filter_changed`
+- `docs.search.friction_feedback_submitted`
 - `razorwire.form.failed`
 - `razorwire.form.failure_recovered`
 - `razorwire.stream.admission_rejected`
 
 Treat event names like browser event names or data attributes: once promoted beyond experimental, they become public contracts.
+
+Hosts can enable every experimental contract with `EnableExperimentalEvents()`, or allow only selected experimental event
+names:
+
+```csharp
+builder.Services.AddAppSurfaceProductIntelligence(options =>
+{
+    options.EnableExperimentalEvents(
+        AppSurfaceProductEventRegistry.DocsSearchSubmitted,
+        AppSurfaceProductEventRegistry.DocsSearchReturnedZeroResults,
+        AppSurfaceProductEventRegistry.DocsSearchResultSelected,
+        AppSurfaceProductEventRegistry.DocsRecoveryLinkSelected,
+        AppSurfaceProductEventRegistry.DocsSearchFilterChanged,
+        AppSurfaceProductEventRegistry.DocsSearchFrictionFeedbackSubmitted);
+});
+```
+
+Use the selected-event allowlist when a package integration, such as AppSurface Docs search-quality metrics, should emit
+only its own experimental product area without enabling unrelated dogfood events.
 
 ## Privacy Defaults
 

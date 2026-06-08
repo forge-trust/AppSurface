@@ -394,6 +394,8 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Feature the first consumer paths through `featured_page_groups`.
 - Configure `AppSurfaceDocs:Localization` and `translation_key` metadata before adding translated files at scale.
 - Verify `/docs`, `/docs/search`, and `/docs/search-index.json`. The search page is server-rendered and should still expose starter query URLs plus browse links before the client index loads; a blocked or missing index must degrade to those links, not to a blank page.
+- If you need search-quality analytics, configure `AppSurfaceDocs:Metrics` explicitly. Static exports should set `Metrics:BrowserCollector:EndpointUrl` to a reviewed HTTPS collector. Hosted docs can enable `Metrics:HostedCollection` and leave the endpoint blank so the layout uses `{DocsRootPath}/_metrics/collect`.
+- Keep `Metrics:HostedReview:Exposure=DevelopmentOnly` unless a trusted operator surface protects `{DocsRootPath}/_search-quality`; the hosted review is bounded, process-local diagnostics rather than durable analytics.
 - For custom docs roots, path bases, or static exports, inspect the generated `search.html` and confirm its search index URL plus fallback anchors point at the mounted root.
 - For published release trees, inspect `search-index.json` before publishing. Stored `documents[].path` values should stay canonical and deployment-independent, such as `/docs/guide.html`; do not include request path bases, custom route roots, origins, executable schemes, traversal, or docs operational routes. AppSurface Docs rewrites valid canonical paths to the mounted root while serving the archive.
 - For static exports with redirect aliases, use the default HTML strategy for GitHub Pages and generic static hosts, or `--mode cdn --redirects netlify` for Netlify-compatible providers. Do not hand-author `_redirects` in the export output.
@@ -424,6 +426,17 @@ When validating a host or release artifact:
 - Confirm the failure panel does not contain replacement navigation links. The durable fallback links live in the server-rendered browse section so they stay available before and after client initialization.
 - For custom docs roots or path bases, confirm the search config, starter query URLs, and browse fallback anchors all include the mounted root.
 - For static exports or published release trees, inspect `search.html` and confirm `search-index.json`, starter query URLs, and fallback anchors are rewritten to the exact release root, including any path base. Keep the stored `search-index.json` document paths canonical (`/docs/...`) so the same archive can be safely mounted under a custom root or virtual directory later.
+
+## Search quality metrics checks
+
+Metrics are opt-in and docs-specific. Disabled hosts should render no collector endpoint, no feedback controls, and no
+hosted metrics routes. Enabled static exports should send only safe AppSurface Docs product events to the configured
+HTTPS endpoint; the browser collector omits credentials and drops transport failures. Enabled hosted docs should accept
+POST JSON at `{DocsRootPath}/_metrics/collect`, validate through `AppSurfaceProductEventRegistry`, and show recent
+aggregate buckets at `{DocsRootPath}/_search-quality` when review exposure allows it.
+
+Do not use metrics configuration to pass API keys, query strings, or custom headers. Put authentication, retention, and
+CORS policy in the host-owned collector or analytics service, not in the AppSurface Docs static export.
 
 ## Where to go next
 

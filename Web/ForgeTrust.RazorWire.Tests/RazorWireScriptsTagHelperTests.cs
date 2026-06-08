@@ -1,4 +1,5 @@
 using FakeItEasy;
+using ForgeTrust.AppSurface.Intelligence;
 using ForgeTrust.RazorWire.TagHelpers;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -7,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.AspNetCore.Razor.TagHelpers;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.RazorWire.Tests;
 
@@ -218,6 +220,30 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("data-rw-form-failure-enabled=\"true\"", content);
         Assert.Contains("data-rw-form-failure-mode=\"auto\"", content);
         Assert.Contains("data-rw-default-failure-message=\"Custom &quot;failure&quot; &amp; retry\"", content);
+    }
+
+    [Fact]
+    public void Process_WhenRazorWireEventIsAllowlisted_EnablesProductIntelligenceRuntimeConfig()
+    {
+        // Arrange
+        var productIntelligenceOptions = new AppSurfaceProductIntelligenceOptions()
+            .EnableExperimentalEvents(AppSurfaceProductEventRegistry.RazorWireFormFailed);
+        var helper = new RazorWireScriptsTagHelper(
+            _fileVersionProvider,
+            productIntelligenceOptions: Options.Create(productIntelligenceOptions))
+        {
+            ViewContext = _viewContext
+        };
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+
+        // Act
+        helper.Process(_context, _output);
+
+        // Assert
+        var content = _output.Content.GetContent();
+        Assert.Contains("data-rw-product-intelligence-enabled=\"true\"", content);
     }
 
     [Fact]

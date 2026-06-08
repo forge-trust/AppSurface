@@ -739,6 +739,8 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("docs/_routes", routePatterns);
         Assert.Contains("docs/_routes.json", routePatterns);
         Assert.Contains("docs/{*path}", routePatterns);
+        Assert.DoesNotContain("docs/_metrics/collect", routePatterns);
+        Assert.DoesNotContain("docs/_search-quality", routePatterns);
         Assert.DoesNotContain("{controller=Docs}/{action=Index}/{path?}", routePatterns);
 
         var prioritizedPatterns = routeBuilder.DataSources
@@ -854,6 +856,173 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Equal(StatusCodes.Status405MethodNotAllowed, httpContext.Response.StatusCode);
         Assert.False(statusCodePages.Enabled);
         Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, httpContext.Response.Headers.Allow);
+    }
+
+    [Fact]
+    public async Task MetricsCollectUnsupportedMethodEndpoint_ShouldReturnMethodNotAllowedAndDisableStatusPages()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Metrics = new AppSurfaceDocsMetricsOptions
+                {
+                    Enabled = true,
+                    HostedCollection = new AppSurfaceDocsHostedMetricsCollectionOptions
+                    {
+                        Enabled = true
+                    }
+                }
+            });
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var endpoint = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Single(
+                endpoint =>
+                {
+                    var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                    return endpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_metrics/collect"
+                        && methods is not null
+                        && methods.Contains(HttpMethods.Get)
+                        && !methods.Contains(HttpMethods.Post);
+                });
+        await using var responseBody = new MemoryStream();
+        var statusCodePages = A.Fake<IStatusCodePagesFeature>();
+        statusCodePages.Enabled = true;
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = responseBody;
+        httpContext.Features.Set(statusCodePages);
+
+        await endpoint.RequestDelegate!(httpContext);
+        await httpContext.Response.StartAsync();
+
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, httpContext.Response.StatusCode);
+        Assert.False(statusCodePages.Enabled);
+        Assert.Equal(HttpMethods.Post, httpContext.Response.Headers.Allow);
+    }
+
+    [Fact]
+    public async Task MetricsCollectUnsupportedMethodEndpoint_ShouldReturnMethodNotAllowedWithoutStatusPagesFeature()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Metrics = new AppSurfaceDocsMetricsOptions
+                {
+                    Enabled = true,
+                    HostedCollection = new AppSurfaceDocsHostedMetricsCollectionOptions
+                    {
+                        Enabled = true
+                    }
+                }
+            });
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var endpoint = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Single(
+                endpoint =>
+                {
+                    var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                    return endpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_metrics/collect"
+                        && methods is not null
+                        && methods.Contains(HttpMethods.Get)
+                        && !methods.Contains(HttpMethods.Post);
+                });
+        await using var responseBody = new MemoryStream();
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = responseBody;
+
+        await endpoint.RequestDelegate!(httpContext);
+        await httpContext.Response.StartAsync();
+
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, httpContext.Response.StatusCode);
+        Assert.Equal(HttpMethods.Post, httpContext.Response.Headers.Allow);
+    }
+
+    [Theory]
+    [InlineData(true, true, true, true)]
+    [InlineData(true, true, false, false)]
+    [InlineData(true, false, true, false)]
+    [InlineData(false, true, true, false)]
+    public void ConfigureEndpoints_ShouldMapHostedMetricsRoutesWhenEnabled(
+        bool metricsEnabled,
+        bool hostedCollectionEnabled,
+        bool hostedReviewEnabled,
+        bool shouldMapSearchQuality)
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Metrics = new AppSurfaceDocsMetricsOptions
+                {
+                    Enabled = metricsEnabled,
+                    HostedCollection = new AppSurfaceDocsHostedMetricsCollectionOptions
+                    {
+                        Enabled = hostedCollectionEnabled
+                    },
+                    HostedReview = new AppSurfaceDocsHostedMetricsReviewOptions
+                    {
+                        Enabled = hostedReviewEnabled
+                    }
+                }
+            });
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var routePatterns = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText?.TrimStart('/'))
+            .ToArray();
+
+        Assert.Equal(metricsEnabled && hostedCollectionEnabled, routePatterns.Contains("docs/_metrics/collect"));
+        Assert.Equal(shouldMapSearchQuality, routePatterns.Contains("docs/_search-quality"));
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotMapHostedMetricsRoutesWhenMetricsOptionsAreMissing()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        builder.Services.AddSingleton(new AppSurfaceDocsOptions { Metrics = null! });
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var routePatterns = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText?.TrimStart('/'))
+            .ToArray();
+
+        Assert.DoesNotContain("docs/_metrics/collect", routePatterns);
+        Assert.DoesNotContain("docs/_search-quality", routePatterns);
     }
 
     [Fact]

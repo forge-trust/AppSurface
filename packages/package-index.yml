@@ -53,7 +53,7 @@ packages:
     start_here_path: Auth/ForgeTrust.AppSurface.Auth/README.md
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
-  - project: Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj
+  - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -61,8 +61,23 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.2.md
     order: 36
+    use_when: Add this in an ASP.NET Core host that already owns authentication and authorization when AppSurface modules need mapped request auth context or named host-policy results.
+    includes: AppSurfaceAspNetCoreAuthModule, AddAppSurfaceAspNetCoreAuth registration, ASP.NET Core request auth context mapping, named host-policy evaluation, AppSurfaceAuthResult mapping, and safe setup diagnostics.
+    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policy definitions, middleware, endpoint filters, challenge or forbid execution, redirects, audit sinks, RazorWire UI, or Minimal API helpers.
+    start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Auth
+  - project: Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/v0.1.0-rc.2.md
+    order: 37
     use_when: Add this when your AppSurface modules or host integrations need product-intelligence event contracts before choosing an analytics vendor.
-    includes: AppSurfaceProductIntelligenceModule, IAppSurfaceProductIntelligence, AppSurfaceProductEvent, typed product-event registry, validation, sanitization, lifecycle states, sensitivity classes, and host-owned sink contracts.
+    includes: AppSurfaceProductIntelligenceModule, IAppSurfaceProductIntelligence, AppSurfaceProductEvent, typed product-event registry, validation, sanitization, lifecycle states, selected experimental event allowlists, sensitivity classes, and host-owned sink contracts.
     does_not_include: PostHog SDKs, OpenTelemetry exporters, analytics storage, retention policy, dashboards, browser autocapture, session replay, cookies, or request-body capture.
     start_here_path: Intelligence/ForgeTrust.AppSurface.Intelligence/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Intelligence` when you want vendor-neutral product event contracts and optional host-owned analytics sinks.
@@ -75,7 +90,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.2.md
-    order: 37
+    order: 38
     use_when: Add this when your app or module needs typed input/output port flow definitions, generated-case authoring, inferred graph mapping, and local runner tests before durable hosting.
     includes: AppSurfaceFlowModule, FlowNodeOutcome discriminated outcome records, generated Flow authoring attributes and analyzer, IFlowTransformerNode, typed port graph inference, IFlowNode, FlowDefinition, FlowGraphBuilder, flow definition registry, and the in-memory runner.
     does_not_include: Durable persistence, timers, external-event delivery, ASP.NET endpoints, UI, Semantic Kernel, or preview C# union syntax.
@@ -91,7 +106,7 @@ packages:
     release_status: excluded
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
-    order: 36
+    order: 39
     note: Private source generator and diagnostics used by `ForgeTrust.AppSurface.Flow`; consume it only through the packed Flow package.
   - project: Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj
     classification: public
@@ -100,7 +115,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.2.md
-    order: 38
+    order: 40
     use_when: Add this after Flow when the same typed definitions need Durable Task persistence, replay, timers, and authorized resume events.
     includes: AppSurfaceFlowDurableTaskModule, durable flow runner and client services, resume-event authorization contract, timeout and late-event mapping, retry policy decisions, and context serialization validation.
     does_not_include: Durable Task worker/client hosting, storage providers, ASP.NET endpoints, authentication handlers, UI, or Semantic Kernel.
@@ -118,7 +133,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.2.md
-    order: 40
+    order: 41
     use_when: Start here for CLI apps and worker-style entry points that should run through the AppSurface startup pipeline with CliFx.
     includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx source-generated command discovery through AppSurface modules.
     does_not_include: ASP.NET Core hosting, OpenAPI surfaces, or Razor-based UI composition.
@@ -341,11 +356,11 @@ packages:
     order: 120
     tool_command_name: appsurface
     use_when: Install this when you want repository-level AppSurface tooling from a global or local .NET tool command.
-    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, and `appsurface coverage gate` private Cobertura threshold enforcement.
-    does_not_include: App runtime packages, hosted coverage dashboards, coverage uploads, stable coverage run/merge orchestration, RazorWire-specific export workflows, or a replacement for project package references.
+    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface coverage run` private test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` private threshold enforcement.
+    does_not_include: App runtime packages, hosted coverage dashboards, coverage uploads, coverage trend storage, RazorWire-specific export workflows, or a replacement for project package references.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README
-    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs` workflows or a private `appsurface coverage gate` without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
+    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs` workflows or private `appsurface coverage run`, `coverage merge`, and `coverage gate` commands without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
     classification: excluded
     publish_decision: do_not_publish

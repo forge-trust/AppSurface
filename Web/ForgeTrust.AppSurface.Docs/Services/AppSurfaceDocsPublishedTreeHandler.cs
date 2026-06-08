@@ -1040,7 +1040,12 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
                 continue;
             }
 
-            var rewrittenScript = RewriteDocsClientConfigScript(scriptContent, mountRootPath, routeRootPath, requestPathBase);
+            var rewrittenScript = RewriteDocsClientConfigScript(
+                scriptContent,
+                mountRootPath,
+                previewRootPath,
+                routeRootPath,
+                requestPathBase);
             if (!string.Equals(scriptContent, rewrittenScript, StringComparison.Ordinal))
             {
                 script.TextContent = rewrittenScript;
@@ -1208,6 +1213,7 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
     private static string RewriteDocsClientConfigScript(
         string scriptContent,
         string mountRootPath,
+        string previewRootPath,
         string routeRootPath,
         string? requestPathBase)
     {
@@ -1225,6 +1231,8 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
                     return match.Value;
                 }
 
+                var originalDocsRootPath = GetLocalConfigPathOrDefault(configNode, "docsRootPath", DocsUrlBuilder.DocsEntryPath);
+
                 configNode["docsRootPath"] = PrefixPathBase(mountRootPath, requestPathBase);
                 configNode["docsArchiveRootPath"] = PrefixPathBase(DocsUrlBuilder.JoinPath(routeRootPath, "versions"), requestPathBase);
                 configNode["docsSearchUrl"] = PrefixPathBase(DocsUrlBuilder.JoinPath(mountRootPath, "search"), requestPathBase);
@@ -1239,10 +1247,68 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
                         requestPathBase) + GetUrlSuffix(miniSearchUrl);
                 }
 
+                if (configNode.TryGetPropertyValue("metrics", out var metricsNode)
+                    && metricsNode is JsonObject metricsObject
+                    && metricsObject.TryGetPropertyValue("browserCollector", out var browserCollectorNode)
+                    && browserCollectorNode is JsonObject browserCollectorObject
+                    && browserCollectorObject.TryGetPropertyValue("endpointUrl", out var endpointUrlNode)
+                    && endpointUrlNode is JsonValue endpointUrlValue
+                    && endpointUrlValue.TryGetValue<string>(out var endpointUrl)
+                    && IsLocalEndpointUrl(endpointUrl))
+                {
+                    browserCollectorObject["endpointUrl"] = RewriteMetricsCollectorEndpointUrl(
+                        endpointUrl,
+                        originalDocsRootPath,
+                        mountRootPath,
+                        requestPathBase);
+                }
+
                 configNode.AsObject().Remove("docsVersionsUrl");
 
                 return $"window.__appSurfaceDocsConfig = {configNode.ToJsonString()};";
             });
+    }
+
+    private static bool IsLocalEndpointUrl(string? endpointUrl)
+    {
+        return !string.IsNullOrWhiteSpace(endpointUrl)
+               && endpointUrl.StartsWith("/", StringComparison.Ordinal)
+               && !endpointUrl.StartsWith("//", StringComparison.Ordinal);
+    }
+
+    private static string GetLocalConfigPathOrDefault(JsonObject configNode, string propertyName, string fallbackPath)
+    {
+        if (configNode.TryGetPropertyValue(propertyName, out var pathNode)
+            && pathNode is JsonValue pathValue
+            && pathValue.TryGetValue<string>(out var path)
+            && IsLocalEndpointUrl(path))
+        {
+            return NormalizeLocalConfigPath(path);
+        }
+
+        return fallbackPath;
+    }
+
+    private static string NormalizeLocalConfigPath(string path)
+    {
+        var trimmed = path.Trim();
+        return trimmed.Length > 1 ? trimmed.TrimEnd('/') : trimmed;
+    }
+
+    private static string RewriteMetricsCollectorEndpointUrl(
+        string endpointUrl,
+        string originalDocsRootPath,
+        string mountRootPath,
+        string? requestPathBase)
+    {
+        var normalizedEndpointUrl = NormalizeLocalConfigPath(endpointUrl);
+        var packageMetricsCollectUrl = DocsUrlBuilder.JoinPath(originalDocsRootPath, "_metrics/collect");
+        if (!string.Equals(normalizedEndpointUrl, packageMetricsCollectUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            return PrefixPathBase(normalizedEndpointUrl, requestPathBase);
+        }
+
+        return PrefixPathBase(DocsUrlBuilder.JoinPath(mountRootPath, "_metrics/collect"), requestPathBase);
     }
 
     private static string GetUrlSuffix(string url)

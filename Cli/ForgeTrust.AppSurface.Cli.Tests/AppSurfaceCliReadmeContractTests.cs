@@ -27,12 +27,16 @@ public sealed class AppSurfaceCliReadmeContractTests
         var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
 
         Assert.Contains("### `appsurface coverage run`", readme, StringComparison.Ordinal);
+        Assert.Contains("### `appsurface coverage merge`", readme, StringComparison.Ordinal);
         Assert.Contains("dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run", readme, StringComparison.Ordinal);
+        Assert.Contains("dotnet tool run appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged", readme, StringComparison.Ordinal);
         Assert.Contains("dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.msbuild", readme, StringComparison.Ordinal);
         Assert.Contains("package-owned ReportGenerator", readme, StringComparison.Ordinal);
         Assert.Contains("`.appsurface-coverage-output`", readme, StringComparison.Ordinal);
         Assert.Contains("Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs anchor, and a log path", readme, StringComparison.Ordinal);
+        Assert.Contains("Every merge diagnostic uses the `ASCOV130` through `ASCOV139` range", readme, StringComparison.Ordinal);
         Assert.Contains("| `ASCOV103` | No Coverlet Cobertura files were produced.", readme, StringComparison.Ordinal);
+        Assert.Contains("| `ASCOV131` | No `coverage.cobertura.xml` files were found.", readme, StringComparison.Ordinal);
         Assert.Contains("- run: dotnet restore ./MyApp.slnx", readme, StringComparison.Ordinal);
         Assert.Contains("dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore", readme, StringComparison.Ordinal);
         Assert.DoesNotContain("intentionally does not expose run or merge orchestration yet", readme, StringComparison.Ordinal);
