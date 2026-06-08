@@ -1565,6 +1565,12 @@ The version catalog is the release-level source of truth for version routing and
 - `versions[].advisoryState`
   - Release-level warning badge. Supported values are `None`, `Vulnerable`, and `SecurityRisk`.
 
+### Release evidence bundles
+
+Official AppSurface release preparation also writes `releases/v{version}.evidence.json` with schema `appsurface-release-evidence-bundle-v1`. That bundle is repository release-artifact consistency evidence: it can reference the catalog `exactTreePath`, the catalog `releaseManifestSha256`, release notes, release JSON, package release-note paths, and commit identity so release-prep and publish workflows can prove those fields agree.
+
+Runtime archive trust does not move into the release evidence bundle. AppSurface Docs still mounts public exact trees only after the trusted version catalog pins `releaseManifestSha256` and local archive verification succeeds. A release evidence bundle is not a signature, hosted-build attestation, or replacement for `appsurface docs verify-archive`.
+
 ### Exact-version tree contract
 
 Each `exactTreePath` directory is treated as a prebuilt static subtree for one exact release. It is usually exported from the stable `/docs` surface, and at minimum it must include:

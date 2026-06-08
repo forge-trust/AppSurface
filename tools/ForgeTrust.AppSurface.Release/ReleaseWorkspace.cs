@@ -71,6 +71,13 @@ internal sealed class ReleaseWorkspace
     internal string ReleaseManifestPath(SemVer version) => PathFor($"releases/v{version}.release.json");
 
     /// <summary>
+    /// Gets the absolute path for a release evidence bundle file.
+    /// </summary>
+    /// <param name="version">Release version.</param>
+    /// <returns>Absolute release evidence bundle path.</returns>
+    internal string ReleaseEvidencePath(SemVer version) => PathFor($"releases/v{version}.evidence.json");
+
+    /// <summary>
     /// Resolves a repository-relative path and verifies that the result stays inside the repository root.
     /// </summary>
     /// <param name="relativePath">Repository-relative path using slash separators and no leading root.</param>

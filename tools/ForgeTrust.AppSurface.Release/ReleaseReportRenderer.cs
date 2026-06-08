@@ -9,9 +9,9 @@ internal static class ReleaseReportRenderer
     /// <returns>Markdown report.</returns>
     /// <remarks>
     /// The report shape is stable for workflow comments and maintainer review: <c># Release readiness report</c>, a summary bullet list,
-    /// <c>## Generated files</c>, <c>## Errors</c>, then <c>## Warnings</c>. Empty diagnostics render as <c>- None</c>. Generated
-    /// file paths and diagnostic codes are wrapped in inline code; diagnostic text is not escaped beyond normal Markdown rendering.
-    /// Consumers should key off headings and diagnostic codes rather than line numbers.
+    /// <c>## Generated files</c>, optional <c>## Release evidence bundle</c>, <c>## Errors</c>, then <c>## Warnings</c>.
+    /// Empty diagnostics render as <c>- None</c>. Generated file paths and diagnostic codes are wrapped in inline code; diagnostic
+    /// text is not escaped beyond normal Markdown rendering. Consumers should key off headings and diagnostic codes rather than line numbers.
     /// </remarks>
     internal static string RenderCheck(ReleaseCheckResult result)
     {
@@ -30,6 +30,7 @@ internal static class ReleaseReportRenderer
             builder.AppendLine($"- `{path}`");
         }
 
+        AppendEvidenceSummary(builder, result.EvidenceSummary);
         AppendDiagnostics(builder, "Errors", result.Errors);
         AppendDiagnostics(builder, "Warnings", result.Warnings);
         return builder.ToString();
@@ -41,9 +42,10 @@ internal static class ReleaseReportRenderer
     /// <param name="result">Preparation result.</param>
     /// <returns>Markdown report.</returns>
     /// <remarks>
-    /// Preparation reports begin with the check report contract, then append a manual review gate and either <c>## Dry-run plan</c> or
-    /// <c>## Files written</c> based on <see cref="ReleasePreparationResult.DryRun"/>. Paths are repository-relative bullets. This
-    /// distinction is the only dry-run marker in the report, so callers that publish the report should preserve that heading.
+    /// Preparation reports begin with the check report contract, then append a manual review gate, optional evidence summary, and either
+    /// <c>## Dry-run plan</c> or <c>## Files written</c> based on <see cref="ReleasePreparationResult.DryRun"/>.
+    /// Paths are repository-relative bullets. This distinction is the only dry-run marker in the report, so callers that publish the report
+    /// should preserve that heading.
     /// </remarks>
     internal static string RenderPreparation(ReleasePreparationResult result)
     {
@@ -53,6 +55,7 @@ internal static class ReleaseReportRenderer
         builder.AppendLine("- Stop at this release pull request for maintainer review and manual merge.");
         builder.AppendLine("- Do not create the annotated tag or start publish workflows until a maintainer gives an explicit post-review instruction.");
         builder.AppendLine();
+        AppendEvidenceSummary(builder, result.EvidenceSummary ?? result.Check.EvidenceSummary);
         builder.AppendLine(result.DryRun ? "## Dry-run plan" : "## Files written");
         foreach (var path in result.PlannedOrWrittenFiles)
         {
@@ -60,6 +63,25 @@ internal static class ReleaseReportRenderer
         }
 
         return builder.ToString();
+    }
+
+    private static void AppendEvidenceSummary(StringBuilder builder, ReleaseEvidenceSummary? summary)
+    {
+        if (summary is null)
+        {
+            return;
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## Release evidence bundle");
+        builder.AppendLine($"- Path: `{summary.Path}`");
+        builder.AppendLine($"- Schema: `{summary.Schema}`");
+        builder.AppendLine($"- Status: {summary.Status}");
+        builder.AppendLine($"- Subject SHA-256: `{summary.SubjectSha256}`");
+        builder.AppendLine($"- Docs archive manifest SHA-256: `{summary.DocsReleaseManifestSha256 ?? "pending"}`");
+        builder.AppendLine($"- Catalog exact tree path: `{summary.CatalogExactTreePath ?? "pending"}`");
+        builder.AppendLine($"- Tag commit: `{summary.TagCommit ?? "pending until publish validation"}`");
+        builder.AppendLine($"- Attestation: {summary.Attestation}");
     }
 
     private static void AppendDiagnostics(StringBuilder builder, string heading, IReadOnlyList<ReleaseDiagnostic> diagnostics)

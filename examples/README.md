@@ -8,6 +8,7 @@ This directory contains sample applications that use **ForgeTrust.AppSurface**.
 - [Web error-page proof](web-error-pages/README.md) – verifies AppSurface Web browser status pages, production exception pages, and API-friendly non-HTML behavior.
 - [Config validation example](config-validation/README.md) – shows scalar validation on a strongly typed config wrapper and the startup failure shape.
 - [Flow approval local example](flow-approval-local/README.md) – shows a typed flow that waits for an approval event and resumes through the in-memory runner.
+- [Flow generated authoring example](flow-generated-authoring/README.md) – shows generated outcome cases, typed input/output ports, inferred and explicit graph mapping, and generated lowering into the in-memory runner.
 
 ---
 [🏠 Back to Root](../README.md)

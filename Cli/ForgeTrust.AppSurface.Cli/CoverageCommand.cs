@@ -10,11 +10,11 @@ namespace ForgeTrust.AppSurface.Cli;
 /// </summary>
 /// <remarks>
 /// The root command keeps the coverage workflow visible in <c>appsurface --help</c>. The stable
-/// v1 contract lives on <c>coverage gate</c>, which evaluates existing Cobertura coverage without
-/// requiring a hosted coverage service. Execution orchestration commands stay out of the public
-/// CLI surface until their package dependency and discovery boundaries are proven outside AppSurface.
+/// v1 contract includes <c>coverage run</c>, which executes instrumented .NET test projects and
+/// merges local Cobertura artifacts, and <c>coverage gate</c>, which evaluates the merged coverage
+/// without requiring a hosted coverage service.
 /// </remarks>
-[Command("coverage", Description = "Inspect AppSurface coverage commands for private CI quality gates.")]
+[Command("coverage", Description = "Inspect AppSurface coverage commands for local coverage execution and threshold enforcement.")]
 internal sealed partial class CoverageCommand : ICommand
 {
     /// <summary>
@@ -25,6 +25,6 @@ internal sealed partial class CoverageCommand : ICommand
     [ExcludeFromCodeCoverage(Justification = "CliFx command discovery covers the root help path; subcommands carry behavior tests.")]
     public async ValueTask ExecuteAsync(IConsole console)
     {
-        await console.Output.WriteLineAsync("Use 'appsurface coverage gate --help' to enforce a Cobertura coverage gate.");
+        await console.Output.WriteLineAsync("Use 'appsurface coverage run --help' to produce Cobertura coverage, then 'appsurface coverage gate --help' to enforce thresholds.");
     }
 }

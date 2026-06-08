@@ -76,13 +76,23 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.2.md
     order: 37
-    use_when: Add this when your app or module needs typed long-running process definitions that can be tested locally before being hosted durably.
-    includes: AppSurfaceFlowModule, FlowNodeOutcome discriminated outcome records, IFlowNode, FlowDefinition, FlowGraphBuilder, flow definition registry, and the in-memory runner.
+    use_when: Add this when your app or module needs typed input/output port flow definitions, generated-case authoring, inferred graph mapping, and local runner tests before durable hosting.
+    includes: AppSurfaceFlowModule, FlowNodeOutcome discriminated outcome records, generated Flow authoring attributes and analyzer, IFlowTransformerNode, typed port graph inference, IFlowNode, FlowDefinition, FlowGraphBuilder, flow definition registry, and the in-memory runner.
     does_not_include: Durable persistence, timers, external-event delivery, ASP.NET endpoints, UI, Semantic Kernel, or preview C# union syntax.
     start_here_path: Flow/ForgeTrust.AppSurface.Flow/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Flow` when you want typed process graphs and local runner tests.
+    recipe_summary: Add `ForgeTrust.AppSurface.Flow` when you want generated-case typed process graphs, inferred port mapping, and local runner tests.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
+  - project: Flow/ForgeTrust.AppSurface.Flow.Generators/ForgeTrust.AppSurface.Flow.Generators.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    product_family: internal_support
+    publish_reason: The generated Flow authoring analyzer is shipped inside `ForgeTrust.AppSurface.Flow` as a private analyzer asset, not as a standalone NuGet package.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 36
+    note: Private source generator and diagnostics used by `ForgeTrust.AppSurface.Flow`; consume it only through the packed Flow package.
   - project: Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj
     classification: public
     publish_decision: publish
