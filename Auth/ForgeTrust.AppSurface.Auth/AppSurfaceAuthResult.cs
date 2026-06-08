@@ -67,11 +67,6 @@ public enum AppSurfaceAuthReason
     MissingServices = 4,
 
     /// <summary>
-    /// The authenticated caller could not be mapped to a stable host-owned subject identifier.
-    /// </summary>
-    MissingSubject = 7,
-
-    /// <summary>
     /// A requested return or navigation target is unsafe.
     /// </summary>
     UnsafeReturnUrl = 5,
@@ -80,6 +75,11 @@ public enum AppSurfaceAuthReason
     /// The session is stale, expired, missing, or cannot be resolved.
     /// </summary>
     StaleOrUnknownSession = 6,
+
+    /// <summary>
+    /// The authenticated caller could not be mapped to a stable host-owned subject identifier.
+    /// </summary>
+    MissingSubject = 7,
 }
 
 /// <summary>
