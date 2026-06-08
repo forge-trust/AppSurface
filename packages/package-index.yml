@@ -68,7 +68,7 @@ packages:
     recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth
-  - project: Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj
+  - project: Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -76,14 +76,14 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.2.md
     order: 37
-    use_when: Add this when your app or module needs typed long-running process definitions that can be tested locally before being hosted durably.
-    includes: AppSurfaceFlowModule, FlowNodeOutcome discriminated outcome records, IFlowNode, FlowDefinition, FlowGraphBuilder, flow definition registry, and the in-memory runner.
-    does_not_include: Durable persistence, timers, external-event delivery, ASP.NET endpoints, UI, Semantic Kernel, or preview C# union syntax.
-    start_here_path: Flow/ForgeTrust.AppSurface.Flow/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Flow` when you want typed process graphs and local runner tests.
+    use_when: Add this when your AppSurface modules or host integrations need product-intelligence event contracts before choosing an analytics vendor.
+    includes: AppSurfaceProductIntelligenceModule, IAppSurfaceProductIntelligence, AppSurfaceProductEvent, typed product-event registry, validation, sanitization, lifecycle states, sensitivity classes, and host-owned sink contracts.
+    does_not_include: PostHog SDKs, OpenTelemetry exporters, analytics storage, retention policy, dashboards, browser autocapture, session replay, cookies, or request-body capture.
+    start_here_path: Intelligence/ForgeTrust.AppSurface.Intelligence/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Intelligence` when you want vendor-neutral product event contracts and optional host-owned analytics sinks.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
-  - project: Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj
+  - project: Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -91,6 +91,31 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.2.md
     order: 38
+    use_when: Add this when your app or module needs typed input/output port flow definitions, generated-case authoring, inferred graph mapping, and local runner tests before durable hosting.
+    includes: AppSurfaceFlowModule, FlowNodeOutcome discriminated outcome records, generated Flow authoring attributes and analyzer, IFlowTransformerNode, typed port graph inference, IFlowNode, FlowDefinition, FlowGraphBuilder, flow definition registry, and the in-memory runner.
+    does_not_include: Durable persistence, timers, external-event delivery, ASP.NET endpoints, UI, Semantic Kernel, or preview C# union syntax.
+    start_here_path: Flow/ForgeTrust.AppSurface.Flow/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Flow` when you want generated-case typed process graphs, inferred port mapping, and local runner tests.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Core
+  - project: Flow/ForgeTrust.AppSurface.Flow.Generators/ForgeTrust.AppSurface.Flow.Generators.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    product_family: internal_support
+    publish_reason: The generated Flow authoring analyzer is shipped inside `ForgeTrust.AppSurface.Flow` as a private analyzer asset, not as a standalone NuGet package.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 39
+    note: Private source generator and diagnostics used by `ForgeTrust.AppSurface.Flow`; consume it only through the packed Flow package.
+  - project: Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/v0.1.0-rc.2.md
+    order: 40
     use_when: Add this after Flow when the same typed definitions need Durable Task persistence, replay, timers, and authorized resume events.
     includes: AppSurfaceFlowDurableTaskModule, durable flow runner and client services, resume-event authorization contract, timeout and late-event mapping, retry policy decisions, and context serialization validation.
     does_not_include: Durable Task worker/client hosting, storage providers, ASP.NET endpoints, authentication handlers, UI, or Semantic Kernel.
@@ -210,8 +235,10 @@ packages:
     start_here_path: Web/ForgeTrust.RazorWire/README.md
     recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, and server-rendered islands.
     depends_on:
+      - ForgeTrust.AppSurface.Intelligence
       - ForgeTrust.AppSurface.Web
     expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Intelligence
       - ForgeTrust.AppSurface.Web
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj
     classification: public
@@ -259,6 +286,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Caching
       - ForgeTrust.AppSurface.Config
+      - ForgeTrust.AppSurface.Intelligence
       - ForgeTrust.AppSurface.Web.Tailwind
       - ForgeTrust.RazorWire
   - project: Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj

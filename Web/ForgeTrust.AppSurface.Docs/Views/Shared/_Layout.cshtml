@@ -1,8 +1,10 @@
 @using System.Text.Json
+@using ForgeTrust.AppSurface.Intelligence
 @inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetPathResolver AssetPathResolver
 @inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetVersioner AssetVersioner
 @inject ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsIdentityResolver IdentityResolver
 @inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
+@inject Microsoft.Extensions.Options.IOptions<AppSurfaceProductIntelligenceOptions> ProductIntelligenceOptions
 @{
     var stylesheetPath = AssetVersioner.AppendVersion(AssetPathResolver.StylesheetPath, "css/site.gen.css");
     var docsIdentity = IdentityResolver.Identity;
@@ -27,7 +29,8 @@
             docsArchiveRootPath = docsArchiveRootUrl,
             docsSearchUrl,
             docsSearchIndexUrl,
-            miniSearchUrl = docsMiniSearchUrl
+            miniSearchUrl = docsMiniSearchUrl,
+            productIntelligenceEnabled = ProductIntelligenceOptions.Value.ExperimentalEventsEnabled
         });
     var isSearchPage = string.Equals(
         ViewContext.RouteData.Values["action"]?.ToString(),

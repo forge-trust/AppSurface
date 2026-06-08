@@ -3,6 +3,7 @@ using System.Net;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Channels;
+using ForgeTrust.AppSurface.Intelligence;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -294,6 +295,95 @@ public class RazorWireEndpointAuthorizationTests
     }
 
     [Fact]
+    public async Task StreamEndpoint_AdmissionRejection_CapturesProductIntelligenceWhenEnabled()
+    {
+        var sink = new ProductIntelligenceRecordingSink();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Production,
+            services =>
+            {
+                services.AddAppSurfaceProductIntelligence(options => options.EnableExperimentalEvents());
+                services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink);
+                services.Configure<RazorWireOptions>(options =>
+                {
+                    options.Streams.BasePath = "/custom-streams";
+                    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+                    options.Streams.MaxLiveChannels = 1;
+                });
+            });
+
+        using var accepted = await fixture.Client.GetAsync(
+            "/custom-streams/tenant-secret-42",
+            HttpCompletionOption.ResponseHeadersRead);
+        using var rejected = await fixture.Client.GetAsync("/custom-streams/other-secret-99");
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        var productEvent = Assert.Single(sink.Events);
+        Assert.Equal(AppSurfaceProductEventRegistry.RazorWireStreamAdmissionRejected, productEvent.Name);
+        Assert.Equal("/custom-streams/{channel}", productEvent.Route);
+        Assert.Equal("TooManyLiveChannels", productEvent.Properties["rejection_reason"]);
+        Assert.Equal("max_live_channels", productEvent.Properties["limit_name"]);
+        Assert.Equal("AllowAll", productEvent.Properties["authorization_mode"]);
+        Assert.DoesNotContain("tenant-secret-42", string.Join(" ", productEvent.Properties.Values), StringComparison.Ordinal);
+        Assert.DoesNotContain("other-secret-99", string.Join(" ", productEvent.Properties.Values), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_AdmissionRejection_DoesNotCaptureProductIntelligenceWhenExperimentalDisabled()
+    {
+        var sink = new ProductIntelligenceRecordingSink();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Production,
+            services =>
+            {
+                services.AddAppSurfaceProductIntelligence();
+                services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink);
+                services.Configure<RazorWireOptions>(options =>
+                {
+                    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+                    options.Streams.MaxLiveChannels = 1;
+                });
+            });
+
+        using var accepted = await fixture.Client.GetAsync(
+            "/_rw/streams/tenant-secret-42",
+            HttpCompletionOption.ResponseHeadersRead);
+        using var rejected = await fixture.Client.GetAsync("/_rw/streams/other-secret-99");
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.Empty(sink.Events);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_AdmissionRejection_ProductIntelligenceCaptureIsTimeBound()
+    {
+        var sink = new ProductIntelligenceBlockingSink();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Production,
+            services =>
+            {
+                services.AddAppSurfaceProductIntelligence(options => options.EnableExperimentalEvents());
+                services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink);
+                services.Configure<RazorWireOptions>(options =>
+                {
+                    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+                    options.Streams.MaxLiveChannels = 1;
+                });
+            });
+
+        using var accepted = await fixture.Client.GetAsync(
+            "/_rw/streams/tenant-secret-42",
+            HttpCompletionOption.ResponseHeadersRead);
+        using var rejected = await fixture.Client.GetAsync("/_rw/streams/other-secret-99");
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        await WaitUntilAsync(() => sink.CancellationObserved);
+    }
+
+    [Fact]
     public async Task StreamEndpoint_SubscribeThrow_ReleasesAdmissionCapacity()
     {
         var hub = new TrackingStreamHub { ThrowOnSubscribe = true };
@@ -444,6 +534,43 @@ public class RazorWireEndpointAuthorizationTests
             if (ThrowOnUnsubscribe)
             {
                 throw new InvalidOperationException("Unsubscribe failed for test.");
+            }
+        }
+    }
+
+    private sealed class ProductIntelligenceRecordingSink : IAppSurfaceProductIntelligenceSink
+    {
+        public IReadOnlyCollection<AppSurfaceProductEvent> Events => _events.ToArray();
+
+        private readonly ConcurrentQueue<AppSurfaceProductEvent> _events = new();
+
+        public ValueTask CaptureAsync(
+            AppSurfaceProductEvent productEvent,
+            CancellationToken cancellationToken = default)
+        {
+            _events.Enqueue(productEvent);
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class ProductIntelligenceBlockingSink : IAppSurfaceProductIntelligenceSink
+    {
+        private int _cancellationObserved;
+
+        public bool CancellationObserved => Volatile.Read(ref _cancellationObserved) == 1;
+
+        public async ValueTask CaptureAsync(
+            AppSurfaceProductEvent productEvent,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                Volatile.Write(ref _cancellationObserved, 1);
+                throw;
             }
         }
     }

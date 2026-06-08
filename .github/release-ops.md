@@ -29,6 +29,12 @@ export workflows remain deferred to the separate `razorwire` tool.
 
 Tracked follow-up: #161, "Automate coordinated monorepo releases from the public release contract".
 
+## Release evidence bundle
+
+Release preparation produces `releases/v{version}.evidence.json`, the release evidence bundle. This is repository release-artifact consistency evidence: it ties the release note, sidecar, release JSON, package release-note paths, optional docs archive catalog fields, and commit identity together for release-prep review and publish-time tag validation.
+
+The release evidence bundle is not a GitHub artifact attestation. Keep `id-token: write` and `attestations: write` out of default release workflows unless an explicit future attestation mode is implemented and reviewed.
+
 ## Package artifact dry run
 
 The pack-only release slice uses `packages/package-index.yml` as the single package

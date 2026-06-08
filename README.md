@@ -64,9 +64,13 @@ This approach aims to:
 - [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) – ASP.NET Core adapter that maps existing host request auth context and named policies into AppSurface auth results without owning schemes, middleware, challenges, forbids, redirects, or identity-provider setup.
 
+### [Intelligence](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md)
+
+- [**ForgeTrust.AppSurface.Intelligence**](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md) - Product-intelligence event contracts, lifecycle metadata, privacy validation, and host-owned sink hooks for forwarding sanitized AppSurface product events to systems such as PostHog without taking a vendor dependency.
+
 ### [Flow](./Flow/README.md)
 
-- [**ForgeTrust.AppSurface.Flow**](./Flow/ForgeTrust.AppSurface.Flow/README.md) – Typed long-running process contracts, graph validation, definition registry, and an in-memory runner for local tests and hello-world flows.
+- [**ForgeTrust.AppSurface.Flow**](./Flow/ForgeTrust.AppSurface.Flow/README.md) – Typed long-running process contracts, generated-case authoring, graph validation, definition registry, and an in-memory runner for local tests and hello-world flows.
 - [**ForgeTrust.AppSurface.Flow.DurableTask**](./Flow/ForgeTrust.AppSurface.Flow.DurableTask/README.md) – Durable Task adapter boundary with runner/client services, resume-event authorization, timeout, late-event and retry behavior, and context serialization validation.
 
 ### [Console](./Console/README.md)
@@ -84,7 +88,7 @@ This approach aims to:
 
 ### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
 
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including `appsurface docs` preview/export workflows and `appsurface coverage gate` private Cobertura threshold enforcement.
+- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including `appsurface docs` preview/export workflows, `appsurface coverage run` private test orchestration, and `appsurface coverage gate` local Cobertura threshold enforcement.
 
 ### [Dependency](./Dependency/README.md)
 
@@ -92,7 +96,7 @@ This approach aims to:
 
 ### [Aspire](./Aspire/README.md)
 
-- [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Integration with .NET Aspire to provide a modular approach to defining distributed applications and service defaults.
+- [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Local .NET Aspire AppHost composition with AppSurface modules, CLI-selectable profiles, and reusable Aspire components.
 
 These packages are designed to work together so that features can be shared
 across different application types while maintaining a consistent startup
@@ -143,7 +147,7 @@ dotnet build
 dotnet test --no-build
 ```
 
-Run merged solution coverage (product assemblies only):
+Run merged solution coverage for this repository's AppSurface-specific validation lane:
 
 ```bash
 ./scripts/coverage-solution.sh
@@ -157,9 +161,19 @@ This command:
 - Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
 - Writes a summary to `TestResults/coverage-merged/summary.txt`.
 - Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
+- Writes slow-test diagnostics to `TestResults/coverage-merged/slow-test-diagnostics.md` and
+  `TestResults/coverage-merged/slow-test-diagnostics.json`, including diagnostic aggregation
+  overhead in seconds and as a percent of total runner time.
 - Restores the pinned local ReportGenerator .NET tool when coverage files need to be merged.
 
-The `appsurface coverage gate` command evaluates the merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage is enabled with `--diff-base` and estimates Codecov-style changed-line and changed-branch coverage from the same merged Cobertura file. The gate is intentionally private-by-default: it does not upload coverage, call GitHub APIs, store trends, or replace the script's AppSurface-specific test scheduling.
+Private package-consuming repositories should use the public CLI runner instead of this repository's script:
+
+```bash
+dotnet tool run appsurface coverage run --solution ./MyApp.slnx
+dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75
+```
+
+The `appsurface coverage run` command discovers `.sln`/`.slnx` test projects or accepts repeated `--test-project` values, runs Coverlet-instrumented projects, writes private local artifacts under `TestResults/coverage-merged`, and merges Cobertura through the CLI package's ReportGenerator dependency without reading the consumer repo's tool manifest. No separate merge command is required for package consumers: `coverage run` produces `TestResults/coverage-merged/coverage.cobertura.xml` directly. The optional `appsurface coverage gate` command evaluates that merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage is enabled with `--diff-base` and estimates Codecov-style changed-line and changed-branch coverage from the same merged Cobertura file. The coverage commands are intentionally private-by-default: they do not upload coverage, call GitHub APIs, or store trends.
 
 The script also supports bounded test groups for local or CI experiments:
 
@@ -218,6 +232,8 @@ how to use this project.
 - [Console app example](examples/console-app/README.md) – builds a simple command line
   application using [CliFx](https://github.com/Tyrrrz/CliFx) source-generated command
   descriptors.
+- [Aspire AppHost example](examples/aspire-apphost/README.md) – shows local Aspire AppHost
+  composition with AppSurface profiles and reusable Aspire components.
 - [Web app example](examples/web-app/README.md) – shows a minimal ASP.NET Core app that
   composes middleware and endpoints from modules.
 - [Web error-page proof](examples/web-error-pages/README.md) – runs a one-command verifier

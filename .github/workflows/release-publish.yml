@@ -46,7 +46,7 @@ jobs:
           git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
           git fetch origin main:refs/remotes/origin/main
 
-      - name: Validate release publish inputs
+      - name: Validate tag-bound release evidence
         id: release
         env:
           VERSION: ${{ inputs.version }}
