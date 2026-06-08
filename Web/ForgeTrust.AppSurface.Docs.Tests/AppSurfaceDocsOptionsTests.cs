@@ -1933,6 +1933,35 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void Validator_ShouldRejectEnabledMetricsFeaturesWithMissingHostedCollectionOptions()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Metrics = new AppSurfaceDocsMetricsOptions
+            {
+                Enabled = true,
+                BrowserCollector = new AppSurfaceDocsBrowserMetricsCollectorOptions
+                {
+                    Enabled = true
+                },
+                HostedCollection = null!,
+                HostedReview = new AppSurfaceDocsHostedMetricsReviewOptions
+                {
+                    Enabled = true
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("EndpointUrl is required", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Metrics:HostedCollection must not be null", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("HostedReview:Enabled requires AppSurfaceDocs:Metrics:HostedCollection:Enabled", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Validator_ShouldRejectMetricsFeaturesEnabledWithoutParentMetricsFlag()
     {
         var validator = new AppSurfaceDocsOptionsValidator();
