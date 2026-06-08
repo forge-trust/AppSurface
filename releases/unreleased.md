@@ -21,6 +21,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Web browser status-page re-execution now preserves the original `401`, `403`, or `404` response status while rendering conventional browser recovery pages, so standalone docs 404 recovery keeps `NotFound` semantics across supported runtimes.
 - `razorwire export` and `appsurface export` now accept `--publish-root-extras <manifest>` for explicit single-file publish-root extras such as GitHub Pages `CNAME`, with `RWEXPORT007` validation for schema, symlink, reserved provider file, generated-output collision, existing-target, and exact release archive incompatibility failures. `appsurface docs export` remains intentionally clean and does not expose the option for exact docs archive artifacts.
 - Package consumers can now follow a package-first AppSurface Web quickstart from a fresh `dotnet new web` app, install `ForgeTrust.AppSurface.Web`, and verify the first route before choosing optional modules.
+- AppSurface Web modules now have a root-first `ConfigureEndpointAwareMiddleware` hook that runs after routing and AppSurface CORS but before endpoint execution, giving root or host integration modules a safe place to register global authentication and authorization middleware while feature modules keep endpoint mapping in `ConfigureEndpoints`.
 - AppSurface Docs Turbo-frame navigation now preserves cross-page heading fragments, so generated package chooser links land directly on the package-first quickstart section instead of the top of the target page.
 - `ForgeTrust.AppSurface.Aspire` now includes a working local Aspire AppHost example at `examples/aspire-apphost`, stronger package guidance for profile and component composition, and explicit troubleshooting for `-- local`, generated `Projects.*` references, duplicate resources, and unsupported deployment/pass-through arguments.
 
@@ -44,4 +45,4 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## Migration watch
 
-- Record breaking or behavior-changing guidance here before it moves into the tagged release note.
+- Middleware that needs selected endpoint metadata, including global `UseAuthentication()` and `UseAuthorization()`, should move from `ConfigureWebApplication` to the root or host integration module's `ConfigureEndpointAwareMiddleware` hook. `ConfigureWebApplication` remains the pre-routing hook for middleware that does not inspect endpoint metadata.

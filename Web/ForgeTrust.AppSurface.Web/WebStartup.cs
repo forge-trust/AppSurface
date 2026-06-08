@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics;
@@ -586,6 +587,11 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
             app.UseCors(_options.Cors.PolicyName);
         }
 
+        foreach (var module in GetEndpointAwareMiddlewareModules(context))
+        {
+            module.ConfigureEndpointAwareMiddleware(context, app);
+        }
+
         app.UseEndpoints(endpoints =>
         {
             // Map endpoints from dependencies.
@@ -634,6 +640,19 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
                 endpoints.MapControllers();
             }
         });
+    }
+
+    private IEnumerable<IAppSurfaceWebModule> GetEndpointAwareMiddlewareModules(StartupContext context)
+    {
+        if (context.RootModule is IAppSurfaceWebModule root)
+        {
+            yield return root;
+        }
+
+        foreach (var module in _modules.Where(module => !ReferenceEquals(module, context.RootModule)))
+        {
+            yield return module;
+        }
     }
 
     internal static bool ShouldApplyConventionalBrowserStatusPages(HttpContext httpContext)
