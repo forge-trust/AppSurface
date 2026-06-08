@@ -60,6 +60,27 @@ public sealed class AppSurfaceAspNetCorePolicyEvaluatorTests
     }
 
     [Fact]
+    public async Task AuthorizeAsync_WithoutRequestServices_ReturnsMissingServices()
+    {
+        using var scope = CreatePolicyScope(PolicyAuthorizationResult.Success());
+        var httpContext = new DefaultHttpContext
+        {
+            User = Principal("sub", "user-1"),
+        };
+        scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>().HttpContext = httpContext;
+
+        var result = await scope.ServiceProvider
+            .GetRequiredService<IAppSurfaceAspNetCorePolicyEvaluator>()
+            .AuthorizeAsync("Operators");
+
+        Assert.Equal(AppSurfaceAuthReason.MissingServices, result.Reason);
+        Assert.Equal("missing_request_services", result.Metadata[AppSurfaceAspNetCoreAuthMetadataKeys.DiagnosticCode]);
+        Assert.Equal(
+            typeof(IServiceProvider).FullName,
+            result.Metadata[AppSurfaceAspNetCoreAuthMetadataKeys.MissingService]);
+    }
+
+    [Fact]
     public async Task AuthorizeAsync_WithoutPolicyEvaluator_ReturnsMissingServices()
     {
         var services = new ServiceCollection();

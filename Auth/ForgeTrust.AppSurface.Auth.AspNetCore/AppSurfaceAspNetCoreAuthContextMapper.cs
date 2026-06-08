@@ -70,19 +70,11 @@ internal sealed class AppSurfaceAspNetCoreAuthContextMapper
 
     private string? ResolveSubject(IReadOnlyList<ClaimsIdentity> identities)
     {
-        foreach (var claimType in _options.Value.SubjectClaimTypes)
-        {
-            var value = identities
+        return _options.Value.SubjectClaimTypes
+            .Select(claimType => identities
                 .SelectMany(identity => identity.FindAll(claimType))
                 .Select(claim => claim.Value)
-                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-
-            if (value is not null)
-            {
-                return value;
-            }
-        }
-
-        return null;
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)))
+            .FirstOrDefault(value => value is not null);
     }
 }

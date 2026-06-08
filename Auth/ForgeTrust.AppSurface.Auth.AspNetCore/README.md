@@ -64,7 +64,7 @@ app.MapGet(
     });
 ```
 
-For a runnable local proof with fake authentication, see [the ASP.NET Core auth bridge example](../../examples/auth-aspnetcore-bridge/README.md).
+For a local proof with fake authentication, see [the ASP.NET Core auth bridge example](../../examples/auth-aspnetcore-bridge/README.md).
 
 ## What The Package Includes
 
