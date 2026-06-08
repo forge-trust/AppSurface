@@ -58,9 +58,15 @@ app.MapGet(
     {
         var result = await evaluator.AuthorizeAsync("OperatorsOnly");
 
-        return result.IsAllowed
-            ? Results.Ok(new { subject = result.Context?.User?.Id })
-            : Results.Json(new { result.Outcome, result.Reason }, statusCode: 403);
+        return result.Outcome switch
+        {
+            AppSurfaceAuthOutcome.Allowed =>
+                Results.Ok(new { subject = result.Context?.User?.Id }),
+            AppSurfaceAuthOutcome.Challenge =>
+                Results.Unauthorized(),
+            _ =>
+                Results.Json(new { result.Outcome, result.Reason }, statusCode: 403),
+        };
     });
 ```
 
