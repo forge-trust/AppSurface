@@ -163,8 +163,8 @@ public class RazorWireEndpointAuthorizationTests
     [Fact]
     public async Task StreamEndpoint_AppSurfaceEndpointAwareMiddleware_PrincipalReachesAuthorizer()
     {
-        RecordingAppSurfaceAuthorizer.Reset();
         var root = new RazorWireEndpointAwareAuthModule();
+        root.Authorizer.Reset();
         var startup = new RazorWireEndpointAwareAuthStartup(root);
 
         await using var fixture = await AppSurfaceRazorWireFixture.StartAsync(startup, root);
@@ -174,7 +174,7 @@ public class RazorWireEndpointAuthorizationTests
         using var response = await fixture.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("razorwire-user", RecordingAppSurfaceAuthorizer.LastUserName);
+        Assert.Equal("razorwire-user", root.Authorizer.LastUserName);
     }
 
     [Fact]
@@ -575,6 +575,8 @@ public class RazorWireEndpointAuthorizationTests
 
     private sealed class RazorWireEndpointAwareAuthModule : IAppSurfaceWebModule
     {
+        public RecordingAppSurfaceAuthorizer Authorizer { get; } = new();
+
         public void ConfigureServices(StartupContext context, IServiceCollection services)
         {
             services
@@ -583,7 +585,8 @@ public class RazorWireEndpointAuthorizationTests
                     RazorWireHeaderAuthenticationHandler.SchemeName,
                     _ => { });
             services.AddAuthorization();
-            services.AddSingleton<IRazorWireChannelAuthorizer, RecordingAppSurfaceAuthorizer>();
+            services.AddSingleton(Authorizer);
+            services.AddSingleton<IRazorWireChannelAuthorizer>(Authorizer);
         }
 
         public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
@@ -608,11 +611,11 @@ public class RazorWireEndpointAuthorizationTests
 
     private sealed class RecordingAppSurfaceAuthorizer : IRazorWireChannelAuthorizer
     {
-        private static string? _lastUserName;
+        private string? _lastUserName;
 
-        public static string? LastUserName => Volatile.Read(ref _lastUserName);
+        public string? LastUserName => Volatile.Read(ref _lastUserName);
 
-        public static void Reset()
+        public void Reset()
         {
             Volatile.Write(ref _lastUserName, null);
         }

@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics;
@@ -648,12 +649,9 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
             yield return root;
         }
 
-        foreach (var module in _modules)
+        foreach (var module in _modules.Where(module => !ReferenceEquals(module, context.RootModule)))
         {
-            if (!ReferenceEquals(module, context.RootModule))
-            {
-                yield return module;
-            }
+            yield return module;
         }
     }
 
