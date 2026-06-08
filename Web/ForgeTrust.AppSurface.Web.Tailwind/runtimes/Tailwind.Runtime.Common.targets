@@ -36,6 +36,7 @@
     <Compile Remove="obj/**/*.cs" />
     <EmbeddedResource Remove="obj/**" />
     <None Remove="obj/**" />
+    <None Include="$(MSBuildThisFileDirectory)..\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="" />
   </ItemGroup>
 
   <Target

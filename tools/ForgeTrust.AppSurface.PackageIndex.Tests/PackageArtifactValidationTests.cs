@@ -1466,6 +1466,629 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_ThrowsWhenSuspiciousPayloadIsUnclassified()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Directory.Packages.props", """<PackageVersion Include="ReportGenerator" Version="5.5.10" />""");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool")
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                        "ForgeTrust.AppSurface.Cli",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                new PackagePayloadInventory()));
+
+        Assert.Contains("ASPKG123", error.Message, StringComparison.Ordinal);
+        Assert.Contains("tools/net10.0/any/reportgenerator/ReportGenerator.dll", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Problem:", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Fix:", error.Message, StringComparison.Ordinal);
+        Assert.Contains("packages/README.md#redistributed-payloads", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenThirdPartyLookingAssemblyIsUnclassified()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["lib/net10.0/Newtonsoft.Json.dll"] = Encoding.UTF8.GetBytes("third-party assembly")
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                        "ForgeTrust.AppSurface.Cli",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                new PackagePayloadInventory()));
+
+        Assert.Contains("ASPKG123", error.Message, StringComparison.Ordinal);
+        Assert.Contains("lib/net10.0/Newtonsoft.Json.dll", error.Message, StringComparison.Ordinal);
+        Assert.Contains("*.dll", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AcceptsForgeTrustAssemblyAsFirstPartyPayload()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Flow",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["analyzers/dotnet/cs/ForgeTrust.AppSurface.Flow.Generators.dll"] = Encoding.UTF8.GetBytes("first-party analyzer")
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            new PackagePublishPlan([
+                new PackagePublishPlanEntry(
+                    "Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj",
+                    "ForgeTrust.AppSurface.Flow",
+                    PackagePublishDecision.Publish,
+                    [],
+                    IsTool: false)
+            ]),
+            artifactDirectory,
+            PackageVersion,
+            _repositoryRoot,
+            new PackagePayloadInventory());
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AcceptsWildcardSegmentPayloadPattern()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["lib/net10.0/Newtonsoft.Json.dll"] = Encoding.UTF8.GetBytes("third-party assembly"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("Newtonsoft.Json 13.0.3 MIT")
+            });
+        var inventory = new PackagePayloadInventory
+        {
+            Notices =
+            {
+                new PackagePayloadNoticeRecord
+                {
+                    Id = "json-assembly",
+                    PackageId = "ForgeTrust.AppSurface.Cli",
+                    Component = "Newtonsoft.Json",
+                    Version = "13.0.3",
+                    License = "MIT",
+                    SourceUrl = "https://www.newtonsoft.com/json",
+                    PayloadPatterns = { "lib/net10.0/*.dll" },
+                    NoticePaths = { "THIRD-PARTY-NOTICES.md" },
+                    Markers = { "Newtonsoft.Json", "13.0.3", "MIT" }
+                }
+            }
+        };
+
+        var report = new PackageArtifactValidator().Validate(
+            new PackagePublishPlan([
+                new PackagePublishPlanEntry(
+                    "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                    "ForgeTrust.AppSurface.Cli",
+                    PackagePublishDecision.Publish,
+                    [],
+                    IsTool: false)
+            ]),
+            artifactDirectory,
+            PackageVersion,
+            _repositoryRoot,
+            inventory);
+
+        var payloadResult = Assert.Single(Assert.Single(report.Entries).PayloadResults!);
+        Assert.Equal(["lib/net10.0/Newtonsoft.Json.dll"], payloadResult.PayloadEntries);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AcceptsNoticeClassifiedPayloadAndReportsCoverage()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Directory.Packages.props", """<PackageVersion Include="ReportGenerator" Version="5.5.10" />""");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10 Apache-2.0")
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            new PackagePublishPlan([
+                new PackagePublishPlanEntry(
+                    "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                    "ForgeTrust.AppSurface.Cli",
+                    PackagePublishDecision.Publish,
+                    [],
+                    IsTool: false)
+            ]),
+            artifactDirectory,
+            PackageVersion,
+            _repositoryRoot,
+            CreateReportGeneratorInventory());
+
+        var entry = Assert.Single(report.Entries);
+        var payloadResult = Assert.Single(entry.PayloadResults!);
+        Assert.Equal(1, entry.SuspiciousPayloadCount);
+        Assert.Equal(1, entry.CoveredSuspiciousPayloadCount);
+        Assert.Equal("cli-reportgenerator-tool-payload", payloadResult.RecordId);
+        Assert.Equal("notice_enforced", payloadResult.Status);
+        Assert.Equal("Directory.Packages.props", payloadResult.VersionSource);
+        var markdown = PackageArtifactReportRenderer.RenderMarkdown(report);
+        Assert.Contains("Suspicious payloads", markdown, StringComparison.Ordinal);
+        Assert.Contains("| `ForgeTrust.AppSurface.Cli` |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| 1/1 |", markdown, StringComparison.Ordinal);
+        Assert.Contains("## Redistributed payload coverage", markdown, StringComparison.Ordinal);
+        Assert.Contains("`cli-reportgenerator-tool-payload`", markdown, StringComparison.Ordinal);
+        Assert.Contains("`THIRD-PARTY-NOTICES.md`", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenAuditOverlapsNoticeClassifiedPayload()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Directory.Packages.props", """<PackageVersion Include="ReportGenerator" Version="5.5.10" />""");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10 Apache-2.0")
+            });
+        var inventory = CreateReportGeneratorInventory();
+        inventory.Audits.Add(
+            new PackagePayloadAuditRecord
+            {
+                Id = "broad-tool-closure",
+                PackageId = "ForgeTrust.AppSurface.Cli",
+                AppliesTo = { "tools/net10.0/any/**/*.dll" },
+                MatchedRule = "dotnet tool dependency closure",
+                EvidenceKind = "dotnet_tool_dependency_closure",
+                SourcePaths = { "Directory.Packages.props" },
+                Reason = "Broad closure must not cover noticed payloads.",
+                ReviewedOn = "2026-06-07",
+                Source = "synthetic test",
+                RevalidateWhen = "Package layout changes."
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                        "ForgeTrust.AppSurface.Cli",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                inventory));
+
+        Assert.Contains("ASPKG138", error.Message, StringComparison.Ordinal);
+        Assert.Contains("broad-tool-closure", error.Message, StringComparison.Ordinal);
+        Assert.Contains("tools/net10.0/any/reportgenerator/ReportGenerator.dll", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenNoticeMarkerIsMissing()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Directory.Packages.props", """<PackageVersion Include="ReportGenerator" Version="5.5.10" />""");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10")
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                        "ForgeTrust.AppSurface.Cli",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                CreateReportGeneratorInventory()));
+
+        Assert.Contains("ASPKG126", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Apache-2.0", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenPayloadPatternUsesEmbeddedGlobstar()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Directory.Packages.props", """<PackageVersion Include="ReportGenerator" Version="5.5.10" />""");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10 Apache-2.0")
+            });
+        var inventory = CreateReportGeneratorInventory();
+        inventory.Notices[0].PayloadPatterns.Add("tools/**reportgenerator/**");
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                        "ForgeTrust.AppSurface.Cli",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                inventory));
+
+        Assert.Contains("ASPKG128", error.Message, StringComparison.Ordinal);
+        Assert.Contains("tools/**reportgenerator/**", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenInventoryPathEscapesRepository()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Directory.Packages.props", """<PackageVersion Include="ReportGenerator" Version="5.5.10" />""");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10 Apache-2.0")
+            });
+        var inventory = CreateReportGeneratorInventory();
+        inventory.Notices[0].SourcePaths.Add("../outside.txt");
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                        "ForgeTrust.AppSurface.Cli",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                inventory));
+
+        Assert.Contains("ASPKG135", error.Message, StringComparison.Ordinal);
+        Assert.Contains("escapes the repository root", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenInventoryPathIsAbsolute()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Directory.Packages.props", """<PackageVersion Include="ReportGenerator" Version="5.5.10" />""");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10 Apache-2.0")
+            });
+        var inventory = CreateReportGeneratorInventory();
+        inventory.Notices[0].SourcePaths.Add(Path.Combine(_repositoryRoot, "Directory.Packages.props"));
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                        "ForgeTrust.AppSurface.Cli",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                inventory));
+
+        Assert.Contains("ASPKG135", error.Message, StringComparison.Ordinal);
+        Assert.Contains("repository-relative", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenPayloadInventoryReferencesUnknownPackage()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies);
+        var inventory = new PackagePayloadInventory
+        {
+            Notices =
+            {
+                new PackagePayloadNoticeRecord
+                {
+                    Id = "stale-notice",
+                    PackageId = "ForgeTrust.Missing.Package",
+                    Component = "Missing component",
+                    Version = "1.0.0",
+                    License = "MIT",
+                    SourceUrl = "https://example.invalid/missing",
+                    PayloadPatterns = { "tools/**" },
+                    NoticePaths = { "THIRD-PARTY-NOTICES.md" },
+                    Markers = { "Missing component" }
+                }
+            }
+        };
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                        "ForgeTrust.AppSurface.Cli",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                inventory));
+
+        Assert.Contains("ASPKG136", error.Message, StringComparison.Ordinal);
+        Assert.Contains("ForgeTrust.Missing.Package", error.Message, StringComparison.Ordinal);
+        Assert.Contains("packages/package-index.yml", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenPackageEntriesCollideAfterNormalization()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("one"),
+                ["third-party-notices.md"] = Encoding.UTF8.GetBytes("two")
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                        "ForgeTrust.AppSurface.Cli",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("duplicate package entry path", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AcceptsGeneratedFirstPartyAuditAndReportsCoverage()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Web/ForgeTrust.RazorWire/assets/src/razorwire.ts", "source");
+        WriteFile("Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js", "generated");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.RazorWire",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["content/razorwire/razorwire.js"] = Encoding.UTF8.GetBytes("generated")
+            });
+
+        var inventory = new PackagePayloadInventory
+        {
+            Audits =
+            {
+                new PackagePayloadAuditRecord
+                {
+                    Id = "razorwire-generated-browser-assets",
+                    PackageId = "ForgeTrust.RazorWire",
+                    AppliesTo = { "content/razorwire/razorwire.js" },
+                    MatchedRule = "embedded generated browser assets",
+                    EvidenceKind = "generated_first_party",
+                    SourcePaths = { "Web/ForgeTrust.RazorWire/assets/src/razorwire.ts" },
+                    GeneratedPaths = { "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js" },
+                    Reason = "Generated from first-party source.",
+                    ReviewedOn = "2026-06-07",
+                    Source = "RWPACK001",
+                    RevalidateWhen = "RazorWire source changes."
+                }
+            }
+        };
+
+        var report = new PackageArtifactValidator().Validate(
+            new PackagePublishPlan([
+                new PackagePublishPlanEntry(
+                    "Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj",
+                    "ForgeTrust.RazorWire",
+                    PackagePublishDecision.Publish,
+                    [],
+                    IsTool: false)
+            ]),
+            artifactDirectory,
+            PackageVersion,
+            _repositoryRoot,
+            inventory);
+
+        var payloadResult = Assert.Single(Assert.Single(report.Entries).PayloadResults!);
+        Assert.Equal("generated_first_party", payloadResult.EvidenceKind);
+        Assert.Equal("audit_enforced", payloadResult.Status);
+    }
+
+    [Fact]
+    public void PackagePayloadInventoryLoader_ThrowsForMalformedYaml()
+    {
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackagePayloadInventoryLoader().Parse(
+                """
+                schema_version: 1
+                notices:
+                  - id: broken
+                    package_id: [
+                """));
+
+        Assert.Contains("could not be parsed", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Problem:", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Fix:", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackagePayloadInventoryLoader_ThrowsForDuplicateRecordIds()
+    {
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackagePayloadInventoryLoader().Parse(
+                """
+                schema_version: 1
+                notices:
+                  - id: duplicate
+                    package_id: ForgeTrust.AppSurface.Cli
+                    component: ReportGenerator
+                    version: 5.5.10
+                    license: Apache-2.0
+                    source_url: https://github.com/danielpalme/ReportGenerator
+                    payload_patterns:
+                      - tools/**/reportgenerator/**
+                    notice_paths:
+                      - THIRD-PARTY-NOTICES.md
+                    markers:
+                      - ReportGenerator
+                audits:
+                  - id: duplicate
+                    package_id: ForgeTrust.RazorWire
+                    applies_to:
+                      - lib/**/ForgeTrust.RazorWire.dll
+                    evidence_kind: generated_first_party
+                    source_paths:
+                      - Web/ForgeTrust.RazorWire/assets/src/razorwire.ts
+                    reason: Generated assets.
+                    reviewed_on: 2026-06-07
+                    source: test
+                    revalidate_when: source changes.
+                """));
+
+        Assert.Contains("duplicate record id", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PackagePayloadInventoryLoader_ThrowsWhenGeneratedFirstPartyAuditOmitsGeneratedPaths()
+    {
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackagePayloadInventoryLoader().Parse(
+                """
+                schema_version: 1
+                audits:
+                  - id: generated-without-output
+                    package_id: ForgeTrust.RazorWire
+                    applies_to:
+                      - lib/**/ForgeTrust.RazorWire.dll
+                    evidence_kind: generated_first_party
+                    source_paths:
+                      - Web/ForgeTrust.RazorWire/assets/src/razorwire.ts
+                    reason: Generated assets.
+                    reviewed_on: 2026-06-07
+                    source: test
+                    revalidate_when: source changes.
+                """));
+
+        Assert.Contains("generated_paths", error.Message, StringComparison.Ordinal);
+        Assert.Contains("generated-without-output", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PackageVersionValidator_RejectsStableVersionsAndBuildMetadata()
     {
         var stable = Assert.Throws<PackageIndexException>(
@@ -1673,6 +2296,22 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """);
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("packages/third-party-payloads.yml",
+            """
+            schema_version: 1
+            audits:
+              - id: workflow-fixture-proof
+                package_id: ForgeTrust.AppSurface.Web
+                applies_to:
+                  - README.md
+                evidence_kind: fixture_audit
+                source_paths:
+                  - packages/package-index.yml
+                reason: Keeps the workflow test focused on command orchestration.
+                reviewed_on: 2026-06-07
+                source: test fixture
+                revalidate_when: fixture changes.
+            """);
         var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
         var reportPath = Path.Combine(artifactDirectory, "package-validation-report.md");
         var artifactManifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
@@ -3219,6 +3858,38 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var fullPath = TestPathUtils.PathUnder(_repositoryRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
+    }
+
+    private void WriteFile(string relativePath, string content)
+    {
+        var fullPath = TestPathUtils.PathUnder(_repositoryRoot, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllText(fullPath, content, Encoding.UTF8);
+    }
+
+    private static PackagePayloadInventory CreateReportGeneratorInventory()
+    {
+        return new PackagePayloadInventory
+        {
+            Notices =
+            {
+                new PackagePayloadNoticeRecord
+                {
+                    Id = "cli-reportgenerator-tool-payload",
+                    PackageId = "ForgeTrust.AppSurface.Cli",
+                    Component = "ReportGenerator",
+                    Version = "5.5.10",
+                    License = "Apache-2.0",
+                    SourceUrl = "https://github.com/danielpalme/ReportGenerator",
+                    PayloadPatterns = { "tools/**/reportgenerator/**" },
+                    NoticePaths = { "THIRD-PARTY-NOTICES.md" },
+                    Markers = { "ReportGenerator", "5.5.10", "Apache-2.0" },
+                    SourcePaths = { "Directory.Packages.props" },
+                    VersionSourcePath = "Directory.Packages.props",
+                    VersionSourceContains = """<PackageVersion Include="ReportGenerator" Version="5.5.10" />"""
+                }
+            }
+        };
     }
 
     private static string GetRepositoryRoot()
