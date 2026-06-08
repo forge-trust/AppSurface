@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using AngleSharp.Dom;
@@ -117,6 +118,49 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("\"browserCollector\":{\"enabled\":true", html);
         Assert.Contains("\"endpointUrl\":\"/some-base/docs/_metrics/collect\"", html);
         Assert.Contains("\"feedbackEnabled\":true", html);
+    }
+
+    [Theory]
+    [InlineData(true, "Collecting")]
+    [InlineData(false, "Paused")]
+    public async Task SearchQualityView_ShouldRenderMetricsModeAndBuckets(bool hostedCollectionEnabled, string expectedCollectionLabel)
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new AppSurfaceDocsSearchQualityResponse(
+            DateTimeOffset.Parse("2026-06-08T01:00:00Z", CultureInfo.InvariantCulture),
+            TotalAcceptedEvents: 5,
+            WindowCapacity: 512,
+            SubmittedSearches: 2,
+            ZeroResultSearches: 1,
+            ResultSelections: 1,
+            RecoverySelections: 1,
+            FilterChanges: 1,
+            FeedbackSubmissions: 2,
+            new AppSurfaceDocsSearchQualityMode(
+                BrowserCollectorEnabled: true,
+                HostedCollectionEnabled: hostedCollectionEnabled,
+                HostedReviewEnabled: true,
+                RawQueriesDisabled: true),
+            [
+                new AppSurfaceDocsSearchQualityBucket("Zero-result searches", 1, "Add aliases."),
+                new AppSurfaceDocsSearchQualityBucket("Result selections", 1, "Tune summaries.")
+            ],
+            [
+                new AppSurfaceDocsSearchQualityBucket("Useful recovery feedback", 1, "Keep it."),
+                new AppSurfaceDocsSearchQualityBucket("Not-useful recovery feedback", 1, "Improve it.")
+            ]);
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/SearchQuality.cshtml",
+            model);
+
+        Assert.Contains(expectedCollectionLabel, html);
+        Assert.Contains("Browser Collector", html);
+        Assert.Contains("Enabled", html);
+        Assert.Contains("Zero-result searches", html);
+        Assert.Contains("Tune summaries.", html);
+        Assert.Contains("Not-useful recovery feedback", html);
     }
 
     [Fact]

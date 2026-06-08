@@ -909,6 +909,47 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Equal(HttpMethods.Post, httpContext.Response.Headers.Allow);
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void ConfigureEndpoints_ShouldMapSearchQualityReviewOnlyWhenHostedMetricsReviewIsEnabled(
+        bool hostedReviewEnabled,
+        bool shouldMap)
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Metrics = new AppSurfaceDocsMetricsOptions
+                {
+                    Enabled = true,
+                    HostedCollection = new AppSurfaceDocsHostedMetricsCollectionOptions
+                    {
+                        Enabled = true
+                    },
+                    HostedReview = new AppSurfaceDocsHostedMetricsReviewOptions
+                    {
+                        Enabled = hostedReviewEnabled
+                    }
+                }
+            });
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var routePatterns = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText?.TrimStart('/'))
+            .ToArray();
+
+        Assert.Equal(shouldMap, routePatterns.Contains("docs/_search-quality"));
+    }
+
     [Fact]
     public void ConfigureEndpoints_ShouldMapBareRootRedirect_WhenAppSurfaceDocsIsTheRootModule()
     {

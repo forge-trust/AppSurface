@@ -1040,6 +1040,33 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceDocs_ShouldNormalizeNullMetricsSubsections()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+
+        services.AddAppSurfaceDocs();
+        services.Configure<AppSurfaceDocsOptions>(
+            options =>
+            {
+                options.Metrics = new AppSurfaceDocsMetricsOptions
+                {
+                    BrowserCollector = null!,
+                    HostedCollection = null!,
+                    HostedReview = null!
+                };
+            });
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.NotNull(options.Metrics);
+        Assert.NotNull(options.Metrics.BrowserCollector);
+        Assert.NotNull(options.Metrics.HostedCollection);
+        Assert.NotNull(options.Metrics.HostedReview);
+    }
+
+    [Fact]
     public void AddAppSurfaceDocs_ShouldBindConfiguredCacheExpirationMinutes()
     {
         var services = new ServiceCollection();
@@ -1797,6 +1824,161 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(
             result.Failures,
             failure => failure.Contains("AppSurfaceDocs:Metrics:BrowserCollector:EndpointUrl", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("//metrics.example.com/collect")]
+    [InlineData("\\docs\\_metrics\\collect")]
+    [InlineData("/")]
+    [InlineData("/docs/_metrics/collect?tenant=docs")]
+    [InlineData("/docs/_metrics/collect#fragment")]
+    [InlineData("docs/_metrics/collect")]
+    [InlineData("http://metrics.example.com/collect")]
+    [InlineData("https://user@metrics.example.com/collect")]
+    [InlineData("https://metrics.example.com")]
+    [InlineData("https://metrics.example.com/")]
+    [InlineData("https://metrics.example.com/collect?tenant=docs")]
+    [InlineData("https://metrics.example.com/collect#fragment")]
+    public void Validator_ShouldRejectUnsupportedMetricsEndpointUrlShapes(string endpointUrl)
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Metrics = new AppSurfaceDocsMetricsOptions
+            {
+                Enabled = true,
+                BrowserCollector = new AppSurfaceDocsBrowserMetricsCollectorOptions
+                {
+                    Enabled = true,
+                    EndpointUrl = endpointUrl
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("AppSurfaceDocs:Metrics:BrowserCollector:EndpointUrl", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectNullMetricsOptions()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Metrics = null!
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Metrics must not be null", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectNullNestedMetricsOptions()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Metrics = new AppSurfaceDocsMetricsOptions
+            {
+                BrowserCollector = null!,
+                HostedCollection = null!,
+                HostedReview = null!
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Metrics:BrowserCollector must not be null", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Metrics:HostedCollection must not be null", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Metrics:HostedReview must not be null", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectMetricsFeaturesEnabledWithoutParentMetricsFlag()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Metrics = new AppSurfaceDocsMetricsOptions
+            {
+                Enabled = false,
+                BrowserCollector = new AppSurfaceDocsBrowserMetricsCollectorOptions
+                {
+                    Enabled = true,
+                    EndpointUrl = "/docs/_metrics/collect"
+                },
+                HostedCollection = new AppSurfaceDocsHostedMetricsCollectionOptions
+                {
+                    Enabled = true
+                },
+                HostedReview = new AppSurfaceDocsHostedMetricsReviewOptions
+                {
+                    Enabled = true
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("BrowserCollector:Enabled requires AppSurfaceDocs:Metrics:Enabled", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("HostedCollection:Enabled requires AppSurfaceDocs:Metrics:Enabled", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("HostedReview:Enabled requires AppSurfaceDocs:Metrics:Enabled", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectHostedReviewWithoutHostedCollection()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Metrics = new AppSurfaceDocsMetricsOptions
+            {
+                Enabled = true,
+                HostedReview = new AppSurfaceDocsHostedMetricsReviewOptions
+                {
+                    Enabled = true
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("HostedReview:Enabled requires AppSurfaceDocs:Metrics:HostedCollection:Enabled", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectUnsupportedHostedReviewExposure()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Metrics = new AppSurfaceDocsMetricsOptions
+            {
+                Enabled = true,
+                HostedCollection = new AppSurfaceDocsHostedMetricsCollectionOptions
+                {
+                    Enabled = true
+                },
+                HostedReview = new AppSurfaceDocsHostedMetricsReviewOptions
+                {
+                    Exposure = (AppSurfaceDocsHarvestHealthExposure)99
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("Unsupported AppSurface Docs search-quality exposure mode", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
