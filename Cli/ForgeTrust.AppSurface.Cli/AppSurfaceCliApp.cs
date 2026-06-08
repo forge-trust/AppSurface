@@ -71,7 +71,7 @@ internal static class AppSurfaceCliApp
         services.AddSingleton<IAppSurfaceDocsExportRunner, AppSurfaceDocsInProcessExportRunner>();
         services.AddSingleton<IAppSurfaceDocsHealthVerifyRunner, AppSurfaceDocsInProcessHealthVerifyRunner>();
         services.AddSingleton<IRazorWireStaticExporter, RazorWireExportEngineAdapter>();
-        services.AddSingleton<ICoverageRunProcessRunner, SystemCoverageRunProcessRunner>();
+        services.AddSingleton<ICoverageRunProcessRunner, CliWrapCoverageRunProcessRunner>();
         services.AddSingleton<IReportGeneratorPackageLocator, ReportGeneratorPackageLocator>();
         services.AddSingleton<ICoverageRunReportGenerator, CoverageRunReportGenerator>();
         services.AddSingleton(TimeProvider.System);

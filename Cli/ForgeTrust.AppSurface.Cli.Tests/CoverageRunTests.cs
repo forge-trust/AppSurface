@@ -925,11 +925,11 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
-    public async Task SystemCoverageRunProcessRunner_ShouldCaptureProcessOutputAndWriteLog()
+    public async Task CliWrapCoverageRunProcessRunner_ShouldCaptureProcessOutputAndWriteLog()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         using var current = PushCurrentDirectory(repo.Path);
-        var runner = new SystemCoverageRunProcessRunner();
+        var runner = new CliWrapCoverageRunProcessRunner();
         var outputFile = Path.Join(repo.Path, "logs", "dotnet.log");
 
         var result = await runner.RunAsync(
@@ -945,10 +945,10 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
-    public async Task SystemCoverageRunProcessRunner_ShouldWrapStartFailureInDiagnostic()
+    public async Task CliWrapCoverageRunProcessRunner_ShouldWrapStartFailureInDiagnostic()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
-        var runner = new SystemCoverageRunProcessRunner();
+        var runner = new CliWrapCoverageRunProcessRunner();
 
         var exception = await Assert.ThrowsAsync<CommandException>(
             () => runner.RunAsync("definitely-not-a-real-dotnet-command", [], repo.Path, CancellationToken.None));
@@ -959,7 +959,7 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
-    public async Task SystemCoverageRunProcessRunner_ShouldCancelAndKillProcessTree()
+    public async Task CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -967,7 +967,7 @@ public sealed class CoverageRunTests
         }
 
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
-        var runner = new SystemCoverageRunProcessRunner();
+        var runner = new CliWrapCoverageRunProcessRunner();
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
