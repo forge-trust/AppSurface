@@ -739,6 +739,8 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("docs/_routes", routePatterns);
         Assert.Contains("docs/_routes.json", routePatterns);
         Assert.Contains("docs/{*path}", routePatterns);
+        Assert.DoesNotContain("docs/_metrics/collect", routePatterns);
+        Assert.DoesNotContain("docs/_search-quality", routePatterns);
         Assert.DoesNotContain("{controller=Docs}/{action=Index}/{path?}", routePatterns);
 
         var prioritizedPatterns = routeBuilder.DataSources
@@ -854,6 +856,57 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Equal(StatusCodes.Status405MethodNotAllowed, httpContext.Response.StatusCode);
         Assert.False(statusCodePages.Enabled);
         Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, httpContext.Response.Headers.Allow);
+    }
+
+    [Fact]
+    public async Task MetricsCollectUnsupportedMethodEndpoint_ShouldReturnMethodNotAllowedAndDisableStatusPages()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Metrics = new AppSurfaceDocsMetricsOptions
+                {
+                    Enabled = true,
+                    HostedCollection = new AppSurfaceDocsHostedMetricsCollectionOptions
+                    {
+                        Enabled = true
+                    }
+                }
+            });
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var endpoint = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Single(
+                endpoint =>
+                {
+                    var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                    return endpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_metrics/collect"
+                        && methods is not null
+                        && methods.Contains(HttpMethods.Get)
+                        && !methods.Contains(HttpMethods.Post);
+                });
+        await using var responseBody = new MemoryStream();
+        var statusCodePages = A.Fake<IStatusCodePagesFeature>();
+        statusCodePages.Enabled = true;
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = responseBody;
+        httpContext.Features.Set(statusCodePages);
+
+        await endpoint.RequestDelegate!(httpContext);
+        await httpContext.Response.StartAsync();
+
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, httpContext.Response.StatusCode);
+        Assert.False(statusCodePages.Enabled);
+        Assert.Equal(HttpMethods.Post, httpContext.Response.Headers.Allow);
     }
 
     [Fact]

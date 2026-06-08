@@ -11,6 +11,8 @@ public sealed class AppSurfaceProductEventRegistryTests
         AppSurfaceProductEventRegistry.DocsSearchReturnedZeroResults,
         AppSurfaceProductEventRegistry.DocsSearchResultSelected,
         AppSurfaceProductEventRegistry.DocsRecoveryLinkSelected,
+        AppSurfaceProductEventRegistry.DocsSearchFilterChanged,
+        AppSurfaceProductEventRegistry.DocsSearchFrictionFeedbackSubmitted,
         AppSurfaceProductEventRegistry.RazorWireFormFailed,
         AppSurfaceProductEventRegistry.RazorWireFormFailureRecovered,
         AppSurfaceProductEventRegistry.RazorWireStreamAdmissionRejected
@@ -36,6 +38,18 @@ public sealed class AppSurfaceProductEventRegistryTests
             Assert.True(Enum.IsDefined(property.Cardinality));
             Assert.NotEqual(AppSurfaceProductEventCardinality.High, property.Cardinality);
         });
+    }
+
+    [Fact]
+    public void ProductIntelligenceOptions_ShouldEnableSpecificExperimentalEventsWithoutGlobalToggle()
+    {
+        var options = new AppSurfaceProductIntelligenceOptions()
+            .EnableExperimentalEvents(AppSurfaceProductEventRegistry.DocsSearchFilterChanged);
+
+        Assert.False(options.ExperimentalEventsEnabled);
+        Assert.True(options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchFilterChanged));
+        Assert.False(options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.RazorWireFormFailed));
+        Assert.Contains(AppSurfaceProductEventRegistry.DocsSearchFilterChanged, options.EnabledExperimentalEventNames);
     }
 
     [Fact]

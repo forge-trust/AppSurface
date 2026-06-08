@@ -7,6 +7,7 @@ using ForgeTrust.AppSurface.Docs.Controllers;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.ViewComponents;
+using ForgeTrust.AppSurface.Intelligence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -21,6 +22,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -88,6 +90,54 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("\"docsSearchUrl\":\"/some-base/docs/search\"", html);
         Assert.Contains("\"docsSearchIndexUrl\":\"/some-base/docs/search-index.json\"", html);
         Assert.Matches("\"miniSearchUrl\":\"/some-base/docs/minisearch\\.min\\.js\\?v=[^\"]+\"", html);
+        Assert.Contains("\"metrics\":{\"enabled\":false", html);
+        Assert.Contains("\"feedbackEnabled\":false", html);
+        Assert.DoesNotContain("\"endpointUrl\":\"/some-base/docs/_metrics/collect\"", html);
+    }
+
+    [Fact]
+    public async Task Layout_ShouldRenderHostedMetricsCollectorEndpoint_WhenEnabled()
+    {
+        using var services = CreateServiceProvider(
+            CreateDocs(),
+            new Dictionary<string, string?>
+            {
+                ["AppSurfaceDocs:Metrics:Enabled"] = "true",
+                ["AppSurfaceDocs:Metrics:BrowserCollector:Enabled"] = "true",
+                ["AppSurfaceDocs:Metrics:HostedCollection:Enabled"] = "true"
+            });
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Search",
+            c => c.Search(),
+            pathBase: "/some-base");
+
+        Assert.Contains("\"metrics\":{\"enabled\":true", html);
+        Assert.Contains("\"browserCollector\":{\"enabled\":true", html);
+        Assert.Contains("\"endpointUrl\":\"/some-base/docs/_metrics/collect\"", html);
+        Assert.Contains("\"feedbackEnabled\":true", html);
+    }
+
+    [Fact]
+    public async Task Layout_ShouldEnableSemanticProductEvents_WhenDocsEventIsAllowlisted()
+    {
+        using var services = CreateServiceProvider(
+            CreateDocs(),
+            configureServices: services =>
+            {
+                services.Configure<AppSurfaceProductIntelligenceOptions>(
+                    options => options.EnableExperimentalEvents(AppSurfaceProductEventRegistry.DocsSearchSubmitted));
+            });
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Search",
+            c => c.Search());
+
+        Assert.Contains("\"productIntelligenceEnabled\":true", html);
+        Assert.Contains("\"metrics\":{\"enabled\":false", html);
+        Assert.Contains("\"feedbackEnabled\":false", html);
     }
 
     [Fact]
@@ -4347,7 +4397,8 @@ public class AppSurfaceDocsViewsTests
     private static ServiceProvider CreateServiceProvider(
         IReadOnlyList<DocNode> docs,
         IDictionary<string, string?>? overrides = null,
-        Assembly? rootModuleAssembly = null)
+        Assembly? rootModuleAssembly = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var webRoot = Path.Combine(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
@@ -4382,6 +4433,7 @@ public class AppSurfaceDocsViewsTests
                 rootModuleAssembly ?? typeof(AppSurfaceDocsWebModule).Assembly));
         services.RemoveAll<IDocHarvester>();
         services.AddSingleton<IDocHarvester>(_ => new StaticDocHarvester(docs));
+        configureServices?.Invoke(services);
         services.AddControllersWithViews()
             .AddApplicationPart(typeof(DocsController).Assembly);
 

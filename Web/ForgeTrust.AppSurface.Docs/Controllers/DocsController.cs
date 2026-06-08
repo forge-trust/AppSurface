@@ -2,6 +2,7 @@ using System.Text.Json;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.ViewComponents;
+using ForgeTrust.AppSurface.Intelligence;
 using ForgeTrust.RazorWire.Bridge;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Authorization;
@@ -24,8 +25,21 @@ public class DocsController : Controller
     private const string CuratedLandingDescription = "Start with the proof path that answers the first evaluator questions, then move into the sections that fit your next decision.";
     private const string SectionUnavailableHeading = "Section unavailable";
     private const int SearchFallbackBucketCount = 5;
+    private const int MetricsRequestMaxBodyBytes = 8192;
+    private const int MetricsRequestMaxProperties = 16;
     private static readonly string[] DefaultProofPathStageLabels = ["Understand", "See Proof", "Adopt Next"];
+    private static readonly HashSet<string> AcceptedDocsMetricsEvents = new(StringComparer.Ordinal)
+    {
+        AppSurfaceProductEventRegistry.DocsSearchSubmitted,
+        AppSurfaceProductEventRegistry.DocsSearchReturnedZeroResults,
+        AppSurfaceProductEventRegistry.DocsSearchResultSelected,
+        AppSurfaceProductEventRegistry.DocsRecoveryLinkSelected,
+        AppSurfaceProductEventRegistry.DocsSearchFilterChanged,
+        AppSurfaceProductEventRegistry.DocsSearchFrictionFeedbackSubmitted
+    };
     private static readonly TimeSpan SearchShellFallbackBudget = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan MetricsCaptureBudget = TimeSpan.FromMilliseconds(100);
+    private static readonly JsonSerializerOptions MetricsRequestJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly DocAggregator _aggregator;
     private readonly DocsUrlBuilder _docsUrlBuilder;
@@ -36,6 +50,8 @@ public class DocsController : Controller
     private readonly IWebHostEnvironment _environment;
     private readonly ILogger<DocsController> _logger;
     private readonly AppSurfaceDocsHarvestCoordinator? _harvestCoordinator;
+    private readonly AppSurfaceDocsSearchQualityReadModel? _searchQualityReadModel;
+    private readonly IAppSurfaceProductIntelligence? _productIntelligence;
 
     /// <summary>
     /// Initializes a new instance of <see cref="DocsController"/> for ad hoc callers that only supply the doc aggregator and logger.
@@ -127,6 +143,8 @@ public class DocsController : Controller
     /// <param name="environment">Host environment used for development-default health visibility.</param>
     /// <param name="logger">Logger used for search index diagnostics.</param>
     /// <param name="harvestCoordinator">Optional initial-harvest coordinator used to render the live harvest observatory during cold starts.</param>
+    /// <param name="searchQualityReadModel">Optional hosted search-quality read model used by metrics collection and review.</param>
+    /// <param name="productIntelligence">Optional product-intelligence dispatcher used to forward accepted metrics to host sinks.</param>
     [ActivatorUtilitiesConstructor]
     public DocsController(
         DocAggregator aggregator,
@@ -136,7 +154,9 @@ public class DocsController : Controller
         AppSurfaceDocsOptions options,
         IWebHostEnvironment environment,
         ILogger<DocsController> logger,
-        AppSurfaceDocsHarvestCoordinator? harvestCoordinator = null)
+        AppSurfaceDocsHarvestCoordinator? harvestCoordinator = null,
+        AppSurfaceDocsSearchQualityReadModel? searchQualityReadModel = null,
+        IAppSurfaceProductIntelligence? productIntelligence = null)
     {
         _aggregator = aggregator ?? throw new ArgumentNullException(nameof(aggregator));
         _docsUrlBuilder = docsUrlBuilder ?? throw new ArgumentNullException(nameof(docsUrlBuilder));
@@ -147,6 +167,8 @@ public class DocsController : Controller
         _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _harvestCoordinator = harvestCoordinator;
+        _searchQualityReadModel = searchQualityReadModel;
+        _productIntelligence = productIntelligence;
     }
 
     /// <summary>
@@ -597,6 +619,103 @@ public class DocsController : Controller
     }
 
     /// <summary>
+    /// Accepts low-trust browser AppSurface Docs metrics submissions for hosted collection.
+    /// </summary>
+    /// <returns>
+    /// <see cref="NoContentResult"/> for accepted, invalid, or dropped submissions while hosted collection is enabled;
+    /// otherwise <see cref="NotFoundResult"/>. Unsupported media type and oversized bodies return HTTP 415 and 413
+    /// respectively without echoing submitted values.
+    /// </returns>
+    /// <remarks>
+    /// The request body uses a narrow DTO containing only <c>name</c>, <c>properties</c>, and an optional client
+    /// timestamp. Browser-supplied identity, route, URL, cookies, headers, and request metadata are not accepted into the
+    /// event envelope. Every submitted event is revalidated through <see cref="AppSurfaceProductEventRegistry"/> before
+    /// the process-local read model or host-owned product-intelligence sinks see it.
+    /// </remarks>
+    [HttpPost]
+    public async Task<IActionResult> CollectMetrics()
+    {
+        if (_options.Metrics?.Enabled != true || _options.Metrics.HostedCollection?.Enabled != true)
+        {
+            return NotFound();
+        }
+
+        SetNoStoreCacheControl();
+        if (!IsJsonContentType(Request.ContentType))
+        {
+            return StatusCode(StatusCodes.Status415UnsupportedMediaType);
+        }
+
+        if (Request.ContentLength > MetricsRequestMaxBodyBytes)
+        {
+            return StatusCode(StatusCodes.Status413PayloadTooLarge);
+        }
+
+        await using var requestBody = await ReadCappedMetricsRequestBodyAsync(
+            Request.Body,
+            HttpContext.RequestAborted);
+        if (requestBody is null)
+        {
+            return StatusCode(StatusCodes.Status413PayloadTooLarge);
+        }
+
+        AppSurfaceDocsMetricsEventRequest? request;
+        try
+        {
+            request = await JsonSerializer.DeserializeAsync<AppSurfaceDocsMetricsEventRequest>(
+                requestBody,
+                MetricsRequestJsonOptions,
+                HttpContext.RequestAborted);
+        }
+        catch (JsonException)
+        {
+            return NoContent();
+        }
+
+        if (request is null
+            || !AcceptedDocsMetricsEvents.Contains(request.Name ?? string.Empty)
+            || request.Properties is null
+            || request.Properties.Count > MetricsRequestMaxProperties)
+        {
+            return NoContent();
+        }
+
+        var productEvent = new AppSurfaceProductEvent(
+            request.Name!,
+            DateTimeOffset.UtcNow,
+            request.Properties,
+            route: "appsurface_docs_metrics");
+        var validation = AppSurfaceProductEventRegistry.Validate(productEvent);
+        if (!validation.IsValid || validation.Contract is null)
+        {
+            return NoContent();
+        }
+
+        _searchQualityReadModel?.Record(validation.Contract, validation.SanitizedProperties);
+        await CaptureMetricsEventAsync(validation.Contract.Name, validation.SanitizedProperties);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Displays recent hosted AppSurface Docs search-quality diagnostics.
+    /// </summary>
+    /// <returns>A no-store diagnostics page when hosted review is enabled and exposed; otherwise <see cref="NotFoundResult"/>.</returns>
+    [HttpGet]
+    public IActionResult SearchQuality()
+    {
+        if (!IsSearchQualityReviewExposed())
+        {
+            return NotFound();
+        }
+
+        SetNoStoreCacheControl();
+        ViewData["Title"] = "Search Quality";
+        var response = (_searchQualityReadModel ?? new AppSurfaceDocsSearchQualityReadModel()).GetSnapshot(_options);
+        return View("SearchQuality", response);
+    }
+
+    /// <summary>
     /// Authorizes a side-effecting search-index refresh request against the host-configured operator policy.
     /// </summary>
     /// <param name="cancellationToken">
@@ -931,6 +1050,89 @@ public class DocsController : Controller
     private void SetNoStoreCacheControl()
     {
         Response.Headers.CacheControl = "no-store, no-cache";
+    }
+
+    private bool IsSearchQualityReviewExposed()
+    {
+        var metrics = _options.Metrics;
+        if (metrics?.Enabled != true
+            || metrics.HostedCollection?.Enabled != true
+            || metrics.HostedReview?.Enabled != true)
+        {
+            return false;
+        }
+
+        return metrics.HostedReview.Exposure switch
+        {
+            AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly => _environment.IsDevelopment(),
+            AppSurfaceDocsHarvestHealthExposure.Always => true,
+            AppSurfaceDocsHarvestHealthExposure.Never => false,
+            _ => false
+        };
+    }
+
+    private async Task CaptureMetricsEventAsync(
+        string eventName,
+        IReadOnlyDictionary<string, string> sanitizedProperties)
+    {
+        if (_productIntelligence is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var captureCts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            captureCts.CancelAfter(MetricsCaptureBudget);
+            await _productIntelligence.CaptureAsync(
+                new AppSurfaceProductEvent(
+                    eventName,
+                    DateTimeOffset.UtcNow,
+                    sanitizedProperties,
+                    route: "appsurface_docs_metrics"),
+                captureCts.Token).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Product-intelligence collection must not change reader request behavior.
+        }
+    }
+
+    private static bool IsJsonContentType(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return false;
+        }
+
+        var mediaType = contentType.Split(';', 2)[0].Trim();
+        return string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(mediaType, "text/json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<MemoryStream?> ReadCappedMetricsRequestBodyAsync(
+        Stream requestBody,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new byte[4096];
+        var body = new MemoryStream();
+        while (true)
+        {
+            var read = await requestBody.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                body.Position = 0;
+                return body;
+            }
+
+            if (body.Length + read > MetricsRequestMaxBodyBytes)
+            {
+                await body.DisposeAsync().ConfigureAwait(false);
+                return null;
+            }
+
+            await body.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -1942,4 +2144,9 @@ public class DocsController : Controller
 
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
+
+    private sealed record AppSurfaceDocsMetricsEventRequest(
+        string? Name,
+        IReadOnlyDictionary<string, string>? Properties,
+        DateTimeOffset? Timestamp);
 }

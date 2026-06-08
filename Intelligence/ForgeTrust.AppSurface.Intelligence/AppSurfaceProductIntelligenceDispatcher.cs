@@ -47,7 +47,7 @@ public sealed class AppSurfaceProductIntelligenceDispatcher : IAppSurfaceProduct
         }
 
         if (validation.Contract.Lifecycle == AppSurfaceProductEventLifecycle.Experimental
-            && !_options.Value.ExperimentalEventsEnabled)
+            && !_options.Value.IsExperimentalEventEnabled(validation.Contract.Name))
         {
             return;
         }

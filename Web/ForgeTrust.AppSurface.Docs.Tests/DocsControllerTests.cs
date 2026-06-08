@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using AngleSharp;
 using FakeItEasy;
@@ -6,6 +7,7 @@ using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Docs.Controllers;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.AppSurface.Intelligence;
 using ForgeTrust.RazorWire.Bridge;
 using ForgeTrust.RazorWire.Streams;
 using Ganss.Xss;
@@ -2927,6 +2929,255 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task CollectMetrics_ShouldReturnNotFound_WhenHostedCollectionIsDisabled()
+    {
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), A.Fake<IDocHarvester>());
+        using (memo)
+        using (cache)
+        {
+            SetJsonRequestBody(
+                controller,
+                new
+                {
+                    name = AppSurfaceProductEventRegistry.DocsSearchSubmitted,
+                    properties = new Dictionary<string, string>
+                    {
+                        ["surface"] = "search_page",
+                        ["query_length"] = "4",
+                        ["result_count"] = "1"
+                    }
+                });
+
+            var result = await controller.CollectMetrics();
+
+            Assert.IsType<NotFoundResult>(result);
+        }
+    }
+
+    [Fact]
+    public async Task CollectMetrics_ShouldAcceptValidEventAndUpdateSearchQualityReadModel()
+    {
+        var readModel = new AppSurfaceDocsSearchQualityReadModel();
+        var options = CreateHostedMetricsOptions();
+        var (controller, cache, memo) = CreateController(
+            options,
+            A.Fake<IDocHarvester>(),
+            Environments.Development,
+            readModel);
+        using (memo)
+        using (cache)
+        {
+            SetJsonRequestBody(
+                controller,
+                new
+                {
+                    name = AppSurfaceProductEventRegistry.DocsSearchFrictionFeedbackSubmitted,
+                    properties = new Dictionary<string, string>
+                    {
+                        ["surface"] = "search_page",
+                        ["source_state"] = "no_results",
+                        ["feedback_value"] = "useful",
+                        ["active_filter_count"] = "1",
+                        ["query_length"] = "12",
+                        ["link_kind"] = "fallback"
+                    }
+                });
+
+            var result = await controller.CollectMetrics();
+            var review = Assert.IsType<ViewResult>(controller.SearchQuality());
+            var model = Assert.IsType<AppSurfaceDocsSearchQualityResponse>(review.Model);
+
+            Assert.IsType<NoContentResult>(result);
+            Assert.Equal(1, model.TotalAcceptedEvents);
+            Assert.Equal(1, model.FeedbackSubmissions);
+            Assert.Contains(model.FeedbackBuckets, bucket => bucket.Name == "Useful recovery feedback" && bucket.Count == 1);
+            Assert.Equal("no-store, no-cache", controller.Response.Headers.CacheControl.ToString());
+        }
+    }
+
+    [Fact]
+    public async Task CollectMetrics_ShouldRejectNonJsonRequestsWithoutEchoingBody()
+    {
+        var readModel = new AppSurfaceDocsSearchQualityReadModel();
+        var options = CreateHostedMetricsOptions();
+        var (controller, cache, memo) = CreateController(
+            options,
+            A.Fake<IDocHarvester>(),
+            Environments.Development,
+            readModel);
+        using (memo)
+        using (cache)
+        {
+            const string submittedSecret = "do-not-echo-this-token";
+            controller.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(submittedSecret));
+            controller.Request.ContentType = "text/plain";
+            controller.Request.ContentLength = submittedSecret.Length;
+
+            var result = await controller.CollectMetrics();
+            var status = Assert.IsType<StatusCodeResult>(result);
+            var model = readModel.GetSnapshot(options);
+
+            Assert.Equal(StatusCodes.Status415UnsupportedMediaType, status.StatusCode);
+            Assert.Equal(0, model.TotalAcceptedEvents);
+            Assert.Equal(0, controller.Response.Body.Length);
+            Assert.Equal("no-store, no-cache", controller.Response.Headers.CacheControl.ToString());
+        }
+    }
+
+    [Fact]
+    public async Task CollectMetrics_ShouldRejectOversizedRequestsWithoutDispatching()
+    {
+        var readModel = new AppSurfaceDocsSearchQualityReadModel();
+        var productIntelligence = A.Fake<IAppSurfaceProductIntelligence>();
+        var options = CreateHostedMetricsOptions();
+        var (controller, cache, memo) = CreateController(
+            options,
+            [A.Fake<IDocHarvester>()],
+            Environments.Development,
+            readModel,
+            productIntelligence);
+        using (memo)
+        using (cache)
+        {
+            controller.Request.Body = new MemoryStream(Array.Empty<byte>());
+            controller.Request.ContentType = "application/json";
+            controller.Request.ContentLength = 8193;
+
+            var result = await controller.CollectMetrics();
+            var status = Assert.IsType<StatusCodeResult>(result);
+
+            Assert.Equal(StatusCodes.Status413PayloadTooLarge, status.StatusCode);
+            Assert.Equal(0, readModel.GetSnapshot(options).TotalAcceptedEvents);
+            A.CallTo(() => productIntelligence.CaptureAsync(A<AppSurfaceProductEvent>._, A<CancellationToken>._))
+                .MustNotHaveHappened();
+        }
+    }
+
+    [Fact]
+    public async Task CollectMetrics_ShouldRejectOversizedRequestsWithoutContentLength()
+    {
+        var readModel = new AppSurfaceDocsSearchQualityReadModel();
+        var productIntelligence = A.Fake<IAppSurfaceProductIntelligence>();
+        var options = CreateHostedMetricsOptions();
+        var (controller, cache, memo) = CreateController(
+            options,
+            [A.Fake<IDocHarvester>()],
+            Environments.Development,
+            readModel,
+            productIntelligence);
+        using (memo)
+        using (cache)
+        {
+            var oversizedJson = $$"""
+                                  {
+                                    "name": "{{AppSurfaceProductEventRegistry.DocsSearchSubmitted}}",
+                                    "properties": {
+                                      "surface": "search_page",
+                                      "query_length": "1",
+                                      "result_count": "1"
+                                    },
+                                    "padding": "{{new string('x', 9000)}}"
+                                  }
+                                  """;
+            controller.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(oversizedJson));
+            controller.Request.ContentType = "application/json";
+            controller.Request.ContentLength = null;
+
+            var result = await controller.CollectMetrics();
+            var status = Assert.IsType<StatusCodeResult>(result);
+
+            Assert.Equal(StatusCodes.Status413PayloadTooLarge, status.StatusCode);
+            Assert.Equal(0, readModel.GetSnapshot(options).TotalAcceptedEvents);
+            A.CallTo(() => productIntelligence.CaptureAsync(A<AppSurfaceProductEvent>._, A<CancellationToken>._))
+                .MustNotHaveHappened();
+        }
+    }
+
+    [Fact]
+    public async Task CollectMetrics_ShouldDropInvalidPayloadsWithoutEchoingValues()
+    {
+        var readModel = new AppSurfaceDocsSearchQualityReadModel();
+        var productIntelligence = A.Fake<IAppSurfaceProductIntelligence>();
+        var options = CreateHostedMetricsOptions();
+        var (controller, cache, memo) = CreateController(
+            options,
+            [A.Fake<IDocHarvester>()],
+            Environments.Development,
+            readModel,
+            productIntelligence);
+        using (memo)
+        using (cache)
+        {
+            SetJsonRequestBody(
+                controller,
+                new
+                {
+                    name = "docs.search.raw_query_submitted",
+                    properties = new Dictionary<string, string>
+                    {
+                        ["surface"] = "search_page",
+                        ["query"] = "raw secret query must be rejected",
+                        ["query_length"] = "5",
+                        ["result_count"] = "0"
+                    }
+                });
+
+            var result = await controller.CollectMetrics();
+
+            Assert.IsType<NoContentResult>(result);
+            Assert.Equal(0, readModel.GetSnapshot(options).TotalAcceptedEvents);
+            Assert.Equal(0, controller.Response.Body.Length);
+            A.CallTo(() => productIntelligence.CaptureAsync(A<AppSurfaceProductEvent>._, A<CancellationToken>._))
+                .MustNotHaveHappened();
+        }
+    }
+
+    [Fact]
+    public async Task CollectMetrics_ShouldIsolateProductIntelligenceSinkFailures()
+    {
+        var readModel = new AppSurfaceDocsSearchQualityReadModel();
+        var productIntelligence = A.Fake<IAppSurfaceProductIntelligence>();
+        A.CallTo(() => productIntelligence.CaptureAsync(A<AppSurfaceProductEvent>._, A<CancellationToken>._))
+            .Throws(new ApplicationException("sink unavailable"));
+        var options = CreateHostedMetricsOptions();
+        var (controller, cache, memo) = CreateController(
+            options,
+            [A.Fake<IDocHarvester>()],
+            Environments.Development,
+            readModel,
+            productIntelligence);
+        using (memo)
+        using (cache)
+        {
+            SetJsonRequestBody(
+                controller,
+                new
+                {
+                    name = AppSurfaceProductEventRegistry.DocsSearchFilterChanged,
+                    properties = new Dictionary<string, string>
+                    {
+                        ["surface"] = "search_page",
+                        ["filter_key"] = "language",
+                        ["filter_action"] = "selected",
+                        ["active_filter_count"] = "1",
+                        ["query_length"] = "0"
+                    }
+                });
+
+            var result = await controller.CollectMetrics();
+            var model = readModel.GetSnapshot(options);
+
+            Assert.IsType<NoContentResult>(result);
+            Assert.Equal(1, model.TotalAcceptedEvents);
+            Assert.Equal(1, model.FilterChanges);
+            A.CallTo(() => productIntelligence.CaptureAsync(
+                    A<AppSurfaceProductEvent>.That.Matches(item => item.Name == AppSurfaceProductEventRegistry.DocsSearchFilterChanged),
+                    A<CancellationToken>._))
+                .MustHaveHappenedOnceExactly();
+        }
+    }
+
+    [Fact]
     public async Task HarvestHealthJson_ShouldRemainHealthyWithVisibleMarkdownResourceWarnings()
     {
         var root = Directory.CreateTempSubdirectory("appsurface-docs-markdown-health-").FullName;
@@ -4575,8 +4826,19 @@ public class DocsControllerTests : IDisposable
 
     private (DocsController Controller, IMemoryCache Cache, Memo Memo) CreateController(
         AppSurfaceDocsOptions options,
+        IDocHarvester harvester,
+        string environmentName,
+        AppSurfaceDocsSearchQualityReadModel searchQualityReadModel)
+    {
+        return CreateController(options, [harvester], environmentName, searchQualityReadModel);
+    }
+
+    private (DocsController Controller, IMemoryCache Cache, Memo Memo) CreateController(
+        AppSurfaceDocsOptions options,
         IReadOnlyList<IDocHarvester> harvesters,
-        string? environmentName = null)
+        string? environmentName = null,
+        AppSurfaceDocsSearchQualityReadModel? searchQualityReadModel = null,
+        IAppSurfaceProductIntelligence? productIntelligence = null)
     {
         var cache = new MemoryCache(new MemoryCacheOptions());
         var memo = new Memo(cache);
@@ -4606,13 +4868,43 @@ public class DocsControllerTests : IDisposable
             new DocFeaturedPageResolver(_featuredPageResolverLoggerFake, docsUrlBuilder),
             options,
             environment,
-            controllerLogger)
+            controllerLogger,
+            searchQualityReadModel: searchQualityReadModel,
+            productIntelligence: productIntelligence)
         {
             ControllerContext = CreateControllerContext(new DefaultHttpContext())
         };
         controller.Url = new UrlHelper(controller.ControllerContext);
 
         return (controller, cache, memo);
+    }
+
+    private static void SetJsonRequestBody(DocsController controller, object body)
+    {
+        var json = JsonSerializer.Serialize(body, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var bytes = Encoding.UTF8.GetBytes(json);
+        controller.Request.Body = new MemoryStream(bytes);
+        controller.Request.ContentType = "application/json";
+        controller.Request.ContentLength = bytes.Length;
+    }
+
+    private static AppSurfaceDocsOptions CreateHostedMetricsOptions()
+    {
+        return new AppSurfaceDocsOptions
+        {
+            Metrics = new AppSurfaceDocsMetricsOptions
+            {
+                Enabled = true,
+                HostedCollection = new AppSurfaceDocsHostedMetricsCollectionOptions
+                {
+                    Enabled = true
+                },
+                HostedReview = new AppSurfaceDocsHostedMetricsReviewOptions
+                {
+                    Enabled = true
+                }
+            }
+        };
     }
 
     private PendingHarvestController CreatePendingHarvestController(

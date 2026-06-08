@@ -15,7 +15,7 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
               <link rel="stylesheet" href="/docs/search.css" />
               <link rel="preload" href="/docs/search-index.json" as="fetch" crossorigin="use-credentials" />
               <script src="/docs/outline-client.js"></script>
-              <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","miniSearchUrl":"/docs/minisearch.min.js?v=abc","docsVersionsUrl":"/docs/versions"};</script>
+              <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","miniSearchUrl":"/docs/minisearch.min.js?v=abc","metrics":{"enabled":true,"browserCollector":{"enabled":true,"endpointUrl":"/docs/_metrics/collect"},"feedbackEnabled":true},"docsVersionsUrl":"/docs/versions"};</script>
             </head>
             <body>
               <a href="/docs/guide.html">Guide</a>
@@ -37,6 +37,7 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
         Assert.Contains("\"docsSearchUrl\":\"/docs/v/1.2.3/search\"", rewritten);
         Assert.Contains("\"docsSearchIndexUrl\":\"/docs/v/1.2.3/search-index.json\"", rewritten);
         Assert.Contains("\"miniSearchUrl\":\"/docs/v/1.2.3/minisearch.min.js?v=abc\"", rewritten);
+        Assert.Contains("\"endpointUrl\":\"/docs/v/1.2.3/_metrics/collect\"", rewritten);
         Assert.DoesNotContain("docsVersionsUrl", rewritten);
         Assert.Contains("href=\"/docs/versions\"", rewritten);
     }
@@ -70,6 +71,92 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
         Assert.Contains("href=\"/docs/v/1.2.3/sections/start-here\"", rewritten);
         Assert.Contains("href=\"/docs/v/1.2.3/packages/README.md\"", rewritten);
         Assert.Contains("href=\"/docs/v/1.2.3/search-index.json\"", rewritten);
+    }
+
+    [Fact]
+    public void RewriteHtml_ShouldPreserveConfiguredSameOriginMetricsEndpoint()
+    {
+        const string html =
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","metrics":{"enabled":true,"browserCollector":{"enabled":true,"endpointUrl":"/analytics/docs"},"feedbackEnabled":true},"docsVersionsUrl":"/docs/versions"};</script>
+            </head>
+            <body></body>
+            </html>
+            """;
+
+        var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs/v/1.2.3");
+
+        Assert.Contains("\"endpointUrl\":\"/analytics/docs\"", rewritten);
+        Assert.DoesNotContain("\"endpointUrl\":\"/docs/v/1.2.3/_metrics/collect\"", rewritten);
+    }
+
+    [Fact]
+    public void RewriteHtml_ShouldPreserveConfiguredDocsRootMetricsEndpoint()
+    {
+        const string html =
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","metrics":{"enabled":true,"browserCollector":{"enabled":true,"endpointUrl":"/docs/analytics/collect"},"feedbackEnabled":true},"docsVersionsUrl":"/docs/versions"};</script>
+            </head>
+            <body></body>
+            </html>
+            """;
+
+        var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs/v/1.2.3");
+
+        Assert.Contains("\"endpointUrl\":\"/docs/analytics/collect\"", rewritten);
+        Assert.DoesNotContain("\"endpointUrl\":\"/docs/v/1.2.3/analytics/collect\"", rewritten);
+    }
+
+    [Fact]
+    public void RewriteHtml_ShouldPrefixPathBaseForConfiguredSameOriginMetricsEndpoint()
+    {
+        const string html =
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","metrics":{"enabled":true,"browserCollector":{"enabled":true,"endpointUrl":"/analytics/docs"},"feedbackEnabled":true},"docsVersionsUrl":"/docs/versions"};</script>
+            </head>
+            <body></body>
+            </html>
+            """;
+
+        var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(
+            html,
+            "/docs/v/1.2.3",
+            requestPathBase: "/some-base");
+
+        Assert.Contains("\"endpointUrl\":\"/some-base/analytics/docs\"", rewritten);
+        Assert.DoesNotContain("\"endpointUrl\":\"/some-base/docs/v/1.2.3/_metrics/collect\"", rewritten);
+    }
+
+    [Fact]
+    public void RewriteHtml_ShouldRebasePathBasePrefixedPackageMetricsEndpoint()
+    {
+        const string html =
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/some-base/docs","docsSearchUrl":"/some-base/docs/search","docsSearchIndexUrl":"/some-base/docs/search-index.json","metrics":{"enabled":true,"browserCollector":{"enabled":true,"endpointUrl":"/some-base/docs/_metrics/collect"},"feedbackEnabled":true},"docsVersionsUrl":"/some-base/docs/versions"};</script>
+            </head>
+            <body></body>
+            </html>
+            """;
+
+        var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(
+            html,
+            "/docs/v/1.2.3",
+            requestPathBase: "/some-base");
+
+        Assert.Contains("\"endpointUrl\":\"/some-base/docs/v/1.2.3/_metrics/collect\"", rewritten);
+        Assert.DoesNotContain("\"endpointUrl\":\"/some-base/docs/_metrics/collect\"", rewritten);
     }
 
     [Fact]

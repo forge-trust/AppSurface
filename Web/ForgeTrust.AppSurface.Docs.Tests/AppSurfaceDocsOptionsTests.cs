@@ -105,6 +105,19 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AppSurfaceDocsOptions_ShouldDisableMetricsByDefault()
+    {
+        var options = new AppSurfaceDocsOptions();
+
+        Assert.False(options.Metrics.Enabled);
+        Assert.False(options.Metrics.BrowserCollector.Enabled);
+        Assert.Null(options.Metrics.BrowserCollector.EndpointUrl);
+        Assert.False(options.Metrics.HostedCollection.Enabled);
+        Assert.False(options.Metrics.HostedReview.Enabled);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Metrics.HostedReview.Exposure);
+    }
+
+    [Fact]
     public void AppSurfaceDocsOptions_ShouldDisableStrictJavaScriptEventDocletsByDefault()
     {
         var options = new AppSurfaceDocsOptions();
@@ -996,6 +1009,37 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceDocs_ShouldBindConfiguredMetricsOptions()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Metrics:Enabled"] = "true",
+                        ["AppSurfaceDocs:Metrics:BrowserCollector:Enabled"] = "true",
+                        ["AppSurfaceDocs:Metrics:BrowserCollector:EndpointUrl"] = " https://metrics.example.com/appsurface/docs ",
+                        ["AppSurfaceDocs:Metrics:HostedCollection:Enabled"] = "true",
+                        ["AppSurfaceDocs:Metrics:HostedReview:Enabled"] = "true",
+                        ["AppSurfaceDocs:Metrics:HostedReview:Exposure"] = "Always"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.True(options.Metrics.Enabled);
+        Assert.True(options.Metrics.BrowserCollector.Enabled);
+        Assert.Equal("https://metrics.example.com/appsurface/docs", options.Metrics.BrowserCollector.EndpointUrl);
+        Assert.True(options.Metrics.HostedCollection.Enabled);
+        Assert.True(options.Metrics.HostedReview.Enabled);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Metrics.HostedReview.Exposure);
+    }
+
+    [Fact]
     public void AddAppSurfaceDocs_ShouldBindConfiguredCacheExpirationMinutes()
     {
         var services = new ServiceCollection();
@@ -1728,6 +1772,80 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.True(result.Failed);
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Diagnostics must not be null", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectInvalidMetricsEndpointUrl()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Metrics = new AppSurfaceDocsMetricsOptions
+            {
+                Enabled = true,
+                BrowserCollector = new AppSurfaceDocsBrowserMetricsCollectorOptions
+                {
+                    Enabled = true,
+                    EndpointUrl = "https://metrics.example.com/collect?token=secret"
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("AppSurfaceDocs:Metrics:BrowserCollector:EndpointUrl", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectBrowserCollectorWithoutEndpointOrHostedCollection()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Metrics = new AppSurfaceDocsMetricsOptions
+            {
+                Enabled = true,
+                BrowserCollector = new AppSurfaceDocsBrowserMetricsCollectorOptions
+                {
+                    Enabled = true
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("EndpointUrl is required", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldAllowBrowserCollectorToUseHostedCollectionEndpoint()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Metrics = new AppSurfaceDocsMetricsOptions
+            {
+                Enabled = true,
+                BrowserCollector = new AppSurfaceDocsBrowserMetricsCollectorOptions
+                {
+                    Enabled = true
+                },
+                HostedCollection = new AppSurfaceDocsHostedMetricsCollectionOptions
+                {
+                    Enabled = true
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.False(result.Failed);
     }
 
     [Fact]

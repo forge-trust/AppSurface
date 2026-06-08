@@ -2,6 +2,7 @@ using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.AppSurface.Intelligence;
 using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -103,6 +104,10 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Harvest ??= new AppSurfaceDocsHarvestOptions();
                     options.Harvest.Health ??= new AppSurfaceDocsHarvestHealthOptions();
                     options.Diagnostics ??= new AppSurfaceDocsDiagnosticsOptions();
+                    options.Metrics ??= new AppSurfaceDocsMetricsOptions();
+                    options.Metrics.BrowserCollector ??= new AppSurfaceDocsBrowserMetricsCollectorOptions();
+                    options.Metrics.HostedCollection ??= new AppSurfaceDocsHostedMetricsCollectionOptions();
+                    options.Metrics.HostedReview ??= new AppSurfaceDocsHostedMetricsReviewOptions();
                     options.Harvest.Paths ??= new AppSurfaceDocsHarvestPathOptions();
                     options.Harvest.Paths.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
                     options.Harvest.Paths.VcsIgnore ??= new AppSurfaceDocsHarvestVcsIgnoreOptions();
@@ -141,6 +146,9 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                         NormalizeDefaultExclusions(options.Harvest.Paths.DefaultExclusions);
                     options.Harvest.Paths.VcsIgnore.AllowGlobs = NormalizeGlobArray(options.Harvest.Paths.VcsIgnore.AllowGlobs);
                     options.Diagnostics.SearchIndexRefreshPolicy = NormalizeOrNull(options.Diagnostics.SearchIndexRefreshPolicy);
+                    options.Metrics.BrowserCollector.EndpointUrl =
+                        AppSurfaceDocsOptionsValidator.NormalizeMetricsEndpointUrlOrNull(
+                            options.Metrics.BrowserCollector.EndpointUrl);
                     options.Harvest.Markdown.IncludeGlobs = NormalizeGlobArray(options.Harvest.Markdown.IncludeGlobs);
                     options.Harvest.Markdown.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Markdown.ExcludeGlobs);
                     options.Harvest.Markdown.DefaultExclusions =
@@ -203,6 +211,22 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                         .ToArray();
                 })
             .ValidateOnStart();
+        services.AddOptions<AppSurfaceProductIntelligenceOptions>()
+            .PostConfigure<AppSurfaceDocsOptions>(
+                (intelligenceOptions, docsOptions) =>
+                {
+                    if (docsOptions.Metrics?.Enabled == true
+                        && docsOptions.Metrics.HostedCollection?.Enabled == true)
+                    {
+                        intelligenceOptions.EnableExperimentalEvents(
+                            AppSurfaceProductEventRegistry.DocsSearchSubmitted,
+                            AppSurfaceProductEventRegistry.DocsSearchReturnedZeroResults,
+                            AppSurfaceProductEventRegistry.DocsSearchResultSelected,
+                            AppSurfaceProductEventRegistry.DocsRecoveryLinkSelected,
+                            AppSurfaceProductEventRegistry.DocsSearchFilterChanged,
+                            AppSurfaceProductEventRegistry.DocsSearchFrictionFeedbackSubmitted);
+                    }
+                });
 
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<AppSurfaceDocsOptions>, AppSurfaceDocsOptionsValidator>());
@@ -215,6 +239,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.TryAddSingleton<DocsRecoveryLinkBuilder>();
         services.TryAddSingleton<AppSurfaceDocsIdentityResolver>();
         services.TryAddSingleton<AppSurfaceDocsVersionCatalogService>();
+        services.TryAddSingleton<AppSurfaceDocsSearchQualityReadModel>();
         services.AddMemoryCache();
         services.TryAddSingleton<IMemo, Memo>();
         TryAddHarvestChannelAuthorizer(services);

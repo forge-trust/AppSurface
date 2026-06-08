@@ -48,6 +48,11 @@ test('authored search client emits product intelligence without raw query payloa
   assert.match(source, /docs\.search\.returned_zero_results/);
   assert.match(source, /docs\.search\.result_selected/);
   assert.match(source, /docs\.recovery_link\.selected/);
+  assert.match(source, /docs\.search\.filter_changed/);
+  assert.match(source, /docs\.search\.friction_feedback_submitted/);
+  assert.match(source, /credentials:\s*'omit'/);
+  assert.match(source, /keepalive:\s*true/);
+  assert.match(source, /docs-search-page-feedback/);
   assert.match(source, /query_length/);
   assert.match(source, /getActiveFilterSignature/);
   assert.match(source, /`\$\{normalized\}:\$\{resultCount\}:\$\{activeFilterCount\}:\$\{filterSignature\}`/);
