@@ -15,7 +15,7 @@
     {
       "path": "releases/v0.1.0-rc.3.md",
       "algorithm": "sha256",
-      "value": "bf040acdfd0558f025e510da98e3641c9c5461de31ec20b3dc370c0d00167731"
+      "value": "cb84551c136034c1e21ad4945755769a7f2eea3e90ba39872115fb77de8ebe3c"
     },
     {
       "path": "releases/v0.1.0-rc.3.md.yml",
@@ -118,7 +118,7 @@
   "generatedAtUtc": "2026-06-08T03:54:34.3855340Z",
   "subject": {
     "name": "releases/v0.1.0-rc.3.evidence.json",
-    "sha256": "08b54607209d556434635ba25f88a8bd88d0dffc33b852a989e93ab98ffd50d3"
+    "sha256": "62306d8cdb64f537649bec52ba5d7c4c37f5dd628f3934cf0859ced3d5a725f0"
   },
   "attestation": null
 }
