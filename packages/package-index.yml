@@ -77,7 +77,7 @@ packages:
     release_notes_path: releases/v0.1.0-rc.3.md
     order: 37
     use_when: Add this when your AppSurface modules or host integrations need product-intelligence event contracts before choosing an analytics vendor.
-    includes: AppSurfaceProductIntelligenceModule, IAppSurfaceProductIntelligence, AppSurfaceProductEvent, typed product-event registry, validation, sanitization, lifecycle states, sensitivity classes, and host-owned sink contracts.
+    includes: AppSurfaceProductIntelligenceModule, IAppSurfaceProductIntelligence, AppSurfaceProductEvent, typed product-event registry, validation, sanitization, lifecycle states, selected experimental event allowlists, sensitivity classes, and host-owned sink contracts.
     does_not_include: PostHog SDKs, OpenTelemetry exporters, analytics storage, retention policy, dashboards, browser autocapture, session replay, cookies, or request-body capture.
     start_here_path: Intelligence/ForgeTrust.AppSurface.Intelligence/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Intelligence` when you want vendor-neutral product event contracts and optional host-owned analytics sinks.

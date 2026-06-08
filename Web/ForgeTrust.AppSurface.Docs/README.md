@@ -42,11 +42,65 @@ Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `
 - A live harvest observatory that starts the first source-backed harvest during startup, streams real-time RazorWire progress, and keeps first navigation informative instead of appearing hung
 - Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by AppSurface Docs consumers
 - `DocsUrlBuilder` plus the MVC surface used by AppSurface Docs consumers so the live docs root, search shell, and archive routes stay in one shared contract
+- Opt-in search-quality metrics for static and hosted docs: the browser collector forwards only safe product-event names and low-cardinality properties, while hosted collection validates through `ForgeTrust.AppSurface.Intelligence` and exposes bounded process-local “Search Quality” diagnostics
 - `AppSurfaceDocsVersionCatalog` plus `AppSurfaceDocsVersionCatalogService` for mounting exact published release trees and surfacing release-level status in the public archive
 - Structured trust metadata plus a built-in trust bar for release notes, upgrade guides, and other pages that need status and provenance near the top
 - A source-backed localization foundation with typed locale options, locale metadata, translation-set inference, and diagnostics for serious multi-language docs systems
 - Contributor provenance rendering with a `Source of truth` strip for source links, edit links, and relative `Last updated` timestamps on details pages
 - Precompiled Tailwind-powered styling with layout-time path resolution for root-module and embedded hosts
+
+## Search Quality Metrics
+
+AppSurface Docs metrics are disabled by default. Enable them only when the host has reviewed its analytics endpoint,
+retention, and access controls. The metrics surface is docs-specific: enabling it does not enable unrelated RazorWire or
+AppSurface experimental product-intelligence events.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Metrics": {
+      "Enabled": true,
+      "BrowserCollector": {
+        "Enabled": true,
+        "EndpointUrl": "https://metrics.example.com/appsurface/docs"
+      }
+    }
+  }
+}
+```
+
+Static exports use the same browser collector. `EndpointUrl` may be an HTTPS absolute URL for a host-owned collector or a
+same-origin app-root path. AppSurface Docs rejects protocol-relative URLs, non-HTTP schemes, credentials, query strings,
+fragments, and secret-like endpoint values. The browser collector sends `fetch` requests with `keepalive: true` and
+`credentials: "omit"` and quietly drops failures so metrics cannot affect readers.
+
+Hosted docs can use the package-owned collector endpoint and bounded search-quality review:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Metrics": {
+      "Enabled": true,
+      "BrowserCollector": { "Enabled": true },
+      "HostedCollection": { "Enabled": true },
+      "HostedReview": {
+        "Enabled": true,
+        "Exposure": "DevelopmentOnly"
+      }
+    }
+  }
+}
+```
+
+When hosted collection is enabled and no browser endpoint is configured, the layout renders
+`{DocsRootPath}/_metrics/collect` as the collector endpoint. That route accepts only narrow JSON event DTOs, revalidates
+against `AppSurfaceProductEventRegistry`, updates a bounded in-memory read model, forwards accepted docs events to
+host-owned product-intelligence sinks when configured, and never echoes submitted values. The review page at
+`{DocsRootPath}/_search-quality` is process-local and non-durable; use it to spot recent no-results, recovery, filter, and
+feedback buckets, not as a historical analytics store.
+
+Metrics never capture raw search text, full URLs, reader identity, cookies, request bodies, stack traces, or free-form
+comments. Reader feedback appears only in search no-results/recovery states and emits low-cardinality usefulness values.
 
 ## Styling Boundary
 

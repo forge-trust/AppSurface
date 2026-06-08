@@ -64,7 +64,9 @@ public sealed class DocsUrlBuilder
             Health = BuildHealthUrl(),
             HealthJson = BuildHealthJsonUrl(),
             RouteInspector = BuildRouteInspectorUrl(),
-            RouteInspectorJson = BuildRouteInspectorJsonUrl()
+            RouteInspectorJson = BuildRouteInspectorJsonUrl(),
+            MetricsCollect = BuildMetricsCollectUrl(),
+            SearchQuality = BuildSearchQualityUrl()
         };
     }
 
@@ -194,6 +196,24 @@ public sealed class DocsUrlBuilder
     public string BuildRouteInspectorJsonUrl()
     {
         return JoinPath(_currentDocsRootPath, "_routes.json");
+    }
+
+    /// <summary>
+    /// Builds the current live docs metrics collection URL.
+    /// </summary>
+    /// <returns>The app-relative browser metrics ingestion URL for the current docs surface.</returns>
+    public string BuildMetricsCollectUrl()
+    {
+        return JoinPath(_currentDocsRootPath, "_metrics/collect");
+    }
+
+    /// <summary>
+    /// Builds the current live docs search-quality diagnostics URL.
+    /// </summary>
+    /// <returns>The app-relative search-quality diagnostics URL for the current docs surface.</returns>
+    public string BuildSearchQualityUrl()
+    {
+        return JoinPath(_currentDocsRootPath, "_search-quality");
     }
 
     /// <summary>
@@ -465,6 +485,8 @@ public sealed class DocsUrlBuilder
                || string.Equals(path, "/_health.json", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/_routes", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/_routes.json", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(path, "/_metrics/collect", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(path, "/_search-quality", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search.css", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search-client.js", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/outline-client.js", StringComparison.OrdinalIgnoreCase)
@@ -681,6 +703,16 @@ public sealed record AppSurfaceDocsRouteReferences
     /// Gets the current live docs route inspector JSON route.
     /// </summary>
     public string RouteInspectorJson { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the current live docs metrics collection route.
+    /// </summary>
+    public string MetricsCollect { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the current live docs search-quality diagnostics route.
+    /// </summary>
+    public string SearchQuality { get; init; } = string.Empty;
 
     /// <summary>
     /// Deconstructs the original route set for callers that used the positional record contract.
