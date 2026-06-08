@@ -57,6 +57,26 @@ public sealed class CoverageMergeTests
     }
 
     [Fact]
+    public async Task MergeAsync_ShouldPrintTruncatedDiscoverySample()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-merge-");
+        for (var index = 0; index < 6; index++)
+        {
+            repo.WriteFile($"shards/project-{index}/coverage.cobertura.xml", "<coverage />");
+        }
+
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        await workflow.MergeAsync(new CoverageMergeRequest("shards", "merged", Clean: true), console, CancellationToken.None);
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Discovered 6 Cobertura shard(s).", output, StringComparison.Ordinal);
+        Assert.Contains("... 1 more shard(s)", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task MergeAsync_ShouldAllowSingleShard()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-merge-");
@@ -82,7 +102,11 @@ public sealed class CoverageMergeTests
         repo.WriteFile("shards/coverage.cobertura.xml", "<coverage />");
         repo.WriteFile("merged/.appsurface-coverage-output", "AppSurface coverage output directory");
         var oldCoverage = repo.WriteFile("merged/coverage.cobertura.xml", "old");
+        var oldSummary = repo.WriteFile("merged/summary.txt", "old summary");
+        var oldTimings = repo.WriteFile("merged/timings.json", "{}");
+        var oldReportGeneratorSummary = repo.WriteFile("merged/reportgenerator-summary.txt", "old rg");
         var oldInput = repo.WriteFile("merged/reportgenerator-input/old/coverage.cobertura.xml", "stale");
+        repo.WriteFile("merged/reportgenerator/old.txt", "old rg output");
         var retainedProjectArtifact = repo.WriteFile("merged/projects/old/coverage.cobertura.xml", "legacy run artifact");
         using var current = PushCurrentDirectory(repo.Path);
         var workflow = CreateWorkflow(new RecordingReportGenerator());
@@ -92,7 +116,11 @@ public sealed class CoverageMergeTests
 
         Assert.EndsWith(Path.Join("merged", "coverage.cobertura.xml"), result.CoveragePath, StringComparison.Ordinal);
         Assert.NotEqual("old", File.ReadAllText(oldCoverage));
+        Assert.NotEqual("old summary", File.ReadAllText(oldSummary));
+        Assert.NotEqual("{}", File.ReadAllText(oldTimings));
+        Assert.NotEqual("old rg", File.ReadAllText(oldReportGeneratorSummary));
         Assert.False(File.Exists(oldInput));
+        Assert.False(File.Exists(Path.Join(repo.Path, "merged", "reportgenerator", "old.txt")));
         Assert.True(File.Exists(retainedProjectArtifact));
     }
 
@@ -114,6 +142,16 @@ public sealed class CoverageMergeTests
             () => workflow.MergeAsync(new CoverageMergeRequest("empty", "merged", Clean: true), console, CancellationToken.None));
         Assert.Contains("ASCOV131", emptySource.Message, StringComparison.Ordinal);
         Assert.Contains("No Cobertura shard files", emptySource.Message, StringComparison.Ordinal);
+
+        var missingSource = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.MergeAsync(new CoverageMergeRequest("missing", "merged", Clean: true), console, CancellationToken.None));
+        Assert.Contains("ASCOV130", missingSource.Message, StringComparison.Ordinal);
+        Assert.Contains("source directory was not found", missingSource.Message, StringComparison.Ordinal);
+
+        var invalidSource = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.MergeAsync(new CoverageMergeRequest("bad\0source", "merged", Clean: true), console, CancellationToken.None));
+        Assert.Contains("ASCOV130", invalidSource.Message, StringComparison.Ordinal);
+        Assert.Contains("source path is invalid", invalidSource.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -133,6 +171,12 @@ public sealed class CoverageMergeTests
             () => CreateWorkflow(new RecordingReportGenerator { MergedCoverage = "<not-coverage />" }).MergeAsync(new CoverageMergeRequest("good", "merged", Clean: true), console, CancellationToken.None));
         Assert.Contains("ASCOV135", badMerge.Message, StringComparison.Ordinal);
         Assert.Contains("Merged Cobertura file is malformed", badMerge.Message, StringComparison.Ordinal);
+
+        repo.WriteFile("malformed/coverage.cobertura.xml", "<coverage");
+        var malformedInput = await Assert.ThrowsAsync<CommandException>(
+            () => CreateWorkflow(new RecordingReportGenerator()).MergeAsync(new CoverageMergeRequest("malformed", "merged", Clean: true), console, CancellationToken.None));
+        Assert.Contains("ASCOV132", malformedInput.Message, StringComparison.Ordinal);
+        Assert.Contains("malformed or unreadable", malformedInput.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -166,18 +210,80 @@ public sealed class CoverageMergeTests
         using var console = new FakeInMemoryConsole();
 
         await AssertUnsafeOutputAsync(workflow, console, source, outputFile, "points to a file");
+        var blankOutput = Assert.Throws<CommandException>(
+            () => CoverageMergeOutputGuard.Prepare(" ", source, clean: true));
+        Assert.Contains("ASCOV136", blankOutput.Message, StringComparison.Ordinal);
+        Assert.Contains("output path was blank", blankOutput.Message, StringComparison.Ordinal);
         await AssertUnsafeOutputAsync(workflow, console, source, ".", "current working directory");
         await AssertUnsafeOutputAsync(workflow, console, source, "populated", "not marked as AppSurface-owned");
+        await AssertUnsafeOutputAsync(workflow, console, source, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "user home directory");
         await AssertOverlapAsync(workflow, console, source, source);
         await AssertOverlapAsync(workflow, console, source, Path.Join(source, "merged"));
         await AssertOverlapAsync(workflow, console, Path.Join(source, "nested"), source);
         await AssertSymlinkOverlapWhenSupportedAsync(workflow, console, source, Path.Join(repo.Path, "linked-output"));
+
+        var invalidOutput = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.MergeAsync(new CoverageMergeRequest(source, "bad\0output", Clean: true), console, CancellationToken.None));
+        Assert.Contains("ASCOV138", invalidOutput.Message, StringComparison.Ordinal);
+
+        var invalidGuardPath = Assert.Throws<CommandException>(
+            () => CoverageMergeOutputGuard.Prepare("merged", "bad\0source", clean: true));
+        Assert.Contains("ASCOV138", invalidGuardPath.Message, StringComparison.Ordinal);
 
         var root = Path.GetPathRoot(repo.Path);
         if (!string.IsNullOrWhiteSpace(root))
         {
             await AssertUnsafeOutputAsync(workflow, console, source, root, "filesystem root");
         }
+    }
+
+    [Fact]
+    public void Resolve_ShouldReportSourceReadFailures()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-merge-");
+        var sourceFile = repo.WriteFile("not-a-directory", "not a directory");
+
+        var exception = Assert.Throws<CommandException>(
+            () => CoverageMergeSourceResolver.Resolve(sourceFile, Path.Join(repo.Path, "merged")));
+
+        Assert.Contains("ASCOV130", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be read", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MergeAsync_ShouldReportStagingFailures()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-merge-");
+        repo.WriteFile("shards/coverage.cobertura.xml", "<coverage />");
+        repo.WriteFile("merged/.appsurface-coverage-output", "AppSurface coverage output directory");
+        repo.WriteFile("merged/reportgenerator-input", "file blocks staging directory");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.MergeAsync(new CoverageMergeRequest("shards", "merged", Clean: true), console, CancellationToken.None));
+
+        Assert.Contains("ASCOV137", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("staging failed", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MergeAsync_ShouldReportArtifactWriteFailures()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-merge-");
+        repo.WriteFile("shards/coverage.cobertura.xml", "<coverage />");
+        repo.WriteFile("merged/.appsurface-coverage-output", "AppSurface coverage output directory");
+        Directory.CreateDirectory(Path.Join(repo.Path, "merged", "summary.txt"));
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.MergeAsync(new CoverageMergeRequest("shards", "merged", Clean: true), console, CancellationToken.None));
+
+        Assert.Contains("ASCOV137", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("artifacts could not be written", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
