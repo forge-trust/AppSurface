@@ -2239,6 +2239,26 @@ These fields let custom search clients stay visually aligned with the landing an
 
 Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, namespace `entryPoints`, and generated API `languageSearchText` as first-class MiniSearch fields with field-specific boosts. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
 
+### Reader-intent search relevance
+
+The built-in search experience keeps MiniSearch as the candidate matcher, then applies a deterministic reader-intent ranking layer in the authored browser asset. This keeps search static-friendly while making common documentation tasks rank ahead of incidental body-text hits.
+
+Ranking uses hydrated search-index documents, not only MiniSearch stored fields. The ranker can read `title`, `path`, `sourcePath`, `canonicalSlug`, `aliases`, `keywords`, namespace `entryPoints`, `pageType`, `navGroup`, `publicSection`, `audience`, `status`, and `order` after the client normalizes the payload.
+
+Precedence is intentionally explicit:
+
+1. exact title, path, source path, canonical slug, alias, keyword, breadcrumb, or related-page matches
+2. explicit filter intent, such as API/reference or internal/contributor filters
+3. exact internal or contributor intent
+4. alias, keyword, or namespace entry-point matches
+5. broad task boosts for guides, start-here pages, how-to/tutorial pages, examples, FAQs, and troubleshooting pages
+6. internal/contributor demotion for broad non-internal queries
+7. original MiniSearch rank, then authored order/path tie-breaks
+
+The relevance layer exposes pure test seams: `rankSearchResults(...)` returns ranked documents, and `explainSearchResultRanking(...)` returns local ranking details such as original MiniSearch rank/score, matched fields, metadata classifications, boosts, demotions, filter overrides, and final rank. These helpers are for tests and maintainer debugging; the production UI does not render match reasons, and product-intelligence events must continue to avoid raw query payloads.
+
+Metadata governance matters because ranking is metadata-aware. Put page-specific aliases and keywords on the owning page or sidecar. Put namespace-specific entry terms in `entry_points`. Add shared synonym behavior only when a reviewed relevance fixture proves that page-local metadata is the wrong ownership boundary. Do not use `redirect_aliases` for search relevance; those are browser URL migrations.
+
 When authored metadata uses `release-note` or `release-notes`, AppSurface Docs keeps the raw `pageType` metadata value in the payload but emits `pageTypeLabel = "Release"` and `pageTypeVariant = "release"` so built-in and custom clients can present release pages consistently.
 
 ## Custom Harvester Outline Contract

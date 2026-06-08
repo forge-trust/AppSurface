@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { performance } from 'node:perf_hooks';
 import { test } from 'node:test';
 import { loadSearchCore } from './load-search-core.mjs';
 
@@ -113,6 +114,214 @@ test('createMiniSearchConfiguration includes all searchable and stored fields', 
   assert.ok(config.storeFields.includes('status'));
   assert.ok(config.storeFields.includes('language'));
   assert.ok(config.storeFields.includes('languageLabel'));
+});
+
+test('rankSearchResults preserves exact lookup matches ahead of broad candidates', async () => {
+  const { normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
+  const docs = [
+    normalizeSearchDocument({
+      id: 'broad-guide',
+      path: '/docs/guides/appsurface',
+      title: 'AppSurface guide',
+      pageType: 'guide',
+      bodyText: 'AddRazorWire AddRazorWire AddRazorWire setup and configuration'
+    }),
+    normalizeSearchDocument({
+      id: 'symbol',
+      path: '/docs/Namespaces/ForgeTrust.RazorWire#AddRazorWire',
+      sourcePath: 'Web/ForgeTrust.RazorWire/RazorWireServiceCollectionExtensions.cs',
+      title: 'AddRazorWire',
+      pageType: 'api-reference',
+      aliases: ['AddRazorWire']
+    })
+  ];
+
+  const ranked = rankSearchResults([
+    { doc: docs[0], miniSearchRank: 0, miniSearchScore: 20 },
+    { doc: docs[1], miniSearchRank: 1, miniSearchScore: 2 }
+  ], { query: 'AddRazorWire' });
+
+  assert.equal(ranked[0].id, 'symbol');
+});
+
+test('rankSearchResults promotes metadata and entry point matches before body-only matches', async () => {
+  const { normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
+  const docs = [
+    normalizeSearchDocument({
+      id: 'body',
+      path: '/docs/reference/body',
+      title: 'Runtime reference',
+      pageType: 'api-reference',
+      bodyText: 'Search index repair appears many times in generated API detail.'
+    }),
+    normalizeSearchDocument({
+      id: 'alias',
+      path: '/docs/troubleshooting/search',
+      title: 'Troubleshoot search indexing',
+      pageType: 'troubleshooting',
+      aliases: ['missing results'],
+      keywords: ['search index repair'],
+      entryPoints: [{ label: 'Refresh index', keywords: ['repair search index'] }]
+    })
+  ];
+
+  const ranked = rankSearchResults([
+    { doc: docs[0], miniSearchRank: 0, miniSearchScore: 10 },
+    { doc: docs[1], miniSearchRank: 1, miniSearchScore: 1 }
+  ], { query: 'search index repair' });
+
+  assert.equal(ranked[0].id, 'alias');
+});
+
+test('rankSearchResults prefers task docs for broad task queries but honors explicit API filters', async () => {
+  const { explainSearchResultRanking, normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
+  const docs = [
+    normalizeSearchDocument({
+      id: 'api',
+      path: '/docs/Namespaces/ForgeTrust.AppSurface.Packages',
+      title: 'Package API Reference',
+      pageType: 'api-reference',
+      bodyText: 'Set up package install configure'
+    }),
+    normalizeSearchDocument({
+      id: 'guide',
+      path: '/docs/packages',
+      title: 'Package adoption guide',
+      pageType: 'guide',
+      navGroup: 'Packages',
+      bodyText: 'Set up package install configure'
+    })
+  ];
+
+  const broadRanked = rankSearchResults([
+    { doc: docs[0], miniSearchRank: 0, miniSearchScore: 10 },
+    { doc: docs[1], miniSearchRank: 1, miniSearchScore: 8 }
+  ], { query: 'set up package' });
+  const apiFiltered = rankSearchResults([
+    { doc: docs[1], miniSearchRank: 0, miniSearchScore: 8 },
+    { doc: docs[0], miniSearchRank: 1, miniSearchScore: 10 }
+  ], { query: 'set up package', filters: { pageType: 'api-reference' } });
+  const apiExplanation = explainSearchResultRanking([
+    { doc: docs[0], miniSearchRank: 0, miniSearchScore: 10 }
+  ], { query: 'set up package', filters: { pageType: 'api-reference' } });
+
+  assert.equal(broadRanked[0].id, 'guide');
+  assert.equal(apiFiltered[0].id, 'api');
+  assert.equal(apiExplanation[0].filterOverride, true);
+  assert.equal(apiExplanation[0].broadTaskBoost, false);
+});
+
+test('rankSearchResults boosts hyphenated task page types for broad task queries', async () => {
+  const { normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
+  const docs = [
+    normalizeSearchDocument({
+      id: 'reference',
+      path: '/docs/reference/install',
+      title: 'Install reference',
+      pageType: 'api-reference',
+      bodyText: 'install configure setup'
+    }),
+    normalizeSearchDocument({
+      id: 'how-to',
+      path: '/docs/how-to/install',
+      title: 'How to install',
+      pageType: 'how-to',
+      bodyText: 'install configure setup'
+    }),
+    normalizeSearchDocument({
+      id: 'start-here',
+      path: '/docs/start',
+      title: 'Start here',
+      pageType: 'start-here',
+      bodyText: 'install configure setup'
+    })
+  ];
+
+  const ranked = rankSearchResults([
+    { doc: docs[0], miniSearchRank: 0, miniSearchScore: 10 },
+    { doc: docs[1], miniSearchRank: 1, miniSearchScore: 8 },
+    { doc: docs[2], miniSearchRank: 2, miniSearchScore: 7 }
+  ], { query: 'install configure' });
+
+  assert.deepEqual(ranked.map((doc) => doc.id), ['how-to', 'start-here', 'reference']);
+});
+
+test('rankSearchResults demotes internal docs for broad queries but protects exact internal intent', async () => {
+  const { normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
+  const docs = [
+    normalizeSearchDocument({
+      id: 'internal',
+      path: '/docs/internals/search-diagnostics',
+      title: 'Internal search diagnostics',
+      pageType: 'internals',
+      audience: 'maintainers',
+      bodyText: 'Debug search indexing'
+    }),
+    normalizeSearchDocument({
+      id: 'public',
+      path: '/docs/troubleshooting/search',
+      title: 'Troubleshoot search indexing',
+      pageType: 'troubleshooting',
+      bodyText: 'Debug search indexing'
+    })
+  ];
+
+  const broadRanked = rankSearchResults([
+    { doc: docs[0], miniSearchRank: 0, miniSearchScore: 10 },
+    { doc: docs[1], miniSearchRank: 1, miniSearchScore: 8 }
+  ], { query: 'debug search indexing' });
+  const exactInternal = rankSearchResults([
+    { doc: docs[1], miniSearchRank: 0, miniSearchScore: 8 },
+    { doc: docs[0], miniSearchRank: 1, miniSearchScore: 10 }
+  ], { query: 'internal search diagnostics' });
+
+  assert.equal(broadRanked[0].id, 'public');
+  assert.equal(exactInternal[0].id, 'internal');
+});
+
+test('explainSearchResultRanking exposes local non-telemetry ranking reasons', async () => {
+  const { explainSearchResultRanking, normalizeSearchDocument } = await loadSearchCore();
+  const doc = normalizeSearchDocument({
+    id: 'alias',
+    path: '/docs/troubleshooting/search',
+    title: 'Troubleshoot search indexing',
+    aliases: ['missing search results'],
+    pageType: 'troubleshooting'
+  });
+
+  const [explanation] = explainSearchResultRanking([
+    { doc, miniSearchRank: 3, miniSearchScore: 4.5 }
+  ], { query: 'missing search results' });
+
+  assert.equal(explanation.finalRank, 1);
+  assert.equal(explanation.miniSearchRank, 3);
+  assert.equal(explanation.miniSearchScore, 4.5);
+  assert.equal(explanation.aliasOrKeywordMatch, true);
+  assert.deepEqual(explanation.matchedFields, ['aliases']);
+});
+
+test('rankSearchResults keeps large-corpus rescoring bounded', async () => {
+  const { normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
+  const candidates = Array.from({ length: 5000 }, (_, index) => ({
+    doc: normalizeSearchDocument({
+      id: `doc-${index}`,
+      path: `/docs/generated/${index}`,
+      title: `Generated page ${index}`,
+      pageType: index % 10 === 0 ? 'guide' : 'api-reference',
+      bodyText: 'install configure setup package '.repeat(20),
+      order: index
+    }),
+    miniSearchRank: index,
+    miniSearchScore: 5000 - index
+  }));
+
+  const started = performance.now();
+  const ranked = rankSearchResults(candidates, { query: 'install package' });
+  const elapsed = performance.now() - started;
+
+  assert.equal(ranked.length, 5000);
+  assert.equal(ranked[0].id, 'doc-0');
+  assert.ok(elapsed < 750, `ranking took ${elapsed}ms`);
 });
 
 test('validateSearchResultPath accepts docs-local browser paths under the active docs root', async () => {

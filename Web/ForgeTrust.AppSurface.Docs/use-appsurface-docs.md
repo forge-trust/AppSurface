@@ -277,6 +277,23 @@ redirect_aliases:
 
 `redirect_aliases` values are docs-root-relative routes, not Netlify `_redirects` syntax. Leave out query strings, fragments, host names, splats, placeholders, and status codes. Static export uses HTML alias files by default for generic hosts; use `appsurface docs export --mode cdn --redirects netlify` when publishing to Netlify-compatible CDN hosts. For Netlify export, avoid defining two aliases that differ only by percent encoding unless they point to the same canonical page.
 
+### Fix a poorly ranked page
+
+When a page exists but ranks below a less useful result, start with the authored content and metadata before changing search code:
+
+1. Open `/docs/search?q=your%20query` and note the current top five results.
+2. Inspect `/docs/search-index.json` for the intended page. Check `title`, `summary`, `headings`, `aliases`, `keywords`, `pageType`, `navGroup`, `audience`, `sourcePath`, and namespace `entryPoints`.
+3. Choose the smallest truthful fix:
+   - edit `title` or `summary` when the page itself does not describe the reader's intent clearly
+   - add `aliases` for page-specific terms readers already use
+   - add `keywords` for compact search terms that belong to that page but would read awkwardly in prose
+   - set `page_type` and `nav_group` so task pages, API pages, troubleshooting pages, and internal pages are classified honestly
+   - add namespace `entry_points` when a generated API namespace needs human entry terms such as registration methods or options types
+4. Refresh the source-backed harvest or restart the local host, then verify `/docs/search?q=...` and `/docs/search-index.json` again.
+5. Promote important or repeated queries into the search relevance fixture suite so the fix survives future ranking changes.
+
+Do not use metadata as a bag of unrelated synonyms. Page-specific aliases and keywords belong on the page or sidecar that owns them. Cross-page language bridges belong in reviewed relevance fixtures or a deliberately shared synonym layer. Use `aliases` for search terms; use `redirect_aliases` only for browser URLs that should redirect.
+
 For namespace API pages, keep the intro as normal Markdown and put the namespace target plus entry-point metadata in the sidecar:
 
 ```yaml
@@ -386,6 +403,15 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Treat the trusted release root as an operator-owned immutable static export store. Symlinks, junctions, reparse points, hidden path segments, rooted catalog paths, and `../` escapes are unavailable and are never mounted.
 - For package maintainers changing built-in Docs browser assets, run `pnpm --dir Web run assets:build` and `pnpm --dir Web run assets:verify` before building or exporting docs. AppSurface Docs embeds `wwwroot/docs/search-client.js` and `wwwroot/docs/minisearch.min.js`, so stale generated assets can otherwise ship inside the package assembly.
 - Run the standalone host or export pipeline in CI before publishing a public docs surface.
+
+### Search relevance refresh paths
+
+| Surface | What changes relevance | Refresh and verify |
+| --- | --- | --- |
+| Live source-backed docs | Markdown body, sidecar/front matter metadata, generated API metadata, or the package search runtime | Refresh/restart harvest, then inspect `/docs/search`, `/docs/search?q=...`, and `/docs/search-index.json`. |
+| Package consumers | Updates to the bundled ranking runtime in `search-client.js` or MiniSearch assets | Consume a package containing rebuilt assets; verify the package's docs surface and asset version query strings. |
+| Static exports | Exported HTML, `search.html`, `search-index.json`, and bundled search assets | Regenerate the export, then inspect `search.html`, root `search-index.json`, and representative query URLs before publishing. |
+| Exact version archives | The archive's frozen `search-client.js` and root `search-index.json` | Existing exact archives keep their own search behavior; new relevance behavior appears only in newly exported or intentionally republished trees. |
 
 ## Search fallback checks
 

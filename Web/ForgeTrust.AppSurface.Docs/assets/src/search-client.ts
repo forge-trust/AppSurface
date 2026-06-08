@@ -5,7 +5,8 @@ import {
   isSafeSearchResultPath,
   normalizeCodeLanguage,
   normalizePageTypeAlias,
-  normalizeSearchDocument
+  normalizeSearchDocument,
+  rankSearchResults
 } from './search-core';
 
 declare global {
@@ -1380,19 +1381,32 @@ declare global {
     }
 
     const normalizedQuery = normalizeQuery(query);
-    const filterFn = hasActiveFilters(filters)
-      ? (result) => matchesStoredResult(result, filters)
+    const normalizedFilters = filters || createEmptyFacetValues();
+    const filterFn = hasActiveFilters(normalizedFilters)
+      ? (result) => matchesStoredResult(result, normalizedFilters)
       : undefined;
 
     let results;
     if (normalizedQuery) {
-      results = searchData.index.search(normalizedQuery, {
+      const miniSearchResults = searchData.index.search(normalizedQuery, {
         ...defaultSearchOptions,
         filter: filterFn
       });
-    } else if (hasActiveFilters(filters)) {
-      results = searchData.sortedDocs.filter((doc) => matchesFilters(doc, filters))
-        .map((doc) => ({ id: doc.id }));
+      results = rankSearchResults(
+        miniSearchResults
+          .map((result, index) => ({
+            doc: searchData.docsById.get(result.id),
+            miniSearchRank: index,
+            miniSearchScore: result.score
+          }))
+          .filter((candidate) => candidate.doc),
+        {
+          searchQuery: normalizedQuery,
+          filters: normalizedFilters
+        });
+    } else if (hasActiveFilters(normalizedFilters)) {
+      results = searchData.sortedDocs.filter((doc) => matchesFilters(doc, normalizedFilters))
+        .map((doc) => doc);
     } else {
       results = [];
     }
@@ -1423,26 +1437,20 @@ declare global {
       .filter(Boolean);
     const normalizedQuery = normalizeQuery(searchPageState.q);
     const isStarter = !normalizedQuery && activeFilters.length === 0;
-    const baseResults = normalizedQuery
-      ? runRankedSearch(normalizedQuery, createEmptyFacetValues())
-      : [];
     const baseDocs = normalizedQuery
-      ? baseResults.map((result) => searchData.docsById.get(result.id)).filter(Boolean)
+      ? runRankedSearch(normalizedQuery, createEmptyFacetValues())
       : searchData.sortedDocs;
     const resultDocs = normalizedQuery
-      ? (activeFilters.length > 0
-          ? baseDocs.filter((doc) => matchesFilters(doc, filters))
-          : baseDocs)
+      ? runRankedSearch(normalizedQuery, filters)
       : (activeFilters.length > 0
           ? searchData.sortedDocs.filter((doc) => matchesFilters(doc, filters))
           : []);
-    const orderedResultDocs = normalizedQuery ? resultDocs : resultDocs;
 
     return {
       normalizedQuery,
       activeFilters,
       facets: deriveFacetState(baseDocs, filters),
-      resultDocs: orderedResultDocs,
+      resultDocs,
       isStarter,
       starterDocs: searchData.starterDocs,
       recoveryLinks: buildRecoveryLinks(baseDocs)

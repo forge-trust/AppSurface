@@ -58,9 +58,15 @@ export function normalizeSearchDocument(doc: any) {
     entryPoints: flattenEntryPoints(doc?.entryPoints),
     status: normalizeFacetValue(doc?.status),
     navGroup: String(doc?.navGroup ?? '').trim(),
+    publicSection: normalizeFacetValue(doc?.publicSection),
+    publicSectionLabel: String(doc?.publicSectionLabel ?? '').trim(),
+    isSectionLanding: Boolean(doc?.isSectionLanding),
     order: Number.isFinite(orderValue) ? orderValue : null,
+    sequenceKey: normalizeFacetValue(doc?.sequenceKey),
+    canonicalSlug: String(doc?.canonicalSlug ?? '').trim(),
     relatedPages: toStringArray(doc?.relatedPages),
-    breadcrumbs: toStringArray(doc?.breadcrumbs)
+    breadcrumbs: toStringArray(doc?.breadcrumbs),
+    sourcePath: String(doc?.sourcePath ?? '').trim()
   };
 }
 
@@ -88,6 +94,76 @@ export function createMiniSearchDocument(doc: any) {
     status: doc.status,
     navGroup: doc.navGroup
   };
+}
+
+export function rankSearchResults(candidates: any[] = [], options: any = {}) {
+  return explainSearchResultRanking(candidates, options).map((item) => item.doc);
+}
+
+export function explainSearchResultRanking(candidates: any[] = [], options: any = {}) {
+  const query = normalizeRankingQuery(options.searchQuery ?? options.query);
+  const filters = normalizeRankingFilters(options.filters);
+  const filterIntent = createFilterIntent(filters);
+  const queryInfo = analyzeRankingQuery(query);
+  const seenIds = new Set<string>();
+  const explanations: any[] = [];
+
+  candidates.forEach((candidate, index) => {
+    const doc = candidate?.doc ?? candidate;
+    if (!doc?.id || seenIds.has(doc.id)) {
+      return;
+    }
+
+    seenIds.add(doc.id);
+    const miniSearchRank = Number.isFinite(candidate?.miniSearchRank) ? candidate.miniSearchRank : index;
+    const miniSearchScore = Number.isFinite(candidate?.miniSearchScore) ? candidate.miniSearchScore : 0;
+    const signals = classifyRankingSignals(doc, queryInfo, filterIntent);
+    const priority = getRankingPriority(signals);
+
+    explanations.push({
+      doc,
+      finalRank: 0,
+      priority,
+      miniSearchRank,
+      miniSearchScore,
+      matchedFields: signals.matchedFields,
+      exactMatch: signals.exactMatch,
+      aliasOrKeywordMatch: signals.aliasOrKeywordMatch,
+      entryPointMatch: signals.entryPointMatch,
+      broadTaskBoost: signals.broadTaskBoost,
+      internalDemotion: signals.internalDemotion,
+      internalOrContributor: signals.internalOrContributor,
+      filterOverride: signals.filterOverride,
+      filterMismatch: signals.filterMismatch
+    });
+  });
+
+  explanations.sort(compareRankingExplanations);
+  explanations.forEach((item, index) => {
+    item.finalRank = index + 1;
+  });
+
+  return explanations;
+}
+
+export function isInternalOrContributorDoc(doc: any) {
+  const pageType = normalizeTokenText(normalizePageTypeAlias(doc?.pageType));
+  const navGroup = normalizeTokenText(doc?.navGroup);
+  const publicSection = normalizeTokenText(doc?.publicSection);
+  const audience = normalizeTokenText(doc?.audience);
+  const status = normalizeTokenText(doc?.status);
+  const path = normalizeTokenText(doc?.path);
+  const sourcePath = normalizeTokenText(doc?.sourcePath);
+
+  return [
+    pageType,
+    navGroup,
+    publicSection,
+    audience,
+    status,
+    path,
+    sourcePath
+  ].some((value) => /\b(internal|internals|contributor|contributors|maintainer|maintainers)\b/.test(value));
 }
 
 export function isSafeSearchResultPath(value: any, options: any = {}) {
@@ -402,6 +478,262 @@ function collectEntryPointTerms(value: any, terms: string[]) {
   collectEntryPointTerms(value.targetText, terms);
   collectEntryPointTerms(value.path, terms);
   collectEntryPointTerms(value.href, terms);
+}
+
+function normalizeRankingQuery(value: any) {
+  return normalizeWhitespace(String(value ?? '').slice(0, 500));
+}
+
+function normalizeRankingFilters(filters: any) {
+  return {
+    pageType: normalizePageTypeAlias(filters?.pageType),
+    component: normalizeFacetValue(filters?.component),
+    language: normalizeCodeLanguage(filters?.language),
+    audience: normalizeFacetValue(filters?.audience),
+    status: normalizeFacetValue(filters?.status)
+  };
+}
+
+function createFilterIntent(filters: any) {
+  const pageType = normalizePageTypeAlias(filters.pageType);
+  const audience = normalizeTokenText(filters.audience);
+  return {
+    filters,
+    hasActiveFilters: Object.values(filters).some(Boolean),
+    api: pageType === 'api' || pageType === 'api-reference',
+    internal: /\b(internal|internals|contributor|contributors|maintainer|maintainers)\b/.test(`${pageType} ${audience}`)
+  };
+}
+
+function analyzeRankingQuery(query: string) {
+  const normalized = normalizeTokenText(query);
+  const tokens = normalized
+    .split(' ')
+    .filter((token) => token.length > 1)
+    .slice(0, 8);
+
+  return {
+    raw: query,
+    normalized,
+    tokens,
+    isInternalIntent: /\b(internal|internals|contributor|contributors|maintainer|maintainers)\b/.test(normalized),
+    isTaskIntent: isTaskIntentQuery(normalized, tokens)
+  };
+}
+
+function isTaskIntentQuery(normalized: string, tokens: string[]) {
+  if (!normalized) {
+    return false;
+  }
+
+  if (/\b(how|setup|install|configure|configuring|configuration|quickstart|start|getting started|troubleshoot|troubleshooting|fix|debug|resolve|guide|example|use|using|adopt|migrate|upgrade|publish|deploy)\b/.test(normalized)) {
+    return true;
+  }
+
+  return tokens.length >= 2;
+}
+
+function classifyRankingSignals(doc: any, queryInfo: any, filterIntent: any) {
+  const matchedFields: string[] = [];
+  const internalOrContributor = isInternalOrContributorDoc(doc);
+  const exactMatch = Boolean(queryInfo.normalized) && hasExactDocumentMatch(doc, queryInfo, matchedFields);
+  const aliasOrKeywordMatch = Boolean(queryInfo.normalized) && hasMetadataMatch(
+    [
+      ['aliases', doc?.aliases],
+      ['keywords', doc?.keywords]
+    ],
+    queryInfo,
+    matchedFields);
+  const entryPointMatch = Boolean(queryInfo.normalized) && fieldContainsQuery(doc?.entryPoints, queryInfo);
+  if (entryPointMatch) {
+    matchedFields.push('entryPoints');
+  }
+
+  const filterOverride = filterIntent.api || filterIntent.internal;
+  const filterMismatch = filterIntent.hasActiveFilters && !matchesRankingFilters(doc, filterIntent.filters);
+  const exactInternalIntent = internalOrContributor && (queryInfo.isInternalIntent || exactMatch || aliasOrKeywordMatch || entryPointMatch);
+  const broadTaskBoost = queryInfo.isTaskIntent
+    && !filterOverride
+    && isReaderTaskDoc(doc)
+    && !internalOrContributor;
+  const internalDemotion = internalOrContributor
+    && !filterIntent.internal
+    && !exactInternalIntent;
+
+  return {
+    matchedFields: [...new Set(matchedFields)],
+    exactMatch,
+    exactInternalIntent,
+    aliasOrKeywordMatch,
+    entryPointMatch,
+    broadTaskBoost,
+    internalDemotion,
+    internalOrContributor,
+    filterOverride,
+    filterMismatch
+  };
+}
+
+function getRankingPriority(signals: any) {
+  if (signals.filterMismatch) {
+    return -1;
+  }
+
+  if (signals.exactMatch) {
+    return 6;
+  }
+
+  if (signals.exactInternalIntent) {
+    return 5;
+  }
+
+  if (signals.aliasOrKeywordMatch || signals.entryPointMatch) {
+    return 4;
+  }
+
+  if (signals.broadTaskBoost) {
+    return 3;
+  }
+
+  if (signals.internalDemotion) {
+    return 0;
+  }
+
+  return 2;
+}
+
+function compareRankingExplanations(left: any, right: any) {
+  if (left.priority !== right.priority) {
+    return right.priority - left.priority;
+  }
+
+  if (left.miniSearchRank !== right.miniSearchRank) {
+    return left.miniSearchRank - right.miniSearchRank;
+  }
+
+  const leftOrder = left.doc?.order ?? Number.MAX_SAFE_INTEGER;
+  const rightOrder = right.doc?.order ?? Number.MAX_SAFE_INTEGER;
+  if (leftOrder !== rightOrder) {
+    return leftOrder - rightOrder;
+  }
+
+  return String(left.doc?.path ?? '').localeCompare(String(right.doc?.path ?? ''), undefined, { sensitivity: 'base' });
+}
+
+function hasExactDocumentMatch(doc: any, queryInfo: any, matchedFields: string[]) {
+  const exactFields = [
+    ['title', doc?.title],
+    ['path', doc?.path],
+    ['sourcePath', doc?.sourcePath],
+    ['canonicalSlug', doc?.canonicalSlug]
+  ];
+
+  for (const [name, value] of exactFields) {
+    if (fieldExactlyMatches(value, queryInfo)) {
+      matchedFields.push(name);
+      return true;
+    }
+  }
+
+  for (const [name, values] of [
+    ['aliases', doc?.aliases],
+    ['keywords', doc?.keywords],
+    ['breadcrumbs', doc?.breadcrumbs],
+    ['relatedPages', doc?.relatedPages]
+  ]) {
+    if (arrayFieldExactlyMatches(values, queryInfo)) {
+      matchedFields.push(name);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasMetadataMatch(fields: any[], queryInfo: any, matchedFields: string[]) {
+  let matched = false;
+  for (const [name, value] of fields) {
+    if (fieldContainsQuery(value, queryInfo)) {
+      matchedFields.push(name);
+      matched = true;
+    }
+  }
+
+  return matched;
+}
+
+function isReaderTaskDoc(doc: any) {
+  const pageType = normalizePageTypeAlias(doc?.pageType);
+  const publicSection = normalizeTokenText(doc?.publicSection);
+  const navGroup = normalizeTokenText(doc?.navGroup);
+
+  return [
+    'guide',
+    'concept',
+    'tutorial',
+    'example',
+    'how-to',
+    'start-here',
+    'troubleshooting',
+    'faq'
+  ].includes(pageType)
+    || /\b(start|guide|guides|example|examples|troubleshooting|how to|tutorial|adopt|packages)\b/.test(`${publicSection} ${navGroup}`);
+}
+
+function matchesRankingFilters(doc: any, filters: any) {
+  return [
+    ['pageType', normalizePageTypeAlias(doc?.pageType)],
+    ['component', normalizeFacetValue(doc?.component)],
+    ['language', normalizeCodeLanguage(doc?.language)],
+    ['audience', normalizeFacetValue(doc?.audience)],
+    ['status', normalizeFacetValue(doc?.status)]
+  ].every(([key, actual]) => {
+    const expected = filters[key];
+    return !expected || actual === expected;
+  });
+}
+
+function fieldExactlyMatches(value: any, queryInfo: any) {
+  const normalized = normalizeTokenText(value);
+  const normalizedRoute = normalizeTokenText(stripRouteSuffix(String(value ?? '')));
+  if (!normalized) {
+    return false;
+  }
+
+  return normalized === queryInfo.normalized || normalizedRoute === queryInfo.normalized;
+}
+
+function arrayFieldExactlyMatches(value: any, queryInfo: any) {
+  return toStringArray(value).some((item) => fieldExactlyMatches(item, queryInfo));
+}
+
+function fieldContainsQuery(value: any, queryInfo: any) {
+  const normalized = normalizeTokenText(Array.isArray(value) ? value.join(' ') : value);
+  if (!normalized || !queryInfo.normalized) {
+    return false;
+  }
+
+  return normalized.includes(queryInfo.normalized)
+    || queryInfo.tokens.length > 0 && queryInfo.tokens.every((token: string) => normalized.includes(token));
+}
+
+function stripRouteSuffix(value: string) {
+  return value
+    .replace(/\.html$/i, '')
+    .replace(/\/index$/i, '')
+    .replace(/\/readme(?:\.md)?$/i, '');
+}
+
+function normalizeTokenText(value: any) {
+  return normalizeWhitespace(String(value ?? '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/[#_.:/\\-]+/g, ' ')
+    .replace(/[^a-z0-9\s]+/g, ' '));
+}
+
+function normalizeWhitespace(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function toStringArray(value: any) {

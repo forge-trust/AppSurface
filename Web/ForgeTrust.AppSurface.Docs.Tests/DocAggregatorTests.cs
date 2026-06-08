@@ -2588,6 +2588,107 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldProjectReaderIntentRankingMetadata()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Install AppSurface Docs",
+                "guides/install-docs.md",
+                "<h2 id=\"setup\">Setup</h2><p>Install and configure the docs host.</p>",
+                Metadata: new DocMetadata
+                {
+                    Summary = "Install and configure AppSurface Docs.",
+                    PageType = "guide",
+                    Audience = "developers",
+                    Component = "Docs",
+                    Aliases = ["docs setup", "missing search results"],
+                    Keywords = ["install docs", "search index repair"],
+                    Status = "Stable",
+                    NavGroup = "Start Here",
+                    SectionLanding = true,
+                    Order = 10,
+                    SequenceKey = "docs-proof",
+                    CanonicalSlug = "guides/install-docs",
+                    RelatedPages = ["guides/troubleshooting-search.md"],
+                    Breadcrumbs = ["Docs", "Install"]
+                }),
+            new(
+                "Search Internals",
+                "internals/search.md",
+                "<p>Maintainer-only search diagnostics.</p>",
+                Metadata: new DocMetadata
+                {
+                    Summary = "Diagnose search ranking internals.",
+                    PageType = "internals",
+                    Audience = "maintainers",
+                    NavGroup = "Internals",
+                    Aliases = ["internal search diagnostics"]
+                }),
+            new(
+                "ForgeTrust.AppSurface.Docs",
+                "Namespaces/ForgeTrust.AppSurface.Docs",
+                "<section id=\"ForgeTrust-AppSurface-Docs-AddAppSurfaceDocs\" class=\"doc-method-group\">Generated API body</section>",
+                Metadata: new DocMetadata
+                {
+                    Summary = "API reference for Docs registration.",
+                    PageType = "api-reference",
+                    NavGroup = "API Reference",
+                    CodeLanguage = "csharp",
+                    EntryPoints =
+                    [
+                        new DocNamespaceEntryPoint
+                        {
+                            Label = "AddAppSurfaceDocs(...)",
+                            Summary = "Register AppSurface Docs services.",
+                            Target = "ForgeTrust-AppSurface-Docs-AddAppSurfaceDocs",
+                            Keywords = ["register docs", "service registration"]
+                        }
+                    ]
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var payload = await _aggregator.GetSearchIndexPayloadAsync();
+
+        var guide = Assert.Single(payload.Documents, document => document.SourcePath == "guides/install-docs.md");
+        Assert.Equal("/docs/guides/install-docs", guide.Path);
+        Assert.Equal("Install and configure AppSurface Docs.", guide.Summary);
+        Assert.Equal("guide", guide.PageType);
+        Assert.Equal("Guide", guide.PageTypeLabel);
+        Assert.Equal("guide", guide.PageTypeVariant);
+        Assert.Equal("developers", guide.Audience);
+        Assert.Equal("Docs", guide.Component);
+        Assert.Equal(["docs setup", "missing search results"], guide.Aliases);
+        Assert.Equal(["install docs", "search index repair"], guide.Keywords);
+        Assert.Equal("Stable", guide.Status);
+        Assert.Equal("Start Here", guide.NavGroup);
+        Assert.Equal("start-here", guide.PublicSection);
+        Assert.Equal("Start Here", guide.PublicSectionLabel);
+        Assert.True(guide.IsSectionLanding);
+        Assert.Equal(10, guide.Order);
+        Assert.Equal("docs-proof", guide.SequenceKey);
+        Assert.Equal("guides/install-docs", guide.CanonicalSlug);
+        Assert.Equal(["guides/troubleshooting-search.md"], guide.RelatedPages);
+        Assert.Equal(["Docs", "Install"], guide.Breadcrumbs);
+
+        var internalDoc = Assert.Single(payload.Documents, document => document.SourcePath == "internals/search.md");
+        Assert.Equal("internals", internalDoc.PageType);
+        Assert.Equal("maintainers", internalDoc.Audience);
+        Assert.Equal(["internal search diagnostics"], internalDoc.Aliases);
+
+        var api = Assert.Single(payload.Documents, document => document.SourcePath == "Namespaces/ForgeTrust.AppSurface.Docs");
+        Assert.Equal("api-reference", api.PageType);
+        Assert.Equal("csharp", api.Language);
+        Assert.Equal("C#", api.LanguageLabel);
+        var entryPoint = Assert.Single(api.EntryPoints!);
+        Assert.Equal("AddAppSurfaceDocs(...)", entryPoint.Label);
+        Assert.Equal("Register AppSurface Docs services.", entryPoint.Summary);
+        Assert.Equal("ForgeTrust-AppSurface-Docs-AddAppSurfaceDocs", entryPoint.Target);
+        Assert.Equal(["register docs", "service registration"], entryPoint.Keywords);
+    }
+
+    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldHonorConfiguredDocsRoot()
     {
         var harvestedDocs = new List<DocNode>
