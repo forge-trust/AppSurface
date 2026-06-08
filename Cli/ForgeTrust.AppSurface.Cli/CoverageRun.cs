@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -10,6 +9,10 @@ using System.Xml.Linq;
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
+using CliWrap;
+using CliWrap.Buffered;
+using CliWrap.Exceptions;
+using CliCommand = CliWrap.Cli;
 
 namespace ForgeTrust.AppSurface.Cli;
 
@@ -1111,11 +1114,11 @@ internal sealed record CoverageRunProcessResult(int ExitCode, string Output);
 /// Default process runner used by the public coverage command.
 /// </summary>
 /// <remarks>
-/// The runner does not invoke a shell, so arguments are passed as literal tokens. On cancellation it
-/// kills the entire child process tree before rethrowing, which avoids orphaned <c>dotnet test</c>
-/// processes and leaves any captured output available to the caller.
+/// The runner delegates tokenized argument escaping, output buffering, and cancellation to CliWrap.
+/// It disables non-zero exit-code validation so coverage workflow failures remain ordinary command
+/// results with captured logs instead of process exceptions.
 /// </remarks>
-internal sealed class SystemCoverageRunProcessRunner : ICoverageRunProcessRunner
+internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunner
 {
     /// <inheritdoc />
     public async Task<CoverageRunProcessResult> RunAsync(
@@ -1125,54 +1128,38 @@ internal sealed class SystemCoverageRunProcessRunner : ICoverageRunProcessRunner
         CancellationToken cancellationToken,
         string? outputFile = null)
     {
-        var startInfo = new ProcessStartInfo(fileName)
-        {
-            WorkingDirectory = workingDirectory,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-        };
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
+        var command = CliCommand.Wrap(fileName)
+            .WithArguments(arguments)
+            .WithWorkingDirectory(workingDirectory)
+            .WithValidation(CommandResultValidation.None);
 
-        using var process = Process.Start(startInfo)
-            ?? throw CoverageRunDiagnostics.Create(
-                "ASCOV110",
-                "Failed to start dotnet.",
-                $"Command: {fileName}.",
-                "Verify the .NET SDK is installed and available on PATH.",
-                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
-        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
-        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        BufferedCommandResult result;
         try
         {
-            await process.WaitForExitAsync(cancellationToken);
+            result = await command.ExecuteBufferedAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-
-            await process.WaitForExitAsync();
-            _ = await standardOutputTask;
-            _ = await standardErrorTask;
             throw;
         }
+        catch (Exception ex) when (ex is CliWrapException or Win32Exception or InvalidOperationException)
+        {
+            throw CoverageRunDiagnostics.Create(
+                "ASCOV110",
+                "Failed to start dotnet.",
+                $"Command: {fileName}. {ex.Message}",
+                "Verify the .NET SDK is installed and available on PATH.",
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+        }
 
-        var standardOutput = await standardOutputTask;
-        var standardError = await standardErrorTask;
-        var output = standardOutput + standardError;
+        var output = result.StandardOutput + result.StandardError;
         if (outputFile is not null)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(outputFile) ?? workingDirectory);
             await File.WriteAllTextAsync(outputFile, output, cancellationToken);
         }
 
-        return new CoverageRunProcessResult(process.ExitCode, output);
+        return new CoverageRunProcessResult(result.ExitCode, output);
     }
 }
 
@@ -1332,7 +1319,10 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
         }
 
         foreach (var versionDirectory in Directory.EnumerateDirectories(packageDirectory)
-            .OrderByDescending(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+            .Select(path => new { Path = path, Name = Path.GetFileName(path) })
+            .OrderByDescending(item => ParsePackageVersionOrZero(item.Name))
+            .ThenByDescending(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(item => item.Path))
         {
             if (string.Equals(Path.GetFileName(versionDirectory), Version, StringComparison.OrdinalIgnoreCase))
             {
@@ -1344,6 +1334,11 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
                 yield return Path.Join(versionDirectory, "tools", target, "ReportGenerator.dll");
             }
         }
+    }
+
+    private static global::System.Version ParsePackageVersionOrZero(string? value)
+    {
+        return global::System.Version.TryParse(value, out var version) ? version : new global::System.Version(0, 0);
     }
 
     private static string?[] ResolvePackageRoots()
@@ -1512,10 +1507,10 @@ internal static class CoverageRunDiagnostics
         builder.Append(code).Append(' ').Append(problem);
         builder.Append(" Cause: ").Append(cause);
         builder.Append(" Fix: ").Append(fix);
-        builder.Append(" Docs: ").Append(docs).Append('.');
+        builder.Append(" Docs: ").Append(docs);
         if (!string.IsNullOrWhiteSpace(logPath))
         {
-            builder.Append(" Log: ").Append(logPath).Append('.');
+            builder.Append(" Log: ").Append(logPath);
         }
 
         return new CommandException(builder.ToString());

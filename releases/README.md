@@ -19,6 +19,17 @@ It also acts as a concrete AppSurface Docs example for teams that want stronger 
 
 Older preview routes redirect to the current release-candidate note so there is one live package-facing story.
 
+## Official release artifacts
+
+Each generated tagged release owns four checked-in artifacts:
+
+- `releases/v{version}.md`: the human release narrative.
+- `releases/v{version}.md.yml`: AppSurface Docs metadata for the release note.
+- `releases/v{version}.release.json`: machine-readable release metadata and generated file list.
+- `releases/v{version}.evidence.json`: generated release evidence bundle proving repository release-artifact consistency.
+
+The release evidence bundle is not a signature or hosted-build attestation. It is the reviewable consistency proof used by release-prep and publish validation.
+
 ## Release format
 
 ### Story first

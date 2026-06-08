@@ -14,6 +14,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
+- Release preparation now generates per-version release evidence bundles at `releases/v{version}.evidence.json`; publish validation checks the bundle at the annotated tag commit before GitHub Release creation.
 - AppSurface CI coverage now runs through a dedicated `ForgeTrust.AppSurface.CoverageRunner` tool behind the stable `scripts/coverage-solution.sh` entrypoint, preserving Codecov artifact paths while adding bounded same-job coverage scheduling.
 - AppSurface CLI now includes `appsurface coverage run` for package consumers that already instrument private .NET test projects with Coverlet, producing local merged Cobertura artifacts without mutating consumer repos or reading their tool manifests.
 - Coverage runs now write slow-test diagnostics in Markdown and JSON, including project timings, parsed JUnit test-case evidence, best-effort parser warnings, and diagnostic aggregation overhead in seconds and as a percent of runner time.
@@ -27,6 +28,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Web browser status-page re-execution now preserves original browser error status codes while direct reserved preview routes continue to render normally.
 - Package consumers now have a package-first AppSurface Web quickstart that starts from `dotnet new web`, installs `ForgeTrust.AppSurface.Web`, and verifies the first route without cloning the repository.
 - AppSurface Docs Turbo-frame navigation now preserves cross-page heading fragments, so generated package chooser links land directly on the intended quickstart section.
+- AppSurface Flow now includes generated-case authoring for typed long-running process graphs, with build-time diagnostics, generated adapters, serializable envelopes, package-transitive analyzer assets, local runner coverage, Durable Task serialization validation, and a generated-authoring approval example.
 - `ForgeTrust.AppSurface.Aspire` now has a working local Aspire AppHost example, richer package guidance, and an overridable `AspireProfile.PassThroughArgs` seam for profiles that intentionally pass known AppHost arguments.
 
 ## 0.1.0-rc.2 - 2026-06-03
