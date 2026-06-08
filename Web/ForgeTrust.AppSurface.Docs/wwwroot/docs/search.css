@@ -97,7 +97,7 @@
 
 .docs-search-option-title {
     display: block;
-    flex: 1 1 100%;
+    flex: 1 1 auto;
     color: var(--docs-search-color-text-default);
     font-size: 0.9rem;
     line-height: 1.35;

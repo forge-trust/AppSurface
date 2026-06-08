@@ -551,14 +551,16 @@ function classifyRankingSignals(doc: any, queryInfo: any, filterIntent: any) {
 
   const filterOverride = filterIntent.api || filterIntent.internal;
   const filterMismatch = filterIntent.hasActiveFilters && !matchesRankingFilters(doc, filterIntent.filters);
-  const exactInternalIntent = internalOrContributor && (queryInfo.isInternalIntent || exactMatch || aliasOrKeywordMatch || entryPointMatch);
+  const explicitInternalIntent = filterIntent.internal || queryInfo.isInternalIntent;
+  const exactInternalIntent = internalOrContributor
+    && explicitInternalIntent
+    && (exactMatch || aliasOrKeywordMatch || entryPointMatch);
   const broadTaskBoost = queryInfo.isTaskIntent
     && !filterOverride
     && isReaderTaskDoc(doc)
     && !internalOrContributor;
   const internalDemotion = internalOrContributor
-    && !filterIntent.internal
-    && !exactInternalIntent;
+    && !explicitInternalIntent;
 
   return {
     matchedFields: [...new Set(matchedFields)],
@@ -579,7 +581,7 @@ function getRankingPriority(signals: any) {
     return -1;
   }
 
-  if (signals.exactMatch) {
+  if (signals.exactMatch && !signals.internalDemotion) {
     return 6;
   }
 
@@ -587,7 +589,7 @@ function getRankingPriority(signals: any) {
     return 5;
   }
 
-  if (signals.aliasOrKeywordMatch || signals.entryPointMatch) {
+  if ((signals.aliasOrKeywordMatch || signals.entryPointMatch) && !signals.internalDemotion) {
     return 4;
   }
 

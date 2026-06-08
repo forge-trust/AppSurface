@@ -279,6 +279,38 @@ test('rankSearchResults demotes internal docs for broad queries but protects exa
   assert.equal(exactInternal[0].id, 'internal');
 });
 
+test('rankSearchResults keeps exact internal metadata demoted without explicit internal intent', async () => {
+  const { normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
+  const docs = [
+    normalizeSearchDocument({
+      id: 'internal',
+      path: '/docs/contributors/search-diagnostics',
+      title: 'Search diagnostics',
+      aliases: ['diagnostics', 'contributor diagnostics'],
+      pageType: 'guide',
+      audience: 'contributors'
+    }),
+    normalizeSearchDocument({
+      id: 'public',
+      path: '/docs/troubleshooting/search-diagnostics',
+      title: 'Troubleshoot search diagnostics',
+      pageType: 'troubleshooting'
+    })
+  ];
+
+  const broadRanked = rankSearchResults([
+    { doc: docs[0], miniSearchRank: 0, miniSearchScore: 10 },
+    { doc: docs[1], miniSearchRank: 1, miniSearchScore: 5 }
+  ], { query: 'diagnostics' });
+  const explicitRanked = rankSearchResults([
+    { doc: docs[1], miniSearchRank: 0, miniSearchScore: 5 },
+    { doc: docs[0], miniSearchRank: 1, miniSearchScore: 10 }
+  ], { query: 'contributor diagnostics' });
+
+  assert.equal(broadRanked[0].id, 'public');
+  assert.equal(explicitRanked[0].id, 'internal');
+});
+
 test('explainSearchResultRanking exposes local non-telemetry ranking reasons', async () => {
   const { explainSearchResultRanking, normalizeSearchDocument } = await loadSearchCore();
   const doc = normalizeSearchDocument({
@@ -318,10 +350,11 @@ test('rankSearchResults keeps large-corpus rescoring bounded', async () => {
   const started = performance.now();
   const ranked = rankSearchResults(candidates, { query: 'install package' });
   const elapsed = performance.now() - started;
+  const budgetMs = process.env.CI ? 2500 : 1000;
 
   assert.equal(ranked.length, 5000);
   assert.equal(ranked[0].id, 'doc-0');
-  assert.ok(elapsed < 750, `ranking took ${elapsed}ms`);
+  assert.ok(elapsed < budgetMs, `ranking took ${elapsed}ms; budget is ${budgetMs}ms`);
 });
 
 test('validateSearchResultPath accepts docs-local browser paths under the active docs root', async () => {

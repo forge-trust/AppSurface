@@ -114,6 +114,16 @@ declare global {
     };
   }
 
+  function createEmptySelectedFilters() {
+    return {
+      pageType: '',
+      component: '',
+      language: '',
+      audience: '',
+      status: ''
+    };
+  }
+
   function normalizeDocsRootPath(path) {
     const value = String(path || '').trim();
     if (!value) {
@@ -1381,7 +1391,7 @@ declare global {
     }
 
     const normalizedQuery = normalizeQuery(query);
-    const normalizedFilters = filters || createEmptyFacetValues();
+    const normalizedFilters = getSearchFilters(filters || createEmptySelectedFilters());
     const filterFn = hasActiveFilters(normalizedFilters)
       ? (result) => matchesStoredResult(result, normalizedFilters)
       : undefined;
@@ -1438,7 +1448,7 @@ declare global {
     const normalizedQuery = normalizeQuery(searchPageState.q);
     const isStarter = !normalizedQuery && activeFilters.length === 0;
     const baseDocs = normalizedQuery
-      ? runRankedSearch(normalizedQuery, createEmptyFacetValues())
+      ? runRankedSearch(normalizedQuery, createEmptySelectedFilters())
       : searchData.sortedDocs;
     const resultDocs = normalizedQuery
       ? runRankedSearch(normalizedQuery, filters)
@@ -1755,7 +1765,7 @@ declare global {
         }
 
         await ensureSearchResourcesLoaded();
-        const queryResults = runRankedSearch(query, createEmptyFacetValues(), topResults);
+        const queryResults = runRankedSearch(query, createEmptySelectedFilters(), topResults);
         activeIndex = queryResults.length > 0 ? 0 : -1;
         renderSidebarResults(sidebar, queryResults, query, activeIndex);
         recordSearchOutcome('sidebar', query, queryResults.length, 0);
@@ -1782,7 +1792,7 @@ declare global {
     input.addEventListener('keydown', async (event) => {
       const currentQuery = normalizeQuery(input.value);
       if (currentQuery && currentQuery !== lastRenderedQuery && searchData.index) {
-        const refreshed = runRankedSearch(currentQuery, createEmptyFacetValues(), topResults);
+        const refreshed = runRankedSearch(currentQuery, createEmptySelectedFilters(), topResults);
         activeIndex = refreshed.length > 0 ? 0 : -1;
         renderSidebarResults(sidebar, refreshed, currentQuery, activeIndex);
         lastRenderedQuery = currentQuery;

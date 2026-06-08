@@ -281,15 +281,15 @@ redirect_aliases:
 
 When a page exists but ranks below a less useful result, start with the authored content and metadata before changing search code:
 
-1. Open `/docs/search?q=your%20query` and note the current top five results.
-2. Inspect `/docs/search-index.json` for the intended page. Check `title`, `summary`, `headings`, `aliases`, `keywords`, `pageType`, `navGroup`, `audience`, `sourcePath`, and namespace `entryPoints`.
+1. Open `{DocsRootPath}/search?q=your%20query` and note the current top five results. `{DocsRootPath}` defaults to `/docs` when the host has not customized the docs root.
+2. Inspect `{DocsRootPath}/search-index.json` for the intended page. Check `title`, `summary`, `headings`, `aliases`, `keywords`, `pageType`, `navGroup`, `audience`, `sourcePath`, and namespace `entryPoints`.
 3. Choose the smallest truthful fix:
    - edit `title` or `summary` when the page itself does not describe the reader's intent clearly
    - add `aliases` for page-specific terms readers already use
    - add `keywords` for compact search terms that belong to that page but would read awkwardly in prose
    - set `page_type` and `nav_group` so task pages, API pages, troubleshooting pages, and internal pages are classified honestly
    - add namespace `entry_points` when a generated API namespace needs human entry terms such as registration methods or options types
-4. Refresh the source-backed harvest or restart the local host, then verify `/docs/search?q=...` and `/docs/search-index.json` again.
+4. Refresh the source-backed harvest or restart the local host, then verify `{DocsRootPath}/search?q=...` and `{DocsRootPath}/search-index.json` again.
 5. Promote important or repeated queries into the search relevance fixture suite so the fix survives future ranking changes.
 
 Do not use metadata as a bag of unrelated synonyms. Page-specific aliases and keywords belong on the page or sidecar that owns them. Cross-page language bridges belong in reviewed relevance fixtures or a deliberately shared synonym layer. Use `aliases` for search terms; use `redirect_aliases` only for browser URLs that should redirect.
