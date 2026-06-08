@@ -410,7 +410,7 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 
 | Surface | What changes relevance | Refresh and verify |
 | --- | --- | --- |
-| Live source-backed docs | Markdown body, sidecar/front matter metadata, generated API metadata, or the package search runtime | Refresh/restart harvest, then inspect `/docs/search`, `/docs/search?q=...`, and `/docs/search-index.json`. |
+| Live source-backed docs | Markdown body, sidecar/front matter metadata, generated API metadata, or the package search runtime | Refresh/restart harvest, then inspect `{DocsRootPath}/search`, `{DocsRootPath}/search?q=...`, and `{DocsRootPath}/search-index.json`. |
 | Package consumers | Updates to the bundled ranking runtime in `search-client.js` or MiniSearch assets | Consume a package containing rebuilt assets; verify the package's docs surface and asset version query strings. |
 | Static exports | Exported HTML, `search.html`, `search-index.json`, and bundled search assets | Regenerate the export, then inspect `search.html`, root `search-index.json`, and representative query URLs before publishing. |
 | Exact version archives | The archive's frozen `search-client.js` and root `search-index.json` | Existing exact archives keep their own search behavior; new relevance behavior appears only in newly exported or intentionally republished trees. |

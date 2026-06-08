@@ -1612,7 +1612,9 @@ declare global {
       ? runRankedSearch(normalizedQuery, createEmptySelectedFilters())
       : searchData.sortedDocs;
     const resultDocs = normalizedQuery
-      ? runRankedSearch(normalizedQuery, filters)
+      ? (activeFilters.length > 0
+          ? runRankedSearch(normalizedQuery, filters)
+          : baseDocs)
       : (activeFilters.length > 0
           ? searchData.sortedDocs.filter((doc) => matchesFilters(doc, filters))
           : []);

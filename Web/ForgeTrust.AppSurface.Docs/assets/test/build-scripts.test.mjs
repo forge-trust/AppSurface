@@ -68,7 +68,7 @@ test('authored search client routes sidebar and full-page ordering through share
   assert.match(source, /function runRankedSearch\(query, filters, maxResults = null\)/);
   assert.match(source, /const queryResults = runRankedSearch\(query, createEmptySelectedFilters\(\), topResults\)/);
   assert.match(source, /const refreshed = runRankedSearch\(currentQuery, createEmptySelectedFilters\(\), topResults\)/);
-  assert.match(source, /const resultDocs = normalizedQuery\s*\?\s*runRankedSearch\(normalizedQuery, filters\)/);
+  assert.match(source, /const resultDocs = normalizedQuery\s*\?\s*\(activeFilters\.length > 0\s*\?\s*runRankedSearch\(normalizedQuery, filters\)\s*:\s*baseDocs\)/);
   assert.match(source, /data-rw-product-result-rank="\$\{index \+ 1\}"/);
   assert.match(source, /link\.dataset\.rwProductResultRank = String\(options\.rank \|\| 0\)/);
 });
