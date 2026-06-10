@@ -634,6 +634,14 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine($"Not included: {webEntry.Manifest.DoesNotInclude}");
         builder.AppendLine();
         builder.AppendLine($"Read next: {FormatMarkdownLink("Package-first quickstart", GetRelativeDocPath(request, WebPackageQuickstartPath) + "#" + WebPackageQuickstartFragment)}");
+
+        const string productReadinessLabPath = "examples/product-readiness-lab/README.md";
+        if (RepositoryFileExists(repositoryRoot, productReadinessLabPath))
+        {
+            builder.AppendLine();
+            builder.AppendLine($"Composed local proof: {FormatMarkdownLink("Product readiness lab", GetRelativeDocPath(request, productReadinessLabPath))} shows how the web, auth, flow, DurableTask-facing, Aspire, and Postgres product-state pieces fit together without claiming production hosting or Durable Task storage ownership.");
+        }
+
         builder.AppendLine();
         builder.AppendLine("Release and readiness:");
         builder.AppendLine($"- {FormatMarkdownLink("Release hub", GetRelativeDocPath(request, ReleaseHubPath))} keeps the public release story, adoption risk, and policy links in one place.");

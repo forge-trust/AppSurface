@@ -140,6 +140,14 @@ dotnet package add ForgeTrust.AppSurface.Web
 
 Add optional modules only when the generated chooser points you to them.
 
+If you need a composed product-shaped proof instead of a single package slice, run the [product-readiness lab](./examples/product-readiness-lab/README.md):
+
+```bash
+dotnet run --project examples/product-readiness-lab/ProductReadinessLab.csproj -- --report
+```
+
+The lab emits a readiness report with `proven-locally`, `host-owned`, `deferred`, `unsafe-to-copy`, and `blocked` rows. Its in-process host proof shows where `IDurableTaskFlowRunner<TContext>` and `IDurableTaskFlowClient<TContext>` fit, while keeping Durable Task worker/client hosting and storage provider setup explicitly host-owned.
+
 For contributor verification, build the solution:
 
 ```bash
@@ -197,6 +205,7 @@ Check out the examples to see how modules are composed in practice:
 dotnet run --project examples/auth-aspnetcore-bridge
 dotnet run --project examples/console-app
 dotnet run --project examples/flow-approval-local/FlowApprovalLocalExample.csproj
+dotnet run --project examples/product-readiness-lab/ProductReadinessLab.csproj -- --report
 dotnet run --project examples/web-app
 dotnet run --project examples/razorwire-mvc/RazorWireWebExample.csproj
 ```
@@ -243,6 +252,9 @@ how to use this project.
   validation on a strongly typed config wrapper and the startup failure shape.
 - [Flow approval local example](examples/flow-approval-local/README.md) – shows a typed
   flow that waits for an approval event and resumes through the in-memory runner.
+- [Product readiness lab](examples/product-readiness-lab/README.md) – runs a composed
+  local evaluator with AppSurface Web, Auth.AspNetCore, Flow, DurableTask-facing
+  host-shape guidance, and Postgres product-state proof.
 
 ## License
 

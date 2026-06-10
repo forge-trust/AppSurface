@@ -8,9 +8,10 @@ The target reader is a team lead, engineering manager, architect, or senior deve
 
 1. Read [Should I Use AppSurface?](should-i-use-appsurface.md) to decide whether plain ASP.NET Core is still enough.
 2. Run [First Success Path](first-success-path.md) to prove the smallest web app starts.
-3. Read [From Program.cs to an AppSurface Module](../guides/from-program-cs-to-module.md) to inspect one concrete startup concern as a module.
-4. Keep [Troubleshoot Startup and Modules](../troubleshooting/startup-and-modules.md) nearby if the first run or module composition does not behave as expected.
-5. Use the [AppSurface Glossary](../concepts/glossary.md) when a term in package docs is unfamiliar.
+3. Run the [Product Readiness Lab](../examples/product-readiness-lab/README.md) when you need a composed product-shaped proof with a readiness report.
+4. Read [From Program.cs to an AppSurface Module](../guides/from-program-cs-to-module.md) to inspect one concrete startup concern as a module.
+5. Keep [Troubleshoot Startup and Modules](../troubleshooting/startup-and-modules.md) nearby if the first run or module composition does not behave as expected.
+6. Use the [AppSurface Glossary](../concepts/glossary.md) when a term in package docs is unfamiliar.
 
 ## What AppSurface Is
 
@@ -19,6 +20,8 @@ AppSurface is a small module composition layer over familiar .NET and ASP.NET Co
 AppSurface gives you a place to name startup concerns. A module can register services, configure host behavior, configure web options, register middleware, and map endpoints through one documented surface.
 
 Start with the [package chooser](../packages/README.md) when you need an install path. Start with this evaluator path when you need the adoption argument.
+
+Use the product-readiness lab after the smallest web proof when the question changes from “can it start?” to “what would AppSurface own in a product app?” The lab report intentionally separates local proofs from host-owned production work: product state can be proven with Postgres, while Durable Task worker/client hosting and storage provider setup remain application-owned.
 
 ## What To Look For
 
