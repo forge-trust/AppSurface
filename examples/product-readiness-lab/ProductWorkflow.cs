@@ -15,7 +15,7 @@ internal sealed class ProductApprovalInProcessHost
     private readonly IDurableTaskFlowRunner<ProductApprovalState> _durableRunner;
     private readonly IDurableTaskFlowClient<ProductApprovalState> _durableClient;
     private readonly IProductStateStore _store;
-    private readonly ConcurrentDictionary<string, FlowRunResult<ProductApprovalState>> _waitingRuns = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ProductWorkflowWaitingRun> _waitingRuns = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Creates the in-process host proof.
@@ -46,7 +46,7 @@ internal sealed class ProductApprovalInProcessHost
 
         var state = new ProductApprovalState(subscription.Id.ToString("N"), accountName, planName, "created", null);
         var run = await _runner.RunAsync(_definition, state, cancellationToken);
-        _waitingRuns[state.RequestId] = run;
+        _waitingRuns[state.RequestId] = new ProductWorkflowWaitingRun(run);
 
         return WorkflowProbe.FromWaiting(state.RequestId, run);
     }
@@ -59,34 +59,62 @@ internal sealed class ProductApprovalInProcessHost
         string decision,
         CancellationToken cancellationToken = default)
     {
-        if (!_waitingRuns.TryRemove(instanceId, out var waiting) || waiting.NodeId is null || waiting.Context is null)
+        if (!_waitingRuns.TryGetValue(instanceId, out var waitingRun))
         {
             throw new ProductWorkflowNotWaitingException(instanceId);
         }
 
-        var authorization = await _durableClient.AuthorizeResumeAsync(
-            new FlowResumeAuthorizationRequest(
-                ProductReadinessFlowDefinition.FlowId,
-                ProductReadinessFlowDefinition.Version,
-                instanceId,
-                waiting.NodeId,
-                ProductReadinessFlowDefinition.ApprovalEventName,
-                "operator-1"),
-            cancellationToken);
-
-        if (!authorization.Allowed)
+        await waitingRun.Gate.WaitAsync(cancellationToken);
+        try
         {
-            throw new InvalidOperationException($"Resume denied: {authorization.Code}.");
+            if (!_waitingRuns.TryGetValue(instanceId, out var currentRun) || !ReferenceEquals(currentRun, waitingRun))
+            {
+                throw new ProductWorkflowNotWaitingException(instanceId);
+            }
+
+            var waiting = currentRun.Result;
+            if (waiting.NodeId is null || waiting.Context is null)
+            {
+                throw new ProductWorkflowNotWaitingException(instanceId);
+            }
+
+            var authorization = await _durableClient.AuthorizeResumeAsync(
+                new FlowResumeAuthorizationRequest(
+                    ProductReadinessFlowDefinition.FlowId,
+                    ProductReadinessFlowDefinition.Version,
+                    instanceId,
+                    waiting.NodeId,
+                    ProductReadinessFlowDefinition.ApprovalEventName,
+                    "operator-1"),
+                cancellationToken);
+
+            if (!authorization.Allowed)
+            {
+                throw new InvalidOperationException($"Resume denied: {authorization.Code}.");
+            }
+
+            var completed = await _runner.ResumeAsync(
+                _definition,
+                waiting.NodeId,
+                waiting.Context,
+                new FlowResumeEvent(ProductReadinessFlowDefinition.ApprovalEventName, decision),
+                cancellationToken);
+
+            if (completed.Status == FlowRunStatus.Waiting)
+            {
+                currentRun.Result = completed;
+            }
+            else
+            {
+                _waitingRuns.TryRemove(instanceId, out _);
+            }
+
+            return WorkflowProbe.FromCompleted(instanceId, completed);
         }
-
-        var completed = await _runner.ResumeAsync(
-            _definition,
-            waiting.NodeId,
-            waiting.Context,
-            new FlowResumeEvent(ProductReadinessFlowDefinition.ApprovalEventName, decision),
-            cancellationToken);
-
-        return WorkflowProbe.FromCompleted(instanceId, completed);
+        finally
+        {
+            waitingRun.Gate.Release();
+        }
     }
 
     /// <summary>
@@ -140,6 +168,31 @@ internal sealed class ProductApprovalInProcessHost
         DurableTaskFlowStep<ProductApprovalState> step,
         FlowResumeEvent resumeEvent) =>
         new(step.FlowId, step.Version, step.InstanceId, step.NodeId, step.Context, resumeEvent);
+}
+
+/// <summary>
+/// Waiting workflow state guarded so only one resume attempt can execute at a time.
+/// </summary>
+internal sealed class ProductWorkflowWaitingRun
+{
+    /// <summary>
+    /// Creates waiting workflow state.
+    /// </summary>
+    /// <param name="result">Current waiting result.</param>
+    public ProductWorkflowWaitingRun(FlowRunResult<ProductApprovalState> result)
+    {
+        Result = result;
+    }
+
+    /// <summary>
+    /// Gets the gate that serializes resume attempts for this workflow instance.
+    /// </summary>
+    public SemaphoreSlim Gate { get; } = new(1, 1);
+
+    /// <summary>
+    /// Gets or sets the current waiting result.
+    /// </summary>
+    public FlowRunResult<ProductApprovalState> Result { get; set; }
 }
 
 /// <summary>

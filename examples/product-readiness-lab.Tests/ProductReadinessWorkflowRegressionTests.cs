@@ -36,6 +36,31 @@ public sealed class ProductReadinessWorkflowRegressionTests
         Assert.Equal("IgnoredLateEvent", conflict.Value?.Status);
     }
 
+    [Fact]
+    public async Task ResumeWorkflowAsync_CanceledResume_CanBeRetried()
+    {
+        // Regression: canceled resume consumed the waiting run before processing completed.
+        // Found by /review on 2026-06-10.
+        await using var provider = BuildProvider(new InMemoryProductStateStore());
+        var host = provider.GetRequiredService<ProductApprovalInProcessHost>();
+        var started = await host.StartAsync("Retry Co", "Team");
+        using var canceled = new CancellationTokenSource();
+        await canceled.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await host.ResumeAsync(started.InstanceId, "approved", canceled.Token));
+
+        var retry = await ProductReadinessEndpoints.ResumeWorkflowAsync(
+            host,
+            started.InstanceId,
+            new ResumeWorkflowRequest("approved"),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<Ok<WorkflowProbe>>(retry.Result);
+        Assert.Equal(started.InstanceId, ok.Value?.InstanceId);
+        Assert.Equal("Completed", ok.Value?.Status);
+    }
+
     private static ServiceProvider BuildProvider(IProductStateStore store)
     {
         var services = new ServiceCollection();
