@@ -59,9 +59,9 @@ internal sealed class ProductApprovalInProcessHost
         string decision,
         CancellationToken cancellationToken = default)
     {
-        if (!_waitingRuns.TryGetValue(instanceId, out var waiting) || waiting.NodeId is null || waiting.Context is null)
+        if (!_waitingRuns.TryRemove(instanceId, out var waiting) || waiting.NodeId is null || waiting.Context is null)
         {
-            throw new InvalidOperationException($"Workflow instance '{instanceId}' is not waiting.");
+            throw new ProductWorkflowNotWaitingException(instanceId);
         }
 
         var authorization = await _durableClient.AuthorizeResumeAsync(
@@ -85,8 +85,6 @@ internal sealed class ProductApprovalInProcessHost
             waiting.Context,
             new FlowResumeEvent(ProductReadinessFlowDefinition.ApprovalEventName, decision),
             cancellationToken);
-
-        _waitingRuns.TryRemove(instanceId, out _);
 
         return WorkflowProbe.FromCompleted(instanceId, completed);
     }
@@ -142,6 +140,27 @@ internal sealed class ProductApprovalInProcessHost
         DurableTaskFlowStep<ProductApprovalState> step,
         FlowResumeEvent resumeEvent) =>
         new(step.FlowId, step.Version, step.InstanceId, step.NodeId, step.Context, resumeEvent);
+}
+
+/// <summary>
+/// Exception thrown when a resume request targets a workflow instance that is no longer waiting.
+/// </summary>
+internal sealed class ProductWorkflowNotWaitingException : InvalidOperationException
+{
+    /// <summary>
+    /// Creates the not-waiting exception.
+    /// </summary>
+    /// <param name="instanceId">Workflow instance id.</param>
+    public ProductWorkflowNotWaitingException(string instanceId)
+        : base($"Workflow instance '{instanceId}' is not waiting.")
+    {
+        InstanceId = instanceId;
+    }
+
+    /// <summary>
+    /// Gets the workflow instance id.
+    /// </summary>
+    public string InstanceId { get; }
 }
 
 /// <summary>

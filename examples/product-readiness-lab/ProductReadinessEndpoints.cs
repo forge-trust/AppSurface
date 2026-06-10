@@ -43,14 +43,29 @@ internal static class ProductReadinessEndpoints
         return TypedResults.Created($"/workflow/{probe.InstanceId}", probe);
     }
 
-    private static async Task<Ok<WorkflowProbe>> ResumeWorkflowAsync(
+    /// <summary>
+    /// Resumes a workflow or returns a handled late-event response when the instance is no longer waiting.
+    /// </summary>
+    /// <param name="host">In-process host that owns waiting workflow instances.</param>
+    /// <param name="instanceId">Workflow instance id.</param>
+    /// <param name="request">Resume request body.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Completed workflow response, or a conflict response for late or unknown resume events.</returns>
+    internal static async Task<Results<Ok<WorkflowProbe>, Conflict<WorkflowResumeRejected>>> ResumeWorkflowAsync(
         ProductApprovalInProcessHost host,
         string instanceId,
         ResumeWorkflowRequest request,
         CancellationToken cancellationToken)
     {
-        var probe = await host.ResumeAsync(instanceId, request.Decision, cancellationToken);
-        return TypedResults.Ok(probe);
+        try
+        {
+            var probe = await host.ResumeAsync(instanceId, request.Decision, cancellationToken);
+            return TypedResults.Ok(probe);
+        }
+        catch (ProductWorkflowNotWaitingException exception)
+        {
+            return TypedResults.Conflict(WorkflowResumeRejected.LateEvent(exception.InstanceId));
+        }
     }
 }
 
@@ -66,6 +81,23 @@ internal sealed record StartWorkflowRequest(string AccountName, string PlanName)
 /// </summary>
 /// <param name="Decision">Approval decision, normally approved or denied.</param>
 internal sealed record ResumeWorkflowRequest(string Decision);
+
+/// <summary>
+/// Response body for resume requests that arrive after an instance is no longer waiting.
+/// </summary>
+/// <param name="InstanceId">Workflow instance id.</param>
+/// <param name="Status">Stable status for late or duplicate resume events.</param>
+/// <param name="Reason">Human-readable reason.</param>
+internal sealed record WorkflowResumeRejected(string InstanceId, string Status, string Reason)
+{
+    /// <summary>
+    /// Creates a late-event response for a workflow instance that is not waiting.
+    /// </summary>
+    /// <param name="instanceId">Workflow instance id.</param>
+    /// <returns>A serializable late-event response.</returns>
+    public static WorkflowResumeRejected LateEvent(string instanceId) =>
+        new(instanceId, "IgnoredLateEvent", "Workflow instance is not waiting for this resume event.");
+}
 
 /// <summary>
 /// Response DTO showing the neutral AppSurface auth result returned by the lab.
