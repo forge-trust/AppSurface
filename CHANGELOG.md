@@ -15,6 +15,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - AppSurface Docs search now keeps MiniSearch candidate matching while applying deterministic reader-intent ranking for exact lookups, aliases, entry points, broad task queries, explicit API/internal filters, and contributor/internal demotion.
+- Package validation now gates redistributed package payload provenance through `packages/third-party-payloads.yml`, package-root notices, generated-first-party evidence, and audited exceptions before prerelease artifacts can pass `verify-packages`.
 
 ## 0.1.0-rc.3 - 2026-06-08
 
