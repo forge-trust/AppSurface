@@ -4,6 +4,7 @@
 @inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetVersioner AssetVersioner
 @inject ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsIdentityResolver IdentityResolver
 @inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
+@inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsOptions DocsOptions
 @inject Microsoft.Extensions.Options.IOptions<AppSurfaceProductIntelligenceOptions> ProductIntelligenceOptions
 @{
     var stylesheetPath = AssetVersioner.AppendVersion(AssetPathResolver.StylesheetPath, "css/site.gen.css");
@@ -13,11 +14,35 @@
     var docsHomeUrl = Url.PathBaseAware(docsIdentity.HomeHref);
     var docsSearchUrl = Url.PathBaseAware(docsRoutes.Search);
     var docsSearchIndexUrl = Url.PathBaseAware(docsRoutes.SearchIndex);
+    var docsMetricsCollectUrl = Url.PathBaseAware(docsRoutes.MetricsCollect);
     var docsArchiveRootUrl = Url.PathBaseAware(docsRoutes.Versions);
     var docsSearchStylesheetUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "search.css"));
     var docsMiniSearchUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "minisearch.min.js"));
     var docsSearchClientUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "search-client.js"));
     var docsBrandIconUrl = Url.Content(AssetPathResolver.BrandIconPath);
+    var metricsOptions = DocsOptions.Metrics ?? new ForgeTrust.AppSurface.Docs.AppSurfaceDocsMetricsOptions();
+    var browserCollectorOptions = metricsOptions.BrowserCollector ?? new ForgeTrust.AppSurface.Docs.AppSurfaceDocsBrowserMetricsCollectorOptions();
+    var hostedCollectionOptions = metricsOptions.HostedCollection ?? new ForgeTrust.AppSurface.Docs.AppSurfaceDocsHostedMetricsCollectionOptions();
+    var hostedReviewOptions = metricsOptions.HostedReview ?? new ForgeTrust.AppSurface.Docs.AppSurfaceDocsHostedMetricsReviewOptions();
+    var metricsEnabled = metricsOptions.Enabled;
+    var browserCollectorEndpointUrl = browserCollectorOptions.EndpointUrl;
+    if (string.IsNullOrWhiteSpace(browserCollectorEndpointUrl) && metricsEnabled && hostedCollectionOptions.Enabled)
+    {
+        browserCollectorEndpointUrl = docsMetricsCollectUrl;
+    }
+
+    var browserCollectorEnabled = metricsEnabled
+        && browserCollectorOptions.Enabled
+        && !string.IsNullOrWhiteSpace(browserCollectorEndpointUrl);
+    var productIntelligenceOptions = ProductIntelligenceOptions.Value;
+    var semanticProductEventsEnabled = browserCollectorEnabled
+        || productIntelligenceOptions.ExperimentalEventsEnabled
+        || productIntelligenceOptions.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchSubmitted)
+        || productIntelligenceOptions.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchReturnedZeroResults)
+        || productIntelligenceOptions.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchResultSelected)
+        || productIntelligenceOptions.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsRecoveryLinkSelected)
+        || productIntelligenceOptions.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchFilterChanged)
+        || productIntelligenceOptions.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchFrictionFeedbackSubmitted);
     var canonicalUrl = ViewData["CanonicalUrl"] as string;
     var canonicalHref = string.IsNullOrWhiteSpace(canonicalUrl)
         ? string.Empty
@@ -30,7 +55,19 @@
             docsSearchUrl,
             docsSearchIndexUrl,
             miniSearchUrl = docsMiniSearchUrl,
-            productIntelligenceEnabled = ProductIntelligenceOptions.Value.ExperimentalEventsEnabled
+            productIntelligenceEnabled = semanticProductEventsEnabled,
+            metrics = new
+            {
+                enabled = metricsEnabled,
+                browserCollector = new
+                {
+                    enabled = browserCollectorEnabled,
+                    endpointUrl = browserCollectorEnabled ? browserCollectorEndpointUrl : null
+                },
+                hostedCollectionEnabled = metricsEnabled && hostedCollectionOptions.Enabled,
+                hostedReviewEnabled = metricsEnabled && hostedReviewOptions.Enabled,
+                feedbackEnabled = browserCollectorEnabled
+            }
         });
     var isSearchPage = string.Equals(
         ViewContext.RouteData.Values["action"]?.ToString(),

@@ -28,6 +28,16 @@ public static class AppSurfaceProductEventRegistry
     public const string DocsRecoveryLinkSelected = "docs.recovery_link.selected";
 
     /// <summary>
+    /// Event name for docs search filter changes.
+    /// </summary>
+    public const string DocsSearchFilterChanged = "docs.search.filter_changed";
+
+    /// <summary>
+    /// Event name for reader feedback on docs search friction recovery.
+    /// </summary>
+    public const string DocsSearchFrictionFeedbackSubmitted = "docs.search.friction_feedback_submitted";
+
+    /// <summary>
     /// Event name for RazorWire form failures.
     /// </summary>
     public const string RazorWireFormFailed = "razorwire.form.failed";
@@ -89,6 +99,9 @@ public static class AppSurfaceProductEventRegistry
 
     private static readonly string[] DocsRecoveryLinkKinds = ["api-reference", "example", "fallback", "guide", "server_fallback"];
     private static readonly string[] DocsRecoverySourceStates = ["loading", "no_results", "unavailable"];
+    private static readonly string[] DocsFilterKeys = ["audience", "component", "language", "pageType", "status"];
+    private static readonly string[] DocsFilterActions = ["cleared", "cleared_all", "selected"];
+    private static readonly string[] DocsFrictionFeedbackValues = ["not_useful", "useful"];
     private static readonly string[] RazorWireFailureModes = ["handled", "unhandled"];
     private static readonly string[] RazorWireResponseKinds = ["html", "json", "network", "turbo-stream", "unknown"];
     private static readonly string[] RazorWireFailureUi = ["disabled", "generated", "handled", "suppressed"];
@@ -165,6 +178,35 @@ public static class AppSurfaceProductEventRegistry
                 Property("surface", "Docs surface that emitted the event.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces)
             ],
             ["raw query text", "full URL with query string", "reader identity"]),
+        new(
+            DocsSearchFilterChanged,
+            AppSurfaceProductEventLifecycle.Experimental,
+            "Understand which structured docs filters readers use without storing filter values or query text.",
+            "ForgeTrust.AppSurface.Docs",
+            "Short product-quality retention; aggregate by filter key and action.",
+            [
+                Property("surface", "Docs surface that emitted the event.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces),
+                Property("filter_key", "Structured filter key changed by the reader.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsFilterKeys),
+                Property("filter_action", "Low-cardinality filter action such as selected, cleared, or cleared_all.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsFilterActions),
+                Property("active_filter_count", "Number of active structured search filters after the change.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low),
+                Property("query_length", "Normalized character count for the active search text.", AppSurfaceProductEventSensitivity.Behavioral, AppSurfaceProductEventCardinality.Medium)
+            ],
+            ["raw query text", "filter values", "full URL", "reader identity"]),
+        new(
+            DocsSearchFrictionFeedbackSubmitted,
+            AppSurfaceProductEventLifecycle.Experimental,
+            "Measure whether no-results and recovery affordances helped readers continue.",
+            "ForgeTrust.AppSurface.Docs",
+            "Short product-quality retention; aggregate by source state and feedback value.",
+            [
+                Property("surface", "Docs surface that emitted the event.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces),
+                Property("source_state", "Search-friction state that rendered the feedback control.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsRecoverySourceStates),
+                Property("feedback_value", "Reader feedback value for the recovery affordance.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsFrictionFeedbackValues),
+                Property("active_filter_count", "Number of active structured search filters at feedback time.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low),
+                Property("query_length", "Normalized character count for the active search text.", AppSurfaceProductEventSensitivity.Behavioral, AppSurfaceProductEventCardinality.Medium),
+                Property("link_kind", "Optional normalized recovery-link kind shown with the feedback control.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: DocsRecoveryLinkKinds)
+            ],
+            ["raw query text", "free-form comments", "full URL", "reader identity"]),
         new(
             RazorWireFormFailed,
             AppSurfaceProductEventLifecycle.Experimental,
