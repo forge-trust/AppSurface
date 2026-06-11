@@ -859,12 +859,9 @@ internal sealed class CoverageRunWorkflow
             "-v",
             request.Verbosity,
         };
-        foreach (var artifact in testResults)
+        foreach (var artifact in testResults.Where(artifact => artifact.Format == CoverageRunTestResultFormat.Junit))
         {
-            if (artifact.Format == CoverageRunTestResultFormat.Junit)
-            {
-                args.Add($"--logger:junit;LogFilePath={artifact.Path}");
-            }
+            args.Add($"--logger:junit;LogFilePath={artifact.Path}");
         }
 
         foreach (var logger in request.Loggers)
