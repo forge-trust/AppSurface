@@ -12,6 +12,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("run", script, StringComparison.Ordinal);
         Assert.Contains("--include \"${INCLUDE_FILTER:-[ForgeTrust.AppSurface.*]*}\"", script, StringComparison.Ordinal);
         Assert.Contains("--exclude \"${EXCLUDE_FILTER:-[*.Tests]*,[*.IntegrationTests]*}\"", script, StringComparison.Ordinal);
+        Assert.Contains("--exclusive-test-project ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj", script, StringComparison.Ordinal);
         Assert.Contains("--test-results junit", script, StringComparison.Ordinal);
         Assert.Contains("--slow-test-diagnostics", script, StringComparison.Ordinal);
         Assert.Contains("--logger \"GitHubActions;report-warnings=false\"", script, StringComparison.Ordinal);

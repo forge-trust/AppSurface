@@ -43,6 +43,7 @@ if [[ "$use_legacy" == "false" ]]; then
     --output "$ROOT_DIR/TestResults/coverage-merged"
     --configuration "$BUILD_CONFIGURATION"
     --parallelism "${COVERAGE_PARALLELISM:-1}"
+    --exclusive-test-project ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj
     --include "${INCLUDE_FILTER:-[ForgeTrust.AppSurface.*]*}"
     --exclude "${EXCLUDE_FILTER:-[*.Tests]*,[*.IntegrationTests]*}"
     --test-results junit

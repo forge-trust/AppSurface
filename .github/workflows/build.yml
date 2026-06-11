@@ -101,6 +101,7 @@ jobs:
             --configuration Release \
             --no-restore \
             --parallelism 2 \
+            --exclusive-test-project ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj \
             --include "[ForgeTrust.AppSurface.*]*" \
             --exclude "[*.Tests]*,[*.IntegrationTests]*" \
             --test-results junit \
