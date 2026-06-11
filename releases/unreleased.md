@@ -4,13 +4,13 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
-- Add merged public changes here as they land.
+- Reader-intent relevance for AppSurface Docs search.
 
 ## Included in the next coordinated version
 
 ### Release and docs surface
 
-- Add release-facing changes here.
+- AppSurface Docs search now hydrates MiniSearch candidates from the normalized docs payload and applies deterministic reader-intent ranking before both sidebar and full-page rendering. Exact title, path, source, alias, keyword, and entry-point matches stay protected; broad task queries prefer reader-facing guides; explicit API/internal filters override broad-task boosts; and contributor/internal docs are demoted unless the query asks for them directly.
 
 ## Migration watch
 
