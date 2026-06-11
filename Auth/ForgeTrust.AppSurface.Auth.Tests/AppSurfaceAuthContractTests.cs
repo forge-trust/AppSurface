@@ -22,6 +22,7 @@ public sealed class AppSurfaceAuthContractTests
     [InlineData(AppSurfaceAuthReason.MissingServices, 4)]
     [InlineData(AppSurfaceAuthReason.UnsafeReturnUrl, 5)]
     [InlineData(AppSurfaceAuthReason.StaleOrUnknownSession, 6)]
+    [InlineData(AppSurfaceAuthReason.MissingSubject, 7)]
     public void AppSurfaceAuthReason_NumericValues_AreStable(AppSurfaceAuthReason value, int expected)
     {
         Assert.Equal(expected, (int)value);
@@ -198,6 +199,7 @@ public sealed class AppSurfaceAuthContractTests
         var forbidden = AppSurfaceAuthResult.Forbidden();
         var missingPolicy = AppSurfaceAuthResult.MissingPolicy();
         var missingServices = AppSurfaceAuthResult.MissingServices();
+        var missingSubject = AppSurfaceAuthResult.MissingSubject();
         var unsafeReturnUrl = AppSurfaceAuthResult.UnsafeReturnUrl();
         var staleSession = AppSurfaceAuthResult.StaleOrUnknownSession();
 
@@ -208,6 +210,7 @@ public sealed class AppSurfaceAuthContractTests
         AssertResult(forbidden, AppSurfaceAuthOutcome.Forbid, AppSurfaceAuthReason.Forbidden);
         AssertResult(missingPolicy, AppSurfaceAuthOutcome.SetupFailure, AppSurfaceAuthReason.MissingPolicy);
         AssertResult(missingServices, AppSurfaceAuthOutcome.SetupFailure, AppSurfaceAuthReason.MissingServices);
+        AssertResult(missingSubject, AppSurfaceAuthOutcome.SetupFailure, AppSurfaceAuthReason.MissingSubject);
         AssertResult(unsafeReturnUrl, AppSurfaceAuthOutcome.UnsafeNavigation, AppSurfaceAuthReason.UnsafeReturnUrl);
         AssertResult(staleSession, AppSurfaceAuthOutcome.StaleOrUnknownSession, AppSurfaceAuthReason.StaleOrUnknownSession);
     }

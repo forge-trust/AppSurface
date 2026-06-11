@@ -8,7 +8,7 @@ Use this package when you are authoring AppSurface modules or host integrations 
 
 ## Release Guidance
 
-AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 2 release note](../../releases/v0.1.0-rc.2.md) for current release risk, migration guidance, and package readiness.
+AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 3 release note](../../releases/v0.1.0-rc.3.md) for current release risk, migration guidance, and package readiness.
 
 ## Quickstart: Model An Auth Decision
 
@@ -86,6 +86,7 @@ if (result.Outcome == AppSurfaceAuthOutcome.Forbid)
 | `Forbid(...)` / `Forbidden(...)` | `Forbid` | `Forbidden` | The caller is signed in but not allowed. | Host policy denied the authenticated caller. | Show a forbidden state or ask an operator to grant access. | "You do not have permission." | HTTP 403 or forbid. |
 | `MissingPolicy(...)` | `SetupFailure` | `MissingPolicy` | The host policy was not configured or could not be found. | A policy name is missing, misspelled, or not registered. | Register the host policy or fix the configured name. | Use generic failure copy. Log the setup issue. | Host setup error or guarded 403. |
 | `MissingServices(...)` | `SetupFailure` | `MissingServices` | Required host auth services are unavailable. | The host did not register its auth or authorization services. | Register the host auth services before using the adapter. | Use generic failure copy. Log the setup issue. | Host setup error or guarded 403. |
+| `MissingSubject(...)` | `SetupFailure` | `MissingSubject` | An authenticated caller could not be mapped to a stable subject. | The host principal did not include a configured subject claim. | Configure the host to issue a stable subject claim or update the host adapter subject mapping. | Use generic failure copy. Log the setup issue. | Host setup error or guarded 403. |
 | `UnsafeReturnUrl(...)` | `UnsafeNavigation` | `UnsafeReturnUrl` | A return or navigation target was unsafe. | User input contained an external, protocol-relative, backslash, or control-character path. | Drop the target and use a safe fallback. | "Return target was not allowed." | Redirect to safe fallback or reject. |
 | `StaleOrUnknownSession(...)` | `StaleOrUnknownSession` | `StaleOrUnknownSession` | The session could not be trusted. | The session expired, was missing, or could not be resolved. | Ask the host to refresh or reauthenticate. | "Your session may have expired." | HTTP 401, challenge, or refresh flow. |
 
@@ -117,11 +118,17 @@ Use host auth directly when you need to authenticate a request, configure scheme
 
 Use AppSurface auth contracts when an AppSurface module needs to describe a user, session, decision, prompt, or audit event without depending on a specific host framework.
 
+## ASP.NET Core Adapter
+
+Use [`ForgeTrust.AppSurface.Auth.AspNetCore`](../ForgeTrust.AppSurface.Auth.AspNetCore/README.md) when an ASP.NET Core host already owns authentication and authorization, but AppSurface-aware code needs mapped request context or named host-policy results.
+
+The ASP.NET Core adapter keeps schemes, policies, middleware, challenges, forbids, redirects, cookies, OIDC, and Identity in the host. It only maps the current request into `AppSurfaceAuthContext` and ASP.NET Core policy outcomes into `AppSurfaceAuthResult`.
+
 ## Future Consumers
 
 The next auth slices map host behavior into these contracts:
 
-- #418 maps ASP.NET Core `ClaimsPrincipal` and policies into `AppSurfaceAuthContext` and `AppSurfaceAuthResult`.
+- #418 adds the ASP.NET Core adapter package for request context and named host-policy results.
 - #419 maps Minimal API policy decisions to correct challenge and forbid behavior.
 - #421 adds a result-bearing RazorWire auth adapter while preserving boolean authorizer compatibility.
 - #422 projects the same auth result states into RazorWire UI components.

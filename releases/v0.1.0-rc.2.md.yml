@@ -6,10 +6,6 @@ order: 10
 breadcrumbs:
 - Releases
 - v0.1.0-rc.2
-redirect_aliases:
-- releases/v0.1-preview
-- releases/v0.1-preview.md
-- releases/v0.1-preview.md.html
 trust:
   status: Tagged
   summary: This page is the final narrative release note for AppSurface 0.1.0-rc.2.
