@@ -1,5 +1,5 @@
 title: Releases
-summary: Start with the public release hub, then drill into the current v0.1.0 RC 2 note, unreleased proof artifact, compact changelog, and pre-1.0 upgrade policy.
+summary: Start with the public release hub, then drill into the current v0.1.0 RC 3 note, unreleased proof artifact, compact changelog, and pre-1.0 upgrade policy.
 page_type: guide
 nav_group: Releases
 order: 10
@@ -16,6 +16,6 @@ trust:
   archive: Tagged release notes live beside this page under /docs/releases/ and remain linked from CHANGELOG.md.
   sources:
     - CHANGELOG.md
-    - releases/v0.1.0-rc.2.md
+    - releases/v0.1.0-rc.3.md
     - releases/unreleased.md
     - releases/release-authoring-checklist.md
