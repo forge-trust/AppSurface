@@ -16,6 +16,12 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--test-results junit", script, StringComparison.Ordinal);
         Assert.Contains("--slow-test-diagnostics", script, StringComparison.Ordinal);
         Assert.Contains("--logger \"GitHubActions;report-warnings=false\"", script, StringComparison.Ordinal);
+        Assert.Equal(2, CountOccurrences(script, "dotnet_run_args+=(--no-restore)"));
+
+        var sourceCliNoRestore = script.IndexOf("dotnet_run_args+=(--no-restore)", StringComparison.Ordinal);
+        var coverageRunDelimiter = script.IndexOf("    --\n    coverage", StringComparison.Ordinal);
+        Assert.True(sourceCliNoRestore >= 0, "The source CLI lane should pass --no-restore to dotnet run when requested.");
+        Assert.True(coverageRunDelimiter > sourceCliNoRestore, "The source CLI lane must append --no-restore before the coverage run delimiter.");
     }
 
     [Fact]
@@ -47,6 +53,23 @@ public sealed class CoverageSolutionScriptTests
 
     private static string ReadWorkflow()
         => ReadRepositoryFile(".github", "workflows", "build.yml");
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        var startIndex = 0;
+        while (true)
+        {
+            var index = text.IndexOf(value, startIndex, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                return count;
+            }
+
+            count++;
+            startIndex = index + value.Length;
+        }
+    }
 
     private static string ReadRepositoryFile(params string[] paths)
     {

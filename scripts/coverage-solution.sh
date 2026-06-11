@@ -51,10 +51,6 @@ if [[ "$use_legacy" == "false" ]]; then
     --logger "GitHubActions;report-warnings=false"
   )
 
-  if [[ "${BUILD_NO_RESTORE:-false}" == "true" ]]; then
-    dotnet_run_args+=(--no-restore)
-  fi
-
   cd "$ROOT_DIR"
   exec dotnet "${dotnet_run_args[@]}"
 fi
