@@ -1146,13 +1146,20 @@ public sealed class CoverageRunTests
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         var runner = new CliWrapCoverageRunProcessRunner();
+        var outputFile = Path.Join(repo.Path, "logs", "dotnet-test.log");
 
         var exception = await Assert.ThrowsAsync<CommandException>(
-            () => runner.RunAsync("definitely-not-a-real-dotnet-command", [], repo.Path, CancellationToken.None));
+            () => runner.RunAsync(
+                "definitely-not-a-real-dotnet-command",
+                [],
+                repo.Path,
+                CancellationToken.None,
+                outputFile));
 
         Assert.Contains("ASCOV110", exception.Message, StringComparison.Ordinal);
         Assert.Contains("Failed to start dotnet", exception.Message, StringComparison.Ordinal);
         Assert.Contains("definitely-not-a-real-dotnet-command", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Failed to start command 'definitely-not-a-real-dotnet-command'", File.ReadAllText(outputFile), StringComparison.Ordinal);
     }
 
     [Fact]
