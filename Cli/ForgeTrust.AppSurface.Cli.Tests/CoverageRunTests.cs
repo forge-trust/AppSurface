@@ -111,6 +111,26 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_TestResultsJunit_ShouldAcceptCaseInsensitiveFormat()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()))
+        {
+            TestProjects = [project],
+            TestResults = "JUNIT",
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console, CancellationToken.None);
+
+        var testCommand = Assert.Single(runner.Commands, recorded => recorded.Arguments.FirstOrDefault() == "test");
+        Assert.Contains(testCommand.Arguments, argument => argument.StartsWith("--logger:junit;LogFilePath=", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RunAsync_SlowTestDiagnostics_ShouldImplyJunitAndWriteDiagnostics()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -687,6 +707,26 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task RunAsync_SlowTestDiagnostics_ShouldWarnWhenExistingDiagnosticsPathCannotBeReused()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        repo.WriteFile("TestResults/coverage-merged/.appsurface-coverage-output", "AppSurface coverage output directory");
+        Directory.CreateDirectory(Path.Join(repo.Path, "TestResults", "coverage-merged", "slow-test-diagnostics.json"));
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(TestProjects: [project], SlowTestDiagnostics: true, Clean: false);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Slow-test diagnostics failed", console.ReadErrorString(), StringComparison.Ordinal);
+        var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
+        Assert.Contains("\"parserStatus\": \"diagnosticsFailed\"", timings, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SlowTestDiagnosticsWriter_ShouldRecordEmptyMetadataAndRewriteFinalOverhead()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -755,13 +795,28 @@ public sealed class CoverageRunTests
     public async Task SlowTestDiagnosticsWriter_ShouldRecordMissingJunitFiles()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
-        var missingJunit = Path.Join(repo.Path, "missing", "junit.xml");
+        var missingDirectory = Directory.CreateDirectory(Path.Join(repo.Path, "missing")).FullName;
+        var missingJunit = Path.Join(missingDirectory, "junit.xml");
         var result = CreateProjectRunResult(repo.Path, missingJunit);
 
         var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync([result], CancellationToken.None);
 
         Assert.False(report.MetadataComplete);
         Assert.Equal(0, report.JunitFileCount);
+        Assert.Equal("missing", Assert.Single(report.Projects).ParserStatus);
+        Assert.Contains(report.Warnings, warning => warning.Contains("JUnit file was not created", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldRecordMissingJunitDirectories()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var missingJunit = Path.Join(repo.Path, "missing", "junit.xml");
+        var result = CreateProjectRunResult(repo.Path, missingJunit);
+
+        var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync([result], CancellationToken.None);
+
+        Assert.False(report.MetadataComplete);
         Assert.Equal("missing", Assert.Single(report.Projects).ParserStatus);
         Assert.Contains(report.Warnings, warning => warning.Contains("JUnit file was not created", StringComparison.Ordinal));
     }
@@ -794,6 +849,20 @@ public sealed class CoverageRunTests
         Assert.Equal("readFailed", Assert.Single(report.Projects).ParserStatus);
         Assert.Contains(report.Warnings, warning => warning.Contains("Failed to", StringComparison.Ordinal)
             && warning.Contains("JUnit XML", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldRecordIoJunitReadFailures()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var longName = new string('x', 4096) + ".xml";
+        var result = CreateProjectRunResult(repo.Path, Path.Join(repo.Path, longName));
+
+        var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync([result], CancellationToken.None);
+
+        Assert.False(report.MetadataComplete);
+        Assert.Equal("readFailed", Assert.Single(report.Projects).ParserStatus);
+        Assert.Contains(report.Warnings, warning => warning.Contains("Failed to read JUnit XML", StringComparison.Ordinal));
     }
 
     [Fact]
