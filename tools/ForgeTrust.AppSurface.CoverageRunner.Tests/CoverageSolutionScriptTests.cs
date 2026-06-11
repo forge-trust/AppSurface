@@ -30,20 +30,38 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("exec dotnet \"${dotnet_run_args[@]}\"", script, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void BuildWorkflow_ShouldUseCoverageSolutionScriptForDefaultLane()
+    {
+        var workflow = ReadWorkflow();
+
+        Assert.Contains("BUILD_CONFIGURATION: Release", workflow, StringComparison.Ordinal);
+        Assert.Contains("BUILD_NO_RESTORE: true", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);
+        Assert.Contains("./scripts/coverage-solution.sh", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("coverage run \\", workflow, StringComparison.Ordinal);
+    }
+
     private static string ReadScript()
+        => ReadRepositoryFile("scripts", "coverage-solution.sh");
+
+    private static string ReadWorkflow()
+        => ReadRepositoryFile(".github", "workflows", "build.yml");
+
+    private static string ReadRepositoryFile(params string[] paths)
     {
         var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
         while (directory is not null)
         {
-            var script = Path.Join(directory.FullName, "scripts", "coverage-solution.sh");
-            if (File.Exists(script))
+            var file = Path.Join([directory.FullName, .. paths]);
+            if (File.Exists(file))
             {
-                return File.ReadAllText(script);
+                return File.ReadAllText(file);
             }
 
             directory = directory.Parent;
         }
 
-        throw new FileNotFoundException("Could not locate scripts/coverage-solution.sh from the test working directory.");
+        throw new FileNotFoundException($"Could not locate {Path.Join(paths)} from the test working directory.");
     }
 }

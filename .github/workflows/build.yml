@@ -94,19 +94,12 @@ jobs:
           pnpm --dir Web run assets:verify
 
       - name: Run solution coverage
+        env:
+          BUILD_CONFIGURATION: Release
+          BUILD_NO_RESTORE: true
+          COVERAGE_PARALLELISM: 2
         run: |
-          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-restore -- \
-            coverage run \
-            --solution ForgeTrust.AppSurface.slnx \
-            --configuration Release \
-            --no-restore \
-            --parallelism 2 \
-            --exclusive-test-project ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj \
-            --include "[ForgeTrust.AppSurface.*]*" \
-            --exclude "[*.Tests]*,[*.IntegrationTests]*" \
-            --test-results junit \
-            --slow-test-diagnostics \
-            --logger "GitHubActions;report-warnings=false"
+          ./scripts/coverage-solution.sh
 
       - name: Upload slow-test diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
