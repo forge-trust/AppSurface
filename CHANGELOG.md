@@ -14,6 +14,8 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
+- AppSurface CI coverage now dogfoods the `appsurface coverage run` command, running from source via `dotnet run --project`, for the default full-solution coverage lane while preserving Cobertura, JUnit, slow-test diagnostics, Codecov, and `coverage gate` evidence.
+- `appsurface coverage run` now supports AppSurface-managed `--test-results junit`; `--slow-test-diagnostics` implies managed JUnit results and records parser status, warnings, metadata completeness, and diagnostic overhead in `timings.json`.
 - AppSurface Docs search now keeps MiniSearch candidate matching while applying deterministic reader-intent ranking for exact lookups, aliases, entry points, broad task queries, explicit API/internal filters, and contributor/internal demotion.
 
 ## 0.1.0-rc.3 - 2026-06-08
