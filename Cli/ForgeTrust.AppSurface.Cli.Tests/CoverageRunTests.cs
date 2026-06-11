@@ -781,7 +781,10 @@ public sealed class CoverageRunTests
         var markdown = File.ReadAllText(diagnostics.MarkdownPath);
         Assert.Contains("No project timing metadata was available.", markdown, StringComparison.Ordinal);
         Assert.Contains("No JUnit test cases were available.", markdown, StringComparison.Ordinal);
-        Assert.Contains("Diagnostic aggregation overhead: 2s (20.00% of total runner time)", markdown, StringComparison.Ordinal);
+        Assert.Contains(
+            "Diagnostic aggregation overhead: 2s (20.00% of elapsed runner time at diagnostics generation)",
+            markdown,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -823,6 +826,24 @@ public sealed class CoverageRunTests
         Assert.Contains("| 3 | failed |", markdown, StringComparison.Ordinal);
         Assert.Contains("| 2 | error |", markdown, StringComparison.Ordinal);
         Assert.Contains("| 1 | skipped |", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldWarnWhenProjectHasMultipleManagedJunitArtifacts()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var firstJunit = repo.WriteFile("first.xml", "<testsuite><testcase classname=\"First\" name=\"UsesFirst\" time=\"1\" /></testsuite>");
+        var secondJunit = repo.WriteFile("second.xml", "<testsuite><testcase classname=\"Second\" name=\"Ignored\" time=\"2\" /></testsuite>");
+        var result = CreateProjectRunResult(repo.Path, [firstJunit, secondJunit]);
+
+        var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync([result], CancellationToken.None);
+
+        Assert.False(report.MetadataComplete);
+        Assert.Equal(1, report.JunitFileCount);
+        Assert.Equal("parsed", Assert.Single(report.Projects).ParserStatus);
+        Assert.Contains(report.Warnings, warning => warning.Contains("multiple managed JUnit artifacts", StringComparison.Ordinal));
+        Assert.Contains(report.TestCases, test => test.Name == "UsesFirst");
+        Assert.DoesNotContain(report.TestCases, test => test.Name == "Ignored");
     }
 
     [Fact]
@@ -1485,6 +1506,9 @@ public sealed class CoverageRunTests
         => new(runner, reportGenerator, TimeProvider.System);
 
     private static CoverageProjectRunResult CreateProjectRunResult(string repoPath, string? junitPath)
+        => CreateProjectRunResult(repoPath, junitPath is null ? [] : [junitPath]);
+
+    private static CoverageProjectRunResult CreateProjectRunResult(string repoPath, IReadOnlyList<string> junitPaths)
         => new(
             0,
             new CoverageRunProject(
@@ -1495,16 +1519,13 @@ public sealed class CoverageRunTests
             Seconds: 7,
             ExitCode: 0,
             LogFile: Path.Join(repoPath, "dotnet-test.log"),
-            TestResults: junitPath is null
-                ? []
-                :
-                [
-                    new CoverageRunTestResultArtifact(
+            TestResults: junitPaths
+                .Select(path => new CoverageRunTestResultArtifact(
                         CoverageRunTestResultFormat.Junit,
                         "tests/Sample.Tests/Sample.Tests.csproj",
-                        junitPath,
-                        "pending"),
-                ]);
+                        path,
+                        "pending"))
+                .ToArray());
 
     private static CoverageRunRequest CreateRequest(
         string? SolutionPath = null,

@@ -159,12 +159,12 @@ This command:
 - Collects coverage only for `ForgeTrust.AppSurface.*` modules.
 - Excludes test modules (`*.Tests` and `*.IntegrationTests`) from coverage.
 - Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
-- Produces AppSurface-managed JUnit files as `TestResults/coverage-merged/junit-coverage-<index>-<project>.xml`.
+- Produces AppSurface-managed JUnit files as `TestResults/coverage-merged/junit-coverage-<index>-<project-name-hash>.xml`.
 - Writes a summary to `TestResults/coverage-merged/summary.txt`.
 - Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
 - Writes slow-test diagnostics to `TestResults/coverage-merged/slow-test-diagnostics.md` and
   `TestResults/coverage-merged/slow-test-diagnostics.json`, including diagnostic aggregation
-  overhead in seconds and as a percent of total runner time.
+  overhead in seconds and as a percent of elapsed runner time at diagnostics generation.
 - Uses the source AppSurface CLI and its package-owned ReportGenerator dependency for the default
   full-solution lane.
 

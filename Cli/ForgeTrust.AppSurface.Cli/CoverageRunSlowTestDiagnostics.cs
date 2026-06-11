@@ -11,6 +11,12 @@ namespace ForgeTrust.AppSurface.Cli;
 /// <remarks>
 /// The writer consumes AppSurface-managed JUnit files only. Parser problems are preserved as
 /// diagnostic warnings so slow-test reporting cannot change the coverage result.
+/// <list type="bullet">
+/// <item><description>Only the first managed JUnit artifact for a project is parsed; additional JUnit artifacts emit warnings.</description></item>
+/// <item><description><see cref="WriteAsync"/> may write artifacts twice when aggregation timing changes during the initial write.</description></item>
+/// <item><description>Legacy or externally managed test-result files are not consumed.</description></item>
+/// <item><description>Missing files and parser failures are reported as warnings instead of failing coverage.</description></item>
+/// </list>
 /// </remarks>
 internal static class CoverageRunSlowTestDiagnosticsWriter
 {
@@ -49,7 +55,15 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         foreach (var result in results.OrderBy(result => result.Index))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var junit = result.TestResults.FirstOrDefault(artifact => artifact.Format == CoverageRunTestResultFormat.Junit);
+            var junitArtifacts = result.TestResults
+                .Where(artifact => artifact.Format == CoverageRunTestResultFormat.Junit)
+                .ToArray();
+            if (junitArtifacts.Length > 1)
+            {
+                AddWarning(warnings, $"Project {result.Project.RelativePath} has multiple managed JUnit artifacts; using first.");
+            }
+
+            var junit = junitArtifacts.FirstOrDefault();
             var project = new CoverageRunSlowTestProject(
                 result.Project.RelativePath,
                 result.Project.IsExclusive,
@@ -99,6 +113,11 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
     /// <param name="calculateAggregationPercent">Calculates aggregation overhead as a percent of runner time.</param>
     /// <param name="cancellationToken">Cancellation token for artifact writes.</param>
     /// <returns>Written artifact paths and high-level metadata.</returns>
+    /// <remarks>
+    /// <see cref="WriteAsync"/> may call <c>WriteArtifactsAsync</c> twice when <c>aggregationSeconds</c> differs from
+    /// <c>finalAggregationSeconds</c>. The single re-write includes the first file-write cost in reported aggregation
+    /// overhead; later timing drift is not captured.
+    /// </remarks>
     public static async Task<CoverageRunSlowTestDiagnosticsRun> WriteAsync(
         string outputDirectory,
         CoverageRunSlowTestDiagnosticsReport report,
@@ -320,7 +339,7 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         builder.AppendLine();
         builder.AppendLine("Managed test results: junit");
         builder.AppendLine(FormattableString.Invariant($"Generated: {report.GeneratedAtUtc:O}"));
-        builder.AppendLine(FormattableString.Invariant($"Diagnostic aggregation overhead: {aggregationSeconds}s ({aggregationPercent:0.00}% of total runner time)"));
+        builder.AppendLine(FormattableString.Invariant($"Diagnostic aggregation overhead: {aggregationSeconds}s ({aggregationPercent:0.00}% of elapsed runner time at diagnostics generation)"));
         builder.AppendLine(FormattableString.Invariant($"Project metadata complete: {report.MetadataComplete}"));
         builder.AppendLine(FormattableString.Invariant($"Markdown: {markdownPath}"));
         builder.AppendLine(FormattableString.Invariant($"JSON: {jsonPath}"));
