@@ -179,14 +179,9 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         List<string> warnings,
         CancellationToken cancellationToken)
     {
-        if (project.JunitFile is null)
-        {
-            return new CoverageRunJunitReadResult([], "notRequested");
-        }
-
         try
         {
-            await using var stream = File.OpenRead(project.JunitFile);
+            await using var stream = File.OpenRead(project.JunitFile!);
             var settings = new XmlReaderSettings
             {
                 Async = true,

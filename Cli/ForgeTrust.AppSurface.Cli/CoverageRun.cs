@@ -1188,10 +1188,6 @@ internal sealed class CoverageRunWorkflow
                 $"Slow-test diagnostics: {diagnostics.MarkdownPath} ({diagnostics.AggregationSeconds}s, {diagnostics.AggregationPercent:0.00}% overhead)"));
             return diagnostics;
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or XmlException)
         {
             var aggregationSeconds = ElapsedSeconds(diagnosticStarted);
@@ -1524,10 +1520,6 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             }
 
             await File.AppendAllTextAsync(outputFile, output, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException)
         {

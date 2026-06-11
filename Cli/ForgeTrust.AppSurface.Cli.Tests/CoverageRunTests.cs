@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
@@ -108,6 +109,39 @@ public sealed class CoverageRunTests
         Assert.Contains("\"junitFiles\": 1", timings, StringComparison.Ordinal);
         Assert.Contains("\"format\": \"junit\"", timings, StringComparison.Ordinal);
         Assert.Contains("\"parserStatus\": \"available\"", timings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_TestResultsJunit_ShouldRecordMissingManagedArtifactWithoutDiagnostics()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner { WriteJunitFiles = false };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(TestProjects: [project], TestResults: CoverageRunTestResultFormat.Junit);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
+        Assert.Contains("\"junitFiles\": 0", timings, StringComparison.Ordinal);
+        Assert.Contains("\"parserStatus\": \"missing\"", timings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_TestResultsInvalidInternalValue_ShouldThrowUnreachableDiagnostic()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(TestProjects: [project], TestResults: (CoverageRunTestResultFormat)999);
+
+        await Assert.ThrowsAsync<UnreachableException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
     }
 
     [Fact]
@@ -1524,6 +1558,7 @@ public sealed class CoverageRunTests
     {
         public string SlnListOutput { get; init; } = string.Empty;
         public bool WriteCoverageFiles { get; init; } = true;
+        public bool WriteJunitFiles { get; init; } = true;
         public int SlnExitCode { get; init; }
         public int BuildExitCode { get; init; }
         public int TestExitCode { get; init; }
@@ -1583,7 +1618,7 @@ public sealed class CoverageRunTests
                         cancellationToken);
                 }
 
-                foreach (var junitLogger in arguments.Where(argument => argument.StartsWith("--logger:junit;LogFilePath=", StringComparison.Ordinal)))
+                foreach (var junitLogger in arguments.Where(argument => WriteJunitFiles && argument.StartsWith("--logger:junit;LogFilePath=", StringComparison.Ordinal)))
                 {
                     var junitFile = junitLogger["--logger:junit;LogFilePath=".Length..];
                     Directory.CreateDirectory(Path.GetDirectoryName(junitFile)!);
