@@ -2,13 +2,21 @@
 
 This example is a local evaluator for AppSurface package-family adoption. The readiness report is the product; the small SaaS-shaped app exists to generate evidence.
 
-Run the report:
+Run the fast report without starting local infrastructure:
 
 ```bash
 dotnet run --project examples/product-readiness-lab/ProductReadinessLab.csproj -- --report
 ```
 
-Expected rows include:
+This command is intentionally dependency-light. If Postgres is not configured, the `postgres-product-state` row is `blocked` because product-state persistence has not been exercised in that process.
+
+Run the AppHost-backed verification to prove everything the local lab can prove, including Postgres product/domain state:
+
+```bash
+aspire run --non-interactive --apphost examples/product-readiness-lab-apphost/ProductReadinessLabAppHost.csproj -- verify
+```
+
+Expected statuses across the full lab include:
 
 ```text
 proven-locally
@@ -31,6 +39,8 @@ Run the Aspire AppHost with local Postgres:
 aspire run --apphost examples/product-readiness-lab-apphost/ProductReadinessLabAppHost.csproj -- local
 ```
 
+Use `local` when you want to inspect the running web app. Use `verify` when you want the bounded proof runner to fail if the AppHost-backed report does not turn Postgres product-state persistence green.
+
 ## What This Lab Proves
 
 - AppSurface Web can host the evaluator endpoints.
@@ -38,6 +48,7 @@ aspire run --apphost examples/product-readiness-lab-apphost/ProductReadinessLabA
 - AppSurface Flow can run an in-process product workflow.
 - `IDurableTaskFlowRunner<TContext>` and `IDurableTaskFlowClient<TContext>` show where a host-owned Durable Task worker/client would connect.
 - Postgres stores product/domain state when the AppHost provides `ConnectionStrings:ProductReadiness`.
+- The AppHost `verify` profile can exercise `/readiness` through the web app and require `postgres-product-state` to be `proven-locally`.
 
 ## What This Lab Does Not Prove
 
@@ -64,6 +75,7 @@ A production host would replace this loop with its own Durable Task worker/clien
 - The AppSurface Web endpoint/module shape when it names real startup policy.
 - The allowlisted config-summary approach.
 - The boundary between product state and workflow orchestration state.
+- The AppHost verifier pattern when a report row needs local infrastructure to become `proven-locally`.
 
 ## What Not To Copy
 

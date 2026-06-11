@@ -399,6 +399,9 @@
           "Npgsql": "[10.0.3, )"
         }
       },
+      "productreadinesslabverifier": {
+        "type": "Project"
+      },
       "CliWrap": {
         "type": "CentralTransitive",
         "requested": "[3.10.1, )",

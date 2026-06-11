@@ -56,6 +56,19 @@ public sealed class ProductReadinessReportTests
     }
 
     [Fact]
+    public async Task Report_WithPostgresBackedStore_MarksProductStateProvenAndDurableTaskHostOwned()
+    {
+        await using var provider = BuildProvider(new ProbeProductStateStore(succeeded: true, isPostgresBacked: true));
+        var report = await provider.GetRequiredService<ProductReadinessReportService>().BuildAsync();
+
+        var postgres = Assert.Single(report.Rows, row => row.Area == "postgres-product-state");
+        var durableTask = Assert.Single(report.Rows, row => row.Area == "durabletask-backend-boundary");
+
+        Assert.Equal(ReadinessStatus.ProvenLocally, postgres.Status);
+        Assert.Equal(ReadinessStatus.HostOwned, durableTask.Status);
+    }
+
+    [Fact]
     public async Task ReadinessResponse_UsesStableStatusWireNames()
     {
         await using var provider = BuildProvider(new InMemoryProductStateStore());
@@ -164,6 +177,27 @@ public sealed class ProductReadinessReportTests
 
     private static ReadinessRow Row(ReadinessStatus status) =>
         new("area", status, "evidence", "problem", "cause", "fix", "copy");
+
+    private sealed class ProbeProductStateStore : IProductStateStore
+    {
+        private readonly bool _succeeded;
+
+        public ProbeProductStateStore(bool succeeded, bool isPostgresBacked)
+        {
+            _succeeded = succeeded;
+            IsPostgresBacked = isPostgresBacked;
+        }
+
+        public bool IsPostgresBacked { get; }
+
+        public Task<ProductSubscription> SaveAsync(
+            ProductSubscription subscription,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(subscription);
+
+        public Task<ProductStateProbe> ProbeAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ProductStateProbe(_succeeded, IsPostgresBacked, "safe diagnostic"));
+    }
 
     private sealed class RecordingApplicationBuilder : IApplicationBuilder
     {

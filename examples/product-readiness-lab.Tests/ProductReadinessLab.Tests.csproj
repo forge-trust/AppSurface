@@ -24,6 +24,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../product-readiness-lab/ProductReadinessLab.csproj" />
+    <ProjectReference Include="../product-readiness-lab-verifier/ProductReadinessLabVerifier.csproj" />
     <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
   </ItemGroup>
   <ItemGroup>

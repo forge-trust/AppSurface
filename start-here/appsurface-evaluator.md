@@ -23,6 +23,18 @@ Start with the [package chooser](../packages/README.md) when you need an install
 
 Use the product-readiness lab after the smallest web proof when the question changes from “can it start?” to “what would AppSurface own in a product app?” The lab report intentionally separates local proofs from host-owned production work: product state can be proven with Postgres, while Durable Task worker/client hosting and storage provider setup remain application-owned.
 
+Use the fast report when you want no infrastructure:
+
+```bash
+dotnet run --project examples/product-readiness-lab/ProductReadinessLab.csproj -- --report
+```
+
+Use the AppHost verifier when you want every locally provable row to be exercised, including Postgres product-state persistence:
+
+```bash
+aspire run --non-interactive --apphost examples/product-readiness-lab-apphost/ProductReadinessLabAppHost.csproj -- verify
+```
+
 ## What To Look For
 
 Look for a setup concern that is repeated, safety-sensitive, or easy to configure differently in each service.
