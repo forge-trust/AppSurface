@@ -61,6 +61,18 @@ test('authored search client emits product intelligence without raw query payloa
   assert.doesNotMatch(source, /query:\s*query/);
 });
 
+test('authored search client routes sidebar and full-page ordering through shared rank gateway', async () => {
+  const source = await readFile(repoPath('Web', 'ForgeTrust.AppSurface.Docs', 'assets', 'src', 'search-client.ts'), 'utf8');
+
+  assert.match(source, /rankSearchResults/);
+  assert.match(source, /function runRankedSearch\(query, filters, maxResults = null\)/);
+  assert.match(source, /const queryResults = runRankedSearch\(query, createEmptySelectedFilters\(\), topResults\)/);
+  assert.match(source, /const refreshed = runRankedSearch\(currentQuery, createEmptySelectedFilters\(\), topResults\)/);
+  assert.match(source, /const resultDocs = normalizedQuery\s*\?\s*\(activeFilters\.length > 0\s*\?\s*runRankedSearch\(normalizedQuery, filters\)\s*:\s*baseDocs\)/);
+  assert.match(source, /data-rw-product-result-rank="\$\{index \+ 1\}"/);
+  assert.match(source, /link\.dataset\.rwProductResultRank = String\(options\.rank \|\| 0\)/);
+});
+
 test('generated asset verification compares rebuilt outputs against git', async () => {
   const verifier = await readFile(repoPath('Web', 'ForgeTrust.AppSurface.Docs', 'assets', 'scripts', 'verify-generated.mjs'), 'utf8');
 

@@ -5,7 +5,8 @@ import {
   isSafeSearchResultPath,
   normalizeCodeLanguage,
   normalizePageTypeAlias,
-  normalizeSearchDocument
+  normalizeSearchDocument,
+  rankSearchResults
 } from './search-core';
 
 declare global {
@@ -56,6 +57,7 @@ declare global {
   const popstateBoundFlag = '__rwDocsSearchPopstateBound';
   const mobileFilterListenerBoundFlag = '__rwDocsSearchMobileFilterListenerBound';
   const mobileFilterMedia = window.matchMedia ? window.matchMedia('(max-width: 767px)') : null;
+  const composingSearchInputs = new WeakSet<HTMLInputElement>();
   const productEventNames = {
     docsSearchSubmitted: 'docs.search.submitted',
     docsSearchReturnedZeroResults: 'docs.search.returned_zero_results',
@@ -137,6 +139,16 @@ declare global {
     };
   }
 
+  function createEmptySelectedFilters() {
+    return {
+      pageType: '',
+      component: '',
+      language: '',
+      audience: '',
+      status: ''
+    };
+  }
+
   function normalizeDocsRootPath(path) {
     const value = String(path || '').trim();
     if (!value) {
@@ -178,7 +190,8 @@ declare global {
     return {
       input: document.getElementById('docs-search-input') as HTMLInputElement | null,
       results: document.getElementById('docs-search-results'),
-      status: document.getElementById('docs-search-status')
+      status: document.getElementById('docs-search-status'),
+      workspaceLink: document.querySelector('[data-rw-search-workspace-link]') as HTMLAnchorElement | null
     };
   }
 
@@ -521,11 +534,15 @@ declare global {
     }
 
     const variant = getPageTypeBadgeVariant(item?.pageTypeVariant);
-    return `<span class="docs-page-badge docs-page-badge--${escapeHtml(variant)}">${escapeHtml(label)}</span>`;
+    return `<span class="docs-page-badge docs-page-badge--${escapeHtml(variant)} docs-search-option-badge">${escapeHtml(label)}</span>`;
+  }
+
+  function limitDraftQuery(value) {
+    return String(value ?? '').slice(0, maxQueryLength);
   }
 
   function normalizeQuery(value) {
-    return String(value ?? '').trim().slice(0, maxQueryLength);
+    return limitDraftQuery(value).trim();
   }
 
   function normalizeFacetValue(value) {
@@ -534,6 +551,59 @@ declare global {
 
   function formatQueryForStatus(value) {
     return normalizeQuery(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ');
+  }
+
+  function isReaderOwnedInput(input) {
+    return input instanceof HTMLInputElement
+      && (document.activeElement === input || composingSearchInputs.has(input));
+  }
+
+  function setInputSelection(input, start, end) {
+    if (typeof start !== 'number' || typeof end !== 'number') {
+      return;
+    }
+
+    try {
+      input.setSelectionRange(Math.min(start, input.value.length), Math.min(end, input.value.length));
+    } catch {
+      // Some input types may not expose selection APIs consistently.
+    }
+  }
+
+  function clampInputDraft(input) {
+    const draft = limitDraftQuery(input.value);
+    if (draft === input.value) {
+      return draft;
+    }
+
+    const selectionStart = input.selectionStart;
+    const selectionEnd = input.selectionEnd;
+    input.value = draft;
+    setInputSelection(input, selectionStart, selectionEnd);
+    return draft;
+  }
+
+  function syncSearchInputValue(input, nextValue, source = 'render') {
+    if (!(input instanceof HTMLInputElement) || input.value === nextValue) {
+      return;
+    }
+
+    if (source !== 'external' && isReaderOwnedInput(input)) {
+      return;
+    }
+
+    input.value = nextValue;
+  }
+
+  function bindSearchInputComposition(input, onCompositionEnd) {
+    input.addEventListener('compositionstart', () => {
+      composingSearchInputs.add(input);
+    });
+
+    input.addEventListener('compositionend', () => {
+      composingSearchInputs.delete(input);
+      onCompositionEnd?.();
+    });
   }
 
   function getErrorMessage(err) {
@@ -1100,6 +1170,10 @@ declare global {
   }
 
   function navigateToSearchPageWithQuery(query) {
+    window.location.assign(createSearchWorkspaceUrl(query));
+  }
+
+  function createSearchWorkspaceUrl(query) {
     const url = new URL(docsSearchUrl, window.location.origin);
     const normalized = normalizeQuery(query);
     if (normalized) {
@@ -1107,7 +1181,15 @@ declare global {
     }
 
     url.hash = searchInputHash;
-    window.location.assign(url.toString());
+    return url.toString();
+  }
+
+  function updateSearchWorkspaceLink(link, query) {
+    if (!(link instanceof HTMLAnchorElement)) {
+      return;
+    }
+
+    link.href = createSearchWorkspaceUrl(query);
   }
 
   function getHighlightTokens(query) {
@@ -1541,19 +1623,32 @@ declare global {
     }
 
     const normalizedQuery = normalizeQuery(query);
-    const filterFn = hasActiveFilters(filters)
-      ? (result) => matchesStoredResult(result, filters)
+    const normalizedFilters = getSearchFilters(filters || createEmptySelectedFilters());
+    const filterFn = hasActiveFilters(normalizedFilters)
+      ? (result) => matchesStoredResult(result, normalizedFilters)
       : undefined;
 
     let results;
     if (normalizedQuery) {
-      results = searchData.index.search(normalizedQuery, {
+      const miniSearchResults = searchData.index.search(normalizedQuery, {
         ...defaultSearchOptions,
         filter: filterFn
       });
-    } else if (hasActiveFilters(filters)) {
-      results = searchData.sortedDocs.filter((doc) => matchesFilters(doc, filters))
-        .map((doc) => ({ id: doc.id }));
+      results = rankSearchResults(
+        miniSearchResults
+          .map((result, index) => ({
+            doc: searchData.docsById.get(result.id),
+            miniSearchRank: index,
+            miniSearchScore: result.score
+          }))
+          .filter((candidate) => candidate.doc),
+        {
+          searchQuery: normalizedQuery,
+          filters: normalizedFilters
+        });
+    } else if (hasActiveFilters(normalizedFilters)) {
+      results = searchData.sortedDocs.filter((doc) => matchesFilters(doc, normalizedFilters))
+        .map((doc) => doc);
     } else {
       results = [];
     }
@@ -1584,26 +1679,22 @@ declare global {
       .filter(Boolean);
     const normalizedQuery = normalizeQuery(searchPageState.q);
     const isStarter = !normalizedQuery && activeFilters.length === 0;
-    const baseResults = normalizedQuery
-      ? runRankedSearch(normalizedQuery, createEmptyFacetValues())
-      : [];
     const baseDocs = normalizedQuery
-      ? baseResults.map((result) => searchData.docsById.get(result.id)).filter(Boolean)
+      ? runRankedSearch(normalizedQuery, createEmptySelectedFilters())
       : searchData.sortedDocs;
     const resultDocs = normalizedQuery
       ? (activeFilters.length > 0
-          ? baseDocs.filter((doc) => matchesFilters(doc, filters))
+          ? runRankedSearch(normalizedQuery, filters)
           : baseDocs)
       : (activeFilters.length > 0
           ? searchData.sortedDocs.filter((doc) => matchesFilters(doc, filters))
           : []);
-    const orderedResultDocs = normalizedQuery ? resultDocs : resultDocs;
 
     return {
       normalizedQuery,
       activeFilters,
       facets: deriveFacetState(baseDocs, filters),
-      resultDocs: orderedResultDocs,
+      resultDocs,
       isStarter,
       starterDocs: searchData.starterDocs,
       recoveryLinks: buildRecoveryLinks(baseDocs)
@@ -1875,7 +1966,7 @@ declare global {
 
   function bindSidebar() {
     const sidebar = getSidebarSearchElements();
-    const { input, results } = sidebar;
+    const { input, results, workspaceLink } = sidebar;
     if (!input || !results) {
       return;
     }
@@ -1889,10 +1980,12 @@ declare global {
     let lastRenderedQuery = '';
 
     const performSearch = debounce(async () => {
-      const query = normalizeQuery(input.value);
-      if (query !== input.value) {
-        input.value = query;
+      if (composingSearchInputs.has(input)) {
+        return;
       }
+
+      const query = normalizeQuery(clampInputDraft(input));
+      updateSearchWorkspaceLink(workspaceLink, query);
 
       if (!query) {
         activeIndex = -1;
@@ -1908,7 +2001,7 @@ declare global {
         }
 
         await ensureSearchResourcesLoaded();
-        const queryResults = runRankedSearch(query, createEmptyFacetValues(), topResults);
+        const queryResults = runRankedSearch(query, createEmptySelectedFilters(), topResults);
         activeIndex = queryResults.length > 0 ? 0 : -1;
         renderSidebarResults(sidebar, queryResults, query, activeIndex);
         recordSearchOutcome('sidebar', query, queryResults.length, 0);
@@ -1920,6 +2013,7 @@ declare global {
     }, 120);
 
     input.addEventListener('focus', () => {
+      updateSearchWorkspaceLink(workspaceLink, normalizeQuery(input.value));
       ensureSearchResourcesLoaded().catch((error) => {
         if (normalizeQuery(input.value)) {
           renderSidebarMessage(sidebar, getErrorMessage(error));
@@ -1929,13 +2023,20 @@ declare global {
 
     input.addEventListener('input', () => {
       activeIndex = -1;
+      updateSearchWorkspaceLink(workspaceLink, normalizeQuery(input.value));
+      performSearch();
+    });
+
+    bindSearchInputComposition(input, () => {
+      activeIndex = -1;
+      updateSearchWorkspaceLink(workspaceLink, normalizeQuery(input.value));
       performSearch();
     });
 
     input.addEventListener('keydown', async (event) => {
       const currentQuery = normalizeQuery(input.value);
       if (currentQuery && currentQuery !== lastRenderedQuery && searchData.index) {
-        const refreshed = runRankedSearch(currentQuery, createEmptyFacetValues(), topResults);
+        const refreshed = runRankedSearch(currentQuery, createEmptySelectedFilters(), topResults);
         activeIndex = refreshed.length > 0 ? 0 : -1;
         renderSidebarResults(sidebar, refreshed, currentQuery, activeIndex);
         lastRenderedQuery = currentQuery;
@@ -1963,6 +2064,17 @@ declare global {
       } else if (event.key === 'Escape') {
         clearSidebarResults(sidebar);
       }
+    });
+
+    workspaceLink?.addEventListener('click', (event) => {
+      const query = normalizeQuery(input.value);
+      updateSearchWorkspaceLink(workspaceLink, query);
+      if (!isPlainPrimaryClick(event) || !query) {
+        return;
+      }
+
+      event.preventDefault();
+      navigateToSearchPageWithQuery(query);
     });
 
     results.addEventListener('click', (event) => {
@@ -2272,12 +2384,12 @@ declare global {
     renderSearchPageResults(page, view);
   }
 
-  function setSearchPageState(nextState, historyMode = 'replace') {
+  function setSearchPageState(nextState, historyMode = 'replace', options: any = {}) {
     Object.assign(searchPageState, nextState);
 
     const page = getSearchPageElements();
-    if (page.input && searchPageState.q !== page.input.value) {
-      page.input.value = searchPageState.q;
+    if (page.input && options.syncInput !== false) {
+      syncSearchInputValue(page.input, searchPageState.q, options.inputSource);
     }
 
     if (historyMode !== 'none') {
@@ -2322,11 +2434,15 @@ declare global {
     root.setAttribute(searchPageBoundAttribute, '1');
     Object.assign(searchPageState, readSearchPageStateFromUrl());
     searchPageState.loadState = searchData.index ? 'ready' : 'loading';
-    input.value = searchPageState.q;
+    syncSearchInputValue(input, searchPageState.q, 'external');
 
     const onInput = debounce(() => {
-      const query = normalizeQuery(input.value);
-      setSearchPageState({ q: query }, 'replace');
+      if (composingSearchInputs.has(input)) {
+        return;
+      }
+
+      const query = normalizeQuery(clampInputDraft(input));
+      setSearchPageState({ q: query }, 'replace', { syncInput: false });
     }, 140);
 
     input.addEventListener('input', () => {
@@ -2334,6 +2450,15 @@ declare global {
         setSearchPageBusy(page, true);
       }
       onInput();
+    });
+
+    bindSearchInputComposition(input, () => {
+      if (searchData.index) {
+        setSearchPageBusy(page, true);
+      }
+
+      const query = normalizeQuery(clampInputDraft(input));
+      setSearchPageState({ q: query }, 'replace', { syncInput: false });
     });
 
     filters.addEventListener('click', (event) => {
@@ -2485,7 +2610,7 @@ declare global {
 
         event.preventDefault();
         const query = normalizeQuery(button.dataset.rwSearchSuggestion);
-        setSearchPageState({ q: query }, 'push');
+        setSearchPageState({ q: query }, 'push', { inputSource: 'external' });
         input.focus();
         input.select?.();
       });
@@ -2508,7 +2633,7 @@ declare global {
           ? 'ready'
           : (searchData.loadPromise ? 'loading' : 'error');
         if (nextPage.input) {
-          nextPage.input.value = searchPageState.q;
+          syncSearchInputValue(nextPage.input, searchPageState.q, 'external');
         }
         renderSearchPage();
       });

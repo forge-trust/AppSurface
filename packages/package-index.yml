@@ -5,7 +5,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 10
     use_when: Install this directly only when you are authoring reusable AppSurface modules or host integrations instead of starting from a web, console, or Aspire package.
     includes: Core module abstractions, dependency graph orchestration, AppSurfaceStartup, and StartupContext.
@@ -17,7 +17,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 20
     use_when: Add this when your AppSurface modules need strongly typed configuration primitives instead of ad hoc configuration lookups.
     includes: AppSurfaceConfigModule, typed config objects, configuration providers, source-aware audit reports, and explicit configuration access patterns.
@@ -31,7 +31,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 30
     use_when: Add this when your modules need lightweight in-process memoization and cache policy primitives.
     includes: AppSurfaceCachingModule, IMemo or Memo helpers, and cache policy primitives on top of Microsoft.Extensions.Caching.Memory.
@@ -45,7 +45,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 35
     use_when: Add this when authoring AppSurface modules or host integrations that need passive cross-surface auth vocabulary without depending on ASP.NET Core.
     includes: AppSurfaceAuthModule, AppSurfaceAuthOptions, neutral user/session/context contracts, auth outcome and reason results, passive login/logout prompts, passive audit event descriptions, and reserved metadata keys.
@@ -59,7 +59,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 36
     use_when: Add this in an ASP.NET Core host that already owns authentication and authorization when AppSurface modules need mapped request auth context or named host-policy results.
     includes: AppSurfaceAspNetCoreAuthModule, AddAppSurfaceAspNetCoreAuth registration, ASP.NET Core request auth context mapping, named host-policy evaluation, AppSurfaceAuthResult mapping, and safe setup diagnostics.
@@ -74,7 +74,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 37
     use_when: Add this when your AppSurface modules or host integrations need product-intelligence event contracts before choosing an analytics vendor.
     includes: AppSurfaceProductIntelligenceModule, IAppSurfaceProductIntelligence, AppSurfaceProductEvent, typed product-event registry, validation, sanitization, lifecycle states, selected experimental event allowlists, sensitivity classes, and host-owned sink contracts.
@@ -89,7 +89,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 38
     use_when: Add this when your app or module needs typed input/output port flow definitions, generated-case authoring, inferred graph mapping, and local runner tests before durable hosting.
     includes: AppSurfaceFlowModule, FlowNodeOutcome discriminated outcome records, generated Flow authoring attributes and analyzer, IFlowTransformerNode, typed port graph inference, IFlowNode, FlowDefinition, FlowGraphBuilder, flow definition registry, and the in-memory runner.
@@ -114,7 +114,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 40
     use_when: Add this after Flow when the same typed definitions need Durable Task persistence, replay, timers, and authorized resume events.
     includes: AppSurfaceFlowDurableTaskModule, durable flow runner and client services, resume-event authorization contract, timeout and late-event mapping, retry policy decisions, and context serialization validation.
@@ -132,7 +132,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 41
     use_when: Start here for CLI apps and worker-style entry points that should run through the AppSurface startup pipeline with CliFx.
     includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx source-generated command discovery through AppSurface modules.
@@ -147,7 +147,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 50
     use_when: Add this when you need Autofac-specific registrations or container features instead of the default .NET service collection.
     includes: AppSurfaceAutofacModule and Autofac-aware service registration hooks for AppSurface modules.
@@ -164,7 +164,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 60
     use_when: Start here for .NET Aspire app-model projects that want AppSurface-style modular composition for service defaults and distributed resources.
     includes: AspireApp entry points and modular registration for distributed application resources and service defaults.
@@ -179,7 +179,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 70
     use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline before layering on optional UI or docs packages.
     includes: Base ASP.NET Core hosting, pre-routing and endpoint-aware middleware composition, endpoint composition, conventional browser error-page hooks, and the core AppSurface web module contract.
@@ -194,7 +194,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 80
     use_when: Add this after the base web package when you want generated OpenAPI endpoints for an AppSurface web app.
     includes: AddOpenApi wiring, endpoint explorer setup, endpoint mapping, and default OpenAPI document transforms.
@@ -211,7 +211,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 90
     use_when: Add this after OpenAPI when you want Scalar's interactive API reference UI served by your AppSurface web app.
     includes: Scalar UI endpoint mapping and the OpenAPI module dependency needed to feed it.
@@ -227,7 +227,7 @@ packages:
     product_family: razorwire
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 100
     use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, or islands without moving to a separate frontend app.
     includes: RazorWire modules, TagHelpers, stream helpers, Razor fragment updates, and hybrid island support.
@@ -246,7 +246,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 110
     use_when: Add this when you want Tailwind build and watch integration in an AppSurface web app without carrying a Node.js asset pipeline.
     includes: Tailwind standalone CLI integration, watch mode, generated CSS output, and transitive runtime package selection for supported build hosts.
@@ -352,12 +352,12 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.2.md
+    release_notes_path: releases/v0.1.0-rc.3.md
     order: 120
     tool_command_name: appsurface
     use_when: Install this when you want repository-level AppSurface tooling from a global or local .NET tool command.
-    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface coverage run` private test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` private threshold enforcement.
-    does_not_include: App runtime packages, hosted coverage dashboards, coverage uploads, coverage trend storage, RazorWire-specific export workflows, or a replacement for project package references.
+    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` private threshold enforcement.
+    does_not_include: App runtime packages, hosted coverage dashboards, coverage uploads, coverage trend storage, grouped coverage runs, TRX/TUnit result parsing, RazorWire-specific export workflows, or a replacement for project package references.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README
     recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs` workflows or private `appsurface coverage run`, `coverage merge`, and `coverage gate` commands without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.

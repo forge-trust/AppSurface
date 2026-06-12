@@ -159,12 +159,14 @@ This command:
 - Collects coverage only for `ForgeTrust.AppSurface.*` modules.
 - Excludes test modules (`*.Tests` and `*.IntegrationTests`) from coverage.
 - Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
+- Produces AppSurface-managed JUnit files as `TestResults/coverage-merged/junit-coverage-<index>-<project-name-hash>.xml`.
 - Writes a summary to `TestResults/coverage-merged/summary.txt`.
 - Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
 - Writes slow-test diagnostics to `TestResults/coverage-merged/slow-test-diagnostics.md` and
   `TestResults/coverage-merged/slow-test-diagnostics.json`, including diagnostic aggregation
-  overhead in seconds and as a percent of total runner time.
-- Restores the pinned local ReportGenerator .NET tool when coverage files need to be merged.
+  overhead in seconds and as a percent of elapsed runner time at diagnostics generation.
+- Uses the source AppSurface CLI and its package-owned ReportGenerator dependency for the default
+  full-solution lane.
 
 Private package-consuming repositories should use the public CLI runner instead of this repository's script:
 
@@ -173,7 +175,7 @@ dotnet tool run appsurface coverage run --solution ./MyApp.slnx
 dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75
 ```
 
-The `appsurface coverage run` command discovers `.sln`/`.slnx` test projects or accepts repeated `--test-project` values, runs Coverlet-instrumented projects, writes private local artifacts under `TestResults/coverage-merged`, and merges Cobertura through the CLI package's ReportGenerator dependency without reading the consumer repo's tool manifest. No separate merge command is required for ordinary package consumers: `coverage run` produces `TestResults/coverage-merged/coverage.cobertura.xml` directly. Use `appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged` when a matrix job or custom test workflow already produced shard files named `coverage.cobertura.xml`. The optional `appsurface coverage gate` command evaluates that merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage accepts exactly one source: `--diff-base` for local Git history, `--diff-file` for a CI-produced unified diff artifact, or `--diff-stdin` for piped unified diff text. External diff artifacts are private local inputs, are bounded at 20 MiB, and fail closed when non-empty content is not unified diff text. The coverage commands are intentionally private-by-default: they do not upload coverage, call GitHub APIs, or store trends.
+The `appsurface coverage run` command discovers `.sln`/`.slnx` test projects or accepts repeated `--test-project` values, runs Coverlet-instrumented projects, writes private local artifacts under `TestResults/coverage-merged`, and merges Cobertura through the CLI package's ReportGenerator dependency without reading the consumer repo's tool manifest. No separate merge command is required for ordinary package consumers: `coverage run` produces `TestResults/coverage-merged/coverage.cobertura.xml` directly. Managed test results are opt-in with `--test-results junit`; this requires selected test projects to reference `JunitXml.TestLogger`. `--slow-test-diagnostics` implies managed JUnit results and writes `slow-test-diagnostics.md` and `.json` beside the merged coverage file. Use `appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged` when a matrix job or custom test workflow already produced shard files named `coverage.cobertura.xml`. The optional `appsurface coverage gate` command evaluates that merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage accepts exactly one source: `--diff-base` for local Git history, `--diff-file` for a CI-produced unified diff artifact, or `--diff-stdin` for piped unified diff text. External diff artifacts are private local inputs, are bounded at 20 MiB, and fail closed when non-empty content is not unified diff text. The coverage commands are intentionally private-by-default: they do not upload coverage, call GitHub APIs, or store trends.
 
 The script also supports bounded test groups for local or CI experiments:
 

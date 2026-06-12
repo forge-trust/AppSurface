@@ -35,6 +35,15 @@ Release preparation produces `releases/v{version}.evidence.json`, the release ev
 
 The release evidence bundle is not a GitHub artifact attestation. Keep `id-token: write` and `attestations: write` out of default release workflows unless an explicit future attestation mode is implemented and reviewed.
 
+## Release-prep review boundary
+
+Release preparation pull requests must include the four generated artifacts for
+the prepared version: release note, sidecar, release manifest, and release
+evidence bundle. They may also update an older generated release sidecar only
+when carrying `redirect_aliases` forward to the new canonical release-candidate
+note. Do not use that sidecar allowance for content edits, trust-bar edits, or
+manifest/evidence rewrites from older releases.
+
 ## Package artifact dry run
 
 The pack-only release slice uses `packages/package-index.yml` as the single package
