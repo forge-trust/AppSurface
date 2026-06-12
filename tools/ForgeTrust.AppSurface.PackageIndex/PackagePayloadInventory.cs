@@ -25,8 +25,7 @@ internal sealed class PackagePayloadInventoryLoader
         string repositoryRoot,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
-        var inventoryPath = Path.Combine(repositoryRoot, DefaultRelativePath);
+        var inventoryPath = ResolveInventoryPath(repositoryRoot, DefaultRelativePath);
         if (!File.Exists(inventoryPath))
         {
             throw new PackageIndexException(
@@ -64,6 +63,36 @@ internal sealed class PackagePayloadInventoryLoader
 
         inventory.Validate(displayPath);
         return inventory;
+    }
+
+    /// <summary>
+    /// Resolves the repository-relative payload inventory path under the repository root.
+    /// </summary>
+    /// <param name="repositoryRoot">Absolute repository root used to resolve the inventory path.</param>
+    /// <param name="relativePath">Repository-relative inventory path.</param>
+    /// <returns>The absolute inventory path.</returns>
+    internal static string ResolveInventoryPath(string repositoryRoot, string relativePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+        if (IsRootedInventoryPath(relativePath))
+        {
+            throw new PackageIndexException(
+                $"Package payload inventory path '{relativePath}' must be repository-relative. Problem: verify-packages must load the durable inventory from this checkout. Cause: the inventory path is absolute. Fix: use {DefaultRelativePath}. Docs: packages/README.md#redistributed-payloads.");
+        }
+
+        return Path.Join(repositoryRoot, relativePath);
+    }
+
+    private static bool IsRootedInventoryPath(string path)
+    {
+        return Path.IsPathRooted(path)
+            || path.StartsWith("/", StringComparison.Ordinal)
+            || path.StartsWith("\\", StringComparison.Ordinal)
+            || (path.Length >= 3
+                && char.IsAsciiLetter(path[0])
+                && path[1] == ':'
+                && (path[2] == '/' || path[2] == '\\'));
     }
 }
 

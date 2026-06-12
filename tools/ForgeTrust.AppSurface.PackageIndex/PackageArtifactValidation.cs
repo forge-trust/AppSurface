@@ -120,7 +120,7 @@ internal sealed class PackageArtifactValidator
                     entry.IsTool,
                     entry.IsTool ? entry.ToolCommandName : string.Empty,
                     payloadSummariesByPackageId.TryGetValue(entry.PackageId, out var payloadSummary)
-                        ? payloadSummary.Results
+                        ? payloadSummary?.Results ?? []
                         : [],
                     payloadSummary?.SuspiciousEntryCount ?? 0,
                     payloadSummary?.CoveredSuspiciousEntryCount ?? 0);
@@ -308,25 +308,19 @@ internal sealed class PackageArtifactValidator
                 .Select(path => NormalizePackagePathStrict(path, $"notice '{notice.Id}' notice_paths"))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            foreach (var noticePath in noticePaths)
+            foreach (var noticePath in noticePaths.Where(path => !inspected.EntryPaths.Contains(path, StringComparer.OrdinalIgnoreCase)))
             {
-                if (!inspected.EntryPaths.Contains(noticePath, StringComparer.OrdinalIgnoreCase))
-                {
-                    throw new PackageIndexException(
-                        $"ASPKG125 {expected.PackageId}: notice '{notice.Id}' requires missing notice path '{noticePath}'. Problem: a redistributed payload lacks package-visible notice text. Cause: the package artifact does not contain the declared notice path. Fix: pack THIRD-PARTY-NOTICES.md at the package root or update notice_paths. Docs: packages/README.md#redistributed-payloads.");
-                }
+                throw new PackageIndexException(
+                    $"ASPKG125 {expected.PackageId}: notice '{notice.Id}' requires missing notice path '{noticePath}'. Problem: a redistributed payload lacks package-visible notice text. Cause: the package artifact does not contain the declared notice path. Fix: pack THIRD-PARTY-NOTICES.md at the package root or update notice_paths. Docs: packages/README.md#redistributed-payloads.");
             }
 
             var noticeText = string.Join(
                 "\n",
                 noticePaths.Select(path => ReadPackageTextEntry(inspected.PackagePath, path, expected.PackageId, notice.Id)));
-            foreach (var marker in notice.Markers)
+            foreach (var marker in notice.Markers.Where(marker => !noticeText.Contains(marker, StringComparison.OrdinalIgnoreCase)))
             {
-                if (!noticeText.Contains(marker, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new PackageIndexException(
-                        $"ASPKG126 {expected.PackageId}: notice '{notice.Id}' is missing marker '{marker}'. Problem: the package notice does not prove the declared component/version/license text. Cause: the packaged notice text is incomplete or stale. Fix: update the package THIRD-PARTY-NOTICES.md entry so it includes the marker. Docs: packages/README.md#redistributed-payloads.");
-                }
+                throw new PackageIndexException(
+                    $"ASPKG126 {expected.PackageId}: notice '{notice.Id}' is missing marker '{marker}'. Problem: the package notice does not prove the declared component/version/license text. Cause: the packaged notice text is incomplete or stale. Fix: update the package THIRD-PARTY-NOTICES.md entry so it includes the marker. Docs: packages/README.md#redistributed-payloads.");
             }
 
             ValidateRepositoryPaths(repositoryRoot, expected.PackageId, notice.Id, "source_paths", notice.SourcePaths);
@@ -400,13 +394,10 @@ internal sealed class PackageArtifactValidator
             .Select(entryPath => new SuspiciousPackageEntry(entryPath, GetSuspiciousPayloadRule(entryPath, firstPartyPackageIds)))
             .Where(entry => entry.Rule is not null)
             .ToArray();
-        foreach (var suspiciousEntry in suspiciousEntries)
+        foreach (var suspiciousEntry in suspiciousEntries.Where(entry => !coveredPackageEntries.Contains(entry.EntryPath)))
         {
-            if (!coveredPackageEntries.Contains(suspiciousEntry.EntryPath))
-            {
-                throw new PackageIndexException(
-                    $"ASPKG123 {expected.PackageId}: {suspiciousEntry.EntryPath} matched {suspiciousEntry.Rule} but has no notice or audit classification. Problem: package redistributes a suspicious payload without provenance evidence. Cause: no packages/third-party-payloads.yml notice or audit record covers the package entry. Fix: add a notice record with payload_patterns and notice_paths, or add a narrow generated-first-party audit record. Docs: packages/README.md#redistributed-payloads.");
-            }
+            throw new PackageIndexException(
+                $"ASPKG123 {expected.PackageId}: {suspiciousEntry.EntryPath} matched {suspiciousEntry.Rule} but has no notice or audit classification. Problem: package redistributes a suspicious payload without provenance evidence. Cause: no packages/third-party-payloads.yml notice or audit record covers the package entry. Fix: add a notice record with payload_patterns and notice_paths, or add a narrow generated-first-party audit record. Docs: packages/README.md#redistributed-payloads.");
         }
 
         var coveredSuspiciousEntryCount = suspiciousEntries.Count(entry => coveredPackageEntries.Contains(entry.EntryPath));
@@ -697,7 +688,8 @@ internal sealed class PackageArtifactValidator
         }
 
         var normalizedRoot = Path.GetFullPath(repositoryRoot);
-        var fullPath = Path.GetFullPath(Path.Combine(normalizedRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        var normalizedRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(Path.Join(normalizedRoot, normalizedRelativePath));
         var rootPrefix = normalizedRoot.EndsWith(Path.DirectorySeparatorChar)
             ? normalizedRoot
             : normalizedRoot + Path.DirectorySeparatorChar;
