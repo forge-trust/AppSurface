@@ -144,11 +144,6 @@ internal sealed class PostgresProductStateStore : IProductStateStore, IAsyncDisp
 
     private async Task EnsureSchemaAsync(CancellationToken cancellationToken)
     {
-        if (_schemaReady)
-        {
-            return;
-        }
-
         await _schemaGate.WaitAsync(cancellationToken);
         try
         {
