@@ -1373,6 +1373,34 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task PatchDiffSource_ForFile_RejectsUnreadableFile_WithDiagnostic()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var path = Path.Join(temp.Path, "unreadable.diff");
+        File.WriteAllText(path, "diff --git a/file b/file");
+        File.SetUnixFileMode(path, UnixFileMode.None);
+        var source = PatchDiffSource.ForFile(path, "unreadable", maxBytes: 1024);
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<CommandException>(
+                () => source.ReadAsync(temp.Path, CancellationToken.None));
+
+            Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("Failed to read", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
     public async Task PatchDiffSource_ForStdin_RejectsOversizedProviderText_WithDiagnostic()
     {
         var source = PatchDiffSource.ForStdin(
@@ -1407,6 +1435,29 @@ public sealed class CoverageGateTests
         Assert.Equal(PatchDiffSourceKind.GitBase, source.Kind);
         Assert.Contains("+changed", artifact.Text, StringComparison.Ordinal);
         Assert.False(artifact.Empty);
+    }
+
+    [Fact]
+    public async Task PatchCoverageEvaluator_RejectsMalformedExternalGitSource_WithDiffBaseDisplay()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var source = new PatchDiffSource(
+            PatchDiffSourceKind.GitBase,
+            "git artifact",
+            "origin/main",
+            null,
+            true,
+            (_, _) => Task.FromResult(PatchDiffArtifact.FromText("not a diff")));
+        var request = new CoveragePatchRequest(temp.Path, source, 100);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => PatchCoverageEvaluator.EvaluateAsync(coverage, request, CancellationToken.None));
+
+        Assert.Contains("ASCOV015", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--diff-base 'origin/main'", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1919,6 +1970,12 @@ public sealed class CoverageGateTests
             +covered
             GIT binary patch
             """);
+        var fileMarkerAfterIncompleteBinaryPatch = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/assets/image.bin b/assets/image.bin
+            index 1111111..2222222 100644
+            GIT binary patch
+            --- a/src/Other.cs
+            """);
         var bogusNoNewlineMarker = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
             diff --git a/src/Foo.cs b/src/Foo.cs
             --- a/src/Foo.cs
@@ -2079,6 +2136,7 @@ public sealed class CoverageGateTests
         var blankOnly = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
 
             """);
+        var newlineOnly = PatchCoverageEvaluator.ParseChangedLinesDetailed(Environment.NewLine);
 
         Assert.Equal(PatchDiffParseStatus.ValidNoAddedLines, deletedOnly.Status);
         Assert.Empty(deletedOnly.ChangedLines);
@@ -2109,6 +2167,7 @@ public sealed class CoverageGateTests
         Assert.Equal(PatchDiffParseStatus.Malformed, newFileMarkerAfterHunk.Status);
         Assert.Equal(PatchDiffParseStatus.Malformed, binaryMarkerAfterHunk.Status);
         Assert.Equal(PatchDiffParseStatus.Malformed, gitBinaryPatchAfterHunk.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, fileMarkerAfterIncompleteBinaryPatch.Status);
         Assert.Equal(PatchDiffParseStatus.Malformed, bogusNoNewlineMarker.Status);
         Assert.Equal(PatchDiffParseStatus.Malformed, noNewlineMarkerBeforeBody.Status);
         Assert.Equal(PatchDiffParseStatus.Malformed, duplicateNoNewlineMarker.Status);
@@ -2135,6 +2194,7 @@ public sealed class CoverageGateTests
         Assert.Equal(PatchDiffParseStatus.Malformed, truncatedHunk.Status);
         Assert.Equal(PatchDiffParseStatus.Malformed, zeroLengthHunk.Status);
         Assert.Equal(PatchDiffParseStatus.Empty, blankOnly.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, newlineOnly.Status);
     }
 
     [Fact]
