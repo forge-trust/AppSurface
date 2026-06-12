@@ -1,5 +1,4 @@
 using ForgeTrust.AppSurface.Core;
-using ForgeTrust.AppSurface.Flow;
 using ForgeTrust.AppSurface.Flow.DurableTask;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -43,7 +42,9 @@ public sealed class ProductReadinessReportTests
     [Fact]
     public async Task Report_WithInMemoryStore_MarksPostgresBlockedAndDurableTaskHostOwned()
     {
-        await using var provider = BuildProvider(new InMemoryProductStateStore());
+        await using var provider = ProductReadinessTestServices.BuildProvider(
+            new InMemoryProductStateStore(),
+            includeReportService: true);
         var report = await provider.GetRequiredService<ProductReadinessReportService>().BuildAsync();
 
         var postgres = Assert.Single(report.Rows, row => row.Area == "postgres-product-state");
@@ -60,7 +61,9 @@ public sealed class ProductReadinessReportTests
     [Fact]
     public async Task Report_WithPostgresBackedStore_MarksProductStateProvenAndDurableTaskHostOwned()
     {
-        await using var provider = BuildProvider(new ProbeProductStateStore(succeeded: true, isPostgresBacked: true));
+        await using var provider = ProductReadinessTestServices.BuildProvider(
+            new ProbeProductStateStore(succeeded: true, isPostgresBacked: true),
+            includeReportService: true);
         var report = await provider.GetRequiredService<ProductReadinessReportService>().BuildAsync();
 
         var postgres = Assert.Single(report.Rows, row => row.Area == "postgres-product-state");
@@ -73,7 +76,9 @@ public sealed class ProductReadinessReportTests
     [Fact]
     public async Task ReadinessResponse_UsesStableStatusWireNames()
     {
-        await using var provider = BuildProvider(new InMemoryProductStateStore());
+        await using var provider = ProductReadinessTestServices.BuildProvider(
+            new InMemoryProductStateStore(),
+            includeReportService: true);
         var report = await provider.GetRequiredService<ProductReadinessReportService>().BuildAsync();
 
         var response = ReadinessReportResponse.FromReport(report);
@@ -148,7 +153,9 @@ public sealed class ProductReadinessReportTests
     [Fact]
     public async Task InProcessHost_ProvesWaitResumeTimeoutFaultAndLateEvent()
     {
-        await using var provider = BuildProvider(new InMemoryProductStateStore());
+        await using var provider = ProductReadinessTestServices.BuildProvider(
+            new InMemoryProductStateStore(),
+            includeReportService: true);
         var host = provider.GetRequiredService<ProductApprovalInProcessHost>();
 
         var started = await host.StartAsync("Acme", "Team");
@@ -169,7 +176,10 @@ public sealed class ProductReadinessReportTests
     public async Task InProcessHost_UsesAuthenticatedCallerForResumeAuthorization()
     {
         var authorizer = new CapturingResumeAuthorizer();
-        await using var provider = BuildProvider(new InMemoryProductStateStore(), authorizer);
+        await using var provider = ProductReadinessTestServices.BuildProvider(
+            new InMemoryProductStateStore(),
+            authorizer,
+            includeReportService: true);
         var host = provider.GetRequiredService<ProductApprovalInProcessHost>();
 
         var started = await host.StartAsync("Caller Co", "Team");
@@ -185,7 +195,9 @@ public sealed class ProductReadinessReportTests
     [Fact]
     public async Task InProcessHost_DeniesResumeFromUnexpectedCaller()
     {
-        await using var provider = BuildProvider(new InMemoryProductStateStore());
+        await using var provider = ProductReadinessTestServices.BuildProvider(
+            new InMemoryProductStateStore(),
+            includeReportService: true);
         var host = provider.GetRequiredService<ProductApprovalInProcessHost>();
 
         var started = await host.StartAsync("Viewer Co", "Team");
@@ -223,31 +235,6 @@ public sealed class ProductReadinessReportTests
     public void ProofAuthGuard_AllowsDisabledProofAuthOutsideDevelopment()
     {
         ProductReadinessProofAuthGuard.Validate("Production", isDevelopment: false, proofAuthEnabled: false);
-    }
-
-    private static ServiceProvider BuildProvider(IProductStateStore store, IFlowResumeAuthorizer? authorizer = null)
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddAuthorization();
-        services.AddSingleton(store);
-        services.AddSingleton(ProductReadinessFlowDefinition.Build());
-        services.AddSingleton<IFlowDefinitionRegistry>(sp =>
-        {
-            var registry = new FlowDefinitionRegistry();
-            registry.Register(sp.GetRequiredService<FlowDefinition<ProductApprovalState>>());
-            return registry;
-        });
-        services.AddSingleton(authorizer ?? new ProductReadinessResumeAuthorizer());
-        services.AddSingleton<FlowContextSerializationValidator>();
-        services.AddSingleton<IFlowContextSerializer, SystemTextJsonFlowContextSerializer>();
-        services.AddOptions<AppSurfaceFlowDurableTaskOptions>();
-        services.AddSingleton(typeof(IDurableTaskFlowRunner<>), typeof(DurableTaskFlowRunner<>));
-        services.AddSingleton(typeof(IDurableTaskFlowClient<>), typeof(DurableTaskFlowClient<>));
-        services.AddSingleton<ProductApprovalInProcessHost>();
-        services.AddSingleton<ProductReadinessReportService>();
-
-        return services.BuildServiceProvider();
     }
 
     private static void AssertEndpointRequiresOperatorPolicy(WebApplication app, string routePattern)

@@ -17,6 +17,13 @@ internal static class ProductReadinessEndpoints
     /// <summary>
     /// Maps product-readiness lab endpoints.
     /// </summary>
+    /// <remarks>
+    /// The readiness endpoints are intentionally public because the report is the primary evaluator
+    /// artifact. Workflow start/resume endpoints are operator-gated because they mutate local product
+    /// state and exercise the in-process host proof. The auth probe endpoints expose safe policy
+    /// outcomes only; they should remain development/local diagnostics, not production authorization
+    /// APIs.
+    /// </remarks>
     /// <param name="endpoints">Endpoint route builder supplied by AppSurface Web.</param>
     public static void Map(IEndpointRouteBuilder endpoints)
     {

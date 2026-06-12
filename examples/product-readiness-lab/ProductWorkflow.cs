@@ -11,17 +11,20 @@ namespace ProductReadinessLab;
 /// <remarks>
 /// <para>
 /// Decision: this type keeps the evaluator experience lightweight by hosting workflow start,
-/// wait, resume, timeout, and resume-authorization behavior in the web app process. Use it for
-/// local product-readiness evidence and focused tests; use a host-owned Durable Task worker/client
-/// process when production durability, distributed execution, or long-running orchestration storage
-/// is required.
+/// wait, resume, timeout, and resume-authorization behavior in the web app process. The private
+/// in-memory runner owns the interactive sample request path, while the DurableTask-facing runner and
+/// client are used to prove the worker/client boundary that a real host would own. Use this type for
+/// local product-readiness evidence and focused tests; use an <see cref="IDurableTaskFlowRunner{TContext}" />
+/// and <see cref="IDurableTaskFlowClient{TContext}" /> backed host when production durability,
+/// distributed execution, or long-running orchestration storage is required.
 /// </para>
 /// <para>
 /// Pitfall: pending workflow state is held in memory in this process. A restart loses waiting
 /// instances, semaphore ordering is not a durability guarantee, and the in-memory runner can differ
-/// from a real Durable Task backend in persistence, replay, and concurrency behavior. The constructor
-/// expects the flow definition, DurableTask-facing runner/client, and product state store to be wired
-/// before the host starts receiving workflow requests.
+/// from a real Durable Task backend in persistence, replay, and concurrency behavior. The product
+/// state store proves product/domain state only; it is not Durable Task orchestration storage. The
+/// constructor expects the flow definition, DurableTask-facing runner/client, and product state store
+/// to be wired before the host starts receiving workflow requests.
 /// </para>
 /// </remarks>
 internal sealed class ProductApprovalInProcessHost
@@ -87,6 +90,7 @@ internal sealed class ProductApprovalInProcessHost
         }
 
         ProductWorkflowWaitingRun? removedRun = null;
+        WorkflowProbe? response = null;
         await waitingRun.Gate.WaitAsync(cancellationToken);
         try
         {
@@ -123,6 +127,7 @@ internal sealed class ProductApprovalInProcessHost
                 new FlowResumeEvent(ProductReadinessFlowDefinition.ApprovalEventName, decision),
                 cancellationToken);
 
+            response = WorkflowProbe.FromCompleted(instanceId, completed);
             if (completed.Status == FlowRunStatus.Waiting)
             {
                 currentRun.Result = completed;
@@ -134,13 +139,15 @@ internal sealed class ProductApprovalInProcessHost
                     removedRun = removed;
                 }
             }
-
-            return WorkflowProbe.FromCompleted(instanceId, completed);
         }
         finally
         {
             waitingRun.Gate.Release();
-            removedRun?.Dispose();
+        }
+
+        using (removedRun)
+        {
+            return response ?? throw new InvalidOperationException("Workflow resume did not produce a response.");
         }
     }
 

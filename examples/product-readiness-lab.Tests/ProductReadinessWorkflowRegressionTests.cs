@@ -1,5 +1,3 @@
-using ForgeTrust.AppSurface.Flow;
-using ForgeTrust.AppSurface.Flow.DurableTask;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,7 +11,7 @@ public sealed class ProductReadinessWorkflowRegressionTests
         // Regression: ISSUE-001 - duplicate workflow resume returned HTTP 500.
         // Found by /qa on 2026-06-10.
         // Report: .gstack/qa-reports/qa-report-product-readiness-lab-2026-06-10.md
-        await using var provider = BuildProvider(new InMemoryProductStateStore());
+        await using var provider = ProductReadinessTestServices.BuildProvider(new InMemoryProductStateStore());
         var host = provider.GetRequiredService<ProductApprovalInProcessHost>();
         var started = await host.StartAsync("QA Co", "Team");
         var request = new ResumeWorkflowRequest("approved");
@@ -43,7 +41,7 @@ public sealed class ProductReadinessWorkflowRegressionTests
     {
         // Regression: canceled resume consumed the waiting run before processing completed.
         // Found by /review on 2026-06-10.
-        await using var provider = BuildProvider(new InMemoryProductStateStore());
+        await using var provider = ProductReadinessTestServices.BuildProvider(new InMemoryProductStateStore());
         var host = provider.GetRequiredService<ProductApprovalInProcessHost>();
         var started = await host.StartAsync("Retry Co", "Team");
         using var canceled = new CancellationTokenSource();
@@ -67,7 +65,7 @@ public sealed class ProductReadinessWorkflowRegressionTests
     [Fact]
     public async Task ResumeWorkflowAsync_InvalidRequest_ReturnsBadRequest()
     {
-        await using var provider = BuildProvider(new InMemoryProductStateStore());
+        await using var provider = ProductReadinessTestServices.BuildProvider(new InMemoryProductStateStore());
         var host = provider.GetRequiredService<ProductApprovalInProcessHost>();
         var started = await host.StartAsync("Validation Co", "Team");
 
@@ -85,27 +83,4 @@ public sealed class ProductReadinessWorkflowRegressionTests
         Assert.Contains(nameof(ResumeWorkflowRequest.Decision), badRequest.Value.Errors.Keys);
     }
 
-    private static ServiceProvider BuildProvider(IProductStateStore store)
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddAuthorization();
-        services.AddSingleton(store);
-        services.AddSingleton(ProductReadinessFlowDefinition.Build());
-        services.AddSingleton<IFlowDefinitionRegistry>(sp =>
-        {
-            var registry = new FlowDefinitionRegistry();
-            registry.Register(sp.GetRequiredService<FlowDefinition<ProductApprovalState>>());
-            return registry;
-        });
-        services.AddSingleton<IFlowResumeAuthorizer, ProductReadinessResumeAuthorizer>();
-        services.AddSingleton<FlowContextSerializationValidator>();
-        services.AddSingleton<IFlowContextSerializer, SystemTextJsonFlowContextSerializer>();
-        services.AddOptions<AppSurfaceFlowDurableTaskOptions>();
-        services.AddSingleton(typeof(IDurableTaskFlowRunner<>), typeof(DurableTaskFlowRunner<>));
-        services.AddSingleton(typeof(IDurableTaskFlowClient<>), typeof(DurableTaskFlowClient<>));
-        services.AddSingleton<ProductApprovalInProcessHost>();
-
-        return services.BuildServiceProvider();
-    }
 }

@@ -5,8 +5,14 @@ using Microsoft.Extensions.Hosting;
 namespace ProductReadinessLabAppHost;
 
 /// <summary>
-/// Root module for the product-readiness lab AppHost.
+/// Root module marker for the product-readiness lab AppHost.
 /// </summary>
+/// <remarks>
+/// The AppHost keeps Aspire composition in <see cref="ProductReadinessComponents" /> and leaves this
+/// module intentionally empty so package evaluators can see that the example does not require hidden
+/// service registration. Add dependencies here only when AppSurface-owned AppHost services become part
+/// of the public proof contract; keep Postgres, web, and verifier wiring in the AppHost builder.
+/// </remarks>
 public sealed class ProductReadinessLabAppHostModule : IAppSurfaceHostModule
 {
     /// <inheritdoc />
