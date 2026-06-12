@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using ForgeTrust.AppSurface.Auth.AspNetCore;
 using Microsoft.AspNetCore.Http.HttpResults;
 
@@ -22,15 +23,19 @@ internal static class ProductReadinessEndpoints
             var report = await reports.BuildAsync(cancellationToken);
             return Results.Text(ReadinessReportMarkdownRenderer.Render(report), "text/markdown");
         });
-        endpoints.MapGet("/auth/allowed", EvaluatePolicyAsync);
-        endpoints.MapGet("/auth/forbidden", EvaluatePolicyAsync);
-        endpoints.MapPost("/workflow/start", StartWorkflowAsync);
-        endpoints.MapPost("/workflow/{instanceId}/resume", ResumeWorkflowAsync);
+        endpoints.MapGet("/auth/allowed", (IAppSurfaceAspNetCorePolicyEvaluator evaluator) =>
+            EvaluatePolicyAsync(evaluator, ProductReadinessPolicies.OperatorsOnly));
+        endpoints.MapGet("/auth/forbidden", (IAppSurfaceAspNetCorePolicyEvaluator evaluator) =>
+            EvaluatePolicyAsync(evaluator, ProductReadinessPolicies.UnavailableEntitlement));
+        endpoints.MapPost("/workflow/start", StartWorkflowAsync)
+            .RequireAuthorization(ProductReadinessPolicies.OperatorsOnly);
+        endpoints.MapPost("/workflow/{instanceId}/resume", ResumeWorkflowAsync)
+            .RequireAuthorization(ProductReadinessPolicies.OperatorsOnly);
     }
 
-    private static async Task<AuthProbe> EvaluatePolicyAsync(IAppSurfaceAspNetCorePolicyEvaluator evaluator)
+    private static async Task<AuthProbe> EvaluatePolicyAsync(IAppSurfaceAspNetCorePolicyEvaluator evaluator, string policyName)
     {
-        var result = await evaluator.AuthorizeAsync(ProductReadinessPolicies.OperatorsOnly);
+        var result = await evaluator.AuthorizeAsync(policyName);
         return AuthProbe.FromResult(result);
     }
 
@@ -53,13 +58,20 @@ internal static class ProductReadinessEndpoints
     /// <returns>Completed workflow response, or a conflict response for late or unknown resume events.</returns>
     internal static async Task<Results<Ok<WorkflowProbe>, Conflict<WorkflowResumeRejected>>> ResumeWorkflowAsync(
         ProductApprovalInProcessHost host,
+        ClaimsPrincipal user,
         string instanceId,
         ResumeWorkflowRequest request,
         CancellationToken cancellationToken)
     {
+        var caller = user.FindFirstValue("sub");
+        if (string.IsNullOrWhiteSpace(caller))
+        {
+            throw new InvalidOperationException("Authenticated operator subject is required to resume the product-readiness workflow.");
+        }
+
         try
         {
-            var probe = await host.ResumeAsync(instanceId, request.Decision, cancellationToken);
+            var probe = await host.ResumeAsync(instanceId, request.Decision, caller, cancellationToken);
             return TypedResults.Ok(probe);
         }
         catch (ProductWorkflowNotWaitingException exception)

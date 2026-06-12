@@ -91,6 +91,17 @@ public sealed class ProductReadinessAppHostVerifierTests
         Assert.Equal(TimeSpan.FromSeconds(30), options.Timeout);
     }
 
+    [Theory]
+    [InlineData("http://127.0.0.1:5061", "http://127.0.0.1:5061/readiness")]
+    [InlineData("http://127.0.0.1:5061/lab", "http://127.0.0.1:5061/lab/readiness")]
+    [InlineData("http://127.0.0.1:5061/lab/", "http://127.0.0.1:5061/lab/readiness")]
+    public void BuildReadinessUri_PreservesBasePath(string target, string expected)
+    {
+        var readinessUri = ProductReadinessAppHostVerifier.BuildReadinessUri(new Uri(target));
+
+        Assert.Equal(new Uri(expected), readinessUri);
+    }
+
     [Fact]
     public void Options_Parse_RejectsMissingTarget()
     {

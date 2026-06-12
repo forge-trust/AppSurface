@@ -114,7 +114,18 @@ public sealed partial class VerifyProfile : ICommand
         }
         finally
         {
-            await app.StopAsync(CancellationToken.None);
+            try
+            {
+                await app.StopAsync(CancellationToken.None);
+            }
+            catch (Exception exception) when (IsNonFatalVerificationException(exception))
+            {
+                _logger.LogWarning(exception, "Error stopping product-readiness AppHost verification resources");
+                if (Environment.ExitCode == 0)
+                {
+                    Environment.ExitCode = -151;
+                }
+            }
         }
     }
 

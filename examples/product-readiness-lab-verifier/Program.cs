@@ -49,7 +49,7 @@ public static class ProductReadinessAppHostVerifier
 
         ProductReadinessProbeDocument? report = null;
         Exception? lastException = null;
-        var readinessUri = new Uri(options.TargetUri!, "/readiness");
+        var readinessUri = BuildReadinessUri(options.TargetUri!);
 
         while (!linked.IsCancellationRequested)
         {
@@ -103,6 +103,24 @@ public static class ProductReadinessAppHostVerifier
         await output.WriteLineAsync("Product-readiness AppHost verification passed.");
         await output.WriteLineAsync("Postgres product-state persistence is proven locally; Durable Task backend/storage remains host-owned.");
         return 0;
+    }
+
+    /// <summary>
+    /// Builds the readiness endpoint URI while preserving target base paths.
+    /// </summary>
+    /// <param name="targetUri">Base target URI for the product-readiness lab web app.</param>
+    /// <returns>The readiness endpoint URI.</returns>
+    public static Uri BuildReadinessUri(Uri targetUri)
+    {
+        ArgumentNullException.ThrowIfNull(targetUri);
+
+        var builder = new UriBuilder(targetUri);
+        if (!builder.Path.EndsWith("/", StringComparison.Ordinal))
+        {
+            builder.Path += "/";
+        }
+
+        return new Uri(builder.Uri, "readiness");
     }
 
     /// <summary>

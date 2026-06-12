@@ -110,7 +110,13 @@ internal static class ProductReadinessServiceCollectionExtensions
                 ProductReadinessPolicies.OperatorsOnly,
                 policy => policy
                     .RequireAuthenticatedUser()
-                    .RequireClaim("role", "operator"));
+                    .RequireClaim("role", "operator")
+                    .RequireClaim("sub"));
+            options.AddPolicy(
+                ProductReadinessPolicies.UnavailableEntitlement,
+                policy => policy
+                    .RequireAuthenticatedUser()
+                    .RequireClaim("entitlement", "product-readiness-admin"));
         });
 
         services.AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim("sub"));
@@ -266,4 +272,9 @@ internal static class ProductReadinessPolicies
     /// Local operator policy used for proof requests.
     /// </summary>
     public const string OperatorsOnly = "OperatorsOnly";
+
+    /// <summary>
+    /// Local probe policy that intentionally fails for bundled proof users.
+    /// </summary>
+    public const string UnavailableEntitlement = "UnavailableEntitlement";
 }

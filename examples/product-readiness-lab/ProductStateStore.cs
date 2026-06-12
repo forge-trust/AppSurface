@@ -70,9 +70,11 @@ internal sealed class InMemoryProductStateStore : IProductStateStore
 /// <summary>
 /// Postgres-backed product state store for local product/domain state.
 /// </summary>
-internal sealed class PostgresProductStateStore : IProductStateStore
+internal sealed class PostgresProductStateStore : IProductStateStore, IAsyncDisposable
 {
-    private readonly string _connectionString;
+    private readonly NpgsqlDataSource _dataSource;
+    private readonly SemaphoreSlim _schemaGate = new(1, 1);
+    private bool _schemaReady;
 
     /// <summary>
     /// Creates a Postgres product-state store.
@@ -80,9 +82,12 @@ internal sealed class PostgresProductStateStore : IProductStateStore
     /// <param name="connectionString">Postgres connection string.</param>
     public PostgresProductStateStore(string connectionString)
     {
-        _connectionString = string.IsNullOrWhiteSpace(connectionString)
-            ? throw new ArgumentException("Connection string is required.", nameof(connectionString))
-            : connectionString;
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new ArgumentException("Connection string is required.", nameof(connectionString));
+        }
+
+        _dataSource = NpgsqlDataSource.Create(connectionString);
     }
 
     /// <inheritdoc />
@@ -93,8 +98,7 @@ internal sealed class PostgresProductStateStore : IProductStateStore
         ProductSubscription subscription,
         CancellationToken cancellationToken = default)
     {
-        await using var dataSource = NpgsqlDataSource.Create(_connectionString);
-        await EnsureSchemaAsync(dataSource, cancellationToken);
+        await EnsureSchemaAsync(cancellationToken);
 
         const string sql = """
             insert into product_readiness_subscriptions (id, account_name, plan_name, status)
@@ -102,10 +106,11 @@ internal sealed class PostgresProductStateStore : IProductStateStore
             on conflict (id) do update
             set account_name = excluded.account_name,
                 plan_name = excluded.plan_name,
-                status = excluded.status;
+                status = excluded.status,
+                updated_at = now();
             """;
 
-        await using var command = dataSource.CreateCommand(sql);
+        await using var command = _dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue(subscription.Id);
         command.Parameters.AddWithValue(subscription.AccountName);
         command.Parameters.AddWithValue(subscription.PlanName);
@@ -130,7 +135,38 @@ internal sealed class PostgresProductStateStore : IProductStateStore
         }
     }
 
-    private static async Task EnsureSchemaAsync(NpgsqlDataSource dataSource, CancellationToken cancellationToken)
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        await _dataSource.DisposeAsync();
+        _schemaGate.Dispose();
+    }
+
+    private async Task EnsureSchemaAsync(CancellationToken cancellationToken)
+    {
+        if (_schemaReady)
+        {
+            return;
+        }
+
+        await _schemaGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_schemaReady)
+            {
+                return;
+            }
+
+            await EnsureSchemaCoreAsync(cancellationToken);
+            _schemaReady = true;
+        }
+        finally
+        {
+            _schemaGate.Release();
+        }
+    }
+
+    private async Task EnsureSchemaCoreAsync(CancellationToken cancellationToken)
     {
         const string sql = """
             create table if not exists product_readiness_subscriptions (
@@ -142,7 +178,7 @@ internal sealed class PostgresProductStateStore : IProductStateStore
             );
             """;
 
-        await using var command = dataSource.CreateCommand(sql);
+        await using var command = _dataSource.CreateCommand(sql);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }

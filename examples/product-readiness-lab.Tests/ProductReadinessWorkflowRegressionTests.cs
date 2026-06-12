@@ -20,11 +20,13 @@ public sealed class ProductReadinessWorkflowRegressionTests
 
         var first = await ProductReadinessEndpoints.ResumeWorkflowAsync(
             host,
+            ProductReadinessProofUsers.CreatePrincipal("operator")!,
             started.InstanceId,
             request,
             CancellationToken.None);
         var second = await ProductReadinessEndpoints.ResumeWorkflowAsync(
             host,
+            ProductReadinessProofUsers.CreatePrincipal("operator")!,
             started.InstanceId,
             request,
             CancellationToken.None);
@@ -48,10 +50,11 @@ public sealed class ProductReadinessWorkflowRegressionTests
         await canceled.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            await host.ResumeAsync(started.InstanceId, "approved", canceled.Token));
+            await host.ResumeAsync(started.InstanceId, "approved", "operator-1", canceled.Token));
 
         var retry = await ProductReadinessEndpoints.ResumeWorkflowAsync(
             host,
+            ProductReadinessProofUsers.CreatePrincipal("operator")!,
             started.InstanceId,
             new ResumeWorkflowRequest("approved"),
             CancellationToken.None);

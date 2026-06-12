@@ -57,6 +57,7 @@ internal sealed class ProductApprovalInProcessHost
     public async Task<WorkflowProbe> ResumeAsync(
         string instanceId,
         string decision,
+        string caller,
         CancellationToken cancellationToken = default)
     {
         if (!_waitingRuns.TryGetValue(instanceId, out var waitingRun))
@@ -85,7 +86,7 @@ internal sealed class ProductApprovalInProcessHost
                     instanceId,
                     waiting.NodeId,
                     ProductReadinessFlowDefinition.ApprovalEventName,
-                    "operator-1"),
+                    caller),
                 cancellationToken);
 
             if (!authorization.Allowed)
@@ -351,6 +352,8 @@ internal sealed class ProductReadinessResumeAuthorizer : IFlowResumeAuthorizer
     {
         var allowed =
             string.Equals(request.FlowId, ProductReadinessFlowDefinition.FlowId, StringComparison.Ordinal)
+            && string.Equals(request.Version, ProductReadinessFlowDefinition.Version, StringComparison.Ordinal)
+            && string.Equals(request.NodeId, ProductReadinessFlowDefinition.ReviewNodeId, StringComparison.Ordinal)
             && string.Equals(request.EventName, ProductReadinessFlowDefinition.ApprovalEventName, StringComparison.Ordinal)
             && string.Equals(request.Caller, "operator-1", StringComparison.Ordinal);
 
