@@ -1711,6 +1711,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
             {
                 ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.resources.dll"] = Encoding.UTF8.GetBytes("copied satellite"),
                 ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10 Apache-2.0")
             });
 
@@ -1730,18 +1731,55 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         var entry = Assert.Single(report.Entries);
         var payloadResult = Assert.Single(entry.PayloadResults!);
-        Assert.Equal(1, entry.SuspiciousPayloadCount);
-        Assert.Equal(1, entry.CoveredSuspiciousPayloadCount);
+        Assert.Equal(2, entry.SuspiciousPayloadCount);
+        Assert.Equal(2, entry.CoveredSuspiciousPayloadCount);
         Assert.Equal("cli-reportgenerator-tool-payload", payloadResult.RecordId);
         Assert.Equal("notice_enforced", payloadResult.Status);
         Assert.Equal("Directory.Packages.props", payloadResult.VersionSource);
+        Assert.Equal(
+            [
+                "tools/net10.0/any/reportgenerator/ReportGenerator.dll",
+                "tools/net10.0/any/reportgenerator/ReportGenerator.resources.dll"
+            ],
+            payloadResult.PayloadEntries);
         var markdown = PackageArtifactReportRenderer.RenderMarkdown(report);
         Assert.Contains("Suspicious payloads", markdown, StringComparison.Ordinal);
         Assert.Contains("| `ForgeTrust.AppSurface.Cli` |", markdown, StringComparison.Ordinal);
-        Assert.Contains("| 1/1 |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| 2/2 |", markdown, StringComparison.Ordinal);
         Assert.Contains("## Redistributed payload coverage", markdown, StringComparison.Ordinal);
         Assert.Contains("`cli-reportgenerator-tool-payload`", markdown, StringComparison.Ordinal);
         Assert.Contains("`THIRD-PARTY-NOTICES.md`", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AllowsRepositoryRootAsEvidencePath()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Directory.Packages.props", """<PackageVersion Include="ReportGenerator" Version="5.5.10" />""");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10 Apache-2.0")
+            });
+        var inventory = CreateReportGeneratorInventory();
+        inventory.Notices[0].SourcePaths.Clear();
+        inventory.Notices[0].SourcePaths.Add(".");
+
+        var report = new PackageArtifactValidator().Validate(
+            CreateCliPublishPlan(),
+            artifactDirectory,
+            PackageVersion,
+            _repositoryRoot,
+            inventory);
+
+        var entry = Assert.Single(report.Entries);
+        Assert.Equal(1, entry.CoveredSuspiciousPayloadCount);
     }
 
     [Fact]
@@ -2107,6 +2145,37 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_ThrowsWhenInventoryPathUsesBackslashRoot()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Directory.Packages.props", """<PackageVersion Include="ReportGenerator" Version="5.5.10" />""");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10 Apache-2.0")
+            });
+        var inventory = CreateReportGeneratorInventory();
+        inventory.Notices[0].SourcePaths.Add("\\tmp\\Directory.Packages.props");
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateCliPublishPlan(),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                inventory));
+
+        Assert.Contains("ASPKG135", error.Message, StringComparison.Ordinal);
+        Assert.Contains("repository-relative", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PackageArtifactValidator_ThrowsWhenNoticePathUsesCurrentDirectorySegment()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -2134,6 +2203,36 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 inventory));
 
         Assert.Contains("current-directory segments", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenNoticePathIsSlashOnly()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10 Apache-2.0")
+            });
+        var inventory = CreateReportGeneratorInventory();
+        inventory.Notices[0].NoticePaths.Clear();
+        inventory.Notices[0].NoticePaths.Add("/");
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateCliPublishPlan(),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                inventory));
+
+        Assert.Contains("package payload paths must be relative", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2369,6 +2468,35 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_ThrowsWhenVersionSourcePathIsMissingButContainsIsSet()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Directory.Packages.props", """<PackageVersion Include="ReportGenerator" Version="5.5.10" />""");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10 Apache-2.0")
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateCliPublishPlan(),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                CreateReportGeneratorInventory(versionSourcePath: null)));
+
+        Assert.Contains("ASPKG132", error.Message, StringComparison.Ordinal);
+        Assert.Contains("version_source_contains", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PackageArtifactValidator_ThrowsWhenVersionSourcePathIsMissing()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -2526,6 +2654,38 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.Contains("ASPKG124", error.Message, StringComparison.Ordinal);
         Assert.Contains("matched no package payload entries", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenGlobstarNoticePatternCannotMatchPayload()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Directory.Packages.props", """<PackageVersion Include="ReportGenerator" Version="5.5.10" />""");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/reportgenerator/ReportGenerator"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10 Apache-2.0")
+            });
+        var inventory = CreateReportGeneratorInventory();
+        inventory.Notices[0].PayloadPatterns.Clear();
+        inventory.Notices[0].PayloadPatterns.Add("tools/**/missing/ReportGenerator");
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateCliPublishPlan(),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                inventory));
+
+        Assert.Contains("ASPKG124", error.Message, StringComparison.Ordinal);
+        Assert.Contains("tools/**/missing/ReportGenerator", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2826,6 +2986,16 @@ public sealed class PackageArtifactValidationTests : IDisposable
             () => PackagePayloadInventoryLoader.ResolveInventoryPath(_repositoryRoot, inventoryPath));
 
         Assert.Contains("repository-relative", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackagePayloadInventoryLoader_ResolvesRelativeInventoryPath()
+    {
+        var inventoryPath = PackagePayloadInventoryLoader.ResolveInventoryPath(
+            _repositoryRoot,
+            "packages/third-party-payloads.yml");
+
+        Assert.Equal(Path.Join(_repositoryRoot, "packages/third-party-payloads.yml"), inventoryPath);
     }
 
     [Fact]
