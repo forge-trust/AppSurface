@@ -2411,6 +2411,37 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_ThrowsWhenNoticePathUsesUtf16Bom()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WriteFile("Directory.Packages.props", """<PackageVersion Include="ReportGenerator" Version="5.5.10" />""");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["tools/net10.0/any/reportgenerator/ReportGenerator.dll"] = Encoding.UTF8.GetBytes("copied tool"),
+                ["THIRD-PARTY-NOTICES.md"] = Encoding.Unicode.GetPreamble()
+                    .Concat(Encoding.Unicode.GetBytes("ReportGenerator 5.5.10 Apache-2.0"))
+                    .ToArray()
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateCliPublishPlan(),
+                artifactDirectory,
+                PackageVersion,
+                _repositoryRoot,
+                CreateReportGeneratorInventory()));
+
+        Assert.Contains("ASPKG130", error.Message, StringComparison.Ordinal);
+        Assert.Contains("UTF-8", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void PackageArtifactValidator_ThrowsWhenSourcePathIsMissing()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");

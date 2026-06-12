@@ -617,7 +617,7 @@ internal sealed class PackageArtifactValidator
             using var reader = new StreamReader(
                 stream,
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true),
-                detectEncodingFromByteOrderMarks: true);
+                detectEncodingFromByteOrderMarks: false);
             return reader.ReadToEnd();
         }
         catch (DecoderFallbackException ex)

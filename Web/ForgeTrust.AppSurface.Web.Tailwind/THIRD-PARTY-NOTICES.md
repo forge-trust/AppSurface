@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-ForgeTrust.AppSurface.Web.Tailwind packages include the following third-party payloads in addition to the repository license.
+ForgeTrust.AppSurface.Web.Tailwind and ForgeTrust.AppSurface.Web.Tailwind.Runtime.* packages include the following third-party payloads in addition to the repository license.
 
 ## Tailwind CSS Standalone CLI
 
