@@ -639,7 +639,7 @@ internal sealed class PackageIndexGenerator
         if (RepositoryFileExists(repositoryRoot, productReadinessLabPath))
         {
             builder.AppendLine();
-            builder.AppendLine($"Composed local proof: {FormatMarkdownLink("Product readiness lab", GetRelativeDocPath(request, productReadinessLabPath))} shows how the web, auth, flow, DurableTask-facing, Aspire, and Postgres product-state pieces fit together without claiming production hosting or Durable Task storage ownership.");
+            builder.AppendLine($"Composed local proof: {FormatMarkdownLink("Product readiness lab", GetRelativeDocPath(request, productReadinessLabPath))} shows how the web, auth, flow, DurableTask-facing, Aspire, and Postgres product-state pieces fit together without claiming production hosting or Durable Task storage ownership. Its paired AppHost `verify` profile starts local Postgres and fails if the Postgres product-state row does not become `proven-locally`.");
         }
 
         builder.AppendLine();
