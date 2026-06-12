@@ -64,6 +64,27 @@ public sealed class ProductReadinessWorkflowRegressionTests
         Assert.Equal("Completed", ok.Value?.Status);
     }
 
+    [Fact]
+    public async Task ResumeWorkflowAsync_InvalidRequest_ReturnsBadRequest()
+    {
+        await using var provider = BuildProvider(new InMemoryProductStateStore());
+        var host = provider.GetRequiredService<ProductApprovalInProcessHost>();
+        var started = await host.StartAsync("Validation Co", "Team");
+
+        var response = await ProductReadinessEndpoints.ResumeWorkflowAsync(
+            host,
+            ProductReadinessProofUsers.CreatePrincipal("operator")!,
+            started.InstanceId,
+            new ResumeWorkflowRequest(string.Empty),
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequest<WorkflowRequestRejected>>(response.Result);
+        Assert.NotNull(badRequest.Value);
+        Assert.Equal(400, badRequest.StatusCode);
+        Assert.Equal("InvalidRequest", badRequest.Value.Status);
+        Assert.Contains(nameof(ResumeWorkflowRequest.Decision), badRequest.Value.Errors.Keys);
+    }
+
     private static ServiceProvider BuildProvider(IProductStateStore store)
     {
         var services = new ServiceCollection();

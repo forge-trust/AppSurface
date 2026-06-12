@@ -111,7 +111,7 @@ internal static class ProductReadinessServiceCollectionExtensions
                 policy => policy
                     .RequireAuthenticatedUser()
                     .RequireClaim("role", "operator")
-                    .RequireClaim("sub"));
+                    .RequireClaim(ProductReadinessClaimNames.Subject));
             options.AddPolicy(
                 ProductReadinessPolicies.UnavailableEntitlement,
                 policy => policy
@@ -119,7 +119,7 @@ internal static class ProductReadinessServiceCollectionExtensions
                     .RequireClaim("entitlement", "product-readiness-admin"));
         });
 
-        services.AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim("sub"));
+        services.AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim(ProductReadinessClaimNames.Subject));
         services.AddOptions<AppSurfaceFlowOptions>();
         services.AddOptions<AppSurfaceFlowDurableTaskOptions>();
         services.TryAddSingleton<IFlowContextSerializer, SystemTextJsonFlowContextSerializer>();
@@ -245,12 +245,12 @@ internal static class ProductReadinessProofUsers
         {
             "operator" =>
             [
-                new Claim("sub", "operator-1"),
+                new Claim(ProductReadinessClaimNames.Subject, "operator-1"),
                 new Claim("role", "operator"),
             ],
             "viewer" =>
             [
-                new Claim("sub", "viewer-1"),
+                new Claim(ProductReadinessClaimNames.Subject, "viewer-1"),
                 new Claim("role", "viewer"),
             ],
             "nosub" => [new Claim("role", "operator")],
@@ -261,6 +261,17 @@ internal static class ProductReadinessProofUsers
             ? null
             : new ClaimsPrincipal(new ClaimsIdentity(claims, ProductReadinessProofAuthenticationHandler.SchemeName));
     }
+}
+
+/// <summary>
+/// Claim names used by the proof authentication and AppSurface auth mapping.
+/// </summary>
+internal static class ProductReadinessClaimNames
+{
+    /// <summary>
+    /// JWT subject claim used as the neutral AppSurface subject identifier.
+    /// </summary>
+    public const string Subject = "sub";
 }
 
 /// <summary>

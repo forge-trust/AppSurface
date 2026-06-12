@@ -8,6 +8,22 @@ namespace ProductReadinessLab;
 /// <summary>
 /// In-process workflow host proof for the product-readiness lab.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Decision: this type keeps the evaluator experience lightweight by hosting workflow start,
+/// wait, resume, timeout, and resume-authorization behavior in the web app process. Use it for
+/// local product-readiness evidence and focused tests; use a host-owned Durable Task worker/client
+/// process when production durability, distributed execution, or long-running orchestration storage
+/// is required.
+/// </para>
+/// <para>
+/// Pitfall: pending workflow state is held in memory in this process. A restart loses waiting
+/// instances, semaphore ordering is not a durability guarantee, and the in-memory runner can differ
+/// from a real Durable Task backend in persistence, replay, and concurrency behavior. The constructor
+/// expects the flow definition, DurableTask-facing runner/client, and product state store to be wired
+/// before the host starts receiving workflow requests.
+/// </para>
+/// </remarks>
 internal sealed class ProductApprovalInProcessHost
 {
     private readonly FlowDefinition<ProductApprovalState> _definition;
@@ -46,7 +62,12 @@ internal sealed class ProductApprovalInProcessHost
 
         var state = new ProductApprovalState(subscription.Id.ToString("N"), accountName, planName, "created", null);
         var run = await _runner.RunAsync(_definition, state, cancellationToken);
-        _waitingRuns[state.RequestId] = new ProductWorkflowWaitingRun(run);
+        var waitingRun = new ProductWorkflowWaitingRun(run);
+        if (!_waitingRuns.TryAdd(state.RequestId, waitingRun))
+        {
+            waitingRun.Dispose();
+            throw new InvalidOperationException($"Workflow instance '{state.RequestId}' already exists.");
+        }
 
         return WorkflowProbe.FromWaiting(state.RequestId, run);
     }
@@ -65,6 +86,7 @@ internal sealed class ProductApprovalInProcessHost
             throw new ProductWorkflowNotWaitingException(instanceId);
         }
 
+        ProductWorkflowWaitingRun? removedRun = null;
         await waitingRun.Gate.WaitAsync(cancellationToken);
         try
         {
@@ -107,7 +129,10 @@ internal sealed class ProductApprovalInProcessHost
             }
             else
             {
-                _waitingRuns.TryRemove(instanceId, out _);
+                if (_waitingRuns.TryRemove(instanceId, out var removed))
+                {
+                    removedRun = removed;
+                }
             }
 
             return WorkflowProbe.FromCompleted(instanceId, completed);
@@ -115,6 +140,7 @@ internal sealed class ProductApprovalInProcessHost
         finally
         {
             waitingRun.Gate.Release();
+            removedRun?.Dispose();
         }
     }
 
@@ -174,7 +200,7 @@ internal sealed class ProductApprovalInProcessHost
 /// <summary>
 /// Waiting workflow state guarded so only one resume attempt can execute at a time.
 /// </summary>
-internal sealed class ProductWorkflowWaitingRun
+internal sealed class ProductWorkflowWaitingRun : IDisposable
 {
     /// <summary>
     /// Creates waiting workflow state.
@@ -194,6 +220,14 @@ internal sealed class ProductWorkflowWaitingRun
     /// Gets or sets the current waiting result.
     /// </summary>
     public FlowRunResult<ProductApprovalState> Result { get; set; }
+
+    /// <summary>
+    /// Disposes the resume gate.
+    /// </summary>
+    public void Dispose()
+    {
+        Gate.Dispose();
+    }
 }
 
 /// <summary>
