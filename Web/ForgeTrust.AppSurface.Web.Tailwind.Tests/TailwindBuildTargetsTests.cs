@@ -493,6 +493,9 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         Assert.Contains(
             archive.Entries,
             entry => entry.FullName == "runtimes/linux-x64/native/tailwindcss-linux-x64");
+        Assert.Contains(
+            archive.Entries,
+            entry => entry.FullName == "THIRD-PARTY-NOTICES.md");
     }
 
     [Fact]

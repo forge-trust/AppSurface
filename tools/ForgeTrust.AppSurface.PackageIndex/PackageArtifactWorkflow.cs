@@ -12,6 +12,7 @@ internal sealed class PackageArtifactWorkflow
     private readonly PackagePublishPlanResolver _planResolver;
     private readonly ICommandRunner _commandRunner;
     private readonly PackageArtifactValidator _validator;
+    private readonly PackagePayloadInventoryLoader _payloadInventoryLoader;
     private readonly PackageArtifactManifestWriter _artifactManifestWriter;
 
     /// <summary>
@@ -28,6 +29,7 @@ internal sealed class PackageArtifactWorkflow
         _planResolver = planResolver;
         _commandRunner = commandRunner;
         _validator = validator;
+        _payloadInventoryLoader = new PackagePayloadInventoryLoader();
         _artifactManifestWriter = new PackageArtifactManifestWriter();
     }
 
@@ -47,6 +49,9 @@ internal sealed class PackageArtifactWorkflow
         var plan = await _planResolver.ResolveAsync(
             request.RepositoryRoot,
             request.ManifestPath,
+            cancellationToken);
+        var payloadInventory = await _payloadInventoryLoader.LoadAsync(
+            request.RepositoryRoot,
             cancellationToken);
 
         Directory.CreateDirectory(request.ArtifactsOutputPath);
@@ -113,7 +118,12 @@ internal sealed class PackageArtifactWorkflow
                 cancellationToken);
         }
 
-        var report = _validator.Validate(plan, request.ArtifactsOutputPath, request.PackageVersion);
+        var report = _validator.Validate(
+            plan,
+            request.ArtifactsOutputPath,
+            request.PackageVersion,
+            request.RepositoryRoot,
+            payloadInventory);
         Directory.CreateDirectory(Path.GetDirectoryName(request.ReportPath)!);
         await File.WriteAllTextAsync(
             request.ReportPath,
