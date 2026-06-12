@@ -5,7 +5,8 @@ import {
   isSafeSearchResultPath,
   normalizeCodeLanguage,
   normalizePageTypeAlias,
-  normalizeSearchDocument
+  normalizeSearchDocument,
+  rankSearchResults
 } from './search-core';
 
 declare global {
@@ -134,6 +135,16 @@ declare global {
       language: [],
       audience: [],
       status: []
+    };
+  }
+
+  function createEmptySelectedFilters() {
+    return {
+      pageType: '',
+      component: '',
+      language: '',
+      audience: '',
+      status: ''
     };
   }
 
@@ -521,7 +532,7 @@ declare global {
     }
 
     const variant = getPageTypeBadgeVariant(item?.pageTypeVariant);
-    return `<span class="docs-page-badge docs-page-badge--${escapeHtml(variant)}">${escapeHtml(label)}</span>`;
+    return `<span class="docs-page-badge docs-page-badge--${escapeHtml(variant)} docs-search-option-badge">${escapeHtml(label)}</span>`;
   }
 
   function normalizeQuery(value) {
@@ -1541,19 +1552,32 @@ declare global {
     }
 
     const normalizedQuery = normalizeQuery(query);
-    const filterFn = hasActiveFilters(filters)
-      ? (result) => matchesStoredResult(result, filters)
+    const normalizedFilters = getSearchFilters(filters || createEmptySelectedFilters());
+    const filterFn = hasActiveFilters(normalizedFilters)
+      ? (result) => matchesStoredResult(result, normalizedFilters)
       : undefined;
 
     let results;
     if (normalizedQuery) {
-      results = searchData.index.search(normalizedQuery, {
+      const miniSearchResults = searchData.index.search(normalizedQuery, {
         ...defaultSearchOptions,
         filter: filterFn
       });
-    } else if (hasActiveFilters(filters)) {
-      results = searchData.sortedDocs.filter((doc) => matchesFilters(doc, filters))
-        .map((doc) => ({ id: doc.id }));
+      results = rankSearchResults(
+        miniSearchResults
+          .map((result, index) => ({
+            doc: searchData.docsById.get(result.id),
+            miniSearchRank: index,
+            miniSearchScore: result.score
+          }))
+          .filter((candidate) => candidate.doc),
+        {
+          searchQuery: normalizedQuery,
+          filters: normalizedFilters
+        });
+    } else if (hasActiveFilters(normalizedFilters)) {
+      results = searchData.sortedDocs.filter((doc) => matchesFilters(doc, normalizedFilters))
+        .map((doc) => doc);
     } else {
       results = [];
     }
@@ -1584,26 +1608,22 @@ declare global {
       .filter(Boolean);
     const normalizedQuery = normalizeQuery(searchPageState.q);
     const isStarter = !normalizedQuery && activeFilters.length === 0;
-    const baseResults = normalizedQuery
-      ? runRankedSearch(normalizedQuery, createEmptyFacetValues())
-      : [];
     const baseDocs = normalizedQuery
-      ? baseResults.map((result) => searchData.docsById.get(result.id)).filter(Boolean)
+      ? runRankedSearch(normalizedQuery, createEmptySelectedFilters())
       : searchData.sortedDocs;
     const resultDocs = normalizedQuery
       ? (activeFilters.length > 0
-          ? baseDocs.filter((doc) => matchesFilters(doc, filters))
+          ? runRankedSearch(normalizedQuery, filters)
           : baseDocs)
       : (activeFilters.length > 0
           ? searchData.sortedDocs.filter((doc) => matchesFilters(doc, filters))
           : []);
-    const orderedResultDocs = normalizedQuery ? resultDocs : resultDocs;
 
     return {
       normalizedQuery,
       activeFilters,
       facets: deriveFacetState(baseDocs, filters),
-      resultDocs: orderedResultDocs,
+      resultDocs,
       isStarter,
       starterDocs: searchData.starterDocs,
       recoveryLinks: buildRecoveryLinks(baseDocs)
@@ -1908,7 +1928,7 @@ declare global {
         }
 
         await ensureSearchResourcesLoaded();
-        const queryResults = runRankedSearch(query, createEmptyFacetValues(), topResults);
+        const queryResults = runRankedSearch(query, createEmptySelectedFilters(), topResults);
         activeIndex = queryResults.length > 0 ? 0 : -1;
         renderSidebarResults(sidebar, queryResults, query, activeIndex);
         recordSearchOutcome('sidebar', query, queryResults.length, 0);
@@ -1935,7 +1955,7 @@ declare global {
     input.addEventListener('keydown', async (event) => {
       const currentQuery = normalizeQuery(input.value);
       if (currentQuery && currentQuery !== lastRenderedQuery && searchData.index) {
-        const refreshed = runRankedSearch(currentQuery, createEmptyFacetValues(), topResults);
+        const refreshed = runRankedSearch(currentQuery, createEmptySelectedFilters(), topResults);
         activeIndex = refreshed.length > 0 ? 0 : -1;
         renderSidebarResults(sidebar, refreshed, currentQuery, activeIndex);
         lastRenderedQuery = currentQuery;

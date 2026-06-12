@@ -71,9 +71,9 @@ appsurface coverage run \
   --output ./TestResults/coverage-merged
 ```
 
-`coverage run` is the public package-consumer coverage orchestrator for private .NET repositories. It supports `.sln` and `.slnx` discovery, repeated `--test-project` selection, a default output directory that matches `coverage gate`, bounded parallel scheduling, per-project logs, stable per-project artifact directories, safe cleanup of AppSurface-owned outputs, and a package-owned ReportGenerator merge. Package consumers do not need a separate merge step: the command finishes by writing the merged `coverage.cobertura.xml` artifact. It does not mutate consumer projects, install tools into the consumer repo, read the consumer `.config/dotnet-tools.json`, upload coverage, call GitHub APIs, or store trends.
+`coverage run` is the public package-consumer coverage orchestrator for private .NET repositories. It supports `.sln` and `.slnx` discovery, repeated `--test-project` selection, a default output directory that matches `coverage gate`, bounded parallel scheduling, per-project logs, stable per-project artifact directories, safe cleanup of AppSurface-owned outputs, managed JUnit test-result artifacts, optional slow-test diagnostics, and a package-owned ReportGenerator merge. Package consumers do not need a separate merge step: the command finishes by writing the merged `coverage.cobertura.xml` artifact. It does not mutate consumer projects, install tools into the consumer repo, read the consumer `.config/dotnet-tools.json`, upload coverage, call GitHub APIs, or store trends.
 
-The v1 contract assumes selected test projects are already instrumented with Coverlet. JUnit or other loggers are best-effort pass-throughs via `--logger`; coverage artifacts and `dotnet-test.log` files are the stable AppSurface-owned outputs.
+The v1 contract assumes selected test projects are already instrumented with Coverlet. No managed test result export happens by default. Use `--test-results junit` when AppSurface should own top-level JUnit artifacts, and make sure every selected test project references `JunitXml.TestLogger`. `junit` is the only managed test-result format supported in this release; `trx` and TUnit-compatible parsing are reserved for follow-up work. `--logger` remains raw `dotnet test` pass-through and does not create AppSurface-managed artifacts.
 
 #### Already Has Coverlet
 
@@ -115,6 +115,8 @@ Options:
 - `--exclusive-test-project`: Repeatable project path or file name that should run exclusively.
 - `--logger`: Repeatable `dotnet test` logger value forwarded as `--logger:<value>`.
 - `--test-argument`: Repeatable extra argument token appended to every `dotnet test` invocation.
+- `--test-results`: Managed test-result format. Use `junit` to write AppSurface-owned top-level JUnit files. Other values fail before tests run.
+- `--slow-test-diagnostics`: Writes `slow-test-diagnostics.md` and `.json` from managed JUnit results. This implies `--test-results junit`.
 - `--no-clean`: Preserves existing AppSurface-owned output instead of cleaning known coverage artifacts first.
 - `--verbosity`: `dotnet test` verbosity. Defaults to `minimal`.
 
@@ -122,13 +124,17 @@ Artifacts are local and private by default:
 
 - `coverage.cobertura.xml`: Merged Cobertura file consumed by `coverage gate`.
 - `summary.txt`: Human-readable merged line and branch coverage summary.
-- `timings.json`: Machine-readable build, test, merge, artifact, log, and exit-code data.
+- `timings.json`: Machine-readable build, test, merge, managed test-result, diagnostics, artifact, log, and exit-code data.
 - `reportgenerator-summary.txt`: Text summary from the package-owned ReportGenerator merge when available.
+- `junit-coverage-<index>-<project-name-hash>.xml`: AppSurface-managed JUnit test results when `--test-results junit` or `--slow-test-diagnostics` is used.
+- `slow-test-diagnostics.md` and `slow-test-diagnostics.json`: Slow-test evidence, parser warnings, metadata completeness, and diagnostic overhead when `--slow-test-diagnostics` is used.
 - `projects/<project-name-hash>/coverage.cobertura.xml`: Per-project Coverlet Cobertura output.
 - `projects/<project-name-hash>/dotnet-test.log`: Full `dotnet test` output for that project.
 - `.appsurface-coverage-output`: Ownership marker that allows future runs to clean only known AppSurface-owned artifacts.
 
 `coverage run` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, the solution directory, test project directories, files, and populated directories that do not carry the AppSurface ownership marker. Use a dedicated artifact directory for CI, for example `TestResults/coverage-merged`.
+
+`coverage run` and `coverage gate` are the supported CLI coverage surfaces. Standalone `coverage merge`, grouped CLI execution, merge-only CLI compatibility, packaged local-tool CI proof, and TRX/TUnit result parsing remain separate follow-up work.
 
 Use this GitHub Actions shape for a private repository that already has Coverlet instrumentation:
 
@@ -139,7 +145,7 @@ Use this GitHub Actions shape for a private repository that already has Coverlet
 - run: git fetch --no-tags --depth=1 origin main
 - run: dotnet tool restore
 - run: dotnet restore ./MyApp.slnx
-- run: dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore
+- run: dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore --test-results junit --slow-test-diagnostics
 - run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75 --diff-base origin/main --min-patch-line 85 --min-patch-branch 75
 - uses: actions/upload-artifact@v4
   if: always()
@@ -149,6 +155,9 @@ Use this GitHub Actions shape for a private repository that already has Coverlet
       TestResults/coverage-merged/coverage.cobertura.xml
       TestResults/coverage-merged/summary.txt
       TestResults/coverage-merged/timings.json
+      TestResults/coverage-merged/junit-*.xml
+      TestResults/coverage-merged/slow-test-diagnostics.md
+      TestResults/coverage-merged/slow-test-diagnostics.json
       TestResults/coverage-merged/coverage-gate.json
       TestResults/coverage-merged/coverage-gate.md
       TestResults/coverage-merged/projects/**/dotnet-test.log
@@ -264,6 +273,7 @@ Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs 
 | `ASCOV106` | The merged Cobertura file is malformed. | Regenerate coverage and inspect ReportGenerator output. |
 | `ASCOV109` | The output path is unsafe or not AppSurface-owned. | Use a dedicated artifact directory such as `TestResults/coverage-merged`. |
 | `ASCOV110` | `dotnet build`, `dotnet test`, or process startup failed. | Fix the build/test failure and inspect the listed project log. |
+| `ASCOV111` | An unsupported managed test-result format was requested. | Use `--test-results junit`, omit `--test-results`, or keep custom loggers on `--logger`. |
 | `ASCOV114` | The package-owned ReportGenerator dependency was not found. | Restore or reinstall `ForgeTrust.AppSurface.Cli` so its package dependencies are present. |
 | `ASCOV120` | One or more test, merge, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix failing tests, then rerun. |
 

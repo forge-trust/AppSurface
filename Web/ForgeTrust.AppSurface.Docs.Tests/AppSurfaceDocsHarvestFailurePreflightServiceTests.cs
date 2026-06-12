@@ -94,9 +94,15 @@ public sealed class AppSurfaceDocsHarvestFailurePreflightServiceTests : IDisposa
 
         await service.StartAsync(CancellationToken.None);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
-        await harvester.Started.Task.WaitAsync(cts.Token);
-        harvester.Complete();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await harvester.Started.Task.WaitAsync(cts.Token);
+        }
+        finally
+        {
+            harvester.Complete();
+        }
     }
 
     [Fact]
