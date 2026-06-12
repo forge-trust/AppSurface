@@ -1955,7 +1955,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 ["THIRD-PARTY-NOTICES.md"] = Encoding.UTF8.GetBytes("ReportGenerator 5.5.10 Apache-2.0")
             });
         var inventory = CreateReportGeneratorInventory();
-        inventory.Notices[0].SourcePaths.Add(Path.Combine(_repositoryRoot, "Directory.Packages.props"));
+        inventory.Notices[0].SourcePaths.Add(CombineSafeChildPath(_repositoryRoot, "Directory.Packages.props"));
 
         var error = Assert.Throws<PackageIndexException>(
             () => new PackageArtifactValidator().Validate(
