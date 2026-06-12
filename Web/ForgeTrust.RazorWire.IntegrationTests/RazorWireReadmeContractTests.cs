@@ -73,6 +73,34 @@ public sealed class RazorWireReadmeContractTests
     }
 
     [Fact]
+    public void RazorWireReadme_HybridHostingGuide_IsLinkedAndDocumentsCloudRunSplitOrigin()
+    {
+        var readme = ReadRazorWireReadme();
+        var guide = ReadRazorWireHybridHostingGuide();
+        var anchors = ExtractMarkdownHeadingAnchors(guide);
+
+        Assert.Contains("Docs/hybrid-hosting.md", readme, StringComparison.Ordinal);
+        Assert.Contains("Cloud Run live-origin recipe", readme, StringComparison.Ordinal);
+        Assert.Contains("razorwire export --mode hybrid", guide, StringComparison.Ordinal);
+        Assert.Contains("--live-origin https://api.example.com", guide, StringComparison.Ordinal);
+        Assert.Contains("--url http://127.0.0.1:5100", guide, StringComparison.Ordinal);
+        Assert.Contains("http://127.0.0.1:8011", guide, StringComparison.Ordinal);
+        Assert.Contains("options.Hybrid.LiveOrigin = \"https://api.example.com\";", guide, StringComparison.Ordinal);
+        Assert.DoesNotContain("options.Hybrid.LiveOrigin = new Uri", guide, StringComparison.Ordinal);
+        Assert.Contains("app.UseCors();", guide, StringComparison.Ordinal);
+        Assert.Contains("app.MapRazorWire();", guide, StringComparison.Ordinal);
+        Assert.Contains("appsurface docs export", guide, StringComparison.Ordinal);
+        Assert.Contains("--public-origin https://docs.example.com", guide, StringComparison.Ordinal);
+        Assert.Contains("service-level minimum instances default to `0`", guide, StringComparison.Ordinal);
+        Assert.Contains("first live request after idle time may pay a cold start", guide, StringComparison.Ordinal);
+        Assert.Contains("`RWEXPORT006` fails unsafe cases before publish", guide, StringComparison.Ordinal);
+        Assert.Contains("local-proof-first", anchors);
+        Assert.Contains("cloud-run-recipe", anchors);
+        Assert.Contains("cors-and-credentials", anchors);
+        Assert.Contains("anti-forgery", anchors);
+    }
+
+    [Fact]
     public void RazorWireReadme_LinkAndAnchorExtraction_IgnoresFencedExamples()
     {
         const string markdown = """
@@ -164,6 +192,14 @@ public sealed class RazorWireReadmeContractTests
     private static string ReadRazorWireReadme()
     {
         return File.ReadAllText(GetRazorWireReadmePath(GetRepositoryRoot()));
+    }
+
+    private static string ReadRazorWireHybridHostingGuide()
+    {
+        var repoRoot = GetRepositoryRoot();
+        var guidePath = Path.Combine(repoRoot, "Web", "ForgeTrust.RazorWire", "Docs", "hybrid-hosting.md");
+
+        return File.ReadAllText(guidePath);
     }
 
     private static IEnumerable<string> ExtractMarkdownLinks(string markdown)
