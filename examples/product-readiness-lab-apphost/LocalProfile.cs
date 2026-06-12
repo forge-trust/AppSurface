@@ -103,14 +103,26 @@ public sealed partial class VerifyProfile : ICommand
             Environment.ExitCode = 124;
             await console.Error.WriteLineAsync("Product-readiness AppHost verification timed out after 5 minutes.");
         }
-        catch (Exception exception)
+        catch (Exception exception) when (IsNonFatalVerificationException(exception))
         {
             _logger.LogCritical(exception, "Error running product-readiness AppHost verification");
             Environment.ExitCode = -150;
+        }
+        catch (Exception)
+        {
+            throw;
         }
         finally
         {
             await app.StopAsync(CancellationToken.None);
         }
+    }
+
+    private static bool IsNonFatalVerificationException(Exception exception)
+    {
+        return exception is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException
+            and not AppDomainUnloadedException;
     }
 }

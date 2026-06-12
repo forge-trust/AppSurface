@@ -17,7 +17,8 @@ public static class ProductReadinessAppHostVerifier
     /// <returns>Zero when the AppHost-backed report proves all locally provable rows; otherwise non-zero.</returns>
     public static async Task<int> Main(string[] args)
     {
-        return await RunAsync(args, Console.Out, Console.Error, new HttpClient());
+        using var httpClient = new HttpClient();
+        return await RunAsync(args, Console.Out, Console.Error, httpClient);
     }
 
     /// <summary>
@@ -118,12 +119,9 @@ public static class ProductReadinessAppHostVerifier
         }
 
         var rows = new Dictionary<string, ProductReadinessProbeRow>(StringComparer.Ordinal);
-        foreach (var row in report.Rows)
+        foreach (var row in report.Rows.Where(row => !rows.TryAdd(row.Area, row)))
         {
-            if (!rows.TryAdd(row.Area, row))
-            {
-                failures.Add($"{row.Area} row is duplicated.");
-            }
+            failures.Add($"{row.Area} row is duplicated.");
         }
 
         RequireStatus(rows, "startup-routing", "proven-locally", failures);
