@@ -2,121 +2,43 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CLI_PROJECT="$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
-BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-Release}"
+PACKAGE_INDEX_PROJECT="$ROOT_DIR/tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj"
 PACKAGE_VERSION_SUFFIX="${PACKAGE_VERSION_SUFFIX:-coverage-run-smoke.$(date +%Y%m%d%H%M%S)}"
-PACKAGE_VERSION="0.1.0-${PACKAGE_VERSION_SUFFIX}"
+PACKAGE_VERSION="${PACKAGE_VERSION:-0.1.0-${PACKAGE_VERSION_SUFFIX}}"
 AUTO_WORK_DIR=0
 if [[ -z "${WORK_DIR:-}" ]]; then
-  WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/appsurface-coverage-run-smoke.XXXXXX")"
+  WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/appsurface-coverage-proof.XXXXXX")"
   AUTO_WORK_DIR=1
 fi
-PACKAGE_SOURCE="$WORK_DIR/packages"
-SMOKE_REPO="$WORK_DIR/repo"
-PACK_NUGET_PACKAGES="${PACK_NUGET_PACKAGES:-$WORK_DIR/pack-nuget}"
-SMOKE_NUGET_PACKAGES="${SMOKE_NUGET_PACKAGES:-$WORK_DIR/smoke-nuget}"
-SMOKE_DOTNET_CLI_HOME="${SMOKE_DOTNET_CLI_HOME:-$WORK_DIR/dotnet-home}"
 
-if [[ "$AUTO_WORK_DIR" == "1" ]]; then
-  trap 'rm -rf "$WORK_DIR"' EXIT
-fi
+PACKAGE_ARTIFACTS="${PACKAGE_ARTIFACTS:-$WORK_DIR/package-artifacts}"
+COVERAGE_PROOF_WORK_DIR="${COVERAGE_PROOF_WORK_DIR:-$WORK_DIR/coverage-cli-consumer-proof}"
+COVERAGE_PROOF_REPORT="${COVERAGE_PROOF_REPORT:-$PACKAGE_ARTIFACTS/coverage-cli-consumer-proof.md}"
+PACKAGE_VALIDATION_REPORT="${PACKAGE_VALIDATION_REPORT:-$PACKAGE_ARTIFACTS/package-validation-report.md}"
+PACKAGE_ARTIFACT_MANIFEST="${PACKAGE_ARTIFACT_MANIFEST:-$PACKAGE_ARTIFACTS/package-artifact-manifest.json}"
 
-mkdir -p "$PACKAGE_SOURCE" "$SMOKE_REPO" "$PACK_NUGET_PACKAGES" "$SMOKE_NUGET_PACKAGES" "$SMOKE_DOTNET_CLI_HOME"
-echo "Smoke workspace: $WORK_DIR"
-
-echo "Restoring ForgeTrust.AppSurface.Cli..."
-NUGET_PACKAGES="$PACK_NUGET_PACKAGES" dotnet restore "$CLI_PROJECT"
-
-echo "Packing ForgeTrust.AppSurface.Cli $PACKAGE_VERSION..."
-NUGET_PACKAGES="$PACK_NUGET_PACKAGES" dotnet pack "$CLI_PROJECT" \
-  --configuration "$BUILD_CONFIGURATION" \
-  --no-restore \
-  --output "$PACKAGE_SOURCE" \
-  /p:VersionSuffix="$PACKAGE_VERSION_SUFFIX"
-
-cd "$SMOKE_REPO"
-export DOTNET_CLI_HOME="$SMOKE_DOTNET_CLI_HOME"
-export NUGET_PACKAGES="$SMOKE_NUGET_PACKAGES"
-dotnet new sln -n Smoke >/dev/null
-if [[ -f Smoke.slnx ]]; then
-  SMOKE_SOLUTION="Smoke.slnx"
-else
-  SMOKE_SOLUTION="Smoke.sln"
-fi
-dotnet new classlib -n Smoke >/dev/null
-dotnet new xunit -n Smoke.Tests >/dev/null
-dotnet sln "$SMOKE_SOLUTION" add Smoke/Smoke.csproj Smoke.Tests/Smoke.Tests.csproj >/dev/null
-dotnet add Smoke.Tests/Smoke.Tests.csproj reference Smoke/Smoke.csproj >/dev/null
-dotnet add Smoke.Tests/Smoke.Tests.csproj package coverlet.msbuild --version 10.0.1 >/dev/null
-
-cat > Smoke/Calculator.cs <<'CS'
-namespace Smoke;
-
-public static class Calculator
-{
-    public static int Add(int left, int right) => left + right;
-
-    public static string Sign(int value) => value >= 0 ? "non-negative" : "negative";
+cleanup() {
+  local status=$?
+  if [[ "$AUTO_WORK_DIR" == "1" && "$status" == "0" ]]; then
+    rm -rf "$WORK_DIR"
+  elif [[ "$AUTO_WORK_DIR" == "1" ]]; then
+    echo "Package coverage proof failed. Preserved workspace: $WORK_DIR" >&2
+  fi
 }
-CS
+trap cleanup EXIT
 
-cat > Smoke.Tests/UnitTest1.cs <<'CS'
-using Smoke;
+mkdir -p "$PACKAGE_ARTIFACTS"
+echo "Authoritative package coverage proof workspace: $WORK_DIR"
 
-namespace Smoke.Tests;
+dotnet run --project "$PACKAGE_INDEX_PROJECT" -- \
+  verify-packages \
+  --package-version "$PACKAGE_VERSION" \
+  --artifacts-output "$PACKAGE_ARTIFACTS" \
+  --artifact-manifest "$PACKAGE_ARTIFACT_MANIFEST" \
+  --report "$PACKAGE_VALIDATION_REPORT" \
+  --coverage-proof-work-dir "$COVERAGE_PROOF_WORK_DIR" \
+  --coverage-proof-report "$COVERAGE_PROOF_REPORT"
 
-public sealed class UnitTest1
-{
-    [Fact]
-    public void Add_ReturnsSum()
-    {
-        Assert.Equal(3, Calculator.Add(1, 2));
-    }
-
-    [Theory]
-    [InlineData(1, "non-negative")]
-    [InlineData(-1, "negative")]
-    public void Sign_ClassifiesValue(int value, string expected)
-    {
-        Assert.Equal(expected, Calculator.Sign(value));
-    }
-}
-CS
-
-dotnet new tool-manifest >/dev/null
-dotnet tool install ForgeTrust.AppSurface.Cli \
-  --add-source "$PACKAGE_SOURCE" \
-  --version "$PACKAGE_VERSION" >/dev/null
-
-dotnet tool run appsurface coverage run \
-  --solution "$SMOKE_SOLUTION" \
-  --include "[Smoke]*" \
-  --output ./TestResults/coverage-merged
-
-test -s ./TestResults/coverage-merged/coverage.cobertura.xml
-test -s ./TestResults/coverage-merged/summary.txt
-test -s ./TestResults/coverage-merged/timings.json
-test -s ./TestResults/coverage-merged/projects/Smoke.Tests-*/dotnet-test.log
-
-mkdir -p ./TestResults/coverage-shards/Smoke.Tests
-cp ./TestResults/coverage-merged/projects/Smoke.Tests-*/coverage.cobertura.xml \
-  ./TestResults/coverage-shards/Smoke.Tests/coverage.cobertura.xml
-
-dotnet tool run appsurface coverage merge \
-  --source ./TestResults/coverage-shards \
-  --output ./TestResults/coverage-fan-in
-
-test -s ./TestResults/coverage-fan-in/coverage.cobertura.xml
-test -s ./TestResults/coverage-fan-in/summary.txt
-test -s ./TestResults/coverage-fan-in/timings.json
-test -s ./TestResults/coverage-fan-in/reportgenerator-input/000001-*/coverage.cobertura.xml
-
-dotnet tool run appsurface coverage gate \
-  --coverage ./TestResults/coverage-fan-in/coverage.cobertura.xml \
-  --min-line 1 \
-  --min-branch 0
-
-test -s ./TestResults/coverage-fan-in/coverage-gate.json
-test -s ./TestResults/coverage-fan-in/coverage-gate.md
-
-echo "Packed coverage run/merge smoke passed. Workspace: $WORK_DIR"
+echo "Packaged coverage CLI consumer proof passed."
+echo "Package validation report: $PACKAGE_VALIDATION_REPORT"
+echo "Coverage proof report: $COVERAGE_PROOF_REPORT"
