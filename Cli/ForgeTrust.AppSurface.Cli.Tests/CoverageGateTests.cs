@@ -1048,6 +1048,64 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ReadsPatchCoverageFromRedirectedStdin()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="9" hits="1" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var originalInput = System.Console.In;
+        System.Console.SetIn(new StringReader("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            index 0000000..1111111 100644
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -0,0 +9,1 @@
+            +covered
+            """));
+        try
+        {
+            var command = new CoverageGateCommand
+            {
+                CoveragePath = coverage,
+                OutputDirectory = temp.Path,
+                RepositoryRoot = temp.Path,
+                MinLine = 100,
+                MinBranch = 100,
+                DiffStdin = true,
+                MinPatchLine = 100,
+                NoGithubSummary = true,
+                IsInputRedirectedProvider = () => true
+            };
+            using var console = new FakeInMemoryConsole();
+
+            await command.ExecuteAsync(console, CancellationToken.None);
+
+            var output = console.ReadOutputString();
+            var json = File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json"));
+            Assert.Contains("patch lines 100.00% >= 100%", output, StringComparison.Ordinal);
+            Assert.Contains("\"kind\": \"stdin\"", json, StringComparison.Ordinal);
+            Assert.Contains("\"sha256\"", json, StringComparison.Ordinal);
+        }
+        finally
+        {
+            System.Console.SetIn(originalInput);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_AcceptsEmptyExternalDiff_AsEmptyPatch()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");
@@ -1107,6 +1165,34 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RejectsMalformedStdinDiff_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            RepositoryRoot = temp.Path,
+            MinLine = 100,
+            MinBranch = 100,
+            DiffStdin = true,
+            MinPatchLine = 100,
+            NoGithubSummary = true,
+            StdinTextProvider = _ => Task.FromResult("<html>login required</html>")
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV015", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--diff-stdin", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RejectsTruncatedExternalDiff_WithDiagnostic()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");
@@ -1136,6 +1222,112 @@ public sealed class CoverageGateTests
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV015", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RejectsMissingDiffFile_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            RepositoryRoot = temp.Path,
+            MinLine = 100,
+            MinBranch = 100,
+            DiffFile = Path.Join(temp.Path, "missing.diff"),
+            MinPatchLine = 100,
+            NoGithubSummary = true
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("was not found", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RejectsDirectoryDiffFile_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            RepositoryRoot = temp.Path,
+            MinLine = 100,
+            MinBranch = 100,
+            DiffFile = temp.Path,
+            MinPatchLine = 100,
+            NoGithubSummary = true
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("not a directory", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PatchCoverageEvaluator_EvaluateAsync_UsesDiffTextOverload()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="4" hits="1" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var request = new CoveragePatchRequest(temp.Path, "origin/main", 100);
+
+        var result = await PatchCoverageEvaluator.EvaluateAsync(
+            coverage,
+            request,
+            """
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            index 0000000..1111111 100644
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -0,0 +4,1 @@
+            +covered
+            """,
+            CancellationToken.None);
+
+        Assert.Equal("origin/main", result.LineCoverage.DiffBase);
+        Assert.Equal(1, result.LineCoverage.CoveredLines);
+        Assert.Equal(100, result.LineCoverage.Percent);
+    }
+
+    [Fact]
+    public async Task PatchDiffSource_ForFile_RejectsDirectory_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var source = PatchDiffSource.ForFile(temp.Path, "directory", 1024);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => source.ReadAsync(temp.Path, CancellationToken.None));
+
+        Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("not a directory", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1217,6 +1409,35 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RejectsTooLargeStdinProvider_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            RepositoryRoot = temp.Path,
+            MinLine = 100,
+            MinBranch = 100,
+            DiffStdin = true,
+            MinPatchLine = 100,
+            NoGithubSummary = true,
+            ExternalDiffSizeLimitBytes = 4,
+            StdinTextProvider = _ => Task.FromResult("too large")
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("too large", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RejectsTooLargeDiffFile_WithDiagnostic()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");
@@ -1253,6 +1474,44 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RejectsTooLargeRedirectedStdin_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var originalInput = System.Console.In;
+        System.Console.SetIn(new StringReader("too large"));
+        try
+        {
+            var command = new CoverageGateCommand
+            {
+                CoveragePath = coverage,
+                OutputDirectory = temp.Path,
+                RepositoryRoot = temp.Path,
+                MinLine = 100,
+                MinBranch = 100,
+                DiffStdin = true,
+                MinPatchLine = 100,
+                NoGithubSummary = true,
+                ExternalDiffSizeLimitBytes = 4,
+                IsInputRedirectedProvider = () => true
+            };
+            using var console = new FakeInMemoryConsole();
+
+            var exception = await Assert.ThrowsAsync<CommandException>(
+                async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+            Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("too large", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            System.Console.SetIn(originalInput);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RejectsInvalidRepositoryRoot_WithDiagnostic()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");
@@ -1278,6 +1537,116 @@ public sealed class CoverageGateTests
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV016", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ParseChangedLinesDetailed_CoversActiveHunkBodyBranches()
+    {
+        var validActiveBody = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            index 1111111..2222222 100644
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -10,2 +10,3 @@
+            -old
+            +new
+             context
+            +extra
+            """);
+        var validNoNewlineMarkerWhileActive = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            index 1111111..2222222 100644
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -1,2 +1,2 @@
+            -old
+            \ No newline at end of file
+            +new
+             context
+            """);
+        var tooManyDeletedLines = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            index 1111111..2222222 100644
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -1,0 +1,2 @@
+            -unexpected
+            """);
+        var tooManyAddedLines = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            index 1111111..2222222 100644
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -1,1 +1,0 @@
+            +unexpected
+            """);
+        var tooManyContextLines = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            index 1111111..2222222 100644
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -1,0 +1,1 @@
+             unexpected
+            """);
+
+        Assert.Equal(PatchDiffParseStatus.ValidWithAddedLines, validActiveBody.Status);
+        Assert.Contains(10, validActiveBody.ChangedLines["src/Foo.cs"]);
+        Assert.Contains(12, validActiveBody.ChangedLines["src/Foo.cs"]);
+        Assert.Equal(PatchDiffParseStatus.ValidWithAddedLines, validNoNewlineMarkerWhileActive.Status);
+        Assert.Contains(1, validNoNewlineMarkerWhileActive.ChangedLines["src/Foo.cs"]);
+        Assert.Equal(PatchDiffParseStatus.Malformed, tooManyDeletedLines.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, tooManyAddedLines.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, tooManyContextLines.Status);
+    }
+
+    [Fact]
+    public void ParseChangedLinesDetailed_CoversCompletedHunkMalformedBranches()
+    {
+        var extraDeletedLine = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            index 1111111..2222222 100644
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -1,1 +1,1 @@
+            -old
+            +new
+            -extra
+            """);
+        var extraAddedLine = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            index 1111111..2222222 100644
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -1,1 +1,1 @@
+            -old
+            +new
+            +extra
+            """);
+        var extraContextLine = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            index 1111111..2222222 100644
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -1,1 +1,1 @@
+            -old
+            +new
+             extra
+            """);
+        var emptyLineBeforeDiff = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            index 1111111..2222222 100644
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -0,0 +1,1 @@
+            +new
+            """);
+
+        Assert.Equal(PatchDiffParseStatus.Malformed, extraDeletedLine.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, extraAddedLine.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, extraContextLine.Status);
+        Assert.Equal(PatchDiffParseStatus.ValidWithAddedLines, emptyLineBeforeDiff.Status);
+        Assert.Contains(1, emptyLineBeforeDiff.ChangedLines["src/Foo.cs"]);
     }
 
     [Fact]
@@ -1499,11 +1868,37 @@ public sealed class CoverageGateTests
             GIT binary patch
             literal 4
             """);
+        var malformedIndexWithoutRange = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Empty.cs b/src/Empty.cs
+            new file mode 100644
+            index malformed
+            """);
         var malformed = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
             diff --git a/src/Foo.cs b/src/Foo.cs
             --- a/src/Foo.cs
             +++ b/src/Foo.cs
             @@ not-a-hunk
+            +covered
+            """);
+        var malformedOldRange = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -bad +1,1 @@
+            +covered
+            """);
+        var malformedBlankNewRange = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -1,1 + @@
+            +covered
+            """);
+        var malformedNewRange = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -1,1 +bad @@
             +covered
             """);
         var truncated = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
@@ -1567,7 +1962,11 @@ public sealed class CoverageGateTests
         Assert.Equal(PatchDiffParseStatus.Malformed, truncatedCopyAndContent.Status);
         Assert.Equal(PatchDiffParseStatus.Malformed, truncatedGitBinaryPatch.Status);
         Assert.Equal(PatchDiffParseStatus.Malformed, truncatedGitBinaryPatchBody.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, malformedIndexWithoutRange.Status);
         Assert.Equal(PatchDiffParseStatus.Malformed, malformed.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, malformedOldRange.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, malformedBlankNewRange.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, malformedNewRange.Status);
         Assert.Equal(PatchDiffParseStatus.Malformed, truncated.Status);
         Assert.Equal(PatchDiffParseStatus.Malformed, truncatedHunk.Status);
         Assert.Equal(PatchDiffParseStatus.Malformed, zeroLengthHunk.Status);
@@ -1613,6 +2012,35 @@ public sealed class CoverageGateTests
 
         Assert.Contains("ASCOV010", exception.Message, StringComparison.Ordinal);
         Assert.Contains("HEAD^1", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FindRepositoryRoot_ReturnsNearestGitDirectoryOrStartDirectory()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var nested = Path.Join(temp.Path, "src", "App");
+        Directory.CreateDirectory(nested);
+        Directory.CreateDirectory(Path.Join(temp.Path, ".git"));
+        using var noRepo = TempDirectory.Create("appsurface-coverage-no-repo-");
+
+        var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(nested);
+        var fallbackRoot = GitRepositoryRootResolver.FindRepositoryRoot(noRepo.Path);
+
+        Assert.Equal(Path.GetFullPath(temp.Path), repositoryRoot);
+        Assert.Equal(Path.GetFullPath(noRepo.Path), fallbackRoot);
+    }
+
+    [Fact]
+    public void FindRepositoryRoot_AcceptsGitFileWorktreeMarker()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var nested = Path.Join(temp.Path, "src", "App");
+        Directory.CreateDirectory(nested);
+        File.WriteAllText(Path.Join(temp.Path, ".git"), "gitdir: /tmp/appsurface-worktree");
+
+        var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(nested);
+
+        Assert.Equal(Path.GetFullPath(temp.Path), repositoryRoot);
     }
 
     [Fact]

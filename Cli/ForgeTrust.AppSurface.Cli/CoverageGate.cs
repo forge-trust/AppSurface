@@ -270,11 +270,6 @@ internal sealed partial class CoverageGateCommand : ICommand
             return PatchDiffSource.ForFile(path, label ?? path, ExternalDiffSizeLimitBytes);
         }
 
-        if (!DiffStdin)
-        {
-            throw new CommandException("ASCOV011 patch coverage thresholds require exactly one patch diff source: --diff-base, --diff-file, or --diff-stdin.");
-        }
-
         if (StdinTextProvider is null && !(IsInputRedirectedProvider?.Invoke() ?? System.Console.IsInputRedirected))
         {
             throw new CommandException("ASCOV014 --diff-stdin was requested, but stdin is interactive. Pipe unified diff text into the command or use --diff-file.");
@@ -476,15 +471,15 @@ internal sealed record PatchDiffSource(
             {
                 try
                 {
+                    if (Directory.Exists(path))
+                    {
+                        throw new CommandException($"ASCOV013 --diff-file must point to a file, not a directory: {path}");
+                    }
+
                     var info = new FileInfo(path);
                     if (!info.Exists)
                     {
                         throw new CommandException($"ASCOV013 --diff-file was not found: {path}");
-                    }
-
-                    if (info.Attributes.HasFlag(FileAttributes.Directory))
-                    {
-                        throw new CommandException($"ASCOV013 --diff-file must point to a file, not a directory: {path}");
                     }
 
                     if (info.Length > maxBytes)
@@ -1304,16 +1299,11 @@ internal static class PatchCoverageEvaluator
                 continue;
             }
 
-            if (currentHunkActive && line.StartsWith("-", StringComparison.Ordinal))
+            if (line.StartsWith("-", StringComparison.Ordinal)
+                || line.StartsWith("+", StringComparison.Ordinal)
+                || line.StartsWith(" ", StringComparison.Ordinal))
             {
-                currentHunkOldLinesRemaining--;
-                if (currentHunkOldLinesRemaining < 0)
-                {
-                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
-                }
-
-                previousLineWasHunkBodyLine = true;
-                continue;
+                return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
             }
 
             if (currentDiffHasBinaryPatchMarker && line.Length == 0)
@@ -1329,34 +1319,6 @@ internal static class PatchCoverageEvaluator
                 }
 
                 return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
-            }
-
-            if (line.StartsWith("+", StringComparison.Ordinal))
-            {
-                currentHunkNewLinesRemaining--;
-                if (currentHunkNewLinesRemaining < 0)
-                {
-                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
-                }
-
-                AddChangedLine(changedLines, currentFile, currentNewLine.Value);
-                currentNewLine++;
-                previousLineWasHunkBodyLine = true;
-                continue;
-            }
-
-            if (line.StartsWith(" ", StringComparison.Ordinal))
-            {
-                currentHunkOldLinesRemaining--;
-                currentHunkNewLinesRemaining--;
-                if (currentHunkOldLinesRemaining < 0 || currentHunkNewLinesRemaining < 0)
-                {
-                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
-                }
-
-                currentNewLine++;
-                previousLineWasHunkBodyLine = true;
-                continue;
             }
 
             return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
