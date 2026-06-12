@@ -12,7 +12,7 @@ namespace ForgeTrust.RazorWire.IntegrationTests;
 public sealed class AppSurfaceDocsSearchTurboCtaRegression1Tests
 {
     private const string MiniSearchRuntimePathPattern = "**/docs/minisearch.min.js*";
-    private const string SearchWorkspaceLinkSelector = "#docs-search-shell a[href$='/docs/search']";
+    private const string SearchWorkspaceLinkSelector = "[data-rw-search-workspace-link]";
     private readonly AppSurfaceDocsPlaywrightFixture _fixture;
 
     public AppSurfaceDocsSearchTurboCtaRegression1Tests(AppSurfaceDocsPlaywrightFixture fixture)

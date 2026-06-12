@@ -17,6 +17,8 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
 {
     private const string SearchIndexPath = "/docs/search-index.json";
     private const string MiniSearchRuntimePathPattern = "**/docs/minisearch.min.js*";
+    private const string MultiWordSearchQuery = "coverage gate";
+    private const string MultiWordFirstTerm = "coverage";
     private readonly AppSurfaceDocsPlaywrightFixture _fixture;
 
     public AppSurfaceDocsSearchPlaywrightTests(AppSurfaceDocsPlaywrightFixture fixture)
@@ -34,7 +36,7 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
         await WaitForSidebarSearchReadyAsync(page);
         await RunSidebarSearchAndAssertResultsAsync(page, _fixture.SearchQuery);
 
-        await page.ClickAsync("#docs-search-shell a[href='/docs/search']");
+        await page.ClickAsync("[data-rw-search-workspace-link]");
         await WaitForPathAsync(page, "/docs/search");
         await WaitForSearchPageSettledAsync(page);
         await RunAdvancedSearchAndAssertResultsAsync(page, _fixture.SearchQuery);
@@ -50,34 +52,7 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
         await page.GotoAsync($"{_fixture.DocsUrl}/search");
         await WaitForSearchPageSettledAsync(page);
 
-        await page.EvaluateAsync(
-            """
-            () => {
-              window.__rwSearchQa = {
-                initialRoot: document.getElementById("docs-search-page"),
-                turboLoads: 0
-              };
-
-              document.addEventListener("turbo:load", () => {
-                window.__rwSearchQa.turboLoads += 1;
-              });
-            }
-            """);
-
-        await page.ClickAsync("#docs-search-shell a[href='/docs/search']");
-        await page.WaitForFunctionAsync(
-            """
-            () => {
-              const qa = window.__rwSearchQa;
-              const currentRoot = document.getElementById("docs-search-page");
-              return Boolean(qa)
-                && qa.turboLoads > 0
-                && currentRoot
-                && currentRoot !== qa.initialRoot;
-            }
-            """,
-            null,
-            new PageWaitForFunctionOptions { Timeout = 15_000 });
+        await page.ClickAsync("[data-rw-search-workspace-link]");
         await WaitForSearchPageSettledAsync(page);
         Assert.True(await page.Locator("#docs-search-page-starter").IsVisibleAsync());
 
@@ -148,6 +123,204 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
 
         Assert.Equal(_fixture.SearchQuery, await page.InputValueAsync("#docs-search-page-input"));
         Assert.Contains($"q={Uri.EscapeDataString(_fixture.SearchQuery)}", page.Url, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchPage_PreservesFocusedDraftWhitespace_AfterDebounce()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(page, BuildMultiWordSearchPayload());
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await WaitForSearchPageSettledAsync(page);
+
+        await TypePausedMultiWordQueryAsync(page, "#docs-search-page-input");
+
+        await page.WaitForFunctionAsync(
+            "(expected) => new URLSearchParams(window.location.search).get('q') === expected",
+            MultiWordSearchQuery,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+        await WaitForAdvancedSearchResultsAsync(page);
+
+        Assert.Equal(MultiWordSearchQuery, await page.InputValueAsync("#docs-search-page-input"));
+        await ExpectCaretAtEndAsync(page, "#docs-search-page-input", MultiWordSearchQuery);
+        await ExpectVisibleTextAsync(page, "#docs-search-page-results-meta", MultiWordSearchQuery);
+    }
+
+    [Fact]
+    public async Task SearchPage_FilterChange_DoesNotRewriteFocusedDraftWhitespace()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(page, BuildMultiWordSearchPayload());
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await WaitForSearchPageSettledAsync(page);
+        await page.FocusAsync("#docs-search-page-input");
+        await page.Keyboard.TypeAsync(MultiWordFirstTerm);
+        await page.Keyboard.PressAsync("Space");
+        await page.WaitForTimeoutAsync(250);
+        await ExpectInputValueAndCaretAtEndAsync(page, "#docs-search-page-input", $"{MultiWordFirstTerm} ");
+
+        await page.Locator("[data-rw-facet-key='pageType'][data-rw-facet-value='guide']").First.EvaluateAsync(
+            """
+            element => {
+              element.dispatchEvent(new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                button: 0
+              }));
+            }
+            """);
+        await page.WaitForFunctionAsync(
+            "() => new URLSearchParams(window.location.search).get('pageType') === 'guide'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await ExpectInputValueAndCaretAtEndAsync(page, "#docs-search-page-input", $"{MultiWordFirstTerm} ");
+    }
+
+    [Fact]
+    public async Task SearchPage_Composition_DoesNotRewriteFocusedDraft()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(page, BuildMultiWordSearchPayload());
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await WaitForSearchPageSettledAsync(page);
+        await page.Locator("#docs-search-page-input").EvaluateAsync(
+            """
+            input => {
+              input.focus();
+              input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+              input.value = 'coverage ';
+              input.setSelectionRange(input.value.length, input.value.length);
+              input.dispatchEvent(new InputEvent('input', {
+                bubbles: true,
+                inputType: 'insertCompositionText',
+                data: ' '
+              }));
+            }
+            """);
+
+        await page.WaitForTimeoutAsync(250);
+        await ExpectInputValueAndCaretAtEndAsync(page, "#docs-search-page-input", $"{MultiWordFirstTerm} ");
+
+        await page.Locator("#docs-search-page-input").EvaluateAsync(
+            """
+            input => {
+              input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+            }
+            """);
+        await page.WaitForFunctionAsync(
+            "(expected) => new URLSearchParams(window.location.search).get('q') === expected",
+            MultiWordFirstTerm,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+        await ExpectInputValueAndCaretAtEndAsync(page, "#docs-search-page-input", $"{MultiWordFirstTerm} ");
+    }
+
+    [Fact]
+    public async Task SearchPage_PreservesWhitespaceDraftMatrix_WhileFocused()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(page, BuildMultiWordSearchPayload());
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await WaitForSearchPageSettledAsync(page);
+
+        var drafts = new (string Draft, string Expected)[]
+        {
+            ($" {MultiWordSearchQuery}", $" {MultiWordSearchQuery}"),
+            ($"{MultiWordSearchQuery} ", $"{MultiWordSearchQuery} "),
+            ("coverage  gate", "coverage  gate"),
+            ("coverage\tgate", "coverage\tgate"),
+            ("coverage\ngate", "coverage gate"),
+            ("coverage\u00A0gate", "coverage\u00A0gate")
+        };
+
+        foreach (var (draft, expected) in drafts)
+        {
+            await page.FillAsync("#docs-search-page-input", draft);
+            await page.WaitForTimeoutAsync(250);
+            Assert.Equal(expected, await page.InputValueAsync("#docs-search-page-input"));
+        }
+    }
+
+    [Fact]
+    public async Task SidebarSearch_PreservesFocusedDraftWhitespace_AfterDebounce()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(page, BuildMultiWordSearchPayload());
+
+        await page.GotoAsync(_fixture.DocsUrl);
+        await WaitForSidebarSearchReadyAsync(page);
+
+        await TypePausedMultiWordQueryAsync(page, "#docs-search-input");
+        await page.WaitForFunctionAsync(
+            "() => document.querySelectorAll('#docs-search-results [role=\"option\"]').length > 0",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+        Assert.Equal(MultiWordSearchQuery, await page.InputValueAsync("#docs-search-input"));
+        await ExpectCaretAtEndAsync(page, "#docs-search-input", MultiWordSearchQuery);
+    }
+
+    [Fact]
+    public async Task SidebarWorkspaceCta_PreservesEffectiveMultiWordQuery()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(page, BuildMultiWordSearchPayload());
+
+        await page.GotoAsync(_fixture.DocsUrl);
+        await WaitForSidebarSearchReadyAsync(page);
+        await RunSidebarSearchAndAssertResultsAsync(page, MultiWordSearchQuery);
+
+        await page.ClickAsync("[data-rw-search-workspace-link]");
+        await WaitForPathAsync(page, "/docs/search");
+        await WaitForSearchPageSettledAsync(page);
+
+        Assert.Equal(MultiWordSearchQuery, await page.InputValueAsync("#docs-search-page-input"));
+        await page.WaitForFunctionAsync(
+            "(expected) => new URLSearchParams(window.location.search).get('q') === expected",
+            MultiWordSearchQuery,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+    }
+
+    [Fact]
+    public async Task SearchPage_ProductIntelligenceEvents_DoNotExposeRawQuery()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(page, BuildMultiWordSearchPayload());
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await WaitForSearchPageSettledAsync(page);
+        await page.EvaluateAsync(
+            """
+            () => {
+              window.__rwProductEvents = [];
+              document.addEventListener('appsurface:product-intelligence:event', (event) => {
+                window.__rwProductEvents.push(event.detail);
+              });
+            }
+            """);
+
+        await page.FillAsync("#docs-search-page-input", MultiWordSearchQuery);
+        await page.WaitForFunctionAsync(
+            "() => (window.__rwProductEvents || []).length > 0",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+        var payloads = await page.EvaluateAsync<string>(
+            "() => JSON.stringify(window.__rwProductEvents || [])");
+        Assert.DoesNotContain("\"query\"", payloads, StringComparison.Ordinal);
+        Assert.DoesNotContain(MultiWordSearchQuery, payloads, StringComparison.Ordinal);
+        Assert.Contains("\"query_length\"", payloads, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -817,6 +990,64 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
             "() => document.querySelectorAll('#docs-search-page-results .docs-search-result').length > 0",
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
+    }
+
+    private static string BuildMultiWordSearchPayload()
+    {
+        return BuildControlledSearchPayload(
+            SearchDoc(
+                "guides/coverage-gate",
+                "Coverage Gate Guide",
+                "guide",
+                "Guide",
+                "guide",
+                "Tune coverage gate thresholds for AppSurface packages.",
+                component: "AppSurface Docs",
+                audience: "maintainer",
+                status: "stable",
+                bodyText: "coverage gate coverage gate patch coverage",
+                breadcrumbs: ["Guides", "Coverage"]),
+            SearchDoc(
+                "api/coverage-gate",
+                "Coverage Gate API",
+                "api-reference",
+                "API Reference",
+                "api-reference",
+                "API details for coverage gate integrations.",
+                bodyText: "coverage gate API reference",
+                breadcrumbs: ["API", "Coverage"]));
+    }
+
+    private static async Task TypePausedMultiWordQueryAsync(IPage page, string selector)
+    {
+        await page.FocusAsync(selector);
+        await page.Keyboard.TypeAsync(MultiWordFirstTerm);
+        await page.Keyboard.PressAsync("Space");
+        await page.WaitForTimeoutAsync(250);
+        await ExpectInputValueAndCaretAtEndAsync(page, selector, $"{MultiWordFirstTerm} ");
+        await page.Keyboard.TypeAsync("gate");
+    }
+
+    private static async Task WaitForAdvancedSearchResultsAsync(IPage page)
+    {
+        await page.WaitForFunctionAsync(
+            "() => document.querySelectorAll('#docs-search-page-results .docs-search-result').length > 0",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+    }
+
+    private static async Task ExpectInputValueAndCaretAtEndAsync(IPage page, string selector, string expected)
+    {
+        Assert.Equal(expected, await page.InputValueAsync(selector));
+        await ExpectCaretAtEndAsync(page, selector, expected);
+    }
+
+    private static async Task ExpectCaretAtEndAsync(IPage page, string selector, string expected)
+    {
+        var selectionStart = await page.Locator(selector).EvaluateAsync<int>("element => element.selectionStart");
+        var selectionEnd = await page.Locator(selector).EvaluateAsync<int>("element => element.selectionEnd");
+        Assert.Equal(expected.Length, selectionStart);
+        Assert.Equal(expected.Length, selectionEnd);
     }
 
     private static async Task RouteSearchPayloadAsync(IPage page, string payload)

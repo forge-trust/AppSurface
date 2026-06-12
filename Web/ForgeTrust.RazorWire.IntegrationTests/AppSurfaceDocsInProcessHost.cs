@@ -180,7 +180,11 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
             "--AppSurfaceDocs:Contributor:EditUrlTemplate",
             "https://github.com/forge-trust/AppSurface/edit/{branch}/{path}",
             "--AppSurfaceDocs:Contributor:LastUpdatedMode",
-            "Git"
+            "Git",
+            "--AppSurfaceDocs:Metrics:Enabled",
+            "true",
+            "--AppSurfaceDocs:Metrics:HostedCollection:Enabled",
+            "true"
         ];
     }
 
