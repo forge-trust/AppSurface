@@ -186,7 +186,7 @@ public sealed class RazorWireReadmeContractTests
 
     private static string GetRazorWireReadmePath(string repoRoot)
     {
-        return Path.Combine(repoRoot, "Web", "ForgeTrust.RazorWire", "README.md");
+        return TestPathUtils.PathUnder(repoRoot, "Web", "ForgeTrust.RazorWire", "README.md");
     }
 
     private static string ReadRazorWireReadme()
@@ -197,7 +197,7 @@ public sealed class RazorWireReadmeContractTests
     private static string ReadRazorWireHybridHostingGuide()
     {
         var repoRoot = GetRepositoryRoot();
-        var guidePath = Path.Combine(repoRoot, "Web", "ForgeTrust.RazorWire", "Docs", "hybrid-hosting.md");
+        var guidePath = TestPathUtils.PathUnder(repoRoot, "Web", "ForgeTrust.RazorWire", "Docs", "hybrid-hosting.md");
 
         return File.ReadAllText(guidePath);
     }
