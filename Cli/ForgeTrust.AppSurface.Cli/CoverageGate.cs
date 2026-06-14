@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -25,6 +26,9 @@ namespace ForgeTrust.AppSurface.Cli;
 [Command("coverage gate", Description = "Enforce line and branch thresholds from a Cobertura coverage file.")]
 internal sealed partial class CoverageGateCommand : ICommand
 {
+    private const long DefaultExternalDiffSizeLimitBytes = 20 * 1024 * 1024;
+    private const int MaxDiffLabelLength = 200;
+
     /// <summary>
     /// Gets or sets the Cobertura XML file to evaluate.
     /// </summary>
@@ -50,16 +54,46 @@ internal sealed partial class CoverageGateCommand : ICommand
     public string? DiffBase { get; set; }
 
     /// <summary>
+    /// Gets or sets a unified diff file used to compute changed-line coverage.
+    /// </summary>
+    [CommandOption("diff-file", Description = "Unified diff file used to estimate changed-line coverage without local git history.")]
+    public string? DiffFile { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether unified diff text should be read from stdin.
+    /// </summary>
+    [CommandOption("diff-stdin", Description = "Read unified diff text from stdin to estimate changed-line coverage.")]
+    public bool DiffStdin { get; set; }
+
+    /// <summary>
+    /// Gets or sets an optional display label for the selected patch diff source.
+    /// </summary>
+    [CommandOption("diff-label", Description = "Display label for the selected patch diff source in reports.")]
+    public string? DiffLabel { get; set; }
+
+    /// <summary>
+    /// Gets or sets the repository root used for Cobertura and diff path matching.
+    /// </summary>
+    [CommandOption("repository-root", Description = "Repository root used for Cobertura and diff path matching. Defaults to the git worktree root when available.")]
+    public string? RepositoryRoot { get; set; }
+
+    /// <summary>
     /// Gets or sets the minimum changed-line coverage percentage from 0 to 100.
     /// </summary>
-    [CommandOption("min-patch-line", Description = "Minimum changed-line coverage percentage from 0 to 100. Requires --diff-base.")]
+    [CommandOption("min-patch-line", Description = "Minimum changed-line coverage percentage from 0 to 100. Requires one patch source: --diff-base, --diff-file, or --diff-stdin.")]
     public decimal? MinPatchLine { get; set; }
 
     /// <summary>
     /// Gets or sets the minimum changed-branch coverage percentage from 0 to 100.
     /// </summary>
-    [CommandOption("min-patch-branch", Description = "Minimum changed-branch coverage percentage from 0 to 100. Requires --diff-base.")]
+    [CommandOption("min-patch-branch", Description = "Minimum changed-branch coverage percentage from 0 to 100. Requires one patch source: --diff-base, --diff-file, or --diff-stdin.")]
     public decimal? MinPatchBranch { get; set; }
+
+    internal long ExternalDiffSizeLimitBytes { get; set; } = DefaultExternalDiffSizeLimitBytes;
+
+    internal Func<bool>? IsInputRedirectedProvider { get; set; }
+
+    internal Func<CancellationToken, Task<string>>? StdinTextProvider { get; set; }
 
     /// <summary>
     /// Gets or sets the directory where coverage-gate.json and coverage-gate.md are written.
@@ -134,14 +168,25 @@ internal sealed partial class CoverageGateCommand : ICommand
             throw new CommandException("ASCOV007 --min-patch-branch must be between 0 and 100.");
         }
 
-        if ((MinPatchLine.HasValue || MinPatchBranch.HasValue) && string.IsNullOrWhiteSpace(DiffBase))
-        {
-            throw new CommandException("ASCOV007 patch coverage thresholds require --diff-base.");
-        }
-
         if (string.IsNullOrWhiteSpace(CoveragePath))
         {
             throw new CommandException("ASCOV001 --coverage must point to a Cobertura XML file.");
+        }
+
+        var diffSourceCount = CountDiffSources();
+        if ((MinPatchLine.HasValue || MinPatchBranch.HasValue) && diffSourceCount == 0)
+        {
+            throw new CommandException("ASCOV011 patch coverage thresholds require exactly one patch diff source: --diff-base, --diff-file, or --diff-stdin.");
+        }
+
+        if (diffSourceCount > 1)
+        {
+            throw new CommandException("ASCOV012 patch coverage accepts exactly one patch diff source. Use only one of --diff-base, --diff-file, or --diff-stdin.");
+        }
+
+        if (diffSourceCount == 0 && !string.IsNullOrWhiteSpace(DiffLabel))
+        {
+            throw new CommandException("ASCOV016 --diff-label requires a patch diff source.");
         }
 
         var coveragePath = GetFullPathOrThrow(
@@ -152,11 +197,11 @@ internal sealed partial class CoverageGateCommand : ICommand
             : GetFullPathOrThrow(
                 OutputDirectory,
                 "ASCOV009 --output must point to a coverage report directory.");
-        var patchCoverage = string.IsNullOrWhiteSpace(DiffBase)
+        var patchCoverage = diffSourceCount == 0
             ? null
             : new CoveragePatchRequest(
-                Path.GetFullPath(Directory.GetCurrentDirectory()),
-                DiffBase.Trim(),
+                ResolveRepositoryRoot(),
+                CreateDiffSource(),
                 MinPatchLine,
                 MinPatchBranchPercent: MinPatchBranch);
 
@@ -180,6 +225,125 @@ internal sealed partial class CoverageGateCommand : ICommand
         {
             throw new CommandException(diagnostic);
         }
+    }
+
+    private int CountDiffSources()
+    {
+        var count = 0;
+        if (!string.IsNullOrWhiteSpace(DiffBase))
+        {
+            count++;
+        }
+
+        if (!string.IsNullOrWhiteSpace(DiffFile))
+        {
+            count++;
+        }
+
+        if (DiffStdin)
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    private PatchDiffSource CreateDiffSource()
+    {
+        var label = NormalizeDiffLabel(DiffLabel);
+        if (!string.IsNullOrWhiteSpace(DiffBase))
+        {
+            var diffBase = DiffBase.Trim();
+            return PatchDiffSource.ForGitBase(diffBase, label ?? diffBase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(DiffFile))
+        {
+            var path = GetFullPathOrThrow(
+                DiffFile.Trim(),
+                "ASCOV013 --diff-file must point to a readable unified diff file.");
+            if (Directory.Exists(path))
+            {
+                throw new CommandException($"ASCOV013 --diff-file must point to a file, not a directory: {path}");
+            }
+
+            return PatchDiffSource.ForFile(path, label ?? path, ExternalDiffSizeLimitBytes);
+        }
+
+        if (StdinTextProvider is null && !(IsInputRedirectedProvider?.Invoke() ?? System.Console.IsInputRedirected))
+        {
+            throw new CommandException("ASCOV014 --diff-stdin was requested, but stdin is interactive. Pipe unified diff text into the command or use --diff-file.");
+        }
+
+        Func<CancellationToken, Task<string>> stdinProvider = StdinTextProvider
+            ?? (cancellationToken => ReadStdinBoundedAsync(ExternalDiffSizeLimitBytes, cancellationToken));
+        return PatchDiffSource.ForStdin(
+            label ?? "stdin",
+            ExternalDiffSizeLimitBytes,
+            stdinProvider);
+    }
+
+    private static async Task<string> ReadStdinBoundedAsync(long maxBytes, CancellationToken cancellationToken)
+    {
+        var builder = new StringBuilder();
+        var buffer = new char[4096];
+        long byteCount = 0;
+        while (true)
+        {
+            var read = await System.Console.In.ReadAsync(buffer.AsMemory(), cancellationToken);
+            if (read == 0)
+            {
+                return builder.ToString();
+            }
+
+            byteCount += Encoding.UTF8.GetByteCount(buffer.AsSpan(0, read));
+            if (byteCount > maxBytes)
+            {
+                throw new CommandException($"ASCOV013 --diff-stdin input is too large. Limit is {maxBytes} bytes.");
+            }
+
+            builder.Append(buffer, 0, read);
+        }
+    }
+
+    private string ResolveRepositoryRoot()
+    {
+        if (!string.IsNullOrWhiteSpace(RepositoryRoot))
+        {
+            var root = GetFullPathOrThrow(
+                RepositoryRoot.Trim(),
+                "ASCOV016 --repository-root must point to an existing repository directory.");
+            if (!Directory.Exists(root))
+            {
+                throw new CommandException($"ASCOV016 --repository-root must point to an existing repository directory: {root}");
+            }
+
+            return root;
+        }
+
+        return GitRepositoryRootResolver.FindRepositoryRoot(Directory.GetCurrentDirectory());
+    }
+
+    private static string? NormalizeDiffLabel(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        foreach (var ch in value.Where(ch => !char.IsControl(ch)))
+        {
+            builder.Append(ch);
+        }
+
+        var label = builder.ToString().Trim();
+        if (label.Length == 0 || label.Length > MaxDiffLabelLength)
+        {
+            throw new CommandException($"ASCOV016 --diff-label must be from 1 to {MaxDiffLabelLength} display characters after trimming control characters.");
+        }
+
+        return label;
     }
 
     private static string RenderConsoleSummary(
@@ -234,19 +398,152 @@ internal sealed record CoverageGateRequest(
     CoveragePatchRequest? PatchCoverage = null);
 
 /// <summary>
-/// Request for estimating coverage on lines changed by a git diff.
+/// Request for estimating coverage on lines changed by a patch diff source.
 /// </summary>
-/// <param name="RepositoryRoot">Repository root used for git diff and path normalization.</param>
-/// <param name="DiffBase">Git ref or commit compared with HEAD.</param>
+/// <param name="RepositoryRoot">Repository root used for diff acquisition and path normalization.</param>
+/// <param name="DiffSource">Patch diff source used to acquire unified diff text.</param>
 /// <param name="MinPatchLinePercent">Optional changed-line threshold.</param>
-/// <param name="DiffProvider">Optional test seam for supplying unified diff text without invoking git.</param>
 /// <param name="MinPatchBranchPercent">Optional changed-branch threshold.</param>
-internal sealed record CoveragePatchRequest(
+internal sealed partial record CoveragePatchRequest(
     string RepositoryRoot,
-    string DiffBase,
+    PatchDiffSource DiffSource,
     decimal? MinPatchLinePercent,
-    Func<CancellationToken, Task<string>>? DiffProvider = null,
     decimal? MinPatchBranchPercent = null);
+
+internal sealed partial record CoveragePatchRequest
+{
+    public CoveragePatchRequest(
+        string RepositoryRoot,
+        string DiffBase,
+        decimal? MinPatchLinePercent,
+        Func<CancellationToken, Task<string>>? DiffProvider = null,
+        decimal? MinPatchBranchPercent = null)
+        : this(
+            RepositoryRoot,
+            PatchDiffSource.ForGitBase(DiffBase, DiffBase, DiffProvider),
+            MinPatchLinePercent,
+            MinPatchBranchPercent)
+    {
+    }
+}
+
+internal enum PatchDiffSourceKind
+{
+    GitBase,
+    File,
+    Stdin,
+}
+
+internal sealed record PatchDiffSource(
+    PatchDiffSourceKind Kind,
+    string Label,
+    string? DiffBase,
+    string? Path,
+    bool IsExternalArtifact,
+    Func<string, CancellationToken, Task<PatchDiffArtifact>> ReadAsync)
+{
+    public static PatchDiffSource ForGitBase(
+        string diffBase,
+        string label,
+        Func<CancellationToken, Task<string>>? diffProvider = null) =>
+        new(
+            PatchDiffSourceKind.GitBase,
+            label,
+            diffBase,
+            null,
+            false,
+            async (repositoryRoot, cancellationToken) =>
+            {
+                var text = diffProvider is null
+                    ? await GitDiffReader.ReadDiffAsync(repositoryRoot, diffBase, cancellationToken)
+                    : await diffProvider(cancellationToken);
+                return PatchDiffArtifact.FromText(text);
+            });
+
+    public static PatchDiffSource ForFile(string path, string label, long maxBytes) =>
+        new(
+            PatchDiffSourceKind.File,
+            label,
+            null,
+            path,
+            true,
+            async (_, cancellationToken) =>
+            {
+                try
+                {
+                    if (Directory.Exists(path))
+                    {
+                        throw new CommandException($"ASCOV013 --diff-file must point to a file, not a directory: {path}");
+                    }
+
+                    var info = new FileInfo(path);
+                    if (!info.Exists)
+                    {
+                        throw new CommandException($"ASCOV013 --diff-file was not found: {path}");
+                    }
+
+                    if (info.Length > maxBytes)
+                    {
+                        throw new CommandException($"ASCOV013 --diff-file is too large. Limit is {maxBytes} bytes: {path}");
+                    }
+
+                    var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
+                    return PatchDiffArtifact.FromBytes(bytes);
+                }
+                catch (CommandException)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    throw new CommandException($"ASCOV013 Failed to read --diff-file '{path}': {ex.Message}");
+                }
+            });
+
+    public static PatchDiffSource ForStdin(
+        string label,
+        long maxBytes,
+        Func<CancellationToken, Task<string>> stdinProvider) =>
+        new(
+            PatchDiffSourceKind.Stdin,
+            label,
+            null,
+            null,
+            true,
+            async (_, cancellationToken) =>
+            {
+                var text = await stdinProvider(cancellationToken);
+                var artifact = PatchDiffArtifact.FromText(text);
+                if (artifact.Bytes > maxBytes)
+                {
+                    throw new CommandException($"ASCOV013 --diff-stdin input is too large. Limit is {maxBytes} bytes.");
+                }
+
+                return artifact;
+            });
+}
+
+internal sealed record PatchDiffArtifact(string Text, long Bytes, string Sha256, bool Empty)
+{
+    public static PatchDiffArtifact FromText(string text) => FromBytes(Encoding.UTF8.GetBytes(text));
+
+    public static PatchDiffArtifact FromBytes(byte[] bytes)
+    {
+        var text = Encoding.UTF8.GetString(bytes);
+        var sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        return new PatchDiffArtifact(text, bytes.Length, sha256, bytes.Length == 0);
+    }
+}
+
+internal sealed record PatchDiffSourceReport(
+    PatchDiffSourceKind Kind,
+    string Label,
+    string? DiffBase,
+    string? Path,
+    long Bytes,
+    string Sha256,
+    bool Empty,
+    bool IsExternalArtifact);
 
 /// <summary>
 /// Result of evaluating coverage against line and branch thresholds.
@@ -263,6 +560,7 @@ internal sealed record CoveragePatchRequest(
 /// <param name="PatchLineCoverage">Optional changed-line coverage metric.</param>
 /// <param name="MinPatchBranchPercent">Optional minimum accepted changed-branch coverage percentage.</param>
 /// <param name="PatchBranchCoverage">Optional changed-branch coverage metric.</param>
+/// <param name="PatchDiffSource">Optional patch diff source provenance.</param>
 internal sealed record CoverageGateResult(
     string CoveragePath,
     CoverageMetric LineCoverage,
@@ -275,7 +573,8 @@ internal sealed record CoverageGateResult(
     decimal? MinPatchLinePercent = null,
     PatchLineCoverageMetric? PatchLineCoverage = null,
     decimal? MinPatchBranchPercent = null,
-    PatchBranchCoverageMetric? PatchBranchCoverage = null);
+    PatchBranchCoverageMetric? PatchBranchCoverage = null,
+    PatchDiffSourceReport? PatchDiffSource = null);
 
 /// <summary>
 /// One Cobertura coverage metric expressed as optional covered/valid counts and a percentage.
@@ -294,7 +593,7 @@ internal sealed record CoverageMetric(int? Covered, int? Valid, decimal Percent)
 /// <param name="CoveredLines">Measurable changed lines with at least one hit.</param>
 /// <param name="Percent">Changed-line coverage percentage.</param>
 internal sealed record PatchLineCoverageMetric(
-    string DiffBase,
+    string? DiffBase,
     int ChangedLines,
     int MeasurableLines,
     int CoveredLines,
@@ -309,7 +608,7 @@ internal sealed record PatchLineCoverageMetric(
 /// <param name="CoveredBranches">Measurable changed-line branch conditions that were covered.</param>
 /// <param name="Percent">Changed-branch coverage percentage.</param>
 internal sealed record PatchBranchCoverageMetric(
-    string DiffBase,
+    string? DiffBase,
     int ChangedLines,
     int MeasurableBranches,
     int CoveredBranches,
@@ -318,11 +617,25 @@ internal sealed record PatchBranchCoverageMetric(
 /// <summary>
 /// Coverage estimates for changed lines and changed-line branch conditions.
 /// </summary>
+/// <param name="SourceReport">Patch diff source provenance captured during evaluation.</param>
 /// <param name="LineCoverage">Changed-line coverage metric.</param>
 /// <param name="BranchCoverage">Changed-branch coverage metric.</param>
 internal sealed record PatchCoverageMetrics(
+    PatchDiffSourceReport SourceReport,
     PatchLineCoverageMetric LineCoverage,
     PatchBranchCoverageMetric BranchCoverage);
+
+internal enum PatchDiffParseStatus
+{
+    Empty,
+    ValidWithAddedLines,
+    ValidNoAddedLines,
+    Malformed,
+}
+
+internal sealed record PatchDiffParseResult(
+    IReadOnlyDictionary<string, IReadOnlySet<int>> ChangedLines,
+    PatchDiffParseStatus Status);
 
 /// <summary>
 /// Parses Cobertura XML and evaluates coverage thresholds.
@@ -394,7 +707,8 @@ internal static class CoverageGateEvaluator
                     request.PatchCoverage?.MinPatchLinePercent,
                     patchCoverage?.LineCoverage,
                     request.PatchCoverage?.MinPatchBranchPercent,
-                    patchCoverage?.BranchCoverage);
+                    patchCoverage?.BranchCoverage,
+                    patchCoverage?.SourceReport);
             }
         }
         catch (XmlException ex)
@@ -585,15 +899,14 @@ internal static class PatchCoverageEvaluator
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (string.IsNullOrWhiteSpace(request.DiffBase))
+        if (request.DiffSource.Kind == PatchDiffSourceKind.GitBase
+            && string.IsNullOrWhiteSpace(request.DiffSource.DiffBase))
         {
             throw new CommandException("ASCOV007 --diff-base must not be blank.");
         }
 
-        var diffText = request.DiffProvider is null
-            ? await GitDiffReader.ReadDiffAsync(request.RepositoryRoot, request.DiffBase, cancellationToken)
-            : await request.DiffProvider(cancellationToken);
-        return await EvaluateAsync(coveragePath, request, diffText, cancellationToken);
+        var artifact = await request.DiffSource.ReadAsync(request.RepositoryRoot, cancellationToken);
+        return await EvaluateAsync(coveragePath, request, artifact, cancellationToken);
     }
 
     /// <summary>
@@ -611,8 +924,25 @@ internal static class PatchCoverageEvaluator
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        return await EvaluateAsync(coveragePath, request, PatchDiffArtifact.FromText(diffText), cancellationToken);
+    }
 
-        var changedLines = ParseChangedLines(diffText);
+    private static async Task<PatchCoverageMetrics> EvaluateAsync(
+        string coveragePath,
+        CoveragePatchRequest request,
+        PatchDiffArtifact artifact,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var parseResult = ParseChangedLinesDetailed(artifact.Text);
+        if (request.DiffSource.IsExternalArtifact && parseResult.Status == PatchDiffParseStatus.Malformed)
+        {
+            throw new CommandException(
+                $"ASCOV015 The patch diff from {GetDiffSourceDisplay(request.DiffSource)} could not be parsed as unified diff text. Download a unified diff artifact or use --diff-base for local git history.");
+        }
+
+        var changedLines = parseResult.ChangedLines;
         var lineHits = await ReadLineCoverageMapAsync(coveragePath, request.RepositoryRoot, cancellationToken);
         var changedLineCount = 0;
         var measurableLineCount = 0;
@@ -656,14 +986,23 @@ internal static class PatchCoverageEvaluator
             ? 100m
             : Math.Round(coveredBranchCount * 100m / measurableBranchCount, 4, MidpointRounding.AwayFromZero);
         return new PatchCoverageMetrics(
+            new PatchDiffSourceReport(
+                request.DiffSource.Kind,
+                request.DiffSource.Label,
+                request.DiffSource.DiffBase,
+                request.DiffSource.Path,
+                artifact.Bytes,
+                artifact.Sha256,
+                artifact.Empty,
+                request.DiffSource.IsExternalArtifact),
             new PatchLineCoverageMetric(
-                request.DiffBase,
+                request.DiffSource.DiffBase,
                 changedLineCount,
                 measurableLineCount,
                 coveredLineCount,
                 linePercent),
             new PatchBranchCoverageMetric(
-                request.DiffBase,
+                request.DiffSource.DiffBase,
                 changedLineCount,
                 measurableBranchCount,
                 coveredBranchCount,
@@ -671,49 +1010,436 @@ internal static class PatchCoverageEvaluator
     }
 
     internal static IReadOnlyDictionary<string, IReadOnlySet<int>> ParseChangedLines(string diffText)
+        => ParseChangedLinesDetailed(diffText).ChangedLines;
+
+    internal static PatchDiffParseResult ParseChangedLinesDetailed(string diffText)
     {
         var changedLines = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
         string? currentFile = null;
         int? currentNewLine = null;
+        var sawDiffHeader = false;
+        var sawFileMarker = false;
+        var sawHunk = false;
+        var currentDiffStarted = false;
+        var currentDiffHasOldFileMarker = false;
+        var currentDiffHasNewFileMarker = false;
+        var currentDiffHasHunk = false;
+        var currentHunkActive = false;
+        var currentHunkOldLinesRemaining = 0;
+        var currentHunkNewLinesRemaining = 0;
+        var previousLineWasHunkBodyLine = false;
+        var currentDiffHasOldMode = false;
+        var currentDiffHasNewMode = false;
+        var currentDiffHasRenameFrom = false;
+        var currentDiffHasRenameTo = false;
+        var currentDiffHasCopyFrom = false;
+        var currentDiffHasCopyTo = false;
+        var currentDiffHasNewFileMode = false;
+        var currentDiffHasDeletedFileMode = false;
+        var currentDiffHasIndex = false;
+        var currentDiffHasEmptyFileIndex = false;
+        var currentDiffHasBinaryMarker = false;
+        var currentDiffHasBinaryPatchMarker = false;
+        var currentDiffHasBinaryPatchBody = false;
+        var currentDiffHasBinaryPatchPayload = false;
 
         foreach (var line in SplitLines(diffText))
         {
+            if (line.StartsWith("diff --git ", StringComparison.Ordinal))
+            {
+                if (currentDiffStarted && (!IsCurrentHunkComplete() || !IsCompleteDiffEntry()))
+                {
+                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                }
+
+                sawDiffHeader = true;
+                ResetCurrentDiffEntry();
+                continue;
+            }
+
+            if (currentHunkActive && !IsCurrentHunkComplete())
+            {
+                if (line.Equals("\\ No newline at end of file", StringComparison.Ordinal))
+                {
+                    if (!previousLineWasHunkBodyLine)
+                    {
+                        return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                    }
+
+                    previousLineWasHunkBodyLine = false;
+                    continue;
+                }
+
+                if (line.StartsWith("-", StringComparison.Ordinal))
+                {
+                    currentHunkOldLinesRemaining--;
+                    if (currentHunkOldLinesRemaining < 0)
+                    {
+                        return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                    }
+
+                    previousLineWasHunkBodyLine = true;
+                    continue;
+                }
+
+                if (currentFile is null || currentNewLine is null)
+                {
+                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                }
+
+                if (line.StartsWith("+", StringComparison.Ordinal))
+                {
+                    currentHunkNewLinesRemaining--;
+                    if (currentHunkNewLinesRemaining < 0)
+                    {
+                        return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                    }
+
+                    AddChangedLine(changedLines, currentFile, currentNewLine.Value);
+                    currentNewLine++;
+                    previousLineWasHunkBodyLine = true;
+                    continue;
+                }
+
+                if (line.StartsWith(" ", StringComparison.Ordinal))
+                {
+                    currentHunkOldLinesRemaining--;
+                    currentHunkNewLinesRemaining--;
+                    if (currentHunkOldLinesRemaining < 0 || currentHunkNewLinesRemaining < 0)
+                    {
+                        return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                    }
+
+                    currentNewLine++;
+                    previousLineWasHunkBodyLine = true;
+                    continue;
+                }
+
+                return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+            }
+
+            if (line.StartsWith("--- ", StringComparison.Ordinal))
+            {
+                if (HasPatchBodyStarted())
+                {
+                    if (!IsCurrentHunkComplete() || !IsCompleteDiffEntry())
+                    {
+                        return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                    }
+
+                    ResetCurrentDiffEntry();
+                }
+
+                currentDiffStarted = true;
+                sawFileMarker = true;
+                if (currentDiffHasOldFileMarker || currentDiffHasNewFileMarker)
+                {
+                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                }
+
+                currentDiffHasOldFileMarker = true;
+                continue;
+            }
+
             if (line.StartsWith("+++ ", StringComparison.Ordinal))
             {
+                if (HasPatchBodyStarted())
+                {
+                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                }
+
+                if (!currentDiffHasOldFileMarker || currentDiffHasNewFileMarker)
+                {
+                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                }
+
+                currentDiffStarted = true;
+                sawFileMarker = true;
+                currentDiffHasNewFileMarker = true;
                 currentFile = NormalizeDiffPath(line["+++ ".Length..]);
                 currentNewLine = null;
                 continue;
             }
 
+            if (currentDiffStarted)
+            {
+                if (HasPatchBodyStarted() && IsDiffMetadataLine(line))
+                {
+                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                }
+
+                if (line.StartsWith("old mode ", StringComparison.Ordinal))
+                {
+                    currentDiffHasOldMode = true;
+                    continue;
+                }
+
+                if (line.StartsWith("new mode ", StringComparison.Ordinal))
+                {
+                    currentDiffHasNewMode = true;
+                    continue;
+                }
+
+                if (line.StartsWith("rename from ", StringComparison.Ordinal))
+                {
+                    currentDiffHasRenameFrom = true;
+                    continue;
+                }
+
+                if (line.StartsWith("rename to ", StringComparison.Ordinal))
+                {
+                    currentDiffHasRenameTo = true;
+                    continue;
+                }
+
+                if (line.StartsWith("copy from ", StringComparison.Ordinal))
+                {
+                    currentDiffHasCopyFrom = true;
+                    continue;
+                }
+
+                if (line.StartsWith("copy to ", StringComparison.Ordinal))
+                {
+                    currentDiffHasCopyTo = true;
+                    continue;
+                }
+
+                if (line.StartsWith("similarity index ", StringComparison.Ordinal)
+                    || line.StartsWith("dissimilarity index ", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (line.StartsWith("new file mode ", StringComparison.Ordinal))
+                {
+                    currentDiffHasNewFileMode = true;
+                    continue;
+                }
+
+                if (line.StartsWith("deleted file mode ", StringComparison.Ordinal))
+                {
+                    currentDiffHasDeletedFileMode = true;
+                    continue;
+                }
+
+                if (line.StartsWith("index ", StringComparison.Ordinal))
+                {
+                    currentDiffHasIndex = true;
+                    currentDiffHasEmptyFileIndex = IsEmptyFileIndexLine(line);
+                    continue;
+                }
+
+                if (line.StartsWith("Binary files ", StringComparison.Ordinal))
+                {
+                    if (HasPatchBodyStarted())
+                    {
+                        return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                    }
+
+                    currentDiffHasBinaryMarker = true;
+                    continue;
+                }
+
+                if (line.StartsWith("GIT binary patch", StringComparison.Ordinal))
+                {
+                    if (HasPatchBodyStarted())
+                    {
+                        return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                    }
+
+                    currentDiffHasBinaryPatchMarker = true;
+                    continue;
+                }
+
+                if (currentDiffHasBinaryPatchMarker
+                    && (line.StartsWith("literal ", StringComparison.Ordinal)
+                        || line.StartsWith("delta ", StringComparison.Ordinal)))
+                {
+                    currentDiffHasBinaryPatchBody = true;
+                    continue;
+                }
+
+                if (currentDiffHasBinaryPatchBody && line.Length > 0)
+                {
+                    currentDiffHasBinaryPatchPayload = true;
+                    continue;
+                }
+            }
+
             if (line.StartsWith("@@ ", StringComparison.Ordinal))
             {
-                currentNewLine = TryReadNewHunkStart(line, out var start) ? start : null;
+                if (!currentDiffHasOldFileMarker
+                    || !currentDiffHasNewFileMarker
+                    || !IsCurrentHunkComplete()
+                    || !TryReadHunkRange(line, out var start, out var oldCount, out var newCount))
+                {
+                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                }
+
+                sawHunk = true;
+                currentDiffHasHunk = true;
+                currentHunkActive = true;
+                currentHunkOldLinesRemaining = oldCount;
+                currentHunkNewLinesRemaining = newCount;
+                currentNewLine = currentFile is null ? null : start;
+                previousLineWasHunkBodyLine = false;
+                continue;
+            }
+
+            if (line.StartsWith("\\ ", StringComparison.Ordinal))
+            {
+                if (!currentHunkActive
+                    || !previousLineWasHunkBodyLine
+                    || !line.Equals("\\ No newline at end of file", StringComparison.Ordinal))
+                {
+                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                }
+
+                previousLineWasHunkBodyLine = false;
+                continue;
+            }
+
+            if (line.StartsWith("-", StringComparison.Ordinal)
+                || line.StartsWith("+", StringComparison.Ordinal)
+                || line.StartsWith(" ", StringComparison.Ordinal))
+            {
+                return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+            }
+
+            if (currentDiffHasBinaryPatchMarker && line.Length == 0)
+            {
                 continue;
             }
 
             if (currentFile is null || currentNewLine is null)
             {
-                continue;
+                if (line.Length == 0 && !currentDiffStarted)
+                {
+                    continue;
+                }
+
+                return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
             }
 
-            if (line.StartsWith("+", StringComparison.Ordinal))
-            {
-                AddChangedLine(changedLines, currentFile, currentNewLine.Value);
-                currentNewLine++;
-                continue;
-            }
-
-            if (line.StartsWith(" ", StringComparison.Ordinal))
-            {
-                currentNewLine++;
-            }
+            return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
         }
 
-        return changedLines.ToDictionary(
+        var readOnly = ToReadOnly(changedLines);
+        if (diffText.Length == 0)
+        {
+            return new PatchDiffParseResult(readOnly, PatchDiffParseStatus.Empty);
+        }
+
+        if (!sawDiffHeader && !sawFileMarker && !sawHunk)
+        {
+            return new PatchDiffParseResult(readOnly, PatchDiffParseStatus.Malformed);
+        }
+
+        if (currentDiffStarted && (!IsCurrentHunkComplete() || !IsCompleteDiffEntry()))
+        {
+            return new PatchDiffParseResult(readOnly, PatchDiffParseStatus.Malformed);
+        }
+
+        var status = readOnly.Count == 0
+            ? PatchDiffParseStatus.ValidNoAddedLines
+            : PatchDiffParseStatus.ValidWithAddedLines;
+        return new PatchDiffParseResult(readOnly, status);
+
+        bool IsCompleteDiffEntry()
+            => currentDiffHasHunk
+                || currentDiffHasBinaryMarker
+                || (currentDiffHasBinaryPatchMarker && currentDiffHasBinaryPatchBody && currentDiffHasBinaryPatchPayload)
+                || ((currentDiffHasNewFileMode || currentDiffHasDeletedFileMode) && currentDiffHasEmptyFileIndex)
+                || (!HasContentChangeIndicator()
+                    && ((currentDiffHasOldMode && currentDiffHasNewMode)
+                        || (currentDiffHasRenameFrom && currentDiffHasRenameTo)
+                        || (currentDiffHasCopyFrom && currentDiffHasCopyTo)));
+
+        bool HasContentChangeIndicator()
+            => currentDiffHasIndex || currentDiffHasOldFileMarker || currentDiffHasNewFileMarker;
+
+        bool HasPatchBodyStarted()
+            => currentDiffHasHunk || currentDiffHasBinaryMarker || currentDiffHasBinaryPatchMarker;
+
+        static bool IsDiffMetadataLine(string line)
+            => line.StartsWith("old mode ", StringComparison.Ordinal)
+                || line.StartsWith("new mode ", StringComparison.Ordinal)
+                || line.StartsWith("rename from ", StringComparison.Ordinal)
+                || line.StartsWith("rename to ", StringComparison.Ordinal)
+                || line.StartsWith("copy from ", StringComparison.Ordinal)
+                || line.StartsWith("copy to ", StringComparison.Ordinal)
+                || line.StartsWith("similarity index ", StringComparison.Ordinal)
+                || line.StartsWith("dissimilarity index ", StringComparison.Ordinal)
+                || line.StartsWith("new file mode ", StringComparison.Ordinal)
+                || line.StartsWith("deleted file mode ", StringComparison.Ordinal)
+                || line.StartsWith("index ", StringComparison.Ordinal);
+
+        bool IsCurrentHunkComplete()
+            => !currentHunkActive || (currentHunkOldLinesRemaining == 0 && currentHunkNewLinesRemaining == 0);
+
+        void ResetCurrentDiffEntry()
+        {
+            currentDiffStarted = true;
+            currentFile = null;
+            currentNewLine = null;
+            currentDiffHasOldFileMarker = false;
+            currentDiffHasNewFileMarker = false;
+            currentDiffHasHunk = false;
+            currentHunkActive = false;
+            currentHunkOldLinesRemaining = 0;
+            currentHunkNewLinesRemaining = 0;
+            previousLineWasHunkBodyLine = false;
+            currentDiffHasOldMode = false;
+            currentDiffHasNewMode = false;
+            currentDiffHasRenameFrom = false;
+            currentDiffHasRenameTo = false;
+            currentDiffHasCopyFrom = false;
+            currentDiffHasCopyTo = false;
+            currentDiffHasNewFileMode = false;
+            currentDiffHasDeletedFileMode = false;
+            currentDiffHasIndex = false;
+            currentDiffHasEmptyFileIndex = false;
+            currentDiffHasBinaryMarker = false;
+            currentDiffHasBinaryPatchMarker = false;
+            currentDiffHasBinaryPatchBody = false;
+            currentDiffHasBinaryPatchPayload = false;
+        }
+    }
+
+    private static bool IsEmptyFileIndexLine(string line)
+    {
+        const string emptyBlobSha = "e69de29";
+        var text = line["index ".Length..].Trim();
+        var rangeEnd = text.IndexOf(' ', StringComparison.Ordinal);
+        var range = rangeEnd < 0 ? text : text[..rangeEnd];
+        var separator = range.IndexOf("..", StringComparison.Ordinal);
+        if (separator <= 0)
+        {
+            return false;
+        }
+
+        var before = range[..separator];
+        var after = range[(separator + 2)..];
+        return (IsAllZeroAbbreviatedSha(before) && after.StartsWith(emptyBlobSha, StringComparison.Ordinal))
+            || (before.StartsWith(emptyBlobSha, StringComparison.Ordinal) && IsAllZeroAbbreviatedSha(after));
+    }
+
+    private static bool IsAllZeroAbbreviatedSha(string value)
+        => value.Length >= 7 && value.All(ch => ch == '0');
+
+    private static string GetDiffSourceDisplay(PatchDiffSource source) => source.Kind switch
+    {
+        PatchDiffSourceKind.File => $"--diff-file '{source.Path}'",
+        PatchDiffSourceKind.Stdin => "--diff-stdin",
+        _ => $"--diff-base '{source.DiffBase}'",
+    };
+
+    private static IReadOnlyDictionary<string, IReadOnlySet<int>> ToReadOnly(
+        Dictionary<string, HashSet<int>> changedLines) =>
+        changedLines.ToDictionary(
             pair => pair.Key,
             pair => (IReadOnlySet<int>)pair.Value,
             StringComparer.Ordinal);
-    }
 
     private static async Task<Dictionary<string, Dictionary<int, PatchLineCoverageData>>> ReadLineCoverageMapAsync(
         string coveragePath,
@@ -872,26 +1598,63 @@ internal static class PatchCoverageEvaluator
         return path;
     }
 
-    private static bool TryReadNewHunkStart(string header, out int start)
+    private static bool TryReadHunkRange(
+        string header,
+        out int newStart,
+        out int oldCount,
+        out int newCount)
     {
-        start = 0;
-        var plusIndex = header.IndexOf('+', StringComparison.Ordinal);
-        if (plusIndex < 0)
+        newStart = 0;
+        oldCount = 0;
+        newCount = 0;
+        if (!header.StartsWith("@@ -", StringComparison.Ordinal))
         {
             return false;
         }
 
-        var endIndex = plusIndex + 1;
-        while (endIndex < header.Length && header[endIndex] != ' ' && header[endIndex] != ',')
+        var oldRangeStart = "@@ -".Length;
+        var oldRangeEnd = header.IndexOf(' ', oldRangeStart);
+        if (oldRangeEnd <= oldRangeStart
+            || !TryReadHunkRangePart(header.AsSpan(oldRangeStart, oldRangeEnd - oldRangeStart), out _, out oldCount))
         {
-            endIndex++;
+            return false;
         }
 
-        return int.TryParse(
-            header.AsSpan(plusIndex + 1, endIndex - plusIndex - 1),
-            NumberStyles.None,
-            CultureInfo.InvariantCulture,
-            out start);
+        var plusIndex = header.IndexOf('+', StringComparison.Ordinal);
+        if (plusIndex < 0 || plusIndex <= oldRangeEnd)
+        {
+            return false;
+        }
+
+        var newRangeEnd = header.IndexOf(' ', plusIndex);
+        if (newRangeEnd <= plusIndex + 1)
+        {
+            return false;
+        }
+
+        if (!TryReadHunkRangePart(
+            header.AsSpan(plusIndex + 1, newRangeEnd - plusIndex - 1),
+            out newStart,
+            out newCount))
+        {
+            return false;
+        }
+
+        return oldCount > 0 || newCount > 0;
+    }
+
+    private static bool TryReadHunkRangePart(ReadOnlySpan<char> range, out int start, out int count)
+    {
+        start = 0;
+        count = 1;
+        var commaIndex = range.IndexOf(',');
+        if (commaIndex < 0)
+        {
+            return int.TryParse(range, NumberStyles.None, CultureInfo.InvariantCulture, out start);
+        }
+
+        return int.TryParse(range[..commaIndex], NumberStyles.None, CultureInfo.InvariantCulture, out start)
+            && int.TryParse(range[(commaIndex + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out count);
     }
 
     private static void AddChangedLine(
@@ -964,6 +1727,31 @@ internal static class GitDiffReader
     }
 }
 
+internal static class GitRepositoryRootResolver
+{
+    public static string FindRepositoryRoot(string startDirectory)
+    {
+        var current = Path.GetFullPath(startDirectory);
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if (Directory.Exists(Path.Join(current, ".git")) || File.Exists(Path.Join(current, ".git")))
+            {
+                return current;
+            }
+
+            var parent = Directory.GetParent(current);
+            if (parent is null)
+            {
+                break;
+            }
+
+            current = parent.FullName;
+        }
+
+        return Path.GetFullPath(startDirectory);
+    }
+}
+
 /// <summary>
 /// Writes private coverage gate report artifacts.
 /// </summary>
@@ -1006,6 +1794,7 @@ internal static class CoverageGateReportWriter
                     patchLine = result.MinPatchLinePercent,
                     patchBranch = result.MinPatchBranchPercent,
                 },
+                patchDiffSource = ToJson(result.PatchDiffSource),
                 line = ToJson(result.LineCoverage),
                 branch = ToJson(result.BranchCoverage),
                 patchLine = ToJson(result.PatchLineCoverage),
@@ -1035,6 +1824,25 @@ internal static class CoverageGateReportWriter
         builder.AppendLine($"# Coverage Gate: {status}");
         builder.AppendLine();
         builder.AppendLine($"Cobertura: {EscapeMarkdownCell(result.CoveragePath)}");
+        if (result.PatchDiffSource is { } source)
+        {
+            builder.AppendLine($"Patch source: {EscapeMarkdownCell(GetKindText(source.Kind))}");
+            builder.AppendLine($"Patch label: {EscapeMarkdownCell(source.Label)}");
+            if (!string.IsNullOrWhiteSpace(source.DiffBase))
+            {
+                builder.AppendLine($"Patch diff base: {EscapeMarkdownCell(source.DiffBase)}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(source.Path))
+            {
+                builder.AppendLine($"Patch diff file: {EscapeMarkdownCell(source.Path)}");
+            }
+
+            builder.AppendLine($"Patch diff bytes: {source.Bytes}");
+            builder.AppendLine($"Patch diff SHA-256: {EscapeMarkdownCell(source.Sha256)}");
+            builder.AppendLine($"Patch diff empty: {source.Empty.ToString(CultureInfo.InvariantCulture).ToLowerInvariant()}");
+        }
+
         builder.AppendLine();
         builder.AppendLine("| Metric | Coverage | Threshold | Result |");
         builder.AppendLine("| --- | ---: | ---: | --- |");
@@ -1059,6 +1867,26 @@ internal static class CoverageGateReportWriter
         valid = metric.Valid,
         percent = metric.Percent,
     };
+
+    private static object? ToJson(PatchDiffSourceReport? source)
+    {
+        if (source is null)
+        {
+            return null;
+        }
+
+        return new
+        {
+            kind = GetKindText(source.Kind),
+            label = source.Label,
+            strictness = source.IsExternalArtifact ? "fail-closed" : "local-git",
+            diffBase = source.DiffBase,
+            path = source.Path,
+            bytes = source.Bytes,
+            sha256 = source.Sha256,
+            empty = source.Empty,
+        };
+    }
 
     private static object? ToJson(PatchLineCoverageMetric? metric)
     {
@@ -1162,6 +1990,14 @@ internal static class CoverageGateReportWriter
             .Replace("|", "\\|", StringComparison.Ordinal)
             .Replace("`", "\\`", StringComparison.Ordinal);
     }
+
+    private static string GetKindText(PatchDiffSourceKind kind) => kind switch
+    {
+        PatchDiffSourceKind.GitBase => "git-base",
+        PatchDiffSourceKind.File => "file",
+        PatchDiffSourceKind.Stdin => "stdin",
+        _ => kind.ToString(),
+    };
 
     private static string StripControls(string value)
     {
