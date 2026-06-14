@@ -49,4 +49,8 @@
           Condition="Exists('$(PkgReportGenerator)/tools/net8.0')" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="$(MSBuildProjectDirectory)\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+
 </Project>

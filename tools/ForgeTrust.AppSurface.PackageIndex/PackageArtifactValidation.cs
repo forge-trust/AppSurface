@@ -14,6 +14,7 @@ internal sealed class PackageArtifactValidator
 {
     private const string RequiredPackageProjectUrl = "https://appsurface.dev";
     private const string TailwindRuntimePackagePrefix = "ForgeTrust.AppSurface.Web.Tailwind.Runtime.";
+    private const int MaxNoticeBytes = 256 * 1024;
 
     private static readonly IReadOnlyDictionary<string, string> TailwindRuntimeBinaryNames =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -31,11 +32,17 @@ internal sealed class PackageArtifactValidator
     /// <param name="plan">Resolved package publish plan.</param>
     /// <param name="artifactsDirectory">Directory containing produced <c>.nupkg</c> files.</param>
     /// <param name="packageVersion">Exact package version expected in every artifact.</param>
+    /// <param name="repositoryRoot">
+    /// Optional repository root used to resolve source-path and version-source evidence when payload inventory validation is enabled.
+    /// </param>
+    /// <param name="payloadInventory">Optional redistributed payload inventory to validate against the produced package artifacts.</param>
     /// <returns>A validation report for the inspected artifacts.</returns>
     internal PackageArtifactValidationReport Validate(
         PackagePublishPlan plan,
         string artifactsDirectory,
-        string packageVersion)
+        string packageVersion,
+        string? repositoryRoot = null,
+        PackagePayloadInventory? payloadInventory = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentException.ThrowIfNullOrWhiteSpace(artifactsDirectory);
@@ -52,7 +59,13 @@ internal sealed class PackageArtifactValidator
         var expectedPackageIds = plan.Entries
             .Select(entry => entry.PackageId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (payloadInventory is not null)
+        {
+            ValidatePayloadInventoryPackageIds(payloadInventory, expectedPackageIds);
+        }
+
         var inspectedPackages = new List<InspectedPackage>(packages.Length);
+        var payloadSummariesByPackageId = new Dictionary<string, PackagePayloadValidationSummary>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var packagePath in packages)
         {
@@ -74,7 +87,13 @@ internal sealed class PackageArtifactValidator
                 throw new PackageIndexException($"Package artifact directory contains multiple artifacts for '{expected.PackageId}'.");
             }
 
-            ValidatePackage(expected, matches[0], expectedPackageIds, packageVersion);
+            payloadSummariesByPackageId[expected.PackageId] = ValidatePackage(
+                expected,
+                matches[0],
+                expectedPackageIds,
+                packageVersion,
+                repositoryRoot,
+                payloadInventory);
         }
 
         foreach (var unexpected in inspectedPackages.Where(package => !expectedPackageIds.Contains(package.PackageId)))
@@ -99,15 +118,22 @@ internal sealed class PackageArtifactValidator
                     entry.ExpectedDependencyPackageIds,
                     inspected.PackagePath,
                     entry.IsTool,
-                    entry.IsTool ? entry.ToolCommandName : string.Empty);
+                    entry.IsTool ? entry.ToolCommandName : string.Empty,
+                    payloadSummariesByPackageId.TryGetValue(entry.PackageId, out var payloadSummary)
+                        ? payloadSummary?.Results ?? []
+                        : [],
+                    payloadSummary?.SuspiciousEntryCount ?? 0,
+                    payloadSummary?.CoveredSuspiciousEntryCount ?? 0);
             }).ToArray());
     }
 
-    private static void ValidatePackage(
+    private static PackagePayloadValidationSummary ValidatePackage(
         PackagePublishPlanEntry expected,
         InspectedPackage inspected,
         IReadOnlySet<string> firstPartyPackageIds,
-        string packageVersion)
+        string packageVersion,
+        string? repositoryRoot,
+        PackagePayloadInventory? payloadInventory)
     {
         if (!string.Equals(inspected.PackageVersion, packageVersion, StringComparison.OrdinalIgnoreCase))
         {
@@ -230,6 +256,467 @@ internal sealed class PackageArtifactValidator
                     $"Package '{expected.PackageId}' contains assembly '{assembly.EntryPath}' with informational version '{assembly.InformationalVersion}', expected '{packageVersion}' or '{packageVersion}+<metadata>'.");
             }
         }
+
+        if (payloadInventory is null)
+        {
+            return PackagePayloadValidationSummary.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(repositoryRoot))
+        {
+            throw new PackageIndexException(
+                "Package payload inventory validation requires a repository root. Problem: source-path and version-source evidence cannot be resolved. Cause: verify-packages was invoked without repository context. Fix: pass the repository root into package artifact validation. Docs: packages/README.md#redistributed-payloads.");
+        }
+
+        return ValidatePackagePayloads(expected, inspected, firstPartyPackageIds, repositoryRoot, payloadInventory);
+    }
+
+    private static PackagePayloadValidationSummary ValidatePackagePayloads(
+        PackagePublishPlanEntry expected,
+        InspectedPackage inspected,
+        IReadOnlySet<string> firstPartyPackageIds,
+        string repositoryRoot,
+        PackagePayloadInventory inventory)
+    {
+        var notices = inventory.Notices
+            .Where(notice => string.Equals(notice.PackageId, expected.PackageId, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var audits = inventory.Audits
+            .Where(audit => string.Equals(audit.PackageId, expected.PackageId, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var results = new List<PackagePayloadValidationResult>(notices.Length + audits.Length);
+        var coveredPackageEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var noticeCoveredPackageEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var notice in notices)
+        {
+            var payloadPatterns = ValidatePackagePatterns(expected.PackageId, notice.Id, notice.PayloadPatterns);
+            var matchedPayloads = MatchPackageEntries(inspected.EntryPaths, payloadPatterns);
+            if (matchedPayloads.Count == 0)
+            {
+                throw new PackageIndexException(
+                    $"ASPKG124 {expected.PackageId}: notice '{notice.Id}' matched no package payload entries. Problem: the payload inventory contains stale or incorrect payload_patterns. Cause: no artifact entry matched {FormatPatterns(payloadPatterns)}. Fix: update packages/third-party-payloads.yml or remove the stale notice record. Docs: packages/README.md#redistributed-payloads.");
+            }
+
+            foreach (var entryPath in matchedPayloads)
+            {
+                coveredPackageEntries.Add(entryPath);
+                noticeCoveredPackageEntries.Add(entryPath);
+            }
+
+            var noticePaths = notice.NoticePaths
+                .Select(path => NormalizePackagePathStrict(path, $"notice '{notice.Id}' notice_paths"))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            foreach (var noticePath in noticePaths.Where(path => !inspected.EntryPaths.Contains(path, StringComparer.OrdinalIgnoreCase)))
+            {
+                throw new PackageIndexException(
+                    $"ASPKG125 {expected.PackageId}: notice '{notice.Id}' requires missing notice path '{noticePath}'. Problem: a redistributed payload lacks package-visible notice text. Cause: the package artifact does not contain the declared notice path. Fix: pack THIRD-PARTY-NOTICES.md at the package root or update notice_paths. Docs: packages/README.md#redistributed-payloads.");
+            }
+
+            var noticeText = string.Join(
+                "\n",
+                noticePaths.Select(path => ReadPackageTextEntry(inspected.PackagePath, path, expected.PackageId, notice.Id)));
+            foreach (var marker in notice.Markers.Where(marker => !noticeText.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new PackageIndexException(
+                    $"ASPKG126 {expected.PackageId}: notice '{notice.Id}' is missing marker '{marker}'. Problem: the package notice does not prove the declared component/version/license text. Cause: the packaged notice text is incomplete or stale. Fix: update the package THIRD-PARTY-NOTICES.md entry so it includes the marker. Docs: packages/README.md#redistributed-payloads.");
+            }
+
+            ValidateRepositoryPaths(repositoryRoot, expected.PackageId, notice.Id, "source_paths", notice.SourcePaths);
+            if (!string.IsNullOrWhiteSpace(notice.VersionSourcePath)
+                || !string.IsNullOrWhiteSpace(notice.VersionSourceContains))
+            {
+                ValidateVersionSource(
+                    repositoryRoot,
+                    expected.PackageId,
+                    notice.Id,
+                    notice.VersionSourcePath,
+                    notice.VersionSourceContains);
+            }
+
+            results.Add(new PackagePayloadValidationResult(
+                expected.PackageId,
+                notice.Id,
+                notice.Component,
+                "notice",
+                "notice_enforced",
+                matchedPayloads,
+                noticePaths,
+                notice.VersionSourcePath ?? string.Empty));
+        }
+
+        foreach (var audit in audits)
+        {
+            var appliesTo = ValidatePackagePatterns(expected.PackageId, audit.Id, audit.AppliesTo);
+            var matchedPayloads = MatchPackageEntries(inspected.EntryPaths, appliesTo);
+            if (matchedPayloads.Count == 0)
+            {
+                throw new PackageIndexException(
+                    $"ASPKG127 {expected.PackageId}: audit '{audit.Id}' matched no package payload entries. Problem: the audit record is stale or too broad to prove package contents. Cause: no artifact entry matched {FormatPatterns(appliesTo)}. Fix: update applies_to or remove the stale audit. Docs: packages/README.md#redistributed-payloads.");
+            }
+
+            var noticeOverlaps = matchedPayloads
+                .Where(noticeCoveredPackageEntries.Contains)
+                .ToArray();
+            if (noticeOverlaps.Length > 0)
+            {
+                throw new PackageIndexException(
+                    $"ASPKG138 {expected.PackageId}: audit '{audit.Id}' overlaps notice-covered payload '{noticeOverlaps[0]}'. Problem: audit records must not mask notice-required redistributed payloads. Cause: applies_to includes entries already covered by notice records. Fix: narrow applies_to so audits cover only non-notice payloads, or keep the notice record as the sole coverage for those entries. Docs: packages/README.md#redistributed-payloads.");
+            }
+
+            foreach (var entryPath in matchedPayloads)
+            {
+                coveredPackageEntries.Add(entryPath);
+            }
+
+            ValidateRepositoryPaths(repositoryRoot, expected.PackageId, audit.Id, "source_paths", audit.SourcePaths);
+            if (string.Equals(audit.EvidenceKind, "generated_first_party", StringComparison.OrdinalIgnoreCase)
+                && audit.GeneratedPaths.Count == 0)
+            {
+                throw new PackageIndexException(
+                    $"ASPKG137 {expected.PackageId}: audit '{audit.Id}' must define generated_paths for generated_first_party evidence. Problem: generated-first-party payloads need both source and output evidence. Cause: the audit record names generated evidence without naming generated repository outputs. Fix: add generated_paths for the emitted files or use a different evidence_kind. Docs: packages/README.md#redistributed-payloads.");
+            }
+
+            ValidateRepositoryPaths(repositoryRoot, expected.PackageId, audit.Id, "generated_paths", audit.GeneratedPaths);
+            results.Add(new PackagePayloadValidationResult(
+                expected.PackageId,
+                audit.Id,
+                audit.MatchedRule ?? audit.EvidenceKind,
+                audit.EvidenceKind,
+                "audit_enforced",
+                matchedPayloads,
+                [],
+                audit.Source));
+        }
+
+        var suspiciousEntries = inspected.EntryPaths
+            .Select(entryPath => new SuspiciousPackageEntry(entryPath, GetSuspiciousPayloadRule(entryPath, firstPartyPackageIds)))
+            .Where(entry => entry.Rule is not null)
+            .ToArray();
+        foreach (var suspiciousEntry in suspiciousEntries.Where(entry => !coveredPackageEntries.Contains(entry.EntryPath)))
+        {
+            throw new PackageIndexException(
+                $"ASPKG123 {expected.PackageId}: {suspiciousEntry.EntryPath} matched {suspiciousEntry.Rule} but has no notice or audit classification. Problem: package redistributes a suspicious payload without provenance evidence. Cause: no packages/third-party-payloads.yml notice or audit record covers the package entry. Fix: add a notice record with payload_patterns and notice_paths, or add a narrow generated-first-party audit record. Docs: packages/README.md#redistributed-payloads.");
+        }
+
+        var coveredSuspiciousEntryCount = suspiciousEntries.Count(entry => coveredPackageEntries.Contains(entry.EntryPath));
+        return new PackagePayloadValidationSummary(results, suspiciousEntries.Length, coveredSuspiciousEntryCount);
+    }
+
+    private static void ValidatePayloadInventoryPackageIds(
+        PackagePayloadInventory inventory,
+        IReadOnlySet<string> expectedPackageIds)
+    {
+        var unknownPackageIds = inventory.Notices
+            .Select(notice => notice.PackageId)
+            .Concat(inventory.Audits.Select(audit => audit.PackageId))
+            .Where(packageId => !string.IsNullOrWhiteSpace(packageId) && !expectedPackageIds.Contains(packageId))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(packageId => packageId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (unknownPackageIds.Length > 0)
+        {
+            throw new PackageIndexException(
+                $"ASPKG136 packages/third-party-payloads.yml references package_id values that are not in packages/package-index.yml: {string.Join(", ", unknownPackageIds)}. Problem: stale payload provenance records can survive after a package is renamed or removed. Cause: the inventory package_id does not match any package publish-plan entry. Fix: update the package_id to the current package or remove the stale inventory record. Docs: packages/README.md#redistributed-payloads.");
+        }
+    }
+
+    private static IReadOnlyList<string> ValidatePackagePatterns(
+        string packageId,
+        string recordId,
+        IEnumerable<string> patterns)
+    {
+        return patterns
+            .Select(pattern => NormalizePackagePattern(packageId, recordId, pattern))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> MatchPackageEntries(
+        IReadOnlyList<string> entryPaths,
+        IReadOnlyList<string> patterns)
+    {
+        return entryPaths
+            .Where(entryPath => patterns.Any(pattern => PackagePathPatternMatches(pattern, entryPath)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(entryPath => entryPath, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string NormalizePackagePattern(string packageId, string recordId, string pattern)
+    {
+        var normalized = NormalizePackagePathStrict(pattern, $"payload inventory record '{recordId}' pattern");
+        if (normalized.Split('/').Any(segment =>
+                segment.Contains("**", StringComparison.Ordinal)
+                && !string.Equals(segment, "**", StringComparison.Ordinal)))
+        {
+            throw new PackageIndexException(
+                $"ASPKG128 {packageId}: payload inventory record '{recordId}' has invalid pattern '{pattern}'. Problem: package payload patterns support only '*' inside a segment or '**' as a whole segment. Cause: the pattern contains an unsupported wildcard run. Fix: use segment globs such as tools/**/reportgenerator/** or runtimes/*/native/*. Docs: packages/README.md#redistributed-payloads.");
+        }
+
+        return normalized;
+    }
+
+    private static bool PackagePathPatternMatches(string pattern, string entryPath)
+    {
+        var patternSegments = pattern.Split('/');
+        var pathSegments = entryPath.Split('/');
+        return PackagePathPatternMatches(patternSegments, 0, pathSegments, 0);
+    }
+
+    private static bool PackagePathPatternMatches(
+        IReadOnlyList<string> patternSegments,
+        int patternIndex,
+        IReadOnlyList<string> pathSegments,
+        int pathIndex)
+    {
+        if (patternIndex == patternSegments.Count)
+        {
+            return pathIndex == pathSegments.Count;
+        }
+
+        var patternSegment = patternSegments[patternIndex];
+        if (string.Equals(patternSegment, "**", StringComparison.Ordinal))
+        {
+            for (var nextPathIndex = pathIndex; nextPathIndex <= pathSegments.Count; nextPathIndex++)
+            {
+                if (PackagePathPatternMatches(patternSegments, patternIndex + 1, pathSegments, nextPathIndex))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return pathIndex < pathSegments.Count
+            && WildcardSegmentMatches(patternSegment, pathSegments[pathIndex])
+            && PackagePathPatternMatches(patternSegments, patternIndex + 1, pathSegments, pathIndex + 1);
+    }
+
+    private static bool WildcardSegmentMatches(string pattern, string value)
+    {
+        var patternIndex = 0;
+        var valueIndex = 0;
+        var starIndex = -1;
+        var retryValueIndex = 0;
+        while (valueIndex < value.Length)
+        {
+            if (patternIndex < pattern.Length
+                && char.ToUpperInvariant(pattern[patternIndex]) == char.ToUpperInvariant(value[valueIndex]))
+            {
+                patternIndex++;
+                valueIndex++;
+                continue;
+            }
+
+            if (patternIndex < pattern.Length && pattern[patternIndex] == '*')
+            {
+                starIndex = patternIndex++;
+                retryValueIndex = valueIndex;
+                continue;
+            }
+
+            if (starIndex != -1)
+            {
+                patternIndex = starIndex + 1;
+                valueIndex = ++retryValueIndex;
+                continue;
+            }
+
+            return false;
+        }
+
+        while (patternIndex < pattern.Length && pattern[patternIndex] == '*')
+        {
+            patternIndex++;
+        }
+
+        return patternIndex == pattern.Length;
+    }
+
+    private static string? GetSuspiciousPayloadRule(string entryPath, IReadOnlySet<string> firstPartyPackageIds)
+    {
+        if (entryPath.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entryPath, "README.md", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entryPath, "THIRD-PARTY-NOTICES.md", StringComparison.OrdinalIgnoreCase)
+            || IsFirstPartyAssemblyPath(entryPath, firstPartyPackageIds))
+        {
+            return null;
+        }
+
+        var fileName = Path.GetFileName(entryPath);
+        if (entryPath.StartsWith("runtimes/", StringComparison.OrdinalIgnoreCase)
+            && entryPath.Contains("/native/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "runtimes/*/native/**";
+        }
+
+        if (entryPath.StartsWith("tools/", StringComparison.OrdinalIgnoreCase)
+            && entryPath.Contains("/reportgenerator/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tools/**/reportgenerator/**";
+        }
+
+        if (fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            return "*.exe";
+        }
+
+        if (fileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            return "*.dll";
+        }
+
+        if (fileName.EndsWith(".min.js", StringComparison.OrdinalIgnoreCase))
+        {
+            return "*.min.js";
+        }
+
+        return null;
+    }
+
+    private static bool IsFirstPartyAssemblyPath(string entryPath, IReadOnlySet<string> firstPartyPackageIds)
+    {
+        if (!entryPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var assemblyName = Path.GetFileNameWithoutExtension(entryPath);
+        return firstPartyPackageIds.Contains(assemblyName)
+            || assemblyName.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ReadPackageTextEntry(
+        string packagePath,
+        string entryPath,
+        string packageId,
+        string recordId)
+    {
+        using var archive = ZipFile.OpenRead(packagePath);
+        var entry = archive.Entries.SingleOrDefault(candidate =>
+            string.Equals(NormalizePackagePath(candidate.FullName), entryPath, StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+        {
+            throw new PackageIndexException(
+                $"ASPKG125 {packageId}: notice '{recordId}' requires missing notice path '{entryPath}'. Problem: a redistributed payload lacks package-visible notice text. Cause: the package artifact does not contain the declared notice path. Fix: pack THIRD-PARTY-NOTICES.md at the package root or update notice_paths. Docs: packages/README.md#redistributed-payloads.");
+        }
+
+        if (entry.Length > MaxNoticeBytes)
+        {
+            throw new PackageIndexException(
+                $"ASPKG129 {packageId}: notice '{recordId}' path '{entryPath}' is too large. Problem: verify-packages only reads bounded notice/evidence text. Cause: the notice file is {entry.Length} bytes, above the {MaxNoticeBytes} byte limit. Fix: keep package notice text focused or split non-notice artifacts out of notice_paths. Docs: packages/README.md#redistributed-payloads.");
+        }
+
+        try
+        {
+            using var stream = entry.Open();
+            using var reader = new StreamReader(
+                stream,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true),
+                detectEncodingFromByteOrderMarks: false);
+            return reader.ReadToEnd();
+        }
+        catch (DecoderFallbackException ex)
+        {
+            throw new PackageIndexException(
+                $"ASPKG130 {packageId}: notice '{recordId}' path '{entryPath}' is not valid UTF-8. Problem: package notices must be readable by humans and CI logs. Cause: UTF-8 decoding failed. Fix: save the notice file as UTF-8 text. Docs: packages/README.md#redistributed-payloads.",
+                ex);
+        }
+    }
+
+    private static void ValidateRepositoryPaths(
+        string repositoryRoot,
+        string packageId,
+        string recordId,
+        string fieldName,
+        IReadOnlyList<string> paths)
+    {
+        foreach (var path in paths)
+        {
+            var fullPath = ResolveRepositoryPath(repositoryRoot, packageId, recordId, fieldName, path);
+            if (!File.Exists(fullPath) && !Directory.Exists(fullPath))
+            {
+                throw new PackageIndexException(
+                    $"ASPKG131 {packageId}: record '{recordId}' references missing {fieldName} path '{path}'. Problem: payload evidence points at a file that no longer exists. Cause: source, generated, or audit evidence moved without updating packages/third-party-payloads.yml. Fix: update the evidence path or restore the referenced file. Docs: packages/README.md#redistributed-payloads.");
+            }
+        }
+    }
+
+    private static void ValidateVersionSource(
+        string repositoryRoot,
+        string packageId,
+        string recordId,
+        string? versionSourcePath,
+        string? versionSourceContains)
+    {
+        if (string.IsNullOrWhiteSpace(versionSourcePath) || string.IsNullOrWhiteSpace(versionSourceContains))
+        {
+            throw new PackageIndexException(
+                $"ASPKG132 {packageId}: notice '{recordId}' must define version_source_path and version_source_contains together. Problem: deterministic version evidence is incomplete. Cause: only one version-source field was supplied. Fix: set both fields or remove both for manual evidence. Docs: packages/README.md#redistributed-payloads.");
+        }
+
+        var fullPath = ResolveRepositoryPath(repositoryRoot, packageId, recordId, "version_source_path", versionSourcePath);
+        if (!File.Exists(fullPath))
+        {
+            throw new PackageIndexException(
+                $"ASPKG133 {packageId}: notice '{recordId}' version source '{versionSourcePath}' does not exist. Problem: deterministic version evidence cannot be checked. Cause: the source file moved or was not committed. Fix: update version_source_path. Docs: packages/README.md#redistributed-payloads.");
+        }
+
+        var content = File.ReadAllText(fullPath);
+        if (!content.Contains(versionSourceContains, StringComparison.Ordinal))
+        {
+            throw new PackageIndexException(
+                $"ASPKG134 {packageId}: notice '{recordId}' version source '{versionSourcePath}' does not contain '{versionSourceContains}'. Problem: payload version evidence drifted from the repository source of truth. Cause: package metadata changed without updating packages/third-party-payloads.yml or the notice text. Fix: update the inventory and notice to match the source version. Docs: packages/README.md#redistributed-payloads.");
+        }
+    }
+
+    private static string ResolveRepositoryPath(
+        string repositoryRoot,
+        string packageId,
+        string recordId,
+        string fieldName,
+        string relativePath)
+    {
+        if (IsRootedRepositoryPath(relativePath))
+        {
+            throw new PackageIndexException(
+                $"ASPKG135 {packageId}: record '{recordId}' {fieldName} path '{relativePath}' must be repository-relative. Problem: payload evidence must be portable across checkouts. Cause: the path is absolute instead of repository-relative. Fix: use a repository-relative source path. Docs: packages/README.md#redistributed-payloads.");
+        }
+
+        var normalizedRoot = Path.GetFullPath(repositoryRoot);
+        var normalizedRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(Path.Join(normalizedRoot, normalizedRelativePath));
+        var rootPrefix = normalizedRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? normalizedRoot
+            : normalizedRoot + Path.DirectorySeparatorChar;
+        if (!string.Equals(fullPath, normalizedRoot, StringComparison.Ordinal)
+            && !fullPath.StartsWith(rootPrefix, StringComparison.Ordinal))
+        {
+            throw new PackageIndexException(
+                $"ASPKG135 {packageId}: record '{recordId}' {fieldName} path '{relativePath}' escapes the repository root. Problem: payload evidence must be reviewable in this repository. Cause: the path resolves outside the checkout. Fix: use a repository-relative source path. Docs: packages/README.md#redistributed-payloads.");
+        }
+
+        return fullPath;
+    }
+
+    private static bool IsRootedRepositoryPath(string path)
+    {
+        return Path.IsPathRooted(path)
+            || path.StartsWith("/", StringComparison.Ordinal)
+            || path.StartsWith("\\", StringComparison.Ordinal)
+            || (path.Length >= 3
+                && char.IsAsciiLetter(path[0])
+                && path[1] == ':'
+                && (path[2] == '/' || path[2] == '\\'));
+    }
+
+    private static string FormatPatterns(IReadOnlyList<string> patterns)
+    {
+        return string.Join(", ", patterns.Select(pattern => $"'{pattern}'"));
     }
 
     private static InspectedPackage InspectPackage(string packagePath, IReadOnlySet<string> packageIds)
@@ -295,6 +782,15 @@ internal sealed class PackageArtifactValidator
         var entryPaths = archive.Entries
             .Select(entry => NormalizePackagePath(entry.FullName))
             .ToArray();
+        var duplicateEntryPath = entryPaths
+            .GroupBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1)
+            ?.Key;
+        if (duplicateEntryPath is not null)
+        {
+            throw new PackageIndexException(
+                $"Package artifact '{packagePath}' contains duplicate package entry path '{duplicateEntryPath}' after normalization. Problem: package payload validation must not depend on ambiguous ZIP entry casing or separators. Cause: the artifact contains entries that normalize to the same path. Fix: remove duplicate or case-colliding package entries. Docs: packages/README.md#redistributed-payloads.");
+        }
         var toolSettingsFiles = ReadToolSettingsFiles(archive, packagePath);
         var toolCommandNames = toolSettingsFiles
             .SelectMany(settingsFile => settingsFile.CommandNames)
@@ -441,7 +937,29 @@ internal sealed class PackageArtifactValidator
 
     private static string NormalizePackagePath(string entryPath)
     {
-        return entryPath.Replace('\\', '/').TrimStart('/');
+        return NormalizePackagePathStrict(entryPath, "package entry");
+    }
+
+    private static string NormalizePackagePathStrict(string entryPath, string sourceDescription)
+    {
+        if (string.IsNullOrWhiteSpace(entryPath))
+        {
+            throw new PackageIndexException(
+                $"Invalid {sourceDescription} path. Problem: package payload paths must not be empty. Cause: an empty path was supplied. Fix: use repository-style package paths such as THIRD-PARTY-NOTICES.md or tools/net10.0/any/reportgenerator/**. Docs: packages/README.md#redistributed-payloads.");
+        }
+
+        var normalized = entryPath.Replace('\\', '/').Trim('/');
+        var segments = normalized.Split('/');
+        if (string.IsNullOrWhiteSpace(normalized)
+            || segments.Any(segment => string.IsNullOrWhiteSpace(segment)
+                || string.Equals(segment, ".", StringComparison.Ordinal)
+                || string.Equals(segment, "..", StringComparison.Ordinal)))
+        {
+            throw new PackageIndexException(
+                $"Invalid {sourceDescription} path '{entryPath}'. Problem: package payload paths must be relative paths without traversal, empty segments, or current-directory segments. Cause: the path is outside the v1 package payload contract. Fix: use clean forward-slash package paths. Docs: packages/README.md#redistributed-payloads.");
+        }
+
+        return normalized;
     }
 
     private static InspectedAssemblyVersion ReadAssemblyVersion(ZipArchiveEntry entry)
@@ -517,6 +1035,16 @@ internal sealed class PackageArtifactValidator
         return string.Equals(informationalVersion, packageVersion, StringComparison.OrdinalIgnoreCase)
             || informationalVersion.StartsWith($"{packageVersion}+", StringComparison.OrdinalIgnoreCase);
     }
+
+    private sealed record SuspiciousPackageEntry(string EntryPath, string? Rule);
+
+    private sealed record PackagePayloadValidationSummary(
+        IReadOnlyList<PackagePayloadValidationResult> Results,
+        int SuspiciousEntryCount,
+        int CoveredSuspiciousEntryCount)
+    {
+        internal static readonly PackagePayloadValidationSummary Empty = new([], 0, 0);
+    }
 }
 
 /// <summary>
@@ -528,16 +1056,19 @@ internal static class PackageArtifactReportRenderer
     /// Renders the validation report as markdown.
     /// </summary>
     /// <param name="report">Validation report to render.</param>
+    /// <param name="coverageProofReport">Optional packaged coverage CLI proof details to append.</param>
     /// <returns>Markdown report content.</returns>
-    internal static string RenderMarkdown(PackageArtifactValidationReport report)
+    internal static string RenderMarkdown(
+        PackageArtifactValidationReport report,
+        CoverageCliConsumerProofReport? coverageProofReport = null)
     {
         var builder = new StringBuilder();
         builder.AppendLine("# Package artifact validation");
         builder.AppendLine();
         builder.AppendLine($"Version: `{report.PackageVersion}`");
         builder.AppendLine();
-        builder.AppendLine("| Package | Project | Decision | ToolCommand | Expected package dependencies |");
-        builder.AppendLine("| --- | --- | --- | --- | --- |");
+        builder.AppendLine("| Package | Project | Decision | ToolCommand | Expected package dependencies | Suspicious payloads |");
+        builder.AppendLine("| --- | --- | --- | --- | --- | --- |");
         foreach (var entry in report.Entries)
         {
             var dependencies = entry.ExpectedDependencyPackageIds.Count == 0
@@ -546,7 +1077,36 @@ internal static class PackageArtifactReportRenderer
             var toolCommand = entry.IsTool && !string.IsNullOrWhiteSpace(entry.ToolCommandName)
                 ? $"`{entry.ToolCommandName}`"
                 : "-";
-            builder.AppendLine($"| `{entry.PackageId}` | `{entry.ProjectPath}` | `{FormatDecision(entry.Decision)}` | {toolCommand} | {dependencies} |");
+            var suspiciousPayloads = entry.SuspiciousPayloadCount == 0
+                ? "0"
+                : $"{entry.CoveredSuspiciousPayloadCount}/{entry.SuspiciousPayloadCount}";
+            builder.AppendLine($"| `{entry.PackageId}` | `{entry.ProjectPath}` | `{FormatDecision(entry.Decision)}` | {toolCommand} | {dependencies} | {suspiciousPayloads} |");
+        }
+
+        var payloadResults = report.Entries
+            .SelectMany(entry => entry.PayloadResults ?? [])
+            .ToArray();
+        if (payloadResults.Length > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Redistributed payload coverage");
+            builder.AppendLine();
+            builder.AppendLine("| Package | Record | Component / rule | Evidence | Status | Payload entries | Notices | Version source |");
+            builder.AppendLine("| --- | --- | --- | --- | --- | --- | --- | --- |");
+            foreach (var result in payloadResults.OrderBy(result => result.PackageId, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(result => result.RecordId, StringComparer.OrdinalIgnoreCase))
+            {
+                builder.AppendLine(
+                    $"| `{result.PackageId}` | `{result.RecordId}` | {EscapeMarkdown(result.ComponentOrRule)} | `{result.EvidenceKind}` | `{result.Status}` | {FormatPathList(result.PayloadEntries)} | {FormatPathList(result.NoticePaths)} | {FormatOptionalPath(result.VersionSource)} |");
+            }
+        }
+
+        if (coverageProofReport is not null)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Coverage CLI consumer proof");
+            builder.AppendLine();
+            CoverageCliConsumerProofReportRenderer.RenderSection(builder, coverageProofReport);
         }
 
         return builder.ToString().TrimEnd() + Environment.NewLine;
@@ -561,6 +1121,25 @@ internal static class PackageArtifactReportRenderer
             PackagePublishDecision.DoNotPublish => "do_not_publish",
             _ => decision.ToString()
         };
+    }
+
+    private static string FormatPathList(IReadOnlyList<string> values)
+    {
+        return values.Count == 0
+            ? "-"
+            : string.Join("<br />", values.Select(value => $"`{value}`"));
+    }
+
+    private static string FormatOptionalPath(string value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? "-"
+            : $"`{value}`";
+    }
+
+    private static string EscapeMarkdown(string value)
+    {
+        return value.Replace("|", "\\|", StringComparison.Ordinal);
     }
 }
 
@@ -621,6 +1200,9 @@ internal sealed record PackageArtifactValidationReport(
 /// Validated command shim token from <c>tool_command_name</c>. It is empty for non-tool packages and required for tool
 /// packages so artifact reports show the exact command that publish smoke tests execute.
 /// </param>
+/// <param name="PayloadResults">Redistributed package payload evidence rows validated for this package.</param>
+/// <param name="SuspiciousPayloadCount">Number of suspicious package entries found in this artifact.</param>
+/// <param name="CoveredSuspiciousPayloadCount">Number of suspicious package entries covered by notice or audit evidence.</param>
 internal sealed record PackageArtifactValidationReportEntry(
     string PackageId,
     string ProjectPath,
@@ -628,7 +1210,31 @@ internal sealed record PackageArtifactValidationReportEntry(
     IReadOnlyList<string> ExpectedDependencyPackageIds,
     string ArtifactPath = "",
     bool IsTool = false,
-    string ToolCommandName = "");
+    string ToolCommandName = "",
+    IReadOnlyList<PackagePayloadValidationResult>? PayloadResults = null,
+    int SuspiciousPayloadCount = 0,
+    int CoveredSuspiciousPayloadCount = 0);
+
+/// <summary>
+/// One redistributed package payload evidence row rendered into the artifact validation report.
+/// </summary>
+/// <param name="PackageId">Package id whose artifact carried or embedded the payload evidence.</param>
+/// <param name="RecordId">Inventory record id from <c>packages/third-party-payloads.yml</c>.</param>
+/// <param name="ComponentOrRule">Third-party component name or audit rule shown to release reviewers.</param>
+/// <param name="EvidenceKind">Evidence type, such as <c>notice</c> or <c>generated_first_party</c>.</param>
+/// <param name="Status">Validation status rendered for release evidence.</param>
+/// <param name="PayloadEntries">Package entries covered by this record.</param>
+/// <param name="NoticePaths">Package notice paths checked by this record.</param>
+/// <param name="VersionSource">Repository path or audit source that anchors the version/evidence.</param>
+internal sealed record PackagePayloadValidationResult(
+    string PackageId,
+    string RecordId,
+    string ComponentOrRule,
+    string EvidenceKind,
+    string Status,
+    IReadOnlyList<string> PayloadEntries,
+    IReadOnlyList<string> NoticePaths,
+    string VersionSource);
 
 /// <summary>
 /// Metadata and payload facts inspected from one NuGet package artifact.
