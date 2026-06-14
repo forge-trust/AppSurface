@@ -41,12 +41,10 @@ public sealed class AppSurfaceLocalSecretIdentityNormalizer
         }
 
         string? normalizedPrefix = null;
-        if (!string.IsNullOrWhiteSpace(keyPrefix))
+        if (!string.IsNullOrWhiteSpace(keyPrefix) &&
+            !TryNormalizeSegment(keyPrefix, nameof(keyPrefix), allowDots: true, out normalizedPrefix, out diagnostic))
         {
-            if (!TryNormalizeSegment(keyPrefix, nameof(keyPrefix), allowDots: true, out normalizedPrefix, out diagnostic))
-            {
-                return AppSurfaceLocalSecretIdentityResult.Invalid(diagnostic);
-            }
+            return AppSurfaceLocalSecretIdentityResult.Invalid(diagnostic);
         }
 
         if (!TryNormalizeKey(key, out var normalizedKey, out diagnostic))

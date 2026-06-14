@@ -73,6 +73,11 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
     private static string? FindOnPath(string fileName)
     {
+        if (string.IsNullOrWhiteSpace(fileName) || Path.IsPathRooted(fileName))
+        {
+            return null;
+        }
+
         var paths = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator);
         return paths
             .Select(path => Path.Combine(path, fileName))
