@@ -1,0 +1,197 @@
+schema_version: 1
+notices:
+  - id: cli-reportgenerator-tool-payload
+    package_id: ForgeTrust.AppSurface.Cli
+    component: ReportGenerator
+    version: 5.5.10
+    license: Apache-2.0
+    source_url: https://github.com/danielpalme/ReportGenerator
+    payload_patterns:
+      - tools/**/reportgenerator/**
+    notice_paths:
+      - THIRD-PARTY-NOTICES.md
+    markers:
+      - ReportGenerator
+      - 5.5.10
+      - Apache-2.0
+    source_paths:
+      - Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+      - Directory.Packages.props
+    version_source_path: Directory.Packages.props
+    version_source_contains: <PackageVersion Include="ReportGenerator" Version="5.5.10" />
+  - id: docs-minisearch-embedded-runtime
+    package_id: ForgeTrust.AppSurface.Docs
+    component: MiniSearch
+    version: 7.2.0
+    license: MIT
+    source_url: https://lucaong.github.io/minisearch/
+    payload_patterns:
+      - lib/**/ForgeTrust.AppSurface.Docs.dll
+      - staticwebassets/docs/minisearch.min.js
+    notice_paths:
+      - THIRD-PARTY-NOTICES.md
+    markers:
+      - MiniSearch
+      - 7.2.0
+      - MIT
+    source_paths:
+      - Web/package.json
+      - Web/ForgeTrust.AppSurface.Docs/THIRD-PARTY-NOTICES.md
+      - Web/ForgeTrust.AppSurface.Docs/wwwroot/docs/minisearch.min.js
+    version_source_path: Web/package.json
+    version_source_contains: '"minisearch": "7.2.0"'
+  - id: tailwind-build-task-clwrap
+    package_id: ForgeTrust.AppSurface.Web.Tailwind
+    component: CliWrap
+    version: 3.10.1
+    license: MIT
+    source_url: https://github.com/Tyrrrz/CliWrap
+    payload_patterns:
+      - build/tasks/CliWrap.dll
+    notice_paths:
+      - THIRD-PARTY-NOTICES.md
+    markers:
+      - CliWrap
+      - 3.10.1
+      - MIT
+    source_paths:
+      - Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj
+      - Web/ForgeTrust.AppSurface.Web.Tailwind/THIRD-PARTY-NOTICES.md
+      - Directory.Packages.props
+    version_source_path: Directory.Packages.props
+    version_source_contains: <PackageVersion Include="CliWrap" Version="3.10.1" />
+  - id: tailwind-linux-arm64-native-runtime
+    package_id: ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64
+    component: Tailwind CSS standalone CLI
+    version: 4.1.18
+    license: MIT
+    source_url: https://github.com/tailwindlabs/tailwindcss
+    payload_patterns:
+      - runtimes/linux-arm64/native/tailwindcss-linux-arm64
+    notice_paths:
+      - THIRD-PARTY-NOTICES.md
+    markers:
+      - Tailwind CSS
+      - 4.1.18
+      - MIT
+    source_paths:
+      - Web/ForgeTrust.AppSurface.Web.Tailwind/Tailwind.Common.props
+      - Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/Tailwind.Runtime.Common.targets
+    version_source_path: Web/ForgeTrust.AppSurface.Web.Tailwind/Tailwind.Common.props
+    version_source_contains: <TailwindVersion>4.1.18</TailwindVersion>
+  - id: tailwind-linux-x64-native-runtime
+    package_id: ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64
+    component: Tailwind CSS standalone CLI
+    version: 4.1.18
+    license: MIT
+    source_url: https://github.com/tailwindlabs/tailwindcss
+    payload_patterns:
+      - runtimes/linux-x64/native/tailwindcss-linux-x64
+    notice_paths:
+      - THIRD-PARTY-NOTICES.md
+    markers:
+      - Tailwind CSS
+      - 4.1.18
+      - MIT
+    source_paths:
+      - Web/ForgeTrust.AppSurface.Web.Tailwind/Tailwind.Common.props
+      - Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/Tailwind.Runtime.Common.targets
+    version_source_path: Web/ForgeTrust.AppSurface.Web.Tailwind/Tailwind.Common.props
+    version_source_contains: <TailwindVersion>4.1.18</TailwindVersion>
+  - id: tailwind-osx-arm64-native-runtime
+    package_id: ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64
+    component: Tailwind CSS standalone CLI
+    version: 4.1.18
+    license: MIT
+    source_url: https://github.com/tailwindlabs/tailwindcss
+    payload_patterns:
+      - runtimes/osx-arm64/native/tailwindcss-macos-arm64
+    notice_paths:
+      - THIRD-PARTY-NOTICES.md
+    markers:
+      - Tailwind CSS
+      - 4.1.18
+      - MIT
+    source_paths:
+      - Web/ForgeTrust.AppSurface.Web.Tailwind/Tailwind.Common.props
+      - Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/Tailwind.Runtime.Common.targets
+    version_source_path: Web/ForgeTrust.AppSurface.Web.Tailwind/Tailwind.Common.props
+    version_source_contains: <TailwindVersion>4.1.18</TailwindVersion>
+  - id: tailwind-osx-x64-native-runtime
+    package_id: ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64
+    component: Tailwind CSS standalone CLI
+    version: 4.1.18
+    license: MIT
+    source_url: https://github.com/tailwindlabs/tailwindcss
+    payload_patterns:
+      - runtimes/osx-x64/native/tailwindcss-macos-x64
+    notice_paths:
+      - THIRD-PARTY-NOTICES.md
+    markers:
+      - Tailwind CSS
+      - 4.1.18
+      - MIT
+    source_paths:
+      - Web/ForgeTrust.AppSurface.Web.Tailwind/Tailwind.Common.props
+      - Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/Tailwind.Runtime.Common.targets
+    version_source_path: Web/ForgeTrust.AppSurface.Web.Tailwind/Tailwind.Common.props
+    version_source_contains: <TailwindVersion>4.1.18</TailwindVersion>
+  - id: tailwind-win-x64-native-runtime
+    package_id: ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64
+    component: Tailwind CSS standalone CLI
+    version: 4.1.18
+    license: MIT
+    source_url: https://github.com/tailwindlabs/tailwindcss
+    payload_patterns:
+      - runtimes/win-x64/native/tailwindcss-windows-x64.exe
+    notice_paths:
+      - THIRD-PARTY-NOTICES.md
+    markers:
+      - Tailwind CSS
+      - 4.1.18
+      - MIT
+    source_paths:
+      - Web/ForgeTrust.AppSurface.Web.Tailwind/Tailwind.Common.props
+      - Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/Tailwind.Runtime.Common.targets
+    version_source_path: Web/ForgeTrust.AppSurface.Web.Tailwind/Tailwind.Common.props
+    version_source_contains: <TailwindVersion>4.1.18</TailwindVersion>
+audits:
+  - id: cli-dotnet-tool-dependency-closure
+    package_id: ForgeTrust.AppSurface.Cli
+    applies_to:
+      - tools/net10.0/any/*.dll
+      - tools/net10.0/any/*/*.dll
+      - tools/net10.0/any/runtimes/**/*.dll
+    matched_rule: dotnet tool dependency closure
+    evidence_kind: dotnet_tool_dependency_closure
+    source_paths:
+      - Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+      - Cli/ForgeTrust.AppSurface.Cli/packages.lock.json
+      - Directory.Packages.props
+    reason: The .NET tool package carries SDK-produced dependency assemblies from the CLI project restore graph. The lock file records resolved package versions and content hashes; hand-copied tool payloads remain separately noticed.
+    reviewed_on: 2026-06-07
+    source: dotnet pack dependency closure from Cli/ForgeTrust.AppSurface.Cli/packages.lock.json
+    revalidate_when: CLI package references, project references, target framework, package lock, or dotnet tool packing layout changes.
+  - id: razorwire-generated-browser-assets
+    package_id: ForgeTrust.RazorWire
+    applies_to:
+      - lib/**/ForgeTrust.RazorWire.dll
+    matched_rule: embedded generated browser assets
+    evidence_kind: generated_first_party
+    source_paths:
+      - Web/ForgeTrust.RazorWire/assets/src/razorwire.ts
+      - Web/ForgeTrust.RazorWire/assets/src/razorwire.islands.ts
+      - Web/ForgeTrust.RazorWire/assets/src/page-navigation.ts
+      - Web/ForgeTrust.RazorWire/assets/src/section-copy.ts
+      - Web/ForgeTrust.RazorWire/assets/scripts/build.mjs
+      - Web/ForgeTrust.RazorWire/assets/scripts/verify-generated.mjs
+      - Web/ForgeTrust.RazorWire/test/generated-assets.test.mjs
+    generated_paths:
+      - Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js
+      - Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.islands.js
+      - Web/ForgeTrust.RazorWire/wwwroot/razorwire/page-navigation.js
+      - Web/ForgeTrust.RazorWire/wwwroot/razorwire/section-copy.js
+    reason: RazorWire embeds generated browser runtime assets built from first-party TypeScript sources. Pack runs RWPACK001 generated asset verification before nuspec generation.
+    reviewed_on: 2026-06-07
+    source: Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj VerifyRazorWireGeneratedAssetsForPack
+    revalidate_when: RazorWire assets/src, assets/scripts, wwwroot/razorwire, or VerifyRazorWireGeneratedAssetsForPack changes.

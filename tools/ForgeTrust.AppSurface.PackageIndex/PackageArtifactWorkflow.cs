@@ -13,6 +13,7 @@ internal sealed class PackageArtifactWorkflow
     private readonly ICommandRunner _commandRunner;
     private readonly PackageArtifactValidator _validator;
     private readonly ICoverageCliConsumerProofWorkflow _coverageProofWorkflow;
+    private readonly PackagePayloadInventoryLoader _payloadInventoryLoader;
     private readonly PackageArtifactManifestWriter _artifactManifestWriter;
 
     /// <summary>
@@ -35,6 +36,7 @@ internal sealed class PackageArtifactWorkflow
         _commandRunner = commandRunner;
         _validator = validator;
         _coverageProofWorkflow = coverageProofWorkflow;
+        _payloadInventoryLoader = new PackagePayloadInventoryLoader();
         _artifactManifestWriter = new PackageArtifactManifestWriter();
     }
 
@@ -54,6 +56,9 @@ internal sealed class PackageArtifactWorkflow
         var plan = await _planResolver.ResolveAsync(
             request.RepositoryRoot,
             request.ManifestPath,
+            cancellationToken);
+        var payloadInventory = await _payloadInventoryLoader.LoadAsync(
+            request.RepositoryRoot,
             cancellationToken);
 
         Directory.CreateDirectory(request.ArtifactsOutputPath);
@@ -121,7 +126,12 @@ internal sealed class PackageArtifactWorkflow
                 cancellationToken);
         }
 
-        var report = _validator.Validate(plan, request.ArtifactsOutputPath, request.PackageVersion);
+        var report = _validator.Validate(
+            plan,
+            request.ArtifactsOutputPath,
+            request.PackageVersion,
+            request.RepositoryRoot,
+            payloadInventory);
         var coverageProofReport = await _coverageProofWorkflow.RunAsync(
             new CoverageCliConsumerProofRequest(
                 request.RepositoryRoot,
@@ -131,13 +141,13 @@ internal sealed class PackageArtifactWorkflow
                 request.Source),
             report,
             cancellationToken);
-        Directory.CreateDirectory(Path.GetDirectoryName(request.CoverageProofReportPath)!);
+        CreateParentDirectoryIfPresent(request.CoverageProofReportPath);
         await File.WriteAllTextAsync(
             request.CoverageProofReportPath,
             CoverageCliConsumerProofReportRenderer.RenderMarkdown(coverageProofReport),
             cancellationToken);
 
-        Directory.CreateDirectory(Path.GetDirectoryName(request.ReportPath)!);
+        CreateParentDirectoryIfPresent(request.ReportPath);
         await File.WriteAllTextAsync(
             request.ReportPath,
             PackageArtifactReportRenderer.RenderMarkdown(report, coverageProofReport),
@@ -251,6 +261,15 @@ internal sealed class PackageArtifactWorkflow
         if (File.Exists(artifactManifestPath))
         {
             File.Delete(artifactManifestPath);
+        }
+    }
+
+    private static void CreateParentDirectoryIfPresent(string path)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
         }
     }
 }

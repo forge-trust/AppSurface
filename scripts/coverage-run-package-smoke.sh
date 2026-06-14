@@ -11,7 +11,7 @@ if [[ -z "${WORK_DIR:-}" ]]; then
   AUTO_WORK_DIR=1
 fi
 
-PACKAGE_ARTIFACTS="${PACKAGE_ARTIFACTS:-$WORK_DIR/package-artifacts}"
+PACKAGE_ARTIFACTS="${PACKAGE_ARTIFACTS:-$(mktemp -d "${TMPDIR:-/tmp}/appsurface-package-artifacts.XXXXXX")}"
 COVERAGE_PROOF_WORK_DIR="${COVERAGE_PROOF_WORK_DIR:-$WORK_DIR/coverage-cli-consumer-proof}"
 COVERAGE_PROOF_REPORT="${COVERAGE_PROOF_REPORT:-$PACKAGE_ARTIFACTS/coverage-cli-consumer-proof.md}"
 PACKAGE_VALIDATION_REPORT="${PACKAGE_VALIDATION_REPORT:-$PACKAGE_ARTIFACTS/package-validation-report.md}"
@@ -32,6 +32,7 @@ echo "Authoritative package coverage proof workspace: $WORK_DIR"
 
 dotnet run --project "$PACKAGE_INDEX_PROJECT" -- \
   verify-packages \
+  --repo-root "$ROOT_DIR" \
   --package-version "$PACKAGE_VERSION" \
   --artifacts-output "$PACKAGE_ARTIFACTS" \
   --artifact-manifest "$PACKAGE_ARTIFACT_MANIFEST" \

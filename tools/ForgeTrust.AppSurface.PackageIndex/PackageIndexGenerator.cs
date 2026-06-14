@@ -28,6 +28,7 @@ internal sealed class PackageIndexGenerator
     private const string WebExamplePath = "examples/web-app/README.md";
     private const string WebPackageQuickstartPath = "start-here/first-success-path.md";
     private const string WebPackageQuickstartFragment = "package-first-path";
+    private const string ProductReadinessLabPath = "examples/product-readiness-lab/README.md";
     private const string RepositoryIssuePrefix = "https://github.com/forge-trust/AppSurface/issues/";
     private const string RepositoryPullPrefix = "https://github.com/forge-trust/AppSurface/pull/";
     private static readonly string[] ProductFamilyValues =
@@ -634,6 +635,13 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine($"Not included: {webEntry.Manifest.DoesNotInclude}");
         builder.AppendLine();
         builder.AppendLine($"Read next: {FormatMarkdownLink("Package-first quickstart", GetRelativeDocPath(request, WebPackageQuickstartPath) + "#" + WebPackageQuickstartFragment)}");
+
+        if (RepositoryFileExists(repositoryRoot, ProductReadinessLabPath))
+        {
+            builder.AppendLine();
+            builder.AppendLine($"Composed local proof: {FormatMarkdownLink("Product readiness lab", GetRelativeDocPath(request, ProductReadinessLabPath))} shows how the web, auth, flow, DurableTask-facing, Aspire, and Postgres product-state pieces fit together without claiming production hosting or Durable Task storage ownership. Its paired AppHost `verify` profile starts local Postgres and fails if the Postgres product-state row does not become `proven-locally`.");
+        }
+
         builder.AppendLine();
         builder.AppendLine("Release and readiness:");
         builder.AppendLine($"- {FormatMarkdownLink("Release hub", GetRelativeDocPath(request, ReleaseHubPath))} keeps the public release story, adoption risk, and policy links in one place.");
@@ -781,6 +789,20 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, Tailwind runtime payloads, or the packaged coverage CLI. This pre-publish workflow installs the packed `ForgeTrust.AppSurface.Cli` tool from local artifacts, runs `coverage run`, `coverage merge`, a passing `coverage gate`, and an intentionally failing `coverage gate`, then writes `coverage-cli-consumer-proof.md` and blocks the publish manifest when the consumer proof fails.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.");
         builder.AppendLine("- Keep `packages/README.md.yml` hand-authored so AppSurface Docs metadata, trust-bar copy, and section placement stay intentional.");
+        builder.AppendLine();
+        builder.AppendLine("### Redistributed payloads");
+        builder.AppendLine();
+        builder.AppendLine("Use `packages/third-party-payloads.yml` when a package carries copied third-party payloads, native runtime binaries, minified browser runtimes, bundled tool payloads, or generated-first-party assets that need provenance evidence. Do not add normal NuGet dependencies to this inventory unless their files are copied into the package payload.");
+        builder.AppendLine();
+        builder.AppendLine("When adding a redistributed payload:");
+        builder.AppendLine();
+        builder.AppendLine("1. Add or update the package-local `THIRD-PARTY-NOTICES.md` file and pack it at package root with `<None Include=\"$(MSBuildProjectDirectory)\\THIRD-PARTY-NOTICES.md\" Pack=\"true\" PackagePath=\"\" />`. The notice must ship the applicable license/NOTICE text itself, or it must name upstream `LICENSE`/`NOTICE` files that are packed beside the redistributed payload; component metadata and marker strings alone are not sufficient redistributed-payload evidence.");
+        builder.AppendLine("2. Add a `notices` record in `packages/third-party-payloads.yml` with `package_id`, `component`, `version`, `license`, `source_url`, `payload_patterns`, `notice_paths`, and `markers`.");
+        builder.AppendLine("3. Add `version_source_path` and `version_source_contains` when the repo has a deterministic source of truth such as `Directory.Packages.props`, `Web/package.json`, or `Tailwind.Common.props`.");
+        builder.AppendLine("4. Use an `audits` record only for narrow generated-first-party evidence or provenance-backed dependency closures that are not notice records. Include `applies_to`, `matched_rule`, `evidence_kind`, `source_paths`, `reviewed_on`, `source`, and `revalidate_when`; add `generated_paths` whenever `evidence_kind` is `generated_first_party` so the waiver self-invalidates when source or generated outputs move. Audit `applies_to` patterns must not overlap notice-covered payload entries; the gate fails broad audits that could mask notice-required payloads.");
+        builder.AppendLine("5. Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` and fix any `ASPKG###` diagnostics. Payload diagnostics use Problem/Cause/Fix/Docs wording and link back to this section, and the package report shows covered/total suspicious payload counts beside the detailed payload evidence rows.");
+        builder.AppendLine();
+        builder.AppendLine("Examples already covered by the inventory: `ForgeTrust.AppSurface.Cli` bundles ReportGenerator under `tools/**/reportgenerator/**` and audits its SDK-produced .NET tool dependency closure; Tailwind runtime packages carry native Tailwind binaries under `runtimes/*/native/**`; `ForgeTrust.AppSurface.Web.Tailwind` notices its build-task CliWrap payload; `ForgeTrust.AppSurface.Docs` embeds the generated MiniSearch runtime and carries `THIRD-PARTY-NOTICES.md`; `ForgeTrust.RazorWire` uses `generated_first_party` audit evidence for browser assets generated from first-party TypeScript.");
 
         return NormalizeMarkdownNewlines(builder.ToString()).TrimEnd('\n') + "\n";
     }

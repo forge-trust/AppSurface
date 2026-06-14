@@ -9,7 +9,9 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.AppHost" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
     <ProjectReference Include="../../Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" IsAspireProjectResource="false" />
-    <ProjectReference Include="../web-app/WebAppExample.csproj" AspireProjectMetadataTypeName="WebAppExample" />
+    <ProjectReference Include="../product-readiness-lab/ProductReadinessLab.csproj" AspireProjectMetadataTypeName="ProductReadinessLab" />
+    <ProjectReference Include="../product-readiness-lab-verifier/ProductReadinessLabVerifier.csproj" AspireProjectMetadataTypeName="ProductReadinessLabVerifier" />
   </ItemGroup>
 </Project>

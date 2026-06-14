@@ -89,14 +89,12 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
                 selectedArtifact);
         }
 
-        var toolPath = Path.Join(request.WorkDirectory, "tools");
         var fixtureDirectory = Path.Join(request.WorkDirectory, "consumer");
         var logsDirectory = Path.Join(request.WorkDirectory, "logs");
         var toolNuGetConfigPath = Path.Join(request.WorkDirectory, "NuGet.tool.config");
         var fixtureNuGetConfigPath = Path.Join(fixtureDirectory, "NuGet.config");
         var sharedPackagesPath = Path.Join(request.WorkDirectory, "packages");
         var dotnetHomePath = Path.Join(request.WorkDirectory, "dotnet-home");
-        Directory.CreateDirectory(toolPath);
         Directory.CreateDirectory(fixtureDirectory);
         Directory.CreateDirectory(logsDirectory);
         Directory.CreateDirectory(sharedPackagesPath);
@@ -114,7 +112,6 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var context = new CoverageCliConsumerProofContext(
             request,
             selectedArtifact,
-            toolPath,
             fixtureDirectory,
             logsDirectory,
             toolNuGetConfigPath,
@@ -166,15 +163,23 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
 
         if (!await RunRequiredAsync(DotNetCommand(
             context,
-            ["tool", "install", CliPackageId, "--version", request.PackageVersion, "--tool-path", toolPath, "--configfile", toolNuGetConfigPath],
+            ["new", "tool-manifest"],
+            "dotnet new tool-manifest",
+            "creating local tool manifest")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!await RunRequiredAsync(DotNetCommand(
+            context,
+            ["tool", "install", CliPackageId, "--version", request.PackageVersion, "--configfile", toolNuGetConfigPath],
             "dotnet tool install",
             $"installing '{CliPackageId}'")))
         {
             return BuildReport(context, commands, artifacts);
         }
 
-        var appsurfacePath = PackageSmokeInstallWorkflow.ResolveToolShimPath(toolPath, CliCommandName);
-        if (!await RunRequiredAsync(ToolCommand(context, appsurfacePath, ["--version"], "appsurface --version", "checking installed CLI version")))
+        if (!await RunRequiredAsync(ToolCommand(context, ["--version"], "appsurface --version", "checking installed CLI version")))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -193,7 +198,6 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var coverageMergedDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-merged");
         if (!await RunRequiredAsync(ToolCommand(
             context,
-            appsurfacePath,
             ["coverage", "run", "--solution", solutionPath, "--include", "[Smoke]*", "--output", coverageMergedDirectory],
             "appsurface coverage run",
             "running packaged coverage CLI")))
@@ -212,7 +216,6 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var coverageFanInDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-fan-in");
         if (!await RunRequiredAsync(ToolCommand(
             context,
-            appsurfacePath,
             ["coverage", "merge", "--source", coverageShardsDirectory, "--output", coverageFanInDirectory],
             "appsurface coverage merge",
             "merging packaged coverage shards")))
@@ -230,7 +233,6 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var passingGateDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-gate-pass");
         if (!await RunRequiredAsync(ToolCommand(
             context,
-            appsurfacePath,
             ["coverage", "gate", "--coverage", mergedCoveragePath, "--output", passingGateDirectory, "--min-line", "1", "--min-branch", "0", "--no-github-summary"],
             "appsurface coverage gate",
             "running passing packaged coverage gate")))
@@ -248,7 +250,6 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var failingGateResult = await RunCommandAsync(
             ToolCommand(
                 context,
-                appsurfacePath,
                 ["coverage", "gate", "--coverage", mergedCoveragePath, "--output", failingGateDirectory, "--min-line", "100", "--min-branch", "100", "--no-github-summary"],
                 "appsurface coverage gate",
                 "running intentionally failing packaged coverage gate"),
@@ -275,6 +276,20 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         return BuildReport(context, commands, artifacts);
     }
 
+    /// <summary>
+    /// Selects the validated <c>ForgeTrust.AppSurface.Cli</c> tool package that the consumer proof installs.
+    /// </summary>
+    /// <param name="report">Package artifact validation report produced from the just-packed local artifacts.</param>
+    /// <param name="packageVersion">Exact package version that must be represented by the selected <c>.nupkg</c>.</param>
+    /// <returns>Selected CLI package metadata plus a SHA-512 hash for diagnostics.</returns>
+    /// <exception cref="PackageIndexException">
+    /// Thrown when the validated report is missing the CLI package, contains more than one CLI row, marks it as a
+    /// non-tool package, uses the wrong command name, points at a missing artifact, or points at a different version.
+    /// </exception>
+    /// <remarks>
+    /// The proof intentionally selects from the validation report instead of globbing the artifact directory so package
+    /// publication cannot silently test an unvalidated file.
+    /// </remarks>
     internal static CoverageCliConsumerProofSelectedArtifact SelectCliToolPackage(
         PackageArtifactValidationReport report,
         string packageVersion)
@@ -327,6 +342,18 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             ComputeSha512(entry.ArtifactPath));
     }
 
+    /// <summary>
+    /// Renders the NuGet config used for local tool installation.
+    /// </summary>
+    /// <param name="localSource">Directory containing locally packed AppSurface and RazorWire package artifacts.</param>
+    /// <param name="nugetOrgSource">NuGet source used for third-party dependency resolution.</param>
+    /// <returns>NuGet configuration XML with package-source mapping.</returns>
+    /// <remarks>
+    /// AppSurface and RazorWire package ids are mapped to the local artifact source with more-specific package patterns;
+    /// the <c>*</c> mapping on the public source remains available for third-party dependencies such as xUnit and
+    /// Coverlet. Keep this config separate from the fixture config so the consumer fixture itself does not restore
+    /// first-party packages from local artifacts accidentally.
+    /// </remarks>
     internal static string RenderMappedNuGetConfig(string localSource, string nugetOrgSource)
     {
         var escapedLocalSource = SecurityElement.Escape(Path.GetFullPath(localSource)) ?? localSource;
@@ -355,6 +382,15 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             """;
     }
 
+    /// <summary>
+    /// Renders the NuGet config used by the generated consumer fixture for test-only dependencies.
+    /// </summary>
+    /// <param name="nugetOrgSource">NuGet source used by <c>dotnet new xunit</c> and <c>dotnet add package coverlet.msbuild</c>.</param>
+    /// <returns>NuGet configuration XML containing only the supplied third-party source.</returns>
+    /// <remarks>
+    /// This config deliberately excludes the local package artifact directory so the fixture exercises the packed CLI
+    /// only through the local tool manifest installation path.
+    /// </remarks>
     internal static string RenderNuGetOrgOnlyConfig(string nugetOrgSource)
     {
         var escapedNuGetOrgSource = SecurityElement.Escape(nugetOrgSource) ?? nugetOrgSource;
@@ -370,6 +406,20 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             """;
     }
 
+    /// <summary>
+    /// Deletes and recreates the isolated coverage proof workspace after rejecting unsafe deletion targets.
+    /// </summary>
+    /// <param name="workDirectory">Workspace that may be recursively deleted and recreated.</param>
+    /// <param name="repositoryRoot">Repository root that must not be deleted or contained by the work directory.</param>
+    /// <param name="artifactsDirectory">Package artifact directory that must not be deleted or contained by the work directory.</param>
+    /// <exception cref="PackageIndexException">
+    /// Thrown when <paramref name="workDirectory" /> is a filesystem root, the repository root, the artifact directory,
+    /// the user's home directory, or a parent of the repository or artifact directory.
+    /// </exception>
+    /// <remarks>
+    /// All compared paths are normalized and trailing directory separators are trimmed before comparison. This prevents
+    /// bypasses such as passing the repository root with a trailing slash before the recursive delete runs.
+    /// </remarks>
     internal static void PrepareWorkDirectory(string workDirectory, string repositoryRoot, string artifactsDirectory)
     {
         var normalizedWorkDirectory = NormalizeDirectoryForSafetyComparison(workDirectory);
@@ -508,14 +558,13 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
 
     private static ExternalCommandRequest ToolCommand(
         CoverageCliConsumerProofContext context,
-        string appsurfacePath,
         IReadOnlyList<string> arguments,
         string operationName,
         string timeoutDescription)
     {
         return new ExternalCommandRequest(
-            appsurfacePath,
-            arguments,
+            "dotnet",
+            ["tool", "run", CliCommandName, .. arguments],
             context.FixtureDirectory,
             operationName,
             timeoutDescription,
@@ -695,7 +744,9 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
                 "--artifacts-output",
                 QuoteShellArgument(request.ArtifactsDirectory),
                 "--coverage-proof-work-dir",
-                QuoteShellArgument(request.WorkDirectory)
+                QuoteShellArgument(request.WorkDirectory),
+                "--source",
+                QuoteShellArgument(request.Source)
             ]);
     }
 
@@ -873,10 +924,20 @@ internal sealed record CoverageCliConsumerProofCommandResult(
 /// <param name="Exists">Whether the artifact exists.</param>
 internal sealed record CoverageCliConsumerProofArtifactCheck(string Description, string Path, bool Exists);
 
+/// <summary>
+/// Runtime paths shared across the packaged coverage CLI consumer proof.
+/// </summary>
+/// <param name="Request">Original proof request and caller-supplied paths.</param>
+/// <param name="SelectedArtifact">Validated CLI package artifact selected for local tool installation.</param>
+/// <param name="FixtureDirectory">Clean consumer repository where solution, test projects, and local tool manifest are created.</param>
+/// <param name="LogsDirectory">Directory for per-command stdout and stderr logs.</param>
+/// <param name="ToolNuGetConfigPath">NuGet configuration used only for installing the AppSurface local tool package.</param>
+/// <param name="FixtureNuGetConfigPath">NuGet configuration used by the consumer fixture for third-party test dependencies.</param>
+/// <param name="SharedPackagesPath">Isolated global packages cache for all proof commands.</param>
+/// <param name="DotNetHomePath">Isolated .NET CLI home used to avoid host-machine state.</param>
 internal sealed record CoverageCliConsumerProofContext(
     CoverageCliConsumerProofRequest Request,
     CoverageCliConsumerProofSelectedArtifact SelectedArtifact,
-    string ToolPath,
     string FixtureDirectory,
     string LogsDirectory,
     string ToolNuGetConfigPath,

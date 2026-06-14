@@ -736,6 +736,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     public async Task GenerateAsync_RendersChooserSectionsAndInstallCommands()
     {
         await WriteCommonChooserFilesAsync(includeUnreleased: true);
+        await WriteFileAsync("examples/product-readiness-lab/README.md", "# Product readiness lab");
 
         var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
@@ -770,6 +771,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.EndsWith("\n", markdown, StringComparison.Ordinal);
         Assert.Contains("### Support and runtime packages", markdown, StringComparison.Ordinal);
         Assert.Contains("### Docs and proof hosts", markdown, StringComparison.Ordinal);
+        Assert.Contains("[Product readiness lab](../examples/product-readiness-lab/README.md)", markdown, StringComparison.Ordinal);
+        Assert.Contains("Its paired AppHost `verify` profile starts local Postgres", markdown, StringComparison.Ordinal);
         Assert.Contains("dotnet tool install --global ForgeTrust.RazorWire.Cli --prerelease", markdown, StringComparison.Ordinal);
     }
 

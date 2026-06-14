@@ -33,6 +33,7 @@
   <ItemGroup>
     <None Include="build\ForgeTrust.AppSurface.Web.Tailwind.targets" Pack="true" PackagePath="build" />
     <None Include="tailwind.version" Pack="true" PackagePath="build" />
+    <None Include="$(MSBuildProjectDirectory)\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="" />
   </ItemGroup>
 
   <Target Name="AddTailwindBuildTaskFilesToPackage">

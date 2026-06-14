@@ -49,9 +49,9 @@ internal static class Program
                                 Required prerelease package version for verify-packages.
           --report <path>       Package artifact report path. Defaults to artifacts/package-validation-report.md.
           --coverage-proof-work-dir <path>
-                                Isolated packaged coverage CLI proof work directory. Defaults to artifacts/packages/coverage-cli-consumer-proof.
+                                Isolated packaged coverage CLI proof work directory. Defaults to <artifacts-output>/coverage-cli-consumer-proof.
           --coverage-proof-report <path>
-                                Packaged coverage CLI proof report path. Defaults to artifacts/packages/coverage-cli-consumer-proof.md.
+                                Packaged coverage CLI proof report path. Defaults to <artifacts-output>/coverage-cli-consumer-proof.md.
           --publish-log <path>  Publish ledger path. Defaults to artifacts/package-publish-log.md.
           --source <url>        NuGet source URL. Defaults to https://api.nuget.org/v3/index.json.
           --api-key-env <name>  Environment variable containing the NuGet API key. Defaults to NUGET_API_KEY.
