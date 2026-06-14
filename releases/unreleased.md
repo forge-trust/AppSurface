@@ -17,6 +17,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - Coverage runs now emit `slow-test-diagnostics.md` and `slow-test-diagnostics.json` next to the merged coverage artifacts. The diagnostics rank project and JUnit test-case timings, preserve best-effort parser warnings without changing coverage exit codes, record metadata completeness, and report diagnostic aggregation overhead in seconds and as a percent of elapsed runner time at diagnostics generation.
 - AppSurface Docs search now hydrates MiniSearch candidates from the normalized docs payload and applies deterministic reader-intent ranking before both sidebar and full-page rendering. Exact title, path, source, alias, keyword, and entry-point matches stay protected; broad task queries prefer reader-facing guides; explicit API/internal filters override broad-task boosts; and contributor/internal docs are demoted unless the query asks for them directly.
 - AppSurface Docs search now preserves multi-word spacing while readers type, so pausing after a separator in either the full-page search workspace or sidebar search no longer joins words together.
+- RazorWire now includes a hybrid-hosting guide for split-origin deployments that serve exported static pages from one origin while Cloud Run or another container host serves RazorWire streams, islands, and lazy anti-forgery forms from a live origin.
 
 ## Migration watch
 

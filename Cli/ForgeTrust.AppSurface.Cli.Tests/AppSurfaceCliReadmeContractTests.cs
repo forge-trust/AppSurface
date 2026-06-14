@@ -22,6 +22,20 @@ public sealed class AppSurfaceCliReadmeContractTests
     }
 
     [Fact]
+    public void Readme_Should_CrossReference_HybridHostingGuide()
+    {
+        var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
+
+        Assert.Contains("../../Web/ForgeTrust.RazorWire/Docs/hybrid-hosting.md", readme, StringComparison.Ordinal);
+        Assert.Contains("Cloud Run live-origin recipe", readme, StringComparison.Ordinal);
+        Assert.Contains("first-interaction cold-start tradeoff", readme, StringComparison.Ordinal);
+        Assert.Contains("appsurface docs export \\", readme, StringComparison.Ordinal);
+        Assert.Contains("--public-origin https://docs.example.com", readme, StringComparison.Ordinal);
+        Assert.Contains("--live-origin https://api.example.com", readme, StringComparison.Ordinal);
+        Assert.Contains("lazy anti-forgery refresh", readme, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Readme_Should_Document_CoverageRun_PublicConsumerPath()
     {
         var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
