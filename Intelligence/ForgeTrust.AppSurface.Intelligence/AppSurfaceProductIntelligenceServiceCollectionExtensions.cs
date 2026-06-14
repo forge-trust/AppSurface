@@ -16,11 +16,11 @@ public static class AppSurfaceProductIntelligenceServiceCollectionExtensions
     /// This extension registers the default dispatcher with <c>TryAddScoped</c>,
     /// so repeated calls do not replace an existing <see cref="IAppSurfaceProductIntelligence" /> registration. Repeated
     /// calls can still accumulate options configuration delegates, so callers should avoid duplicate configure actions.
-    /// Call <see cref="AppSurfaceProductIntelligenceOptions.EnableExperimentalEvents" /> only when experimental dogfood
+    /// Call <see cref="AppSurfaceProductIntelligenceOptions.EnableExperimentalEvents()" /> only when experimental dogfood
     /// events should be emitted to host-owned sinks.
     /// </remarks>
     /// <param name="services">Service collection to configure.</param>
-    /// <param name="configure">Optional options callback. Call <see cref="AppSurfaceProductIntelligenceOptions.EnableExperimentalEvents"/> to emit dogfood events.</param>
+    /// <param name="configure">Optional options callback. Call <see cref="AppSurfaceProductIntelligenceOptions.EnableExperimentalEvents()"/> to emit dogfood events.</param>
     /// <returns>The original service collection.</returns>
     public static IServiceCollection AddAppSurfaceProductIntelligence(
         this IServiceCollection services,

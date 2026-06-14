@@ -277,6 +277,23 @@ redirect_aliases:
 
 `redirect_aliases` values are docs-root-relative routes, not Netlify `_redirects` syntax. Leave out query strings, fragments, host names, splats, placeholders, and status codes. Static export uses HTML alias files by default for generic hosts; use `appsurface docs export --mode cdn --redirects netlify` when publishing to Netlify-compatible CDN hosts. For Netlify export, avoid defining two aliases that differ only by percent encoding unless they point to the same canonical page.
 
+### Fix a poorly ranked page
+
+When a page exists but ranks below a less useful result, start with the authored content and metadata before changing search code:
+
+1. Open `{DocsRootPath}/search?q=your%20query` and note the current top five results. `{DocsRootPath}` defaults to `/docs` when the host has not customized the docs root.
+2. Inspect `{DocsRootPath}/search-index.json` for the intended page. Check `title`, `summary`, `headings`, `aliases`, `keywords`, `pageType`, `navGroup`, `audience`, `sourcePath`, and namespace `entryPoints`.
+3. Choose the smallest truthful fix:
+   - edit `title` or `summary` when the page itself does not describe the reader's intent clearly
+   - add `aliases` for page-specific terms readers already use
+   - add `keywords` for compact search terms that belong to that page but would read awkwardly in prose
+   - set `page_type` and `nav_group` so task pages, API pages, troubleshooting pages, and internal pages are classified honestly
+   - add namespace `entry_points` when a generated API namespace needs human entry terms such as registration methods or options types
+4. Refresh the source-backed harvest or restart the local host, then verify `{DocsRootPath}/search?q=...` and `{DocsRootPath}/search-index.json` again.
+5. Promote important or repeated queries into the search relevance fixture suite so the fix survives future ranking changes.
+
+Do not use metadata as a bag of unrelated synonyms. Page-specific aliases and keywords belong on the page or sidecar that owns them. Cross-page language bridges belong in reviewed relevance fixtures or a deliberately shared synonym layer. Use `aliases` for search terms; use `redirect_aliases` only for browser URLs that should redirect.
+
 For namespace API pages, keep the intro as normal Markdown and put the namespace target plus entry-point metadata in the sidecar:
 
 ```yaml
@@ -377,6 +394,8 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Feature the first consumer paths through `featured_page_groups`.
 - Configure `AppSurfaceDocs:Localization` and `translation_key` metadata before adding translated files at scale.
 - Verify `/docs`, `/docs/search`, and `/docs/search-index.json`. The search page is server-rendered and should still expose starter query URLs plus browse links before the client index loads; a blocked or missing index must degrade to those links, not to a blank page.
+- If you need search-quality analytics, configure `AppSurfaceDocs:Metrics` explicitly. Static exports should set `Metrics:BrowserCollector:EndpointUrl` to a reviewed HTTPS collector. Hosted docs can enable `Metrics:HostedCollection` and leave the endpoint blank so the layout uses `{DocsRootPath}/_metrics/collect`.
+- Keep `Metrics:HostedReview:Exposure=DevelopmentOnly` unless a trusted operator surface protects `{DocsRootPath}/_search-quality`; the hosted review is bounded, process-local diagnostics rather than durable analytics.
 - For custom docs roots, path bases, or static exports, inspect the generated `search.html` and confirm its search index URL plus fallback anchors point at the mounted root.
 - For published release trees, inspect `search-index.json` before publishing. Stored `documents[].path` values should stay canonical and deployment-independent, such as `/docs/guide.html`; do not include request path bases, custom route roots, origins, executable schemes, traversal, or docs operational routes. AppSurface Docs rewrites valid canonical paths to the mounted root while serving the archive.
 - For static exports with redirect aliases, use the default HTML strategy for GitHub Pages and generic static hosts, or `--mode cdn --redirects netlify` for Netlify-compatible providers. Do not hand-author `_redirects` in the export output.
@@ -386,6 +405,15 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Treat the trusted release root as an operator-owned immutable static export store. Symlinks, junctions, reparse points, hidden path segments, rooted catalog paths, and `../` escapes are unavailable and are never mounted.
 - For package maintainers changing built-in Docs browser assets, run `pnpm --dir Web run assets:build` and `pnpm --dir Web run assets:verify` before building or exporting docs. AppSurface Docs embeds `wwwroot/docs/search-client.js` and `wwwroot/docs/minisearch.min.js`, so stale generated assets can otherwise ship inside the package assembly.
 - Run the standalone host or export pipeline in CI before publishing a public docs surface.
+
+### Search relevance refresh paths
+
+| Surface | What changes relevance | Refresh and verify |
+| --- | --- | --- |
+| Live source-backed docs | Markdown body, sidecar/front matter metadata, generated API metadata, or the package search runtime | Refresh/restart harvest, then inspect `{DocsRootPath}/search`, `{DocsRootPath}/search?q=...`, and `{DocsRootPath}/search-index.json`. |
+| Package consumers | Updates to the bundled ranking runtime in `search-client.js` or MiniSearch assets | Consume a package containing rebuilt assets; verify the package's docs surface and asset version query strings. |
+| Static exports | Exported HTML, `search.html`, `search-index.json`, and bundled search assets | Regenerate the export, then inspect `search.html`, root `search-index.json`, and representative query URLs before publishing. |
+| Exact version archives | The archive's frozen `search-client.js` and root `search-index.json` | Existing exact archives keep their own search behavior; new relevance behavior appears only in newly exported or intentionally republished trees. |
 
 ## Search fallback checks
 
@@ -398,6 +426,17 @@ When validating a host or release artifact:
 - Confirm the failure panel does not contain replacement navigation links. The durable fallback links live in the server-rendered browse section so they stay available before and after client initialization.
 - For custom docs roots or path bases, confirm the search config, starter query URLs, and browse fallback anchors all include the mounted root.
 - For static exports or published release trees, inspect `search.html` and confirm `search-index.json`, starter query URLs, and fallback anchors are rewritten to the exact release root, including any path base. Keep the stored `search-index.json` document paths canonical (`/docs/...`) so the same archive can be safely mounted under a custom root or virtual directory later.
+
+## Search quality metrics checks
+
+Metrics are opt-in and docs-specific. Disabled hosts should render no collector endpoint, no feedback controls, and no
+hosted metrics routes. Enabled static exports should send only safe AppSurface Docs product events to the configured
+HTTPS endpoint; the browser collector omits credentials and drops transport failures. Enabled hosted docs should accept
+POST JSON at `{DocsRootPath}/_metrics/collect`, validate through `AppSurfaceProductEventRegistry`, and show recent
+aggregate buckets at `{DocsRootPath}/_search-quality` when review exposure allows it.
+
+Do not use metrics configuration to pass API keys, query strings, or custom headers. Put authentication, retention, and
+CORS policy in the host-owned collector or analytics service, not in the AppSurface Docs static export.
 
 ## Where to go next
 

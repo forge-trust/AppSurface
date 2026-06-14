@@ -30,10 +30,11 @@ public sealed class AppSurfaceProductIntelligenceDispatcher : IAppSurfaceProduct
     /// <remarks>
     /// Invalid events are discarded silently after <see cref="AppSurfaceProductEventRegistry.Validate(AppSurfaceProductEvent)" />.
     /// Experimental contracts are also ignored unless <see cref="AppSurfaceProductIntelligenceOptions.ExperimentalEventsEnabled" />
-    /// is enabled for the current options instance. Registered sinks run sequentially, and non-cancellation sink failures
-    /// are swallowed so product-intelligence capture cannot break request paths. Callers should treat this method as
-    /// best-effort delivery and should not rely on it to surface sink errors or guarantee that a downstream analytics
-    /// provider accepted the event.
+    /// enables the whole experimental surface or <see cref="AppSurfaceProductIntelligenceOptions.IsExperimentalEventEnabled(string)" />
+    /// enables that specific event name through the per-event allowlist. Registered sinks run sequentially, and
+    /// non-cancellation sink failures are swallowed so product-intelligence capture cannot break request paths. Callers
+    /// should treat this method as best-effort delivery and should not rely on it to surface sink errors or guarantee
+    /// that a downstream analytics provider accepted the event.
     /// </remarks>
     public async ValueTask CaptureAsync(AppSurfaceProductEvent productEvent, CancellationToken cancellationToken = default)
     {
@@ -47,7 +48,7 @@ public sealed class AppSurfaceProductIntelligenceDispatcher : IAppSurfaceProduct
         }
 
         if (validation.Contract.Lifecycle == AppSurfaceProductEventLifecycle.Experimental
-            && !_options.Value.ExperimentalEventsEnabled)
+            && !_options.Value.IsExperimentalEventEnabled(validation.Contract.Name))
         {
             return;
         }

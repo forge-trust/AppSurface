@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Services;
@@ -76,6 +77,18 @@ public sealed class AppSurfaceDocsOptions
     /// Gets diagnostics settings for maintainer-facing AppSurface Docs inspection surfaces.
     /// </summary>
     public AppSurfaceDocsDiagnosticsOptions Diagnostics { get; set; } = new();
+
+    /// <summary>
+    /// Gets search-quality metrics settings for AppSurface Docs.
+    /// </summary>
+    /// <remarks>
+    /// Metrics are disabled by default. Enabling this block controls only AppSurface Docs search-quality events and does
+    /// not enable unrelated AppSurface or RazorWire experimental product-intelligence contracts. Use the browser
+    /// collector for static exports and live hosted docs that should forward safe registry-shaped events to a configured
+    /// endpoint. Use hosted collection and hosted review when a running AppSurface Docs server should validate browser
+    /// submissions, forward accepted events to host-owned sinks, and expose a bounded maintainer diagnostics surface.
+    /// </remarks>
+    public AppSurfaceDocsMetricsOptions Metrics { get; set; } = new();
 
     /// <summary>
     /// Gets bundle-mode settings used by future bundle-backed runtime loading.
@@ -616,6 +629,106 @@ public sealed class AppSurfaceDocsDiagnosticsOptions
 }
 
 /// <summary>
+/// Search-quality metrics settings for AppSurface Docs.
+/// </summary>
+/// <remarks>
+/// This options block is intentionally docs-specific. It never captures raw search text, full URLs, reader identity,
+/// cookies, request bodies, or free-form comments. The browser collector forwards only the semantic event name and
+/// low-cardinality string properties already emitted by AppSurface Docs search UI. Hosted collection revalidates those
+/// events through the AppSurface product-event registry before any host sink or in-memory review model sees them.
+/// </remarks>
+public sealed class AppSurfaceDocsMetricsOptions
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether AppSurface Docs metrics features may run.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="false"/>. When disabled, the docs layout emits no browser collector endpoint,
+    /// feedback controls stay hidden, hosted metrics collection returns not found, and hosted review returns not found.
+    /// </remarks>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Gets browser collector settings used by live and static docs pages.
+    /// </summary>
+    public AppSurfaceDocsBrowserMetricsCollectorOptions BrowserCollector { get; set; } = new();
+
+    /// <summary>
+    /// Gets hosted collection settings for the package-owned ingestion endpoint.
+    /// </summary>
+    public AppSurfaceDocsHostedMetricsCollectionOptions HostedCollection { get; set; } = new();
+
+    /// <summary>
+    /// Gets hosted review settings for maintainer-facing search quality diagnostics.
+    /// </summary>
+    public AppSurfaceDocsHostedMetricsReviewOptions HostedReview { get; set; } = new();
+}
+
+/// <summary>
+/// Browser-side docs metrics collector settings.
+/// </summary>
+public sealed class AppSurfaceDocsBrowserMetricsCollectorOptions
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether the browser collector should forward safe docs metrics events.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="false"/>. When enabled, <see cref="AppSurfaceDocsMetricsOptions.Enabled"/> must
+    /// also be enabled. <see cref="EndpointUrl"/> may point at an app-root same-origin path such as
+    /// <c>/docs/_metrics/collect</c> or an HTTPS absolute URL for static CDN deployments.
+    /// </remarks>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the browser collector endpoint.
+    /// </summary>
+    /// <remarks>
+    /// Values may be same-origin app-root paths or HTTPS absolute URLs. Protocol-relative URLs, non-HTTP(S) schemes,
+    /// query strings, fragments, embedded credentials, and secret-like values are rejected during options validation.
+    /// When hosted collection is enabled and this value is blank, the layout uses the package-owned hosted collection
+    /// endpoint for the current docs root.
+    /// </remarks>
+    public string? EndpointUrl { get; set; }
+}
+
+/// <summary>
+/// Hosted docs metrics collection settings.
+/// </summary>
+public sealed class AppSurfaceDocsHostedMetricsCollectionOptions
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether the package-owned metrics collection endpoint is enabled.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="false"/>. The endpoint is a public low-trust browser submission boundary: it accepts
+    /// narrow JSON event DTOs, validates through the product-event registry, updates only bounded in-memory review
+    /// aggregates, forwards to host-owned product-intelligence sinks when configured, and never echoes submitted values.
+    /// </remarks>
+    public bool Enabled { get; set; }
+}
+
+/// <summary>
+/// Hosted search-quality review settings.
+/// </summary>
+public sealed class AppSurfaceDocsHostedMetricsReviewOptions
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether the hosted search-quality diagnostics route is enabled.
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets when AppSurface Docs should expose the hosted search-quality diagnostics route.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see cref="AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly"/>. Production hosts that set this
+    /// to <see cref="AppSurfaceDocsHarvestHealthExposure.Always"/> must protect the route with host-owned access controls
+    /// when the search-quality aggregate is sensitive.
+    /// </remarks>
+    public AppSurfaceDocsHarvestHealthExposure Exposure { get; set; } = AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly;
+}
+
+/// <summary>
 /// Bundle-mode configuration for AppSurface Docs.
 /// </summary>
 public sealed class AppSurfaceDocsBundleOptions
@@ -1050,6 +1163,7 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         var identity = options.Identity;
         var harvest = options.Harvest;
         var diagnostics = options.Diagnostics;
+        var metrics = options.Metrics;
         var bundle = options.Bundle;
         var sidebar = options.Sidebar;
         var contributor = options.Contributor;
@@ -1278,6 +1392,72 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
             }
         }
 
+        if (metrics is null)
+        {
+            failures.Add("AppSurfaceDocs:Metrics must not be null.");
+        }
+        else
+        {
+            if (metrics.BrowserCollector is null)
+            {
+                failures.Add("AppSurfaceDocs:Metrics:BrowserCollector must not be null.");
+            }
+            else
+            {
+                if (metrics.BrowserCollector.Enabled && !metrics.Enabled)
+                {
+                    failures.Add("AppSurfaceDocs:Metrics:BrowserCollector:Enabled requires AppSurfaceDocs:Metrics:Enabled.");
+                }
+
+                var endpointUrl = metrics.BrowserCollector.EndpointUrl;
+                if (!string.IsNullOrWhiteSpace(endpointUrl)
+                    && !TryNormalizeMetricsEndpointUrl(endpointUrl, out _, out var endpointError))
+                {
+                    failures.Add($"AppSurfaceDocs:Metrics:BrowserCollector:EndpointUrl {endpointError}");
+                }
+
+                if (metrics.Enabled
+                    && metrics.BrowserCollector.Enabled
+                    && string.IsNullOrWhiteSpace(endpointUrl)
+                    && metrics.HostedCollection?.Enabled != true)
+                {
+                    failures.Add(
+                        "AppSurfaceDocs:Metrics:BrowserCollector:EndpointUrl is required when browser collection is enabled without hosted collection.");
+                }
+            }
+
+            if (metrics.HostedCollection is null)
+            {
+                failures.Add("AppSurfaceDocs:Metrics:HostedCollection must not be null.");
+            }
+            else if (metrics.HostedCollection.Enabled && !metrics.Enabled)
+            {
+                failures.Add("AppSurfaceDocs:Metrics:HostedCollection:Enabled requires AppSurfaceDocs:Metrics:Enabled.");
+            }
+
+            if (metrics.HostedReview is null)
+            {
+                failures.Add("AppSurfaceDocs:Metrics:HostedReview must not be null.");
+            }
+            else
+            {
+                if (metrics.HostedReview.Enabled && !metrics.Enabled)
+                {
+                    failures.Add("AppSurfaceDocs:Metrics:HostedReview:Enabled requires AppSurfaceDocs:Metrics:Enabled.");
+                }
+
+                if (metrics.HostedReview.Enabled && metrics.HostedCollection?.Enabled != true)
+                {
+                    failures.Add("AppSurfaceDocs:Metrics:HostedReview:Enabled requires AppSurfaceDocs:Metrics:HostedCollection:Enabled.");
+                }
+
+                if (!Enum.IsDefined(metrics.HostedReview.Exposure))
+                {
+                    failures.Add($"Unsupported AppSurface Docs search-quality exposure mode '{metrics.HostedReview.Exposure}'.");
+                }
+            }
+        }
+
         if (sidebar is null)
         {
             failures.Add("AppSurfaceDocs:Sidebar must not be null.");
@@ -1494,6 +1674,86 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
 
         var cacheDuration = TimeSpan.FromMinutes(cacheExpirationMinutes);
         return cacheDuration.Ticks % TimeSpan.TicksPerSecond == 0;
+    }
+
+    internal static string? NormalizeMetricsEndpointUrlOrNull(string? endpointUrl)
+    {
+        return TryNormalizeMetricsEndpointUrl(endpointUrl, out var normalizedEndpointUrl, out _)
+            ? normalizedEndpointUrl
+            : endpointUrl;
+    }
+
+    internal static bool TryNormalizeMetricsEndpointUrl(
+        string? endpointUrl,
+        out string? normalizedEndpointUrl,
+        [NotNullWhen(false)] out string? error)
+    {
+        normalizedEndpointUrl = null;
+        error = null;
+        if (string.IsNullOrWhiteSpace(endpointUrl))
+        {
+            return true;
+        }
+
+        var value = endpointUrl.Trim();
+        if (ContainsForbiddenMetricsEndpointText(value))
+        {
+            error = "must not include secret-like values.";
+            return false;
+        }
+
+        if (value.StartsWith("//", StringComparison.Ordinal)
+            || value.StartsWith("\\", StringComparison.Ordinal)
+            || value.Contains('\\', StringComparison.Ordinal)
+            || value.Any(char.IsControl))
+        {
+            error = "must be a same-origin app-root path or an HTTPS absolute URL.";
+            return false;
+        }
+
+        if (value.StartsWith("/", StringComparison.Ordinal))
+        {
+            if (value.Length == 1 || value.Contains("://", StringComparison.Ordinal) || value.IndexOfAny(['?', '#']) >= 0)
+            {
+                error = "must be an app-root path without query string, fragment, or URL scheme.";
+                return false;
+            }
+
+            normalizedEndpointUrl = value.TrimEnd('/');
+            return true;
+        }
+
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            error = "must be a same-origin app-root path or an HTTPS absolute URL.";
+            return false;
+        }
+
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrEmpty(uri.Host)
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || string.IsNullOrEmpty(uri.AbsolutePath)
+            || string.Equals(uri.AbsolutePath, "/", StringComparison.Ordinal)
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment))
+        {
+            error = "must be an HTTPS absolute URL with a path and without userinfo, query string, or fragment.";
+            return false;
+        }
+
+        normalizedEndpointUrl = uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        return true;
+    }
+
+    private static bool ContainsForbiddenMetricsEndpointText(string value)
+    {
+        return value.Contains("token", StringComparison.OrdinalIgnoreCase)
+               || value.Contains("secret", StringComparison.OrdinalIgnoreCase)
+               || value.Contains("password", StringComparison.OrdinalIgnoreCase)
+               || value.Contains("apikey", StringComparison.OrdinalIgnoreCase)
+               || value.Contains("api-key", StringComparison.OrdinalIgnoreCase)
+               || value.Contains("connectionstring", StringComparison.OrdinalIgnoreCase)
+               || value.Contains("connection_string", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void AddIdentityBrowserPathFailure(

@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -137,6 +139,18 @@ internal sealed partial class CoverageRunCommand : ICommand
     public string[] TestArguments { get; set; } = [];
 
     /// <summary>
+    /// Gets or sets the managed test result artifact format.
+    /// </summary>
+    [CommandOption("test-results", Description = "Managed test result format. Only junit is supported in this release.")]
+    public string? TestResults { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether slow-test diagnostic artifacts should be written.
+    /// </summary>
+    [CommandOption("slow-test-diagnostics", Description = "Write slow-test diagnostics from managed JUnit test results.")]
+    public bool SlowTestDiagnostics { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether existing owned output should not be cleaned before the run.
     /// </summary>
     [CommandOption("no-clean", Description = "Do not clean existing AppSurface-owned output before the run.")]
@@ -199,6 +213,12 @@ internal sealed partial class CoverageRunCommand : ICommand
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
         }
 
+        var testResults = ParseTestResults();
+        if (SlowTestDiagnostics && testResults == CoverageRunTestResultFormat.None)
+        {
+            testResults = CoverageRunTestResultFormat.Junit;
+        }
+
         return new CoverageRunRequest(
             SolutionPath,
             TestProjects,
@@ -215,8 +235,30 @@ internal sealed partial class CoverageRunCommand : ICommand
             ExclusiveTestProjects,
             Loggers,
             TestArguments,
+            testResults,
+            SlowTestDiagnostics,
             !NoClean,
             Verbosity);
+    }
+
+    private CoverageRunTestResultFormat ParseTestResults()
+    {
+        if (string.IsNullOrWhiteSpace(TestResults))
+        {
+            return CoverageRunTestResultFormat.None;
+        }
+
+        if (string.Equals(TestResults, "junit", StringComparison.OrdinalIgnoreCase))
+        {
+            return CoverageRunTestResultFormat.Junit;
+        }
+
+        throw CoverageRunDiagnostics.Create(
+            "ASCOV111",
+            "--test-results supports only junit in this release.",
+            $"Received '{TestResults}'. TRX and TUnit-compatible result parsing are planned in #491.",
+            "Use --test-results junit, omit --test-results, or keep passing custom loggers with --logger.",
+            "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
     }
 }
 
@@ -245,6 +287,8 @@ internal sealed partial class CoverageRunCommand : ICommand
 /// <param name="ExclusiveTestProjects">Explicit project path or file-name matches that should run exclusively.</param>
 /// <param name="Loggers">Logger values forwarded to <c>dotnet test</c> as repeatable <c>--logger:</c> arguments.</param>
 /// <param name="TestArguments">Extra tokens appended to each <c>dotnet test</c> invocation.</param>
+/// <param name="TestResults">Managed test result artifact format.</param>
+/// <param name="SlowTestDiagnostics">Whether slow-test diagnostic artifacts should be written.</param>
 /// <param name="Clean">Whether AppSurface-owned output is cleaned before writing new artifacts.</param>
 /// <param name="Verbosity">Verbosity forwarded to <c>dotnet test</c>.</param>
 internal sealed record CoverageRunRequest(
@@ -263,8 +307,26 @@ internal sealed record CoverageRunRequest(
     IReadOnlyList<string> ExclusiveTestProjects,
     IReadOnlyList<string> Loggers,
     IReadOnlyList<string> TestArguments,
+    CoverageRunTestResultFormat TestResults,
+    bool SlowTestDiagnostics,
     bool Clean,
     string Verbosity);
+
+/// <summary>
+/// Managed test result artifact format for <c>coverage run</c>.
+/// </summary>
+internal enum CoverageRunTestResultFormat
+{
+    /// <summary>
+    /// Do not create AppSurface-managed test result artifacts.
+    /// </summary>
+    None,
+
+    /// <summary>
+    /// Create top-level JUnit XML artifacts with stable AppSurface-owned names.
+    /// </summary>
+    Junit,
+}
 
 /// <summary>
 /// Result of a public coverage run.
@@ -327,6 +389,11 @@ internal sealed class CoverageRunWorkflow
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(console);
 
+        if (request.SlowTestDiagnostics && request.TestResults == CoverageRunTestResultFormat.None)
+        {
+            request = request with { TestResults = CoverageRunTestResultFormat.Junit };
+        }
+
         var currentDirectory = Path.GetFullPath(Directory.GetCurrentDirectory());
         var resolution = await ResolveProjectsAsync(request, currentDirectory, cancellationToken);
         var outputDirectory = ResolveUserPath(request.OutputDirectory, currentDirectory);
@@ -370,6 +437,14 @@ internal sealed class CoverageRunWorkflow
                 projectResults.Select(result => result.LogFile).FirstOrDefault(File.Exists));
         }
 
+        var diagnostics = await RunSlowTestDiagnosticsAsync(
+            request,
+            outputDirectory,
+            projectResults,
+            () => ElapsedSeconds(runStarted),
+            console,
+            cancellationToken);
+
         var mergeStarted = _timeProvider.GetTimestamp();
         var mergeDirectory = Path.Join(outputDirectory, "reportgenerator");
         Directory.CreateDirectory(mergeDirectory);
@@ -392,7 +467,7 @@ internal sealed class CoverageRunWorkflow
             File.Copy(merge.SummaryPath, Path.Join(outputDirectory, "reportgenerator-summary.txt"), overwrite: true);
         }
 
-        await WriteSummaryAsync(outputDirectory, mergedCoveragePath, console, cancellationToken);
+        await WriteSummaryAsync(outputDirectory, mergedCoveragePath, request, diagnostics, console, cancellationToken);
         await WriteTimingsAsync(
             request,
             resolution,
@@ -404,6 +479,7 @@ internal sealed class CoverageRunWorkflow
             merge.ExitCode,
             coverageFiles.Length,
             projectResults,
+            diagnostics,
             cancellationToken);
 
         await console.Output.WriteLineAsync($"Coverage artifacts: {outputDirectory}");
@@ -752,7 +828,8 @@ internal sealed class CoverageRunWorkflow
         await console.Output.WriteLineAsync(
             $"[{index + 1}/{resolution.Projects.Count}] starting {project.RelativePath}{(project.IsExclusive ? " (exclusive)" : string.Empty)}");
 
-        var args = CreateTestArguments(request, project, projectOutputDirectory, skipBuildDuringTests);
+        var testResults = CreateTestResultArtifacts(request, outputDirectory, project, index);
+        var args = CreateTestArguments(request, project, projectOutputDirectory, testResults, skipBuildDuringTests);
         var processResult = await _processRunner.RunAsync("dotnet", args, resolution.SolutionDirectory, cancellationToken, outputFile: logFile);
         var seconds = ElapsedSeconds(started);
 
@@ -763,13 +840,14 @@ internal sealed class CoverageRunWorkflow
             await console.Error.WriteLineAsync($"Test run failed for {project.RelativePath}; log: {logFile}");
         }
 
-        return new CoverageProjectRunResult(index, project, seconds, processResult.ExitCode, logFile);
+        return new CoverageProjectRunResult(index, project, seconds, processResult.ExitCode, logFile, testResults);
     }
 
     private static IReadOnlyList<string> CreateTestArguments(
         CoverageRunRequest request,
         CoverageRunProject project,
         string projectOutputDirectory,
+        IReadOnlyList<CoverageRunTestResultArtifact> testResults,
         bool skipBuildDuringTests)
     {
         var args = new List<string>
@@ -781,6 +859,11 @@ internal sealed class CoverageRunWorkflow
             "-v",
             request.Verbosity,
         };
+        foreach (var artifact in testResults.Where(artifact => artifact.Format == CoverageRunTestResultFormat.Junit))
+        {
+            args.Add($"--logger:junit;LogFilePath={artifact.Path}");
+        }
+
         foreach (var logger in request.Loggers)
         {
             args.Add($"--logger:{logger}");
@@ -811,6 +894,27 @@ internal sealed class CoverageRunWorkflow
 
         args.AddRange(request.TestArguments);
         return args;
+    }
+
+    private static IReadOnlyList<CoverageRunTestResultArtifact> CreateTestResultArtifacts(
+        CoverageRunRequest request,
+        string outputDirectory,
+        CoverageRunProject project,
+        int index)
+    {
+        return request.TestResults switch
+        {
+            CoverageRunTestResultFormat.None => [],
+            CoverageRunTestResultFormat.Junit =>
+            [
+                new CoverageRunTestResultArtifact(
+                    CoverageRunTestResultFormat.Junit,
+                    project.RelativePath,
+                    Path.Join(outputDirectory, $"junit-coverage-{index + 1}-{project.Slug}.xml"),
+                    "pending"),
+            ],
+            _ => throw new UnreachableException(),
+        };
     }
 
     private static async Task ReplayLogsAsync(IReadOnlyList<CoverageProjectRunResult> results, IConsole console, CancellationToken cancellationToken)
@@ -871,6 +975,7 @@ internal sealed class CoverageRunWorkflow
         await console.Output.WriteLineAsync($"  Parallelism: {request.Parallelism.ToString(CultureInfo.InvariantCulture)}");
         await console.Output.WriteLineAsync($"  Include: {request.IncludeFilter ?? "(Coverlet default)"}");
         await console.Output.WriteLineAsync($"  Exclude: {request.ExcludeFilter}");
+        await console.Output.WriteLineAsync($"  Managed test results: {DescribeTestResults(request)}");
         await console.Output.WriteLineAsync($"Discovered {resolution.Projects.Count.ToString(CultureInfo.InvariantCulture)} test project(s).");
 
         foreach (var project in resolution.Projects)
@@ -888,6 +993,8 @@ internal sealed class CoverageRunWorkflow
     private static async Task WriteSummaryAsync(
         string outputDirectory,
         string coveragePath,
+        CoverageRunRequest request,
+        CoverageRunSlowTestDiagnosticsRun? diagnostics,
         IConsole console,
         CancellationToken cancellationToken)
     {
@@ -914,9 +1021,21 @@ internal sealed class CoverageRunWorkflow
             Coverage run summary
             Line coverage: {linePercent:0.00}%
             Branch coverage: {branchPercent:0.00}%
+            Managed test results: {DescribeTestResults(request)}
             Cobertura: {coveragePath}
             Timings: {Path.Join(outputDirectory, "timings.json")}
             """);
+
+        if (diagnostics is not null)
+        {
+            summary += Environment.NewLine + FormattableString.Invariant($"""
+                Slow-test diagnostics: {diagnostics.MarkdownPath}
+                Slow-test diagnostics JSON: {diagnostics.JsonPath}
+                Slow-test diagnostics overhead: {diagnostics.AggregationSeconds}s ({diagnostics.AggregationPercent:0.00}%)
+                Slow-test diagnostics warnings: {diagnostics.WarningCount}
+                Slow-test diagnostics metadata complete: {diagnostics.MetadataComplete}
+                """);
+        }
 
         await File.WriteAllTextAsync(Path.Join(outputDirectory, "summary.txt"), summary, cancellationToken);
         await console.Output.WriteLineAsync(summary);
@@ -943,8 +1062,18 @@ internal sealed class CoverageRunWorkflow
         int mergeExitCode,
         int coverageFileCount,
         IReadOnlyList<CoverageProjectRunResult> projectResults,
+        CoverageRunSlowTestDiagnosticsRun? diagnostics,
         CancellationToken cancellationToken)
     {
+        var testResultArtifacts = projectResults
+            .SelectMany(result => result.TestResults.Select(artifact => artifact with
+            {
+                ParserStatus = ResolveParserStatus(artifact, diagnostics),
+            }))
+            .ToArray();
+        var junitArtifacts = testResultArtifacts
+            .Where(artifact => artifact.Format == CoverageRunTestResultFormat.Junit)
+            .ToArray();
         var payload = new
         {
             solution = resolution.SolutionPath,
@@ -965,7 +1094,37 @@ internal sealed class CoverageRunWorkflow
             {
                 coverageFiles = coverageFileCount,
                 cobertura = coveragePath,
+                junitFiles = junitArtifacts.Count(artifact => File.Exists(artifact.Path)),
+                testResults = testResultArtifacts.Select(artifact => new
+                {
+                    format = artifact.Format.ToString().ToLowerInvariant(),
+                    project = artifact.Project,
+                    path = artifact.Path,
+                    parserStatus = artifact.ParserStatus,
+                }),
+                diagnostics = diagnostics is null
+                    ? null
+                    : new
+                    {
+                        schemaVersion = CoverageRunSlowTestDiagnosticsWriter.SchemaVersion,
+                        markdown = diagnostics.MarkdownPath,
+                        json = diagnostics.JsonPath,
+                    },
             },
+            diagnostics = diagnostics is null
+                ? null
+                : new
+                {
+                    slowTests = new
+                    {
+                        warningCount = diagnostics.WarningCount,
+                        metadataComplete = diagnostics.MetadataComplete,
+                        aggregationSeconds = diagnostics.AggregationSeconds,
+                        aggregationPercent = diagnostics.AggregationPercent,
+                        markdown = diagnostics.MarkdownPath,
+                        json = diagnostics.JsonPath,
+                    },
+                },
             projects = projectResults
                 .OrderBy(result => result.Index)
                 .Select(result => new
@@ -976,11 +1135,93 @@ internal sealed class CoverageRunWorkflow
                     exitCode = result.ExitCode,
                     exclusive = result.Project.IsExclusive,
                     log = result.LogFile,
+                    testResults = result.TestResults.Select(artifact => new
+                    {
+                        format = artifact.Format.ToString().ToLowerInvariant(),
+                        path = artifact.Path,
+                        parserStatus = ResolveParserStatus(artifact, diagnostics),
+                    }),
                 }),
         };
 
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(Path.Join(outputDirectory, "timings.json"), json + Environment.NewLine, cancellationToken);
+    }
+
+    private static string ResolveParserStatus(
+        CoverageRunTestResultArtifact artifact,
+        CoverageRunSlowTestDiagnosticsRun? diagnostics)
+    {
+        if (diagnostics is not null && diagnostics.ParserStatuses.TryGetValue(artifact.Path, out var parserStatus))
+        {
+            return parserStatus;
+        }
+
+        return File.Exists(artifact.Path) ? "available" : "missing";
+    }
+
+    private async Task<CoverageRunSlowTestDiagnosticsRun?> RunSlowTestDiagnosticsAsync(
+        CoverageRunRequest request,
+        string outputDirectory,
+        IReadOnlyList<CoverageProjectRunResult> projectResults,
+        Func<long> getTotalSeconds,
+        IConsole console,
+        CancellationToken cancellationToken)
+    {
+        if (!request.SlowTestDiagnostics)
+        {
+            return null;
+        }
+
+        var diagnosticStarted = _timeProvider.GetTimestamp();
+        try
+        {
+            var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(projectResults, cancellationToken);
+            var diagnostics = await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
+                outputDirectory,
+                report,
+                () => ElapsedSeconds(diagnosticStarted),
+                aggregationSeconds => CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
+                cancellationToken);
+
+            await console.Output.WriteLineAsync(FormattableString.Invariant(
+                $"Slow-test diagnostics: {diagnostics.MarkdownPath} ({diagnostics.AggregationSeconds}s, {diagnostics.AggregationPercent:0.00}% overhead)"));
+            return diagnostics;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or XmlException)
+        {
+            var aggregationSeconds = ElapsedSeconds(diagnosticStarted);
+            var diagnostics = new CoverageRunSlowTestDiagnosticsRun(
+                Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName),
+                Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.JsonFileName),
+                aggregationSeconds,
+                CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
+                WarningCount: 1,
+                MetadataComplete: false,
+                projectResults
+                    .SelectMany(result => result.TestResults)
+                    .ToDictionary(artifact => artifact.Path, _ => "diagnosticsFailed", StringComparer.Ordinal));
+            await console.Error.WriteLineAsync(FormattableString.Invariant(
+                $"Slow-test diagnostics failed after {diagnostics.AggregationSeconds}s ({diagnostics.AggregationPercent:0.00}% overhead): {ex.Message}"));
+            return diagnostics;
+        }
+    }
+
+    private static decimal CalculateAggregationPercent(long aggregationSeconds, long totalSeconds)
+    {
+        return totalSeconds <= 0 ? 0 : aggregationSeconds * 100m / totalSeconds;
+    }
+
+    private static string DescribeTestResults(CoverageRunRequest request)
+    {
+        if (request.TestResults == CoverageRunTestResultFormat.None)
+        {
+            return "none";
+        }
+
+        return request.SlowTestDiagnostics
+            ? "junit (enabled for slow-test diagnostics)"
+            : "junit";
     }
 
     private long ElapsedSeconds(long started)
@@ -1055,12 +1296,27 @@ internal sealed record CoverageSkippedProject(string ProjectPath, string Reason)
 /// <param name="Seconds">Elapsed whole seconds for the project test command.</param>
 /// <param name="ExitCode">Test process exit code.</param>
 /// <param name="LogFile">Per-project log file path.</param>
+/// <param name="TestResults">Managed test result artifacts requested for this project.</param>
 internal sealed record CoverageProjectRunResult(
     int Index,
     CoverageRunProject Project,
     long Seconds,
     int ExitCode,
-    string LogFile);
+    string LogFile,
+    IReadOnlyList<CoverageRunTestResultArtifact> TestResults);
+
+/// <summary>
+/// Managed test result artifact requested by <c>coverage run</c>.
+/// </summary>
+/// <param name="Format">Artifact format.</param>
+/// <param name="Project">Project that owns the artifact.</param>
+/// <param name="Path">Absolute artifact path.</param>
+/// <param name="ParserStatus">Best-effort parser status recorded in timings.</param>
+internal sealed record CoverageRunTestResultArtifact(
+    CoverageRunTestResultFormat Format,
+    string Project,
+    string Path,
+    string ParserStatus);
 
 /// <summary>
 /// Build phase result used to coordinate later <c>dotnet test</c> arguments.
@@ -1081,8 +1337,8 @@ internal sealed record CoverageLogPrefix(string Text, bool Truncated);
 /// </summary>
 /// <remarks>
 /// Implementations must preserve command output for diagnostics and honor cancellation promptly.
-/// Callers depend on <c>outputFile</c> containing the same captured output returned in
-/// <see cref="CoverageRunProcessResult.Output"/> when a path is supplied.
+/// When <c>outputFile</c> is supplied, implementations should stream output to that file during
+/// process execution and may return an empty <see cref="CoverageRunProcessResult.Output"/>.
 /// </remarks>
 internal interface ICoverageRunProcessRunner
 {
@@ -1114,9 +1370,9 @@ internal sealed record CoverageRunProcessResult(int ExitCode, string Output);
 /// Default process runner used by the public coverage command.
 /// </summary>
 /// <remarks>
-/// The runner delegates tokenized argument escaping, output buffering, and cancellation to CliWrap.
-/// It disables non-zero exit-code validation so coverage workflow failures remain ordinary command
-/// results with captured logs instead of process exceptions.
+/// The runner delegates tokenized argument escaping and cancellation to CliWrap. It buffers
+/// short-lived discovery/build commands, streams per-project test logs to disk, and disables
+/// non-zero exit-code validation so coverage workflow failures remain ordinary command results.
 /// </remarks>
 internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunner
 {
@@ -1128,22 +1384,26 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         CancellationToken cancellationToken,
         string? outputFile = null)
     {
-        var command = CliCommand.Wrap(fileName)
-            .WithArguments(arguments)
-            .WithWorkingDirectory(workingDirectory)
-            .WithValidation(CommandResultValidation.None);
-
-        BufferedCommandResult result;
         try
         {
-            result = await command.ExecuteBufferedAsync(cancellationToken);
+            return outputFile is null
+                ? await RunBufferedAsync(fileName, arguments, workingDirectory, cancellationToken)
+                : await RunStreamingAsync(fileName, arguments, workingDirectory, outputFile, cancellationToken);
         }
         catch (OperationCanceledException)
         {
             throw;
         }
-        catch (Exception ex) when (ex is CliWrapException or Win32Exception or InvalidOperationException)
+        catch (Exception ex) when (IsCommandLaunchFailure(ex))
         {
+            if (outputFile is not null)
+            {
+                await TryAppendFailureLogAsync(
+                    outputFile,
+                    $"Failed to start command '{fileName}': {ex.Message}{Environment.NewLine}",
+                    cancellationToken);
+            }
+
             throw CoverageRunDiagnostics.Create(
                 "ASCOV110",
                 "Failed to start dotnet.",
@@ -1151,15 +1411,120 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                 "Verify the .NET SDK is installed and available on PATH.",
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
         }
+    }
 
+    private static async Task<CoverageRunProcessResult> RunBufferedAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        BufferedCommandResult result = await CliCommand.Wrap(fileName)
+            .WithArguments(arguments)
+            .WithWorkingDirectory(workingDirectory)
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
         var output = result.StandardOutput + result.StandardError;
-        if (outputFile is not null)
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(outputFile) ?? workingDirectory);
-            await File.WriteAllTextAsync(outputFile, output, cancellationToken);
-        }
 
         return new CoverageRunProcessResult(result.ExitCode, output);
+    }
+
+    private static async Task<CoverageRunProcessResult> RunStreamingAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        string outputFile,
+        CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(outputFile);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        await using var stream = new FileStream(
+            outputFile,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.Read,
+            bufferSize: 81920,
+            useAsync: true);
+        using var writeGate = new SemaphoreSlim(1, 1);
+
+        var result = await CliCommand.Wrap(fileName)
+            .WithArguments(arguments)
+            .WithWorkingDirectory(workingDirectory)
+            .WithValidation(CommandResultValidation.None)
+            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token)))
+            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token)))
+            .ExecuteAsync(cancellationToken);
+
+        return new CoverageRunProcessResult(result.ExitCode, string.Empty);
+    }
+
+    private static async Task CopyPipeToFileAsync(
+        Stream source,
+        Stream target,
+        SemaphoreSlim writeGate,
+        CancellationToken cancellationToken)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(81920);
+        try
+        {
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+                if (read == 0)
+                {
+                    return;
+                }
+
+                await writeGate.WaitAsync(cancellationToken);
+                try
+                {
+                    await target.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                }
+                finally
+                {
+                    writeGate.Release();
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static bool IsCommandLaunchFailure(Exception exception)
+    {
+        return exception is CliWrapException
+            or Win32Exception
+            or UnauthorizedAccessException
+            or DirectoryNotFoundException
+            or IOException
+            or InvalidOperationException;
+    }
+
+    private static async Task TryAppendFailureLogAsync(
+        string outputFile,
+        string output,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(outputFile);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            await File.AppendAllTextAsync(outputFile, output, cancellationToken);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException)
+        {
+            // The thrown ASCOV110 diagnostic remains the user-visible failure when the log path is also unavailable.
+        }
     }
 }
 
@@ -1374,7 +1739,8 @@ internal static class CoverageRunOutputGuard
         var output = Path.GetFullPath(outputDirectory);
         Directory.CreateDirectory(output);
         var marker = Path.Join(output, MarkerFileName);
-        if (clean && File.Exists(marker))
+        var legacyOwned = !File.Exists(marker) && IsLegacyOwnedOutput(EnumerateOutputEntries(output));
+        if (clean && (File.Exists(marker) || legacyOwned))
         {
             DeleteKnownOutput(output);
         }
@@ -1444,16 +1810,63 @@ internal static class CoverageRunOutputGuard
             var entries = Directory.EnumerateFileSystemEntries(output)
                 .Where(path => !string.Equals(Path.GetFileName(path), MarkerFileName, StringComparison.Ordinal))
                 .ToArray();
-            if (entries.Length > 0 && !File.Exists(marker))
+            if (entries.Length > 0 && !File.Exists(marker) && !IsLegacyOwnedOutput(entries))
             {
                 throw UnsafeOutput("--output already contains files and is not marked as AppSurface-owned.");
             }
         }
     }
 
+    private static string[] EnumerateOutputEntries(string output)
+    {
+        return Directory.Exists(output)
+            ? Directory.EnumerateFileSystemEntries(output)
+                .Where(path => !string.Equals(Path.GetFileName(path), MarkerFileName, StringComparison.Ordinal))
+                .ToArray()
+            : [];
+    }
+
+    private static bool IsLegacyOwnedOutput(IReadOnlyList<string> entries)
+    {
+        return entries.Count > 0 && entries.All(IsKnownOutputEntry);
+    }
+
+    private static bool IsKnownOutputEntry(string path)
+    {
+        var name = Path.GetFileName(path);
+        if (Directory.Exists(path))
+        {
+            return string.Equals(name, "projects", StringComparison.Ordinal)
+                || string.Equals(name, "reportgenerator", StringComparison.Ordinal);
+        }
+
+        return string.Equals(name, "coverage.cobertura.xml", StringComparison.Ordinal)
+            || string.Equals(name, "coverage.json", StringComparison.Ordinal)
+            || string.Equals(name, "coverage-gate.json", StringComparison.Ordinal)
+            || string.Equals(name, "coverage-gate.md", StringComparison.Ordinal)
+            || string.Equals(name, "summary.txt", StringComparison.Ordinal)
+            || string.Equals(name, "timings.json", StringComparison.Ordinal)
+            || string.Equals(name, "reportgenerator-summary.txt", StringComparison.Ordinal)
+            || string.Equals(name, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName, StringComparison.Ordinal)
+            || string.Equals(name, CoverageRunSlowTestDiagnosticsWriter.JsonFileName, StringComparison.Ordinal)
+            || name.StartsWith("junit-", StringComparison.Ordinal) && name.EndsWith(".xml", StringComparison.Ordinal)
+            || name.StartsWith("test-results-", StringComparison.Ordinal) && name.EndsWith(".xml", StringComparison.Ordinal);
+    }
+
     private static void DeleteKnownOutput(string output)
     {
-        foreach (var path in new[] { "coverage.cobertura.xml", "coverage.json", "summary.txt", "timings.json", "reportgenerator-summary.txt" }
+        foreach (var path in new[]
+            {
+                "coverage.cobertura.xml",
+                "coverage.json",
+                "coverage-gate.json",
+                "coverage-gate.md",
+                "summary.txt",
+                "timings.json",
+                "reportgenerator-summary.txt",
+                CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName,
+                CoverageRunSlowTestDiagnosticsWriter.JsonFileName,
+            }
             .Select(file => Path.Join(output, file))
             .Where(File.Exists))
         {
@@ -1463,6 +1876,11 @@ internal static class CoverageRunOutputGuard
         foreach (var junitFile in Directory.EnumerateFiles(output, "junit-*.xml", SearchOption.TopDirectoryOnly))
         {
             File.Delete(junitFile);
+        }
+
+        foreach (var testResultFile in Directory.EnumerateFiles(output, "test-results-*.xml", SearchOption.TopDirectoryOnly))
+        {
+            File.Delete(testResultFile);
         }
 
         foreach (var path in new[] { "projects", "reportgenerator" }

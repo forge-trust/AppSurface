@@ -89,15 +89,20 @@
 .docs-search-option-title-row {
     display: flex;
     align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 0.35rem 0.75rem;
+    min-width: 0;
 }
 
 .docs-search-option-title {
     display: block;
+    flex: 1 1 auto;
     color: var(--docs-search-color-text-default);
     font-size: 0.9rem;
     line-height: 1.35;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .docs-search-option-path {
@@ -105,6 +110,11 @@
     color: var(--docs-search-color-text-faint);
     font-size: 0.74rem;
     margin-top: 0.2rem;
+    overflow-wrap: anywhere;
+}
+
+.docs-search-option-badge {
+    flex-shrink: 0;
 }
 
 .docs-search-option.active,
@@ -825,6 +835,56 @@
 .docs-harvest-return-link a {
     color: var(--docs-search-color-accent);
     font-weight: 700;
+}
+
+.docs-search-page-feedback {
+    margin: 0.85rem 0 0;
+    border: 1px solid var(--docs-search-color-border-default);
+    border-radius: 0.5rem;
+    background: var(--docs-search-color-surface-overlay-soft);
+    padding: 0.85rem;
+}
+
+.docs-search-page-feedback-legend {
+    padding: 0;
+    color: var(--docs-search-color-text-default);
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.docs-search-page-feedback-actions {
+    margin-top: 0.65rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.docs-search-page-feedback-button {
+    min-width: 3.25rem;
+    border: 1px solid var(--docs-search-color-border-accent-muted);
+    border-radius: 0.45rem;
+    background: var(--docs-search-color-surface-raised);
+    color: var(--docs-search-color-accent-soft);
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 0.45rem 0.7rem;
+}
+
+.docs-search-page-feedback-button:hover,
+.docs-search-page-feedback-button:focus-visible {
+    border-color: var(--docs-search-color-accent);
+    color: var(--docs-search-color-accent);
+    outline: none;
+}
+
+.docs-search-page-feedback-confirmation {
+    margin: 0.85rem 0 0;
+    border: 1px solid var(--docs-search-color-border-accent-muted);
+    border-radius: 0.5rem;
+    background: var(--docs-search-color-surface-overlay-soft);
+    color: var(--docs-search-color-text-muted);
+    font-size: 0.84rem;
+    padding: 0.75rem 0.85rem;
 }
 
 @media (max-width: 767px) {

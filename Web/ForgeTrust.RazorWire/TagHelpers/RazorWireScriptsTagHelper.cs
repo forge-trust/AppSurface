@@ -116,7 +116,11 @@ public class RazorWireScriptsTagHelper : TagHelper
             ? _options.Forms.FailureMode.ToString().ToLowerInvariant()
             : "off";
         var failureUxEnabled = _options.Forms.EnableFailureUx.ToString().ToLowerInvariant();
-        var productIntelligenceEnabled = (_productIntelligenceOptions?.Value.ExperimentalEventsEnabled == true)
+        var productIntelligenceOptions = _productIntelligenceOptions?.Value;
+        var productIntelligenceEnabled = (productIntelligenceOptions is not null
+                                         && (productIntelligenceOptions.ExperimentalEventsEnabled
+                                             || productIntelligenceOptions.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.RazorWireFormFailed)
+                                             || productIntelligenceOptions.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.RazorWireFormFailureRecovered)))
             .ToString()
             .ToLowerInvariant();
         var defaultFailureMessage = HtmlEncoder.Default.Encode(_options.Forms.DefaultFailureMessage);

@@ -42,11 +42,65 @@ Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `
 - A live harvest observatory that starts the first source-backed harvest during startup, streams real-time RazorWire progress, and keeps first navigation informative instead of appearing hung
 - Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by AppSurface Docs consumers
 - `DocsUrlBuilder` plus the MVC surface used by AppSurface Docs consumers so the live docs root, search shell, and archive routes stay in one shared contract
+- Opt-in search-quality metrics for static and hosted docs: the browser collector forwards only safe product-event names and low-cardinality properties, while hosted collection validates through `ForgeTrust.AppSurface.Intelligence` and exposes bounded process-local “Search Quality” diagnostics
 - `AppSurfaceDocsVersionCatalog` plus `AppSurfaceDocsVersionCatalogService` for mounting exact published release trees and surfacing release-level status in the public archive
 - Structured trust metadata plus a built-in trust bar for release notes, upgrade guides, and other pages that need status and provenance near the top
 - A source-backed localization foundation with typed locale options, locale metadata, translation-set inference, and diagnostics for serious multi-language docs systems
 - Contributor provenance rendering with a `Source of truth` strip for source links, edit links, and relative `Last updated` timestamps on details pages
 - Precompiled Tailwind-powered styling with layout-time path resolution for root-module and embedded hosts
+
+## Search Quality Metrics
+
+AppSurface Docs metrics are disabled by default. Enable them only when the host has reviewed its analytics endpoint,
+retention, and access controls. The metrics surface is docs-specific: enabling it does not enable unrelated RazorWire or
+AppSurface experimental product-intelligence events.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Metrics": {
+      "Enabled": true,
+      "BrowserCollector": {
+        "Enabled": true,
+        "EndpointUrl": "https://metrics.example.com/appsurface/docs"
+      }
+    }
+  }
+}
+```
+
+Static exports use the same browser collector. `EndpointUrl` may be an HTTPS absolute URL for a host-owned collector or a
+same-origin app-root path. AppSurface Docs rejects protocol-relative URLs, non-HTTP schemes, credentials, query strings,
+fragments, and secret-like endpoint values. The browser collector sends `fetch` requests with `keepalive: true` and
+`credentials: "omit"` and quietly drops failures so metrics cannot affect readers.
+
+Hosted docs can use the package-owned collector endpoint and bounded search-quality review:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Metrics": {
+      "Enabled": true,
+      "BrowserCollector": { "Enabled": true },
+      "HostedCollection": { "Enabled": true },
+      "HostedReview": {
+        "Enabled": true,
+        "Exposure": "DevelopmentOnly"
+      }
+    }
+  }
+}
+```
+
+When hosted collection is enabled and no browser endpoint is configured, the layout renders
+`{DocsRootPath}/_metrics/collect` as the collector endpoint. That route accepts only narrow JSON event DTOs, revalidates
+against `AppSurfaceProductEventRegistry`, updates a bounded in-memory read model, forwards accepted docs events to
+host-owned product-intelligence sinks when configured, and never echoes submitted values. The review page at
+`{DocsRootPath}/_search-quality` is process-local and non-durable; use it to spot recent no-results, recovery, filter, and
+feedback buckets, not as a historical analytics store.
+
+Metrics never capture raw search text, full URLs, reader identity, cookies, request bodies, stack traces, or free-form
+comments. Reader feedback appears only in search no-results/recovery states and emits low-cardinality usefulness values.
 
 ## Styling Boundary
 
@@ -2238,6 +2292,26 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
 
 Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, namespace `entryPoints`, and generated API `languageSearchText` as first-class MiniSearch fields with field-specific boosts. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
+
+### Reader-intent search relevance
+
+The built-in search experience keeps MiniSearch as the candidate matcher, then applies a deterministic reader-intent ranking layer in the authored browser asset. This keeps search static-friendly while making common documentation tasks rank ahead of incidental body-text hits.
+
+Ranking uses hydrated search-index documents, not only MiniSearch stored fields. The ranker can read `title`, `path`, `sourcePath`, `canonicalSlug`, `aliases`, `keywords`, namespace `entryPoints`, `pageType`, `navGroup`, `publicSection`, `audience`, `status`, and `order` after the client normalizes the payload.
+
+Precedence is intentionally explicit:
+
+1. exact title, path, source path, canonical slug, alias, keyword, breadcrumb, or related-page matches
+2. explicit filter intent, such as API/reference or internal/contributor filters
+3. exact internal or contributor intent
+4. alias, keyword, or namespace entry-point matches
+5. broad task boosts for guides, start-here pages, how-to/tutorial pages, examples, FAQs, and troubleshooting pages
+6. internal/contributor demotion for broad non-internal queries
+7. original MiniSearch rank, then authored order/path tie-breaks
+
+The relevance layer exposes pure test seams: `rankSearchResults(...)` returns ranked documents, and `explainSearchResultRanking(...)` returns local ranking details such as original MiniSearch rank/score, matched fields, metadata classifications, boosts, demotions, filter overrides, and final rank. These helpers are for tests and maintainer debugging; the production UI does not render match reasons, and product-intelligence events must continue to avoid raw query payloads.
+
+Metadata governance matters because ranking is metadata-aware. Put page-specific aliases and keywords on the owning page or sidecar. Put namespace-specific entry terms in `entry_points`. Add shared synonym behavior only when a reviewed relevance fixture proves that page-local metadata is the wrong ownership boundary. Do not use `redirect_aliases` for search relevance; those are browser URL migrations.
 
 When authored metadata uses `release-note` or `release-notes`, AppSurface Docs keeps the raw `pageType` metadata value in the payload but emits `pageTypeLabel = "Release"` and `pageTypeVariant = "release"` so built-in and custom clients can present release pages consistently.
 
