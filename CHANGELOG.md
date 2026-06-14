@@ -24,6 +24,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs search now preserves multi-word spacing while readers type in the full-page and sidebar search boxes.
 - RazorWire now includes a Cloud Run hybrid-hosting guide for split-origin deployments that serve exported static pages from one origin while a live RazorWire app serves streams, islands, and lazy anti-forgery forms from another origin.
 - Package validation now gates redistributed package payload provenance through `packages/third-party-payloads.yml`, package-root notices, generated-first-party evidence, and audited exceptions before prerelease artifacts can pass `verify-packages`.
+- AppSurface.Intelligence now lets hosts and packages register privacy-checked product-event contract packs through DI, with composed registries, value-shape validation, lifecycle gating, safe diagnostics, and a Skoolie-modeled adoption example.
 
 ## 0.1.0-rc.3 - 2026-06-08
 
