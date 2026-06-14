@@ -136,17 +136,20 @@ Artifacts are local and private by default:
 
 `coverage run`, `coverage merge`, and `coverage gate` are the supported CLI coverage surfaces. The package artifact verifier installs the packed `ForgeTrust.AppSurface.Cli` tool in a clean fixture and proves all three coverage commands, including a deliberately failing gate that must still write reports, before publication. Grouped CLI execution and TRX/TUnit result parsing remain separate follow-up work.
 
-Use this GitHub Actions shape for a private repository that already has Coverlet instrumentation:
+Use this GitHub Actions shape for a private pull request workflow that already has Coverlet instrumentation. GitHub's checkout action fetches one commit by default; `fetch-depth: 2` is enough to keep the default pull request merge checkout and let the patch gate compare against the merge commit's base parent without fetching full history:
 
 ```yaml
+- uses: actions/checkout@v5
+  with:
+    fetch-depth: 2
+    persist-credentials: false
 - uses: actions/setup-dotnet@v5
   with:
     dotnet-version: 10.0.x
-- run: git fetch --no-tags --depth=1 origin main
 - run: dotnet tool restore
 - run: dotnet restore ./MyApp.slnx
 - run: dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore --test-results junit --slow-test-diagnostics
-- run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75 --diff-base origin/main --min-patch-line 85 --min-patch-branch 75
+- run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75 --diff-base HEAD^1 --min-patch-line 85 --min-patch-branch 75
 - uses: actions/upload-artifact@v4
   if: always()
   with:
@@ -162,6 +165,8 @@ Use this GitHub Actions shape for a private repository that already has Coverlet
       TestResults/coverage-merged/coverage-gate.md
       TestResults/coverage-merged/projects/**/dotnet-test.log
 ```
+
+GitHub's default `pull_request` checkout is the synthetic merge commit. `fetch-depth: 2` brings in the merge commit and its base parent, so `--diff-base HEAD^1` reports the pull request changes as tested by the job without fetching the full repository. If `fetch-depth: 2` is omitted, `actions/checkout` fetches only `HEAD`, `HEAD^1` is unavailable, and the gate fails closed with `ASCOV010`. If a workflow checks out the pull request head instead, use a head-vs-base source for that same tree; do not reuse merge-ref coverage artifacts with a head diff.
 
 ### `appsurface coverage merge`
 
@@ -218,10 +223,12 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+          persist-credentials: false
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
-      - run: git fetch --no-tags --depth=1 origin main
       - run: dotnet tool restore
       - uses: actions/download-artifact@v4
         with:
@@ -229,7 +236,7 @@ jobs:
           path: ./TestResults/coverage-shards
           merge-multiple: false
       - run: dotnet tool run appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged
-      - run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75 --diff-base origin/main --min-patch-line 85 --min-patch-branch 75
+      - run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75 --diff-base HEAD^1 --min-patch-line 85 --min-patch-branch 75
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -286,28 +293,32 @@ appsurface coverage gate \
   --coverage ./TestResults/coverage-merged/coverage.cobertura.xml \
   --min-line 95 \
   --min-branch 85 \
-  --diff-base origin/main \
+  --diff-base HEAD^1 \
   --min-patch-line 95 \
   --min-patch-branch 85
 ```
 
-`coverage gate` is the stable v1 coverage API. It does not run tests, merge shards, upload coverage, call GitHub APIs, or store trends. It reads one Cobertura file, evaluates line and branch percentages, optionally estimates changed-line and changed-branch coverage from `git diff`, writes `coverage-gate.json` and `coverage-gate.md`, prints the result, and exits nonzero when any configured threshold fails. When `$GITHUB_STEP_SUMMARY` is set, the Markdown report is appended by default so GitHub Actions logs show the gate result without requiring Codecov or another hosted dashboard. Use `--no-github-summary` when a workflow wants only file artifacts.
+`coverage gate` is the stable v1 coverage API. It does not run tests, merge shards, upload coverage, call GitHub APIs, or store trends. It reads one Cobertura file, evaluates line and branch percentages, optionally estimates changed-line and changed-branch coverage from exactly one patch diff source, writes `coverage-gate.json` and `coverage-gate.md`, prints the result, and exits nonzero when any configured threshold fails. When `$GITHUB_STEP_SUMMARY` is set, the Markdown report is appended by default so GitHub Actions logs show the gate result without requiring Codecov or another hosted dashboard. Use `--no-github-summary` when a workflow wants only file artifacts.
 
 Options:
 
 - `--coverage`: Cobertura XML file to evaluate. Defaults to `TestResults/coverage-merged/coverage.cobertura.xml`.
 - `--min-line`: Minimum line coverage percentage from `0` through `100`. Defaults to `0`.
 - `--min-branch`: Minimum branch coverage percentage from `0` through `100`. Defaults to `0`.
-- `--diff-base`: Git ref or commit compared with `HEAD` for patch coverage. When set, the command runs `git diff --unified=0 --no-ext-diff --relative <base>...HEAD --` from the current directory.
-- `--min-patch-line`: Minimum changed-line coverage percentage from `0` through `100`. Requires `--diff-base`. Omit it to report changed-line coverage without gating on it.
-- `--min-patch-branch`: Minimum changed-branch coverage percentage from `0` through `100`. Requires `--diff-base`. Omit it to report changed-branch coverage without gating on it.
+- `--diff-base`: Git ref or commit compared with `HEAD` for patch coverage. When set, the command runs `git diff --unified=0 --no-ext-diff --relative <base>...HEAD --` from the repository root.
+- `--diff-file`: Unified diff file for patch coverage. Use this for CI systems that can download a pull request or compare diff without fetching full repository history.
+- `--diff-stdin`: Read unified diff text from stdin. Use this with pipes or redirected input; interactive stdin fails fast so local terminals do not appear hung.
+- `--diff-label`: Optional display label for the selected patch source in JSON, Markdown, and GitHub summaries.
+- `--repository-root`: Repository root used to normalize Cobertura paths and diff paths. Defaults to the Git worktree root when available, otherwise the current directory.
+- `--min-patch-line`: Minimum changed-line coverage percentage from `0` through `100`. Requires exactly one patch source: `--diff-base`, `--diff-file`, or `--diff-stdin`. Omit it to report changed-line coverage without gating on it.
+- `--min-patch-branch`: Minimum changed-branch coverage percentage from `0` through `100`. Requires exactly one patch source. Omit it to report changed-branch coverage without gating on it.
 - `--output`: Directory for `coverage-gate.json` and `coverage-gate.md`. Defaults to the coverage file directory.
 - `--github-summary`: Append Markdown to `$GITHUB_STEP_SUMMARY` when it is set. Enabled by default.
 - `--no-github-summary`: Suppress GitHub step summary output.
 
 The command accepts Cobertura root attributes such as `line-rate`, `branch-rate`, `lines-covered`, `lines-valid`, `branches-covered`, and `branches-valid`. XML parsing disables DTD processing and external resolution. Coverage counts must be non-negative, covered counts cannot exceed valid counts, rates must be from `0` through `1`, and zero valid line or branch counts fail with `ASCOV006` because a quality gate with no measurable denominator is misleading.
 
-Patch coverage counts added or modified diff lines, intersects those lines with Cobertura `<class filename>` and `<line number hits>` entries, and reports covered/measurable lines. Changed lines that do not appear in the Cobertura line map are ignored for the denominator, which keeps docs, project files, generated artifacts, and other non-coverable edits from failing the patch gate. Changed-branch coverage uses Cobertura line-level `condition-coverage` counts on those same changed measurable lines, so ordinary changed statements without branch conditions do not inflate the branch denominator. When a diff has no measurable changed lines or no measurable changed branches, the corresponding patch metric reports `100%` and says so explicitly in Markdown.
+Patch coverage counts added or modified diff lines, intersects those lines with Cobertura `<class filename>` and `<line number hits>` entries, and reports covered/measurable lines. Changed lines that do not appear in the Cobertura line map are ignored for the denominator, which keeps docs, project files, generated artifacts, and other non-coverable edits from failing the patch gate. Changed-branch coverage uses Cobertura line-level `condition-coverage` counts on those same changed measurable lines, so ordinary changed statements without branch conditions do not inflate the branch denominator. When a diff has no measurable changed lines or no measurable changed branches, the corresponding patch metric reports `100%` and says so explicitly in Markdown. Empty external diff files or stdin are valid empty patches. Non-empty malformed external artifacts, such as HTML login pages or JSON API errors, fail before coverage is evaluated.
 
 Reports are private local artifacts:
 
@@ -321,6 +332,16 @@ Reports are private local artifacts:
     "patchLine": 95,
     "patchBranch": 85
   },
+  "patchDiffSource": {
+    "kind": "git-base",
+    "label": "HEAD^1",
+    "strictness": "local-git",
+    "diffBase": "HEAD^1",
+    "path": null,
+    "bytes": 1024,
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "empty": false
+  },
   "line": {
     "covered": 80,
     "valid": 100,
@@ -332,14 +353,14 @@ Reports are private local artifacts:
     "percent": 60
   },
   "patchLine": {
-    "diffBase": "origin/main",
+    "diffBase": "HEAD^1",
     "changed": 28,
     "measurable": 20,
     "covered": 18,
     "percent": 90
   },
   "patchBranch": {
-    "diffBase": "origin/main",
+    "diffBase": "HEAD^1",
     "changed": 28,
     "measurable": 8,
     "covered": 7,
@@ -351,14 +372,17 @@ Reports are private local artifacts:
 Use `coverage gate` after `coverage run`, or after any other private coverage workflow that produces a local Cobertura file:
 
 ```yaml
+- uses: actions/checkout@v5
+  with:
+    fetch-depth: 2
+    persist-credentials: false
 - uses: actions/setup-dotnet@v5
   with:
     dotnet-version: 10.0.x
-- run: git fetch --no-tags --depth=1 origin main
 - run: dotnet tool restore
 - run: dotnet restore ./MyApp.slnx
 - run: dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore
-- run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --min-patch-branch 85
+- run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base HEAD^1 --min-patch-line 95 --min-patch-branch 85
 - uses: actions/upload-artifact@v4
   if: always()
   with:
@@ -374,16 +398,31 @@ Use `coverage gate` after `coverage run`, or after any other private coverage wo
 
 For repositories with an existing coverage producer, replace the `coverage run` step and the `--coverage` path with the command and Cobertura file path your test setup actually produces.
 
+Use `--diff-base origin/main` for local development or simple CI jobs that already fetched the base ref. Use `--diff-file` when CI already produced a unified diff artifact, and use `--diff-stdin` when another command streams unified diff text:
+
+```bash
+git diff --unified=0 --no-ext-diff --relative origin/main...HEAD -- \
+  | appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --diff-stdin --diff-label origin/main...HEAD --min-patch-line 95
+```
+
+For GitHub pull requests, prefer the default merge checkout with `fetch-depth: 2` and `--diff-base HEAD^1`. This keeps patch line numbers aligned with the tree that produced coverage while still avoiding full history. If `HEAD^1` cannot be resolved, the checkout is probably still at the default depth of `1`; add `fetch-depth: 2` to the checkout step. If your CI checks out the pull request head instead, generate or download a head-vs-base diff for that same tree and pass it with `--diff-file` or `--diff-stdin`.
+
 Diagnostics use `ASCOV###` codes so CI logs are searchable:
 
 | Code | Meaning | Fix |
 | --- | --- | --- |
 | `ASCOV001` | The Cobertura file is missing or `--coverage` is blank. | Produce coverage first or pass the correct file path. |
 | `ASCOV006` | The Cobertura file is malformed or has unsupported/misleading metrics. | Regenerate coverage and verify counts/rates on the root `<coverage>` element. |
-| `ASCOV007` | A threshold is outside the `0` through `100` range or a patch threshold is missing `--diff-base`. | Correct `--min-line`, `--min-branch`, `--min-patch-line`, `--min-patch-branch`, or `--diff-base`. |
+| `ASCOV007` | A threshold is outside the `0` through `100` range. | Correct `--min-line`, `--min-branch`, `--min-patch-line`, or `--min-patch-branch`. |
 | `ASCOV008` | GitHub step summary could not be written. | Check `$GITHUB_STEP_SUMMARY` permissions or add `--no-github-summary`. |
 | `ASCOV009` | The report output path is unsafe. | Use a dedicated artifact directory, not a filesystem root or working directory. |
-| `ASCOV010` | The command could not run or read `git diff` for changed-line coverage. | Fetch the diff base or pass a valid local commit/ref to `--diff-base`. |
+| `ASCOV010` | The command could not run or read `git diff` for changed-line coverage. | Fetch the diff base or pass a valid local commit/ref to `--diff-base`. In GitHub pull request workflows using `--diff-base HEAD^1`, set `actions/checkout` to `fetch-depth: 2`; the default depth is `1` and does not include `HEAD^1`. |
+| `ASCOV011` | A patch threshold was set without a patch diff source. | Pass exactly one of `--diff-base`, `--diff-file`, or `--diff-stdin`. |
+| `ASCOV012` | Multiple patch diff sources were set. | Keep only one of `--diff-base`, `--diff-file`, or `--diff-stdin`. |
+| `ASCOV013` | An external diff file/stdin artifact is missing, unreadable, or larger than 20 MiB. | Regenerate the unified diff artifact or pass a smaller diff. |
+| `ASCOV014` | `--diff-stdin` was requested from an interactive terminal. | Pipe or redirect unified diff text, or use `--diff-file`. |
+| `ASCOV015` | A non-empty external diff artifact is not unified diff text. | Download the diff with `Accept: application/vnd.github.diff`, fix the producer, or use `--diff-base`. |
+| `ASCOV016` | Patch source metadata is invalid. | Correct `--diff-label` or `--repository-root`. |
 | `ASCOV020` | The gate ran successfully and coverage is below threshold. | Raise coverage or lower the threshold intentionally in source control. |
 
 ### `appsurface export`

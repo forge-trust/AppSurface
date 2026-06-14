@@ -5,6 +5,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ## What is taking shape
 
 - AppSurface CI can now prove the default full-solution coverage lane through the `appsurface coverage run` command, running from source via `dotnet run --project`, without waiting on matrix fan-in workflows.
+- Patch coverage gates can now use Git refs, unified diff files, or piped unified diff text without forcing full-history checkout.
 - Reader-intent relevance for AppSurface Docs search.
 - Product-readiness evaluation now has a report-first lab and an Aspire AppHost verifier that proves local Postgres product-state persistence without claiming Durable Task backend ownership.
 - More trustworthy AppSurface Docs search typing for multi-word queries.
@@ -14,6 +15,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ### Release and docs surface
 
 - AppSurface CI coverage now dogfoods the `appsurface coverage run` command, running from source via `dotnet run --project`, for the default full-solution lane. The lane preserves the existing merged Cobertura, managed JUnit, slow-test diagnostics, Codecov, and `coverage gate` evidence paths while `scripts/coverage-solution.sh` keeps legacy compatibility for grouped runs, group listing, merge-only runs, `TEST_GROUP`, and `BUILD_SOLUTION=false`.
+- Patch coverage gates now accept exactly one diff source: `--diff-base` for local Git history, `--diff-file` for CI-produced unified diff artifacts, or `--diff-stdin` for piped unified diff text. External diff artifacts are bounded, empty external diffs are treated as valid empty patches, malformed non-empty external diffs fail closed before coverage evaluation, and JSON plus Markdown reports record patch diff provenance.
 - `appsurface coverage run` now supports `--test-results junit` for AppSurface-managed top-level JUnit artifacts. `--slow-test-diagnostics` implies managed JUnit results and writes diagnostics from those files; `junit` is the only managed result format in this release, with TRX/TUnit compatibility reserved for #491.
 - Package artifact validation now runs a pre-publish consumer proof for the packed `ForgeTrust.AppSurface.Cli` tool. The proof installs the local artifact into an isolated clean fixture, runs `coverage run`, `coverage merge`, a passing `coverage gate`, and an intentionally failing `coverage gate`, then writes `coverage-cli-consumer-proof.md` so publish manifests are blocked when packaged consumer behavior breaks.
 - Coverage runs now emit `slow-test-diagnostics.md` and `slow-test-diagnostics.json` next to the merged coverage artifacts. The diagnostics rank project and JUnit test-case timings, preserve best-effort parser warnings without changing coverage exit codes, record metadata completeness, and report diagnostic aggregation overhead in seconds and as a percent of elapsed runner time at diagnostics generation.

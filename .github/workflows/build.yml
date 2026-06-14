@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-          fetch-depth: 0
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
 
       - name: Setup .NET SDK
         id: setup-dotnet
@@ -125,16 +125,26 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Gate coverage with AppSurface CLI
+      - name: Gate PR coverage with AppSurface CLI
+        if: ${{ github.event_name == 'pull_request' }}
         run: |
           dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-restore -- \
             coverage gate \
             --coverage TestResults/coverage-merged/coverage.cobertura.xml \
             --min-line 95 \
             --min-branch 85 \
-            --diff-base origin/main \
+            --diff-base HEAD^1 \
             --min-patch-line 95 \
             --min-patch-branch 85
+
+      - name: Gate baseline coverage with AppSurface CLI
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-restore -- \
+            coverage gate \
+            --coverage TestResults/coverage-merged/coverage.cobertura.xml \
+            --min-line 95 \
+            --min-branch 85
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
