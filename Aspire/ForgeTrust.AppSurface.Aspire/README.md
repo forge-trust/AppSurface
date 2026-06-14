@@ -124,7 +124,7 @@ Aspire AppHost projects treat most `ProjectReference` entries as resources and g
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
-  <Sdk Name="Aspire.AppHost.Sdk" Version="9.4.2" />
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.3" />
   <ItemGroup>
     <ProjectReference Include="../../Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="../web-app/WebAppExample.csproj" AspireProjectMetadataTypeName="WebAppExample" />
@@ -155,6 +155,7 @@ For reusable package-owned components, expose them through an app-local profile 
 | What you see | Likely cause | Fix |
 | --- | --- | --- |
 | `aspire: command not found` | The Aspire CLI is not installed or not on `PATH`. | Install the Aspire CLI, then rerun the `aspire run --apphost ... -- local` command. |
+| Aspire stops at `Checking certificates...` or `Trusting certificates...` | The local ASP.NET Core development certificate has not been trusted yet. | Run `aspire certs trust` from an interactive shell, or fall back to `dotnet dev-certs https --trust`, and approve the OS trust prompt. |
 | `The type or namespace name 'Projects' could not be found` | The AppHost SDK did not generate project metadata, or the project reference is marked as `IsAspireProjectResource=false`. | Build the AppHost project and keep `IsAspireProjectResource=false` only on library references such as `ForgeTrust.AppSurface.Aspire`. |
 | Duplicate resource name error | Two different component instances generated the same Aspire resource name. | Constructor-inject shared concrete components and resolve dependencies through `AspireStartupContext.Resolve(...)` instead of manually creating components. |
 | Unknown argument or deployment argument does not reach Aspire | `AspireProfile` is also a CliFx command, and `PassThroughArgs` defaults to empty. | Keep local profile selection to `-- local`, or override `PassThroughArgs` for known AppHost arguments in that profile. Deployment support is not shipped in this preview. |

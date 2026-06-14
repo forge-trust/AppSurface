@@ -20,6 +20,8 @@ Not included: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind bui
 
 Read next: [Package-first quickstart](../start-here/first-success-path.md#package-first-path)
 
+Composed local proof: [Product readiness lab](../examples/product-readiness-lab/README.md) shows how the web, auth, flow, DurableTask-facing, Aspire, and Postgres product-state pieces fit together without claiming production hosting or Durable Task storage ownership. Its paired AppHost `verify` profile starts local Postgres and fails if the Postgres product-state row does not become `proven-locally`.
+
 Release and readiness:
 - [Release hub](../releases/README.md) keeps the public release story, adoption risk, and policy links in one place.
 - [v0.1.0-rc.3 release note](../releases/v0.1.0-rc.3.md) is the current package-facing story for this coordinated release.
