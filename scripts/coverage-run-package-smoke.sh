@@ -11,7 +11,11 @@ if [[ -z "${WORK_DIR:-}" ]]; then
   AUTO_WORK_DIR=1
 fi
 
-PACKAGE_ARTIFACTS="${PACKAGE_ARTIFACTS:-$(mktemp -d "${TMPDIR:-/tmp}/appsurface-package-artifacts.XXXXXX")}"
+AUTO_PACKAGE_ARTIFACTS=0
+if [[ -z "${PACKAGE_ARTIFACTS:-}" ]]; then
+  PACKAGE_ARTIFACTS="$(mktemp -d "${TMPDIR:-/tmp}/appsurface-package-artifacts.XXXXXX")"
+  AUTO_PACKAGE_ARTIFACTS=1
+fi
 COVERAGE_PROOF_WORK_DIR="${COVERAGE_PROOF_WORK_DIR:-$WORK_DIR/coverage-cli-consumer-proof}"
 COVERAGE_PROOF_REPORT="${COVERAGE_PROOF_REPORT:-$PACKAGE_ARTIFACTS/coverage-cli-consumer-proof.md}"
 PACKAGE_VALIDATION_REPORT="${PACKAGE_VALIDATION_REPORT:-$PACKAGE_ARTIFACTS/package-validation-report.md}"
@@ -23,6 +27,12 @@ cleanup() {
     rm -rf "$WORK_DIR"
   elif [[ "$AUTO_WORK_DIR" == "1" ]]; then
     echo "Package coverage proof failed. Preserved workspace: $WORK_DIR" >&2
+  fi
+
+  if [[ "$AUTO_PACKAGE_ARTIFACTS" == "1" && "$status" == "0" ]]; then
+    rm -rf "$PACKAGE_ARTIFACTS"
+  elif [[ "$AUTO_PACKAGE_ARTIFACTS" == "1" ]]; then
+    echo "Package coverage proof failed. Preserved package artifacts: $PACKAGE_ARTIFACTS" >&2
   fi
 }
 trap cleanup EXIT
