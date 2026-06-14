@@ -1056,8 +1056,11 @@ internal static class PackageArtifactReportRenderer
     /// Renders the validation report as markdown.
     /// </summary>
     /// <param name="report">Validation report to render.</param>
+    /// <param name="coverageProofReport">Optional packaged coverage CLI proof details to append.</param>
     /// <returns>Markdown report content.</returns>
-    internal static string RenderMarkdown(PackageArtifactValidationReport report)
+    internal static string RenderMarkdown(
+        PackageArtifactValidationReport report,
+        CoverageCliConsumerProofReport? coverageProofReport = null)
     {
         var builder = new StringBuilder();
         builder.AppendLine("# Package artifact validation");
@@ -1096,6 +1099,14 @@ internal static class PackageArtifactReportRenderer
                 builder.AppendLine(
                     $"| `{result.PackageId}` | `{result.RecordId}` | {EscapeMarkdown(result.ComponentOrRule)} | `{result.EvidenceKind}` | `{result.Status}` | {FormatPathList(result.PayloadEntries)} | {FormatPathList(result.NoticePaths)} | {FormatOptionalPath(result.VersionSource)} |");
             }
+        }
+
+        if (coverageProofReport is not null)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Coverage CLI consumer proof");
+            builder.AppendLine();
+            CoverageCliConsumerProofReportRenderer.RenderSection(builder, coverageProofReport);
         }
 
         return builder.ToString().TrimEnd() + Environment.NewLine;

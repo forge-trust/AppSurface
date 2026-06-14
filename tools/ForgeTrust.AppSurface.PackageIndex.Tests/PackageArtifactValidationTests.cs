@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using System.Xml.Linq;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
@@ -12,7 +13,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
     public PackageArtifactValidationTests()
     {
-        _repositoryRoot = Path.Combine(Path.GetTempPath(), "PackageArtifactValidationTests", Guid.NewGuid().ToString("N"));
+        _repositoryRoot = TestPathUtils.PathUnder(Path.GetTempPath(), "PackageArtifactValidationTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_repositoryRoot);
     }
 
@@ -116,7 +117,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         await WriteFileAsync("ForgeTrust.AppSurface.Core/README.md", "# Core");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
-        var coreProjectPath = Path.Combine(_repositoryRoot, "ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Core.csproj");
+        var coreProjectPath = CombineSafeChildPath(_repositoryRoot, "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj");
         var resolver = CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
             ["ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"] = CreateMetadata(
@@ -164,7 +165,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/README.md", "# CLI");
-        var webProjectPath = Path.Combine(_repositoryRoot, "Web", "ForgeTrust.AppSurface.Web", "ForgeTrust.AppSurface.Web.csproj");
+        var webProjectPath = CombineSafeChildPath(_repositoryRoot, "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj");
         var resolver = CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
             ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
@@ -186,9 +187,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
     public async Task PublishPlanResolver_ThrowsWhenRepositoryRootOrManifestIsMissing()
     {
         var resolver = CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase));
-        var missingRepository = Path.Combine(_repositoryRoot, "missing");
+        var missingRepository = CombineSafeChildPath(_repositoryRoot, "missing");
         var missingRepositoryError = await Assert.ThrowsAsync<PackageIndexException>(
-            () => resolver.ResolveAsync(missingRepository, Path.Combine(missingRepository, "packages", "package-index.yml"), CancellationToken.None));
+            () => resolver.ResolveAsync(missingRepository, CombineSafeChildPath(missingRepository, "packages/package-index.yml"), CancellationToken.None));
 
         var missingManifestError = await Assert.ThrowsAsync<PackageIndexException>(
             () => resolver.ResolveAsync(_repositoryRoot, ManifestPath, CancellationToken.None));
@@ -312,8 +313,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web.OpenApi/README.md", "# OpenAPI");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
-        var coreProjectPath = Path.Combine(_repositoryRoot, "ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Core.csproj");
-        var openApiProjectPath = Path.Combine(_repositoryRoot, "Web", "ForgeTrust.AppSurface.Web.OpenApi", "ForgeTrust.AppSurface.Web.OpenApi.csproj");
+        var coreProjectPath = CombineSafeChildPath(_repositoryRoot, "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj");
+        var openApiProjectPath = CombineSafeChildPath(_repositoryRoot, "Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj");
         var resolver = CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
             ["ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"] = CreateMetadata(
@@ -640,7 +641,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             ["Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj"] = CreateMetadata(
                 "Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj",
                 "ForgeTrust.RazorWire.Cli",
-                projectReferences: [Path.Combine(_repositoryRoot, "Web", "ForgeTrust.AppSurface.Web", "ForgeTrust.AppSurface.Web.csproj")],
+                projectReferences: [CombineSafeChildPath(_repositoryRoot, "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj")],
                 isTool: true)
         });
 
@@ -682,7 +683,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public void PackageArtifactValidator_ThrowsWhenArtifactDirectoryIsMissing()
     {
-        var artifactDirectory = Path.Combine(_repositoryRoot, "missing-artifacts");
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "missing-artifacts");
 
         var error = Assert.Throws<PackageIndexException>(
             () => new PackageArtifactValidator().Validate(CreatePlan(), artifactDirectory, PackageVersion));
@@ -3026,7 +3027,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _repositoryRoot,
             "packages/third-party-payloads.yml");
 
-        Assert.Equal(Path.Join(_repositoryRoot, "packages/third-party-payloads.yml"), inventoryPath);
+        Assert.Equal(CombineSafeChildPath(_repositoryRoot, "packages/third-party-payloads.yml"), inventoryPath);
     }
 
     [Fact]
@@ -3107,6 +3108,638 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("`generated-fixture`", markdown, StringComparison.Ordinal);
         Assert.Contains("| `ForgeTrust.AppSurface.EmptyPayload` | `experimental/EmptyPayload.csproj` | `publish` | - | none | 0 |", markdown, StringComparison.Ordinal);
         Assert.Contains("| `ForgeTrust.AppSurface.Experimental` | `generated-fixture` | generated browser assets | `generated_first_party` | `audit_enforced` | `content/app/app.min.js` | - | - |", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_RunsCoverageCommandsAndTreatsFailingGateAsSuccess()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(PackageVersion, createFailingGateReports: true);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.True(report.Succeeded, report.FirstFailure);
+        Assert.Equal(
+            [
+                "dotnet new tool-manifest",
+                "dotnet tool install",
+                "appsurface --version",
+                "appsurface coverage run",
+                "appsurface coverage merge",
+                "appsurface coverage gate",
+                "appsurface coverage gate"
+            ],
+            commandRunner.Requests
+                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface coverage run" or "appsurface coverage merge" or "appsurface coverage gate")
+                .Select(request => request.OperationName)
+                .ToArray());
+        var addPackageRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet add package");
+        Assert.DoesNotContain("--configfile", addPackageRequest.Arguments);
+        Assert.True(File.Exists(CombineSafeChildPath(report.WorkDirectory, "consumer/NuGet.config")));
+        var failingGate = report.Commands.Last();
+        Assert.True(failingGate.ExpectedNonZeroExitCode);
+        Assert.True(failingGate.Succeeded);
+        Assert.Equal(1, failingGate.ExitCode);
+        Assert.All(report.Commands, command =>
+        {
+            Assert.True(File.Exists(command.StandardOutputPath));
+            Assert.True(File.Exists(command.StandardErrorPath));
+        });
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate JSON report" && artifact.Exists);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate Markdown report" && artifact.Exists);
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenIntentionalGateDoesNotWriteReports()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(PackageVersion, createFailingGateReports: false);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("did not write both gate reports", report.FirstFailure, StringComparison.Ordinal);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate JSON report" && !artifact.Exists);
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_ReturnsFailureReportWhenCliPackageCannotBeSelected()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var commandRunner = new CoverageProofRecordingCommandRunner(PackageVersion, createFailingGateReports: true);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            new PackageArtifactValidationReport(PackageVersion, []),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("requires validated package", report.FirstFailure, StringComparison.Ordinal);
+        Assert.Null(report.SelectedArtifact);
+        Assert.Empty(commandRunner.Requests);
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_ReturnsFailureReportWhenWorkDirectoryIsUnsafe()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(PackageVersion, createFailingGateReports: true);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                artifactDirectory,
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("not a safe deletion target", report.FirstFailure, StringComparison.Ordinal);
+        Assert.NotNull(report.SelectedArtifact);
+        Assert.Empty(commandRunner.Requests);
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_StopsAfterFirstRequiredCommandFailure()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new RecordingExternalCommandRunner([
+            new ExternalCommandResult(2, "template stdout", "template stderr")
+        ]);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        var command = Assert.Single(report.Commands);
+        Assert.False(report.Succeeded);
+        Assert.Equal("dotnet new sln", command.OperationName);
+        Assert.Equal(2, command.ExitCode);
+        Assert.Contains("Expected exit code 0", report.FirstFailure, StringComparison.Ordinal);
+        Assert.True(File.Exists(command.StandardOutputPath));
+        Assert.True(File.Exists(command.StandardErrorPath));
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenInstalledCliVersionDoesNotMatchPackageVersion()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner("0.0.0-wrong", createFailingGateReports: true);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("Expected 'appsurface --version'", report.FirstFailure, StringComparison.Ordinal);
+        Assert.Equal("appsurface --version", report.Commands.Last().OperationName);
+        Assert.Contains(commandRunner.Requests, request => request.OperationName == "dotnet tool install");
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage run");
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenCoverageRunArtifactsAreMissing()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            createCoverageRunArtifacts: false);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("coverage run merged Cobertura", report.FirstFailure, StringComparison.Ordinal);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run merged Cobertura" && !artifact.Exists);
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage merge");
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenCoverageMergeArtifactsAreMissing()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            createCoverageMergeArtifacts: false);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("coverage merge Cobertura", report.FirstFailure, StringComparison.Ordinal);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage merge Cobertura" && !artifact.Exists);
+        Assert.DoesNotContain(
+            commandRunner.Requests,
+            request => request.OperationName == "appsurface coverage gate"
+                && request.TimeoutDescription.Contains("passing", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenPassingGateArtifactsAreMissing()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            createPassingGateReports: false);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("passing gate JSON report", report.FirstFailure, StringComparison.Ordinal);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "passing gate JSON report" && !artifact.Exists);
+        Assert.DoesNotContain(
+            commandRunner.Requests,
+            request => request.OperationName == "appsurface coverage gate"
+                && request.TimeoutDescription.Contains("intentionally failing", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("dotnet new classlib", null)]
+    [InlineData("dotnet new xunit", null)]
+    [InlineData("dotnet sln add", null)]
+    [InlineData("dotnet add reference", null)]
+    [InlineData("dotnet add package", null)]
+    [InlineData("dotnet new tool-manifest", null)]
+    [InlineData("dotnet tool install", null)]
+    [InlineData("appsurface --version", null)]
+    [InlineData("appsurface coverage run", null)]
+    [InlineData("appsurface coverage merge", null)]
+    [InlineData("appsurface coverage gate", "passing")]
+    public async Task CoverageCliConsumerProofWorkflow_StopsWhenRequiredCommandFails(
+        string failedOperationName,
+        string? failedTimeoutDescription)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            failOperationName: failedOperationName,
+            failTimeoutDescriptionContains: failedTimeoutDescription);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, $"coverage-proof-{Guid.NewGuid():N}"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Equal(failedOperationName, report.Commands.Last().OperationName);
+        Assert.Contains("Expected exit code 0", report.FirstFailure, StringComparison.Ordinal);
+        Assert.Equal(commandRunner.Requests.Count, report.Commands.Count);
+        if (failedTimeoutDescription is not null)
+        {
+            Assert.Contains(failedTimeoutDescription, commandRunner.Requests.Last().TimeoutDescription, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                commandRunner.Requests,
+                request => request.OperationName == "appsurface coverage gate"
+                    && request.TimeoutDescription.Contains("intentionally failing", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenIntentionalGateExitsZero()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            intentionallyFailingGateExitsNonZero: false);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("Expected a non-zero exit code", report.FirstFailure, StringComparison.Ordinal);
+        Assert.False(report.Commands.Last().Succeeded);
+        Assert.True(report.Commands.Last().ExpectedNonZeroExitCode);
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_ThrowsWhenRequestRootPathsAreMissing()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var workflow = new CoverageCliConsumerProofWorkflow(new RecordingExternalCommandRunner([]));
+        var missingRepository = CombineSafeChildPath(_repositoryRoot, "missing-repository");
+        var missingArtifacts = CombineSafeChildPath(_repositoryRoot, "missing-artifacts");
+
+        var missingRepositoryError = await Assert.ThrowsAsync<PackageIndexException>(
+            () => workflow.RunAsync(
+                new CoverageCliConsumerProofRequest(
+                    missingRepository,
+                    artifactDirectory,
+                    PackageVersion,
+                    CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                    "https://api.nuget.org/v3/index.json"),
+                new PackageArtifactValidationReport(PackageVersion, []),
+                CancellationToken.None));
+        var missingArtifactsError = await Assert.ThrowsAsync<PackageIndexException>(
+            () => workflow.RunAsync(
+                new CoverageCliConsumerProofRequest(
+                    _repositoryRoot,
+                    missingArtifacts,
+                    PackageVersion,
+                    CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                    "https://api.nuget.org/v3/index.json"),
+                new PackageArtifactValidationReport(PackageVersion, []),
+                CancellationToken.None));
+
+        Assert.Contains("Repository root", missingRepositoryError.Message, StringComparison.Ordinal);
+        Assert.Contains("Package artifact directory", missingArtifactsError.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CoverageCliConsumerProofWorkflow_SelectsOnlyValidatedCliToolPackage()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        File.WriteAllText(cliArtifactPath, "cli package", Encoding.UTF8);
+
+        var selected = CoverageCliConsumerProofWorkflow.SelectCliToolPackage(
+            CreateCliProofValidationReport(cliArtifactPath),
+            PackageVersion);
+
+        Assert.Equal("ForgeTrust.AppSurface.Cli", selected.PackageId);
+        Assert.Equal("appsurface", selected.ToolCommandName);
+        Assert.Equal(cliArtifactPath, selected.ArtifactPath);
+        Assert.False(string.IsNullOrWhiteSpace(selected.Sha512));
+    }
+
+    [Fact]
+    public void CoverageCliConsumerProofWorkflow_RejectsInvalidCliPackageSelection()
+    {
+        var missingPackage = Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.SelectCliToolPackage(
+                new PackageArtifactValidationReport(PackageVersion, []),
+                PackageVersion));
+        var nonTool = Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.SelectCliToolPackage(
+                new PackageArtifactValidationReport(
+                    PackageVersion,
+                    [
+                        new PackageArtifactValidationReportEntry(
+                            "ForgeTrust.AppSurface.Cli",
+                            "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                            PackagePublishDecision.Publish,
+                            [])
+                    ]),
+                PackageVersion));
+        var wrongCommand = Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.SelectCliToolPackage(
+                new PackageArtifactValidationReport(
+                    PackageVersion,
+                    [
+                        new PackageArtifactValidationReportEntry(
+                            "ForgeTrust.AppSurface.Cli",
+                            "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                            PackagePublishDecision.Publish,
+                            [],
+                            "missing.nupkg",
+                            IsTool: true,
+                            ToolCommandName: "wrong")
+                    ]),
+                PackageVersion));
+        var missingCommand = Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.SelectCliToolPackage(
+                new PackageArtifactValidationReport(
+                    PackageVersion,
+                    [
+                        new PackageArtifactValidationReportEntry(
+                            "ForgeTrust.AppSurface.Cli",
+                            "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                            PackagePublishDecision.Publish,
+                            [],
+                            "missing.nupkg",
+                            IsTool: true,
+                            ToolCommandName: "")
+                    ]),
+                PackageVersion));
+        var wrongVersionArtifactDirectory = CombineSafeChildPath(_repositoryRoot, "wrong-version");
+        Directory.CreateDirectory(wrongVersionArtifactDirectory);
+        var wrongVersionArtifactPath = CombineSafeChildPath(
+            wrongVersionArtifactDirectory,
+            "ForgeTrust.AppSurface.Cli.0.0.0-wrong.nupkg");
+        File.WriteAllText(wrongVersionArtifactPath, "cli package", Encoding.UTF8);
+        var wrongVersion = Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.SelectCliToolPackage(
+                CreateCliProofValidationReport(wrongVersionArtifactPath),
+                PackageVersion));
+
+        Assert.Contains("requires validated package", missingPackage.Message, StringComparison.Ordinal);
+        Assert.Contains(".NET tool", nonTool.Message, StringComparison.Ordinal);
+        Assert.Contains("tool command", wrongCommand.Message, StringComparison.Ordinal);
+        Assert.Contains("tool command", missingCommand.Message, StringComparison.Ordinal);
+        Assert.Contains("does not match package version", wrongVersion.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CoverageCliConsumerProofWorkflow_PrepareWorkDirectoryDeletesOnlySafeChild()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        var workDirectory = CombineSafeChildPath(artifactDirectory, "coverage-proof");
+        var staleFile = CombineSafeChildPath(workDirectory, "stale.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(staleFile)!);
+        File.WriteAllText(staleFile, "stale", Encoding.UTF8);
+
+        CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(workDirectory, _repositoryRoot, artifactDirectory);
+
+        Assert.True(Directory.Exists(workDirectory));
+        Assert.False(File.Exists(staleFile));
+    }
+
+    [Fact]
+    public void CoverageCliConsumerProofWorkflow_PrepareWorkDirectoryRejectsUnsafeDeletionTargets()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+
+        Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(_repositoryRoot, _repositoryRoot, artifactDirectory));
+        Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(
+                _repositoryRoot + Path.DirectorySeparatorChar,
+                _repositoryRoot,
+                artifactDirectory));
+        Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(artifactDirectory, _repositoryRoot, artifactDirectory));
+        Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(
+                artifactDirectory + Path.DirectorySeparatorChar,
+                _repositoryRoot,
+                artifactDirectory));
+        Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(Directory.GetParent(_repositoryRoot)!.FullName, _repositoryRoot, artifactDirectory));
+        Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(
+                Directory.GetParent(_repositoryRoot)!.FullName + Path.DirectorySeparatorChar,
+                _repositoryRoot,
+                artifactDirectory));
+    }
+
+    [Fact]
+    public void CoverageCliConsumerProofWorkflow_RendersNuGetSourceIsolationConfig()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        var config = CoverageCliConsumerProofWorkflow.RenderMappedNuGetConfig(
+            artifactDirectory,
+            "https://api.nuget.org/v3/index.json");
+        var document = XDocument.Parse(config);
+        var localSource = document.Descendants("packageSource")
+            .Single(source => string.Equals(source.Attribute("key")?.Value, "local-appsurface", StringComparison.Ordinal));
+        var nugetOrgSource = document.Descendants("packageSource")
+            .Single(source => string.Equals(source.Attribute("key")?.Value, "nuget-org", StringComparison.Ordinal));
+
+        Assert.Contains(document.Descendants("add"), source => source.Attribute("key")?.Value == "local-appsurface" && source.Attribute("value")?.Value == Path.GetFullPath(artifactDirectory));
+        Assert.Contains(localSource.Descendants("package"), package => package.Attribute("pattern")?.Value == "ForgeTrust.AppSurface.*");
+        Assert.Contains(localSource.Descendants("package"), package => package.Attribute("pattern")?.Value == "ForgeTrust.RazorWire.*");
+        Assert.Contains(nugetOrgSource.Descendants("package"), package => package.Attribute("pattern")?.Value == "*");
+    }
+
+    [Fact]
+    public void CoverageCliConsumerProofReportRenderer_RendersSuccessAndFailureSections()
+    {
+        var selected = new CoverageCliConsumerProofSelectedArtifact(
+            "ForgeTrust.AppSurface.Cli",
+            "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+            "/tmp/ForgeTrust.AppSurface.Cli.nupkg",
+            "appsurface",
+            "abc123");
+        var command = new CoverageCliConsumerProofCommandResult(
+            "appsurface coverage gate",
+            "appsurface",
+            ["coverage", "gate"],
+            "/tmp/work",
+            1,
+            ExpectedNonZeroExitCode: true,
+            Succeeded: true,
+            FailureReason: string.Empty,
+            TimeSpan.FromMilliseconds(12),
+            "/tmp/stdout.log",
+            "/tmp/stderr.log",
+            "ASCOV020 Coverage gate failed.",
+            string.Empty);
+        var success = new CoverageCliConsumerProofReport(
+            PackageVersion,
+            "/tmp/work",
+            "https://api.nuget.org/v3/index.json",
+            selected,
+            "/tmp/tool.config",
+            "/tmp/fixture.config",
+            "/tmp/logs",
+            [command],
+            [new CoverageCliConsumerProofArtifactCheck("failing gate JSON report", "/tmp/coverage-gate.json", Exists: true)],
+            string.Empty,
+            "dotnet run -- verify-packages");
+        var failure = success with
+        {
+            FirstFailure = "missing artifact",
+            Artifacts = [new CoverageCliConsumerProofArtifactCheck("coverage merge Cobertura", "/tmp/coverage.cobertura.xml", Exists: false)]
+        };
+
+        var successMarkdown = CoverageCliConsumerProofReportRenderer.RenderMarkdown(success);
+        var failureMarkdown = CoverageCliConsumerProofReportRenderer.RenderMarkdown(failure);
+
+        Assert.Contains("Status: `passed`", successMarkdown, StringComparison.Ordinal);
+        Assert.Contains("Selected artifact SHA-512: `abc123`", successMarkdown, StringComparison.Ordinal);
+        Assert.Contains("ASCOV020 Coverage gate failed.", successMarkdown, StringComparison.Ordinal);
+        Assert.Contains("Status: `failed`", failureMarkdown, StringComparison.Ordinal);
+        Assert.Contains("## Missing artifacts", failureMarkdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CoverageCliConsumerProofReportRenderer_RendersEmptyOptionalSections()
+    {
+        var report = new CoverageCliConsumerProofReport(
+            PackageVersion,
+            "/tmp/work",
+            "https://api.nuget.org/v3/index.json",
+            SelectedArtifact: null,
+            ToolNuGetConfigPath: string.Empty,
+            FixtureNuGetConfigPath: string.Empty,
+            LogsDirectory: string.Empty,
+            Commands:
+            [
+                new CoverageCliConsumerProofCommandResult(
+                    "dotnet new sln",
+                    "dotnet",
+                    ["new", "sln"],
+                    "/tmp/work",
+                    1,
+                    ExpectedNonZeroExitCode: false,
+                    Succeeded: false,
+                    "Expected exit code 0, got 1.",
+                    TimeSpan.Zero,
+                    "/tmp/stdout.log",
+                    "/tmp/stderr.log",
+                    string.Empty,
+                    "template failed")
+            ],
+            Artifacts: [],
+            FirstFailure: string.Empty,
+            ReproduceCommand: string.Empty);
+
+        var markdown = CoverageCliConsumerProofReportRenderer.RenderMarkdown(report);
+
+        Assert.Contains("Status: `failed`", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("Selected artifact:", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("Reproduce:", markdown, StringComparison.Ordinal);
+        Assert.Contains("No artifact checks ran.", markdown, StringComparison.Ordinal);
+        Assert.Contains("stderr:", markdown, StringComparison.Ordinal);
+        Assert.Contains("template failed", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3274,14 +3907,15 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 revalidate_when: fixture changes.
             """);
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
-        var reportPath = Path.Combine(artifactDirectory, "package-validation-report.md");
-        var artifactManifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
+        var reportPath = CombineSafeChildPath(artifactDirectory, "package-validation-report.md");
+        var artifactManifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
         Directory.CreateDirectory(artifactDirectory);
-        var stalePackage = Path.Combine(artifactDirectory, "stale.nupkg");
-        var staleSymbolPackage = Path.Combine(artifactDirectory, "stale.snupkg");
+        var stalePackage = CombineSafeChildPath(artifactDirectory, "stale.nupkg");
+        var staleSymbolPackage = CombineSafeChildPath(artifactDirectory, "stale.snupkg");
         await File.WriteAllTextAsync(stalePackage, "old package", Encoding.UTF8);
         await File.WriteAllTextAsync(staleSymbolPackage, "old symbol package", Encoding.UTF8);
         var commandRunner = new RecordingCommandRunner();
+        var coverageProofWorkflow = new RecordingCoverageCliConsumerProofWorkflow(succeeded: true);
         var workflow = new PackageArtifactWorkflow(
             CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
             {
@@ -3290,7 +3924,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
                     "ForgeTrust.AppSurface.Web")
             }),
             commandRunner,
-            new PackageArtifactValidator());
+            new PackageArtifactValidator(),
+            coverageProofWorkflow);
 
         var report = await workflow.RunAsync(
             new PackageArtifactRequest(
@@ -3299,9 +3934,13 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 artifactDirectory,
                 reportPath,
                 PackageVersion,
-                artifactManifestPath));
+                artifactManifestPath,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                CombineSafeChildPath(artifactDirectory, "coverage-proof.md"),
+                "https://api.nuget.org/v3/index.json"));
 
         Assert.Single(report.Entries);
+        Assert.Single(coverageProofWorkflow.Requests);
         Assert.Equal(["dotnet restore", "dotnet build", "dotnet pack"], commandRunner.OperationNames);
         var restoreCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet restore");
         Assert.Contains("/p:ContinuousIntegrationBuild=true", restoreCommand.Arguments);
@@ -3321,18 +3960,89 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.False(File.Exists(stalePackage));
         Assert.False(File.Exists(staleSymbolPackage));
         Assert.True(File.Exists(reportPath), $"Expected report at {reportPath}.");
+        Assert.Contains("Coverage CLI consumer proof", await File.ReadAllTextAsync(reportPath), StringComparison.Ordinal);
         Assert.True(File.Exists(artifactManifestPath), $"Expected artifact manifest at {artifactManifestPath}.");
+    }
+
+    [Fact]
+    public async Task PackageArtifactWorkflow_DoesNotWriteArtifactManifestWhenCoverageProofFails()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Install this first.
+                includes: Base web hosting.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("packages/third-party-payloads.yml",
+            """
+            schema_version: 1
+            audits:
+              - id: workflow-fixture-proof
+                package_id: ForgeTrust.AppSurface.Web
+                applies_to:
+                  - README.md
+                evidence_kind: fixture_audit
+                source_paths:
+                  - packages/package-index.yml
+                reason: Keeps the workflow test focused on command orchestration.
+                reviewed_on: 2026-06-07
+                source: test fixture
+                revalidate_when: fixture changes.
+            """);
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        var reportPath = CombineSafeChildPath(artifactDirectory, "package-validation-report.md");
+        var artifactManifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
+        Directory.CreateDirectory(artifactDirectory);
+        await File.WriteAllTextAsync(artifactManifestPath, "stale manifest", Encoding.UTF8);
+        var workflow = new PackageArtifactWorkflow(
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                    "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                    "ForgeTrust.AppSurface.Web")
+            }),
+            new RecordingCommandRunner(),
+            new PackageArtifactValidator(),
+            new RecordingCoverageCliConsumerProofWorkflow(succeeded: false));
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => workflow.RunAsync(
+                new PackageArtifactRequest(
+                    _repositoryRoot,
+                    ManifestPath,
+                    artifactDirectory,
+                    reportPath,
+                    PackageVersion,
+                    artifactManifestPath,
+                    CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                    CombineSafeChildPath(artifactDirectory, "coverage-proof.md"),
+                    "https://api.nuget.org/v3/index.json")));
+
+        Assert.Contains("Coverage CLI consumer proof failed", error.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(reportPath), $"Expected failure report at {reportPath}.");
+        Assert.Contains("First failure", await File.ReadAllTextAsync(reportPath), StringComparison.Ordinal);
+        Assert.False(File.Exists(artifactManifestPath), "A failed proof must not leave a publish-ready manifest.");
     }
 
     [Fact]
     public async Task TailwindRuntimeBinaryResolutionWorkflowPolicy_KeepsSolutionBuildsAndPackageValidationEnabled()
     {
         var repositoryRoot = GetRepositoryRoot();
-        var buildWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "build.yml"));
-        var codeQualityWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "code-quality.yml"));
-        var vcsIgnoreParityWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "vcs-ignore-parity.yml"));
-        var packageGateWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-gate.yml"));
-        var packageArtifactsWorkflow = await File.ReadAllTextAsync(Path.Join(repositoryRoot, ".github", "workflows", "package-artifacts.yml"));
+        var buildWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/build.yml"));
+        var codeQualityWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/code-quality.yml"));
+        var vcsIgnoreParityWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/vcs-ignore-parity.yml"));
+        var packageGateWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/package-gate.yml"));
+        var packageArtifactsWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/package-artifacts.yml"));
+        var prereleasePublishWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/nuget-prerelease-publish.yml"));
         const string disabledRuntimeResolutionSetting =
             """(?im)(?:^\s*TailwindRuntimeBinaryResolutionEnabled:\s*(?:"false"|'false'|false)\s*$|(?:^|\s)(?:env\s+)?TailwindRuntimeBinaryResolutionEnabled=false\b|(?:/p:|-p:|/property:|-property:)(?:[^\s'"]*;)*TailwindRuntimeBinaryResolutionEnabled=false\b)""";
 
@@ -3342,6 +4052,23 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj", vcsIgnoreParityWorkflow, StringComparison.Ordinal);
         Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"true\"", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.Contains("Upload package validation diagnostics", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.Contains("if: ${{ always() }}", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof.md", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof/NuGet.tool.config", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof/consumer/NuGet.config", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof/consumer/TestResults/**", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof/logs/**", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("coverage-cli-consumer-proof/**", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.Contains("Upload package validation diagnostics", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("appsurface-prerelease-validation-diagnostics", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof/NuGet.tool.config", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof/consumer/NuGet.config", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof/consumer/TestResults/**", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof/logs/**", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("coverage-cli-consumer-proof/**", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("Upload package artifacts", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.Contains("Upload validated package artifacts", prereleasePublishWorkflow, StringComparison.Ordinal);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageGateWorkflow);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageArtifactsWorkflow);
         Assert.Matches(disabledRuntimeResolutionSetting, "-p:TailwindRuntimeBinaryResolutionEnabled=false");
@@ -3359,25 +4086,32 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var workflow = new PackageArtifactWorkflow(
             CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)),
             new RecordingCommandRunner(),
-            new PackageArtifactValidator());
-        var missingRepository = Path.Combine(_repositoryRoot, "missing");
+            new PackageArtifactValidator(),
+            new RecordingCoverageCliConsumerProofWorkflow(succeeded: true));
+        var missingRepository = CombineSafeChildPath(_repositoryRoot, "missing");
         var missingRepositoryError = await Assert.ThrowsAsync<PackageIndexException>(
             () => workflow.RunAsync(new PackageArtifactRequest(
                 missingRepository,
-                Path.Combine(missingRepository, "packages", "package-index.yml"),
-                Path.Combine(missingRepository, "artifacts"),
-                Path.Combine(missingRepository, "report.md"),
+                CombineSafeChildPath(missingRepository, "packages/package-index.yml"),
+                CombineSafeChildPath(missingRepository, "artifacts"),
+                CombineSafeChildPath(missingRepository, "report.md"),
                 PackageVersion,
-                Path.Combine(missingRepository, "manifest.json"))));
+                CombineSafeChildPath(missingRepository, "manifest.json"),
+                CombineSafeChildPath(missingRepository, "proof"),
+                CombineSafeChildPath(missingRepository, "proof.md"),
+                "https://api.nuget.org/v3/index.json")));
 
         var missingManifestError = await Assert.ThrowsAsync<PackageIndexException>(
             () => workflow.RunAsync(new PackageArtifactRequest(
                 _repositoryRoot,
                 ManifestPath,
-                Path.Combine(_repositoryRoot, "artifacts"),
-                Path.Combine(_repositoryRoot, "report.md"),
+                CombineSafeChildPath(_repositoryRoot, "artifacts"),
+                CombineSafeChildPath(_repositoryRoot, "report.md"),
                 PackageVersion,
-                Path.Combine(_repositoryRoot, "manifest.json"))));
+                CombineSafeChildPath(_repositoryRoot, "manifest.json"),
+                CombineSafeChildPath(_repositoryRoot, "proof"),
+                CombineSafeChildPath(_repositoryRoot, "proof.md"),
+                "https://api.nuget.org/v3/index.json")));
 
         await WriteFileAsync("packages/package-index.yml", "packages: []");
         var missingArtifactPathError = await Assert.ThrowsAsync<PackageIndexException>(
@@ -3385,24 +4119,66 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 _repositoryRoot,
                 ManifestPath,
                 " ",
-                Path.Combine(_repositoryRoot, "report.md"),
+                CombineSafeChildPath(_repositoryRoot, "report.md"),
                 PackageVersion,
-                Path.Combine(_repositoryRoot, "manifest.json"))));
+                CombineSafeChildPath(_repositoryRoot, "manifest.json"),
+                CombineSafeChildPath(_repositoryRoot, "proof"),
+                CombineSafeChildPath(_repositoryRoot, "proof.md"),
+                "https://api.nuget.org/v3/index.json")));
         var missingReportPathError = await Assert.ThrowsAsync<PackageIndexException>(
             () => workflow.RunAsync(new PackageArtifactRequest(
                 _repositoryRoot,
                 ManifestPath,
-                Path.Combine(_repositoryRoot, "artifacts"),
+                CombineSafeChildPath(_repositoryRoot, "artifacts"),
                 "",
                 PackageVersion,
-                Path.Combine(_repositoryRoot, "manifest.json"))));
+                CombineSafeChildPath(_repositoryRoot, "manifest.json"),
+                CombineSafeChildPath(_repositoryRoot, "proof"),
+                CombineSafeChildPath(_repositoryRoot, "proof.md"),
+                "https://api.nuget.org/v3/index.json")));
         var missingArtifactManifestPathError = await Assert.ThrowsAsync<PackageIndexException>(
             () => workflow.RunAsync(new PackageArtifactRequest(
                 _repositoryRoot,
                 ManifestPath,
-                Path.Combine(_repositoryRoot, "artifacts"),
-                Path.Combine(_repositoryRoot, "report.md"),
+                CombineSafeChildPath(_repositoryRoot, "artifacts"),
+                CombineSafeChildPath(_repositoryRoot, "report.md"),
                 PackageVersion,
+                "",
+                CombineSafeChildPath(_repositoryRoot, "proof"),
+                CombineSafeChildPath(_repositoryRoot, "proof.md"),
+                "https://api.nuget.org/v3/index.json")));
+        var missingCoverageProofWorkDirectoryError = await Assert.ThrowsAsync<PackageIndexException>(
+            () => workflow.RunAsync(new PackageArtifactRequest(
+                _repositoryRoot,
+                ManifestPath,
+                CombineSafeChildPath(_repositoryRoot, "artifacts"),
+                CombineSafeChildPath(_repositoryRoot, "report.md"),
+                PackageVersion,
+                CombineSafeChildPath(_repositoryRoot, "manifest.json"),
+                "",
+                CombineSafeChildPath(_repositoryRoot, "proof.md"),
+                "https://api.nuget.org/v3/index.json")));
+        var missingCoverageProofReportPathError = await Assert.ThrowsAsync<PackageIndexException>(
+            () => workflow.RunAsync(new PackageArtifactRequest(
+                _repositoryRoot,
+                ManifestPath,
+                CombineSafeChildPath(_repositoryRoot, "artifacts"),
+                CombineSafeChildPath(_repositoryRoot, "report.md"),
+                PackageVersion,
+                CombineSafeChildPath(_repositoryRoot, "manifest.json"),
+                CombineSafeChildPath(_repositoryRoot, "proof"),
+                "",
+                "https://api.nuget.org/v3/index.json")));
+        var missingSourceError = await Assert.ThrowsAsync<PackageIndexException>(
+            () => workflow.RunAsync(new PackageArtifactRequest(
+                _repositoryRoot,
+                ManifestPath,
+                CombineSafeChildPath(_repositoryRoot, "artifacts"),
+                CombineSafeChildPath(_repositoryRoot, "report.md"),
+                PackageVersion,
+                CombineSafeChildPath(_repositoryRoot, "manifest.json"),
+                CombineSafeChildPath(_repositoryRoot, "proof"),
+                CombineSafeChildPath(_repositoryRoot, "proof.md"),
                 "")));
 
         Assert.Contains("Repository root", missingRepositoryError.Message, StringComparison.Ordinal);
@@ -3410,6 +4186,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("output path", missingArtifactPathError.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("report path", missingReportPathError.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("manifest path", missingArtifactManifestPathError.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("work directory", missingCoverageProofWorkDirectoryError.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("proof report path", missingCoverageProofReportPathError.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("source", missingSourceError.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -3553,11 +4332,11 @@ public sealed class PackageArtifactValidationTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
-        var corePackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
-        var webPackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        var corePackagePath = CombineSafeChildPath(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
+        var webPackagePath = CombineSafeChildPath(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
         await File.WriteAllTextAsync(corePackagePath, "core", Encoding.UTF8);
         await File.WriteAllTextAsync(webPackagePath, "web", Encoding.UTF8);
-        var manifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
+        var manifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
         await new PackageArtifactManifestWriter().WriteAsync(
             new PackageArtifactValidationReport(
                 PackageVersion,
@@ -3591,12 +4370,12 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
                     "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
                     "ForgeTrust.AppSurface.Web",
-                    projectReferences: [Path.Combine(_repositoryRoot, "ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Core.csproj")])
+                    projectReferences: [CombineSafeChildPath(_repositoryRoot, "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj")])
             }),
             new PackageArtifactManifestReader(),
             commandRunner,
             new PackagePublishLedgerRenderer());
-        var publishLogPath = Path.Combine(artifactDirectory, "publish.md");
+        var publishLogPath = CombineSafeChildPath(artifactDirectory, "publish.md");
         Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", "secret");
 
         try
@@ -3655,11 +4434,11 @@ public sealed class PackageArtifactValidationTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
-        var corePackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
-        var webPackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        var corePackagePath = CombineSafeChildPath(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
+        var webPackagePath = CombineSafeChildPath(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
         await File.WriteAllTextAsync(corePackagePath, "core", Encoding.UTF8);
         await File.WriteAllTextAsync(webPackagePath, "web", Encoding.UTF8);
-        var manifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
+        var manifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
         await new PackageArtifactManifestWriter().WriteAsync(
             new PackageArtifactValidationReport(
                 PackageVersion,
@@ -3692,7 +4471,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                     ManifestPath,
                     artifactDirectory,
                     manifestPath,
-                    Path.Combine(artifactDirectory, "publish.md"),
+                    CombineSafeChildPath(artifactDirectory, "publish.md"),
                     "https://api.nuget.org/v3/index.json",
                     "PACKAGE_INDEX_TEST_NUGET_API_KEY"),
                 CancellationToken.None);
@@ -3737,11 +4516,11 @@ public sealed class PackageArtifactValidationTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
-        var corePackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
-        var webPackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        var corePackagePath = CombineSafeChildPath(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
+        var webPackagePath = CombineSafeChildPath(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
         await File.WriteAllTextAsync(corePackagePath, "core", Encoding.UTF8);
         await File.WriteAllTextAsync(webPackagePath, "web", Encoding.UTF8);
-        var manifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
+        var manifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
         await new PackageArtifactManifestWriter().WriteAsync(
             new PackageArtifactValidationReport(
                 PackageVersion,
@@ -3752,7 +4531,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             artifactDirectory,
             manifestPath,
             CancellationToken.None);
-        var publishLogPath = Path.Combine(artifactDirectory, "publish.md");
+        var publishLogPath = CombineSafeChildPath(artifactDirectory, "publish.md");
         var commandRunner = new RecordingExternalCommandRunner([
             new ExternalCommandResult(0, "api-key: super-secret-token", "pushed super-secret-token"),
             new InvalidOperationException("runner crashed")
@@ -3830,15 +4609,15 @@ public sealed class PackageArtifactValidationTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
         await WriteFileAsync("Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj", "<Project />");
         await WriteFileAsync("Config/ForgeTrust.AppSurface.Config/README.md", "# Config");
-        var artifactDirectory = Path.Join(_repositoryRoot, "artifacts");
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
-        var packagePath = Path.Join(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        var packagePath = CombineSafeChildPath(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
         await File.WriteAllTextAsync(packagePath, "web", Encoding.UTF8);
-        var configPackagePath = Path.Join(artifactDirectory, $"ForgeTrust.AppSurface.Config.{PackageVersion}.nupkg");
+        var configPackagePath = CombineSafeChildPath(artifactDirectory, $"ForgeTrust.AppSurface.Config.{PackageVersion}.nupkg");
         await File.WriteAllTextAsync(configPackagePath, "config", Encoding.UTF8);
-        var supportPackagePath = Path.Join(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
+        var supportPackagePath = CombineSafeChildPath(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
         await File.WriteAllTextAsync(supportPackagePath, "core", Encoding.UTF8);
-        var manifestPath = Path.Join(artifactDirectory, "package-artifact-manifest.json");
+        var manifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
         await new PackageArtifactManifestWriter().WriteAsync(
             new PackageArtifactValidationReport(
                 PackageVersion,
@@ -3870,7 +4649,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 delays.Add(delay);
                 return Task.CompletedTask;
             });
-        var workDirectory = Path.Join(_repositoryRoot, "smoke");
+        var workDirectory = CombineSafeChildPath(_repositoryRoot, "smoke");
 
         var report = await workflow.RunAsync(
             new PackageSmokeInstallRequest(
@@ -3878,7 +4657,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 ManifestPath,
                 manifestPath,
                 workDirectory,
-                Path.Join(workDirectory, "smoke.md"),
+                CombineSafeChildPath(workDirectory, "smoke.md"),
                 "https://api.nuget.org/v3/index.json"),
             CancellationToken.None);
 
@@ -3886,9 +4665,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.All(report.Entries, entry => Assert.Equal(PackageSmokeInstallStatus.Restored, entry.Status));
         Assert.Equal(2, commandRunner.Requests.Count);
         Assert.Single(delays);
-        Assert.True(File.Exists(Path.Join(workDirectory, "NuGet.config")));
-        Assert.Contains("<clear />", await File.ReadAllTextAsync(Path.Join(workDirectory, "NuGet.config")), StringComparison.Ordinal);
-        var smokeProject = await File.ReadAllTextAsync(Path.Join(workDirectory, "package-restore", "Smoke.csproj"));
+        Assert.True(File.Exists(CombineSafeChildPath(workDirectory, "NuGet.config")));
+        Assert.Contains("<clear />", await File.ReadAllTextAsync(CombineSafeChildPath(workDirectory, "NuGet.config")), StringComparison.Ordinal);
+        var smokeProject = await File.ReadAllTextAsync(CombineSafeChildPath(workDirectory, "package-restore/Smoke.csproj"));
         Assert.Contains("Include=\"ForgeTrust.AppSurface.Web\"", smokeProject, StringComparison.Ordinal);
         Assert.Contains("Include=\"ForgeTrust.AppSurface.Config\"", smokeProject, StringComparison.Ordinal);
         Assert.Contains("NUGET_PACKAGES", commandRunner.Requests[0].Environment!.Keys);
@@ -3923,13 +4702,13 @@ public sealed class PackageArtifactValidationTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
         await WriteFileAsync("Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj", "<Project />");
         await WriteFileAsync("Config/ForgeTrust.AppSurface.Config/README.md", "# Config");
-        var artifactDirectory = Path.Join(_repositoryRoot, "artifacts");
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
-        var webPackagePath = Path.Join(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        var webPackagePath = CombineSafeChildPath(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
         await File.WriteAllTextAsync(webPackagePath, "web", Encoding.UTF8);
-        var configPackagePath = Path.Join(artifactDirectory, $"ForgeTrust.AppSurface.Config.{PackageVersion}.nupkg");
+        var configPackagePath = CombineSafeChildPath(artifactDirectory, $"ForgeTrust.AppSurface.Config.{PackageVersion}.nupkg");
         await File.WriteAllTextAsync(configPackagePath, "config", Encoding.UTF8);
-        var manifestPath = Path.Join(artifactDirectory, "package-artifact-manifest.json");
+        var manifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
         await new PackageArtifactManifestWriter().WriteAsync(
             new PackageArtifactValidationReport(
                 PackageVersion,
@@ -3964,7 +4743,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 return Task.CompletedTask;
             });
 
-        var workDirectory = Path.Join(_repositoryRoot, "smoke");
+        var workDirectory = CombineSafeChildPath(_repositoryRoot, "smoke");
 
         var report = await workflow.RunAsync(
             new PackageSmokeInstallRequest(
@@ -3972,7 +4751,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 ManifestPath,
                 manifestPath,
                 workDirectory,
-                Path.Join(workDirectory, "report.md"),
+                CombineSafeChildPath(workDirectory, "report.md"),
                 "https://api.nuget.org/v3/index.json"),
             CancellationToken.None);
 
@@ -4381,7 +5160,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         var shimPath = PackageSmokeInstallWorkflow.ResolveToolShimPath(toolPath, "appsurface");
 
-        Assert.Equal(Path.Join(toolPath, expectedShimName), shimPath);
+        Assert.Equal(CombineSafeChildPath(toolPath, expectedShimName), shimPath);
     }
 
     [Theory]
@@ -4427,9 +5206,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
-        var packagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        var packagePath = CombineSafeChildPath(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
         await File.WriteAllTextAsync(packagePath, "web", Encoding.UTF8);
-        var manifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
+        var manifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
         await new PackageArtifactManifestWriter().WriteAsync(
             new PackageArtifactValidationReport(
                 PackageVersion,
@@ -4460,8 +5239,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
                     _repositoryRoot,
                     ManifestPath,
                     manifestPath,
-                    Path.Combine(_repositoryRoot, "smoke"),
-                    Path.Combine(_repositoryRoot, "smoke", "report.md"),
+                    CombineSafeChildPath(_repositoryRoot, "smoke"),
+                    CombineSafeChildPath(_repositoryRoot, "smoke/report.md"),
                     "https://api.nuget.org/v3/index.json"),
                 CancellationToken.None));
 
@@ -4590,7 +5369,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         return (report, commandRunner);
     }
 
-    private string ManifestPath => Path.Combine(_repositoryRoot, "packages", "package-index.yml");
+    private string ManifestPath => CombineSafeChildPath(_repositoryRoot, "packages/package-index.yml");
 
     private static IReadOnlyDictionary<string, string> EmptyDependencies { get; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -4638,7 +5417,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         IReadOnlyList<string>? toolCommandNames = null,
         string? projectUrl = RequiredPackageProjectUrl)
     {
-        var packagePath = Path.Combine(artifactDirectory, $"{packageId}.{packageVersion}.nupkg");
+        var packagePath = CombineSafeChildPath(artifactDirectory, $"{packageId}.{packageVersion}.nupkg");
         using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
         if (includeNuspec)
         {
@@ -4778,6 +5557,22 @@ public sealed class PackageArtifactValidationTests : IDisposable
         return fileName;
     }
 
+    private static PackageArtifactValidationReport CreateCliProofValidationReport(string cliArtifactPath)
+    {
+        return new PackageArtifactValidationReport(
+            PackageVersion,
+            [
+                new PackageArtifactValidationReportEntry(
+                    "ForgeTrust.AppSurface.Cli",
+                    "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                    PackagePublishDecision.Publish,
+                    [],
+                    cliArtifactPath,
+                    IsTool: true,
+                    ToolCommandName: "appsurface")
+            ]);
+    }
+
     private static PackagePublishPlan CreateCliPublishPlan()
     {
         return new PackagePublishPlan([
@@ -4872,8 +5667,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         while (current is not null)
         {
-            if (File.Exists(Path.Join(current.FullName, "ForgeTrust.AppSurface.slnx")) &&
-                Directory.Exists(Path.Join(current.FullName, ".github", "workflows")))
+            if (File.Exists(CombineSafeChildPath(current.FullName, "ForgeTrust.AppSurface.slnx")) &&
+                Directory.Exists(CombineSafeChildPath(current.FullName, ".github/workflows")))
             {
                 return current.FullName;
             }
@@ -4964,6 +5759,180 @@ public sealed class PackageArtifactValidationTests : IDisposable
             }
 
             return Task.FromResult((ExternalCommandResult)result);
+        }
+    }
+
+    private sealed class RecordingCoverageCliConsumerProofWorkflow : ICoverageCliConsumerProofWorkflow
+    {
+        private readonly bool _succeeded;
+
+        public RecordingCoverageCliConsumerProofWorkflow(bool succeeded)
+        {
+            _succeeded = succeeded;
+        }
+
+        public List<CoverageCliConsumerProofRequest> Requests { get; } = [];
+
+        public Task<CoverageCliConsumerProofReport> RunAsync(
+            CoverageCliConsumerProofRequest request,
+            PackageArtifactValidationReport validationReport,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            var selectedArtifact = validationReport.Entries
+                .Select(entry => new CoverageCliConsumerProofSelectedArtifact(
+                    entry.PackageId,
+                    entry.ProjectPath,
+                    entry.ArtifactPath,
+                    entry.ToolCommandName,
+                    "test-sha512"))
+                .FirstOrDefault();
+            return Task.FromResult(new CoverageCliConsumerProofReport(
+                request.PackageVersion,
+                request.WorkDirectory,
+                request.Source,
+                selectedArtifact,
+                CombineSafeChildPath(request.WorkDirectory, "NuGet.tool.config"),
+                CombineSafeChildPath(request.WorkDirectory, "NuGet.fixture.config"),
+                CombineSafeChildPath(request.WorkDirectory, "logs"),
+                [],
+                [],
+                _succeeded ? string.Empty : "proof failed",
+                "dotnet run -- verify-packages"));
+        }
+    }
+
+    private sealed class CoverageProofRecordingCommandRunner : IExternalCommandRunner
+    {
+        private readonly string _packageVersion;
+        private readonly bool _createFailingGateReports;
+        private readonly bool _createCoverageRunArtifacts;
+        private readonly bool _createCoverageMergeArtifacts;
+        private readonly bool _createPassingGateReports;
+        private readonly string? _failOperationName;
+        private readonly string? _failTimeoutDescriptionContains;
+        private readonly bool _intentionallyFailingGateExitsNonZero;
+
+        public CoverageProofRecordingCommandRunner(
+            string packageVersion,
+            bool createFailingGateReports,
+            bool createCoverageRunArtifacts = true,
+            bool createCoverageMergeArtifacts = true,
+            bool createPassingGateReports = true,
+            string? failOperationName = null,
+            string? failTimeoutDescriptionContains = null,
+            bool intentionallyFailingGateExitsNonZero = true)
+        {
+            _packageVersion = packageVersion;
+            _createFailingGateReports = createFailingGateReports;
+            _createCoverageRunArtifacts = createCoverageRunArtifacts;
+            _createCoverageMergeArtifacts = createCoverageMergeArtifacts;
+            _createPassingGateReports = createPassingGateReports;
+            _failOperationName = failOperationName;
+            _failTimeoutDescriptionContains = failTimeoutDescriptionContains;
+            _intentionallyFailingGateExitsNonZero = intentionallyFailingGateExitsNonZero;
+        }
+
+        public List<ExternalCommandRequest> Requests { get; } = [];
+
+        public Task<ExternalCommandResult> RunAsync(
+            ExternalCommandRequest request,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            if (string.Equals(request.OperationName, _failOperationName, StringComparison.Ordinal)
+                && (_failTimeoutDescriptionContains is null
+                    || request.TimeoutDescription.Contains(_failTimeoutDescriptionContains, StringComparison.Ordinal)))
+            {
+                return Task.FromResult(new ExternalCommandResult(2, string.Empty, $"{request.OperationName} failed"));
+            }
+
+            if (request.OperationName == "appsurface --version")
+            {
+                return Task.FromResult(new ExternalCommandResult(0, _packageVersion, string.Empty));
+            }
+
+            if (request.OperationName == "appsurface coverage run")
+            {
+                var outputDirectory = ReadOption(request.Arguments, "--output");
+                if (_createCoverageRunArtifacts)
+                {
+                    CreateCoverageRunArtifacts(outputDirectory);
+                }
+
+                return Task.FromResult(new ExternalCommandResult(0, "coverage run passed", string.Empty));
+            }
+
+            if (request.OperationName == "appsurface coverage merge")
+            {
+                var outputDirectory = ReadOption(request.Arguments, "--output");
+                if (_createCoverageMergeArtifacts)
+                {
+                    CreateCoverageMergeArtifacts(outputDirectory);
+                }
+
+                return Task.FromResult(new ExternalCommandResult(0, "coverage merge passed", string.Empty));
+            }
+
+            if (request.OperationName == "appsurface coverage gate")
+            {
+                var outputDirectory = ReadOption(request.Arguments, "--output");
+                var isFailingGate = request.TimeoutDescription.Contains("intentionally failing", StringComparison.Ordinal);
+                if ((isFailingGate && _createFailingGateReports)
+                    || (!isFailingGate && _createPassingGateReports))
+                {
+                    CreateCoverageGateArtifacts(outputDirectory);
+                }
+
+                return Task.FromResult(isFailingGate
+                    ? new ExternalCommandResult(
+                        _intentionallyFailingGateExitsNonZero ? 1 : 0,
+                        "ASCOV020 Coverage gate failed.",
+                        string.Empty)
+                    : new ExternalCommandResult(0, "Coverage gate passed.", string.Empty));
+            }
+
+            return Task.FromResult(new ExternalCommandResult(0, $"{request.OperationName} passed", string.Empty));
+        }
+
+        private static string ReadOption(IReadOnlyList<string> arguments, string option)
+        {
+            var index = arguments.ToList().IndexOf(option);
+            if (index < 0 || index + 1 >= arguments.Count)
+            {
+                throw new InvalidOperationException($"Expected option '{option}'.");
+            }
+
+            return arguments[index + 1];
+        }
+
+        private static void CreateCoverageRunArtifacts(string outputDirectory)
+        {
+            var projectDirectory = CombineSafeChildPath(outputDirectory, "projects/Smoke.Tests-123");
+            Directory.CreateDirectory(projectDirectory);
+            File.WriteAllText(CombineSafeChildPath(outputDirectory, "coverage.cobertura.xml"), "<coverage />", Encoding.UTF8);
+            File.WriteAllText(CombineSafeChildPath(outputDirectory, "summary.txt"), "summary", Encoding.UTF8);
+            File.WriteAllText(CombineSafeChildPath(outputDirectory, "timings.json"), "{}", Encoding.UTF8);
+            File.WriteAllText(CombineSafeChildPath(outputDirectory, ".appsurface-coverage-output"), "owned", Encoding.UTF8);
+            File.WriteAllText(CombineSafeChildPath(projectDirectory, "dotnet-test.log"), "tests", Encoding.UTF8);
+            File.WriteAllText(CombineSafeChildPath(projectDirectory, "coverage.cobertura.xml"), "<coverage />", Encoding.UTF8);
+        }
+
+        private static void CreateCoverageMergeArtifacts(string outputDirectory)
+        {
+            var inputDirectory = CombineSafeChildPath(outputDirectory, "reportgenerator-input/000001-Smoke.Tests");
+            Directory.CreateDirectory(inputDirectory);
+            File.WriteAllText(CombineSafeChildPath(outputDirectory, "coverage.cobertura.xml"), "<coverage />", Encoding.UTF8);
+            File.WriteAllText(CombineSafeChildPath(outputDirectory, "summary.txt"), "summary", Encoding.UTF8);
+            File.WriteAllText(CombineSafeChildPath(outputDirectory, "timings.json"), "{}", Encoding.UTF8);
+            File.WriteAllText(CombineSafeChildPath(inputDirectory, "coverage.cobertura.xml"), "<coverage />", Encoding.UTF8);
+        }
+
+        private static void CreateCoverageGateArtifacts(string outputDirectory)
+        {
+            Directory.CreateDirectory(outputDirectory);
+            File.WriteAllText(CombineSafeChildPath(outputDirectory, "coverage-gate.json"), "{}", Encoding.UTF8);
+            File.WriteAllText(CombineSafeChildPath(outputDirectory, "coverage-gate.md"), "# Gate", Encoding.UTF8);
         }
     }
 }
