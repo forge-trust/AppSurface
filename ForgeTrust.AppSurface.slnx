@@ -25,6 +25,8 @@
     <Project Path="Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj" />
   </Folder>
   <Folder Name="/Config/">
+    <Project Path="Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/ForgeTrust.AppSurface.Config.LocalSecrets.Tests.csproj" />
+    <Project Path="Config/ForgeTrust.AppSurface.Config.LocalSecrets/ForgeTrust.AppSurface.Config.LocalSecrets.csproj" />
     <Project Path="Config/ForgeTrust.AppSurface.Config.Tests/ForgeTrust.AppSurface.Config.Tests.csproj" />
     <Project Path="Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj" />
   </Folder>
@@ -41,6 +43,7 @@
     <Project Path="examples/aspire-apphost/AspireAppHostExample.csproj" />
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
+    <Project Path="examples/local-secrets/LocalSecretsExample.csproj" />
     <Project Path="examples/flow-generated-authoring/FlowGeneratedAuthoringExample.csproj" />
     <Project Path="examples/flow-approval-local/FlowApprovalLocalExample.csproj" />
     <Project Path="examples/web-app/WebAppExample.csproj" />

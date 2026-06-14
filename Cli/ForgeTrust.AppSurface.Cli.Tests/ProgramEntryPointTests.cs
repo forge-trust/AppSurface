@@ -43,8 +43,46 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("docs", result.AllText, StringComparison.Ordinal);
         Assert.Contains("docs export", result.AllText, StringComparison.Ordinal);
         Assert.Contains("coverage", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("secrets", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_Should_Print_Secrets_Help_Without_Lifecycle_Noise()
+    {
+        var result = await InvokeEntryPointAsync(["secrets", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Manage AppSurface local development secrets.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("set", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("doctor", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("appsurface secrets [command] --help", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsCommands_Should_Set_List_Get_And_Delete_Without_PrintingSecretValue()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Combine(temp.Path, "local-secrets.json");
+        var shared = new[] { "--app", "MyApp", "--environment", "Development", "--store-file", storePath };
+
+        var init = await InvokeProgramEntryPointAsync(["secrets", "init", .. shared]);
+        var set = await InvokeProgramEntryPointAsync(["secrets", "set", "Stripe:ApiKey", "--stdin", .. shared], standardInput: "sk_test_secret\n");
+        var list = await InvokeProgramEntryPointAsync(["secrets", "list", .. shared]);
+        var get = await InvokeProgramEntryPointAsync(["secrets", "get", "Stripe:ApiKey", .. shared]);
+        var delete = await InvokeProgramEntryPointAsync(["secrets", "delete", "Stripe:ApiKey", .. shared]);
+
+        Assert.Equal(0, init.ExitCode);
+        Assert.Equal(0, set.ExitCode);
+        Assert.Equal(0, list.ExitCode);
+        Assert.Equal(0, get.ExitCode);
+        Assert.Equal(0, delete.ExitCode);
+        Assert.Contains("Stripe:ApiKey", list.AllText, StringComparison.Ordinal);
+        Assert.Contains("Found: local secret namespace", get.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", init.AllText + set.AllText + list.AllText + get.AllText + delete.AllText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2600,9 +2638,15 @@ public sealed class ProgramEntryPointTests
 
     private static async Task<CapturedCliRun> InvokeProgramEntryPointAsync(
         string[] args,
-        Action<ConsoleOptions>? configureOptions = null)
+        Action<ConsoleOptions>? configureOptions = null,
+        string? standardInput = null)
     {
         var console = new FakeInMemoryConsole();
+        if (standardInput != null)
+        {
+            console.WriteInput(standardInput);
+        }
+
         var loggerProvider = new InMemoryLoggerProvider();
         var originalExitCode = Environment.ExitCode;
 

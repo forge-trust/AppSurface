@@ -14,6 +14,8 @@ appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 
 The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency in the same command. `appsurface coverage merge` fans in existing Cobertura shards from matrix or custom test workflows without reading a consumer tool manifest. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service.
 
+`appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, delete keys, and run doctor diagnostics for platform availability.
+
 ## Release Guidance
 
 AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 3 release note](../../releases/v0.1.0-rc.3.md) for current release risk, migration guidance, and package readiness.
@@ -60,6 +62,24 @@ dotnet tool run appsurface --version
 ```
 
 ## Commands
+
+### `appsurface secrets`
+
+Manage AppSurface local development secrets before a remote vault exists.
+
+```bash
+appsurface secrets init --app MyApp --environment Development
+printf '%s' "<secret>" | appsurface secrets set Stripe:ApiKey --app MyApp --environment Development --stdin
+appsurface secrets doctor --app MyApp --environment Development
+appsurface secrets list --app MyApp --environment Development
+appsurface secrets get Stripe:ApiKey --app MyApp --environment Development
+```
+
+`get` verifies presence and source without printing the secret value. `doctor` reports `Problem`, `Cause`, `Fix`,
+`Docs`, and `Retryable` so unsupported platforms, locked stores, and headless sessions fail closed instead of falling
+through to file secrets. Use `--store-file <path>` only for deterministic examples and tests; normal local development
+should use the OS-backed store when the platform adapter is available. Use environment variables, key-per-file, or a
+remote vault for CI, containers, team environments, and production.
 
 ### `appsurface coverage run`
 

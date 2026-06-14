@@ -16,6 +16,7 @@
 
     <ItemGroup>
       <InternalsVisibleTo Include="ForgeTrust.AppSurface.Config.Tests" />
+      <InternalsVisibleTo Include="ForgeTrust.AppSurface.Config.LocalSecrets.Tests" />
       <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
     </ItemGroup>
 
