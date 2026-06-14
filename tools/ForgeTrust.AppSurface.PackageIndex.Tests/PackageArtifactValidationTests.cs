@@ -2016,7 +2016,17 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Throws<PackageIndexException>(
             () => CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(_repositoryRoot, _repositoryRoot, artifactDirectory));
         Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(
+                _repositoryRoot + Path.DirectorySeparatorChar,
+                _repositoryRoot,
+                artifactDirectory));
+        Assert.Throws<PackageIndexException>(
             () => CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(artifactDirectory, _repositoryRoot, artifactDirectory));
+        Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(
+                artifactDirectory + Path.DirectorySeparatorChar,
+                _repositoryRoot,
+                artifactDirectory));
         Assert.Throws<PackageIndexException>(
             () => CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(Directory.GetParent(_repositoryRoot)!.FullName, _repositoryRoot, artifactDirectory));
         Assert.Throws<PackageIndexException>(
@@ -2460,12 +2470,12 @@ public sealed class PackageArtifactValidationTests : IDisposable
             () => workflow.RunAsync(new PackageArtifactRequest(
                 _repositoryRoot,
                 ManifestPath,
-                Path.Combine(_repositoryRoot, "artifacts"),
-                Path.Combine(_repositoryRoot, "report.md"),
+                Path.Join(_repositoryRoot, "artifacts"),
+                Path.Join(_repositoryRoot, "report.md"),
                 PackageVersion,
-                Path.Combine(_repositoryRoot, "manifest.json"),
-                Path.Combine(_repositoryRoot, "proof"),
-                Path.Combine(_repositoryRoot, "proof.md"),
+                Path.Join(_repositoryRoot, "manifest.json"),
+                Path.Join(_repositoryRoot, "proof"),
+                Path.Join(_repositoryRoot, "proof.md"),
                 "https://api.nuget.org/v3/index.json")));
 
         await WriteFileAsync("packages/package-index.yml", "packages: []");
@@ -2474,66 +2484,66 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 _repositoryRoot,
                 ManifestPath,
                 " ",
-                Path.Combine(_repositoryRoot, "report.md"),
+                Path.Join(_repositoryRoot, "report.md"),
                 PackageVersion,
-                Path.Combine(_repositoryRoot, "manifest.json"),
-                Path.Combine(_repositoryRoot, "proof"),
-                Path.Combine(_repositoryRoot, "proof.md"),
+                Path.Join(_repositoryRoot, "manifest.json"),
+                Path.Join(_repositoryRoot, "proof"),
+                Path.Join(_repositoryRoot, "proof.md"),
                 "https://api.nuget.org/v3/index.json")));
         var missingReportPathError = await Assert.ThrowsAsync<PackageIndexException>(
             () => workflow.RunAsync(new PackageArtifactRequest(
                 _repositoryRoot,
                 ManifestPath,
-                Path.Combine(_repositoryRoot, "artifacts"),
+                Path.Join(_repositoryRoot, "artifacts"),
                 "",
                 PackageVersion,
-                Path.Combine(_repositoryRoot, "manifest.json"),
-                Path.Combine(_repositoryRoot, "proof"),
-                Path.Combine(_repositoryRoot, "proof.md"),
+                Path.Join(_repositoryRoot, "manifest.json"),
+                Path.Join(_repositoryRoot, "proof"),
+                Path.Join(_repositoryRoot, "proof.md"),
                 "https://api.nuget.org/v3/index.json")));
         var missingArtifactManifestPathError = await Assert.ThrowsAsync<PackageIndexException>(
             () => workflow.RunAsync(new PackageArtifactRequest(
                 _repositoryRoot,
                 ManifestPath,
-                Path.Combine(_repositoryRoot, "artifacts"),
-                Path.Combine(_repositoryRoot, "report.md"),
+                Path.Join(_repositoryRoot, "artifacts"),
+                Path.Join(_repositoryRoot, "report.md"),
                 PackageVersion,
                 "",
-                Path.Combine(_repositoryRoot, "proof"),
-                Path.Combine(_repositoryRoot, "proof.md"),
+                Path.Join(_repositoryRoot, "proof"),
+                Path.Join(_repositoryRoot, "proof.md"),
                 "https://api.nuget.org/v3/index.json")));
         var missingCoverageProofWorkDirectoryError = await Assert.ThrowsAsync<PackageIndexException>(
             () => workflow.RunAsync(new PackageArtifactRequest(
                 _repositoryRoot,
                 ManifestPath,
-                Path.Combine(_repositoryRoot, "artifacts"),
-                Path.Combine(_repositoryRoot, "report.md"),
+                Path.Join(_repositoryRoot, "artifacts"),
+                Path.Join(_repositoryRoot, "report.md"),
                 PackageVersion,
-                Path.Combine(_repositoryRoot, "manifest.json"),
+                Path.Join(_repositoryRoot, "manifest.json"),
                 "",
-                Path.Combine(_repositoryRoot, "proof.md"),
+                Path.Join(_repositoryRoot, "proof.md"),
                 "https://api.nuget.org/v3/index.json")));
         var missingCoverageProofReportPathError = await Assert.ThrowsAsync<PackageIndexException>(
             () => workflow.RunAsync(new PackageArtifactRequest(
                 _repositoryRoot,
                 ManifestPath,
-                Path.Combine(_repositoryRoot, "artifacts"),
-                Path.Combine(_repositoryRoot, "report.md"),
+                Path.Join(_repositoryRoot, "artifacts"),
+                Path.Join(_repositoryRoot, "report.md"),
                 PackageVersion,
-                Path.Combine(_repositoryRoot, "manifest.json"),
-                Path.Combine(_repositoryRoot, "proof"),
+                Path.Join(_repositoryRoot, "manifest.json"),
+                Path.Join(_repositoryRoot, "proof"),
                 "",
                 "https://api.nuget.org/v3/index.json")));
         var missingSourceError = await Assert.ThrowsAsync<PackageIndexException>(
             () => workflow.RunAsync(new PackageArtifactRequest(
                 _repositoryRoot,
                 ManifestPath,
-                Path.Combine(_repositoryRoot, "artifacts"),
-                Path.Combine(_repositoryRoot, "report.md"),
+                Path.Join(_repositoryRoot, "artifacts"),
+                Path.Join(_repositoryRoot, "report.md"),
                 PackageVersion,
-                Path.Combine(_repositoryRoot, "manifest.json"),
-                Path.Combine(_repositoryRoot, "proof"),
-                Path.Combine(_repositoryRoot, "proof.md"),
+                Path.Join(_repositoryRoot, "manifest.json"),
+                Path.Join(_repositoryRoot, "proof"),
+                Path.Join(_repositoryRoot, "proof.md"),
                 "")));
 
         Assert.Contains("Repository root", missingRepositoryError.Message, StringComparison.Ordinal);

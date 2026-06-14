@@ -372,9 +372,9 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
 
     internal static void PrepareWorkDirectory(string workDirectory, string repositoryRoot, string artifactsDirectory)
     {
-        var normalizedWorkDirectory = Path.GetFullPath(workDirectory);
-        var normalizedRepositoryRoot = Path.GetFullPath(repositoryRoot);
-        var normalizedArtifactsDirectory = Path.GetFullPath(artifactsDirectory);
+        var normalizedWorkDirectory = NormalizeDirectoryForSafetyComparison(workDirectory);
+        var normalizedRepositoryRoot = NormalizeDirectoryForSafetyComparison(repositoryRoot);
+        var normalizedArtifactsDirectory = NormalizeDirectoryForSafetyComparison(artifactsDirectory);
         var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var invalidTargets = new List<string>
         {
@@ -384,7 +384,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         };
         if (!string.IsNullOrWhiteSpace(homeDirectory))
         {
-            invalidTargets.Add(Path.GetFullPath(homeDirectory));
+            invalidTargets.Add(NormalizeDirectoryForSafetyComparison(homeDirectory));
         }
 
         if (invalidTargets.Any(target => string.Equals(normalizedWorkDirectory, target, PackageIndexGenerator.RepositoryPathComparison)))
@@ -404,6 +404,20 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         }
 
         Directory.CreateDirectory(normalizedWorkDirectory);
+    }
+
+    private static string NormalizeDirectoryForSafetyComparison(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(fullPath) ?? string.Empty;
+        while (fullPath.Length > root.Length
+            && (fullPath.EndsWith(Path.DirectorySeparatorChar)
+                || fullPath.EndsWith(Path.AltDirectorySeparatorChar)))
+        {
+            fullPath = fullPath[..^1];
+        }
+
+        return fullPath;
     }
 
     private static async Task<CoverageCliConsumerProofSelectedArtifact> SelectCliToolPackageAsync(
