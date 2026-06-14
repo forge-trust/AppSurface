@@ -72,7 +72,9 @@ appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 
 ## Dogfood Harvest Boundary
 
-The standalone host ships an `appsettings.json` that dogfoods the reusable harvest path policy for this repository. It keeps the live AppSurface docs surface focused on intentional public docs paths such as the root `README.md`, `LICENSE`, package READMEs, colocated `NAMESPACE.md` namespace intros, authored docs folders, releases, guides, troubleshooting, and example READMEs. It also excludes host-specific generated and test-result paths:
+The standalone host ships an `appsettings.json` that dogfoods the reusable harvest path policy for this repository. It keeps the live AppSurface docs surface focused on intentional public docs paths such as the root `README.md`, `LICENSE`, public package READMEs across the AppSurface package families, colocated `NAMESPACE.md` namespace intros, authored docs folders, releases, guides, troubleshooting, and example READMEs. It also excludes host-specific generated and test-result paths.
+
+The package chooser is generated from `packages/package-index.yml`; do not hand-edit `packages/README.md` when a package link is wrong. Each public package `start_here_path` must point at a real repository Markdown file that this standalone harvest boundary includes, otherwise the generated chooser link will be valid Markdown but will not resolve in the hosted `/docs` surface. Add the package family to `AppSurfaceDocs:Harvest:Paths:IncludeGlobs` when introducing a new top-level package README such as Intelligence:
 
 ```json
 {
@@ -82,6 +84,7 @@ The standalone host ships an `appsettings.json` that dogfoods the reusable harve
         "IncludeGlobs": [
           "README.md",
           "LICENSE",
+          "Intelligence/**/README.md",
           "packages/**/README.md",
           "Web/**/README.md",
           "Web/**/NAMESPACE.md",
