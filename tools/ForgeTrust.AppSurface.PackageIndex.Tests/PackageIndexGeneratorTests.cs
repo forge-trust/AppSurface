@@ -2402,11 +2402,11 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         Assert.Equal(0, exitCode);
         Assert.NotNull(capturedRequest);
-        Assert.Equal(Path.Combine(_repositoryRoot, "packages-out"), capturedRequest.ArtifactsOutputPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "packages.md"), capturedRequest.ReportPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "artifacts.json"), capturedRequest.ArtifactManifestPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "coverage-proof"), capturedRequest.CoverageProofWorkDirectory);
-        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "coverage-proof.md"), capturedRequest.CoverageProofReportPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "packages-out"), capturedRequest.ArtifactsOutputPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "reports", "packages.md"), capturedRequest.ReportPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "reports", "artifacts.json"), capturedRequest.ArtifactManifestPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "reports", "coverage-proof"), capturedRequest.CoverageProofWorkDirectory);
+        Assert.Equal(Path.Join(_repositoryRoot, "reports", "coverage-proof.md"), capturedRequest.CoverageProofReportPath);
         Assert.Equal("https://api.nuget.org/v3/index.json", capturedRequest.Source);
         Assert.Equal("0.0.0-ci.99", capturedRequest.PackageVersion);
         Assert.Contains("Validated 1 package artifacts for 0.0.0-ci.99. Report: reports/packages.md.", stdout.ToString(), StringComparison.Ordinal);
