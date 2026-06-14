@@ -34,6 +34,10 @@ The diagnostics path reports where a value came from without printing the raw se
 
 Use environment variables, key-per-file, or a remote vault in CI, containers, team environments, and production.
 
+## Release Guidance
+
+Use the [v0.1.0 RC 3 release note](../../releases/v0.1.0-rc.3.md) for the current package-facing prerelease story, risk notes, and migration guidance.
+
 ## Structured Statuses
 
 `AppSurfaceLocalSecretProvider.GetValue<T>` adapts LocalSecrets into the normal AppSurface config provider contract.
