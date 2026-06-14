@@ -9,6 +9,13 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets.Tests;
 public sealed class LocalSecretsRegistrationTests
 {
     [Fact]
+    public void LocalSecretsPostureMode_Should_DefaultToDevelopmentOnly()
+    {
+        Assert.Equal(LocalSecretsPostureMode.DevelopmentOnly, default);
+        Assert.Equal(0, (int)LocalSecretsPostureMode.DevelopmentOnly);
+    }
+
+    [Fact]
     public void ConfigureServices_Should_RegisterProviderAndConfigProvider()
     {
         var services = new ServiceCollection();

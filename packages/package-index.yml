@@ -374,7 +374,7 @@ packages:
     order: 120
     tool_command_name: appsurface
     use_when: Install this when you want repository-level AppSurface tooling from a global or local .NET tool command.
-    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, and `appsurface secrets` local-secret setup/doctor commands.
+    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, and the `appsurface secrets init`, `set`, `get`, `list --names-only`, `delete`, and `doctor` local-secret workflow.
     does_not_include: App runtime packages, hosted coverage dashboards, coverage uploads, coverage trend storage, grouped coverage runs, TRX/TUnit result parsing, RazorWire-specific export workflows, or a replacement for project package references.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README

@@ -22,12 +22,13 @@ public sealed class ConfigurationResolutionException : Exception
         string key,
         string providerName,
         ConfigProviderTerminalDiagnostic diagnostic)
-        : base(CreateMessage(providerName, diagnostic))
+        : base(CreateMessage(
+            providerName ?? throw new ArgumentNullException(nameof(providerName)),
+            diagnostic ?? throw new ArgumentNullException(nameof(diagnostic))))
     {
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(key);
         ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
-        ArgumentNullException.ThrowIfNull(diagnostic);
 
         EnvironmentName = environment;
         Key = key;
