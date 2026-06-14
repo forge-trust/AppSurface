@@ -488,7 +488,7 @@ internal sealed record PatchDiffSource(
                     }
 
                     var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
-                    return PatchDiffArtifact.FromBytes(bytes);
+                    return CreateArtifactFromBoundedBytes(bytes, maxBytes, $"--diff-file is too large. Limit is {maxBytes} bytes: {path}");
                 }
                 catch (CommandException)
                 {
@@ -521,6 +521,19 @@ internal sealed record PatchDiffSource(
 
                 return artifact;
             });
+
+    internal static PatchDiffArtifact CreateArtifactFromBoundedBytes(
+        byte[] bytes,
+        long maxBytes,
+        string diagnostic)
+    {
+        if (bytes.LongLength > maxBytes)
+        {
+            throw new CommandException($"ASCOV013 {diagnostic}");
+        }
+
+        return PatchDiffArtifact.FromBytes(bytes);
+    }
 }
 
 internal sealed record PatchDiffArtifact(string Text, long Bytes, string Sha256, bool Empty)

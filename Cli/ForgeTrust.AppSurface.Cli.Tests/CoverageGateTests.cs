@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
@@ -1630,6 +1631,19 @@ public sealed class CoverageGateTests
 
         Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
         Assert.Contains("too large", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateArtifactFromBoundedBytes_RejectsBytesThatExceedLimitAfterRead()
+    {
+        var exception = Assert.Throws<CommandException>(
+            () => PatchDiffSource.CreateArtifactFromBoundedBytes(
+                Encoding.UTF8.GetBytes("too large"),
+                4,
+                "--diff-file is too large. Limit is 4 bytes: /tmp/pr.diff"));
+
+        Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--diff-file is too large", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
