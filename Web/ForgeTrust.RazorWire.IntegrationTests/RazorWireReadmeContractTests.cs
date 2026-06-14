@@ -82,12 +82,13 @@ public sealed class RazorWireReadmeContractTests
         Assert.Contains("Docs/hybrid-hosting.md", readme, StringComparison.Ordinal);
         Assert.Contains("Cloud Run live-origin recipe", readme, StringComparison.Ordinal);
         Assert.Contains("razorwire export --mode hybrid", guide, StringComparison.Ordinal);
+        Assert.Contains("## Cloud Run Recipe", guide, StringComparison.Ordinal);
         Assert.Contains("--live-origin https://api.example.com", guide, StringComparison.Ordinal);
         Assert.Contains("--url http://127.0.0.1:5100", guide, StringComparison.Ordinal);
         Assert.Contains("http://127.0.0.1:8011", guide, StringComparison.Ordinal);
         Assert.Contains("options.Hybrid.LiveOrigin = \"https://api.example.com\";", guide, StringComparison.Ordinal);
         Assert.DoesNotContain("options.Hybrid.LiveOrigin = new Uri", guide, StringComparison.Ordinal);
-        Assert.Contains("app.UseCors();", guide, StringComparison.Ordinal);
+        Assert.Contains("app.UseCors(\"StaticSite\");", guide, StringComparison.Ordinal);
         Assert.Contains("app.MapRazorWire();", guide, StringComparison.Ordinal);
         Assert.Contains("appsurface docs export", guide, StringComparison.Ordinal);
         Assert.Contains("--public-origin https://docs.example.com", guide, StringComparison.Ordinal);

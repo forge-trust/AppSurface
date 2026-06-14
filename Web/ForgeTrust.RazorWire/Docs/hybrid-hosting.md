@@ -145,7 +145,7 @@ Install the CORS middleware before mapped endpoints execute, then map RazorWire 
 var app = builder.Build();
 
 app.UseRouting();
-app.UseCors();
+app.UseCors("StaticSite");
 
 app.MapRazorWire();
 ```

@@ -46,6 +46,6 @@ public sealed class RazorWireCliReadmeContractTests
     private static string GetRazorWireCliReadmePath()
     {
         var repositoryRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        return Path.Join(repositoryRoot, "Web", "ForgeTrust.RazorWire.Cli", "README.md");
+        return TestPathUtils.PathUnder(repositoryRoot, "Web", "ForgeTrust.RazorWire.Cli", "README.md");
     }
 }
