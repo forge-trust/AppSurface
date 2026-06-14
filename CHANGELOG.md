@@ -19,6 +19,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs search now keeps MiniSearch candidate matching while applying deterministic reader-intent ranking for exact lookups, aliases, entry points, broad task queries, explicit API/internal filters, and contributor/internal demotion.
 - Evaluators can run `examples/product-readiness-lab` as a report-first product proof, then use the paired Aspire AppHost verifier to exercise Postgres-backed product state while keeping Durable Task worker/client hosting and storage provider setup explicitly host-owned.
 - AppSurface Docs search now preserves multi-word spacing while readers type in the full-page and sidebar search boxes.
+- Package validation now gates redistributed package payload provenance through `packages/third-party-payloads.yml`, package-root notices, generated-first-party evidence, and audited exceptions before prerelease artifacts can pass `verify-packages`.
 
 ## 0.1.0-rc.3 - 2026-06-08
 
