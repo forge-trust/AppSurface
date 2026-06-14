@@ -57,6 +57,7 @@ declare global {
   const popstateBoundFlag = '__rwDocsSearchPopstateBound';
   const mobileFilterListenerBoundFlag = '__rwDocsSearchMobileFilterListenerBound';
   const mobileFilterMedia = window.matchMedia ? window.matchMedia('(max-width: 767px)') : null;
+  const composingSearchInputs = new WeakSet<HTMLInputElement>();
   const productEventNames = {
     docsSearchSubmitted: 'docs.search.submitted',
     docsSearchReturnedZeroResults: 'docs.search.returned_zero_results',
@@ -189,7 +190,8 @@ declare global {
     return {
       input: document.getElementById('docs-search-input') as HTMLInputElement | null,
       results: document.getElementById('docs-search-results'),
-      status: document.getElementById('docs-search-status')
+      status: document.getElementById('docs-search-status'),
+      workspaceLink: document.querySelector('[data-rw-search-workspace-link]') as HTMLAnchorElement | null
     };
   }
 
@@ -535,8 +537,12 @@ declare global {
     return `<span class="docs-page-badge docs-page-badge--${escapeHtml(variant)} docs-search-option-badge">${escapeHtml(label)}</span>`;
   }
 
+  function limitDraftQuery(value) {
+    return String(value ?? '').slice(0, maxQueryLength);
+  }
+
   function normalizeQuery(value) {
-    return String(value ?? '').trim().slice(0, maxQueryLength);
+    return limitDraftQuery(value).trim();
   }
 
   function normalizeFacetValue(value) {
@@ -545,6 +551,59 @@ declare global {
 
   function formatQueryForStatus(value) {
     return normalizeQuery(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ');
+  }
+
+  function isReaderOwnedInput(input) {
+    return input instanceof HTMLInputElement
+      && (document.activeElement === input || composingSearchInputs.has(input));
+  }
+
+  function setInputSelection(input, start, end) {
+    if (typeof start !== 'number' || typeof end !== 'number') {
+      return;
+    }
+
+    try {
+      input.setSelectionRange(Math.min(start, input.value.length), Math.min(end, input.value.length));
+    } catch {
+      // Some input types may not expose selection APIs consistently.
+    }
+  }
+
+  function clampInputDraft(input) {
+    const draft = limitDraftQuery(input.value);
+    if (draft === input.value) {
+      return draft;
+    }
+
+    const selectionStart = input.selectionStart;
+    const selectionEnd = input.selectionEnd;
+    input.value = draft;
+    setInputSelection(input, selectionStart, selectionEnd);
+    return draft;
+  }
+
+  function syncSearchInputValue(input, nextValue, source = 'render') {
+    if (!(input instanceof HTMLInputElement) || input.value === nextValue) {
+      return;
+    }
+
+    if (source !== 'external' && isReaderOwnedInput(input)) {
+      return;
+    }
+
+    input.value = nextValue;
+  }
+
+  function bindSearchInputComposition(input, onCompositionEnd) {
+    input.addEventListener('compositionstart', () => {
+      composingSearchInputs.add(input);
+    });
+
+    input.addEventListener('compositionend', () => {
+      composingSearchInputs.delete(input);
+      onCompositionEnd?.();
+    });
   }
 
   function getErrorMessage(err) {
@@ -1111,6 +1170,10 @@ declare global {
   }
 
   function navigateToSearchPageWithQuery(query) {
+    window.location.assign(createSearchWorkspaceUrl(query));
+  }
+
+  function createSearchWorkspaceUrl(query) {
     const url = new URL(docsSearchUrl, window.location.origin);
     const normalized = normalizeQuery(query);
     if (normalized) {
@@ -1118,7 +1181,15 @@ declare global {
     }
 
     url.hash = searchInputHash;
-    window.location.assign(url.toString());
+    return url.toString();
+  }
+
+  function updateSearchWorkspaceLink(link, query) {
+    if (!(link instanceof HTMLAnchorElement)) {
+      return;
+    }
+
+    link.href = createSearchWorkspaceUrl(query);
   }
 
   function getHighlightTokens(query) {
@@ -1895,7 +1966,7 @@ declare global {
 
   function bindSidebar() {
     const sidebar = getSidebarSearchElements();
-    const { input, results } = sidebar;
+    const { input, results, workspaceLink } = sidebar;
     if (!input || !results) {
       return;
     }
@@ -1909,10 +1980,12 @@ declare global {
     let lastRenderedQuery = '';
 
     const performSearch = debounce(async () => {
-      const query = normalizeQuery(input.value);
-      if (query !== input.value) {
-        input.value = query;
+      if (composingSearchInputs.has(input)) {
+        return;
       }
+
+      const query = normalizeQuery(clampInputDraft(input));
+      updateSearchWorkspaceLink(workspaceLink, query);
 
       if (!query) {
         activeIndex = -1;
@@ -1940,6 +2013,7 @@ declare global {
     }, 120);
 
     input.addEventListener('focus', () => {
+      updateSearchWorkspaceLink(workspaceLink, normalizeQuery(input.value));
       ensureSearchResourcesLoaded().catch((error) => {
         if (normalizeQuery(input.value)) {
           renderSidebarMessage(sidebar, getErrorMessage(error));
@@ -1949,6 +2023,13 @@ declare global {
 
     input.addEventListener('input', () => {
       activeIndex = -1;
+      updateSearchWorkspaceLink(workspaceLink, normalizeQuery(input.value));
+      performSearch();
+    });
+
+    bindSearchInputComposition(input, () => {
+      activeIndex = -1;
+      updateSearchWorkspaceLink(workspaceLink, normalizeQuery(input.value));
       performSearch();
     });
 
@@ -1983,6 +2064,17 @@ declare global {
       } else if (event.key === 'Escape') {
         clearSidebarResults(sidebar);
       }
+    });
+
+    workspaceLink?.addEventListener('click', (event) => {
+      const query = normalizeQuery(input.value);
+      updateSearchWorkspaceLink(workspaceLink, query);
+      if (!isPlainPrimaryClick(event) || !query) {
+        return;
+      }
+
+      event.preventDefault();
+      navigateToSearchPageWithQuery(query);
     });
 
     results.addEventListener('click', (event) => {
@@ -2292,12 +2384,12 @@ declare global {
     renderSearchPageResults(page, view);
   }
 
-  function setSearchPageState(nextState, historyMode = 'replace') {
+  function setSearchPageState(nextState, historyMode = 'replace', options: any = {}) {
     Object.assign(searchPageState, nextState);
 
     const page = getSearchPageElements();
-    if (page.input && searchPageState.q !== page.input.value) {
-      page.input.value = searchPageState.q;
+    if (page.input && options.syncInput !== false) {
+      syncSearchInputValue(page.input, searchPageState.q, options.inputSource);
     }
 
     if (historyMode !== 'none') {
@@ -2342,11 +2434,15 @@ declare global {
     root.setAttribute(searchPageBoundAttribute, '1');
     Object.assign(searchPageState, readSearchPageStateFromUrl());
     searchPageState.loadState = searchData.index ? 'ready' : 'loading';
-    input.value = searchPageState.q;
+    syncSearchInputValue(input, searchPageState.q, 'external');
 
     const onInput = debounce(() => {
-      const query = normalizeQuery(input.value);
-      setSearchPageState({ q: query }, 'replace');
+      if (composingSearchInputs.has(input)) {
+        return;
+      }
+
+      const query = normalizeQuery(clampInputDraft(input));
+      setSearchPageState({ q: query }, 'replace', { syncInput: false });
     }, 140);
 
     input.addEventListener('input', () => {
@@ -2354,6 +2450,15 @@ declare global {
         setSearchPageBusy(page, true);
       }
       onInput();
+    });
+
+    bindSearchInputComposition(input, () => {
+      if (searchData.index) {
+        setSearchPageBusy(page, true);
+      }
+
+      const query = normalizeQuery(clampInputDraft(input));
+      setSearchPageState({ q: query }, 'replace', { syncInput: false });
     });
 
     filters.addEventListener('click', (event) => {
@@ -2505,7 +2610,7 @@ declare global {
 
         event.preventDefault();
         const query = normalizeQuery(button.dataset.rwSearchSuggestion);
-        setSearchPageState({ q: query }, 'push');
+        setSearchPageState({ q: query }, 'push', { inputSource: 'external' });
         input.focus();
         input.select?.();
       });
@@ -2528,7 +2633,7 @@ declare global {
           ? 'ready'
           : (searchData.loadPromise ? 'loading' : 'error');
         if (nextPage.input) {
-          nextPage.input.value = searchPageState.q;
+          syncSearchInputValue(nextPage.input, searchPageState.q, 'external');
         }
         renderSearchPage();
       });
