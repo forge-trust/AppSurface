@@ -27,7 +27,26 @@ public sealed class AppSurfaceProductIntelligenceDispatcherTests
 
         Assert.Throws<ArgumentNullException>(() => new AppSurfaceProductIntelligenceDispatcher(
             Options.Create(new AppSurfaceProductIntelligenceOptions()),
+            null!,
+            Array.Empty<IAppSurfaceProductIntelligenceSink>()));
+
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceProductIntelligenceDispatcher(
+            Options.Create(new AppSurfaceProductIntelligenceOptions()),
+            new TestRegistry(),
             null!));
+    }
+
+    [Fact]
+    public async Task CaptureAsync_TwoArgumentConstructor_UsesBuiltInRegistry()
+    {
+        var sink = new RecordingSink();
+        var dispatcher = new AppSurfaceProductIntelligenceDispatcher(
+            Options.Create(new AppSurfaceProductIntelligenceOptions().EnableExperimentalEvents()),
+            [sink]);
+
+        await dispatcher.CaptureAsync(CreateStreamRejectedEvent());
+
+        Assert.Single(sink.Events);
     }
 
     [Fact]
@@ -212,6 +231,126 @@ public sealed class AppSurfaceProductIntelligenceDispatcherTests
     }
 
     [Fact]
+    public async Task CaptureAsync_CustomStableContract_EmitsByRegistration()
+    {
+        var sink = new RecordingSink();
+        using var provider = CreateServices(
+            services => services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink),
+            options => options.RegisterEventContracts(CreateSkoolieContract(AppSurfaceProductEventLifecycle.Stable)));
+        var intelligence = provider.GetRequiredService<IAppSurfaceProductIntelligence>();
+
+        await intelligence.CaptureAsync(CreateSkoolieEvent());
+
+        var captured = Assert.Single(sink.Events);
+        Assert.Equal("skoolie.card.generated", captured.Name);
+        Assert.Equal("3", captured.Properties["attachment_count"]);
+        Assert.Equal("queued", captured.Properties["delivery_state"]);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_CustomExperimentalContract_RequiresAllowlist()
+    {
+        var sink = new RecordingSink();
+        using var provider = CreateServices(
+            services => services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink),
+            options => options.RegisterEventContracts(CreateSkoolieContract(AppSurfaceProductEventLifecycle.Experimental)));
+        var intelligence = provider.GetRequiredService<IAppSurfaceProductIntelligence>();
+
+        await intelligence.CaptureAsync(CreateSkoolieEvent());
+
+        Assert.Empty(sink.Events);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_CustomExperimentalContract_EmitsWhenAllowlisted()
+    {
+        var sink = new RecordingSink();
+        using var provider = CreateServices(
+            services => services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink),
+            options => options
+                .RegisterEventContracts(CreateSkoolieContract(AppSurfaceProductEventLifecycle.Experimental))
+                .EnableExperimentalEvents("skoolie.card.generated"));
+        var intelligence = provider.GetRequiredService<IAppSurfaceProductIntelligence>();
+
+        await intelligence.CaptureAsync(CreateSkoolieEvent());
+
+        Assert.Single(sink.Events);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_ThrowOnInvalidEvents_ThrowsSafeExceptionForUnknownEvents()
+    {
+        var sink = new RecordingSink();
+        using var provider = CreateServices(
+            services => services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink),
+            options => options.ThrowOnInvalidEvents());
+        var intelligence = provider.GetRequiredService<IAppSurfaceProductIntelligence>();
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceProductEventValidationException>(
+            async () => await intelligence.CaptureAsync(
+                new AppSurfaceProductEvent(
+                    "skoolie.card.generated",
+                    DateTimeOffset.UnixEpoch,
+                    new Dictionary<string, string>
+                    {
+                        ["recipient"] = "andrew@example.test",
+                        ["token"] = "token=secret-value"
+                    })));
+
+        Assert.Equal("skoolie.card.generated", exception.EventName);
+        Assert.Contains(AppSurfaceProductEventValidationFailureReason.EventNotRegistered, exception.ReasonCodes);
+        Assert.Contains("Register", exception.FixHint, StringComparison.Ordinal);
+        Assert.DoesNotContain("andrew@example.test", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-value", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(sink.Events);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_ThrowOnInvalidEvents_ScrubsUnsafeEventNames()
+    {
+        var sink = new RecordingSink();
+        using var provider = CreateServices(
+            services => services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink),
+            options => options.ThrowOnInvalidEvents());
+        var intelligence = provider.GetRequiredService<IAppSurfaceProductIntelligence>();
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceProductEventValidationException>(
+            async () => await intelligence.CaptureAsync(
+                new AppSurfaceProductEvent("child@example.test", DateTimeOffset.UnixEpoch)));
+
+        Assert.Equal("[unsafe-property-name]", exception.EventName);
+        Assert.Contains("[unsafe-property-name]", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("child@example.test", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_ThrowOnInvalidEvents_DoesNotThrowForSanitizedOptionalProperties()
+    {
+        var sink = new RecordingSink();
+        using var provider = CreateServices(
+            services => services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sink),
+            options => options
+                .RegisterEventContracts(CreateSkoolieContract(AppSurfaceProductEventLifecycle.Stable))
+                .ThrowOnInvalidEvents());
+        var intelligence = provider.GetRequiredService<IAppSurfaceProductIntelligence>();
+
+        await intelligence.CaptureAsync(
+            new AppSurfaceProductEvent(
+                "skoolie.card.generated",
+                DateTimeOffset.UnixEpoch,
+                new Dictionary<string, string>
+                {
+                    ["launch_surface"] = "dashboard",
+                    ["attachment_count"] = "3",
+                    ["delivery_state"] = "queued",
+                    ["raw_child_email"] = "child@example.test"
+                }));
+
+        var captured = Assert.Single(sink.Events);
+        Assert.DoesNotContain("raw_child_email", captured.Properties.Keys);
+    }
+
+    [Fact]
     public async Task CaptureAsync_SinkFailure_DoesNotBreakRequestPath()
     {
         var recordingSink = new RecordingSink();
@@ -332,6 +471,53 @@ public sealed class AppSurfaceProductIntelligenceDispatcherTests
             });
     }
 
+    private static AppSurfaceProductEventContract CreateSkoolieContract(AppSurfaceProductEventLifecycle lifecycle)
+    {
+        return new AppSurfaceProductEventContract(
+            "skoolie.card.generated",
+            lifecycle,
+            "Measure whether launch-card generation moves safely into send review.",
+            "Skoolie",
+            "Short launch-quality retention; aggregate before long-term storage.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    "launch_surface",
+                    "Host-owned surface that generated the card.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low,
+                    required: true,
+                    valueShape: AppSurfaceProductEventValueShape.Token),
+                new AppSurfaceProductEventPropertyContract(
+                    "attachment_count",
+                    "Number of safe launch artifacts attached to the generated card.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Medium,
+                    valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                new AppSurfaceProductEventPropertyContract(
+                    "delivery_state",
+                    "Normalized downstream state.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low,
+                    required: true,
+                    allowedValues: ["queued", "sent"],
+                    valueShape: AppSurfaceProductEventValueShape.AllowedValue)
+            ],
+            ["child identity", "email body", "raw attachment"]);
+    }
+
+    private static AppSurfaceProductEvent CreateSkoolieEvent()
+    {
+        return new AppSurfaceProductEvent(
+            "skoolie.card.generated",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["launch_surface"] = "dashboard",
+                ["attachment_count"] = "003",
+                ["delivery_state"] = "queued"
+            });
+    }
+
     private sealed class RecordingSink : IAppSurfaceProductIntelligenceSink
     {
         public List<AppSurfaceProductEvent> Events { get; } = [];
@@ -342,6 +528,23 @@ public sealed class AppSurfaceProductIntelligenceDispatcherTests
         {
             Events.Add(productEvent);
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class TestRegistry : IAppSurfaceProductEventRegistry
+    {
+        public IReadOnlyList<AppSurfaceProductEventContract> All => AppSurfaceProductEventRegistry.All;
+
+        public IReadOnlySet<string> ForbiddenProperties => AppSurfaceProductEventRegistry.ForbiddenProperties;
+
+        public AppSurfaceProductEventContract? Find(string name)
+        {
+            return AppSurfaceProductEventRegistry.Find(name);
+        }
+
+        public AppSurfaceProductEventValidationResult Validate(AppSurfaceProductEvent productEvent)
+        {
+            return AppSurfaceProductEventRegistry.Validate(productEvent);
         }
     }
 

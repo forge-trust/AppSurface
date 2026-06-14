@@ -15,6 +15,9 @@ public sealed class AppSurfaceProductEventContract
     /// <param name="retentionExpectation">Expected retention class for downstream sinks.</param>
     /// <param name="properties">Allowed property schema.</param>
     /// <param name="forbiddenExamples">Examples of values or property shapes that must not be captured.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="lifecycle" /> is not a defined <see cref="AppSurfaceProductEventLifecycle" /> value.
+    /// </exception>
     public AppSurfaceProductEventContract(
         string name,
         AppSurfaceProductEventLifecycle lifecycle,
@@ -24,6 +27,14 @@ public sealed class AppSurfaceProductEventContract
         IEnumerable<AppSurfaceProductEventPropertyContract> properties,
         IEnumerable<string> forbiddenExamples)
     {
+        if (!Enum.IsDefined(lifecycle))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(lifecycle),
+                lifecycle,
+                "Lifecycle must be a defined product-event lifecycle value.");
+        }
+
         Name = AppSurfaceProductEventMetadata.RequireIdentifier(name, nameof(name));
         Lifecycle = lifecycle;
         Purpose = AppSurfaceProductEventMetadata.RequireText(purpose, nameof(purpose));

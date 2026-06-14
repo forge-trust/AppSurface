@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace ForgeTrust.AppSurface.Intelligence;
 
 /// <summary>
@@ -136,10 +134,10 @@ public static class AppSurfaceProductEventRegistry
             "ForgeTrust.AppSurface.Docs",
             "Short product-quality retention; aggregate before long-term storage.",
             [
-                Property("query_length", "Normalized character count for the submitted search text.", AppSurfaceProductEventSensitivity.Behavioral, AppSurfaceProductEventCardinality.Medium),
-                Property("result_count", "Number of safe docs results returned to the reader.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Medium),
-                Property("active_filter_count", "Number of active structured search filters.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low),
-                Property("surface", "Docs surface that emitted the event, such as sidebar or search_page.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces)
+                Property("query_length", "Normalized character count for the submitted search text.", AppSurfaceProductEventSensitivity.Behavioral, AppSurfaceProductEventCardinality.Medium, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                Property("result_count", "Number of safe docs results returned to the reader.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Medium, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                Property("active_filter_count", "Number of active structured search filters.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                Property("surface", "Docs surface that emitted the event, such as sidebar or search_page.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces, valueShape: AppSurfaceProductEventValueShape.AllowedValue)
             ],
             ["raw query text", "request body", "full result URL", "reader identity"]),
         new(
@@ -149,9 +147,9 @@ public static class AppSurfaceProductEventRegistry
             "ForgeTrust.AppSurface.Docs",
             "Short product-quality retention; aggregate before long-term storage.",
             [
-                Property("query_length", "Normalized character count for the submitted search text.", AppSurfaceProductEventSensitivity.Behavioral, AppSurfaceProductEventCardinality.Medium),
-                Property("active_filter_count", "Number of active structured search filters.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low),
-                Property("surface", "Docs surface that emitted the event, such as sidebar or search_page.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces)
+                Property("query_length", "Normalized character count for the submitted search text.", AppSurfaceProductEventSensitivity.Behavioral, AppSurfaceProductEventCardinality.Medium, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                Property("active_filter_count", "Number of active structured search filters.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                Property("surface", "Docs surface that emitted the event, such as sidebar or search_page.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces, valueShape: AppSurfaceProductEventValueShape.AllowedValue)
             ],
             ["raw query text", "request body", "full filter values that contain user input"]),
         new(
@@ -161,9 +159,9 @@ public static class AppSurfaceProductEventRegistry
             "ForgeTrust.AppSurface.Docs",
             "Short product-quality retention; aggregate by result kind rather than full URL when possible.",
             [
-                Property("result_rank", "One-based rank of the selected result.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Medium),
-                Property("result_kind", "Normalized page type or fallback result kind.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: DocsResultKinds),
-                Property("surface", "Docs surface that emitted the event, such as sidebar or search_page.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces)
+                Property("result_rank", "One-based rank of the selected result.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Medium, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                Property("result_kind", "Normalized page type or fallback result kind.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: DocsResultKinds, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("surface", "Docs surface that emitted the event, such as sidebar or search_page.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces, valueShape: AppSurfaceProductEventValueShape.AllowedValue)
             ],
             ["raw query text", "full URL with query string", "document body"]),
         new(
@@ -173,9 +171,9 @@ public static class AppSurfaceProductEventRegistry
             "ForgeTrust.AppSurface.Docs",
             "Short product-quality retention; aggregate by link kind and source state.",
             [
-                Property("link_kind", "Normalized recovery-link kind, such as guide, api-reference, example, or fallback.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsRecoveryLinkKinds),
-                Property("source_state", "State that rendered the recovery path, such as no_results, loading, or unavailable.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsRecoverySourceStates),
-                Property("surface", "Docs surface that emitted the event.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces)
+                Property("link_kind", "Normalized recovery-link kind, such as guide, api-reference, example, or fallback.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsRecoveryLinkKinds, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("source_state", "State that rendered the recovery path, such as no_results, loading, or unavailable.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsRecoverySourceStates, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("surface", "Docs surface that emitted the event.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces, valueShape: AppSurfaceProductEventValueShape.AllowedValue)
             ],
             ["raw query text", "full URL with query string", "reader identity"]),
         new(
@@ -185,11 +183,11 @@ public static class AppSurfaceProductEventRegistry
             "ForgeTrust.AppSurface.Docs",
             "Short product-quality retention; aggregate by filter key and action.",
             [
-                Property("surface", "Docs surface that emitted the event.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces),
-                Property("filter_key", "Structured filter key changed by the reader.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsFilterKeys),
-                Property("filter_action", "Low-cardinality filter action such as selected, cleared, or cleared_all.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsFilterActions),
-                Property("active_filter_count", "Number of active structured search filters after the change.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low),
-                Property("query_length", "Normalized character count for the active search text.", AppSurfaceProductEventSensitivity.Behavioral, AppSurfaceProductEventCardinality.Medium)
+                Property("surface", "Docs surface that emitted the event.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("filter_key", "Structured filter key changed by the reader.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsFilterKeys, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("filter_action", "Low-cardinality filter action such as selected, cleared, or cleared_all.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsFilterActions, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("active_filter_count", "Number of active structured search filters after the change.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                Property("query_length", "Normalized character count for the active search text.", AppSurfaceProductEventSensitivity.Behavioral, AppSurfaceProductEventCardinality.Medium, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger)
             ],
             ["raw query text", "filter values", "full URL", "reader identity"]),
         new(
@@ -199,12 +197,12 @@ public static class AppSurfaceProductEventRegistry
             "ForgeTrust.AppSurface.Docs",
             "Short product-quality retention; aggregate by source state and feedback value.",
             [
-                Property("surface", "Docs surface that emitted the event.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces),
-                Property("source_state", "Search-friction state that rendered the feedback control.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsRecoverySourceStates),
-                Property("feedback_value", "Reader feedback value for the recovery affordance.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsFrictionFeedbackValues),
-                Property("active_filter_count", "Number of active structured search filters at feedback time.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low),
-                Property("query_length", "Normalized character count for the active search text.", AppSurfaceProductEventSensitivity.Behavioral, AppSurfaceProductEventCardinality.Medium),
-                Property("link_kind", "Optional normalized recovery-link kind shown with the feedback control.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: DocsRecoveryLinkKinds)
+                Property("surface", "Docs surface that emitted the event.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsSurfaces, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("source_state", "Search-friction state that rendered the feedback control.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsRecoverySourceStates, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("feedback_value", "Reader feedback value for the recovery affordance.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: DocsFrictionFeedbackValues, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("active_filter_count", "Number of active structured search filters at feedback time.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                Property("query_length", "Normalized character count for the active search text.", AppSurfaceProductEventSensitivity.Behavioral, AppSurfaceProductEventCardinality.Medium, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                Property("link_kind", "Optional normalized recovery-link kind shown with the feedback control.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: DocsRecoveryLinkKinds, valueShape: AppSurfaceProductEventValueShape.AllowedValue)
             ],
             ["raw query text", "free-form comments", "full URL", "reader identity"]),
         new(
@@ -214,10 +212,10 @@ public static class AppSurfaceProductEventRegistry
             "ForgeTrust.RazorWire",
             "Short framework-quality retention; avoid retaining host form identifiers.",
             [
-                Property("failure_mode", "Whether RazorWire handled the failure response before surfacing failure UX.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: RazorWireFailureModes),
-                Property("http_status", "HTTP status code when available.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low),
-                Property("response_kind", "Normalized response kind such as turbo-stream, html, json, unknown, or network.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: RazorWireResponseKinds),
-                Property("failure_ui", "Failure UX outcome such as generated, handled, suppressed, or disabled.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: RazorWireFailureUi)
+                Property("failure_mode", "Whether RazorWire handled the failure response before surfacing failure UX.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: RazorWireFailureModes, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("http_status", "HTTP status code when available.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                Property("response_kind", "Normalized response kind such as turbo-stream, html, json, unknown, or network.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: RazorWireResponseKinds, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("failure_ui", "Failure UX outcome such as generated, handled, suppressed, or disabled.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: RazorWireFailureUi, valueShape: AppSurfaceProductEventValueShape.AllowedValue)
             ],
             ["form field values", "request body", "anti-forgery token", "stack trace"]),
         new(
@@ -227,8 +225,8 @@ public static class AppSurfaceProductEventRegistry
             "ForgeTrust.RazorWire",
             "Short framework-quality retention; aggregate by recovery action.",
             [
-                Property("recovery_action", "Normalized recovery action such as retry_submit or next_success.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: RazorWireRecoveryActions),
-                Property("attempt_count", "Small count of attempts observed by the runtime.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low)
+                Property("recovery_action", "Normalized recovery action such as retry_submit or next_success.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: RazorWireRecoveryActions, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("attempt_count", "Small count of attempts observed by the runtime.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger)
             ],
             ["form field values", "request body", "anti-forgery token", "stack trace"]),
         new(
@@ -238,10 +236,10 @@ public static class AppSurfaceProductEventRegistry
             "ForgeTrust.RazorWire",
             "Short framework-quality retention; aggregate by rejection reason and limit name.",
             [
-                Property("rejection_reason", "RazorWire stream admission rejection reason.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: RazorWireAdmissionReasons),
-                Property("limit_name", "Normalized limit that caused the rejection.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: RazorWireAdmissionLimits),
-                Property("current_count", "Current count or input length that tripped the limit.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Medium),
-                Property("authorization_mode", "Configured stream authorization mode.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: RazorWireAuthorizationModes)
+                Property("rejection_reason", "RazorWire stream admission rejection reason.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: RazorWireAdmissionReasons, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("limit_name", "Normalized limit that caused the rejection.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, required: true, allowedValues: RazorWireAdmissionLimits, valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                Property("current_count", "Current count or input length that tripped the limit.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Medium, valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                Property("authorization_mode", "Configured stream authorization mode.", AppSurfaceProductEventSensitivity.Operational, AppSurfaceProductEventCardinality.Low, allowedValues: RazorWireAuthorizationModes, valueShape: AppSurfaceProductEventValueShape.AllowedValue)
             ],
             ["channel name", "route value", "user id", "email", "authorization token"])
     ];
@@ -283,63 +281,10 @@ public static class AppSurfaceProductEventRegistry
     {
         ArgumentNullException.ThrowIfNull(productEvent);
 
-        if (!ContractsByName.TryGetValue(productEvent.Name, out var contract))
-        {
-            return new AppSurfaceProductEventValidationResult(
-                null,
-                isValid: false,
-                sanitizedProperties: new Dictionary<string, string>(),
-                rejectedProperties: [],
-                diagnostics: ["Event name is not registered in the AppSurface product-intelligence registry."]);
-        }
-
-        var allowedProperties = contract.Properties.ToDictionary(property => property.Name, StringComparer.Ordinal);
-        var sanitized = new Dictionary<string, string>(StringComparer.Ordinal);
-        var rejected = new List<string>();
-        var diagnostics = new List<string>();
-
-        foreach (var (key, value) in productEvent.Properties)
-        {
-            if (!allowedProperties.TryGetValue(key, out var property))
-            {
-                rejected.Add(key);
-                diagnostics.Add($"Property '{key}' is not registered for event '{contract.Name}'.");
-                continue;
-            }
-
-            if (ForbiddenPropertyNames.Contains(key))
-            {
-                rejected.Add(key);
-                diagnostics.Add($"Property '{key}' uses a globally forbidden property name.");
-                continue;
-            }
-
-            if (!TrySanitizePropertyValue(property, value, out var sanitizedValue, out var diagnostic))
-            {
-                rejected.Add(key);
-                diagnostics.Add(diagnostic);
-                continue;
-            }
-
-            sanitized[key] = sanitizedValue;
-        }
-
-        var missingRequired = contract.Properties
-            .Where(property => property.Required && !sanitized.ContainsKey(property.Name))
-            .Select(property => property.Name)
-            .ToArray();
-
-        foreach (var property in missingRequired)
-        {
-            diagnostics.Add($"Required property '{property}' is missing for event '{contract.Name}'.");
-        }
-
-        return new AppSurfaceProductEventValidationResult(
-            contract,
-            isValid: missingRequired.Length == 0,
-            sanitizedProperties: sanitized,
-            rejectedProperties: rejected,
-            diagnostics: diagnostics);
+        return AppSurfaceProductEventValidationEngine.Validate(
+            productEvent,
+            ContractsByName,
+            ForbiddenPropertyNames);
     }
 
     private static AppSurfaceProductEventPropertyContract Property(
@@ -349,98 +294,17 @@ public static class AppSurfaceProductEventRegistry
         AppSurfaceProductEventCardinality cardinality,
         bool required = false,
         IEnumerable<string>? allowedValues = null,
-        int maxLength = 64)
+        int maxLength = 64,
+        AppSurfaceProductEventValueShape valueShape = AppSurfaceProductEventValueShape.Token)
     {
         return new AppSurfaceProductEventPropertyContract(
             name,
             description,
             sensitivity,
             cardinality,
-            required,
-            allowedValues,
-            maxLength);
-    }
-
-    private static bool TrySanitizePropertyValue(
-        AppSurfaceProductEventPropertyContract property,
-        string rawValue,
-        out string sanitizedValue,
-        out string diagnostic)
-    {
-        sanitizedValue = string.Empty;
-        diagnostic = string.Empty;
-        var value = AppSurfaceProductEventMetadata.NormalizeOptionalText(rawValue);
-        if (value is null)
-        {
-            diagnostic = $"Property '{property.Name}' has an empty value.";
-            return false;
-        }
-
-        if (AppSurfaceProductEventMetadata.ContainsForbiddenValueShape(value))
-        {
-            diagnostic = $"Property '{property.Name}' contains a forbidden value shape.";
-            return false;
-        }
-
-        if (IsNonNegativeIntegerProperty(property.Name))
-        {
-            if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) || parsed < 0)
-            {
-                diagnostic = $"Property '{property.Name}' must be a non-negative integer.";
-                return false;
-            }
-
-            sanitizedValue = parsed.ToString(CultureInfo.InvariantCulture);
-            return true;
-        }
-
-        if (value.Length > property.MaxLength)
-        {
-            diagnostic = $"Property '{property.Name}' exceeds the maximum allowed value length.";
-            return false;
-        }
-
-        if (property.AllowedValues.Count > 0
-            && !property.AllowedValues.Contains(value, StringComparer.Ordinal))
-        {
-            diagnostic = $"Property '{property.Name}' value is not in the registered allowed-value set.";
-            return false;
-        }
-
-        if (property.Cardinality == AppSurfaceProductEventCardinality.Low && !IsSafeTokenValue(value))
-        {
-            diagnostic = $"Property '{property.Name}' must be a bounded token value.";
-            return false;
-        }
-
-        sanitizedValue = value;
-        return true;
-    }
-
-    private static bool IsNonNegativeIntegerProperty(string propertyName)
-    {
-        return propertyName is "active_filter_count"
-            or "attempt_count"
-            or "current_count"
-            or "http_status"
-            or "query_length"
-            or "result_count"
-            or "result_rank";
-    }
-
-    private static bool IsSafeTokenValue(string value)
-    {
-        foreach (var character in value)
-        {
-            if (char.IsAsciiLetterOrDigit(character)
-                || character is '-' or '_' or '.' or ':')
-            {
-                continue;
-            }
-
-            return false;
-        }
-
-        return true;
+            valueShape,
+            required: required,
+            allowedValues: allowedValues,
+            maxLength: maxLength);
     }
 }

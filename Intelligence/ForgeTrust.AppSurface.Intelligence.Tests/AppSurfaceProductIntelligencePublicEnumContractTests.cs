@@ -4,6 +4,23 @@ namespace ForgeTrust.AppSurface.Intelligence.Tests;
 
 public sealed class AppSurfaceProductIntelligencePublicEnumContractTests
 {
+    [Fact]
+    public void AppSurfaceProductEventPropertyContract_LegacyConstructorSignature_IsPreserved()
+    {
+        var constructor = typeof(AppSurfaceProductEventPropertyContract).GetConstructor(
+            [
+                typeof(string),
+                typeof(string),
+                typeof(AppSurfaceProductEventSensitivity),
+                typeof(AppSurfaceProductEventCardinality),
+                typeof(bool),
+                typeof(IEnumerable<string>),
+                typeof(int)
+            ]);
+
+        Assert.NotNull(constructor);
+    }
+
     [Theory]
     [InlineData(AppSurfaceProductEventLifecycle.Experimental, 0)]
     [InlineData(AppSurfaceProductEventLifecycle.Recommended, 1)]
@@ -33,6 +50,33 @@ public sealed class AppSurfaceProductIntelligencePublicEnumContractTests
     [InlineData(AppSurfaceProductEventSensitivity.Sensitive, 2)]
     public void AppSurfaceProductEventSensitivity_NumericValues_AreStable(
         AppSurfaceProductEventSensitivity value,
+        int expected)
+    {
+        Assert.Equal(expected, (int)value);
+    }
+
+    [Theory]
+    [InlineData(AppSurfaceProductEventValueShape.Token, 0)]
+    [InlineData(AppSurfaceProductEventValueShape.BoundedText, 1)]
+    [InlineData(AppSurfaceProductEventValueShape.NonNegativeInteger, 2)]
+    [InlineData(AppSurfaceProductEventValueShape.Boolean, 3)]
+    [InlineData(AppSurfaceProductEventValueShape.AllowedValue, 4)]
+    public void AppSurfaceProductEventValueShape_NumericValues_AreStable(
+        AppSurfaceProductEventValueShape value,
+        int expected)
+    {
+        Assert.Equal(expected, (int)value);
+    }
+
+    [Theory]
+    [InlineData(AppSurfaceProductEventValidationFailureReason.EventNotRegistered, 0)]
+    [InlineData(AppSurfaceProductEventValidationFailureReason.PropertyNotRegistered, 1)]
+    [InlineData(AppSurfaceProductEventValidationFailureReason.ForbiddenPropertyName, 2)]
+    [InlineData(AppSurfaceProductEventValidationFailureReason.InvalidPropertyValue, 3)]
+    [InlineData(AppSurfaceProductEventValidationFailureReason.RequiredPropertyMissing, 4)]
+    [InlineData(AppSurfaceProductEventValidationFailureReason.ExperimentalEventNotEnabled, 5)]
+    public void AppSurfaceProductEventValidationFailureReason_NumericValues_AreStable(
+        AppSurfaceProductEventValidationFailureReason value,
         int expected)
     {
         Assert.Equal(expected, (int)value);
