@@ -44,6 +44,8 @@ public sealed class AppSurfaceLocalSecretResultContractTests
         var failed = AppSurfaceLocalSecretListResult.Failed(LocalSecretResultStatus.Locked, diagnostic, "Fixed");
 
         Assert.Empty(failed.Keys);
+        Assert.Same(diagnostic, failed.Diagnostic);
+        Assert.Equal("Fixed", failed.Source);
         Assert.Equal(diagnostic.ToDisplayString(), diagnostic.ToString());
         Assert.Contains("local-secret-test", diagnostic.ToString(), StringComparison.Ordinal);
     }

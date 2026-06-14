@@ -6,7 +6,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void SetGetListDelete_Should_WorkWithoutPrintingSecretInResults()
     {
         using var temp = TempDirectory.Create();
-        var store = new FileAppSurfaceLocalSecretStore(Path.Combine(temp.Path, "secrets.json"));
+        var store = new FileAppSurfaceLocalSecretStore(Path.Join(temp.Path, "secrets.json"));
         var identity = new AppSurfaceLocalSecretIdentityNormalizer()
             .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
             .Identity!;
@@ -30,7 +30,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void Delete_Should_ReturnMissing_WhenKeyDoesNotExist()
     {
         using var temp = TempDirectory.Create();
-        var store = new FileAppSurfaceLocalSecretStore(Path.Combine(temp.Path, "secrets.json"));
+        var store = new FileAppSurfaceLocalSecretStore(Path.Join(temp.Path, "secrets.json"));
         var identity = new AppSurfaceLocalSecretIdentityNormalizer()
             .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
             .Identity!;
@@ -44,7 +44,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void Doctor_Should_CreateFileAndReturnReadyDiagnostic()
     {
         using var temp = TempDirectory.Create();
-        var path = Path.Combine(temp.Path, "nested", "secrets.json");
+        var path = Path.Join(temp.Path, "nested", "secrets.json");
         var store = new FileAppSurfaceLocalSecretStore(path);
 
         var result = store.Doctor("MyApp", "Development", null);
@@ -59,14 +59,14 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     {
         var path = FileAppSurfaceLocalSecretStore.GetDefaultPath();
 
-        Assert.EndsWith(Path.Combine("AppSurface", "local-secrets.json"), path, StringComparison.Ordinal);
+        Assert.EndsWith(Path.Join("AppSurface", "local-secrets.json"), path, StringComparison.Ordinal);
     }
 
     [Fact]
     public void List_Should_FilterByPrefixAndReturnEmptyForNullJsonDocument()
     {
         using var temp = TempDirectory.Create();
-        var path = Path.Combine(temp.Path, "secrets.json");
+        var path = Path.Join(temp.Path, "secrets.json");
         var store = new FileAppSurfaceLocalSecretStore(path);
         var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
         store.Set(normalizer.Normalize("MyApp", "Development", "Payments", "Stripe:ApiKey").Identity!, "stripe");
@@ -86,7 +86,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void Get_Should_ThrowPasteSafeException_WhenFileContainsInvalidJson()
     {
         using var temp = TempDirectory.Create();
-        var path = Path.Combine(temp.Path, "secrets.json");
+        var path = Path.Join(temp.Path, "secrets.json");
         File.WriteAllText(path, "{not-json: raw-secret}");
         var store = new FileAppSurfaceLocalSecretStore(path);
         var identity = new AppSurfaceLocalSecretIdentityNormalizer()
@@ -110,7 +110,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         public static TempDirectory Create()
         {
-            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"appsurface-local-secrets-{Guid.NewGuid():N}");
+            var path = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"appsurface-local-secrets-{Guid.NewGuid():N}");
             Directory.CreateDirectory(path);
             return new TempDirectory(path);
         }

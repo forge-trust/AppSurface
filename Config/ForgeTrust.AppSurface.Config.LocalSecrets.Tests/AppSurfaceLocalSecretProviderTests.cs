@@ -260,6 +260,8 @@ public sealed class AppSurfaceLocalSecretProviderTests
             manager.GetValue<string>("Development", "Stripe:ApiKey"));
 
         Assert.Equal("local-secret-store-locked", exception.Diagnostic.Code);
+        Assert.Equal("Development", exception.EnvironmentName);
+        Assert.Equal(nameof(AppSurfaceLocalSecretProvider), exception.ProviderName);
         Assert.False(fileProvider.WasCalled);
     }
 

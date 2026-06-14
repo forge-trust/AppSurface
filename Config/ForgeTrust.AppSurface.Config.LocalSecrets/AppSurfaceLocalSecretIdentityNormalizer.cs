@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text;
 
@@ -179,6 +180,8 @@ public sealed class AppSurfaceLocalSecretIdentityNormalizer
         return $"appsurface:{app}:{environment}:{logicalKey}";
     }
 
+    [ExcludeFromCodeCoverage(
+        Justification = "Entry assembly and current directory fallback paths depend on the hosting process; explicit application-name normalization is covered deterministically.")]
     private static string InferApplicationName()
     {
         var entryName = Assembly.GetEntryAssembly()?.GetName().Name;

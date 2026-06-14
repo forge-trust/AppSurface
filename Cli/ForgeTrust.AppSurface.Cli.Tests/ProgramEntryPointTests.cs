@@ -66,7 +66,7 @@ public sealed class ProgramEntryPointTests
     public async Task SecretsCommands_Should_Set_List_Get_And_Delete_Without_PrintingSecretValue()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");
-        var storePath = Path.Combine(temp.Path, "local-secrets.json");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
         var shared = new[] { "--app", "MyApp", "--environment", "Development", "--store-file", storePath };
 
         var init = await InvokeProgramEntryPointAsync(["secrets", "init", .. shared]);
@@ -89,7 +89,7 @@ public sealed class ProgramEntryPointTests
     public async Task SecretsDoctorCommand_Should_RenderReadyDiagnosticWithoutPrintingSecretValue()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");
-        var storePath = Path.Combine(temp.Path, "local-secrets.json");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
 
         var result = await InvokeProgramEntryPointAsync(
             ["secrets", "doctor", "--app", "MyApp", "--environment", "Development", "--store-file", storePath]);
@@ -104,7 +104,7 @@ public sealed class ProgramEntryPointTests
     public async Task SecretsSetCommand_Should_RejectConflictingValueSources()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");
-        var storePath = Path.Combine(temp.Path, "local-secrets.json");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
 
         var result = await InvokeProgramEntryPointAsync(
             ["secrets", "set", "Stripe:ApiKey", "--value", "sk_test_secret", "--stdin", "--store-file", storePath],
@@ -120,7 +120,7 @@ public sealed class ProgramEntryPointTests
     public async Task SecretsSetCommand_Should_RejectMissingValue()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");
-        var storePath = Path.Combine(temp.Path, "local-secrets.json");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
 
         var result = await InvokeProgramEntryPointAsync(
             ["secrets", "set", "Stripe:ApiKey", "--store-file", storePath]);
@@ -133,7 +133,7 @@ public sealed class ProgramEntryPointTests
     public async Task SecretsGetCommand_Should_ReturnPasteSafeFailure_WhenSecretIsMissing()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");
-        var storePath = Path.Combine(temp.Path, "local-secrets.json");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
 
         var result = await InvokeProgramEntryPointAsync(
             ["secrets", "get", "Stripe:ApiKey", "--store-file", storePath]);
@@ -147,7 +147,7 @@ public sealed class ProgramEntryPointTests
     public async Task SecretsCommand_Should_ReturnIdentityDiagnostic_WhenNamespaceIsInvalid()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");
-        var storePath = Path.Combine(temp.Path, "local-secrets.json");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
 
         var result = await InvokeProgramEntryPointAsync(
             ["secrets", "init", "--app", "Bad/App", "--store-file", storePath]);
@@ -160,7 +160,7 @@ public sealed class ProgramEntryPointTests
     public async Task SecretsCommand_Should_ReturnIdentityDiagnostic_WhenKeyIsInvalid()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");
-        var storePath = Path.Combine(temp.Path, "local-secrets.json");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
 
         var result = await InvokeProgramEntryPointAsync(
             ["secrets", "get", "Stripe\nApiKey", "--store-file", storePath]);

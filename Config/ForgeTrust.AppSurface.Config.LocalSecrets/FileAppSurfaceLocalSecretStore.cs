@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.Config.LocalSecrets;
@@ -35,15 +36,17 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
     /// Gets the default per-user AppSurface local secret file path.
     /// </summary>
     /// <returns>A path under the user's local application data directory.</returns>
+    [ExcludeFromCodeCoverage(
+        Justification = "Special-folder fallback depends on host OS profile state; constructor and file-store behavior are covered with deterministic paths.")]
     public static string GetDefaultPath()
     {
         var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(root))
         {
-            root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".appsurface");
+            root = Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".appsurface");
         }
 
-        return Path.Combine(root, "AppSurface", "local-secrets.json");
+        return Path.Join(root, "AppSurface", "local-secrets.json");
     }
 
     /// <inheritdoc />
