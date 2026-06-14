@@ -134,7 +134,7 @@ Artifacts are local and private by default:
 
 `coverage run` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, the solution directory, test project directories, files, and populated directories that do not carry the AppSurface ownership marker. Use a dedicated artifact directory for CI, for example `TestResults/coverage-merged`.
 
-`coverage run` and `coverage gate` are the supported CLI coverage surfaces. Standalone `coverage merge`, grouped CLI execution, merge-only CLI compatibility, packaged local-tool CI proof, and TRX/TUnit result parsing remain separate follow-up work.
+`coverage run`, `coverage merge`, and `coverage gate` are the supported CLI coverage surfaces. The package artifact verifier installs the packed `ForgeTrust.AppSurface.Cli` tool in a clean fixture and proves all three coverage commands, including a deliberately failing gate that must still write reports, before publication. Grouped CLI execution and TRX/TUnit result parsing remain separate follow-up work.
 
 Use this GitHub Actions shape for a private repository that already has Coverlet instrumentation:
 

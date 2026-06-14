@@ -2378,7 +2378,9 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "--package-version", "0.0.0-ci.99",
                 "--artifacts-output", "packages-out",
                 "--artifact-manifest", "reports/artifacts.json",
-                "--report", "reports/packages.md"
+                "--report", "reports/packages.md",
+                "--coverage-proof-work-dir", "reports/coverage-proof",
+                "--coverage-proof-report", "reports/coverage-proof.md"
             ],
             stdout,
             stderr,
@@ -2403,6 +2405,9 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.Combine(_repositoryRoot, "packages-out"), capturedRequest.ArtifactsOutputPath);
         Assert.Equal(Path.Combine(_repositoryRoot, "reports", "packages.md"), capturedRequest.ReportPath);
         Assert.Equal(Path.Combine(_repositoryRoot, "reports", "artifacts.json"), capturedRequest.ArtifactManifestPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "coverage-proof"), capturedRequest.CoverageProofWorkDirectory);
+        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "coverage-proof.md"), capturedRequest.CoverageProofReportPath);
+        Assert.Equal("https://api.nuget.org/v3/index.json", capturedRequest.Source);
         Assert.Equal("0.0.0-ci.99", capturedRequest.PackageVersion);
         Assert.Contains("Validated 1 package artifacts for 0.0.0-ci.99. Report: reports/packages.md.", stdout.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr.ToString());

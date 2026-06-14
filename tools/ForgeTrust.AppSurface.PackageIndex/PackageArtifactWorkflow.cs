@@ -12,6 +12,7 @@ internal sealed class PackageArtifactWorkflow
     private readonly PackagePublishPlanResolver _planResolver;
     private readonly ICommandRunner _commandRunner;
     private readonly PackageArtifactValidator _validator;
+    private readonly ICoverageCliConsumerProofWorkflow _coverageProofWorkflow;
     private readonly PackageArtifactManifestWriter _artifactManifestWriter;
 
     /// <summary>
@@ -20,14 +21,20 @@ internal sealed class PackageArtifactWorkflow
     /// <param name="planResolver">Resolver for the manifest-backed publish plan.</param>
     /// <param name="commandRunner">External command runner for restore, build, and pack operations.</param>
     /// <param name="validator">Package artifact validator.</param>
+    /// <param name="coverageProofWorkflow">
+    /// Packaged coverage CLI proof that installs the validated CLI artifact in a clean consumer fixture before
+    /// protected publish jobs can consume the artifact manifest.
+    /// </param>
     internal PackageArtifactWorkflow(
         PackagePublishPlanResolver planResolver,
         ICommandRunner commandRunner,
-        PackageArtifactValidator validator)
+        PackageArtifactValidator validator,
+        ICoverageCliConsumerProofWorkflow coverageProofWorkflow)
     {
         _planResolver = planResolver;
         _commandRunner = commandRunner;
         _validator = validator;
+        _coverageProofWorkflow = coverageProofWorkflow;
         _artifactManifestWriter = new PackageArtifactManifestWriter();
     }
 
@@ -51,6 +58,7 @@ internal sealed class PackageArtifactWorkflow
 
         Directory.CreateDirectory(request.ArtifactsOutputPath);
         CleanPackageArtifacts(request.ArtifactsOutputPath);
+        DeleteArtifactManifest(request.ArtifactManifestPath);
 
         await RunRepositoryCommandAsync(
             request,
@@ -114,11 +122,34 @@ internal sealed class PackageArtifactWorkflow
         }
 
         var report = _validator.Validate(plan, request.ArtifactsOutputPath, request.PackageVersion);
+        var coverageProofReport = await _coverageProofWorkflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                request.RepositoryRoot,
+                request.ArtifactsOutputPath,
+                request.PackageVersion,
+                request.CoverageProofWorkDirectory,
+                request.Source),
+            report,
+            cancellationToken);
+        Directory.CreateDirectory(Path.GetDirectoryName(request.CoverageProofReportPath)!);
+        await File.WriteAllTextAsync(
+            request.CoverageProofReportPath,
+            CoverageCliConsumerProofReportRenderer.RenderMarkdown(coverageProofReport),
+            cancellationToken);
+
         Directory.CreateDirectory(Path.GetDirectoryName(request.ReportPath)!);
         await File.WriteAllTextAsync(
             request.ReportPath,
-            PackageArtifactReportRenderer.RenderMarkdown(report),
+            PackageArtifactReportRenderer.RenderMarkdown(report, coverageProofReport),
             cancellationToken);
+
+        if (!coverageProofReport.Succeeded)
+        {
+            DeleteArtifactManifest(request.ArtifactManifestPath);
+            throw new PackageIndexException(
+                $"Coverage CLI consumer proof failed for '{CoverageCliConsumerProofWorkflow.CliPackageId}'. Report: {request.CoverageProofReportPath}");
+        }
+
         await _artifactManifestWriter.WriteAsync(
             report,
             request.ArtifactsOutputPath,
@@ -154,6 +185,21 @@ internal sealed class PackageArtifactWorkflow
         if (string.IsNullOrWhiteSpace(request.ArtifactManifestPath))
         {
             throw new PackageIndexException("Package artifact manifest path must be provided.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.CoverageProofWorkDirectory))
+        {
+            throw new PackageIndexException("Coverage CLI consumer proof work directory must be provided.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.CoverageProofReportPath))
+        {
+            throw new PackageIndexException("Coverage CLI consumer proof report path must be provided.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Source))
+        {
+            throw new PackageIndexException("Package source must be provided.");
         }
     }
 
@@ -199,6 +245,14 @@ internal sealed class PackageArtifactWorkflow
             File.Delete(symbolPackagePath);
         }
     }
+
+    private static void DeleteArtifactManifest(string artifactManifestPath)
+    {
+        if (File.Exists(artifactManifestPath))
+        {
+            File.Delete(artifactManifestPath);
+        }
+    }
 }
 
 /// <summary>
@@ -210,10 +264,16 @@ internal sealed class PackageArtifactWorkflow
 /// <param name="ReportPath">Markdown validation report path.</param>
 /// <param name="PackageVersion">Exact prerelease package version to pack and validate.</param>
 /// <param name="ArtifactManifestPath">Machine-readable validation manifest path for the publish workflow.</param>
+/// <param name="CoverageProofWorkDirectory">Isolated work directory for the packaged coverage CLI consumer proof.</param>
+/// <param name="CoverageProofReportPath">Standalone markdown report path for the packaged coverage CLI consumer proof.</param>
+/// <param name="Source">NuGet source used for third-party dependencies while first-party packages map to local artifacts.</param>
 internal sealed record PackageArtifactRequest(
     string RepositoryRoot,
     string ManifestPath,
     string ArtifactsOutputPath,
     string ReportPath,
     string PackageVersion,
-    string ArtifactManifestPath);
+    string ArtifactManifestPath,
+    string CoverageProofWorkDirectory,
+    string CoverageProofReportPath,
+    string Source);
