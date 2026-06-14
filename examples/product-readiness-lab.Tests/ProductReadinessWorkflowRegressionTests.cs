@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Flow.DurableTask;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -63,6 +64,40 @@ public sealed class ProductReadinessWorkflowRegressionTests
     }
 
     [Fact]
+    public async Task ResumeWorkflowAsync_ConcurrentDuplicateResume_ReturnsLateEventConflict()
+    {
+        var authorizer = new BlockingResumeAuthorizer();
+        await using var provider = ProductReadinessTestServices.BuildProvider(
+            new InMemoryProductStateStore(),
+            authorizer);
+        var host = provider.GetRequiredService<ProductApprovalInProcessHost>();
+        var started = await host.StartAsync("Concurrent Co", "Team");
+        var request = new ResumeWorkflowRequest("approved");
+
+        var first = ProductReadinessEndpoints.ResumeWorkflowAsync(
+            host,
+            ProductReadinessProofUsers.CreatePrincipal("operator")!,
+            started.InstanceId,
+            request,
+            CancellationToken.None);
+        await authorizer.FirstRequestReached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var second = ProductReadinessEndpoints.ResumeWorkflowAsync(
+            host,
+            ProductReadinessProofUsers.CreatePrincipal("operator")!,
+            started.InstanceId,
+            request,
+            CancellationToken.None);
+
+        authorizer.AllowFirstRequest.SetResult();
+        var firstResult = await first;
+        var secondResult = await second;
+
+        Assert.IsType<Ok<WorkflowProbe>>(firstResult.Result);
+        var conflict = Assert.IsType<Conflict<WorkflowResumeRejected>>(secondResult.Result);
+        Assert.Equal("IgnoredLateEvent", conflict.Value?.Status);
+    }
+
+    [Fact]
     public async Task ResumeWorkflowAsync_InvalidRequest_ReturnsBadRequest()
     {
         await using var provider = ProductReadinessTestServices.BuildProvider(new InMemoryProductStateStore());
@@ -83,4 +118,25 @@ public sealed class ProductReadinessWorkflowRegressionTests
         Assert.Contains(nameof(ResumeWorkflowRequest.Decision), badRequest.Value.Errors.Keys);
     }
 
+    private sealed class BlockingResumeAuthorizer : IFlowResumeAuthorizer
+    {
+        private int _requests;
+
+        public TaskCompletionSource FirstRequestReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource AllowFirstRequest { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask<FlowResumeAuthorizationResult> AuthorizeAsync(
+            FlowResumeAuthorizationRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _requests) == 1)
+            {
+                FirstRequestReached.SetResult();
+                await AllowFirstRequest.Task.WaitAsync(cancellationToken);
+            }
+
+            return FlowResumeAuthorizationResult.Allow();
+        }
+    }
 }

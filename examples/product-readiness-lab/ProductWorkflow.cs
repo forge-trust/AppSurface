@@ -84,71 +84,76 @@ internal sealed class ProductApprovalInProcessHost
         string caller,
         CancellationToken cancellationToken = default)
     {
-        if (!_waitingRuns.TryGetValue(instanceId, out var waitingRun))
+        if (!_waitingRuns.TryGetValue(instanceId, out var waitingRun) || !waitingRun.TryAddReference())
         {
             throw new ProductWorkflowNotWaitingException(instanceId);
         }
 
-        ProductWorkflowWaitingRun? removedRun = null;
         WorkflowProbe? response = null;
-        await waitingRun.Gate.WaitAsync(cancellationToken);
+        var gateAcquired = false;
         try
         {
-            if (!_waitingRuns.TryGetValue(instanceId, out var currentRun) || !ReferenceEquals(currentRun, waitingRun))
+            await waitingRun.Gate.WaitAsync(cancellationToken);
+            gateAcquired = true;
+            try
             {
-                throw new ProductWorkflowNotWaitingException(instanceId);
-            }
-
-            var waiting = currentRun.Result;
-            if (waiting.NodeId is null || waiting.Context is null)
-            {
-                throw new ProductWorkflowNotWaitingException(instanceId);
-            }
-
-            var authorization = await _durableClient.AuthorizeResumeAsync(
-                new FlowResumeAuthorizationRequest(
-                    ProductReadinessFlowDefinition.FlowId,
-                    ProductReadinessFlowDefinition.Version,
-                    instanceId,
-                    waiting.NodeId,
-                    ProductReadinessFlowDefinition.ApprovalEventName,
-                    caller),
-                cancellationToken);
-
-            if (!authorization.Allowed)
-            {
-                throw new InvalidOperationException($"Resume denied: {authorization.Code}.");
-            }
-
-            var completed = await _runner.ResumeAsync(
-                _definition,
-                waiting.NodeId,
-                waiting.Context,
-                new FlowResumeEvent(ProductReadinessFlowDefinition.ApprovalEventName, decision),
-                cancellationToken);
-
-            response = WorkflowProbe.FromCompleted(instanceId, completed);
-            if (completed.Status == FlowRunStatus.Waiting)
-            {
-                currentRun.Result = completed;
-            }
-            else
-            {
-                if (_waitingRuns.TryRemove(instanceId, out var removed))
+                if (!_waitingRuns.TryGetValue(instanceId, out var currentRun) || !ReferenceEquals(currentRun, waitingRun))
                 {
-                    removedRun = removed;
+                    throw new ProductWorkflowNotWaitingException(instanceId);
+                }
+
+                var waiting = currentRun.Result;
+                if (waiting.NodeId is null || waiting.Context is null)
+                {
+                    throw new ProductWorkflowNotWaitingException(instanceId);
+                }
+
+                var authorization = await _durableClient.AuthorizeResumeAsync(
+                    new FlowResumeAuthorizationRequest(
+                        ProductReadinessFlowDefinition.FlowId,
+                        ProductReadinessFlowDefinition.Version,
+                        instanceId,
+                        waiting.NodeId,
+                        ProductReadinessFlowDefinition.ApprovalEventName,
+                        caller),
+                    cancellationToken);
+
+                if (!authorization.Allowed)
+                {
+                    throw new InvalidOperationException($"Resume denied: {authorization.Code}.");
+                }
+
+                var completed = await _runner.ResumeAsync(
+                    _definition,
+                    waiting.NodeId,
+                    waiting.Context,
+                    new FlowResumeEvent(ProductReadinessFlowDefinition.ApprovalEventName, decision),
+                    cancellationToken);
+
+                response = WorkflowProbe.FromCompleted(instanceId, completed);
+                if (completed.Status == FlowRunStatus.Waiting)
+                {
+                    currentRun.Result = completed;
+                }
+                else if (_waitingRuns.TryRemove(instanceId, out var removed))
+                {
+                    removed.MarkRemoved();
+                }
+            }
+            finally
+            {
+                if (gateAcquired)
+                {
+                    waitingRun.Gate.Release();
                 }
             }
         }
         finally
         {
-            waitingRun.Gate.Release();
+            waitingRun.ReleaseReference();
         }
 
-        using (removedRun)
-        {
-            return response ?? throw new InvalidOperationException("Workflow resume did not produce a response.");
-        }
+        return response ?? throw new InvalidOperationException("Workflow resume did not produce a response.");
     }
 
     /// <summary>
@@ -209,6 +214,11 @@ internal sealed class ProductApprovalInProcessHost
 /// </summary>
 internal sealed class ProductWorkflowWaitingRun : IDisposable
 {
+    private readonly object _lifetimeGate = new();
+    private int _activeReferences;
+    private bool _removed;
+    private bool _disposed;
+
     /// <summary>
     /// Creates waiting workflow state.
     /// </summary>
@@ -229,11 +239,83 @@ internal sealed class ProductWorkflowWaitingRun : IDisposable
     public FlowRunResult<ProductApprovalState> Result { get; set; }
 
     /// <summary>
-    /// Disposes the resume gate.
+    /// Attempts to retain the waiting run before using its gate.
+    /// </summary>
+    /// <returns><see langword="true" /> when the run can still be used; otherwise <see langword="false" />.</returns>
+    public bool TryAddReference()
+    {
+        lock (_lifetimeGate)
+        {
+            if (_removed || _disposed)
+            {
+                return false;
+            }
+
+            _activeReferences++;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Releases a retained use of the waiting run.
+    /// </summary>
+    public void ReleaseReference()
+    {
+        var dispose = false;
+        lock (_lifetimeGate)
+        {
+            if (_activeReferences == 0)
+            {
+                throw new InvalidOperationException("Workflow waiting run reference count is already zero.");
+            }
+
+            _activeReferences--;
+            dispose = _removed && _activeReferences == 0 && !_disposed;
+            _disposed |= dispose;
+        }
+
+        if (dispose)
+        {
+            Gate.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Marks the waiting run as removed so the gate is disposed after retained resume attempts finish.
+    /// </summary>
+    public void MarkRemoved()
+    {
+        var dispose = false;
+        lock (_lifetimeGate)
+        {
+            _removed = true;
+            dispose = _activeReferences == 0 && !_disposed;
+            _disposed |= dispose;
+        }
+
+        if (dispose)
+        {
+            Gate.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Disposes the gate when the waiting run was created but never published.
     /// </summary>
     public void Dispose()
     {
-        Gate.Dispose();
+        var dispose = false;
+        lock (_lifetimeGate)
+        {
+            dispose = !_disposed;
+            _disposed = true;
+            _removed = true;
+        }
+
+        if (dispose)
+        {
+            Gate.Dispose();
+        }
     }
 }
 
