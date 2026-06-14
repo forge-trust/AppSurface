@@ -105,7 +105,8 @@ internal static class AppSurfaceProductEventMetadata
     /// </summary>
     /// <remarks>
     /// The returned list is a read-only wrapper over a private copy. Empty sequences and duplicate property names throw
-    /// because every event contract must publish an explicit schema.
+    /// because every event contract must publish an explicit schema. Null property-contract entries throw as invalid
+    /// contract metadata instead of surfacing later as registry or dispatcher failures.
     /// </remarks>
     internal static IReadOnlyList<AppSurfaceProductEventPropertyContract> NormalizeContracts(
         IEnumerable<AppSurfaceProductEventPropertyContract> contracts,
@@ -117,6 +118,11 @@ internal static class AppSurfaceProductEventMetadata
         if (normalized.Length == 0)
         {
             throw new ArgumentException("At least one property contract is required.", parameterName);
+        }
+
+        if (normalized.Any(property => property is null))
+        {
+            throw new ArgumentException("Property contract entries must not be null.", parameterName);
         }
 
         var duplicate = normalized

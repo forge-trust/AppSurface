@@ -18,6 +18,10 @@ public sealed class AppSurfaceProductEventContract
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown when <paramref name="lifecycle" /> is not a defined <see cref="AppSurfaceProductEventLifecycle" /> value.
     /// </exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when required text is empty, <paramref name="properties" /> is empty, any property entry is null, or property
+    /// names are duplicated.
+    /// </exception>
     public AppSurfaceProductEventContract(
         string name,
         AppSurfaceProductEventLifecycle lifecycle,

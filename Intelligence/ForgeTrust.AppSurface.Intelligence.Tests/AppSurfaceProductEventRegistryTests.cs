@@ -83,6 +83,21 @@ public sealed class AppSurfaceProductEventRegistryTests
     }
 
     [Fact]
+    public void EventContract_RejectsNullPropertyContracts()
+    {
+        var exception = Assert.Throws<ArgumentException>(() => new AppSurfaceProductEventContract(
+            "docs.search.null_property",
+            AppSurfaceProductEventLifecycle.Experimental,
+            "Prove null property validation.",
+            "Tests",
+            "Discard during tests.",
+            [null!],
+            ["raw query"]));
+
+        Assert.Contains("Property contract entries must not be null", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EventContract_RejectsDuplicatePropertyContracts()
     {
         var duplicateProperties = new[]
