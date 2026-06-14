@@ -216,7 +216,7 @@ public sealed class AppSurfaceLocalSecretProvider : IConfigProvider, IConfigProv
             diagnostic = null!;
             return true;
         }
-        catch (Exception ex) when (ex is ArgumentException or FormatException or InvalidCastException or JsonException)
+        catch (Exception ex) when (ex is ArgumentException or FormatException or InvalidCastException or OverflowException or JsonException)
         {
             value = default;
             diagnostic = new AppSurfaceLocalSecretDiagnostic(

@@ -108,6 +108,26 @@ public sealed class AppSurfaceLocalSecretProviderTests
     }
 
     [Fact]
+    public void GetValue_Should_StopResolutionWhenConversionOverflowsWithoutLeakingRawValue()
+    {
+        var overflowingSecret = "999999999999999999999999999999";
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        store.Set(normalizer.Normalize("MyApp", "Development", null, "Port").Identity!, overflowingSecret);
+        var provider = CreateProvider(store);
+
+        var value = provider.GetValue<int?>("Development", "Port");
+        var resolution = provider.ResolveValue<int?>("Development", "Port");
+
+        Assert.Null(value);
+        Assert.Equal(LocalSecretResultStatus.ConversionFailed, resolution.Status);
+        Assert.True(provider.TryGetTerminalDiagnostic("Development", "Port", out var diagnostic));
+        Assert.Equal("local-secret-conversion-failed", diagnostic.Code);
+        Assert.DoesNotContain(overflowingSecret, diagnostic.ToDisplayString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(overflowingSecret, resolution.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ResolveValue_Should_ReturnInvalidIdentityStatus()
     {
         var provider = CreateProvider(new InMemoryAppSurfaceLocalSecretStore());
