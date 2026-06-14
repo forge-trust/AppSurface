@@ -105,6 +105,12 @@ internal sealed partial class SecretsGetCommand : SecretsKeyCommandBase
 [Command("secrets list", Description = "List AppSurface local secret names without values.")]
 internal sealed partial class SecretsListCommand : SecretsCommandBase
 {
+    /// <summary>
+    /// Gets or sets a value indicating whether to print only secret names.
+    /// </summary>
+    [CommandOption("names-only", Description = "Print only local secret names, without source metadata.")]
+    public bool NamesOnly { get; set; }
+
     /// <inheritdoc />
     public override async ValueTask ExecuteAsync(IConsole console)
     {
@@ -112,7 +118,11 @@ internal sealed partial class SecretsListCommand : SecretsCommandBase
         var result = context.Store.List(context.ApplicationName, context.Environment, context.KeyPrefix);
         if (result.Status == LocalSecretResultStatus.Found)
         {
-            await console.Output.WriteLineAsync($"Source: {result.Source}");
+            if (!NamesOnly)
+            {
+                await console.Output.WriteLineAsync($"Source: {result.Source}");
+            }
+
             foreach (var key in result.Keys)
             {
                 await console.Output.WriteLineAsync(key);

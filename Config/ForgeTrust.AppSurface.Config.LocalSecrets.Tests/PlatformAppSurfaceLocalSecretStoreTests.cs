@@ -62,6 +62,47 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void MacOsAccount_Should_IncludePrefixToAvoidNamespaceCollisions()
+    {
+        var prefixed = Identity with
+        {
+            KeyPrefix = "Payments",
+            StorageName = "appsurface:MyApp:Development:Payments:Stripe:ApiKey"
+        };
+
+        Assert.Equal("Stripe:ApiKey", PlatformAppSurfaceLocalSecretStore.MacOsKeychainLocalSecretStore.Account(Identity));
+        Assert.Equal("Payments:Stripe:ApiKey", PlatformAppSurfaceLocalSecretStore.MacOsKeychainLocalSecretStore.Account(prefixed));
+    }
+
+    [Fact]
+    public void LinuxArguments_Should_IncludePrefixAttributeToAvoidNamespaceCollisions()
+    {
+        var prefixed = Identity with
+        {
+            KeyPrefix = "Payments",
+            StorageName = "appsurface:MyApp:Development:Payments:Stripe:ApiKey"
+        };
+
+        var arguments = PlatformAppSurfaceLocalSecretStore.LinuxSecretServiceLocalSecretStore.BuildArguments("lookup", prefixed);
+
+        Assert.Equal(
+            [
+                "lookup",
+                "appsurface",
+                "local-secrets",
+                "application",
+                "MyApp",
+                "environment",
+                "Development",
+                "prefix",
+                "Payments",
+                "key",
+                "Stripe:ApiKey"
+            ],
+            arguments);
+    }
+
+    [Fact]
     public void IndexedStore_Should_PreserveCaseVariantKeysInListAndDelete()
     {
         var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();

@@ -86,6 +86,23 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task SecretsListCommand_Should_PrintOnlyNames_WhenNamesOnlyIsSet()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+        var shared = new[] { "--app", "MyApp", "--environment", "Development", "--store-file", storePath };
+
+        var set = await InvokeProgramEntryPointAsync(["secrets", "set", "Stripe:ApiKey", "--stdin", .. shared], standardInput: "sk_test_secret\n");
+        var list = await InvokeProgramEntryPointAsync(["secrets", "list", "--names-only", .. shared]);
+
+        Assert.Equal(0, set.ExitCode);
+        Assert.Equal(0, list.ExitCode);
+        Assert.Contains("Stripe:ApiKey", list.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Source:", list.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", list.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SecretsDoctorCommand_Should_RenderReadyDiagnosticWithoutPrintingSecretValue()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");

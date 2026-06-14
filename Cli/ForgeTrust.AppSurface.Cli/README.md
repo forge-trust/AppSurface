@@ -71,7 +71,7 @@ Manage AppSurface local development secrets before a remote vault exists.
 appsurface secrets init --app MyApp --environment Development
 printf '%s' "<secret>" | appsurface secrets set Stripe:ApiKey --app MyApp --environment Development --stdin
 appsurface secrets doctor --app MyApp --environment Development
-appsurface secrets list --app MyApp --environment Development
+appsurface secrets list --names-only --app MyApp --environment Development
 appsurface secrets get Stripe:ApiKey --app MyApp --environment Development
 ```
 

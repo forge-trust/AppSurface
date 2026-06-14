@@ -125,7 +125,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         protected override AppSurfaceLocalSecretResult ReadValue(AppSurfaceLocalSecretIdentity identity)
         {
             var service = Encode(Service(identity));
-            var account = Encode(identity.Key);
+            var account = Encode(Account(identity));
             var status = SecKeychainFindGenericPassword(
                 IntPtr.Zero,
                 (uint)service.Length,
@@ -160,7 +160,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         protected override AppSurfaceLocalSecretResult WriteValue(AppSurfaceLocalSecretIdentity identity, string value)
         {
             var service = Encode(Service(identity));
-            var account = Encode(identity.Key);
+            var account = Encode(Account(identity));
             var password = Encoding.UTF8.GetBytes(value);
             var status = SecKeychainAddGenericPassword(
                 IntPtr.Zero,
@@ -239,6 +239,9 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         private static string Service(AppSurfaceLocalSecretIdentity identity) =>
             $"AppSurface.LocalSecrets.{identity.ApplicationName}.{identity.Environment}";
 
+        internal static string Account(AppSurfaceLocalSecretIdentity identity) =>
+            string.IsNullOrWhiteSpace(identity.KeyPrefix) ? identity.Key : $"{identity.KeyPrefix}:{identity.Key}";
+
         private static byte[] Encode(string value) => Encoding.UTF8.GetBytes(value);
 
         internal AppSurfaceLocalSecretResult MapMacOsStatus(int status, string operation)
@@ -281,7 +284,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         private static int FindItem(AppSurfaceLocalSecretIdentity identity, out IntPtr itemRef)
         {
             var service = Encode(Service(identity));
-            var account = Encode(identity.Key);
+            var account = Encode(Account(identity));
             var status = SecKeychainFindGenericPassword(
                 IntPtr.Zero,
                 (uint)service.Length,
@@ -375,7 +378,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         {
             var result = Run(
                 _secretToolPath,
-                ["lookup", "appsurface", "local-secrets", "application", identity.ApplicationName, "environment", identity.Environment, "key", identity.Key],
+                BuildArguments("lookup", identity),
                 null);
             if (result.ExitCode == 0)
             {
@@ -392,7 +395,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             var label = $"AppSurface {identity.ApplicationName} {identity.Environment} {identity.Key}";
             var result = Run(
                 _secretToolPath,
-                ["store", "--label", label, "appsurface", "local-secrets", "application", identity.ApplicationName, "environment", identity.Environment, "key", identity.Key],
+                ["store", "--label", label, .. BuildArguments(identity)],
                 value);
             if (result.ExitCode != 0)
             {
@@ -411,7 +414,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         {
             var result = Run(
                 _secretToolPath,
-                ["clear", "appsurface", "local-secrets", "application", identity.ApplicationName, "environment", identity.Environment, "key", identity.Key],
+                BuildArguments("clear", identity),
                 null);
             if (result.ExitCode != 0)
             {
@@ -448,6 +451,23 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             result.ExitCode != 0
             && string.IsNullOrWhiteSpace(result.Output)
             && string.IsNullOrWhiteSpace(result.Error);
+
+        internal static string[] BuildArguments(string command, AppSurfaceLocalSecretIdentity identity) =>
+            [command, .. BuildArguments(identity)];
+
+        private static string[] BuildArguments(AppSurfaceLocalSecretIdentity identity) =>
+            [
+                "appsurface",
+                "local-secrets",
+                "application",
+                identity.ApplicationName,
+                "environment",
+                identity.Environment,
+                "prefix",
+                identity.KeyPrefix ?? string.Empty,
+                "key",
+                identity.Key
+            ];
     }
 
     [SupportedOSPlatform("windows")]
