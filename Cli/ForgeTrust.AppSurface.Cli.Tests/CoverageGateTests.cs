@@ -1094,14 +1094,15 @@ public sealed class CoverageGateTests
             </coverage>
             """);
         var originalInput = System.Console.In;
-        System.Console.SetIn(new StringReader("""
+        var redirectedInput = new StringReader("""
             diff --git a/src/Foo.cs b/src/Foo.cs
             index 0000000..1111111 100644
             --- a/src/Foo.cs
             +++ b/src/Foo.cs
             @@ -0,0 +9,1 @@
             +covered
-            """));
+            """);
+        System.Console.SetIn(redirectedInput);
         try
         {
             var command = new CoverageGateCommand
@@ -1129,6 +1130,7 @@ public sealed class CoverageGateTests
         finally
         {
             System.Console.SetIn(originalInput);
+            redirectedInput.Dispose();
         }
     }
 
@@ -1639,7 +1641,8 @@ public sealed class CoverageGateTests
             <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
             """);
         var originalInput = System.Console.In;
-        System.Console.SetIn(new StringReader("too large"));
+        var redirectedInput = new StringReader("too large");
+        System.Console.SetIn(redirectedInput);
         try
         {
             var command = new CoverageGateCommand
@@ -1666,6 +1669,7 @@ public sealed class CoverageGateTests
         finally
         {
             System.Console.SetIn(originalInput);
+            redirectedInput.Dispose();
         }
     }
 
