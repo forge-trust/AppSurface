@@ -1,0 +1,56 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net10.0": {
+      "Npgsql": {
+        "type": "Direct",
+        "requested": "[10.0.3, )",
+        "resolved": "10.0.3",
+        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w=="
+      },
+      "forgetrust.appsurface.auth": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.auth.aspnetcore": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Auth": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.core": {
+        "type": "Project",
+        "dependencies": {
+          "CliWrap": "[3.10.1, )"
+        }
+      },
+      "forgetrust.appsurface.flow": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.flow.durabletask": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Flow": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.web": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+        }
+      },
+      "CliWrap": {
+        "type": "CentralTransitive",
+        "requested": "[3.10.1, )",
+        "resolved": "3.10.1",
+        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
+      }
+    }
+  }
+}
