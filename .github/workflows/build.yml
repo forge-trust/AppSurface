@@ -125,7 +125,7 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Gate coverage with AppSurface CLI
+      - name: Gate PR coverage with AppSurface CLI
         if: ${{ github.event_name == 'pull_request' }}
         run: |
           dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-restore -- \
@@ -137,7 +137,7 @@ jobs:
             --min-patch-line 95 \
             --min-patch-branch 85
 
-      - name: Gate coverage with AppSurface CLI
+      - name: Gate baseline coverage with AppSurface CLI
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-restore -- \
