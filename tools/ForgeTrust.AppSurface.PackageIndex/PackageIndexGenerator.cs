@@ -28,6 +28,7 @@ internal sealed class PackageIndexGenerator
     private const string WebExamplePath = "examples/web-app/README.md";
     private const string WebPackageQuickstartPath = "start-here/first-success-path.md";
     private const string WebPackageQuickstartFragment = "package-first-path";
+    private const string ProductReadinessLabPath = "examples/product-readiness-lab/README.md";
     private const string RepositoryIssuePrefix = "https://github.com/forge-trust/AppSurface/issues/";
     private const string RepositoryPullPrefix = "https://github.com/forge-trust/AppSurface/pull/";
     private static readonly string[] ProductFamilyValues =
@@ -634,6 +635,13 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine($"Not included: {webEntry.Manifest.DoesNotInclude}");
         builder.AppendLine();
         builder.AppendLine($"Read next: {FormatMarkdownLink("Package-first quickstart", GetRelativeDocPath(request, WebPackageQuickstartPath) + "#" + WebPackageQuickstartFragment)}");
+
+        if (RepositoryFileExists(repositoryRoot, ProductReadinessLabPath))
+        {
+            builder.AppendLine();
+            builder.AppendLine($"Composed local proof: {FormatMarkdownLink("Product readiness lab", GetRelativeDocPath(request, ProductReadinessLabPath))} shows how the web, auth, flow, DurableTask-facing, Aspire, and Postgres product-state pieces fit together without claiming production hosting or Durable Task storage ownership. Its paired AppHost `verify` profile starts local Postgres and fails if the Postgres product-state row does not become `proven-locally`.");
+        }
+
         builder.AppendLine();
         builder.AppendLine("Release and readiness:");
         builder.AppendLine($"- {FormatMarkdownLink("Release hub", GetRelativeDocPath(request, ReleaseHubPath))} keeps the public release story, adoption risk, and policy links in one place.");

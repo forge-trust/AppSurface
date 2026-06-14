@@ -11,6 +11,7 @@ This directory contains sample applications that use **ForgeTrust.AppSurface**.
 - [Config validation example](config-validation/README.md) – shows scalar validation on a strongly typed config wrapper and the startup failure shape.
 - [Flow approval local example](flow-approval-local/README.md) – shows a typed flow that waits for an approval event and resumes through the in-memory runner.
 - [Flow generated authoring example](flow-generated-authoring/README.md) – shows generated outcome cases, typed input/output ports, inferred and explicit graph mapping, and generated lowering into the in-memory runner.
+- [Product readiness lab](product-readiness-lab/README.md) – runs a report-first local evaluator that composes AppSurface Web, Auth.AspNetCore, Flow, DurableTask-facing host-shape guidance, Aspire, and Postgres product-state proof. Its paired AppHost `verify` profile starts local Postgres and requires the product-state row to become `proven-locally`.
 
 ---
 [🏠 Back to Root](../README.md)
