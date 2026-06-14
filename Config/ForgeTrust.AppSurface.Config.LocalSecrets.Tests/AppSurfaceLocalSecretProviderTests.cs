@@ -76,6 +76,84 @@ public sealed class AppSurfaceLocalSecretProviderTests
     }
 
     [Fact]
+    public void GetValue_Should_StopResolutionWhenPostureIsDisabled()
+    {
+        var provider = CreateProvider(
+            new InMemoryAppSurfaceLocalSecretStore(),
+            options => options.Posture = LocalSecretsPostureMode.Disabled);
+
+        var resolution = provider.ResolveValue<string>("Development", "Stripe:ApiKey");
+
+        Assert.Equal(LocalSecretResultStatus.DisabledByPosture, resolution.Status);
+        Assert.Equal("local-secret-posture-disabled", resolution.Diagnostic?.Code);
+        Assert.Contains("Disabled", resolution.Diagnostic?.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryGetTerminalDiagnostic_Should_ReturnFalse_WhenFailClosedIsDisabled()
+    {
+        var store = new FixedResultStore(AppSurfaceLocalSecretResult.NotFound(
+            LocalSecretResultStatus.Locked,
+            new AppSurfaceLocalSecretDiagnostic(
+                "local-secret-store-locked",
+                "Local secret store is locked.",
+                "The store rejected access.",
+                "Unlock the store."),
+            "Fixed"));
+        var provider = CreateProvider(store, options => options.FailClosedOnStoreFailure = false);
+
+        var resolution = provider.ResolveValue<string>("Development", "Stripe:ApiKey");
+
+        Assert.Equal(LocalSecretResultStatus.Locked, resolution.Status);
+        Assert.False(provider.TryGetTerminalDiagnostic("Development", "Stripe:ApiKey", out _));
+    }
+
+    [Fact]
+    public void ResolveValue_Should_AllowProduction_WhenSingleMachineSelfHostedIsExplicit()
+    {
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        store.Set(normalizer.Normalize("MyApp", "Production", null, "Stripe:ApiKey").Identity!, "sk_test_secret");
+        var provider = CreateProvider(
+            store,
+            options => options.Posture = LocalSecretsPostureMode.SingleMachineSelfHosted);
+
+        var resolution = provider.ResolveValue<string>("Production", "Stripe:ApiKey");
+
+        Assert.Equal(LocalSecretResultStatus.Found, resolution.Status);
+        Assert.Equal("sk_test_secret", resolution.Value);
+    }
+
+    [Fact]
+    public void ResolveValue_Should_TreatNullFoundValueAsEmptyStringWithoutLeaking()
+    {
+        var provider = CreateProvider(new FixedResultStore(new AppSurfaceLocalSecretResult(
+            LocalSecretResultStatus.Found,
+            null,
+            null,
+            "Fixed")));
+
+        var resolution = provider.ResolveValue<string>("Development", "Stripe:ApiKey");
+
+        Assert.Equal(LocalSecretResultStatus.Found, resolution.Status);
+        Assert.Equal(string.Empty, resolution.Value);
+        Assert.DoesNotContain("raw-secret", resolution.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveValue_Should_ReturnProviderFailed_WhenStoreThrowsWithoutLeakingValue()
+    {
+        var provider = CreateProvider(new ThrowingStore());
+
+        var resolution = provider.ResolveValue<string>("Development", "Stripe:ApiKey");
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, resolution.Status);
+        Assert.Equal("local-secret-provider-threw", resolution.Diagnostic?.Code);
+        Assert.Contains(nameof(InvalidOperationException), resolution.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.DoesNotContain("raw-secret", resolution.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GetValue_Should_ConvertScalarValues()
     {
         var store = new InMemoryAppSurfaceLocalSecretStore();
@@ -86,6 +164,25 @@ public sealed class AppSurfaceLocalSecretProviderTests
         var value = provider.GetValue<int?>("Development", "Port");
 
         Assert.Equal(443, value);
+    }
+
+    [Fact]
+    public void GetValue_Should_ConvertEnumGuidAndJsonValues()
+    {
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        store.Set(normalizer.Normalize("MyApp", "Development", null, "Mode").Identity!, "singlemachineselfhosted");
+        store.Set(normalizer.Normalize("MyApp", "Development", null, "Tenant").Identity!, "47f6ca0f-5fdc-45d4-87d0-f5d9a69195f4");
+        store.Set(normalizer.Normalize("MyApp", "Development", null, "Payload").Identity!, """{"Name":"Stripe","Retries":3}""");
+        var provider = CreateProvider(store);
+
+        var mode = provider.GetValue<LocalSecretsPostureMode>("Development", "Mode");
+        var tenant = provider.GetValue<Guid>("Development", "Tenant");
+        var payload = provider.GetValue<SecretPayload>("Development", "Payload");
+
+        Assert.Equal(LocalSecretsPostureMode.SingleMachineSelfHosted, mode);
+        Assert.Equal(Guid.Parse("47f6ca0f-5fdc-45d4-87d0-f5d9a69195f4"), tenant);
+        Assert.Equal(new SecretPayload("Stripe", 3), payload);
     }
 
     [Fact]
@@ -216,6 +313,28 @@ public sealed class AppSurfaceLocalSecretProviderTests
 
         public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) => result;
     }
+
+    private sealed class ThrowingStore : IAppSurfaceLocalSecretStore
+    {
+        public string Name => nameof(ThrowingStore);
+
+        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) =>
+            throw new InvalidOperationException("raw-secret must never appear in diagnostics");
+
+        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value) =>
+            throw new NotSupportedException();
+
+        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) =>
+            throw new NotSupportedException();
+
+        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
+            throw new NotSupportedException();
+
+        public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed record SecretPayload(string Name, int Retries);
 
     private sealed class StaticProvider(int priority, string value) : IConfigProvider
     {

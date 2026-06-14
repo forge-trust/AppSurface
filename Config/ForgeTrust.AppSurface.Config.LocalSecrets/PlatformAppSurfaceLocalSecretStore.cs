@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
@@ -13,6 +14,8 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// macOS uses Security.framework Keychain generic passwords, Windows uses current-user Credential Manager generic credentials,
 /// Linux uses Secret Service through <c>secret-tool</c>, and unsupported sessions return display-safe diagnostics.
 /// </remarks>
+[ExcludeFromCodeCoverage(
+    Justification = "Real OS credential stores depend on desktop session state, prompts, and native services; deterministic tests cover fake stores and status mapping.")]
 public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
 {
     private readonly IAppSurfaceLocalSecretStore _inner;
