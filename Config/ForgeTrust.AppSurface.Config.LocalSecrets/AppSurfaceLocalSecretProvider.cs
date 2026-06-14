@@ -31,6 +31,9 @@ public sealed class AppSurfaceLocalSecretProvider : IConfigProvider, IConfigProv
         AppSurfaceLocalSecretIdentityNormalizer normalizer)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(normalizer);
+
         _options = options.Value;
         _store = store;
         _normalizer = normalizer;

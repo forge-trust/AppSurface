@@ -19,12 +19,22 @@ public sealed record AppSurfaceLocalSecretIdentityResult(
     /// </summary>
     /// <param name="identity">The normalized identity.</param>
     /// <returns>A successful result.</returns>
-    public static AppSurfaceLocalSecretIdentityResult Valid(AppSurfaceLocalSecretIdentity identity) => new(identity, null);
+    public static AppSurfaceLocalSecretIdentityResult Valid(AppSurfaceLocalSecretIdentity identity)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+
+        return new AppSurfaceLocalSecretIdentityResult(identity, null);
+    }
 
     /// <summary>
     /// Creates a failed identity result.
     /// </summary>
     /// <param name="diagnostic">The display-safe diagnostic.</param>
     /// <returns>A failed result.</returns>
-    public static AppSurfaceLocalSecretIdentityResult Invalid(AppSurfaceLocalSecretDiagnostic diagnostic) => new(null, diagnostic);
+    public static AppSurfaceLocalSecretIdentityResult Invalid(AppSurfaceLocalSecretDiagnostic diagnostic)
+    {
+        ArgumentNullException.ThrowIfNull(diagnostic);
+
+        return new AppSurfaceLocalSecretIdentityResult(null, diagnostic);
+    }
 }

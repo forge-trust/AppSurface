@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 
@@ -35,6 +36,7 @@ public static class ServiceCollectionLocalSecretsExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.RemoveAll<IAppSurfaceLocalSecretStore>();
         services.AddSingleton<IAppSurfaceLocalSecretStore, TStore>();
         return services;
     }
@@ -52,6 +54,7 @@ public static class ServiceCollectionLocalSecretsExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(store);
 
+        services.RemoveAll<IAppSurfaceLocalSecretStore>();
         services.AddSingleton(store);
         return services;
     }

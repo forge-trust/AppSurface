@@ -7,6 +7,15 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// <summary>
 /// Normalizes LocalSecrets app, environment, prefix, and key values into a stable storage identity.
 /// </summary>
+/// <remarks>
+/// The normalizer is the boundary between logical AppSurface config keys and platform-specific local secret names.
+/// Application, environment, and prefix segments are trimmed, capped at 128 characters, and limited to ASCII letters,
+/// digits, dash, underscore, and dot where documented. Whitespace in segments becomes <c>-</c>. Config keys are trimmed,
+/// capped at 256 characters, reject nulls and line breaks, normalize <c>__</c> to <c>:</c>, and normalize <c>\</c> to
+/// <c>/</c>. When the application name is omitted, the normalizer infers one from the entry assembly, then the current
+/// directory, then <c>AppSurfaceApp</c>; pin <see cref="AppSurfaceLocalSecretsOptions.ApplicationName"/> for published
+/// apps so deployment shape or working-directory changes do not move the local secret namespace.
+/// </remarks>
 public sealed class AppSurfaceLocalSecretIdentityNormalizer
 {
     private const int MaxSegmentLength = 128;
@@ -20,6 +29,11 @@ public sealed class AppSurfaceLocalSecretIdentityNormalizer
     /// <param name="keyPrefix">The optional key prefix.</param>
     /// <param name="key">The AppSurface config key.</param>
     /// <returns>A normalized identity result.</returns>
+    /// <remarks>
+    /// A successful result contains normalized display segments and a storage name in the form
+    /// <c>appsurface:{application}:{environment}:{prefix}:{key}</c>. Invalid input returns a display-safe diagnostic
+    /// rather than throwing so command and provider paths can render paste-safe guidance.
+    /// </remarks>
     public AppSurfaceLocalSecretIdentityResult Normalize(
         string? applicationName,
         string environment,

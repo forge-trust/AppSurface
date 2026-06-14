@@ -117,6 +117,24 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task SecretsSetCommand_Should_SetValueOptionWithoutPrintingSecretValue()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var set = await InvokeProgramEntryPointAsync(
+            ["secrets", "set", "Stripe:ApiKey", "--value", "sk_test_secret", "--store-file", storePath]);
+        var get = await InvokeProgramEntryPointAsync(
+            ["secrets", "get", "Stripe:ApiKey", "--store-file", storePath]);
+
+        Assert.Equal(0, set.ExitCode);
+        Assert.Equal(0, get.ExitCode);
+        Assert.Contains("Set: local secret namespace", set.AllText, StringComparison.Ordinal);
+        Assert.Contains("Found: local secret namespace", get.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", set.AllText + get.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SecretsSetCommand_Should_RejectMissingValue()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");

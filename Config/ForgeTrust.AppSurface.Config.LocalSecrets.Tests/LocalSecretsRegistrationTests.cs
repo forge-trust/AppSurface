@@ -43,11 +43,27 @@ public sealed class LocalSecretsRegistrationTests
     public void UseAppSurfaceLocalSecretStore_Should_RegisterStoreType()
     {
         var services = new ServiceCollection();
+        services.AddSingleton<IAppSurfaceLocalSecretStore>(new InMemoryAppSurfaceLocalSecretStore());
 
         services.UseAppSurfaceLocalSecretStore<InMemoryAppSurfaceLocalSecretStore>();
 
         using var provider = services.BuildServiceProvider();
         Assert.IsType<InMemoryAppSurfaceLocalSecretStore>(provider.GetRequiredService<IAppSurfaceLocalSecretStore>());
+        Assert.Single(provider.GetServices<IAppSurfaceLocalSecretStore>());
+    }
+
+    [Fact]
+    public void UseAppSurfaceLocalSecretStore_Should_ReplacePriorStoreInstance()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IAppSurfaceLocalSecretStore>(new InMemoryAppSurfaceLocalSecretStore());
+        var replacement = new InMemoryAppSurfaceLocalSecretStore();
+
+        services.UseAppSurfaceLocalSecretStore(replacement);
+
+        using var provider = services.BuildServiceProvider();
+        Assert.Same(replacement, provider.GetRequiredService<IAppSurfaceLocalSecretStore>());
+        Assert.Single(provider.GetServices<IAppSurfaceLocalSecretStore>());
     }
 
     [Fact]

@@ -7,6 +7,19 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets.Tests;
 public sealed class AppSurfaceLocalSecretProviderTests
 {
     [Fact]
+    public void Constructor_Should_RejectNullStoreAndNormalizer()
+    {
+        var options = Options.Create(new AppSurfaceLocalSecretsOptions());
+        var storeError = Assert.Throws<ArgumentNullException>(() =>
+            new AppSurfaceLocalSecretProvider(options, null!, new AppSurfaceLocalSecretIdentityNormalizer()));
+        var normalizerError = Assert.Throws<ArgumentNullException>(() =>
+            new AppSurfaceLocalSecretProvider(options, new InMemoryAppSurfaceLocalSecretStore(), null!));
+
+        Assert.Equal("store", storeError.ParamName);
+        Assert.Equal("normalizer", normalizerError.ParamName);
+    }
+
+    [Fact]
     public void GetValue_Should_ReturnSecretWhenStoreFindsValue()
     {
         var store = new InMemoryAppSurfaceLocalSecretStore();

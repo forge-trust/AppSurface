@@ -6,6 +6,8 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// <remarks>
 /// Only <see cref="Missing"/> represents true absence and may fall through to lower-priority configuration providers.
 /// All other non-found states are terminal for a LocalSecrets-claimed key.
+/// Numeric values are part of the public AppSurface LocalSecrets contract and must remain stable because status values
+/// may appear in diagnostics, tests, serialized examples, or package-consumer switch expressions.
 /// </remarks>
 public enum LocalSecretResultStatus
 {

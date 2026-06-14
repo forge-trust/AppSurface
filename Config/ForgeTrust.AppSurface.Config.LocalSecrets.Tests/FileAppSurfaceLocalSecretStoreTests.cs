@@ -83,7 +83,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
-    public void Get_Should_ThrowPasteSafeException_WhenFileContainsInvalidJson()
+    public void ReadOperations_Should_ReturnPasteSafeDiagnostic_WhenFileContainsInvalidJson()
     {
         using var temp = TempDirectory.Create();
         var path = Path.Join(temp.Path, "secrets.json");
@@ -93,10 +93,123 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
             .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
             .Identity!;
 
-        var exception = Assert.Throws<InvalidOperationException>(() => store.Get(identity));
+        var get = store.Get(identity);
+        var list = store.List("MyApp", "Development", null);
 
-        Assert.Equal("Local secret file could not be parsed.", exception.Message);
-        Assert.DoesNotContain("raw-secret", exception.ToString(), StringComparison.Ordinal);
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, get.Status);
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, list.Status);
+        Assert.Equal("local-secret-store-invalid", get.Diagnostic?.Code);
+        Assert.Equal("local-secret-store-invalid", list.Diagnostic?.Code);
+        Assert.DoesNotContain("raw-secret", get.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("raw-secret", list.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Set_Should_ReturnPasteSafeDiagnostic_WhenStorePathIsDirectory()
+    {
+        using var temp = TempDirectory.Create();
+        var store = new FileAppSurfaceLocalSecretStore(temp.Path);
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var result = store.Set(identity, "sk_test_secret");
+
+        Assert.True(result.Status is LocalSecretResultStatus.Locked or LocalSecretResultStatus.Unavailable);
+        Assert.StartsWith("local-secret-store-", result.Diagnostic?.Code, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Get_Should_ReturnLockedDiagnostic_WhenReadIsUnauthorized()
+    {
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(read: () => throw new UnauthorizedAccessException()));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var result = store.Get(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
+        Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void List_Should_ReturnUnavailableDiagnostic_WhenReadFailsWithIoException()
+    {
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(read: () => throw new IOException()));
+
+        var result = store.List("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
+        Assert.True(result.Diagnostic?.Retryable);
+    }
+
+    [Fact]
+    public void Set_Should_ReturnLockedDiagnostic_WhenReadIsUnauthorized()
+    {
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(read: () => throw new UnauthorizedAccessException()));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var result = store.Set(identity, "sk_test_secret");
+
+        Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
+        Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
+        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Delete_Should_ReturnUnavailableDiagnostic_WhenReadFailsWithIoException()
+    {
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(read: () => throw new IOException()));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var result = store.Delete(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
+        Assert.True(result.Diagnostic?.Retryable);
+    }
+
+    [Fact]
+    public void Delete_Should_ReturnUnavailableDiagnostic_WhenWriteFailsWithIoException()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var entry = """
+            {
+              "appsurface:MyApp:Development:Stripe:ApiKey": {
+                "ApplicationName": "MyApp",
+                "Environment": "Development",
+                "KeyPrefix": null,
+                "Key": "Stripe:ApiKey",
+                "Value": "sk_test_secret"
+              }
+            }
+            """;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(read: () => entry, write: _ => throw new IOException()));
+
+        var result = store.Delete(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
+        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
     }
 
     private sealed class TempDirectory : IDisposable
@@ -122,5 +235,22 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
                 Directory.Delete(Path, recursive: true);
             }
         }
+    }
+
+    private sealed class ThrowingFileSystem(
+        Func<string>? read = null,
+        Action<string>? write = null) : IFileAppSurfaceLocalSecretStoreFileSystem
+    {
+        public bool FileExists(string path) => true;
+
+        public string ReadAllText(string path) => read?.Invoke() ?? "{}";
+
+        public void WriteAllText(string path, string contents) => (write ?? (_ => { }))(contents);
+
+        public void CreateDirectory(string path)
+        {
+        }
+
+        public Stream OpenOrCreate(string path) => new MemoryStream();
     }
 }

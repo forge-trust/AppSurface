@@ -307,8 +307,8 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             }
         }
 
-        [DllImport("/System/Library/Frameworks/Security.framework/Security")]
-        private static extern int SecKeychainAddGenericPassword(
+        [LibraryImport("/System/Library/Frameworks/Security.framework/Security")]
+        private static partial int SecKeychainAddGenericPassword(
             IntPtr keychain,
             uint serviceNameLength,
             [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)]
@@ -321,8 +321,8 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             byte[] passwordData,
             out IntPtr itemRef);
 
-        [DllImport("/System/Library/Frameworks/Security.framework/Security")]
-        private static extern int SecKeychainFindGenericPassword(
+        [LibraryImport("/System/Library/Frameworks/Security.framework/Security")]
+        private static partial int SecKeychainFindGenericPassword(
             IntPtr keychainOrArray,
             uint serviceNameLength,
             [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)]
@@ -334,22 +334,22 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             out IntPtr passwordData,
             out IntPtr itemRef);
 
-        [DllImport("/System/Library/Frameworks/Security.framework/Security")]
-        private static extern int SecKeychainItemModifyAttributesAndData(
+        [LibraryImport("/System/Library/Frameworks/Security.framework/Security")]
+        private static partial int SecKeychainItemModifyAttributesAndData(
             IntPtr itemRef,
             IntPtr attrList,
             uint length,
             [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)]
             byte[] data);
 
-        [DllImport("/System/Library/Frameworks/Security.framework/Security")]
-        private static extern int SecKeychainItemDelete(IntPtr itemRef);
+        [LibraryImport("/System/Library/Frameworks/Security.framework/Security")]
+        private static partial int SecKeychainItemDelete(IntPtr itemRef);
 
-        [DllImport("/System/Library/Frameworks/Security.framework/Security")]
-        private static extern int SecKeychainItemFreeContent(IntPtr attrList, IntPtr data);
+        [LibraryImport("/System/Library/Frameworks/Security.framework/Security")]
+        private static partial int SecKeychainItemFreeContent(IntPtr attrList, IntPtr data);
 
-        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
-        private static extern void CFRelease(IntPtr cf);
+        [LibraryImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
+        private static partial void CFRelease(IntPtr cf);
     }
 
     internal sealed class LinuxSecretServiceLocalSecretStore : CommandBackedLocalSecretStore
@@ -591,20 +591,20 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         private static string TargetName(AppSurfaceLocalSecretIdentity identity) => $"AppSurface.LocalSecrets.{identity.StorageName}";
 
-        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [LibraryImport("advapi32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool CredReadW(string target, int type, int reservedFlag, out IntPtr credential);
+        private static partial bool CredReadW(string target, int type, int reservedFlag, out IntPtr credential);
 
-        [DllImport("advapi32.dll", ExactSpelling = true, SetLastError = true)]
+        [LibraryImport("advapi32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool CredWriteW(IntPtr userCredential, int flags);
+        private static partial bool CredWriteW(IntPtr userCredential, int flags);
 
-        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [LibraryImport("advapi32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool CredDeleteW(string target, int type, int flags);
+        private static partial bool CredDeleteW(string target, int type, int flags);
 
-        [DllImport("advapi32.dll", ExactSpelling = true)]
-        private static extern void CredFree(IntPtr buffer);
+        [LibraryImport("advapi32.dll")]
+        private static partial void CredFree(IntPtr buffer);
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct NativeCredential
@@ -770,15 +770,19 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             process.StartInfo.UseShellExecute = false;
             process.Start();
 
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+
             if (standardInput != null)
             {
                 process.StandardInput.Write(standardInput);
                 process.StandardInput.Close();
             }
 
-            var output = process.StandardOutput.ReadToEnd().TrimEnd('\r', '\n');
-            var error = process.StandardError.ReadToEnd();
             process.WaitForExit();
+            Task.WhenAll(outputTask, errorTask).GetAwaiter().GetResult();
+            var output = outputTask.GetAwaiter().GetResult().TrimEnd('\r', '\n');
+            var error = errorTask.GetAwaiter().GetResult();
             return new PlatformSecretCommandResult(process.ExitCode, output, error);
         }
     }

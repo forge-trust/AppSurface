@@ -224,6 +224,11 @@ internal abstract class SecretsCommandBase : ICommand
     /// <param name="result">The local secret result.</param>
     /// <param name="successVerb">The success verb to display.</param>
     /// <returns>A value task that completes when output is written.</returns>
+    /// <remarks>
+    /// LocalSecrets treats <see cref="LocalSecretResultStatus.Missing"/> as failure everywhere except doctor-style
+    /// readiness probes that return the <c>local-secret-store-ready</c> diagnostic. Keep that exception explicit when
+    /// adding commands so ordinary missing secrets do not report success.
+    /// </remarks>
     protected static async ValueTask WriteResultAsync(
         IConsole console,
         AppSurfaceLocalSecretResult result,

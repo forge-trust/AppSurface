@@ -16,6 +16,7 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     private readonly string _path;
+    private readonly IFileAppSurfaceLocalSecretStoreFileSystem _fileSystem;
     private readonly object _gate = new();
 
     /// <summary>
@@ -23,10 +24,19 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
     /// </summary>
     /// <param name="path">The JSON file that stores local secrets.</param>
     public FileAppSurfaceLocalSecretStore(string path)
+        : this(path, DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance)
+    {
+    }
+
+    internal FileAppSurfaceLocalSecretStore(
+        string path,
+        IFileAppSurfaceLocalSecretStoreFileSystem fileSystem)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(fileSystem);
 
         _path = Path.GetFullPath(path);
+        _fileSystem = fileSystem;
     }
 
     /// <inheritdoc />
@@ -56,7 +66,11 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
 
         lock (_gate)
         {
-            var data = Read();
+            if (!TryRead(out var data, out var failure))
+            {
+                return failure;
+            }
+
             return data.TryGetValue(identity.StorageName, out var entry)
                 ? AppSurfaceLocalSecretResult.Found(entry.Value, Name)
                 : AppSurfaceLocalSecretResult.Missing(Name);
@@ -71,9 +85,17 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
 
         lock (_gate)
         {
-            var data = Read();
+            if (!TryRead(out var data, out var failure))
+            {
+                return failure;
+            }
+
             data[identity.StorageName] = new FileSecretEntry(identity.ApplicationName, identity.Environment, identity.KeyPrefix, identity.Key, value);
-            Write(data);
+            var writeFailure = TryWrite(data);
+            if (writeFailure != null)
+            {
+                return writeFailure;
+            }
         }
 
         return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
@@ -86,13 +108,21 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
 
         lock (_gate)
         {
-            var data = Read();
+            if (!TryRead(out var data, out var failure))
+            {
+                return failure;
+            }
+
             if (!data.Remove(identity.StorageName))
             {
                 return AppSurfaceLocalSecretResult.Missing(Name);
             }
 
-            Write(data);
+            var writeFailure = TryWrite(data);
+            if (writeFailure != null)
+            {
+                return writeFailure;
+            }
         }
 
         return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
@@ -103,7 +133,12 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
     {
         lock (_gate)
         {
-            var keys = Read().Values
+            if (!TryRead(out var data, out var failure))
+            {
+                return AppSurfaceLocalSecretListResult.Failed(failure.Status, failure.Diagnostic!, Name);
+            }
+
+            var keys = data.Values
                 .Where(entry => string.Equals(entry.ApplicationName, applicationName, StringComparison.Ordinal)
                                 && string.Equals(entry.Environment, environment, StringComparison.Ordinal)
                                 && string.Equals(entry.KeyPrefix, keyPrefix, StringComparison.Ordinal))
@@ -121,10 +156,10 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
             var directory = Path.GetDirectoryName(_path);
             if (!string.IsNullOrWhiteSpace(directory))
             {
-                Directory.CreateDirectory(directory);
+                _fileSystem.CreateDirectory(directory);
             }
 
-            using var stream = new FileStream(_path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            using var stream = _fileSystem.OpenOrCreate(_path);
             return AppSurfaceLocalSecretResult.NotFound(
                 LocalSecretResultStatus.Missing,
                 new AppSurfaceLocalSecretDiagnostic(
@@ -145,27 +180,94 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
         }
     }
 
+    private bool TryRead(
+        out Dictionary<string, FileSecretEntry> data,
+        out AppSurfaceLocalSecretResult failure)
+    {
+        try
+        {
+            data = Read();
+            failure = null!;
+            return true;
+        }
+        catch (JsonException)
+        {
+            data = [];
+            failure = Failure(
+                LocalSecretResultStatus.ProviderFailed,
+                "local-secret-store-invalid",
+                "Local secret file store is invalid.",
+                "The configured local secret file could not be parsed.",
+                "Delete and recreate the LocalSecrets namespace with `appsurface secrets init`.");
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            data = [];
+            failure = Failure(
+                LocalSecretResultStatus.Locked,
+                "local-secret-store-locked",
+                "Local secret file store cannot be read.",
+                "The current user cannot read the configured local secret file.",
+                "Fix file permissions or choose an OS-backed store.");
+            return false;
+        }
+        catch (IOException)
+        {
+            data = [];
+            failure = Failure(
+                LocalSecretResultStatus.Unavailable,
+                "local-secret-store-unavailable",
+                "Local secret file store is unavailable.",
+                "The configured local secret file could not be read.",
+                "Close other processes using the file and retry.",
+                retryable: true);
+            return false;
+        }
+    }
+
     private Dictionary<string, FileSecretEntry> Read()
     {
-        if (!File.Exists(_path))
+        if (!_fileSystem.FileExists(_path))
         {
             return new Dictionary<string, FileSecretEntry>(StringComparer.Ordinal);
         }
 
+        var text = _fileSystem.ReadAllText(_path);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return new Dictionary<string, FileSecretEntry>(StringComparer.Ordinal);
+        }
+
+        return JsonSerializer.Deserialize<Dictionary<string, FileSecretEntry>>(text, JsonOptions)
+               ?? new Dictionary<string, FileSecretEntry>(StringComparer.Ordinal);
+    }
+
+    private AppSurfaceLocalSecretResult? TryWrite(Dictionary<string, FileSecretEntry> data)
+    {
         try
         {
-            var text = File.ReadAllText(_path);
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return new Dictionary<string, FileSecretEntry>(StringComparer.Ordinal);
-            }
-
-            return JsonSerializer.Deserialize<Dictionary<string, FileSecretEntry>>(text, JsonOptions)
-                   ?? new Dictionary<string, FileSecretEntry>(StringComparer.Ordinal);
+            Write(data);
+            return null;
         }
-        catch (JsonException)
+        catch (UnauthorizedAccessException)
         {
-            throw new InvalidOperationException("Local secret file could not be parsed.");
+            return Failure(
+                LocalSecretResultStatus.Locked,
+                "local-secret-store-locked",
+                "Local secret file store cannot be written.",
+                "The current user cannot write the configured local secret file.",
+                "Fix file permissions or choose an OS-backed store.");
+        }
+        catch (IOException)
+        {
+            return Failure(
+                LocalSecretResultStatus.Unavailable,
+                "local-secret-store-unavailable",
+                "Local secret file store is unavailable.",
+                "The configured local secret file could not be written.",
+                "Close other processes using the file and retry.",
+                retryable: true);
         }
     }
 
@@ -174,10 +276,10 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
         var directory = Path.GetDirectoryName(_path);
         if (!string.IsNullOrWhiteSpace(directory))
         {
-            Directory.CreateDirectory(directory);
+            _fileSystem.CreateDirectory(directory);
         }
 
-        File.WriteAllText(_path, JsonSerializer.Serialize(data, JsonOptions));
+        _fileSystem.WriteAllText(_path, JsonSerializer.Serialize(data, JsonOptions));
     }
 
     private AppSurfaceLocalSecretResult Failure(
@@ -198,4 +300,32 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
         string? KeyPrefix,
         string Key,
         string Value);
+}
+
+internal interface IFileAppSurfaceLocalSecretStoreFileSystem
+{
+    bool FileExists(string path);
+
+    string ReadAllText(string path);
+
+    void WriteAllText(string path, string contents);
+
+    void CreateDirectory(string path);
+
+    Stream OpenOrCreate(string path);
+}
+
+internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileAppSurfaceLocalSecretStoreFileSystem
+{
+    public static DefaultFileAppSurfaceLocalSecretStoreFileSystem Instance { get; } = new();
+
+    public bool FileExists(string path) => File.Exists(path);
+
+    public string ReadAllText(string path) => File.ReadAllText(path);
+
+    public void WriteAllText(string path, string contents) => File.WriteAllText(path, contents);
+
+    public void CreateDirectory(string path) => Directory.CreateDirectory(path);
+
+    public Stream OpenOrCreate(string path) => new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 }
