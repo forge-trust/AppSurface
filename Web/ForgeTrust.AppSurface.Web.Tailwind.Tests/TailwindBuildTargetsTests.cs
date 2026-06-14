@@ -1192,6 +1192,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             Assert.Contains(archive.Entries, entry => entry.FullName == "build/tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.dll");
             Assert.Contains(archive.Entries, entry => entry.FullName == "build/tasks/CliWrap.dll");
             Assert.Contains(archive.Entries, entry => entry.FullName == "build/ForgeTrust.AppSurface.Web.Tailwind.targets");
+            Assert.Contains(archive.Entries, entry => entry.FullName == "THIRD-PARTY-NOTICES.md");
         }
 
         var projectDirectory = Path.Join(_tempRoot, "packed-consumer");
