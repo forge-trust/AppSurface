@@ -80,7 +80,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         var paths = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator);
         return paths
-            .Select(path => Path.Combine(path, fileName))
+            .Select(path => Path.Join(path, fileName))
             .FirstOrDefault(File.Exists);
     }
 
