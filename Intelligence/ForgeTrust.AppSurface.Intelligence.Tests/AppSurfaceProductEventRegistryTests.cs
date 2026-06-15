@@ -833,6 +833,26 @@ public sealed class AppSurfaceProductEventRegistryTests
         Assert.Contains(AppSurfaceProductEventValidationFailureReason.RequiredPropertyMissing, result.ReasonCodes);
     }
 
+    [Fact]
+    public void ComposedRegistry_AllowsTokenPropertiesWithSupportedPunctuation()
+    {
+        using var provider = CreateProvider(options => options.RegisterEventContracts(CreateSkoolieContract()));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        var result = registry.Validate(new AppSurfaceProductEvent(
+            "skoolie.card.generated",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["launch_surface"] = "dash-1_under.score:colon",
+                ["delivery_state"] = "queued"
+            }));
+
+        Assert.True(result.IsValid);
+        Assert.Equal("dash-1_under.score:colon", result.SanitizedProperties["launch_surface"]);
+        Assert.DoesNotContain("launch_surface", result.RejectedProperties);
+    }
+
     [Theory]
     [InlineData("true", "true")]
     [InlineData("False", "false")]
