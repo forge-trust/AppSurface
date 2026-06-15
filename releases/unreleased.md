@@ -9,6 +9,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - Reader-intent relevance for AppSurface Docs search.
 - Product-readiness evaluation now has a report-first lab and an Aspire AppHost verifier that proves local Postgres product-state persistence without claiming Durable Task backend ownership.
 - More trustworthy AppSurface Docs search typing for multi-word queries.
+- CodeQL JavaScript/TypeScript analysis now ignores the intentionally malformed parser-decision fixture while the docs tests still exercise the same parse-failure bytes.
 
 ## Included in the next coordinated version
 
@@ -25,6 +26,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Docs search now preserves multi-word spacing while readers type, so pausing after a separator in either the full-page search workspace or sidebar search no longer joins words together.
 - RazorWire now includes a hybrid-hosting guide for split-origin deployments that serve exported static pages from one origin while Cloud Run or another container host serves RazorWire streams, islands, and lazy anti-forgery forms from a live origin.
 - Package validation now treats redistributed package payload provenance as an enforced release gate. `verify-packages` reads `packages/third-party-payloads.yml`, proves notice, generated-first-party, or audited coverage for suspicious payloads, and renders package report rows with notice paths, evidence kind, version source, and suspicious payload counts.
+- AppSurface Docs parser-decision fixtures now keep the deliberate malformed JavaScript sample under a non-JavaScript suffix so repository-level JavaScript/TypeScript scanners do not treat the negative parser test as product source.
 
 ## Migration watch
 
