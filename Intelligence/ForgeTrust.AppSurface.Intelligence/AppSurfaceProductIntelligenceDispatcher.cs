@@ -19,7 +19,7 @@ public sealed class AppSurfaceProductIntelligenceDispatcher : IAppSurfaceProduct
     public AppSurfaceProductIntelligenceDispatcher(
         IOptions<AppSurfaceProductIntelligenceOptions> options,
         IEnumerable<IAppSurfaceProductIntelligenceSink> sinks)
-        : this(options, new BuiltInAppSurfaceProductEventRegistry(), sinks)
+        : this(options, new DefaultAppSurfaceProductEventRegistry([]), sinks)
     {
     }
 

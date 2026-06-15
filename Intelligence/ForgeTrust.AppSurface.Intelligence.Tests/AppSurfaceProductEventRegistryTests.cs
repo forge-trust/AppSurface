@@ -760,11 +760,11 @@ public sealed class AppSurfaceProductEventRegistryTests
             {
                 ["launch_surface"] = "dashboard",
                 ["delivery_state"] = "queued",
-                ["debug_note"] = "operator-note"
+                ["debug_note"] = "child@example."
             }));
 
         Assert.True(result.IsValid);
-        Assert.Equal("operator-note", result.SanitizedProperties["debug_note"]);
+        Assert.Equal("child@example.", result.SanitizedProperties["debug_note"]);
         Assert.DoesNotContain("debug_note", result.RejectedProperties);
     }
 

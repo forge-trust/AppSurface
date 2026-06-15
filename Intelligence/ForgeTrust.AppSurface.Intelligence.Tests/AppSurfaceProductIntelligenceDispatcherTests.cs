@@ -299,6 +299,8 @@ public sealed class AppSurfaceProductIntelligenceDispatcherTests
 
         Assert.Equal("skoolie.card.generated", exception.EventName);
         Assert.Contains(AppSurfaceProductEventValidationFailureReason.EventNotRegistered, exception.ReasonCodes);
+        Assert.Empty(exception.RejectedProperties);
+        Assert.Contains("README", exception.DocsLink, StringComparison.Ordinal);
         Assert.Contains("Register", exception.FixHint, StringComparison.Ordinal);
         Assert.DoesNotContain("andrew@example.test", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-value", exception.Message, StringComparison.Ordinal);
