@@ -105,7 +105,8 @@ internal static class AppSurfaceProductEventMetadata
     /// </summary>
     /// <remarks>
     /// The returned list is a read-only wrapper over a private copy. Empty sequences and duplicate property names throw
-    /// because every event contract must publish an explicit schema.
+    /// because every event contract must publish an explicit schema. Null property-contract entries throw as invalid
+    /// contract metadata instead of surfacing later as registry or dispatcher failures.
     /// </remarks>
     internal static IReadOnlyList<AppSurfaceProductEventPropertyContract> NormalizeContracts(
         IEnumerable<AppSurfaceProductEventPropertyContract> contracts,
@@ -117,6 +118,11 @@ internal static class AppSurfaceProductEventMetadata
         if (normalized.Length == 0)
         {
             throw new ArgumentException("At least one property contract is required.", parameterName);
+        }
+
+        if (normalized.Any(property => property is null))
+        {
+            throw new ArgumentException("Property contract entries must not be null.", parameterName);
         }
 
         var duplicate = normalized
@@ -240,6 +246,96 @@ internal static class AppSurfaceProductEventMetadata
     }
 
     /// <summary>
+    /// Filters property names before they are included in safe diagnostics.
+    /// </summary>
+    /// <remarks>
+    /// Product-event property keys are caller input. Diagnostic output must not echo raw keys that look like URLs,
+    /// email addresses, credentials, secrets, bearer headers, or other high-risk values.
+    /// </remarks>
+    internal static string SanitizeDiagnosticPropertyName(string value)
+    {
+        return SanitizeDiagnosticIdentifier(value);
+    }
+
+    /// <summary>
+    /// Filters event names before they are included in safe diagnostics.
+    /// </summary>
+    /// <remarks>
+    /// Product-event names may come from callers before registry matching. Diagnostic output must not echo raw names
+    /// that look like URLs, email addresses, credentials, secrets, bearer headers, or other high-risk values.
+    /// </remarks>
+    internal static string SanitizeDiagnosticEventName(string value)
+    {
+        return SanitizeDiagnosticIdentifier(value);
+    }
+
+    /// <summary>
+    /// Filters owner/source labels before they are included in safe diagnostics.
+    /// </summary>
+    /// <remarks>
+    /// Owners are contract metadata rather than event payloads, but registration failures are often copied into issue
+    /// trackers and CI logs. This keeps those diagnostics descriptive without echoing accidental addresses, URLs, or
+    /// credential-shaped labels.
+    /// </remarks>
+    internal static string SanitizeDiagnosticOwner(string value)
+    {
+        var normalized = NormalizeOptionalText(value);
+        if (normalized is null
+            || normalized.Length > 80
+            || ContainsForbiddenValueShape(normalized))
+        {
+            return "[unsafe-owner]";
+        }
+
+        foreach (var character in normalized)
+        {
+            if (char.IsAsciiLetterOrDigit(character)
+                || character is '-' or '_' or '.' or ' ')
+            {
+                continue;
+            }
+
+            return "[unsafe-owner]";
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
+    /// Returns whether a caller-supplied identifier can be emitted in diagnostics without scrubbing.
+    /// </summary>
+    /// <param name="value">Identifier to inspect.</param>
+    /// <returns><see langword="true" /> when diagnostics may include the identifier as-is.</returns>
+    internal static bool IsSafeDiagnosticIdentifier(string value)
+    {
+        return SanitizeDiagnosticIdentifier(value) == NormalizeOptionalText(value);
+    }
+
+    private static string SanitizeDiagnosticIdentifier(string value)
+    {
+        var normalized = NormalizeOptionalText(value);
+        if (normalized is null
+            || normalized.Length > 64
+            || ContainsForbiddenValueShape(normalized))
+        {
+            return "[unsafe-property-name]";
+        }
+
+        foreach (var character in normalized)
+        {
+            if (char.IsAsciiLetterOrDigit(character)
+                || character is '-' or '_' or '.')
+            {
+                continue;
+            }
+
+            return "[unsafe-property-name]";
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
     /// Returns whether a value looks like a secret, credential, connection string, bearer header, or stack trace.
     /// </summary>
     internal static bool ContainsForbiddenValueShape(string value)
@@ -252,7 +348,33 @@ internal static class AppSurfaceProductEventMetadata
             || lower.Contains("connectionstring", StringComparison.Ordinal)
             || lower.Contains("connection string", StringComparison.Ordinal)
             || lower.Contains("stack trace", StringComparison.Ordinal)
-            || lower.Contains("bearer ", StringComparison.Ordinal);
+            || lower.Contains("bearer ", StringComparison.Ordinal)
+            || lower.Contains("://", StringComparison.Ordinal)
+            || lower.StartsWith("//", StringComparison.Ordinal)
+            || lower.Contains("?token=", StringComparison.Ordinal)
+            || lower.Contains("?secret=", StringComparison.Ordinal)
+            || lower.Contains("?password=", StringComparison.Ordinal)
+            || lower.Contains("&token=", StringComparison.Ordinal)
+            || lower.Contains("&secret=", StringComparison.Ordinal)
+            || lower.Contains("&password=", StringComparison.Ordinal)
+            || LooksLikeEmailAddress(lower);
+    }
+
+    private static bool LooksLikeEmailAddress(string value)
+    {
+        var at = value.IndexOf('@', StringComparison.Ordinal);
+        if (at <= 0 || at == value.Length - 1)
+        {
+            return false;
+        }
+
+        var dotAfterAt = value.IndexOf('.', at + 1);
+        if (dotAfterAt <= at + 1 || dotAfterAt == value.Length - 1)
+        {
+            return false;
+        }
+
+        return value.All(character => !char.IsWhiteSpace(character));
     }
 
     /// <summary>
