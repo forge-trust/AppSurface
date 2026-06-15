@@ -62,6 +62,42 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void LinuxGet_Should_ReturnUnavailable_WhenSecretToolTimesOut()
+    {
+        var store = new PlatformAppSurfaceLocalSecretStore.LinuxSecretServiceLocalSecretStore(
+            "/usr/bin/secret-tool",
+            new FixedCommandRunner(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.TimedOut));
+
+        var result = store.Get(Identity);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
+        Assert.True(result.Diagnostic?.Retryable);
+    }
+
+    [Fact]
+    public void DefaultCommandRunner_Should_RejectNonPositiveTimeout()
+    {
+        var error = Assert.Throws<ArgumentOutOfRangeException>(
+            () => new PlatformAppSurfaceLocalSecretStore.DefaultPlatformSecretCommandRunner(TimeSpan.Zero));
+
+        Assert.Equal("commandTimeout", error.ParamName);
+    }
+
+    [Fact]
+    public void DefaultCommandRunner_Should_ReturnTimedOutResult_WhenCommandDoesNotExit()
+    {
+        var runner = new PlatformAppSurfaceLocalSecretStore.DefaultPlatformSecretCommandRunner(TimeSpan.FromMilliseconds(50));
+        var (fileName, arguments) = SlowCommand();
+
+        var result = runner.Run(fileName, arguments, null);
+
+        Assert.Equal(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.TimedOutExitCode, result.ExitCode);
+        Assert.Empty(result.Output);
+        Assert.Contains("Timed out", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MacOsAccount_Should_IncludePrefixToAvoidNamespaceCollisions()
     {
         var prefixed = Identity with
@@ -132,6 +168,16 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
             IReadOnlyList<string> arguments,
             string? standardInput) =>
             result;
+    }
+
+    private static (string FileName, IReadOnlyList<string> Arguments) SlowCommand()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return ("cmd.exe", ["/c", "ping -n 6 127.0.0.1 > NUL"]);
+        }
+
+        return ("/bin/sh", ["-c", "sleep 5"]);
     }
 
     private sealed class IndexedMemoryStore : PlatformAppSurfaceLocalSecretStore.IndexedLocalSecretStore

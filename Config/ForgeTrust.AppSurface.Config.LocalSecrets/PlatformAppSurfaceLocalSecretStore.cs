@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
@@ -773,7 +774,20 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
     internal sealed class DefaultPlatformSecretCommandRunner : IPlatformSecretCommandRunner
     {
-        public static DefaultPlatformSecretCommandRunner Instance { get; } = new();
+        private static readonly TimeSpan DefaultCommandTimeout = TimeSpan.FromSeconds(30);
+        private readonly TimeSpan _commandTimeout;
+
+        public static DefaultPlatformSecretCommandRunner Instance { get; } = new(DefaultCommandTimeout);
+
+        internal DefaultPlatformSecretCommandRunner(TimeSpan commandTimeout)
+        {
+            if (commandTimeout <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(commandTimeout), commandTimeout, "Command timeout must be positive.");
+            }
+
+            _commandTimeout = commandTimeout;
+        }
 
         public PlatformSecretCommandResult Run(string fileName, IReadOnlyList<string> arguments, string? standardInput)
         {
@@ -799,13 +813,41 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 process.StandardInput.Close();
             }
 
-            process.WaitForExit();
+            if (!process.WaitForExit(_commandTimeout))
+            {
+                KillTimedOutProcess(process);
+                return PlatformSecretCommandResult.TimedOut;
+            }
+
             Task.WhenAll(outputTask, errorTask).GetAwaiter().GetResult();
             var output = outputTask.GetAwaiter().GetResult().TrimEnd('\r', '\n');
             var error = errorTask.GetAwaiter().GetResult();
             return new PlatformSecretCommandResult(process.ExitCode, output, error);
         }
+
+        private static void KillTimedOutProcess(Process process)
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (NotSupportedException)
+            {
+            }
+            catch (Win32Exception)
+            {
+            }
+        }
     }
 
-    internal sealed record PlatformSecretCommandResult(int ExitCode, string Output, string Error);
+    internal sealed record PlatformSecretCommandResult(int ExitCode, string Output, string Error)
+    {
+        internal const int TimedOutExitCode = -1;
+
+        public static PlatformSecretCommandResult TimedOut { get; } =
+            new(TimedOutExitCode, string.Empty, "Timed out waiting for the platform secret command to finish.");
+    }
 }
