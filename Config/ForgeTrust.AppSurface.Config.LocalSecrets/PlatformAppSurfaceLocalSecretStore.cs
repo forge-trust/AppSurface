@@ -125,14 +125,13 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         protected override AppSurfaceLocalSecretResult ReadValue(AppSurfaceLocalSecretIdentity identity)
         {
-            var service = Encode(Service(identity));
-            var account = Encode(Account(identity));
+            var names = BuildKeychainName(identity);
             var status = SecKeychainFindGenericPassword(
                 IntPtr.Zero,
-                (uint)service.Length,
-                service,
-                (uint)account.Length,
-                account,
+                (uint)names.Service.Length,
+                names.Service,
+                (uint)names.Account.Length,
+                names.Account,
                 out var passwordLength,
                 out var passwordData,
                 out var itemRef);
@@ -160,15 +159,14 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         protected override AppSurfaceLocalSecretResult WriteValue(AppSurfaceLocalSecretIdentity identity, string value)
         {
-            var service = Encode(Service(identity));
-            var account = Encode(Account(identity));
+            var names = BuildKeychainName(identity);
             var password = Encoding.UTF8.GetBytes(value);
             var status = SecKeychainAddGenericPassword(
                 IntPtr.Zero,
-                (uint)service.Length,
-                service,
-                (uint)account.Length,
-                account,
+                (uint)names.Service.Length,
+                names.Service,
+                (uint)names.Account.Length,
+                names.Account,
                 (uint)password.Length,
                 password,
                 out var addedItemRef);
@@ -243,6 +241,9 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         internal static string Account(AppSurfaceLocalSecretIdentity identity) =>
             string.IsNullOrWhiteSpace(identity.KeyPrefix) ? identity.Key : $"{identity.KeyPrefix}:{identity.Key}";
 
+        internal static KeychainNameBytes BuildKeychainName(AppSurfaceLocalSecretIdentity identity) =>
+            new(Encode(Service(identity)), Encode(Account(identity)));
+
         private static byte[] Encode(string value) => Encoding.UTF8.GetBytes(value);
 
         internal AppSurfaceLocalSecretResult MapMacOsStatus(int status, string operation)
@@ -284,14 +285,13 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         private static int FindItem(AppSurfaceLocalSecretIdentity identity, out IntPtr itemRef)
         {
-            var service = Encode(Service(identity));
-            var account = Encode(Account(identity));
+            var names = BuildKeychainName(identity);
             var status = SecKeychainFindGenericPassword(
                 IntPtr.Zero,
-                (uint)service.Length,
-                service,
-                (uint)account.Length,
-                account,
+                (uint)names.Service.Length,
+                names.Service,
+                (uint)names.Account.Length,
+                names.Account,
                 out _,
                 out var passwordData,
                 out itemRef);
@@ -302,6 +302,8 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
             return status;
         }
+
+        internal readonly record struct KeychainNameBytes(byte[] Service, byte[] Account);
 
         private static void ReleaseIfNeeded(IntPtr itemRef)
         {

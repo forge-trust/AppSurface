@@ -111,6 +111,23 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void MacOsKeychainName_Should_UseUtf8ByteLengthsForUnicodeKeys()
+    {
+        var unicode = Identity with
+        {
+            Key = "Stripe:雪",
+            StorageName = "appsurface:MyApp:Development:Stripe:雪"
+        };
+        var account = PlatformAppSurfaceLocalSecretStore.MacOsKeychainLocalSecretStore.Account(unicode);
+
+        var names = PlatformAppSurfaceLocalSecretStore.MacOsKeychainLocalSecretStore.BuildKeychainName(unicode);
+
+        Assert.Equal(System.Text.Encoding.UTF8.GetByteCount(account), names.Account.Length);
+        Assert.True(names.Account.Length > account.Length);
+        Assert.Equal(System.Text.Encoding.UTF8.GetString(names.Account), account);
+    }
+
+    [Fact]
     public void LinuxArguments_Should_IncludePrefixAttributeToAvoidNamespaceCollisions()
     {
         var prefixed = Identity with
