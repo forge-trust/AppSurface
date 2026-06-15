@@ -15,6 +15,9 @@ public sealed class AppSurfaceDocsSourceRouteRedirectTests
     [InlineData(
         "/docs/guides/from-program-cs-to-module.md.html?view=compact",
         "/docs/guides/from-program-cs-to-module?view=compact")]
+    [InlineData(
+        "/docs/Intelligence/ForgeTrust.AppSurface.Intelligence/README.md?view=compact",
+        "/docs/intelligence/forgetrust.appsurface.intelligence?view=compact")]
     public async Task SourceShapedMarkdownRoutes_ShouldRedirectToCanonicalDocsRoute_AfterInitialHarvestCompletes(
         string requestPath,
         string expectedLocation)

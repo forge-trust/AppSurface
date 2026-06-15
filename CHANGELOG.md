@@ -15,6 +15,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - `appsurface coverage gate` patch coverage now supports local Git refs, CI-produced unified diff files, and piped unified diff text, with fail-closed validation and report provenance for external diff artifacts.
+- The package chooser Intelligence entry now resolves in hosted AppSurface Docs instead of pointing readers at a harvested-out README route.
 - AppSurface CI coverage now dogfoods the `appsurface coverage run` command, running from source via `dotnet run --project`, for the default full-solution coverage lane while preserving Cobertura, JUnit, slow-test diagnostics, Codecov, and `coverage gate` evidence.
 - `appsurface coverage run` now supports AppSurface-managed `--test-results junit`; `--slow-test-diagnostics` implies managed JUnit results and records parser status, warnings, metadata completeness, and diagnostic overhead in `timings.json`.
 - Package artifact validation now installs the packed `ForgeTrust.AppSurface.Cli` tool into a clean consumer fixture before publication and proves `coverage run`, `coverage merge`, a passing `coverage gate`, and a deliberately failing `coverage gate` all behave from the packaged tool.
