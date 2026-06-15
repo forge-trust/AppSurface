@@ -48,6 +48,10 @@ internal static class Program
           --package-version <version>
                                 Required prerelease package version for verify-packages.
           --report <path>       Package artifact report path. Defaults to artifacts/package-validation-report.md.
+          --coverage-proof-work-dir <path>
+                                Isolated packaged coverage CLI proof work directory. Defaults to <artifacts-output>/coverage-cli-consumer-proof.
+          --coverage-proof-report <path>
+                                Packaged coverage CLI proof report path. Defaults to <artifacts-output>/coverage-cli-consumer-proof.md.
           --publish-log <path>  Publish ledger path. Defaults to artifacts/package-publish-log.md.
           --source <url>        NuGet source URL. Defaults to https://api.nuget.org/v3/index.json.
           --api-key-env <name>  Environment variable containing the NuGet API key. Defaults to NUGET_API_KEY.
@@ -216,7 +220,8 @@ internal static class Program
                 new DotNetProjectMetadataProvider(),
                 new PackageManifestLoader()),
             new ProcessCommandRunner(),
-            new PackageArtifactValidator());
+            new PackageArtifactValidator(),
+            new CoverageCliConsumerProofWorkflow(new CliWrapCommandRunner()));
         return await workflow.RunAsync(packageRequest, cancellationToken);
     }
 
@@ -280,6 +285,8 @@ internal static class Program
 /// <param name="PackageVersion">Optional package version supplied for package artifact verification.</param>
 /// <param name="ArtifactsInputPath">Resolved package artifact input directory for protected publish jobs.</param>
 /// <param name="ArtifactManifestPath">Resolved machine-readable package artifact manifest path.</param>
+/// <param name="CoverageProofWorkDirectory">Resolved packaged coverage CLI consumer proof work directory.</param>
+/// <param name="CoverageProofReportPath">Resolved packaged coverage CLI consumer proof report path.</param>
 /// <param name="PublishLogPath">Resolved protected publish ledger path.</param>
 /// <param name="Source">NuGet source URL used for publish and smoke install.</param>
 /// <param name="ApiKeyEnvironmentVariable">Environment variable name that supplies the NuGet API key.</param>
@@ -292,6 +299,8 @@ internal sealed record CommandLineOptions(
     string? PackageVersion,
     string ArtifactsInputPath,
     string ArtifactManifestPath,
+    string CoverageProofWorkDirectory,
+    string CoverageProofReportPath,
     string PublishLogPath,
     string Source,
     string ApiKeyEnvironmentVariable,
@@ -314,6 +323,8 @@ internal sealed record CommandLineOptions(
         string? artifactsOutputPath = null;
         string? artifactsInputPath = null;
         string? artifactManifestPath = null;
+        string? coverageProofWorkDirectory = null;
+        string? coverageProofReportPath = null;
         string? packageVersion = null;
         string? reportPath = null;
         string? publishLogPath = null;
@@ -379,6 +390,18 @@ internal sealed record CommandLineOptions(
                 continue;
             }
 
+            if (string.Equals(argument, "--coverage-proof-work-dir", StringComparison.Ordinal))
+            {
+                coverageProofWorkDirectory = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--coverage-proof-report", StringComparison.Ordinal))
+            {
+                coverageProofReportPath = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
             if (string.Equals(argument, "--publish-log", StringComparison.Ordinal))
             {
                 publishLogPath = ReadRequiredValue(args, ref index, argument);
@@ -420,6 +443,8 @@ internal sealed record CommandLineOptions(
         var resolvedArtifactsInputPath = ResolvePath(artifactsInputPath, repoRoot, resolvedArtifactsOutputPath);
         var resolvedArtifactManifestPath = ResolvePath(artifactManifestPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-artifact-manifest.json"));
         var resolvedReportPath = ResolvePath(reportPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-validation-report.md"));
+        var resolvedCoverageProofWorkDirectory = ResolvePath(coverageProofWorkDirectory, repoRoot, Path.Join(resolvedArtifactsOutputPath, "coverage-cli-consumer-proof"));
+        var resolvedCoverageProofReportPath = ResolvePath(coverageProofReportPath, repoRoot, Path.Join(resolvedArtifactsOutputPath, "coverage-cli-consumer-proof.md"));
         var resolvedPublishLogPath = ResolvePath(publishLogPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-publish-log.md"));
         var resolvedSmokeWorkDirectory = ResolvePath(smokeWorkDirectory, repoRoot, Path.Join(repoRoot, "artifacts", "package-smoke"));
         var resolvedSmokeReportPath = ResolvePath(smokeReportPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-smoke-report.md"));
@@ -431,6 +456,8 @@ internal sealed record CommandLineOptions(
             packageVersion,
             resolvedArtifactsInputPath,
             resolvedArtifactManifestPath,
+            resolvedCoverageProofWorkDirectory,
+            resolvedCoverageProofReportPath,
             resolvedPublishLogPath,
             string.IsNullOrWhiteSpace(source) ? "https://api.nuget.org/v3/index.json" : source,
             string.IsNullOrWhiteSpace(apiKeyEnvironmentVariable) ? "NUGET_API_KEY" : apiKeyEnvironmentVariable,
@@ -456,7 +483,10 @@ internal sealed record CommandLineOptions(
             ArtifactsOutputPath,
             ReportPath,
             PackageVersion,
-            ArtifactManifestPath);
+            ArtifactManifestPath,
+            CoverageProofWorkDirectory,
+            CoverageProofReportPath,
+            Source);
     }
 
     /// <summary>

@@ -29,9 +29,23 @@ public sealed class RazorWireCliReadmeContractTests
         Assert.Contains("surrounding publish root", readme, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Readme_Should_CrossReference_HybridHostingGuide()
+    {
+        var readme = File.ReadAllText(GetRazorWireCliReadmePath());
+
+        Assert.Contains("../ForgeTrust.RazorWire/Docs/hybrid-hosting.md", readme, StringComparison.Ordinal);
+        Assert.Contains("Cloud Run live-origin deployment recipe", readme, StringComparison.Ordinal);
+        Assert.Contains("CORS setup", readme, StringComparison.Ordinal);
+        Assert.Contains("cold-start tradeoffs", readme, StringComparison.Ordinal);
+        Assert.Contains("appsurface docs export", readme, StringComparison.Ordinal);
+        Assert.Contains("--live-origin https://api.example.com", readme, StringComparison.Ordinal);
+        Assert.Contains("The runtime wakes the live origin only when the user interacts with the form", readme, StringComparison.Ordinal);
+    }
+
     private static string GetRazorWireCliReadmePath()
     {
         var repositoryRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        return Path.Join(repositoryRoot, "Web", "ForgeTrust.RazorWire.Cli", "README.md");
+        return TestPathUtils.PathUnder(repositoryRoot, "Web", "ForgeTrust.RazorWire.Cli", "README.md");
     }
 }
