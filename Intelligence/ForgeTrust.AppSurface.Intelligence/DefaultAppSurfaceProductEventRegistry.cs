@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace ForgeTrust.AppSurface.Intelligence;
 
 /// <summary>
@@ -13,6 +15,7 @@ internal sealed class DefaultAppSurfaceProductEventRegistry : IAppSurfaceProduct
 {
     private static readonly IReadOnlySet<string> ForbiddenPropertyNames = AppSurfaceProductEventRegistry.ForbiddenProperties;
     private readonly IReadOnlyDictionary<string, AppSurfaceProductEventContract> _contractsByName;
+    private readonly IReadOnlySet<string> _forbiddenProperties;
 
     internal DefaultAppSurfaceProductEventRegistry(IEnumerable<AppSurfaceProductEventContract> customContracts)
     {
@@ -46,6 +49,7 @@ internal sealed class DefaultAppSurfaceProductEventRegistry : IAppSurfaceProduct
         }
 
         _contractsByName = composed;
+        _forbiddenProperties = ForbiddenPropertyNames.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
         All = Array.AsReadOnly(composed.Values.ToArray());
     }
 
@@ -53,8 +57,7 @@ internal sealed class DefaultAppSurfaceProductEventRegistry : IAppSurfaceProduct
     public IReadOnlyList<AppSurfaceProductEventContract> All { get; }
 
     /// <inheritdoc />
-    public IReadOnlySet<string> ForbiddenProperties =>
-        new HashSet<string>(ForbiddenPropertyNames, StringComparer.OrdinalIgnoreCase);
+    public IReadOnlySet<string> ForbiddenProperties => _forbiddenProperties;
 
     /// <inheritdoc />
     public AppSurfaceProductEventContract? Find(string name)

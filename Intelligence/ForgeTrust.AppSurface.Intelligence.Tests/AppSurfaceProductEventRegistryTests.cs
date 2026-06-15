@@ -725,10 +725,11 @@ public sealed class AppSurfaceProductEventRegistryTests
     public void RegistryCollections_DoNotExposeMutableBackingState()
     {
         var contracts = Assert.IsAssignableFrom<IList<AppSurfaceProductEventContract>>(AppSurfaceProductEventRegistry.All);
-        var forbidden = Assert.IsAssignableFrom<ISet<string>>(AppSurfaceProductEventRegistry.ForbiddenProperties);
+        var forbidden = AppSurfaceProductEventRegistry.ForbiddenProperties;
 
         Assert.Throws<NotSupportedException>(() => contracts.Clear());
-        Assert.True(forbidden.Remove("token"));
+        Assert.Throws<NotSupportedException>(() => ((ISet<string>)forbidden).Remove("token"));
+        Assert.Same(forbidden, AppSurfaceProductEventRegistry.ForbiddenProperties);
         Assert.Contains("token", AppSurfaceProductEventRegistry.ForbiddenProperties);
     }
 

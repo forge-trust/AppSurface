@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace ForgeTrust.AppSurface.Intelligence;
 
 /// <summary>
@@ -247,8 +249,8 @@ public static class AppSurfaceProductEventRegistry
     private static readonly IReadOnlyDictionary<string, AppSurfaceProductEventContract> ContractsByName =
         Contracts.ToDictionary(contract => contract.Name, StringComparer.Ordinal);
 
-    private static readonly HashSet<string> ForbiddenPropertyNames =
-        GlobalForbiddenPropertyNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly IReadOnlySet<string> ForbiddenPropertyNames =
+        GlobalForbiddenPropertyNames.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Gets every registered AppSurface product event contract.
@@ -258,8 +260,7 @@ public static class AppSurfaceProductEventRegistry
     /// <summary>
     /// Gets globally forbidden property names that are always dropped from emitted payloads.
     /// </summary>
-    public static IReadOnlySet<string> ForbiddenProperties =>
-        new HashSet<string>(ForbiddenPropertyNames, StringComparer.OrdinalIgnoreCase);
+    public static IReadOnlySet<string> ForbiddenProperties => ForbiddenPropertyNames;
 
     /// <summary>
     /// Finds a registered contract by event name.

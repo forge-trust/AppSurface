@@ -8,6 +8,21 @@ namespace ForgeTrust.AppSurface.Intelligence;
 /// </summary>
 internal static class AppSurfaceProductEventValidationEngine
 {
+    /// <summary>
+    /// Validates a product event against registered contracts and returns a privacy-safe sanitization result.
+    /// </summary>
+    /// <param name="productEvent">Event to validate.</param>
+    /// <param name="contractsByName">Registered contracts keyed by event name using ordinal comparison.</param>
+    /// <param name="forbiddenPropertyNames">Global property names that must always be rejected.</param>
+    /// <returns>
+    /// A result containing event validity, sanitized properties, rejected-property names, diagnostics, reason codes, and
+    /// an optional safe fix hint.
+    /// </returns>
+    /// <remarks>
+    /// Optional-property failures are rejected at the property level while required-property failures invalidate the
+    /// event. Callers should gate sink emission on <see cref="AppSurfaceProductEventValidationResult.IsValid" /> and
+    /// should not infer success from sanitized-property count alone.
+    /// </remarks>
     internal static AppSurfaceProductEventValidationResult Validate(
         AppSurfaceProductEvent productEvent,
         IReadOnlyDictionary<string, AppSurfaceProductEventContract> contractsByName,

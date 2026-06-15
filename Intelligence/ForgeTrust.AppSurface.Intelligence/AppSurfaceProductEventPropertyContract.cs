@@ -19,6 +19,16 @@ public sealed class AppSurfaceProductEventPropertyContract
     /// Thrown when <paramref name="sensitivity" /> or <paramref name="cardinality" /> is not a defined product-event enum
     /// value, or when <paramref name="maxLength" /> is not positive.
     /// </exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when required text is empty, <paramref name="allowedValues" /> contains empty or duplicate entries, or
+    /// allowed-value constraints cannot be normalized.
+    /// </exception>
+    /// <remarks>
+    /// This compatibility overload starts from the <see cref="AppSurfaceProductEventValueShape.Token" /> shape. When
+    /// <paramref name="allowedValues" /> is provided, the resulting <see cref="ValueShape" /> is normalized to
+    /// <see cref="AppSurfaceProductEventValueShape.AllowedValue" /> so legacy callers get the same bounded-dimension
+    /// behavior as the explicit value-shape overload.
+    /// </remarks>
     public AppSurfaceProductEventPropertyContract(
         string name,
         string description,
@@ -54,6 +64,19 @@ public sealed class AppSurfaceProductEventPropertyContract
     /// Thrown when <paramref name="sensitivity" />, <paramref name="cardinality" />, or <paramref name="valueShape" /> is
     /// not a defined product-event enum value, or when <paramref name="maxLength" /> is not positive.
     /// </exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when required text is empty, <paramref name="allowedValues" /> contains empty or duplicate entries,
+    /// <paramref name="valueShape" /> is <see cref="AppSurfaceProductEventValueShape.AllowedValue" /> without allowed
+    /// values, or allowed values are provided for a non-<see cref="AppSurfaceProductEventValueShape.AllowedValue" />
+    /// shape.
+    /// </exception>
+    /// <remarks>
+    /// <paramref name="allowedValues" /> and <paramref name="valueShape" /> are intentionally coupled. When allowed
+    /// values are supplied with the default <see cref="AppSurfaceProductEventValueShape.Token" /> shape, the contract
+    /// normalizes <see cref="ValueShape" /> to <see cref="AppSurfaceProductEventValueShape.AllowedValue" />. Supplying
+    /// allowed values with any other non-allowed-value shape is rejected so callers cannot accidentally mix enum
+    /// contracts with free-form token, text, boolean, or integer validation.
+    /// </remarks>
     public AppSurfaceProductEventPropertyContract(
         string name,
         string description,
