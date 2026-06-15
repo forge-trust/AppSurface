@@ -586,6 +586,64 @@ public sealed class AppSurfaceProductEventRegistryTests
     }
 
     [Fact]
+    public void ValidationEngine_DropsForbiddenPropertyNamesAfterContractMatch()
+    {
+        var contract = new AppSurfaceProductEventContract(
+            "host.defensive_forbidden_property",
+            AppSurfaceProductEventLifecycle.Stable,
+            "Prove the shared validator enforces forbidden names even for matched contracts.",
+            "Host",
+            "Discard during tests.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    "token",
+                    "Forbidden credential-shaped property.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low)
+            ],
+            ["raw credential"]);
+        var result = AppSurfaceProductEventValidationEngine.Validate(
+            new AppSurfaceProductEvent(
+                "host.defensive_forbidden_property",
+                DateTimeOffset.UnixEpoch,
+                new Dictionary<string, string>
+                {
+                    ["token"] = "safe-looking-token"
+                }),
+            new Dictionary<string, AppSurfaceProductEventContract>
+            {
+                [contract.Name] = contract
+            },
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "token"
+            });
+
+        Assert.True(result.IsValid);
+        Assert.Contains("token", result.RejectedProperties);
+        Assert.Contains(AppSurfaceProductEventValidationFailureReason.ForbiddenPropertyName, result.ReasonCodes);
+        Assert.DoesNotContain("safe-looking-token", result.SanitizedProperties.Values);
+    }
+
+    [Fact]
+    public void ValidationException_FormatsUnknownReasonsAndRejectedPropertiesSafely()
+    {
+        var exception = new AppSurfaceProductEventValidationException(
+            "host.unsafe_value",
+            new AppSurfaceProductEventValidationResult(
+                contract: null,
+                isValid: false,
+                sanitizedProperties: new Dictionary<string, string>(),
+                rejectedProperties: ["debug_note"],
+                diagnostics: ["Property was rejected."]),
+            "Register a bounded property.");
+
+        Assert.Contains("Reasons: Unknown", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Rejected properties: debug_note", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("debug_note", exception.RejectedProperties);
+    }
+
+    [Fact]
     public void Validate_DropsMissingRequiredEvent()
     {
         var productEvent = new AppSurfaceProductEvent(
