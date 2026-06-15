@@ -1,0 +1,128 @@
+{
+  "schema": "appsurface-release-manifest-v1",
+  "version": "0.1.0-rc.4",
+  "tag": "v0.1.0-rc.4",
+  "date": "2026-06-15",
+  "sourceCommit": "8f8110794a39b76381fdbf12917811016c36820f",
+  "releaseClassification": "prerelease",
+  "generatedFiles": [
+    "releases/v0.1.0-rc.4.md",
+    "releases/v0.1.0-rc.4.md.yml",
+    "releases/v0.1.0-rc.4.release.json",
+    "releases/v0.1.0-rc.4.evidence.json"
+  ],
+  "publishedPackageProjects": [
+    "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj",
+    "Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj",
+    "Config/ForgeTrust.AppSurface.Config.LocalSecrets/ForgeTrust.AppSurface.Config.LocalSecrets.csproj",
+    "Caching/ForgeTrust.AppSurface.Caching/ForgeTrust.AppSurface.Caching.csproj",
+    "Auth/ForgeTrust.AppSurface.Auth/ForgeTrust.AppSurface.Auth.csproj",
+    "Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj",
+    "Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj",
+    "Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj",
+    "Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj",
+    "Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj",
+    "Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj",
+    "Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj",
+    "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+    "Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj",
+    "Web/ForgeTrust.AppSurface.Web.Scalar/ForgeTrust.AppSurface.Web.Scalar.csproj",
+    "Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj",
+    "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+    "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
+  ],
+  "packagePathUpdates": [
+    {
+      "project": "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Config/ForgeTrust.AppSurface.Config.LocalSecrets/ForgeTrust.AppSurface.Config.LocalSecrets.csproj",
+      "previousReleaseNotesPath": "releases/unreleased.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Caching/ForgeTrust.AppSurface.Caching/ForgeTrust.AppSurface.Caching.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Auth/ForgeTrust.AppSurface.Auth/ForgeTrust.AppSurface.Auth.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Web/ForgeTrust.AppSurface.Web.Scalar/ForgeTrust.AppSurface.Web.Scalar.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    },
+    {
+      "project": "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+      "previousReleaseNotesPath": "releases/v0.1.0-rc.3.md",
+      "nextReleaseNotesPath": "releases/v0.1.0-rc.4.md"
+    }
+  ],
+  "diagnostics": [],
+  "warningIds": []
+}
