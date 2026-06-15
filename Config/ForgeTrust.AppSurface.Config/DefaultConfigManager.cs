@@ -66,6 +66,12 @@ internal partial class DefaultConfigManager : IConfigManager
 
                 break;
             }
+
+            if (provider is IConfigProviderTerminalDiagnosticProvider terminalProvider
+                && terminalProvider.TryGetTerminalDiagnostic(environment, key, out var diagnostic))
+            {
+                throw new ConfigurationResolutionException(environment, key, provider.Name, diagnostic);
+            }
         }
 
         if (_environmentProvider is IConfigValuePatcher patcher
