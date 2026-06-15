@@ -56,6 +56,10 @@ public sealed class ConfigurationResolutionException : Exception
     /// </summary>
     public ConfigProviderTerminalDiagnostic Diagnostic { get; }
 
+    /// <inheritdoc />
+    public override string ToString() =>
+        $"{base.ToString()}{Environment.NewLine}Environment: {EnvironmentName}{Environment.NewLine}Key: {Key}";
+
     private static string CreateMessage(string providerName, ConfigProviderTerminalDiagnostic diagnostic) =>
         $"Configuration provider {providerName} stopped resolution. {diagnostic.ToDisplayString()}";
 }

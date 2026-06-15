@@ -19,9 +19,19 @@ public interface IConfigProvider
     /// <summary>
     /// Retrieves a configuration value for a specific environment and key.
     /// </summary>
+    /// <remarks>
+    /// Plain providers return the default value of <typeparamref name="T"/> when a key is absent. Aggregating managers
+    /// such as <see cref="IConfigManager"/> may throw <see cref="ConfigurationResolutionException"/> instead when a
+    /// fail-closed provider reports that it owns the key but cannot safely return a value, for example because a local
+    /// secret store is locked, unavailable, unsupported, or disabled by posture. Catch that exception at host, command,
+    /// or diagnostics boundaries when rendering provider guidance to users.
+    /// </remarks>
     /// <typeparam name="T">The type of the configuration value.</typeparam>
     /// <param name="environment">The environment name (e.g., "Production").</param>
     /// <param name="key">The configuration key.</param>
     /// <returns>The configuration value, or the default value of <typeparamref name="T"/> if not found.</returns>
+    /// <exception cref="ConfigurationResolutionException">
+    /// Thrown by aggregating managers when a provider reports a terminal, display-safe diagnostic for the requested key.
+    /// </exception>
     T? GetValue<T>(string environment, string key);
 }

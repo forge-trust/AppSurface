@@ -31,8 +31,9 @@ public sealed class AppSurfaceLocalSecretIdentityNormalizer
     /// <returns>A normalized identity result.</returns>
     /// <remarks>
     /// A successful result contains normalized display segments and a storage name in the form
-    /// <c>appsurface:{application}:{environment}:{prefix}:{key}</c>. Invalid input returns a display-safe diagnostic
-    /// rather than throwing so command and provider paths can render paste-safe guidance.
+    /// <c>appsurface:{application}:{environment}:{key}</c>, or
+    /// <c>appsurface:{application}:{environment}:{prefix}:{key}</c> when a prefix is configured. Invalid input returns
+    /// a display-safe diagnostic rather than throwing so command and provider paths can render paste-safe guidance.
     /// </remarks>
     public AppSurfaceLocalSecretIdentityResult Normalize(
         string? applicationName,

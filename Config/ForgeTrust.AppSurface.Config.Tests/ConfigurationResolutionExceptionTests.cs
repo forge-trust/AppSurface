@@ -22,6 +22,22 @@ public sealed class ConfigurationResolutionExceptionTests
         Assert.Equal("diagnostic", error.ParamName);
     }
 
+    [Fact]
+    public void ToString_Should_IncludeDisplaySafeResolutionContext()
+    {
+        var exception = new ConfigurationResolutionException(
+            "Development",
+            "Stripe:ApiKey",
+            "LocalSecrets",
+            CreateDiagnostic());
+
+        var text = exception.ToString();
+
+        Assert.Contains("Environment: Development", text, StringComparison.Ordinal);
+        Assert.Contains("Key: Stripe:ApiKey", text, StringComparison.Ordinal);
+        Assert.Contains("Configuration provider LocalSecrets stopped resolution.", text, StringComparison.Ordinal);
+    }
+
     private static ConfigProviderTerminalDiagnostic CreateDiagnostic() =>
         new(
             "local-secret-store-locked",
