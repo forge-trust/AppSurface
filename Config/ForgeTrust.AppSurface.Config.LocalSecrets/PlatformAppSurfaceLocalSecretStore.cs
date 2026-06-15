@@ -833,16 +833,25 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             {
                 process.Kill(entireProcessTree: true);
             }
-            catch (InvalidOperationException)
+            catch (InvalidOperationException ex)
             {
+                TraceTimedOutProcessCleanupFailure(ex);
             }
-            catch (NotSupportedException)
+            catch (NotSupportedException ex)
             {
+                TraceTimedOutProcessCleanupFailure(ex);
             }
-            catch (Win32Exception)
+            catch (Win32Exception ex)
             {
+                TraceTimedOutProcessCleanupFailure(ex);
             }
         }
+
+        private static void TraceTimedOutProcessCleanupFailure(Exception exception) =>
+            Trace.TraceWarning(
+                "AppSurface LocalSecrets could not terminate a timed-out platform secret command. Exception={0}; HResult={1}.",
+                exception.GetType().FullName,
+                exception.HResult);
     }
 
     internal sealed record PlatformSecretCommandResult(int ExitCode, string Output, string Error)
