@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 
 namespace ForgeTrust.AppSurface.Intelligence;
@@ -140,11 +141,17 @@ internal static class AppSurfaceProductEventValidationEngine
                 value,
                 out sanitizedValue,
                 out diagnostic),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(property),
-                property.ValueShape,
-                "Unexpected product-event property value shape.")
+            _ => ThrowUnexpectedValueShape(property.ValueShape)
         };
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Property contracts reject undefined value-shape enum values before validation.")]
+    private static bool ThrowUnexpectedValueShape(AppSurfaceProductEventValueShape valueShape)
+    {
+        throw new ArgumentOutOfRangeException(
+            nameof(valueShape),
+            valueShape,
+            "Unexpected product-event property value shape.");
     }
 
     private static bool TrySanitizeNonNegativeInteger(
