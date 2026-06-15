@@ -27,7 +27,7 @@ The original spike kept the dependency in `ForgeTrust.AppSurface.Docs.Tests` onl
 | Block comment spans | Available through `ParserOptions.OnComment`; `Comment.Range` gives zero-based start/end and `Comment.ContentRange` gives the comment body. |
 | AST node spans | Available on every `Node` through `Start`, `End`, `Range`, and `Location`. |
 | Source line/column behavior | Lines are one-based. Columns are zero-based. This matches parser error columns and node/comment locations. |
-| Parser failure behavior | Malformed JavaScript throws a catchable `ParseErrorException` subclass. The probe catches `ParseErrorException` for `malformed.js`, with line and column populated. |
+| Parser failure behavior | Malformed JavaScript throws a catchable `ParseErrorException` subclass. The probe catches `ParseErrorException` for `malformed.js.txt`, with line and column populated. |
 | Package size | `.nupkg`: 632,632 bytes. `lib/net8.0/Acornima.dll`: 363,520 bytes. |
 | License compatibility | BSD-3-Clause. Acceptable for AppSurface package and CLI distribution. |
 | Maintenance status | Current NuGet package, current README, and current ECMAScript coverage claim. This is healthier than depending on an abandoned grammar fork. |
@@ -81,6 +81,7 @@ The probe verifies:
 - standalone public `@typedef` doclets
 - `window.RazorWire = { ... }` assignment detection
 - catchable malformed-file parse failures
+- The intentionally invalid checked-in parser fixture uses the `.js.txt` suffix so repository-level JavaScript/TypeScript tools, including CodeQL default setup, do not parse it as source while the probe still reads the same JavaScript bytes.
 - lightweight parse-cost measurements for real and synthetic JavaScript inputs
 
 ## Parse-Cost Snapshot
@@ -96,7 +97,7 @@ dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Test
 | `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js` | current generated asset size | measured by test output | real generated RazorWire runtime file; contract harvesting now uses the docs-only manifest instead |
 | `Web/ForgeTrust.AppSurface.Docs/wwwroot/docs/outline-client.js` | current authored asset size | measured by test output | AppSurface Docs authored browser asset; generated/minified `search-client.js` is no longer a parser dogfood file |
 | `Web/ForgeTrust.AppSurface.Docs/wwwroot/docs/minisearch.min.js` | current generated asset size | skipped | should stay excluded by `*.min.js` by default |
-| `malformed.js` | 107 bytes | 0.450 ms | failure path; catchable parse exception |
+| `malformed.js.txt` | 107 bytes | 0.450 ms | failure path; catchable parse exception |
 | synthetic large public-doclet fixture | 117,965 bytes | 5.563 ms | 750 public function doclets; parsed successfully with 4,503 AST nodes and 750 block comments |
 
 ## Known Unsupported Syntax For V1 Harvesting
