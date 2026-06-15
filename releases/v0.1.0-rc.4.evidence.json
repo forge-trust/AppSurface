@@ -15,12 +15,12 @@
     {
       "path": "releases/v0.1.0-rc.4.md",
       "algorithm": "sha256",
-      "value": "b43351acdb4aa0efe1b5406c75269c56fa2d69544bdbe64c8738ae27f4b92caf"
+      "value": "c92a02c4c1cc9026bdf6331d505ad6b601afb6570253dadde0ff2072a6aaa3c6"
     },
     {
       "path": "releases/v0.1.0-rc.4.md.yml",
       "algorithm": "sha256",
-      "value": "4f56175ec1519a103aae7865446d4ff919066c8f73f06eafa418ef88436ee091"
+      "value": "fbd05376d13931233953ecb3a8c51c3232b2371eb8dd467be930a664a80fc2ea"
     },
     {
       "path": "releases/v0.1.0-rc.4.release.json",
@@ -122,7 +122,7 @@
   "generatedAtUtc": "2026-06-15T07:56:00.8044090Z",
   "subject": {
     "name": "releases/v0.1.0-rc.4.evidence.json",
-    "sha256": "aaaef36922a738d745aaf7d4ff8344f729ee07b247966151ddac913744d09376"
+    "sha256": "9cbbc14223a16e60c8e11ec2894472dffdee457c4b568ff655d9aaa43db8aacd"
   },
   "attestation": null
 }

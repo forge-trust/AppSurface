@@ -14,6 +14,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
+
 ## 0.1.0-rc.4 - 2026-06-15
 
 - Narrative release note: [v0.1.0-rc.4](./releases/v0.1.0-rc.4.md)
