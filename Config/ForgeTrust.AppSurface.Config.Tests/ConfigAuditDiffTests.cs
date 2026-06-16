@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using FakeItEasy;
 
@@ -399,6 +400,212 @@ public sealed class ConfigAuditDiffTests
     }
 
     [Fact]
+    public void Render_EmptyRetainedItemsAndAllSourceKinds()
+    {
+        var emptyDiff = new ConfigAuditReportDiffer().Compare(
+            CreateReport("Staging"),
+            CreateReport("Production"),
+            new ConfigAuditDiffOptions { EvidenceMode = ConfigAuditDiffEvidenceMode.CapturedSnapshot });
+
+        var emptyRendered = new ConfigAuditDiffTextRenderer().Render(emptyDiff);
+
+        Assert.Contains("No changed, added, removed, or uncomparable items retained.", emptyRendered, StringComparison.Ordinal);
+
+        var baseline = CreateReport(
+            "Staging",
+            entries:
+            [
+                Entry(
+                    "Composite.Value",
+                    "baseline",
+                    sources:
+                    [
+                        Source(ConfigAuditSourceKind.File, providerName: "FileProvider", filePath: "/full/path/appsettings.json", configPath: "Composite:Value", location: null),
+                        Source(ConfigAuditSourceKind.EnvironmentVariable, environmentVariableName: "APP_COMPOSITE_VALUE"),
+                        Source(ConfigAuditSourceKind.Default, providerName: "DefaultProvider"),
+                        Source(ConfigAuditSourceKind.Missing),
+                        Source((ConfigAuditSourceKind)999, providerName: "CustomProvider")
+                    ])
+            ]);
+        var target = CreateReport(
+            "Production",
+            entries:
+            [
+                Entry(
+                    "Composite.Value",
+                    "target",
+                    sources:
+                    [
+                        Source(ConfigAuditSourceKind.File, providerName: "FileProvider", filePath: null, configPath: "Composite:Value", location: null)
+                    ])
+            ]);
+
+        var rendered = new ConfigAuditDiffTextRenderer().Render(new ConfigAuditReportDiffer().Compare(baseline, target));
+
+        Assert.Contains("FileProvider appsettings.json :: Composite:Value", rendered, StringComparison.Ordinal);
+        Assert.Contains("FileProvider  :: Composite:Value", rendered, StringComparison.Ordinal);
+        Assert.Contains("Environment variable APP_COMPOSITE_VALUE", rendered, StringComparison.Ordinal);
+        Assert.Contains("Default value on DefaultProvider", rendered, StringComparison.Ordinal);
+        Assert.Contains("none", rendered, StringComparison.Ordinal);
+        Assert.Contains("CustomProvider", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Compare_DiscoveredKeyEvidenceCoversMissingSourceAndUncertaintyBranches()
+    {
+        var baseline = CreateReport(
+            "Staging",
+            discoveredKeys:
+            [
+                Discovered("Only.Baseline", "old", ConfigAuditDiscoveredValueDisplayState.Shown),
+                Discovered("Both.Redacted", "[redacted]", ConfigAuditDiscoveredValueDisplayState.Redacted, isRedacted: true),
+                Discovered("Redacted.ThenShown", "[redacted]", ConfigAuditDiscoveredValueDisplayState.Redacted, isRedacted: true),
+                Discovered("Omitted.Value", null, ConfigAuditDiscoveredValueDisplayState.OmittedInventory),
+                Discovered("Unspecified.Value", null, ConfigAuditDiscoveredValueDisplayState.Unspecified),
+                Discovered("Source.Only", "same", ConfigAuditDiscoveredValueDisplayState.Shown, sourcePath: "/config/staging.json")
+            ]);
+        var target = CreateReport(
+            "Production",
+            discoveredKeys:
+            [
+                Discovered("Only.Target", "new", ConfigAuditDiscoveredValueDisplayState.Shown),
+                Discovered("Both.Redacted", "[redacted]", ConfigAuditDiscoveredValueDisplayState.Redacted, isRedacted: true),
+                Discovered("Redacted.ThenShown", "shown", ConfigAuditDiscoveredValueDisplayState.Shown),
+                Discovered("Omitted.Value", null, ConfigAuditDiscoveredValueDisplayState.OmittedInventory),
+                Discovered("Unspecified.Value", null, ConfigAuditDiscoveredValueDisplayState.Unspecified),
+                Discovered("Source.Only", "same", ConfigAuditDiscoveredValueDisplayState.Shown, sourcePath: "/config/production.json")
+            ]);
+
+        var diff = new ConfigAuditReportDiffer().Compare(
+            baseline,
+            target,
+            new ConfigAuditDiffOptions { IncludeUnchangedItems = true });
+        var rendered = new ConfigAuditDiffTextRenderer().Render(diff);
+
+        Assert.Contains(diff.Items, item => item.Key == "Only.Baseline" && item.Status == ConfigAuditDiffItemStatus.Removed);
+        Assert.Contains(diff.Items, item => item.Key == "Only.Target" && item.Status == ConfigAuditDiffItemStatus.Added);
+        Assert.Contains(diff.Items, item => item.Key == "Both.Redacted" && item.ValueEvidence == ConfigAuditDiffValueEvidence.BothRedacted);
+        Assert.Contains(diff.Items, item => item.Key == "Redacted.ThenShown" && item.ValueEvidence == ConfigAuditDiffValueEvidence.RedactedVersusShown);
+        Assert.Contains(diff.Items, item => item.Key == "Omitted.Value" && item.ValueEvidence == ConfigAuditDiffValueEvidence.Omitted);
+        Assert.Contains(diff.Items, item => item.Key == "Unspecified.Value" && item.ValueEvidence == ConfigAuditDiffValueEvidence.Unspecified);
+        Assert.Contains(diff.Items, item => item.Key == "Source.Only" && item.Kind == ConfigAuditDiffItemKind.Source && item.Significance == ConfigAuditDiffSignificance.Context);
+        Assert.Contains("one value was redacted and one was shown", rendered, StringComparison.Ordinal);
+        Assert.Contains("value display evidence is incomplete", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Compare_EntryEvidenceCoversRedactedShownOmittedAndManualReportDiagnostics()
+    {
+        var baseline = CreateReport(
+            "",
+            generatedAt: default(DateTimeOffset),
+            entries:
+            [
+                Entry("Redacted.ThenShown", "[redacted]", isRedacted: true),
+                Entry("Omitted.Value", null)
+            ]);
+        var target = CreateReport(
+            "Production",
+            entries:
+            [
+                Entry("Redacted.ThenShown", "shown"),
+                Entry("Omitted.Value", null)
+            ]);
+
+        var diff = new ConfigAuditReportDiffer().Compare(
+            baseline,
+            target,
+            new ConfigAuditDiffOptions { IncludeUnchangedItems = true });
+        var rendered = new ConfigAuditDiffTextRenderer().Render(diff);
+
+        Assert.Contains(diff.Diagnostics, diagnostic => diagnostic.Message.Contains("no environment name", StringComparison.Ordinal));
+        Assert.Contains(diff.Diagnostics, diagnostic => diagnostic.Message.Contains("default generated timestamp", StringComparison.Ordinal));
+        Assert.Contains(diff.Items, item => item.Key == "Redacted.ThenShown" && item.ValueEvidence == ConfigAuditDiffValueEvidence.RedactedVersusShown);
+        Assert.Contains(diff.Items, item => item.Key == "Omitted.Value" && item.ValueEvidence == ConfigAuditDiffValueEvidence.Omitted);
+        Assert.Contains("one value was redacted and one was shown", rendered, StringComparison.Ordinal);
+        Assert.Contains("at least one display value was omitted", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Compare_DiagnosticChangesCoverUnchangedInfoAndFallbackKeys()
+    {
+        var baseline = CreateReport(
+            "Staging",
+            diagnostics:
+            [
+                Diagnostic(ConfigAuditDiagnosticSeverity.Info, "same-info", "Same info."),
+                Diagnostic(ConfigAuditDiagnosticSeverity.Info, "changed-info", "Old info."),
+                Diagnostic(ConfigAuditDiagnosticSeverity.Warning, "fallback-code", "Old fallback.", key: null, configPath: null)
+            ]);
+        var target = CreateReport(
+            "Production",
+            diagnostics:
+            [
+                Diagnostic(ConfigAuditDiagnosticSeverity.Info, "same-info", "Same info."),
+                Diagnostic(ConfigAuditDiagnosticSeverity.Info, "changed-info", "New info."),
+                Diagnostic(ConfigAuditDiagnosticSeverity.Warning, "fallback-code", "New fallback.", key: null, configPath: null)
+            ]);
+
+        var diff = new ConfigAuditReportDiffer().Compare(
+            baseline,
+            target,
+            new ConfigAuditDiffOptions { IncludeUnchangedItems = true });
+
+        Assert.Contains(diff.Items, item => item.Key == "same-info" && item.Status == ConfigAuditDiffItemStatus.Unchanged && item.Significance == ConfigAuditDiffSignificance.Unchanged);
+        Assert.Contains(diff.Items, item => item.Key == "changed-info" && item.Status == ConfigAuditDiffItemStatus.Changed && item.Significance == ConfigAuditDiffSignificance.Context);
+        Assert.Contains(diff.Items, item => item.Key == "fallback-code" && item.Status == ConfigAuditDiffItemStatus.Changed);
+    }
+
+    [Fact]
+    public void Render_ManualReportCoversFallbackWordingAndItemDiagnostics()
+    {
+        var report = new ConfigAuditDiffReport
+        {
+            BaselineEnvironment = "Staging",
+            TargetEnvironment = "Production",
+            GeneratedAt = DateTimeOffset.UtcNow,
+            EvidenceMode = (ConfigAuditDiffEvidenceMode)999,
+            SourceDetail = ConfigAuditDiffSourceDetail.Summarized,
+            Summary = new ConfigAuditDiffSummary
+            {
+                Changed = 1,
+                Added = 0,
+                Removed = 0,
+                Unchanged = 0,
+                Uncomparable = 0,
+                Diagnostics = 0
+            },
+            Items =
+            [
+                new ConfigAuditDiffItem
+                {
+                    Kind = ConfigAuditDiffItemKind.KnownEntry,
+                    Status = ConfigAuditDiffItemStatus.Changed,
+                    Significance = ConfigAuditDiffSignificance.NeedsAttention,
+                    Key = "Manual.Value",
+                    Description = "Manual item.",
+                    ValueEvidence = (ConfigAuditDiffValueEvidence)999,
+                    Diagnostics =
+                    [
+                        new ConfigAuditComparisonDiagnostic
+                        {
+                            Severity = ConfigAuditDiagnosticSeverity.Warning,
+                            Code = "manual-diagnostic",
+                            Message = "Manual diagnostic."
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var rendered = new ConfigAuditDiffTextRenderer().Render(report);
+
+        Assert.Contains("Evidence: 999", rendered, StringComparison.Ordinal);
+        Assert.Contains("Value evidence: 999", rendered, StringComparison.Ordinal);
+        Assert.Contains("Diagnostic: [Warning] manual-diagnostic: Manual diagnostic.", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Run_UsesReporterDifferAndRendererWithoutCommandFramework()
     {
         var reporter = A.Fake<IConfigAuditReporter>();
@@ -440,6 +647,57 @@ public sealed class ConfigAuditDiffTests
     }
 
     [Fact]
+    public void Run_InputAndTargetFailuresAreSanitized()
+    {
+        var reporter = A.Fake<IConfigAuditReporter>();
+        A.CallTo(() => reporter.GetReport("Staging")).Returns(CreateReport("Staging"));
+        A.CallTo(() => reporter.GetReport("Production")).Throws(new InvalidOperationException("super-secret target path"));
+        var runner = new ConfigAuditDiffCommandRunner(
+            reporter,
+            new ConfigAuditReportDiffer(),
+            new ConfigAuditDiffTextRenderer());
+
+        var blankBaseline = runner.Run("", "Production", TextWriter.Null);
+        var blankTarget = runner.Run("Staging", " ", TextWriter.Null);
+        var targetFailure = runner.Run("Staging", "Production", TextWriter.Null);
+
+        Assert.Equal(ConfigAuditDiffFailureStage.Baseline, blankBaseline.Failure!.Stage);
+        Assert.Equal(ConfigAuditDiffFailureStage.Target, blankTarget.Failure!.Stage);
+        Assert.Equal(ConfigAuditDiffFailureStage.Target, targetFailure.Failure!.Stage);
+        Assert.DoesNotContain("super-secret", targetFailure.Failure.ToDisplayString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Run_CompareAndRenderFailuresAreSanitized()
+    {
+        var reporter = A.Fake<IConfigAuditReporter>();
+        A.CallTo(() => reporter.GetReport("Invalid")).Returns(new ConfigAuditReport
+        {
+            Environment = "Invalid",
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Providers = [],
+            Entries = null!,
+            DiscoveredKeys = [],
+            Diagnostics = [],
+            Redaction = Redaction()
+        });
+        A.CallTo(() => reporter.GetReport("Production")).Returns(CreateReport("Production"));
+        A.CallTo(() => reporter.GetReport("Staging")).Returns(CreateReport("Staging"));
+        var runner = new ConfigAuditDiffCommandRunner(
+            reporter,
+            new ConfigAuditReportDiffer(),
+            new ConfigAuditDiffTextRenderer());
+
+        var compareFailure = runner.Run("Invalid", "Production", TextWriter.Null);
+        var renderFailure = runner.Run("Staging", "Production", new ThrowingTextWriter());
+
+        Assert.Equal(ConfigAuditDiffFailureStage.Compare, compareFailure.Failure!.Stage);
+        Assert.DoesNotContain("NullReferenceException", compareFailure.Failure.Problem, StringComparison.Ordinal);
+        Assert.Equal(ConfigAuditDiffFailureStage.Render, renderFailure.Failure!.Stage);
+        Assert.Contains("InvalidOperationException", renderFailure.Failure.ToDisplayString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RunCapturedSnapshots_ParsesJsonAndUsesCapturedEvidenceMode()
     {
         using var output = new StringWriter();
@@ -458,6 +716,32 @@ public sealed class ConfigAuditDiffTests
     }
 
     [Fact]
+    public void RunCapturedSnapshots_SuccessPreservesIncludeUnchangedAndSourceDetailOptions()
+    {
+        using var output = new StringWriter();
+        var runner = new ConfigAuditDiffCommandRunner(
+            A.Fake<IConfigAuditReporter>(),
+            new ConfigAuditReportDiffer(),
+            new ConfigAuditDiffTextRenderer());
+        var baseline = JsonSerializer.Serialize(CreateReport("Staging", entries: [Entry("Feature.Enabled", "same", sourcePath: "/full/path/staging.json")]));
+        var target = JsonSerializer.Serialize(CreateReport("Production", entries: [Entry("Feature.Enabled", "same", sourcePath: "/full/path/staging.json")]));
+
+        var result = runner.RunCapturedSnapshots(
+            baseline,
+            target,
+            output,
+            new ConfigAuditDiffOptions
+            {
+                IncludeUnchangedItems = true,
+                SourceDetail = ConfigAuditDiffSourceDetail.Full
+            });
+
+        Assert.True(result.Succeeded);
+        Assert.Contains("Unchanged KnownEntry: Feature.Enabled", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("/full/path/staging.json", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RunCapturedSnapshots_ParseFailureIsSanitized()
     {
         using var output = new StringWriter();
@@ -472,6 +756,51 @@ public sealed class ConfigAuditDiffTests
         Assert.Equal(ConfigAuditDiffFailureStage.SnapshotParse, result.Failure!.Stage);
         Assert.DoesNotContain("super-secret", result.Failure.ToDisplayString(), StringComparison.Ordinal);
         Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public void RunCapturedSnapshots_TargetParseFailureAndOptionsAreSanitized()
+    {
+        using var output = new StringWriter();
+        var runner = new ConfigAuditDiffCommandRunner(
+            A.Fake<IConfigAuditReporter>(),
+            new ConfigAuditReportDiffer(),
+            new ConfigAuditDiffTextRenderer());
+        var baseline = JsonSerializer.Serialize(CreateReport("Staging", entries: [Entry("Feature.Enabled", "same")]));
+
+        var result = runner.RunCapturedSnapshots(
+            baseline,
+            "{ not json super-secret",
+            output,
+            new ConfigAuditDiffOptions
+            {
+                EvidenceMode = ConfigAuditDiffEvidenceMode.SameHostNamedEnvironment,
+                IncludeUnchangedItems = true,
+                SourceDetail = ConfigAuditDiffSourceDetail.Full
+            });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("Staging", result.BaselineEnvironment);
+        Assert.Null(result.TargetEnvironment);
+        Assert.Equal(ConfigAuditDiffFailureStage.SnapshotParse, result.Failure!.Stage);
+        Assert.DoesNotContain("super-secret", result.Failure.ToDisplayString(), StringComparison.Ordinal);
+        Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public void RunCapturedSnapshots_EmptySnapshotFailureIsSanitizedWithoutExceptionTypeForInputFailures()
+    {
+        var runner = new ConfigAuditDiffCommandRunner(
+            A.Fake<IConfigAuditReporter>(),
+            new ConfigAuditReportDiffer(),
+            new ConfigAuditDiffTextRenderer());
+
+        var result = runner.RunCapturedSnapshots(" ", "{}", TextWriter.Null);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(ConfigAuditDiffFailureStage.SnapshotParse, result.Failure!.Stage);
+        Assert.Contains("ArgumentException", result.Failure.ToDisplayString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -505,11 +834,12 @@ public sealed class ConfigAuditDiffTests
         IReadOnlyList<ConfigAuditEntry>? entries = null,
         IReadOnlyList<ConfigAuditDiscoveredKey>? discoveredKeys = null,
         IReadOnlyList<ConfigAuditDiagnostic>? diagnostics = null,
-        ConfigAuditRedaction? redaction = null) =>
+        ConfigAuditRedaction? redaction = null,
+        DateTimeOffset? generatedAt = null) =>
         new()
         {
             Environment = environment,
-            GeneratedAt = DateTimeOffset.UtcNow,
+            GeneratedAt = generatedAt ?? DateTimeOffset.UtcNow,
             Providers = providers ?? [Provider("EnvironmentConfigProvider", priority: -1, precedence: 0, isOverride: true)],
             Entries = entries ?? [],
             DiscoveredKeys = discoveredKeys ?? [],
@@ -523,7 +853,8 @@ public sealed class ConfigAuditDiffTests
         bool isRedacted = false,
         string sourcePath = "/config/appsettings.json",
         ConfigAuditElementIdentity? element = null,
-        IReadOnlyList<ConfigAuditEntry>? children = null) =>
+        IReadOnlyList<ConfigAuditEntry>? children = null,
+        IReadOnlyList<ConfigAuditSourceRecord>? sources = null) =>
         new()
         {
             Key = key,
@@ -533,7 +864,7 @@ public sealed class ConfigAuditDiffTests
             IsRedacted = isRedacted,
             Element = element,
             Children = children ?? [],
-            Sources =
+            Sources = sources ??
             [
                 new ConfigAuditSourceRecord
                 {
@@ -547,6 +878,25 @@ public sealed class ConfigAuditDiffTests
                     Location = new ConfigAuditSourceLocation(2, 4)
                 }
             ]
+        };
+
+    private static ConfigAuditSourceRecord Source(
+        ConfigAuditSourceKind kind,
+        string? providerName = null,
+        string? filePath = null,
+        string? environmentVariableName = null,
+        string? configPath = null,
+        ConfigAuditSourceLocation? location = null) =>
+        new()
+        {
+            Kind = kind,
+            ProviderName = providerName,
+            FilePath = filePath,
+            EnvironmentVariableName = environmentVariableName,
+            ConfigPath = configPath,
+            AppliedToPath = configPath,
+            Role = ConfigAuditSourceRole.Base,
+            Location = location
         };
 
     private static ConfigAuditElementIdentity DictionaryElement(
@@ -579,20 +929,23 @@ public sealed class ConfigAuditDiffTests
     private static ConfigAuditDiscoveredKey Discovered(
         string key,
         string? value,
-        ConfigAuditDiscoveredValueDisplayState valueDisplayState) =>
+        ConfigAuditDiscoveredValueDisplayState valueDisplayState,
+        bool isRedacted = false,
+        string sourcePath = "/config/appsettings.json") =>
         new()
         {
             Key = key,
             Classification = ConfigAuditDiscoveredKeyClassification.Unknown,
             DisplayValue = value,
             ValueDisplayState = valueDisplayState,
+            IsRedacted = isRedacted,
             Sources =
             [
                 new ConfigAuditSourceRecord
                 {
                     Kind = ConfigAuditSourceKind.File,
                     ProviderName = "FileBasedConfigProvider",
-                    FilePath = "/config/appsettings.json",
+                    FilePath = sourcePath,
                     ConfigPath = key,
                     AppliedToPath = key,
                     Role = ConfigAuditSourceRole.Base
@@ -603,14 +956,16 @@ public sealed class ConfigAuditDiffTests
     private static ConfigAuditDiagnostic Diagnostic(
         ConfigAuditDiagnosticSeverity severity,
         string code,
-        string message) =>
+        string message,
+        string? key = null,
+        string? configPath = null) =>
         new()
         {
             Severity = severity,
             Code = code,
             Message = message,
-            Key = code,
-            ConfigPath = code
+            Key = key ?? code,
+            ConfigPath = configPath ?? code
         };
 
     private static ConfigAuditRedaction Redaction(string placeholder = "[redacted]") =>
@@ -623,4 +978,12 @@ public sealed class ConfigAuditDiffTests
             DictionaryKeyCorrelationKeyId = "kid",
             DictionaryKeyCorrelationApplicationScope = "app"
         };
+
+    private sealed class ThrowingTextWriter : TextWriter
+    {
+        public override Encoding Encoding => Encoding.UTF8;
+
+        public override void Write(string? value) =>
+            throw new InvalidOperationException("super-secret writer path");
+    }
 }
