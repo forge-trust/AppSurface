@@ -35,8 +35,11 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
         services.AddOptions<ConfigAuditDictionaryKeyCorrelationOptions>();
         services.AddSingleton<ConfigDiagnosticsCommandRunner>();
+        services.AddSingleton<ConfigAuditDiffCommandRunner>();
         services.AddSingleton<ConfigAuditRedactor>();
         services.AddSingleton<ConfigAuditTextRenderer>();
+        services.AddSingleton<ConfigAuditReportDiffer>();
+        services.AddSingleton<ConfigAuditDiffTextRenderer>();
         services.AddSingleton<IEnvironmentConfigProvider, EnvironmentConfigProvider>();
         services.AddSingleton<IConfigFileLocationProvider, DefaultConfigFileLocationProvider>();
         services.AddSingleton<IConfigProvider, FileBasedConfigProvider>();

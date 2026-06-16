@@ -134,6 +134,18 @@ public class AppSurfaceConfigModuleTests
             services,
             d => d.ServiceType == typeof(ConfigDiagnosticsCommandRunner)
                  && d.ImplementationType == typeof(ConfigDiagnosticsCommandRunner));
+        Assert.Contains(
+            services,
+            d => d.ServiceType == typeof(ConfigAuditDiffCommandRunner)
+                 && d.ImplementationType == typeof(ConfigAuditDiffCommandRunner));
+        Assert.Contains(
+            services,
+            d => d.ServiceType == typeof(ConfigAuditReportDiffer)
+                 && d.ImplementationType == typeof(ConfigAuditReportDiffer));
+        Assert.Contains(
+            services,
+            d => d.ServiceType == typeof(ConfigAuditDiffTextRenderer)
+                 && d.ImplementationType == typeof(ConfigAuditDiffTextRenderer));
 
         // One registration for the module's assembly scanning task
         Assert.Single(context.CustomRegistrations);
