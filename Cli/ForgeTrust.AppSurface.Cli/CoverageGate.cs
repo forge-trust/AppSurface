@@ -1119,7 +1119,7 @@ internal static class PatchCoverageEvaluator
                     }
 
                     AddChangedLine(changedLines, state.CurrentFile, state.CurrentNewLine.Value);
-                    state.CurrentNewLine++;
+                    state.CurrentNewLine = state.CurrentNewLine.Value + 1;
                     state.PreviousLineWasHunkBodyLine = true;
                     continue;
                 }
@@ -1133,7 +1133,7 @@ internal static class PatchCoverageEvaluator
                         return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                     }
 
-                    state.CurrentNewLine++;
+                    state.CurrentNewLine = state.CurrentNewLine.Value + 1;
                     state.PreviousLineWasHunkBodyLine = true;
                     continue;
                 }
@@ -1358,7 +1358,7 @@ internal static class PatchCoverageEvaluator
             return new PatchDiffParseResult(readOnly, PatchDiffParseStatus.Malformed);
         }
 
-        if (state.CurrentDiffStarted && (!IsCurrentHunkComplete() || !IsCompleteDiffEntry()))
+        if (!IsCurrentHunkComplete() || !IsCompleteDiffEntry())
         {
             return new PatchDiffParseResult(readOnly, PatchDiffParseStatus.Malformed);
         }
