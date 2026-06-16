@@ -100,7 +100,12 @@ public sealed class ConfigAuditDiffTests
     {
         var baseline = CreateReport(
             "Staging",
-            providers: [Provider("FileProvider", priority: 10, precedence: 1)],
+            providers:
+            [
+                Provider("FileProvider", priority: 10, precedence: 1),
+                Provider("RemovedProvider", priority: 30, precedence: 3)
+            ],
+            entries: [Entry("Feature.Enabled", "true")],
             discoveredKeys:
             [
                 Discovered("Feature.Flag", "true", ConfigAuditDiscoveredValueDisplayState.Shown),
@@ -112,7 +117,12 @@ public sealed class ConfigAuditDiffTests
             ]);
         var target = CreateReport(
             "Production",
-            providers: [Provider("FileProvider", priority: 20, precedence: 1)],
+            providers:
+            [
+                Provider("FileProvider", priority: 20, precedence: 1),
+                Provider("AddedProvider", priority: 40, precedence: 4)
+            ],
+            entries: [Entry("Feature.Enabled", "true")],
             discoveredKeys:
             [
                 Discovered("Feature.Flag", "false", ConfigAuditDiscoveredValueDisplayState.Shown),
@@ -124,14 +134,22 @@ public sealed class ConfigAuditDiffTests
             ],
             redaction: Redaction(placeholder: "[hidden]"));
 
-        var diff = new ConfigAuditReportDiffer().Compare(baseline, target);
+        var diff = new ConfigAuditReportDiffer().Compare(
+            baseline,
+            target,
+            new ConfigAuditDiffOptions { IncludeUnchangedItems = true });
+        var rendered = new ConfigAuditDiffTextRenderer().Render(diff);
 
         Assert.Contains(diff.Items, item => item.Kind == ConfigAuditDiffItemKind.Provider && item.Status == ConfigAuditDiffItemStatus.Changed);
+        Assert.Contains(diff.Items, item => item.Kind == ConfigAuditDiffItemKind.Provider && item.Status == ConfigAuditDiffItemStatus.Added);
+        Assert.Contains(diff.Items, item => item.Kind == ConfigAuditDiffItemKind.Provider && item.Status == ConfigAuditDiffItemStatus.Removed);
+        Assert.Contains(diff.Items, item => item.Key == "Feature.Enabled" && item.ValueEvidence == ConfigAuditDiffValueEvidence.RedactionPolicyMismatch);
         Assert.Contains(diff.Items, item => item.Kind == ConfigAuditDiffItemKind.DiscoveredKey && item.Key == "Feature.Flag");
         Assert.Contains(diff.Items, item => item.Kind == ConfigAuditDiffItemKind.RedactionPolicy);
         Assert.Contains(diff.Items, item => item.Kind == ConfigAuditDiffItemKind.Diagnostic && item.Status == ConfigAuditDiffItemStatus.Added);
         Assert.Contains(diff.Items, item => item.Kind == ConfigAuditDiffItemKind.Diagnostic && item.Status == ConfigAuditDiffItemStatus.Removed);
         Assert.Contains(diff.Diagnostics, diagnostic => diagnostic.Code == "config-diff-manual-report-evidence");
+        Assert.Contains("redaction policy metadata differs", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
