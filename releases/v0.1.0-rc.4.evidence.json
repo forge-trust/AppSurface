@@ -9,23 +9,23 @@
   "evidencePath": "releases/v0.1.0-rc.4.evidence.json",
   "releaseManifestDigest": {
     "algorithm": "sha256",
-    "value": "c44c470235aa1a8ea4eb115eceac05b6736755111b83b2cb0b1a24a5ec391f45"
+    "value": "800637fd9a3f356b19a88284473aff2e6ab28280f0cc05493023856209cd9b9c"
   },
   "releaseArtifactDigests": [
     {
       "path": "releases/v0.1.0-rc.4.md",
       "algorithm": "sha256",
-      "value": "c92a02c4c1cc9026bdf6331d505ad6b601afb6570253dadde0ff2072a6aaa3c6"
+      "value": "8894324196a087de9cc54054ca8dae21f321cbb5836d5cee489c3fbd31abe1ec"
     },
     {
       "path": "releases/v0.1.0-rc.4.md.yml",
       "algorithm": "sha256",
-      "value": "fbd05376d13931233953ecb3a8c51c3232b2371eb8dd467be930a664a80fc2ea"
+      "value": "16281d67fdb4456cf8b6cc0f4a5f6abccf699f0b0756500335cc7b216460baa2"
     },
     {
       "path": "releases/v0.1.0-rc.4.release.json",
       "algorithm": "sha256",
-      "value": "c44c470235aa1a8ea4eb115eceac05b6736755111b83b2cb0b1a24a5ec391f45"
+      "value": "800637fd9a3f356b19a88284473aff2e6ab28280f0cc05493023856209cd9b9c"
     }
   ],
   "packageReleaseNotePaths": [
@@ -111,7 +111,7 @@
     "catalogEntry": null
   },
   "commits": {
-    "contentSourceCommit": "8f8110794a39b76381fdbf12917811016c36820f",
+    "contentSourceCommit": "3ab0fa766574f19526950fd10b63ec537e1baafa",
     "releasePreparationCommit": null,
     "tagCommit": null,
     "workflowRunId": null
@@ -119,10 +119,10 @@
   "generatedBy": {
     "tool": "./eng/release"
   },
-  "generatedAtUtc": "2026-06-15T07:56:00.8044090Z",
+  "generatedAtUtc": "2026-06-16T04:02:43.1860000Z",
   "subject": {
     "name": "releases/v0.1.0-rc.4.evidence.json",
-    "sha256": "9cbbc14223a16e60c8e11ec2894472dffdee457c4b568ff655d9aaa43db8aacd"
+    "sha256": "84610ff9ae250edb4153abd96c5b8cbd6b55f959cfb8d7d36ed88540e1a6f3cb"
   },
   "attestation": null
 }
