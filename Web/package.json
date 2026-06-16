@@ -14,7 +14,7 @@
     "assets:razorwire:verify": "pnpm --filter @forge-trust/razorwire-assets run verify-generated"
   },
   "devDependencies": {
-    "esbuild": "0.27.0",
+    "esbuild": "0.28.1",
     "typescript": "5.9.3"
   },
   "dependencies": {
