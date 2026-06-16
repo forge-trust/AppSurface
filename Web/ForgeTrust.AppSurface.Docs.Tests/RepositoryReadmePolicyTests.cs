@@ -104,7 +104,7 @@ public sealed partial class RepositoryReadmePolicyTests
 
             Assert.Contains("## Release Guidance", content, StringComparison.Ordinal);
 
-            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1.0-rc.3.md"), repoRoot);
+            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1.0-rc.4.md"), repoRoot);
             var linksToReleaseNote = MarkdownLinkRegex()
                 .Matches(content)
                 .Select(match => ResolveRelativeLinkTarget(
@@ -113,7 +113,7 @@ public sealed partial class RepositoryReadmePolicyTests
                     readmePath))
                 .Any(target => string.Equals(target, expectedTarget, StringComparison.Ordinal));
 
-            Assert.True(linksToReleaseNote, $"{readmePath} must link to the v0.1.0 RC 3 release note.");
+            Assert.True(linksToReleaseNote, $"{readmePath} must link to the v0.1.0 RC 4 release note.");
         }
     }
 
