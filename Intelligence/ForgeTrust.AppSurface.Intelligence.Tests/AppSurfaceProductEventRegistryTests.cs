@@ -1,5 +1,7 @@
 using System.Text.Json;
 using ForgeTrust.AppSurface.Intelligence;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Intelligence.Tests;
 
@@ -36,6 +38,7 @@ public sealed class AppSurfaceProductEventRegistryTests
             Assert.NotEmpty(property.Description);
             Assert.True(Enum.IsDefined(property.Sensitivity));
             Assert.True(Enum.IsDefined(property.Cardinality));
+            Assert.True(Enum.IsDefined(property.ValueShape));
             Assert.NotEqual(AppSurfaceProductEventCardinality.High, property.Cardinality);
         });
     }
@@ -50,6 +53,48 @@ public sealed class AppSurfaceProductEventRegistryTests
         Assert.True(options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchFilterChanged));
         Assert.False(options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.RazorWireFormFailed));
         Assert.Contains(AppSurfaceProductEventRegistry.DocsSearchFilterChanged, options.EnabledExperimentalEventNames);
+    }
+
+    [Fact]
+    public void ProductIntelligenceOptions_RegisterEventContracts_CopiesContractsAndAcceptsEmptyCollections()
+    {
+        var contracts = new List<AppSurfaceProductEventContract>
+        {
+            CreateSkoolieContract()
+        };
+        var options = new AppSurfaceProductIntelligenceOptions()
+            .RegisterEventContracts(contracts)
+            .RegisterEventContracts(Array.Empty<AppSurfaceProductEventContract>());
+
+        contracts.Clear();
+
+        Assert.Single(options.RegisteredEventContracts);
+        Assert.Equal("skoolie.card.generated", options.RegisteredEventContracts[0].Name);
+    }
+
+    [Fact]
+    public void ProductIntelligenceOptions_RegisterEventContracts_RejectsNullInputs()
+    {
+        var options = new AppSurfaceProductIntelligenceOptions();
+
+        Assert.Throws<ArgumentNullException>(() => options.RegisterEventContracts((IEnumerable<AppSurfaceProductEventContract>)null!));
+        Assert.Throws<ArgumentNullException>(() => options.RegisterEventContracts((AppSurfaceProductEventContract[])null!));
+        Assert.Throws<ArgumentNullException>(() => options.RegisterEventContracts([null!]));
+    }
+
+    [Fact]
+    public void EventContract_RejectsNullPropertyContracts()
+    {
+        var exception = Assert.Throws<ArgumentException>(() => new AppSurfaceProductEventContract(
+            "docs.search.null_property",
+            AppSurfaceProductEventLifecycle.Experimental,
+            "Prove null property validation.",
+            "Tests",
+            "Discard during tests.",
+            [null!],
+            ["raw query"]));
+
+        Assert.Contains("Property contract entries must not be null", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -114,6 +159,72 @@ public sealed class AppSurfaceProductEventRegistryTests
             allowedValues: ["search_page", "search_page"]));
 
         Assert.Contains("search_page", duplicateAllowedValue.Message, StringComparison.Ordinal);
+
+        Assert.Throws<ArgumentException>(() => new AppSurfaceProductEventPropertyContract(
+            "surface",
+            "Search surface.",
+            AppSurfaceProductEventSensitivity.Operational,
+            AppSurfaceProductEventCardinality.Low,
+            valueShape: AppSurfaceProductEventValueShape.AllowedValue));
+
+        Assert.Throws<ArgumentException>(() => new AppSurfaceProductEventPropertyContract(
+            "surface",
+            "Search surface.",
+            AppSurfaceProductEventSensitivity.Operational,
+            AppSurfaceProductEventCardinality.Low,
+            allowedValues: ["search_page"],
+            valueShape: AppSurfaceProductEventValueShape.BoundedText));
+    }
+
+    [Fact]
+    public void Contracts_RejectUndefinedEnumMetadata()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceProductEventContract(
+            "host.invalid_lifecycle",
+            (AppSurfaceProductEventLifecycle)99,
+            "Prove undefined lifecycle values fail registration.",
+            "Host",
+            "Discard during tests.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    "surface",
+                    "Search surface.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low)
+            ],
+            ["raw query"]));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceProductEventPropertyContract(
+            "surface",
+            "Search surface.",
+            (AppSurfaceProductEventSensitivity)99,
+            AppSurfaceProductEventCardinality.Low));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceProductEventPropertyContract(
+            "surface",
+            "Search surface.",
+            AppSurfaceProductEventSensitivity.Operational,
+            (AppSurfaceProductEventCardinality)99));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceProductEventPropertyContract(
+            "surface",
+            "Search surface.",
+            AppSurfaceProductEventSensitivity.Operational,
+            AppSurfaceProductEventCardinality.Low,
+            valueShape: (AppSurfaceProductEventValueShape)99));
+    }
+
+    [Fact]
+    public void PropertyContract_AllowedValuesInferAllowedValueShape()
+    {
+        var property = new AppSurfaceProductEventPropertyContract(
+            "delivery_state",
+            "Normalized delivery state.",
+            AppSurfaceProductEventSensitivity.Operational,
+            AppSurfaceProductEventCardinality.Low,
+            allowedValues: ["queued", "sent"]);
+
+        Assert.Equal(AppSurfaceProductEventValueShape.AllowedValue, property.ValueShape);
     }
 
     [Fact]
@@ -163,6 +274,246 @@ public sealed class AppSurfaceProductEventRegistryTests
     }
 
     [Fact]
+    public void ComposedRegistry_IncludesBuiltInsAndCustomContracts()
+    {
+        using var provider = CreateProvider(options => options.RegisterEventContracts(CreateSkoolieContract()));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        Assert.NotNull(registry.Find(AppSurfaceProductEventRegistry.DocsSearchSubmitted));
+        Assert.NotNull(registry.Find("skoolie.card.generated"));
+        Assert.Contains("token", registry.ForbiddenProperties);
+    }
+
+    [Fact]
+    public void ComposedRegistry_TreatsIdenticalDuplicatesAsIdempotent()
+    {
+        var contract = CreateSkoolieContract();
+        using var provider = CreateProvider(options => options
+            .RegisterEventContracts(contract)
+            .RegisterEventContracts(contract));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        Assert.Single(registry.All, candidate => candidate.Name == "skoolie.card.generated");
+    }
+
+    [Fact]
+    public void ComposedRegistry_TreatsReorderedSemanticDuplicatesAsIdempotent()
+    {
+        using var provider = CreateProvider(options => options
+            .RegisterEventContracts(CreateReorderableContract())
+            .RegisterEventContracts(CreateReorderableContract(reordered: true)));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        Assert.Single(registry.All, candidate => candidate.Name == "host.reordered_duplicate");
+    }
+
+    [Fact]
+    public void ComposedRegistry_RejectsConflictingDuplicateContracts()
+    {
+        using var provider = CreateProvider(options => options
+            .RegisterEventContracts(CreateSkoolieContract())
+            .RegisterEventContracts(CreateSkoolieContract(owner: "Another.Package")));
+
+        var exception = Assert.Throws<OptionsValidationException>(
+            () => provider.GetRequiredService<IAppSurfaceProductEventRegistry>());
+
+        Assert.Contains("skoolie.card.generated", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Skoolie", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Another.Package", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProductIntelligenceOptionsValidator_RejectsConflictingDuplicateContracts()
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceProductIntelligence(options => options
+            .RegisterEventContracts(CreateSkoolieContract())
+            .RegisterEventContracts(CreateSkoolieContract(owner: "Another.Package")));
+        using var provider = services.BuildServiceProvider(
+            new ServiceProviderOptions
+            {
+                ValidateOnBuild = true,
+                ValidateScopes = true
+            });
+        var monitor = provider.GetRequiredService<IOptions<AppSurfaceProductIntelligenceOptions>>();
+
+        var exception = Assert.Throws<OptionsValidationException>(() => monitor.Value);
+
+        Assert.Contains("skoolie.card.generated", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Another.Package", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("token")]
+    [InlineData("query")]
+    public void ComposedRegistry_RejectsCustomForbiddenProperties(string propertyName)
+    {
+        var contract = new AppSurfaceProductEventContract(
+            "host.forbidden",
+            AppSurfaceProductEventLifecycle.Stable,
+            "Prove forbidden custom properties fail registration.",
+            "Host",
+            "Discard during tests.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    propertyName,
+                    "Forbidden property.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low)
+            ],
+            ["secret values"]);
+
+        using var provider = CreateProvider(options => options.RegisterEventContracts(contract));
+
+        var exception = Assert.Throws<OptionsValidationException>(
+            () => provider.GetRequiredService<IAppSurfaceProductEventRegistry>());
+
+        Assert.Contains(propertyName, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("child@example.test", "safe.property")]
+    [InlineData("host.safe", "child@example.test")]
+    [InlineData("host event!", "safe.property")]
+    [InlineData("host.safe", "unsafe property!")]
+    public void ComposedRegistry_RejectsUnsafeCustomEventOrPropertyNames(
+        string eventName,
+        string propertyName)
+    {
+        var contract = new AppSurfaceProductEventContract(
+            eventName,
+            AppSurfaceProductEventLifecycle.Stable,
+            "Prove unsafe custom contract names fail registration.",
+            "Host",
+            "Discard during tests.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    propertyName,
+                    "Unsafe property name.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low)
+            ],
+            ["unsafe names"]);
+
+        using var provider = CreateProvider(options => options.RegisterEventContracts(contract));
+
+        var exception = Assert.Throws<OptionsValidationException>(
+            () => provider.GetRequiredService<IAppSurfaceProductEventRegistry>());
+
+        Assert.Contains("[unsafe-property-name]", exception.Message, StringComparison.Ordinal);
+        if (eventName.Contains('!', StringComparison.Ordinal) || eventName.Contains('@', StringComparison.Ordinal))
+        {
+            Assert.DoesNotContain(eventName, exception.Message, StringComparison.Ordinal);
+        }
+
+        if (propertyName.Contains('!', StringComparison.Ordinal) || propertyName.Contains('@', StringComparison.Ordinal))
+        {
+            Assert.DoesNotContain(propertyName, exception.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData("child@example.test")]
+    [InlineData("Another/Owner")]
+    public void ComposedRegistry_RegistrationDiagnosticsScrubUnsafeOwners(string owner)
+    {
+        var contract = new AppSurfaceProductEventContract(
+            "host.owner",
+            AppSurfaceProductEventLifecycle.Stable,
+            "Prove unsafe custom owner labels are scrubbed in registration diagnostics.",
+            owner,
+            "Discard during tests.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    "token",
+                    "Forbidden property.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low)
+            ],
+            ["unsafe owner labels"]);
+
+        using var provider = CreateProvider(options => options.RegisterEventContracts(contract));
+
+        var exception = Assert.Throws<OptionsValidationException>(
+            () => provider.GetRequiredService<IAppSurfaceProductEventRegistry>());
+
+        Assert.Contains("[unsafe-owner]", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(owner, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ComposedRegistry_RejectsCustomSensitiveAndHighCardinalityProperties()
+    {
+        using var sensitiveProvider = CreateProvider(options => options.RegisterEventContracts(new AppSurfaceProductEventContract(
+            "host.sensitive",
+            AppSurfaceProductEventLifecycle.Stable,
+            "Prove sensitive custom properties fail registration.",
+            "Host",
+            "Discard during tests.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    "recipient_segment",
+                    "Potentially sensitive segment.",
+                    AppSurfaceProductEventSensitivity.Sensitive,
+                    AppSurfaceProductEventCardinality.Low)
+            ],
+            ["recipient identity"])));
+        using var highProvider = CreateProvider(options => options.RegisterEventContracts(new AppSurfaceProductEventContract(
+            "host.high",
+            AppSurfaceProductEventLifecycle.Stable,
+            "Prove high-cardinality custom properties fail registration.",
+            "Host",
+            "Discard during tests.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    "object_key",
+                    "High-cardinality object key.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.High)
+            ],
+            ["object identity"])));
+
+        Assert.Throws<OptionsValidationException>(
+            () => sensitiveProvider.GetRequiredService<IAppSurfaceProductEventRegistry>());
+        Assert.Throws<OptionsValidationException>(
+            () => highProvider.GetRequiredService<IAppSurfaceProductEventRegistry>());
+    }
+
+    [Fact]
+    public void ComposedRegistry_SourceListMutationsAfterRegistration_DoNotChangeRegistry()
+    {
+        var properties = new List<AppSurfaceProductEventPropertyContract>
+        {
+            new(
+                "launch_surface",
+                "Host-owned surface that generated the card.",
+                AppSurfaceProductEventSensitivity.Operational,
+                AppSurfaceProductEventCardinality.Low,
+                required: true)
+        };
+        var contract = new AppSurfaceProductEventContract(
+            "skoolie.card.generated",
+            AppSurfaceProductEventLifecycle.Stable,
+            "Measure launch-card generation.",
+            "Skoolie",
+            "Discard during tests.",
+            properties,
+            ["child identity"]);
+        using var provider = CreateProvider(options => options.RegisterEventContracts(contract));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        properties.Add(new AppSurfaceProductEventPropertyContract(
+            "late_mutation",
+            "Late mutation should not appear.",
+            AppSurfaceProductEventSensitivity.Operational,
+            AppSurfaceProductEventCardinality.Low));
+
+        var composed = registry.Find("skoolie.card.generated");
+        Assert.NotNull(composed);
+        Assert.DoesNotContain(composed!.Properties, property => property.Name == "late_mutation");
+    }
+
+    [Fact]
     public void Validate_UnregisteredEvent_IsInvalidAndDoesNotEchoSensitiveValues()
     {
         var productEvent = new AppSurfaceProductEvent(
@@ -181,6 +532,27 @@ public sealed class AppSurfaceProductEventRegistryTests
         Assert.Empty(result.SanitizedProperties);
         Assert.DoesNotContain("abc123", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("secret stack body", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Validate_UnsafePropertyNames_AreScrubbedFromDiagnostics()
+    {
+        var productEvent = new AppSurfaceProductEvent(
+            AppSurfaceProductEventRegistry.DocsSearchSubmitted,
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["surface"] = "search_page",
+                ["result_count"] = "1",
+                ["andrew@example.test"] = "safe-token"
+            });
+
+        var result = AppSurfaceProductEventRegistry.Validate(productEvent);
+        var rendered = JsonSerializer.Serialize(result);
+
+        Assert.True(result.IsValid);
+        Assert.Contains("[unsafe-property-name]", result.RejectedProperties);
+        Assert.DoesNotContain("andrew@example.test", rendered, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -211,6 +583,64 @@ public sealed class AppSurfaceProductEventRegistryTests
         Assert.DoesNotContain(propertyName, result.SanitizedProperties.Keys);
         Assert.Contains(propertyName, result.RejectedProperties);
         Assert.DoesNotContain("raw-sensitive-value", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidationEngine_DropsForbiddenPropertyNamesAfterContractMatch()
+    {
+        var contract = new AppSurfaceProductEventContract(
+            "host.defensive_forbidden_property",
+            AppSurfaceProductEventLifecycle.Stable,
+            "Prove the shared validator enforces forbidden names even for matched contracts.",
+            "Host",
+            "Discard during tests.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    "token",
+                    "Forbidden credential-shaped property.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low)
+            ],
+            ["raw credential"]);
+        var result = AppSurfaceProductEventValidationEngine.Validate(
+            new AppSurfaceProductEvent(
+                "host.defensive_forbidden_property",
+                DateTimeOffset.UnixEpoch,
+                new Dictionary<string, string>
+                {
+                    ["token"] = "safe-looking-token"
+                }),
+            new Dictionary<string, AppSurfaceProductEventContract>
+            {
+                [contract.Name] = contract
+            },
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "token"
+            });
+
+        Assert.True(result.IsValid);
+        Assert.Contains("token", result.RejectedProperties);
+        Assert.Contains(AppSurfaceProductEventValidationFailureReason.ForbiddenPropertyName, result.ReasonCodes);
+        Assert.DoesNotContain("safe-looking-token", result.SanitizedProperties.Values);
+    }
+
+    [Fact]
+    public void ValidationException_FormatsUnknownReasonsAndRejectedPropertiesSafely()
+    {
+        var exception = new AppSurfaceProductEventValidationException(
+            "host.unsafe_value",
+            new AppSurfaceProductEventValidationResult(
+                contract: null,
+                isValid: false,
+                sanitizedProperties: new Dictionary<string, string>(),
+                rejectedProperties: ["debug_note"],
+                diagnostics: ["Property was rejected."]),
+            "Register a bounded property.");
+
+        Assert.Contains("Reasons: Unknown", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Rejected properties: debug_note", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("debug_note", exception.RejectedProperties);
     }
 
     [Fact]
@@ -295,10 +725,11 @@ public sealed class AppSurfaceProductEventRegistryTests
     public void RegistryCollections_DoNotExposeMutableBackingState()
     {
         var contracts = Assert.IsAssignableFrom<IList<AppSurfaceProductEventContract>>(AppSurfaceProductEventRegistry.All);
-        var forbidden = Assert.IsAssignableFrom<ISet<string>>(AppSurfaceProductEventRegistry.ForbiddenProperties);
+        var forbidden = AppSurfaceProductEventRegistry.ForbiddenProperties;
 
         Assert.Throws<NotSupportedException>(() => contracts.Clear());
-        Assert.True(forbidden.Remove("token"));
+        Assert.Throws<NotSupportedException>(() => ((ISet<string>)forbidden).Remove("token"));
+        Assert.Same(forbidden, AppSurfaceProductEventRegistry.ForbiddenProperties);
         Assert.Contains("token", AppSurfaceProductEventRegistry.ForbiddenProperties);
     }
 
@@ -346,6 +777,199 @@ public sealed class AppSurfaceProductEventRegistryTests
         Assert.True(result.IsValid);
         Assert.Contains("failure_ui", result.RejectedProperties);
         Assert.DoesNotContain(new string('a', 65), result.SanitizedProperties.Values);
+    }
+
+    [Fact]
+    public void ComposedRegistry_ValidatesCustomValueShapesAndPrivacy()
+    {
+        using var provider = CreateProvider(options => options.RegisterEventContracts(CreateSkoolieContract()));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        var result = registry.Validate(new AppSurfaceProductEvent(
+            "skoolie.card.generated",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["launch_surface"] = "dashboard",
+                ["attachment_count"] = " 004 ",
+                ["delivery_state"] = "queued",
+                ["raw_query"] = "token=secret-value",
+                ["debug_note"] = "child@example.test"
+            }));
+        var rendered = JsonSerializer.Serialize(result);
+
+        Assert.True(result.IsValid);
+        Assert.Equal("4", result.SanitizedProperties["attachment_count"]);
+        Assert.Equal("queued", result.SanitizedProperties["delivery_state"]);
+        Assert.Contains("raw_query", result.RejectedProperties);
+        Assert.Contains("debug_note", result.RejectedProperties);
+        Assert.DoesNotContain("child@example.test", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ComposedRegistry_ValidatesCustomBoundedTextProperties()
+    {
+        using var provider = CreateProvider(options => options.RegisterEventContracts(CreateSkoolieContract()));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        var result = registry.Validate(new AppSurfaceProductEvent(
+            "skoolie.card.generated",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["launch_surface"] = "dashboard",
+                ["delivery_state"] = "queued",
+                ["debug_note"] = "child@example."
+            }));
+
+        Assert.True(result.IsValid);
+        Assert.Equal("child@example.", result.SanitizedProperties["debug_note"]);
+        Assert.DoesNotContain("debug_note", result.RejectedProperties);
+    }
+
+    [Fact]
+    public void ComposedRegistry_DropsEmptyOptionalPropertyValuesWithoutDroppingEvent()
+    {
+        using var provider = CreateProvider(options => options.RegisterEventContracts(CreateSkoolieContract()));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        var result = registry.Validate(new AppSurfaceProductEvent(
+            "skoolie.card.generated",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["launch_surface"] = "dashboard",
+                ["delivery_state"] = "queued",
+                ["debug_note"] = "   "
+            }));
+
+        Assert.True(result.IsValid);
+        Assert.Contains("debug_note", result.RejectedProperties);
+        Assert.DoesNotContain("debug_note", result.SanitizedProperties.Keys);
+    }
+
+    [Fact]
+    public void ComposedRegistry_DropsBoundedTextPropertiesThatExceedRegisteredMaximumLength()
+    {
+        using var provider = CreateProvider(options => options.RegisterEventContracts(CreateSkoolieContract()));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        var result = registry.Validate(new AppSurfaceProductEvent(
+            "skoolie.card.generated",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["launch_surface"] = "dashboard",
+                ["delivery_state"] = "queued",
+                ["debug_note"] = new string('x', 25)
+            }));
+
+        Assert.True(result.IsValid);
+        Assert.Contains("debug_note", result.RejectedProperties);
+        Assert.DoesNotContain(new string('x', 25), result.SanitizedProperties.Values);
+    }
+
+    [Theory]
+    [InlineData("dashboard.dashboard.dashboard.dashboard.dashboard.dashboard.dashboard.dashboard.dashboard")]
+    [InlineData("dashboard launch")]
+    public void ComposedRegistry_DropsInvalidRequiredTokenProperties(string launchSurface)
+    {
+        using var provider = CreateProvider(options => options.RegisterEventContracts(CreateSkoolieContract()));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        var result = registry.Validate(new AppSurfaceProductEvent(
+            "skoolie.card.generated",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["launch_surface"] = launchSurface,
+                ["delivery_state"] = "queued"
+            }));
+
+        Assert.False(result.IsValid);
+        Assert.Contains("launch_surface", result.RejectedProperties);
+        Assert.DoesNotContain(launchSurface, result.SanitizedProperties.Values);
+        Assert.Contains(AppSurfaceProductEventValidationFailureReason.RequiredPropertyMissing, result.ReasonCodes);
+    }
+
+    [Fact]
+    public void ComposedRegistry_AllowsTokenPropertiesWithSupportedPunctuation()
+    {
+        using var provider = CreateProvider(options => options.RegisterEventContracts(CreateSkoolieContract()));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        var result = registry.Validate(new AppSurfaceProductEvent(
+            "skoolie.card.generated",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["launch_surface"] = "dash-1_under.score:colon",
+                ["delivery_state"] = "queued"
+            }));
+
+        Assert.True(result.IsValid);
+        Assert.Equal("dash-1_under.score:colon", result.SanitizedProperties["launch_surface"]);
+        Assert.DoesNotContain("launch_surface", result.RejectedProperties);
+    }
+
+    [Theory]
+    [InlineData("true", "true")]
+    [InlineData("False", "false")]
+    public void ComposedRegistry_NormalizesBooleanPropertyValues(string rawValue, string expected)
+    {
+        using var provider = CreateProvider(options => options.RegisterEventContracts(CreateToggleContract()));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        var result = registry.Validate(new AppSurfaceProductEvent(
+            "host.toggle.changed",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["enabled"] = rawValue
+            }));
+
+        Assert.True(result.IsValid);
+        Assert.Equal(expected, result.SanitizedProperties["enabled"]);
+    }
+
+    [Fact]
+    public void ComposedRegistry_DropsInvalidBooleanPropertyValues()
+    {
+        using var provider = CreateProvider(options => options.RegisterEventContracts(CreateToggleContract()));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        var result = registry.Validate(new AppSurfaceProductEvent(
+            "host.toggle.changed",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["enabled"] = "yes"
+            }));
+
+        Assert.False(result.IsValid);
+        Assert.Contains("enabled", result.RejectedProperties);
+        Assert.DoesNotContain("yes", result.SanitizedProperties.Values);
+    }
+
+    [Fact]
+    public void ComposedRegistry_DeprecatedContractsValidateWithSafeDiagnostic()
+    {
+        using var provider = CreateProvider(options => options.RegisterEventContracts(CreateSkoolieContract(
+            lifecycle: AppSurfaceProductEventLifecycle.Deprecated)));
+        var registry = provider.GetRequiredService<IAppSurfaceProductEventRegistry>();
+
+        var result = registry.Validate(new AppSurfaceProductEvent(
+            "skoolie.card.generated",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, string>
+            {
+                ["launch_surface"] = "dashboard",
+                ["attachment_count"] = "1",
+                ["delivery_state"] = "queued"
+            }));
+
+        Assert.True(result.IsValid);
+        Assert.Contains("deprecated", string.Join(" ", result.Diagnostics), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -483,5 +1107,106 @@ public sealed class AppSurfaceProductEventRegistryTests
             },
             _ => throw new ArgumentOutOfRangeException(nameof(eventName), eventName, "Unexpected event name.")
         };
+    }
+
+    private static ServiceProvider CreateProvider(Action<AppSurfaceProductIntelligenceOptions> configure)
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceProductIntelligence(configure);
+        return services.BuildServiceProvider();
+    }
+
+    private static AppSurfaceProductEventContract CreateSkoolieContract(
+        string owner = "Skoolie",
+        AppSurfaceProductEventLifecycle lifecycle = AppSurfaceProductEventLifecycle.Stable)
+    {
+        return new AppSurfaceProductEventContract(
+            "skoolie.card.generated",
+            lifecycle,
+            "Measure whether launch-card generation moves safely into send review.",
+            owner,
+            "Short launch-quality retention; aggregate before long-term storage.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    "launch_surface",
+                    "Host-owned surface that generated the card.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low,
+                    required: true,
+                    valueShape: AppSurfaceProductEventValueShape.Token),
+                new AppSurfaceProductEventPropertyContract(
+                    "attachment_count",
+                    "Number of safe launch artifacts attached to the generated card.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Medium,
+                    valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                new AppSurfaceProductEventPropertyContract(
+                    "delivery_state",
+                    "Normalized downstream state.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low,
+                    required: true,
+                    allowedValues: ["queued", "sent"],
+                    valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+                new AppSurfaceProductEventPropertyContract(
+                    "debug_note",
+                    "Bounded operator note for diagnostics.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Medium,
+                    maxLength: 24,
+                    valueShape: AppSurfaceProductEventValueShape.BoundedText)
+            ],
+            ["child identity", "email body", "raw attachment"]);
+    }
+
+    private static AppSurfaceProductEventContract CreateReorderableContract(bool reordered = false)
+    {
+        AppSurfaceProductEventPropertyContract[] properties =
+        [
+            new(
+                "delivery_state",
+                "Normalized downstream state.",
+                AppSurfaceProductEventSensitivity.Operational,
+                AppSurfaceProductEventCardinality.Low,
+                required: true,
+                allowedValues: reordered ? ["sent", "queued"] : ["queued", "sent"],
+                valueShape: AppSurfaceProductEventValueShape.AllowedValue),
+            new(
+                "launch_surface",
+                "Host-owned surface that generated the card.",
+                AppSurfaceProductEventSensitivity.Operational,
+                AppSurfaceProductEventCardinality.Low,
+                required: true,
+                valueShape: AppSurfaceProductEventValueShape.Token)
+        ];
+
+        return new AppSurfaceProductEventContract(
+            "host.reordered_duplicate",
+            AppSurfaceProductEventLifecycle.Stable,
+            "Measure host-owned launch-card generation.",
+            "Host",
+            "Discard during tests.",
+            reordered ? properties.Reverse() : properties,
+            reordered ? ["raw attachment", "child identity"] : ["child identity", "raw attachment"]);
+    }
+
+    private static AppSurfaceProductEventContract CreateToggleContract()
+    {
+        return new AppSurfaceProductEventContract(
+            "host.toggle.changed",
+            AppSurfaceProductEventLifecycle.Stable,
+            "Measure host-owned toggle changes.",
+            "Host",
+            "Discard during tests.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    "enabled",
+                    "Whether the toggle is enabled.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low,
+                    required: true,
+                    valueShape: AppSurfaceProductEventValueShape.Boolean)
+            ],
+            ["user identity"]);
     }
 }
