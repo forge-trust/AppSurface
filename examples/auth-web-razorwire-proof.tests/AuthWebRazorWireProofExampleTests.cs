@@ -79,6 +79,19 @@ public sealed class AuthWebRazorWireProofExampleTests
         }
     }
 
+    [Theory]
+    [InlineData("/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")]
+    [InlineData("/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js")]
+    public async Task BrowserProof_ServesRazorWireRuntimeAssets(string assetPath)
+    {
+        using var client = _fixture.CreateClient();
+
+        using var response = await client.GetAsync(assetPath);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/javascript", response.Content.Headers.ContentType?.MediaType);
+    }
+
     [Fact]
     public void Documentation_DiscoverySurfacesPointToTheBrowserFirstProof()
     {

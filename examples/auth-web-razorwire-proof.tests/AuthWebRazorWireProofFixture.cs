@@ -45,8 +45,8 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
             .WithEnvironmentVariables(new Dictionary<string, string?>
             {
                 ["ASPNETCORE_URLS"] = "http://127.0.0.1:0",
-                ["ASPNETCORE_ENVIRONMENT"] = "Development",
-                ["DOTNET_ENVIRONMENT"] = "Development"
+                ["ASPNETCORE_ENVIRONMENT"] = "Production",
+                ["DOTNET_ENVIRONMENT"] = "Production"
             })
             .WithValidation(CommandResultValidation.None)
             .WithStandardOutputPipe(PipeTarget.ToDelegate(CaptureAppLog))

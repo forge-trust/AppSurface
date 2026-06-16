@@ -145,6 +145,66 @@
             font-size: 0.8125rem;
             text-transform: uppercase;
         }
+
+        @@media (max-width: 640px) {
+            thead {
+                display: none;
+            }
+
+            tbody,
+            tr,
+            td {
+                display: block;
+            }
+
+            tr {
+                border-bottom: 1px solid #e2e8f0;
+                padding: 10px 0;
+            }
+
+            tr:last-child {
+                border-bottom: 0;
+            }
+
+            td {
+                align-items: center;
+                border-bottom: 0;
+                display: flex;
+                gap: 16px;
+                justify-content: space-between;
+                padding: 8px 12px;
+                text-align: right;
+            }
+
+            td::before {
+                color: #334155;
+                content: "";
+                font-size: 0.8125rem;
+                font-weight: 700;
+                text-align: left;
+                text-transform: uppercase;
+            }
+
+            td:nth-child(1)::before {
+                content: "Persona";
+            }
+
+            td:nth-child(2)::before {
+                content: "API status";
+            }
+
+            td:nth-child(3)::before {
+                content: "Outcome";
+            }
+
+            td:nth-child(4)::before {
+                content: "Reason";
+            }
+
+            td:nth-child(5)::before {
+                content: "RazorWire state";
+            }
+        }
     </style>
 </head>
 <body>

@@ -33,6 +33,7 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.MapRazorWireProofRuntimeAssets();
 app.MapRazorWire();
 app.MapGet("/api/auth-proof", async (
     IAppSurfaceAspNetCorePolicyEvaluator evaluator,
