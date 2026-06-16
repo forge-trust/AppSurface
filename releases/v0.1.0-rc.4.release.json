@@ -2,8 +2,8 @@
   "schema": "appsurface-release-manifest-v1",
   "version": "0.1.0-rc.4",
   "tag": "v0.1.0-rc.4",
-  "date": "2026-06-15",
-  "sourceCommit": "8f8110794a39b76381fdbf12917811016c36820f",
+  "date": "2026-06-16",
+  "sourceCommit": "3ab0fa766574f19526950fd10b63ec537e1baafa",
   "releaseClassification": "prerelease",
   "generatedFiles": [
     "releases/v0.1.0-rc.4.md",

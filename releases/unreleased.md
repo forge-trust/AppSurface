@@ -11,7 +11,6 @@ This is the living release note for the next coordinated AppSurface version afte
 ### Release and docs surface
 
 - Add release-facing changes here.
-- Pin Aspire's transitive MessagePack dependency to 2.5.301 and refresh the affected lock files so locked CI restores continue to use the patched package graph.
 
 ## Migration watch
 
