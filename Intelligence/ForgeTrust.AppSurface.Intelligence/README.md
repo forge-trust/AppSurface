@@ -290,4 +290,4 @@ Use AppSurface.Intelligence when you want reusable semantic contracts, lifecycle
 
 ## Release Guidance
 
-`ForgeTrust.AppSurface.Intelligence` follows the AppSurface public-preview compatibility policy. The current package family release guidance is tracked in the [v0.1.0 RC 3 release note](../../releases/v0.1.0-rc.3.md), while the event contracts in this package remain `Experimental` until dogfood usage promotes them.
+`ForgeTrust.AppSurface.Intelligence` follows the AppSurface public-preview compatibility policy. The current package family release guidance is tracked in the [v0.1.0 RC 4 release note](../../releases/v0.1.0-rc.4.md), while the event contracts in this package remain `Experimental` until dogfood usage promotes them.
