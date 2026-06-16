@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <DefineConstants>CARTER_WEB;APPSURFACE_WEB;ABP_WEB</DefineConstants>
+    <DefineConstants>CARTER_WEB;APPSURFACE_WEB;ABP_WEB;FLOW</DefineConstants>
   </PropertyGroup>
 
   <!-- Shared web benchmark dependencies -->
@@ -13,6 +13,11 @@
     <ProjectReference Include="../ManyDependencyInjectionControllers/ManyDependencyInjectionControllers.csproj" />
     <ProjectReference Include="../SimpleApiController/SimpleApiController.csproj" />
     <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+
+  <!-- AppSurface.Flow benchmarks -->
+  <ItemGroup Condition="$([System.String]::Copy(';$(DefineConstants);').Contains(';FLOW;'))">
+    <ProjectReference Include="../../Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj" />
   </ItemGroup>
 
   <!-- AppSurface.Console benchmarks -->
