@@ -70,7 +70,7 @@ app.MapGet(
     });
 ```
 
-For a local proof with fake authentication, see [the ASP.NET Core auth bridge example](../../examples/auth-aspnetcore-bridge/README.md).
+For the five-minute browser proof, run the [Auth Web/RazorWire proof](../../examples/auth-web-razorwire-proof/README.md). It shows one host-owned ASP.NET Core policy driving both a Minimal API response and a RazorWire-facing state. For lower-level setup diagnostics with fake authentication, see [the ASP.NET Core auth bridge example](../../examples/auth-aspnetcore-bridge/README.md).
 
 ## What The Package Includes
 

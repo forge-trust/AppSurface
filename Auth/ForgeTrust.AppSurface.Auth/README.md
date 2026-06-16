@@ -124,15 +124,6 @@ Use [`ForgeTrust.AppSurface.Auth.AspNetCore`](../ForgeTrust.AppSurface.Auth.AspN
 
 The ASP.NET Core adapter keeps schemes, policies, middleware, challenges, forbids, redirects, cookies, OIDC, and Identity in the host. It only maps the current request into `AppSurfaceAuthContext` and ASP.NET Core policy outcomes into `AppSurfaceAuthResult`.
 
-## Future Consumers
-
-The next auth slices map host behavior into these contracts:
-
-- #418 adds the ASP.NET Core adapter package for request context and named host-policy results.
-- #419 maps Minimal API policy decisions to correct challenge and forbid behavior.
-- #421 adds a result-bearing RazorWire auth adapter while preserving boolean authorizer compatibility.
-- #422 projects the same auth result states into RazorWire UI components.
-
 ## Composition
 
 Register `AppSurfaceAuthModule` from another AppSurface module when you need the auth boundary present in the module graph:

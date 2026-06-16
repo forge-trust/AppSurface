@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - AppSurface Auth Proof</title>
+    <rw:scripts />
+    <style>
+        :root {
+            color-scheme: light;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            line-height: 1.5;
+        }
+
+        body {
+            margin: 0;
+            background: #f8fafc;
+            color: #0f172a;
+        }
+
+        main {
+            margin: 0 auto;
+            max-width: 1040px;
+            padding: 32px 20px 48px;
+        }
+
+        a {
+            color: inherit;
+        }
+
+        .proof-header {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+
+        .proof-kicker {
+            color: #475569;
+            font-size: 0.875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        h1 {
+            font-size: clamp(2rem, 5vw, 3rem);
+            line-height: 1.05;
+            margin: 0;
+        }
+
+        .proof-copy {
+            color: #334155;
+            max-width: 760px;
+        }
+
+        .persona-switch,
+        .state-grid,
+        .matrix {
+            display: grid;
+            gap: 12px;
+        }
+
+        .persona-switch {
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            margin: 24px 0;
+        }
+
+        .persona-link,
+        .state-card,
+        .matrix {
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            border-radius: 8px;
+        }
+
+        .persona-link {
+            padding: 14px 16px;
+            text-align: center;
+            text-decoration: none;
+        }
+
+        .persona-link[aria-current="true"] {
+            border-color: #2563eb;
+            box-shadow: inset 0 0 0 1px #2563eb;
+            color: #1d4ed8;
+            font-weight: 700;
+        }
+
+        .state-grid {
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        }
+
+        .state-card {
+            padding: 20px;
+        }
+
+        .state-card h2 {
+            font-size: 1rem;
+            margin: 0 0 16px;
+        }
+
+        dl {
+            display: grid;
+            gap: 10px;
+            margin: 0;
+        }
+
+        .state-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 10px;
+        }
+
+        dt {
+            color: #64748b;
+            font-weight: 700;
+        }
+
+        dd {
+            margin: 0;
+            text-align: right;
+        }
+
+        .matrix {
+            margin-top: 24px;
+            overflow: hidden;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        th,
+        td {
+            border-bottom: 1px solid #e2e8f0;
+            padding: 12px;
+            text-align: left;
+        }
+
+        th {
+            background: #f1f5f9;
+            color: #334155;
+            font-size: 0.8125rem;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+<main>
+    @RenderBody()
+</main>
+</body>
+</html>

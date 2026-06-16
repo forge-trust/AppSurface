@@ -83,7 +83,7 @@ packages:
     includes: AppSurfaceAspNetCoreAuthModule, AddAppSurfaceAspNetCoreAuth registration, ASP.NET Core request auth context mapping, named host-policy evaluation, AppSurfaceAuthResult mapping, and safe setup diagnostics.
     does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policy definitions, middleware, endpoint filters, challenge or forbid execution, redirects, audit sinks, RazorWire UI, or Minimal API helpers.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results.
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results; run `examples/auth-web-razorwire-proof/README.md` for the browser-first Web/RazorWire proof.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth
   - project: Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj

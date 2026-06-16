@@ -30,6 +30,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - Package validation now treats redistributed package payload provenance as an enforced release gate. `verify-packages` reads `packages/third-party-payloads.yml`, proves notice, generated-first-party, or audited coverage for suspicious payloads, and renders package report rows with notice paths, evidence kind, version source, and suspicious payload counts.
 - AppSurface.Intelligence now acts as a reusable product-intelligence contract layer for host and package events. Hosts can register contract packs with `RegisterEventContracts(...)`, compose them with the built-in AppSurface catalog through `IAppSurfaceProductEventRegistry`, validate token, bounded-text, boolean, integer, and allowed-value property shapes, require per-event allowlisting for experimental custom events, and opt into safe development exceptions without bypassing forbidden property names or unsafe value-shape filtering.
 - AppSurface Docs parser-decision fixtures now keep the deliberate malformed JavaScript sample under a non-JavaScript suffix so repository-level JavaScript/TypeScript scanners do not treat the negative parser test as product source.
+- `examples/auth-web-razorwire-proof` now gives package adopters a five-minute browser proof for `ForgeTrust.AppSurface.Auth.AspNetCore`: one host-owned `OperatorsOnly` policy drives both a Minimal API response and a RazorWire-facing rendered state while all fake auth and persona switching stays sample-local.
 
 ## Migration watch
 
