@@ -612,6 +612,9 @@ public class DocAggregatorTests : IDisposable
         Assert.Contains(
             "href=\"/docs/web/forgetrust.appsurface.web.openapi\"",
             chooser!.Content);
+        Assert.Contains(
+            "href=\"/docs/intelligence/forgetrust.appsurface.intelligence\"",
+            chooser.Content);
     }
 
     [Fact]

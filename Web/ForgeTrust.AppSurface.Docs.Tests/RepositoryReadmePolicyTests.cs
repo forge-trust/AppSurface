@@ -32,6 +32,10 @@ public sealed partial class RepositoryReadmePolicyTests
 
         Assert.True(policy.ShouldIncludeFilePath("README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.True(policy.ShouldIncludeFilePath("LICENSE", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(
+            policy.ShouldIncludeFilePath(
+                "Intelligence/ForgeTrust.AppSurface.Intelligence/README.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/generated/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/TestResults/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
@@ -45,14 +49,41 @@ public sealed partial class RepositoryReadmePolicyTests
     }
 
     [Fact]
+    public void PublicPackageStartHereReadmes_ShouldBeHarvestedByStandaloneDocs()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var entries = ReadPackageManifestEntries(repoRoot);
+        var requiredReadmes = entries
+            .Where(IsPublicPublishedStartHereEntry)
+            .Select(entry => entry.StartHerePath!)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        using var provider = CreatePolicyProvider(repoRoot);
+        var policy = provider.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>();
+
+        foreach (var readmePath in requiredReadmes)
+        {
+            var fullReadmePath = ResolveRepositoryRelativePath(
+                repoRoot,
+                readmePath,
+                $"{readmePath} package chooser start_here_path");
+
+            Assert.True(
+                File.Exists(fullReadmePath),
+                $"{readmePath} must exist because it is a public package start_here_path.");
+            Assert.True(
+                policy.ShouldIncludeFilePath(readmePath, AppSurfaceDocsHarvestSourceKind.Markdown),
+                $"{readmePath} must be included by Web/ForgeTrust.AppSurface.Docs.Standalone/appsettings.json AppSurfaceDocs:Harvest:Paths:IncludeGlobs.");
+        }
+    }
+
+    [Fact]
     public void PublicPackageReadmes_ShouldLinkToCurrentReleaseCandidate()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var entries = ReadPackageManifestEntries(repoRoot);
         var requiredReadmes = entries
-            .Where(entry => string.Equals(entry.Classification, "public", StringComparison.OrdinalIgnoreCase)
-                            && string.Equals(entry.PublishDecision, "publish", StringComparison.OrdinalIgnoreCase)
-                            && !string.IsNullOrWhiteSpace(entry.StartHerePath))
+            .Where(IsPublicPublishedStartHereEntry)
             .Select(entry => entry.StartHerePath!)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -62,7 +93,7 @@ public sealed partial class RepositoryReadmePolicyTests
             .Select(entry => entry.StartHerePath!)
             .ToArray();
 
-        Assert.Equal(17, requiredReadmes.Length);
+        Assert.Equal(18, requiredReadmes.Length);
         Assert.Contains("Web/ForgeTrust.AppSurface.Docs/README.md", nonRequiredReadmes);
         Assert.Contains("Web/ForgeTrust.RazorWire.Cli/README.md", nonRequiredReadmes);
 
@@ -73,7 +104,7 @@ public sealed partial class RepositoryReadmePolicyTests
 
             Assert.Contains("## Release Guidance", content, StringComparison.Ordinal);
 
-            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1.0-rc.3.md"), repoRoot);
+            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1.0-rc.4.md"), repoRoot);
             var linksToReleaseNote = MarkdownLinkRegex()
                 .Matches(content)
                 .Select(match => ResolveRelativeLinkTarget(
@@ -82,7 +113,7 @@ public sealed partial class RepositoryReadmePolicyTests
                     readmePath))
                 .Any(target => string.Equals(target, expectedTarget, StringComparison.Ordinal));
 
-            Assert.True(linksToReleaseNote, $"{readmePath} must link to the v0.1.0 RC 3 release note.");
+            Assert.True(linksToReleaseNote, $"{readmePath} must link to the v0.1.0 RC 4 release note.");
         }
     }
 
@@ -166,6 +197,13 @@ public sealed partial class RepositoryReadmePolicyTests
         var manifest = deserializer.Deserialize<PackageReadmeManifest>(File.ReadAllText(manifestPath));
 
         return manifest.Packages;
+    }
+
+    private static bool IsPublicPublishedStartHereEntry(PackageManifestReadmeEntry entry)
+    {
+        return string.Equals(entry.Classification, "public", StringComparison.OrdinalIgnoreCase)
+               && string.Equals(entry.PublishDecision, "publish", StringComparison.OrdinalIgnoreCase)
+               && !string.IsNullOrWhiteSpace(entry.StartHerePath);
     }
 
     private static string ResolveRepositoryRelativePath(string repoRoot, string repositoryRelativePath, string description)

@@ -6,9 +6,18 @@ Strongly typed configuration primitives for AppSurface applications.
 
 This package provides the configuration layer for AppSurface modules. It combines file-based configuration, environment-aware providers, and strongly typed configuration objects so modules can consume configuration without hard-coding access patterns throughout the codebase.
 
+`ForgeTrust.AppSurface.Config` does not store secrets by itself. Use `ForgeTrust.AppSurface.Config.LocalSecrets` only
+when a solo or hobbyist app needs local, single-machine, pre-vault secret posture with source-aware diagnostics. Use
+environment variables, key-per-file, or a remote vault for CI, containers, team environments, and production. The
+migration ladder is:
+
+```text
+appsettings defaults < LocalSecrets < environment variables < future remote vault provider
+```
+
 ## Release Guidance
 
-AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 3 release note](../../releases/v0.1.0-rc.3.md) for current release risk, migration guidance, and package readiness.
+AppSurface publishes coordinated `v0.1.0` release candidates. Before installing this package from a prerelease feed, read the [v0.1.0 RC 4 release note](../../releases/v0.1.0-rc.4.md) for current release risk, migration guidance, and package readiness.
 
 ## Key Types
 

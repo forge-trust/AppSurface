@@ -103,7 +103,7 @@ public sealed class JavaScriptParserDecisionTests
     [Fact]
     public void Acornima_Should_Report_Catchable_Parse_Failure()
     {
-        var source = ReadFixture("malformed.js");
+        var source = ReadFixture("malformed.js.txt");
 
         var exception = Assert.ThrowsAny<ParseErrorException>(() => ProbeSource(source));
 
@@ -130,7 +130,7 @@ public sealed class JavaScriptParserDecisionTests
                 "minisearch.min.js",
                 PathUnder(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "docs", "minisearch.min.js"),
                 "*.min.js remains excluded by default"),
-            ParseCostCase.Fixture("malformed.js", ReadFixture("malformed.js"), expectedSuccess: false),
+            ParseCostCase.Fixture("malformed.js.txt", ReadFixture("malformed.js.txt"), expectedSuccess: false),
             ParseCostCase.Fixture("synthetic-large-public-doclet.js", CreateSyntheticPublicDocletFixture(750), expectedSuccess: true),
         };
 

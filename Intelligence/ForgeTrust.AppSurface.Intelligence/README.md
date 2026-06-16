@@ -1,8 +1,8 @@
 # ForgeTrust.AppSurface.Intelligence
 
-`ForgeTrust.AppSurface.Intelligence` defines AppSurface-owned product-intelligence contracts. It is not an analytics vendor package and it does not configure transport, storage, dashboards, retention, access control, browser autocapture, session replay, or OpenTelemetry exporters.
+`ForgeTrust.AppSurface.Intelligence` defines privacy-checked product-intelligence contracts for AppSurface and host/package contract packs. It is not an analytics vendor package and it does not configure transport, storage, dashboards, retention, access control, browser autocapture, session replay, or OpenTelemetry exporters.
 
-Use it when you want AppSurface semantic events to be validated before a host forwards them to PostHog, a warehouse, an internal analytics service, or another product analytics system.
+Use it when you want semantic product events to be validated before a host forwards them to PostHog, a warehouse, an internal analytics service, or another product analytics system.
 
 ## Quickstart
 
@@ -27,7 +27,7 @@ public sealed class MyProductAnalyticsSink : IAppSurfaceProductIntelligenceSink
         CancellationToken cancellationToken = default)
     {
         // Forward productEvent.Name and productEvent.Properties to your host-owned analytics transport.
-        // The event envelope and properties have already been filtered through AppSurfaceProductEventRegistry.
+        // The event envelope and properties have already been filtered through the composed registry.
         return ValueTask.CompletedTask;
     }
 }
@@ -55,9 +55,113 @@ Experimental events are disabled by default. Without `EnableExperimentalEvents()
 
 Register sinks with the lifetime their transport needs. The default dispatcher is scoped so host-owned sinks may depend on scoped queues, tenant context, or request-aware services without being resolved from the root service provider.
 
+## Custom Event Contracts In 5 Minutes
+
+Use `RegisterEventContracts` when a host app or package owns product events that should use the same privacy boundary as AppSurface built-ins.
+
+```csharp
+using ForgeTrust.AppSurface.Intelligence;
+
+public static class SkoolieLaunchIntelligenceContracts
+{
+    public const string CardGenerated = "skoolie.card.generated";
+
+    public static IReadOnlyList<AppSurfaceProductEventContract> All { get; } =
+    [
+        new(
+            CardGenerated,
+            AppSurfaceProductEventLifecycle.Experimental,
+            "Measure whether launch-card generation moves safely into send review.",
+            "Skoolie",
+            "Short launch-quality retention; aggregate before long-term storage.",
+            [
+                new AppSurfaceProductEventPropertyContract(
+                    "launch_surface",
+                    "Host-owned surface that generated the card.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low,
+                    required: true,
+                    valueShape: AppSurfaceProductEventValueShape.Token),
+                new AppSurfaceProductEventPropertyContract(
+                    "attachment_count",
+                    "Number of safe launch artifacts attached to the generated card.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Medium,
+                    valueShape: AppSurfaceProductEventValueShape.NonNegativeInteger),
+                new AppSurfaceProductEventPropertyContract(
+                    "delivery_state",
+                    "Normalized downstream state.",
+                    AppSurfaceProductEventSensitivity.Operational,
+                    AppSurfaceProductEventCardinality.Low,
+                    required: true,
+                    allowedValues: ["queued", "sent"],
+                    valueShape: AppSurfaceProductEventValueShape.AllowedValue)
+            ],
+            ["child identity", "email body", "raw attachment"])
+    ];
+}
+```
+
+Register the contract pack, allowlist the experimental event, and add a sink:
+
+```csharp
+builder.Services.AddAppSurfaceProductIntelligence(options =>
+{
+    options.RegisterEventContracts(SkoolieLaunchIntelligenceContracts.All);
+    options.EnableExperimentalEvents(SkoolieLaunchIntelligenceContracts.CardGenerated);
+
+    // Useful in development and tests; production capture remains best-effort by default.
+    options.ThrowOnInvalidEvents();
+});
+
+builder.Services.AddSingleton<RecordingProductIntelligenceSink>();
+builder.Services.AddSingleton<IAppSurfaceProductIntelligenceSink>(sp =>
+    sp.GetRequiredService<RecordingProductIntelligenceSink>());
+```
+
+Capture the event through the normal dispatcher:
+
+```csharp
+await intelligence.CaptureAsync(
+    new AppSurfaceProductEvent(
+        SkoolieLaunchIntelligenceContracts.CardGenerated,
+        DateTimeOffset.UtcNow,
+        new Dictionary<string, string>
+        {
+            ["launch_surface"] = "dashboard",
+            ["attachment_count"] = "3",
+            ["delivery_state"] = "queued"
+        }),
+    cancellationToken);
+```
+
+A minimal recording sink can prove the event arrived after validation:
+
+```csharp
+public sealed class RecordingProductIntelligenceSink : IAppSurfaceProductIntelligenceSink
+{
+    public List<AppSurfaceProductEvent> Events { get; } = [];
+
+    public ValueTask CaptureAsync(
+        AppSurfaceProductEvent productEvent,
+        CancellationToken cancellationToken = default)
+    {
+        Events.Add(productEvent);
+        return ValueTask.CompletedTask;
+    }
+}
+
+Assert.Contains(
+    recordingSink.Events,
+    captured => captured.Name == SkoolieLaunchIntelligenceContracts.CardGenerated
+        && captured.Properties["attachment_count"] == "3");
+```
+
+If an event is not registered, `ThrowOnInvalidEvents()` raises a safe `AppSurfaceProductEventValidationException` with the event name, stable reason codes, rejected property names, and a fix hint such as calling `RegisterEventContracts(...)`. Exception messages, validation results, and dispatcher diagnostics must not include raw property values.
+
 ## Event Registry
 
-`AppSurfaceProductEventRegistry` is the source of truth for product-intelligence contracts. Each contract declares:
+`AppSurfaceProductEventRegistry` is the built-in AppSurface contract catalog and compatibility facade. The runtime dispatcher uses the DI-composed `IAppSurfaceProductEventRegistry`, which combines built-in AppSurface contracts with host/package contracts registered through `AppSurfaceProductIntelligenceOptions.RegisterEventContracts(...)`. Each contract declares:
 
 - event name
 - lifecycle state: `Experimental`, `Recommended`, `Stable`, or `Deprecated`
@@ -66,6 +170,7 @@ Register sinks with the lifetime their transport needs. The default dispatcher i
 - allowed property schema
 - sensitivity class
 - cardinality budget
+- value shape: `Token`, `BoundedText`, `NonNegativeInteger`, `Boolean`, or `AllowedValue`
 - retention expectation
 - forbidden examples
 
@@ -102,11 +207,17 @@ builder.Services.AddAppSurfaceProductIntelligence(options =>
 Use the selected-event allowlist when a package integration, such as AppSurface Docs search-quality metrics, should emit
 only its own experimental product area without enabling unrelated dogfood events.
 
+Host/package contracts follow the same lifecycle rule: `Experimental` custom contracts require `EnableExperimentalEvents(...)`; `Recommended`, `Stable`, and `Deprecated` custom contracts are eligible for capture by registration. Deprecated contracts remain valid for compatibility, but new instrumentation should move to a non-deprecated contract.
+
+Identical semantic duplicate registrations are idempotent so repeated module registration is safe. Incompatible duplicate event names fail registry construction with a safe `AppSurfaceProductEventContractRegistrationException` that names the event and owners without referring to payload values.
+
 ## Privacy Defaults
 
-The dispatcher validates against the registry before invoking host sinks. Unregistered properties are dropped. Globally risky property names are always blocked in this package version, even if a property schema accidentally registers one of those names. Use `AppSurfaceProductEventRegistry.ForbiddenProperties` as the source of truth; it includes names such as `token`, `cookie`, `secret`, `password`, `body`, `config`, `connection_string`, `exception`, `raw_query`, `request_body`, `stack_trace`, and raw `query`.
+The dispatcher validates against the composed registry before invoking host sinks. Unregistered properties are dropped. Globally risky property names are always blocked in this package version, even if a property schema accidentally registers one of those names. Use `IAppSurfaceProductEventRegistry.ForbiddenProperties` or `AppSurfaceProductEventRegistry.ForbiddenProperties` as the source of truth; it includes names such as `token`, `cookie`, `secret`, `password`, `body`, `config`, `connection_string`, `exception`, `raw_query`, `request_body`, `stack_trace`, and raw `query`.
 
-Registered property values are also normalized before emission. Low-cardinality dimensions use bounded token values or explicit allowed-value sets, numeric properties must parse as non-negative integers, and values that look like secrets, bearer headers, cookies, connection strings, or stack traces are rejected before sinks run.
+Registered property values are also normalized before emission according to each property's `AppSurfaceProductEventValueShape`. Token properties use bounded ASCII token values, bounded text properties keep short non-secret text, numeric properties must parse as non-negative integers, boolean properties normalize to `true` or `false`, and allowed-value properties must match their registered set. Values that look like secrets, bearer headers, cookies, connection strings, or stack traces are rejected before sinks run.
+
+Custom contract packs cannot register `Sensitive` or `High` properties by default. They also cannot bypass forbidden property names, forbidden value-shape filtering, lifecycle gating, or safe diagnostics through options. Supported escape hatches are custom sinks, replacing `IAppSurfaceProductEventRegistry` with an implementation that preserves the privacy boundary, direct `Validate(...)` calls in tests, and `ThrowOnInvalidEvents()` for development feedback.
 
 Envelope fields are filtered too. `ActorId`, `SessionId`, and `CorrelationId` must be short bounded tokens; values with whitespace, PII-shaped characters, bearer headers, cookies, secrets, or other forbidden shapes are dropped. `Route` must be a short route template or surface name; full URLs, query strings, fragments, and unsafe characters are dropped before sinks run.
 
@@ -138,7 +249,7 @@ The browser event detail has this shape:
 - `detail.name`: one registered event name from `AppSurfaceProductEventRegistry`
 - `detail.properties`: string-valued properties that mirror the registry schema
 
-The browser bridge must not include raw search text, form field values, request bodies, tokens, cookies, stack traces, or full URLs with query strings. Treat it as an experimental transport bridge for dogfooding, not as a replacement for backend validation when events cross into a trusted host transport.
+The browser bridge must not include raw search text, form field values, request bodies, tokens, cookies, stack traces, or full URLs with query strings. Treat it as an experimental transport bridge for dogfooding, not as a replacement for backend validation when events cross into a trusted host transport. Custom contract schema export to browser clients is not part of this package version; server-side validation remains authoritative.
 
 ## PostHog Recipe
 
@@ -175,6 +286,8 @@ PostHog is one possible product analytics UI and transport. Use it after the App
 
 OpenTelemetry remains the operational telemetry path for logs, metrics, and traces. Use `Meter` and `ActivitySource` for performance, health, and debugging. Product-intelligence events may carry correlation IDs so a host can join analytics back to traces, but AppSurface does not force product analytics through OTel.
 
+Use AppSurface.Intelligence when you want reusable semantic contracts, lifecycle metadata, privacy-shape validation, safe diagnostics, and freedom to forward to any product analytics backend. Use a local validator when a host app is iterating before the package surface is available or before a contract pack is ready to publish. Use PostHog directly only when you intentionally accept a vendor-specific event shape and a separate privacy-review process.
+
 ## Release Guidance
 
-`ForgeTrust.AppSurface.Intelligence` follows the AppSurface public-preview compatibility policy. The current package family release guidance is tracked in the [v0.1.0 RC 3 release note](../../releases/v0.1.0-rc.3.md), while the event contracts in this package remain `Experimental` until dogfood usage promotes them.
+`ForgeTrust.AppSurface.Intelligence` follows the AppSurface public-preview compatibility policy. The current package family release guidance is tracked in the [v0.1.0 RC 4 release note](../../releases/v0.1.0-rc.4.md), while the event contracts in this package remain `Experimental` until dogfood usage promotes them.

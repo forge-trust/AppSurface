@@ -259,6 +259,9 @@ how to use this project.
   non-HTML behavior.
 - [Config validation example](examples/config-validation/README.md) – shows scalar
   validation on a strongly typed config wrapper and the startup failure shape.
+- [Local secrets example](examples/local-secrets/README.md) – shows OS-backed local
+  secret posture, CLI setup, provider precedence, and paste-safe diagnostics for
+  solo development before a remote vault exists.
 - [Flow approval local example](examples/flow-approval-local/README.md) – shows a typed
   flow that waits for an approval event and resumes through the in-memory runner.
 - [Product readiness lab](examples/product-readiness-lab/README.md) – runs a composed
