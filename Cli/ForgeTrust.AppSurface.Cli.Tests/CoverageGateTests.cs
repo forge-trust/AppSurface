@@ -1851,6 +1851,81 @@ public sealed class CoverageGateTests
         Assert.Equal(PatchDiffParseStatus.Malformed, nextDiffStartsBeforeHunkComplete.Status);
     }
 
+    [Theory]
+    [InlineData("old mode 100644")]
+    [InlineData("new mode 100755")]
+    [InlineData("rename from src/Old.cs")]
+    [InlineData("rename to src/New.cs")]
+    [InlineData("copy from src/Old.cs")]
+    [InlineData("copy to src/New.cs")]
+    [InlineData("similarity index 100%")]
+    [InlineData("dissimilarity index 100%")]
+    [InlineData("new file mode 100644")]
+    [InlineData("deleted file mode 100644")]
+    [InlineData("index 1111111..2222222 100644")]
+    public void ParseChangedLinesDetailed_RejectsMetadataAfterPatchBody(string metadataLine)
+    {
+        var result = PatchCoverageEvaluator.ParseChangedLinesDetailed($"""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -0,0 +1,1 @@
+            +covered
+            {metadataLine}
+            """);
+
+        Assert.Equal(PatchDiffParseStatus.Malformed, result.Status);
+    }
+
+    [Fact]
+    public void ParseChangedLinesDetailed_CoversParserStateEdgeBranches()
+    {
+        var oldFileMarkerAfterIncompleteHunk = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            @@ -0,0 +1,2 @@
+            +covered
+            --- a/src/Other.cs
+            """);
+        var noNewlineMarkerOutsideHunk = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            --- a/src/Foo.cs
+            +++ b/src/Foo.cs
+            \ No newline at end of file
+            """);
+        var binaryPatchWithBlankSeparator = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/assets/image.bin b/assets/image.bin
+            index 1111111..2222222 100644
+            GIT binary patch
+
+            literal 0
+            HcmV?d00001
+            """);
+        var oldModeOnly = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Foo.cs b/src/Foo.cs
+            old mode 100644
+            """);
+        var renameFromOnly = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Old.cs b/src/New.cs
+            similarity index 100%
+            rename from src/Old.cs
+            """);
+        var copyFromOnly = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/Old.cs b/src/New.cs
+            similarity index 100%
+            copy from src/Old.cs
+            """);
+
+        Assert.Equal(PatchDiffParseStatus.Malformed, oldFileMarkerAfterIncompleteHunk.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, noNewlineMarkerOutsideHunk.Status);
+        Assert.Equal(PatchDiffParseStatus.ValidNoAddedLines, binaryPatchWithBlankSeparator.Status);
+        Assert.Empty(binaryPatchWithBlankSeparator.ChangedLines);
+        Assert.Equal(PatchDiffParseStatus.Malformed, oldModeOnly.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, renameFromOnly.Status);
+        Assert.Equal(PatchDiffParseStatus.Malformed, copyFromOnly.Status);
+    }
+
     [Fact]
     public void ParseChangedLinesDetailed_ClassifiesValidNoAddedLineAndMalformedDiffs()
     {

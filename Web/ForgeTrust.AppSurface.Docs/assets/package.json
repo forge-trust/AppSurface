@@ -9,7 +9,7 @@
     "verify-generated": "node scripts/verify-generated.mjs"
   },
   "devDependencies": {
-    "esbuild": "0.27.0",
+    "esbuild": "0.28.1",
     "minisearch": "7.2.0",
     "typescript": "5.9.3"
   }
