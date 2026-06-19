@@ -65,6 +65,31 @@ public sealed class AppSurfaceUserIdentityContractTests
         Assert.DoesNotContain("tenant-secret", text, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ExternalSubject_ToString_WhenPartitionIsMissing_ReportsNoneWithoutRawValues()
+    {
+        var subject = new ExternalSubject("issuer-secret", "subject-secret");
+        var text = subject.ToString();
+
+        Assert.Contains("ExternalSubject", text, StringComparison.Ordinal);
+        Assert.Contains("none", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("issuer-secret", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("subject-secret", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExternalSubject_EqualsObjectAndDefaultHashCode_AreStable()
+    {
+        var subject = new ExternalSubject("issuer", "subject");
+        object boxedSame = new ExternalSubject("issuer", "subject");
+        object differentType = "issuer";
+
+        Assert.True(subject.Equals(boxedSame));
+        Assert.False(subject.Equals(differentType));
+        Assert.False(subject.Equals(null));
+        Assert.Equal(default(ExternalSubject).GetHashCode(), default(ExternalSubject).GetHashCode());
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -95,6 +120,19 @@ public sealed class AppSurfaceUserIdentityContractTests
     }
 
     [Fact]
+    public void AppUserId_EqualsObjectAndDefaultHashCode_AreStable()
+    {
+        var id = new AppUserId("app-user");
+        object boxedSame = new AppUserId("app-user");
+        object differentType = "app-user";
+
+        Assert.True(id.Equals(boxedSame));
+        Assert.False(id.Equals(differentType));
+        Assert.False(id.Equals(null));
+        Assert.Equal(0, default(AppUserId).GetHashCode());
+    }
+
+    [Fact]
     public void ResolutionContext_NormalizesCorrelationAndCopiesMetadata()
     {
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -109,6 +147,15 @@ public sealed class AppSurfaceUserIdentityContractTests
         Assert.Equal("alpha", context.Metadata["Tenant"]);
         Assert.False(context.Metadata.ContainsKey("tenant"));
         Assert.Empty(AppSurfaceUserIdentityResolutionContext.Empty.Metadata);
+    }
+
+    [Fact]
+    public void ResolutionContext_PreservesNonblankCorrelationAndUsesEmptyMetadata()
+    {
+        var context = new AppSurfaceUserIdentityResolutionContext("correlation-1");
+
+        Assert.Equal("correlation-1", context.CorrelationId);
+        Assert.Empty(context.Metadata);
     }
 
     [Theory]
@@ -193,6 +240,22 @@ public sealed class AppSurfaceUserIdentityContractTests
         {
             Assert.Equal(subject, result.Subject);
         }
+    }
+
+    [Fact]
+    public void Result_FailureFactory_NormalizesMessageAndCopiesMetadata()
+    {
+        var metadata = new Dictionary<string, string> { ["reason"] = "invite_required" };
+
+        var result = AppSurfaceUserIdentityResult.ProvisioningDenied(
+            message: " ",
+            metadata: metadata);
+        metadata["reason"] = "changed";
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(AppSurfaceUserIdentityStatus.ProvisioningDenied, result.Status);
+        Assert.Null(result.Message);
+        Assert.Equal("invite_required", result.Metadata["reason"]);
     }
 
     [Fact]
