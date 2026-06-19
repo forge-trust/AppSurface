@@ -95,6 +95,23 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
         Assert.Single(endpointBuilder.Metadata.OfType<IAllowAnonymous>());
     }
 
+    [Fact]
+    public async Task RequireSurfacePolicy_FilterFactoryEvaluatesPolicy()
+    {
+        var builder = new TestEndpointConventionBuilder();
+        builder.RequireSurfacePolicy("docs.publish");
+        var endpointBuilder = new RouteEndpointBuilder(_ => Task.CompletedTask, RoutePatternFactory.Parse("/"), 0);
+        builder.Apply(endpointBuilder);
+        var httpContext = CreateHttpContext(AppSurfaceAuthResult.Allowed());
+        var endpointFilter = Assert.Single(endpointBuilder.FilterFactories)(
+            null!,
+            _ => ValueTask.FromResult<object?>("handler-result"));
+
+        var result = await endpointFilter(new TestEndpointFilterInvocationContext(httpContext));
+
+        Assert.Equal("handler-result", result);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -218,6 +235,55 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
 
         Assert.Equal("docs.publish", evaluator.PolicyName);
         Assert.Equal(cancellation.Token, evaluator.CancellationToken);
+    }
+
+    [Fact]
+    public void ProblemDetailsMapper_WithNullResult_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => AppSurfacePolicyProblemDetailsMapper.ToResult(null!, "docs.publish"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ProblemDetailsMapper_WithBlankPolicyName_ThrowsArgumentException(string? policyName)
+    {
+        Assert.ThrowsAny<ArgumentException>(
+            () => AppSurfacePolicyProblemDetailsMapper.ToResult(AppSurfaceAuthResult.Challenge(), policyName!));
+    }
+
+    [Fact]
+    public void ProblemDetailsMapper_WithAllowedResult_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(
+            () => AppSurfacePolicyProblemDetailsMapper.ToResult(AppSurfaceAuthResult.Allowed(), "docs.publish"));
+    }
+
+    [Fact]
+    public async Task ProblemDetailsMapper_CopiesOnlySafeMetadata()
+    {
+        var result = AppSurfaceAuthResult.Challenge(
+            message: "Sign in before publishing.",
+            metadata: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AppSurfaceAspNetCoreAuthMetadataKeys.DiagnosticCode] = "challenge",
+                [AppSurfaceAspNetCoreAuthMetadataKeys.PolicyName] = "docs.publish",
+                [AppSurfaceAspNetCoreAuthMetadataKeys.MissingService] = "Microsoft.AspNetCore.Authorization.IAuthorizationService",
+                [AppSurfaceAspNetCoreAuthMetadataKeys.SubjectClaimTypes] = "sub,nameidentifier",
+                ["email"] = "operator@example.test",
+            });
+
+        var problem = await ExecuteProblemAsync(AppSurfacePolicyProblemDetailsMapper.ToResult(result, "docs.publish"));
+
+        Assert.Equal("Sign in before publishing.", problem.Detail);
+        Assert.Equal("challenge", AssertExtension(problem, AppSurfaceAspNetCoreAuthMetadataKeys.DiagnosticCode));
+        Assert.Equal("docs.publish", AssertExtension(problem, AppSurfaceAspNetCoreAuthMetadataKeys.PolicyName));
+        Assert.Equal(
+            "Microsoft.AspNetCore.Authorization.IAuthorizationService",
+            AssertExtension(problem, AppSurfaceAspNetCoreAuthMetadataKeys.MissingService));
+        Assert.Equal("sub,nameidentifier", AssertExtension(problem, AppSurfaceAspNetCoreAuthMetadataKeys.SubjectClaimTypes));
+        Assert.False(problem.Extensions.ContainsKey("email"));
     }
 
     public static TheoryData<AppSurfaceAuthResult, int, string> FailureResults()
