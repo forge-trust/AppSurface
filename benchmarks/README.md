@@ -10,10 +10,10 @@ projects. They measure:
 Benchmarks are compiled separately per library using conditional
 compilation, ensuring that only the code under test is loaded for each job.
 
-Run them in release mode to get optimized measurements:
+From the repository root, run them in release mode to get optimized measurements:
 
 ```bash
-dotnet run -c Release --project AppSurfaceBenchmarks
+dotnet run -c Release --project benchmarks/AppSurfaceBenchmarks/AppSurfaceBenchmarks.csproj
 ```
 
 Run only the Flow benchmarks when investigating state-machine overhead:
