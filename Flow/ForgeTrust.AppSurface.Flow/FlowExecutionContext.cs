@@ -9,7 +9,13 @@ namespace ForgeTrust.AppSurface.Flow;
 /// <param name="NodeId">Current node id.</param>
 /// <param name="State">Current typed state.</param>
 /// <param name="ResumeEvent">Optional external event or timeout that resumed the node.</param>
-public sealed record FlowExecutionContext<TContext>(
+/// <remarks>
+/// The context is an immutable value-type snapshot so in-process runners can pass it to synchronous nodes without
+/// allocating a new reference object for every step. Runners always populate all members before invoking a node. Avoid
+/// using <c>default</c> instances as real execution contexts because value types can be default-created without the
+/// required flow, version, node, or state values.
+/// </remarks>
+public readonly record struct FlowExecutionContext<TContext>(
     string FlowId,
     string Version,
     string NodeId,

@@ -48,6 +48,62 @@ public sealed class InMemoryFlowRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_WithReentrantNextTarget_Completes()
+    {
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", new ReentrantNode(limit: 3), "start")
+            .StartAt("start")
+            .Build();
+
+        var result = await Runner().RunAsync(definition, new TestState(0, "created"));
+
+        Assert.Equal(FlowRunStatus.Completed, result.Status);
+        Assert.Equal("start", result.NodeId);
+        Assert.Equal(new TestState(3, "complete"), result.Context);
+    }
+
+    [Fact]
+    public async Task RunAsync_AfterSourceNodeDictionaryMutation_UsesCopiedDefinition()
+    {
+        var nodes = new Dictionary<string, FlowNodeDescriptor<TestState>>(StringComparer.Ordinal)
+        {
+            ["start"] = Descriptor("start", new NextNode("finish"), "finish"),
+            ["finish"] = Descriptor("finish", new CompleteNode()),
+        };
+        var definition = new FlowDefinition<TestState>("approval", "1", "start", nodes);
+        nodes["start"] = Descriptor("start", new CompleteNode());
+        nodes.Remove("finish");
+
+        var result = await Runner().RunAsync(definition, new TestState(0, "created"));
+
+        Assert.Equal(FlowRunStatus.Completed, result.Status);
+        Assert.Equal("finish", result.NodeId);
+        Assert.Equal(new TestState(1, "complete"), result.Context);
+    }
+
+    [Fact]
+    public async Task RunAsync_AfterSourceNextNodeIdsMutation_RejectsUndeclaredRuntimeTarget()
+    {
+        var nextNodeIds = new HashSet<string>(StringComparer.Ordinal) { "finish" };
+        var mutableNode = new MutableNextNode("finish");
+        var nodes = new Dictionary<string, FlowNodeDescriptor<TestState>>(StringComparer.Ordinal)
+        {
+            ["start"] = new("start", mutableNode, nextNodeIds),
+            ["finish"] = Descriptor("finish", new CompleteNode()),
+        };
+        var definition = new FlowDefinition<TestState>("approval", "1", "start", nodes);
+        nodes["late"] = Descriptor("late", new CompleteNode());
+        nextNodeIds.Add("late");
+        mutableNode.Target = "late";
+
+        var exception = await Assert.ThrowsAsync<FlowDefinitionException>(async () =>
+            await Runner().RunAsync(definition, new TestState(0, "created")));
+
+        Assert.Contains("undeclared target", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task RunAsync_StopsAtWait()
     {
         var timeout = new FlowTimeout(TimeSpan.FromMinutes(10));
@@ -82,6 +138,27 @@ public sealed class InMemoryFlowRunnerTests
 
         Assert.Equal(FlowRunStatus.Completed, result.Status);
         Assert.Equal(new TestState(0, "approved:andrew"), result.Context);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithValidNonStartNode_RunsThatNode()
+    {
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", new WaitNode(new FlowTimeout(TimeSpan.FromMinutes(10))))
+            .AddNode("finish", new CompleteNode())
+            .StartAt("start")
+            .Build();
+
+        var result = await Runner().ResumeAsync(
+            definition,
+            "finish",
+            new TestState(0, "waiting"),
+            new FlowResumeEvent("approved", "andrew"));
+
+        Assert.Equal(FlowRunStatus.Completed, result.Status);
+        Assert.Equal("finish", result.NodeId);
+        Assert.Equal(new TestState(0, "complete"), result.Context);
     }
 
     [Fact]
@@ -237,6 +314,12 @@ public sealed class InMemoryFlowRunnerTests
     private static InMemoryFlowRunner<TestState> Runner(int maxSteps = 1000) =>
         new(Options.Create(new AppSurfaceFlowOptions { MaxStepsPerRun = maxSteps }));
 
+    private static FlowNodeDescriptor<TestState> Descriptor(
+        string nodeId,
+        IFlowNode<TestState> node,
+        params string[] nextNodeIds) =>
+        new(nodeId, node, new HashSet<string>(nextNodeIds, StringComparer.Ordinal));
+
     private sealed record TestState(int Count, string Status);
 
     private sealed class NextNode : IFlowNode<TestState>
@@ -253,6 +336,46 @@ public sealed class InMemoryFlowRunnerTests
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult<FlowNodeOutcome<TestState>>(
                 FlowNodeOutcome<TestState>.Next(_target, context.State with { Count = context.State.Count + 1 }));
+    }
+
+    private sealed class MutableNextNode : IFlowNode<TestState>
+    {
+        internal MutableNextNode(string target)
+        {
+            Target = target;
+        }
+
+        internal string Target { get; set; }
+
+        public ValueTask<FlowNodeOutcome<TestState>> ExecuteAsync(
+            FlowExecutionContext<TestState> context,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<FlowNodeOutcome<TestState>>(
+                FlowNodeOutcome<TestState>.Next(Target, context.State with { Count = context.State.Count + 1 }));
+    }
+
+    private sealed class ReentrantNode : IFlowNode<TestState>
+    {
+        private readonly int _limit;
+
+        internal ReentrantNode(int limit)
+        {
+            _limit = limit;
+        }
+
+        public ValueTask<FlowNodeOutcome<TestState>> ExecuteAsync(
+            FlowExecutionContext<TestState> context,
+            CancellationToken cancellationToken = default)
+        {
+            if (context.State.Count >= _limit)
+            {
+                return ValueTask.FromResult<FlowNodeOutcome<TestState>>(
+                    FlowNodeOutcome<TestState>.Complete(context.State with { Status = "complete" }));
+            }
+
+            return ValueTask.FromResult<FlowNodeOutcome<TestState>>(
+                FlowNodeOutcome<TestState>.Next("start", context.State with { Count = context.State.Count + 1 }));
+        }
     }
 
     private sealed class CompleteNode : IFlowNode<TestState>
