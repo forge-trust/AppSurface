@@ -61,7 +61,7 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
             throw new FileNotFoundException("Could not find the AppSurface Auth Web/RazorWire proof project.", projectPath);
         }
 
-        _appProcess = CliWrapProcessLease.Start(Cli.Wrap("dotnet")
+        var appProcess = CliWrapProcessLease.Start(Cli.Wrap("dotnet")
             .WithArguments(["run", "--project", projectPath, "--no-launch-profile", "--configuration", ResolveCurrentConfiguration()])
             .WithWorkingDirectory(RepositoryRoot)
             .WithEnvironmentVariables(new Dictionary<string, string?>
@@ -73,11 +73,12 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
             .WithValidation(CommandResultValidation.None)
             .WithStandardOutputPipe(PipeTarget.ToDelegate(CaptureAppLog))
             .WithStandardErrorPipe(PipeTarget.ToDelegate(CaptureAppLog)));
+        _appProcess = appProcess;
 
-        _ = _appProcess.Completion.ContinueWith(
+        _ = appProcess.Completion.ContinueWith(
             task =>
             {
-                if (_appProcess.IsCancellationRequested)
+                if (appProcess.IsCancellationRequested)
                 {
                     return;
                 }
@@ -213,7 +214,14 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
                 // Expected while the proof app is still binding; retry until ready or timeout.
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(250), timeoutCts.Token);
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250), timeoutCts.Token);
+            }
+            catch (TaskCanceledException) when (timeoutCts.IsCancellationRequested)
+            {
+                break;
+            }
         }
 
         throw new TimeoutException($"Auth Web/RazorWire proof was not ready within {timeout.TotalSeconds} seconds.{Environment.NewLine}{GetRecentLogs()}");
