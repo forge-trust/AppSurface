@@ -50,6 +50,7 @@ public sealed class AppSurfaceUserIdentityContractTests
         Assert.True(subject == same);
         Assert.True(subject != differentPartition);
         Assert.NotEqual(subject, differentCase);
+        Assert.NotEqual(subject, new ExternalSubject("issuer", "other-subject"));
     }
 
     [Fact]
@@ -256,6 +257,36 @@ public sealed class AppSurfaceUserIdentityContractTests
         Assert.Equal(AppSurfaceUserIdentityStatus.ProvisioningDenied, result.Status);
         Assert.Null(result.Message);
         Assert.Equal("invite_required", result.Metadata["reason"]);
+    }
+
+    [Theory]
+    [InlineData(AppSurfaceUserIdentityStatus.DisabledAppUser)]
+    [InlineData(AppSurfaceUserIdentityStatus.StaleOrUnknownSession)]
+    [InlineData(AppSurfaceUserIdentityStatus.DuplicateMapping)]
+    [InlineData(AppSurfaceUserIdentityStatus.StoreUnavailable)]
+    [InlineData(AppSurfaceUserIdentityStatus.ProvisioningDenied)]
+    public void Result_OptionalSubjectFailureFactories_AllowMissingSubject(AppSurfaceUserIdentityStatus status)
+    {
+        var result = status switch
+        {
+            AppSurfaceUserIdentityStatus.DisabledAppUser =>
+                AppSurfaceUserIdentityResult.DisabledAppUser(),
+            AppSurfaceUserIdentityStatus.StaleOrUnknownSession =>
+                AppSurfaceUserIdentityResult.StaleOrUnknownSession(),
+            AppSurfaceUserIdentityStatus.DuplicateMapping =>
+                AppSurfaceUserIdentityResult.DuplicateMapping(),
+            AppSurfaceUserIdentityStatus.StoreUnavailable =>
+                AppSurfaceUserIdentityResult.StoreUnavailable(),
+            AppSurfaceUserIdentityStatus.ProvisioningDenied =>
+                AppSurfaceUserIdentityResult.ProvisioningDenied(),
+            _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
+        };
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(status, result.Status);
+        Assert.Null(result.AppUserId);
+        Assert.Null(result.Subject);
+        Assert.Empty(result.Metadata);
     }
 
     [Fact]
