@@ -28,8 +28,7 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         RepositoryRoot = FindRepositoryRoot(AppContext.BaseDirectory);
-        var projectPath = Path.Combine(
-            RepositoryRoot,
+        var projectPath = ResolveRepositoryPath(
             "examples",
             "auth-web-razorwire-proof",
             "AuthWebRazorWireProofExample.csproj");
@@ -88,12 +87,11 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
         };
     }
 
-    public HttpClient CreateClientWithCookies()
+    public HttpClient CreateBrowserClient()
     {
         return new HttpClient(new HttpClientHandler
         {
-            AllowAutoRedirect = true,
-            CookieContainer = new CookieContainer()
+            AllowAutoRedirect = true
         })
         {
             BaseAddress = new Uri(BaseUrl)
@@ -102,18 +100,13 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
 
     public string ReadRepositoryFile(params string[] pathParts)
     {
-        var parts = new string[pathParts.Length + 1];
-        parts[0] = RepositoryRoot;
-        Array.Copy(pathParts, 0, parts, 1, pathParts.Length);
-
-        return File.ReadAllText(Path.Combine(parts));
+        return File.ReadAllText(ResolveRepositoryPath(pathParts));
     }
 
     public IEnumerable<string> ReadProductSourceFiles(params string[] roots)
     {
-        foreach (var root in roots)
+        foreach (var absoluteRoot in roots.Select(root => ResolveRepositoryPath(root)))
         {
-            var absoluteRoot = Path.Combine(RepositoryRoot, root);
             foreach (var file in Directory.EnumerateFiles(absoluteRoot, "*.cs", SearchOption.AllDirectories)
                          .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                              && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)))
@@ -133,6 +126,7 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
         _recentLogs.Enqueue(line);
         while (_recentLogs.Count > 80 && _recentLogs.TryDequeue(out _))
         {
+            // Intentionally empty: trimming recent logs is done in the loop condition.
         }
 
         var match = ListeningUrlRegex().Match(line);
@@ -172,6 +166,7 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
             {
+                // Expected while the proof app is still binding; retry until ready or timeout.
             }
 
             await Task.Delay(TimeSpan.FromMilliseconds(250), timeoutCts.Token);
@@ -199,7 +194,7 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
         var directory = new DirectoryInfo(startPath);
         while (directory is not null)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "ForgeTrust.AppSurface.slnx")))
+            if (File.Exists(Path.Join(directory.FullName, "ForgeTrust.AppSurface.slnx")))
             {
                 return directory.FullName;
             }
@@ -258,12 +253,40 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
         return $"exited with code {task.Result.ExitCode}";
     }
 
+    private string ResolveRepositoryPath(params string[] relativeParts)
+    {
+        foreach (var part in relativeParts)
+        {
+            if (Path.IsPathRooted(part))
+            {
+                throw new ArgumentException($"Repository-relative path segment must not be rooted: '{part}'.", nameof(relativeParts));
+            }
+        }
+
+        var path = RepositoryRoot;
+        foreach (var part in relativeParts)
+        {
+            path = Path.Join(path, part);
+        }
+
+        var fullPath = Path.GetFullPath(path);
+        var rootWithSeparator = RepositoryRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(rootWithSeparator, StringComparison.Ordinal)
+            && !string.Equals(fullPath, RepositoryRoot, StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"Repository-relative path escaped the repository root: '{fullPath}'.", nameof(relativeParts));
+        }
+
+        return fullPath;
+    }
+
     [GeneratedRegex("Now listening on:\\s+(?<url>https?://\\S+)", RegexOptions.CultureInvariant)]
     private static partial Regex ListeningUrlRegex();
 
     private sealed class CliWrapProcessLease : IAsyncDisposable
     {
-        private readonly CancellationTokenSource _cancellation = new();
+        private readonly CancellationTokenSourceLease _cancellation = new();
 
         private CliWrapProcessLease(CliWrap.Command command)
         {
@@ -281,22 +304,46 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
 
         public async ValueTask DisposeAsync()
         {
-            if (!_cancellation.IsCancellationRequested)
+            await using (_cancellation.ConfigureAwait(false))
             {
-                _cancellation.Cancel();
-            }
+                if (!_cancellation.IsCancellationRequested)
+                {
+                    _cancellation.Cancel();
+                }
 
-            try
-            {
-                await Completion.WaitAsync(TimeSpan.FromSeconds(10));
+                try
+                {
+                    await Completion.WaitAsync(TimeSpan.FromSeconds(10));
+                }
+                catch (Exception ex) when (ex is OperationCanceledException or TaskCanceledException or TimeoutException)
+                {
+                    System.Diagnostics.Trace.TraceWarning(
+                        "Ignored expected proof app shutdown exception: {0}: {1}",
+                        ex.GetType().Name,
+                        ex.Message);
+                }
             }
-            catch (Exception ex) when (ex is OperationCanceledException or TaskCanceledException or TimeoutException)
-            {
-            }
-            finally
-            {
-                _cancellation.Dispose();
-            }
+        }
+    }
+
+    private sealed class CancellationTokenSourceLease : IAsyncDisposable
+    {
+        private readonly CancellationTokenSource _source = new();
+
+        public CancellationToken Token => _source.Token;
+
+        public bool IsCancellationRequested => _source.IsCancellationRequested;
+
+        public void Cancel()
+        {
+            _source.Cancel();
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            _source.Dispose();
+
+            return ValueTask.CompletedTask;
         }
     }
 }

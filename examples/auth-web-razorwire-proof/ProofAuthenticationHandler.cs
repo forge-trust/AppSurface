@@ -11,14 +11,14 @@ namespace AuthWebRazorWireProofExample;
 /// <remarks>
 /// This handler exists only so the sample can run without cookies, OAuth, OIDC, JWT, ASP.NET Identity, or any external
 /// identity provider. Real hosts should keep their normal ASP.NET Core authentication handlers and let the AppSurface
-/// adapter observe the populated request principal. The <c>X-Proof-User</c> header takes precedence over the browser
-/// proof cookie so curl checks stay deterministic.
+/// adapter observe the populated request principal. The <c>X-Proof-User</c> header takes precedence over the URL-local
+/// browser proof state so curl checks stay deterministic.
 /// </remarks>
 internal sealed class ProofAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
     public const string SchemeName = "Proof";
     public const string HeaderName = "X-Proof-User";
-    public const string CookieName = "appsurface-auth-proof-user";
+    public const string QueryStateName = "proofPersona";
 
     public ProofAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -69,12 +69,12 @@ internal sealed class ProofAuthenticationHandler : AuthenticationHandler<Authent
             return headerUser;
         }
 
-        return request.Cookies[CookieName] ?? ProofPersona.Anonymous;
+        return request.Query[QueryStateName].ToString();
     }
 }
 
 /// <summary>
-/// Sample-local proof personas supported by the browser switch and curl header.
+/// Sample-local proof personas supported by the browser switch, URL state, and curl header.
 /// </summary>
 internal static class ProofPersona
 {

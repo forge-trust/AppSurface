@@ -24,9 +24,11 @@ public sealed class AuthProofController : Controller
     {
         if (Request.Query.ContainsKey(ProofUserQueryKey))
         {
-            ApplyProofPersona(proofUser);
+            var persona = ProofPersona.Normalize(proofUser);
 
-            return RedirectToAction(nameof(Index));
+            return persona == ProofPersona.Anonymous
+                ? RedirectToAction(nameof(Index))
+                : RedirectToAction(nameof(Index), new { proofPersona = persona });
         }
 
         var result = await _evaluator.AuthorizeAsync(AuthProofPolicy.Name, cancellationToken: cancellationToken);
@@ -37,28 +39,6 @@ public sealed class AuthProofController : Controller
         return View(model);
     }
 
-    private void ApplyProofPersona(string? proofUser)
-    {
-        var persona = ProofPersona.Normalize(proofUser);
-        if (persona == ProofPersona.Anonymous)
-        {
-            Response.Cookies.Delete(ProofAuthenticationHandler.CookieName);
-
-            return;
-        }
-
-        Response.Cookies.Append(
-            ProofAuthenticationHandler.CookieName,
-            persona,
-            new CookieOptions
-            {
-                HttpOnly = true,
-                IsEssential = true,
-                SameSite = SameSiteMode.Lax,
-                Secure = false
-            });
-    }
-
     private string ResolveCurrentPersona()
     {
         var headerPersona = ProofPersona.Normalize(Request.Headers[ProofAuthenticationHandler.HeaderName].ToString());
@@ -67,6 +47,6 @@ public sealed class AuthProofController : Controller
             return headerPersona;
         }
 
-        return ProofPersona.Normalize(Request.Cookies[ProofAuthenticationHandler.CookieName]);
+        return ProofPersona.Normalize(Request.Query[ProofAuthenticationHandler.QueryStateName].ToString());
     }
 }

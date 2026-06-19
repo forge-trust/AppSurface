@@ -27,7 +27,7 @@ The two panels should agree for every persona:
 
 ## Curl Parity
 
-The browser switch writes a local proof cookie. Curl can use `X-Proof-User`; the header wins over the cookie so command-line checks stay deterministic.
+The browser switch keeps the selected persona in URL-local proof state. Curl can use `X-Proof-User`; the header wins over URL state so command-line checks stay deterministic.
 
 ```bash
 curl -i http://127.0.0.1:5058/api/auth-proof
@@ -58,7 +58,7 @@ Unsupported proof users behave like anonymous requests.
 - Not a public Minimal API helper.
 - Not an `AuthGate`, `AuthView`, `PermissionGate`, or result-bearing RazorWire auth adapter.
 
-Keep the proof-only `ProofAuthenticationHandler`, proof cookie, and persona switch inside this sample. Real applications should keep their existing ASP.NET Core authentication handlers and policies, then let AppSurface observe the populated request principal and named host-policy result.
+Keep the proof-only `ProofAuthenticationHandler`, URL-local proof state, and persona switch inside this sample. Real applications should keep their existing ASP.NET Core authentication handlers and policies, then let AppSurface observe the populated request principal and named host-policy result.
 
 ## If Your Result Differs
 

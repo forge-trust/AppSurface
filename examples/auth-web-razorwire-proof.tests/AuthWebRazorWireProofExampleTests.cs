@@ -58,7 +58,7 @@ public sealed class AuthWebRazorWireProofExampleTests
         string expectedState,
         string? expectedSubject)
     {
-        using var client = _fixture.CreateClientWithCookies();
+        using var client = _fixture.CreateBrowserClient();
 
         var html = await client.GetStringAsync($"/?proofUser={proofUser}");
 
@@ -108,6 +108,7 @@ public sealed class AuthWebRazorWireProofExampleTests
             sampleReadme,
             StringComparison.Ordinal);
         Assert.Contains("Your host owns auth. This sample only changes the local proof persona.", sampleReadme, StringComparison.Ordinal);
+        Assert.Contains("The browser switch keeps the selected persona in URL-local proof state.", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("| `operator` | `200` | `Allowed` | `None` | allowed |", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("X-Proof-User", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("auth-web-razorwire-proof/README.md", authAspNetCoreReadme, StringComparison.Ordinal);
@@ -143,6 +144,18 @@ public sealed class AuthWebRazorWireProofExampleTests
         Assert.DoesNotContain("class AuthGate", source, StringComparison.Ordinal);
         Assert.DoesNotContain("class AuthView", source, StringComparison.Ordinal);
         Assert.DoesNotContain("class PermissionGate", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProofSampleSource_DoesNotPersistPersonaInCookies()
+    {
+        var source = string.Join(
+            Environment.NewLine,
+            _fixture.ReadProductSourceFiles("examples/auth-web-razorwire-proof"));
+
+        Assert.DoesNotContain("Response.Cookies", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Request.Cookies", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("CookieOptions", source, StringComparison.Ordinal);
     }
 
     private static string ReadString(JsonDocument json, string propertyName)
