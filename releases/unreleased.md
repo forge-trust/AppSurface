@@ -4,14 +4,14 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
-- Add merged public changes here as they land.
+- `ForgeTrust.AppSurface.Auth` now defines durable external-subject to app-user-id mapping contracts without taking on user-store, ASP.NET Core, OIDC, EF Core, Aspire, or tenant-authority responsibilities.
 
 ## Included in the next coordinated version
 
 ### Release and docs surface
 
-- Add release-facing changes here.
+- Added `ExternalSubject`, `AppUserId`, `IAppSurfaceUserIdentityResolver`, `AppSurfaceUserIdentityResolutionContext`, `AppSurfaceUserIdentityResult`, and `AppSurfaceUserIdentityStatus`, with README guidance for uniqueness, idempotency, cancellation, concurrency, PII-safe diagnostics, and ASP.NET Core adapter integration planning.
 
 ## Migration watch
 
-- Record breaking or behavior-changing guidance here before it moves into the tagged release note.
+- `AppSurfaceUser.Id` remains a host-owned subject identifier in the existing ASP.NET Core adapter. Consumers that need durable app-owned users should resolve that subject through the new identity resolver contract instead of treating the mapped subject claim as an app user id.

@@ -121,6 +121,10 @@ Only authenticated identities are inspected. Claims on unauthenticated identitie
 
 Mapped claims are context, not permission truth. Host-owned ASP.NET Core policies remain authoritative for authorization.
 
+The mapped `AppSurfaceUser.Id` is the selected host-owned subject claim. Do not use it as a durable app-owned user id for domain records, preferences, billing, or audit ownership. For that boundary, use `ExternalSubject`, `AppUserId`, and an app-implemented `IAppSurfaceUserIdentityResolver` from `ForgeTrust.AppSurface.Auth`; keep the resolver in the app so persistence and provisioning policy stay app-owned.
+
+ASP.NET Core integration plan: a later adapter can build an `ExternalSubject` from the configured subject claim plus a host-validated issuer and optional partition, then call the app resolver asynchronously. That integration should remain outside Auth core and should not force database or provisioning work into the current synchronous request-context accessor.
+
 ## Policy Results
 
 `IAppSurfaceAspNetCorePolicyEvaluator.AuthorizeAsync(...)` observes cancellation before and during policy lookup. ASP.NET Core policy evaluation itself does not expose a cancellation-token overload, so handler execution is not cancellable through this API.
@@ -157,4 +161,5 @@ The adapter does not copy raw claims, tokens, emails, display names, or identity
 - Use the accessor or evaluator after `UseAuthentication()` has populated `HttpContext.User`.
 - Pass the same authorization resource your host policy expects. The adapter uses `HttpContext` when no resource is supplied.
 - Do not treat mapped metadata as permission truth. Ask ASP.NET Core policies for permission decisions.
+- Do not treat a mapped subject claim as a durable app-owned user id. Resolve it through an app-owned identity resolver before writing domain records keyed by app user.
 - A missing subject claim is a setup problem for authenticated users. Configure `MapSubjectClaim(...)` or issue a stable subject claim from the host auth system.
