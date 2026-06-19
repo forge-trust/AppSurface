@@ -77,13 +77,13 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.4.md
+    release_notes_path: releases/unreleased.md
     order: 36
-    use_when: Add this in an ASP.NET Core host that already owns authentication and authorization when AppSurface modules need mapped request auth context or named host-policy results.
-    includes: AppSurfaceAspNetCoreAuthModule, AddAppSurfaceAspNetCoreAuth registration, ASP.NET Core request auth context mapping, named host-policy evaluation, AppSurfaceAuthResult mapping, and safe setup diagnostics.
-    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policy definitions, middleware, endpoint filters, challenge or forbid execution, redirects, audit sinks, RazorWire UI, or Minimal API helpers.
+    use_when: Add this in an ASP.NET Core host that already owns authentication and authorization when AppSurface modules need mapped request auth context, named host-policy results, or Minimal API endpoints with AppSurface-shaped auth failure responses.
+    includes: AppSurfaceAspNetCoreAuthModule, AddAppSurfaceAspNetCoreAuth registration, AddAppSurfacePolicy policy naming, RequireSurfacePolicy Minimal API endpoint filters with fallback-policy opt-out metadata, ASP.NET Core request auth context mapping, named host-policy evaluation, AppSurfaceAuthResult mapping, ProblemDetails auth failure responses, and safe setup diagnostics.
+    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policy definitions, middleware insertion, ASP.NET Core authorization middleware replacement, browser challenge or forbid execution, redirects, audit sinks, RazorWire UI, or MVC/controller auth helpers.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results.
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results or Minimal API ProblemDetails responses.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth
   - project: Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj
