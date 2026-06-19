@@ -775,6 +775,12 @@
           "CliWrap": "[3.10.1, )"
         }
       },
+      "forgetrust.appsurface.flow": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {
