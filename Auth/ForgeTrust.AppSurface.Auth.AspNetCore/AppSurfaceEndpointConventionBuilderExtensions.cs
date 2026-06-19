@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 
 namespace ForgeTrust.AppSurface.Auth.AspNetCore;
 
@@ -28,16 +29,48 @@ public static class AppSurfaceEndpointConventionBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(policyName);
 
-        builder.Add(endpointBuilder =>
-        {
-            endpointBuilder.Metadata.Add(new AppSurfacePolicyEndpointMetadata(policyName));
-            endpointBuilder.Metadata.Add(new AllowAnonymousAttribute());
-            endpointBuilder.FilterFactories.Add((_, next) =>
-            {
-                var filter = new AppSurfacePolicyEndpointFilter(policyName);
-                return context => filter.InvokeAsync(context, next);
-            });
-        });
+        var convention = new AppSurfacePolicyEndpointConvention(policyName);
+        builder.Add(convention.Apply);
         return builder;
+    }
+
+    private sealed class AppSurfacePolicyEndpointConvention
+    {
+        private readonly string _policyName;
+
+        public AppSurfacePolicyEndpointConvention(string policyName)
+        {
+            _policyName = policyName;
+        }
+
+        public void Apply(EndpointBuilder endpointBuilder)
+        {
+            endpointBuilder.Metadata.Add(new AppSurfacePolicyEndpointMetadata(_policyName));
+            endpointBuilder.Metadata.Add(new AllowAnonymousAttribute());
+            endpointBuilder.FilterFactories.Add(CreateFilter);
+        }
+
+        private EndpointFilterDelegate CreateFilter(EndpointFilterFactoryContext _, EndpointFilterDelegate next)
+        {
+            var filter = new AppSurfacePolicyEndpointFilter(_policyName);
+            return new AppSurfacePolicyEndpointFilterAdapter(filter, next).InvokeAsync;
+        }
+    }
+
+    private sealed class AppSurfacePolicyEndpointFilterAdapter
+    {
+        private readonly AppSurfacePolicyEndpointFilter _filter;
+        private readonly EndpointFilterDelegate _next;
+
+        public AppSurfacePolicyEndpointFilterAdapter(AppSurfacePolicyEndpointFilter filter, EndpointFilterDelegate next)
+        {
+            _filter = filter;
+            _next = next;
+        }
+
+        public ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context)
+        {
+            return _filter.InvokeAsync(context, _next);
+        }
     }
 }
