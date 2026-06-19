@@ -86,7 +86,7 @@ public sealed class AppSurfaceUserIdentityContractTests
 
         Assert.True(subject.Equals(boxedSame));
         Assert.False(subject.Equals(differentType));
-        Assert.False(subject.Equals(null));
+        Assert.False(object.Equals(subject, null));
         Assert.Equal(default(ExternalSubject).GetHashCode(), default(ExternalSubject).GetHashCode());
     }
 
@@ -128,7 +128,7 @@ public sealed class AppSurfaceUserIdentityContractTests
 
         Assert.True(id.Equals(boxedSame));
         Assert.False(id.Equals(differentType));
-        Assert.False(id.Equals(null));
+        Assert.False(object.Equals(id, null));
         Assert.Equal(0, default(AppUserId).GetHashCode());
     }
 

@@ -58,15 +58,34 @@ public enum AppSurfaceUserIdentityStatus
 public sealed class AppSurfaceUserIdentityResult
 {
     private AppSurfaceUserIdentityResult(
+        AppUserId appUserId,
+        ExternalSubject subject,
+        string? message,
+        IReadOnlyDictionary<string, string>? metadata)
+    {
+        appUserId.EnsureInitialized(nameof(appUserId));
+        subject.EnsureInitialized(nameof(subject));
+
+        Status = AppSurfaceUserIdentityStatus.Resolved;
+        AppUserId = appUserId;
+        Subject = subject;
+        Message = AppSurfaceAuthMetadata.NormalizeOptionalText(message);
+        Metadata = AppSurfaceAuthMetadata.Normalize(metadata, nameof(metadata));
+    }
+
+    private AppSurfaceUserIdentityResult(
         AppSurfaceUserIdentityStatus status,
-        AppUserId? appUserId,
         ExternalSubject? subject,
         string? message,
         IReadOnlyDictionary<string, string>? metadata)
     {
-        ValidateCombination(status, appUserId, subject);
+        if (subject is not null)
+        {
+            subject.Value.EnsureInitialized(nameof(subject));
+        }
+
         Status = status;
-        AppUserId = appUserId;
+        AppUserId = null;
         Subject = subject;
         Message = AppSurfaceAuthMetadata.NormalizeOptionalText(message);
         Metadata = AppSurfaceAuthMetadata.Normalize(metadata, nameof(metadata));
@@ -116,12 +135,7 @@ public sealed class AppSurfaceUserIdentityResult
         string? message = null,
         IReadOnlyDictionary<string, string>? metadata = null)
     {
-        return new AppSurfaceUserIdentityResult(
-            AppSurfaceUserIdentityStatus.Resolved,
-            appUserId,
-            subject,
-            message,
-            metadata);
+        return new AppSurfaceUserIdentityResult(appUserId, subject, message, metadata);
     }
 
     /// <summary>
@@ -231,39 +245,6 @@ public sealed class AppSurfaceUserIdentityResult
         string? message,
         IReadOnlyDictionary<string, string>? metadata)
     {
-        return new AppSurfaceUserIdentityResult(status, appUserId: null, subject, message, metadata);
-    }
-
-    private static void ValidateCombination(
-        AppSurfaceUserIdentityStatus status,
-        AppUserId? appUserId,
-        ExternalSubject? subject)
-    {
-        if (status == AppSurfaceUserIdentityStatus.Resolved)
-        {
-            if (appUserId is null)
-            {
-                throw new ArgumentException("Resolved identity results require an app user id.", nameof(appUserId));
-            }
-
-            if (subject is null)
-            {
-                throw new ArgumentException("Resolved identity results require an external subject.", nameof(subject));
-            }
-
-            appUserId.Value.EnsureInitialized(nameof(appUserId));
-            subject.Value.EnsureInitialized(nameof(subject));
-            return;
-        }
-
-        if (appUserId is not null)
-        {
-            throw new ArgumentException("Failed identity results must not include an app user id.", nameof(appUserId));
-        }
-
-        if (subject is not null)
-        {
-            subject.Value.EnsureInitialized(nameof(subject));
-        }
+        return new AppSurfaceUserIdentityResult(status, subject, message, metadata);
     }
 }
