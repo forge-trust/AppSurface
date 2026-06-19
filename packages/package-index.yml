@@ -63,7 +63,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.4.md
+    release_notes_path: releases/unreleased.md
     order: 35
     use_when: Add this when authoring AppSurface modules or host integrations that need passive cross-surface auth vocabulary or durable app-user mapping contracts without depending on ASP.NET Core.
     includes: AppSurfaceAuthModule, AppSurfaceAuthOptions, neutral user/session/context contracts, auth outcome and reason results, durable external-subject to app-user-id mapping contracts, passive login/logout prompts, passive audit event descriptions, and reserved metadata keys.
