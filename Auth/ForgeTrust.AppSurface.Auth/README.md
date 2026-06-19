@@ -112,6 +112,8 @@ var subject = new ExternalSubject(
 
 The uniqueness key is `(Issuer, Subject, PartitionKey)` with ordinal comparison. `PartitionKey` is optional host-validated namespace context for issuers where subject ids are only unique within a realm, tenant, client, or environment. It is not tenant authority and should not be used as a permission source unless the host app validates it through its own security model.
 
+Do not use email, display name, subject alone, tenant id alone, or another mutable profile claim as the durable identity key. Those values can be reassigned, renamed, duplicated across issuers, or corrected by an identity provider without meaning "same app user" in your domain.
+
 Use `AppUserId` for the durable app-owned user id returned by your app resolver:
 
 ```csharp
@@ -150,16 +152,16 @@ public sealed class SqlUserIdentityResolver : IAppSurfaceUserIdentityResolver
 
 Identity resolution failures are separate from `AppSurfaceAuthResult`:
 
-| Factory | Status | Meaning | Typical response |
-| --- | --- | --- | --- |
-| `Resolved(...)` | `Resolved` | The external subject mapped to a durable app-owned user id. | Continue with app-owned user state. |
-| `MissingSubject(...)` | `MissingSubject` | No external subject was available to resolve. | Treat as host setup or authentication mapping failure. |
-| `MalformedSubject(...)` | `MalformedSubject` | The supplied subject was invalid for the resolver. | Reject the mapping and log safe diagnostics. |
-| `DisabledAppUser(...)` | `DisabledAppUser` | The mapped app user exists but is disabled. | Show a disabled-account or support path. |
-| `StaleOrUnknownSession(...)` | `StaleOrUnknownSession` | The host session cannot be trusted for mapping. | Ask the host to refresh or reauthenticate. |
-| `DuplicateMapping(...)` | `DuplicateMapping` | More than one mapping matched the same external subject tuple. | Fail closed and repair the app store. |
-| `StoreUnavailable(...)` | `StoreUnavailable` | The app-owned identity store was unavailable. | Retry later or show a temporary failure. |
-| `ProvisioningDenied(...)` | `ProvisioningDenied` | The app declined to create or attach a user. | Show invite, approval, or access-request UX. |
+| Factory | Status | Problem | Likely cause | Fix | Safe user copy | Operator diagnostic |
+| --- | --- | --- | --- | --- | --- | --- |
+| `Resolved(...)` | `Resolved` | The external subject mapped to a durable app-owned user id. | Existing or newly provisioned mapping matched exactly one app user. | Continue with app-owned user state. | Optional success copy. | Record the app user id only when your app permits it; never log raw provider payloads by default. |
+| `MissingSubject(...)` | `MissingSubject` | No external subject was available to resolve. | Host auth produced no stable subject claim or skipped identity mapping. | Fix the host subject claim mapping before calling the resolver. | "Sign in again or contact support." | Log the adapter, correlation id, and configured claim names without raw tokens. |
+| `MalformedSubject(...)` | `MalformedSubject` | The supplied subject was invalid for the resolver. | The issuer, subject, or partition failed app-owned validation. | Reject the mapping and correct the upstream identity contract. | "This account cannot be used here." | Log which field failed validation, not the raw field value. |
+| `DisabledAppUser(...)` | `DisabledAppUser` | The mapped app user exists but is disabled. | An operator, policy, billing state, or compliance rule blocked the app user. | Show a disabled-account or support path. | "This account is disabled." | Log the app-owned disabled reason if it is safe for operators. |
+| `StaleOrUnknownSession(...)` | `StaleOrUnknownSession` | The host session cannot be trusted for mapping. | Session expiry, revoked login, missing session record, or stale host context. | Ask the host to refresh or reauthenticate before mapping. | "Your session may have expired." | Log session freshness state and correlation id. |
+| `DuplicateMapping(...)` | `DuplicateMapping` | More than one mapping matched the same external subject tuple. | A uniqueness constraint is missing, a migration imported duplicates, or concurrent first sign-in created two mappings. | Fail closed, repair the app store, then add an app-owned uniqueness guard. | "We could not safely identify your account." | Log duplicate count and safe mapping ids for repair. |
+| `StoreUnavailable(...)` | `StoreUnavailable` | The app-owned identity store was unavailable. | Database, cache, network, or dependency outage. | Retry later or show a temporary failure. | "Account lookup is temporarily unavailable." | Log dependency name, timeout/retry state, and correlation id. |
+| `ProvisioningDenied(...)` | `ProvisioningDenied` | The app declined to create or attach a user. | Invite, approval, billing, plan, or domain policy denied provisioning. | Show invite, approval, or access-request UX. | "Request access to continue." | Log safe policy code and next operator action. |
 
 Copy this pattern:
 
