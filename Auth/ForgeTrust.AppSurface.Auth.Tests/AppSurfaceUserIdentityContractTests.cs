@@ -329,6 +329,20 @@ public sealed class AppSurfaceUserIdentityContractTests
         Assert.Equal("tenant-a", result.Metadata["partition_hint"]);
     }
 
+    [Fact]
+    public async Task ResolverContract_WhenTokenIsCanceled_ThrowsOperationCanceledException()
+    {
+        var appUserId = new AppUserId("app-user-1");
+        var subject = new ExternalSubject("issuer", "subject");
+        var context = new AppSurfaceUserIdentityResolutionContext("correlation-1");
+        IAppSurfaceUserIdentityResolver resolver = new CapturingResolver(appUserId);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            async () => await resolver.ResolveAsync(subject, context, cancellation.Token));
+    }
+
     private sealed class CapturingResolver(AppUserId appUserId) : IAppSurfaceUserIdentityResolver
     {
         public ValueTask<AppSurfaceUserIdentityResult> ResolveAsync(
