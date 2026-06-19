@@ -1,0 +1,299 @@
+using System.Text.Json;
+using ForgeTrust.AppSurface.Auth;
+using ForgeTrust.AppSurface.Auth.AspNetCore;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Infrastructure;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Routing.Patterns;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace ForgeTrust.AppSurface.Auth.AspNetCore.Tests;
+
+public sealed class AppSurfaceEndpointPolicyExtensionsTests
+{
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AddAppSurfacePolicy_WithBlankPolicyName_ThrowsArgumentException(string? policyName)
+    {
+        var options = new AuthorizationOptions();
+
+        Assert.ThrowsAny<ArgumentException>(
+            () => options.AddAppSurfacePolicy(policyName!, policy => policy.RequireAuthenticatedUser()));
+    }
+
+    [Fact]
+    public async Task AddAppSurfacePolicy_RegistersNormalAspNetCorePolicy()
+    {
+        var services = new ServiceCollection();
+        services.AddAuthorization(options =>
+            options.AddAppSurfacePolicy("docs.publish", policy => policy.RequireAuthenticatedUser()));
+        await using var provider = services.BuildServiceProvider();
+        var policyProvider = provider.GetRequiredService<IAuthorizationPolicyProvider>();
+
+        var policy = await policyProvider.GetPolicyAsync("docs.publish");
+
+        Assert.NotNull(policy);
+        Assert.Contains(policy.Requirements, requirement => requirement is DenyAnonymousAuthorizationRequirement);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void RequireSurfacePolicy_WithBlankPolicyName_ThrowsArgumentException(string? policyName)
+    {
+        var builder = new TestEndpointConventionBuilder();
+
+        Assert.ThrowsAny<ArgumentException>(() => builder.RequireSurfacePolicy(policyName!));
+    }
+
+    [Fact]
+    public void RequireSurfacePolicy_ReturnsSameBuilderAndAddsMetadata()
+    {
+        var builder = new TestEndpointConventionBuilder();
+
+        var returned = builder.RequireSurfacePolicy("docs.publish");
+
+        Assert.Same(builder, returned);
+
+        var endpointBuilder = new RouteEndpointBuilder(_ => Task.CompletedTask, RoutePatternFactory.Parse("/"), 0);
+        builder.Apply(endpointBuilder);
+
+        var metadata = Assert.IsType<AppSurfacePolicyEndpointMetadata>(
+            Assert.Single(endpointBuilder.Metadata.OfType<AppSurfacePolicyEndpointMetadata>()));
+        Assert.Equal("docs.publish", metadata.PolicyName);
+        Assert.Single(endpointBuilder.Metadata.OfType<IAllowAnonymous>());
+    }
+
+    [Fact]
+    public async Task Filter_WhenAllowed_CallsNext()
+    {
+        var httpContext = CreateHttpContext(AppSurfaceAuthResult.Allowed());
+        var filter = new AppSurfacePolicyEndpointFilter("docs.publish");
+        var nextCalled = false;
+
+        var result = await filter.InvokeAsync(
+            new TestEndpointFilterInvocationContext(httpContext),
+            _ =>
+            {
+                nextCalled = true;
+                return ValueTask.FromResult<object?>("handler-result");
+            });
+
+        Assert.True(nextCalled);
+        Assert.Equal("handler-result", result);
+    }
+
+    [Theory]
+    [MemberData(nameof(FailureResults))]
+    public async Task Filter_WhenPolicyFails_ReturnsProblemDetails(
+        AppSurfaceAuthResult authResult,
+        int expectedStatus,
+        string expectedTitle)
+    {
+        var httpContext = CreateHttpContext(authResult);
+        var filter = new AppSurfacePolicyEndpointFilter("docs.publish");
+        var nextCalled = false;
+
+        var result = await filter.InvokeAsync(
+            new TestEndpointFilterInvocationContext(httpContext),
+            _ =>
+            {
+                nextCalled = true;
+                return ValueTask.FromResult<object?>("handler-result");
+            });
+
+        Assert.False(nextCalled);
+        var problem = await ExecuteProblemAsync(Assert.IsAssignableFrom<IResult>(result));
+
+        Assert.Equal(expectedStatus, problem.Status);
+        Assert.Equal(expectedTitle, problem.Title);
+        Assert.Equal(authResult.Outcome.ToString(), AssertExtension(problem, "appsurfaceAuthOutcome"));
+        Assert.Equal(authResult.Reason.ToString(), AssertExtension(problem, "appsurfaceAuthReason"));
+        Assert.Equal("docs.publish", AssertExtension(problem, "appsurfacePolicyName"));
+    }
+
+    [Fact]
+    public async Task Filter_WhenEvaluatorIsMissing_ReturnsSetupFailureProblemDetails()
+    {
+        var services = new ServiceCollection();
+        await using var provider = services.BuildServiceProvider();
+        var httpContext = new DefaultHttpContext { RequestServices = provider };
+        var filter = new AppSurfacePolicyEndpointFilter("docs.publish");
+
+        var result = await filter.InvokeAsync(
+            new TestEndpointFilterInvocationContext(httpContext),
+            _ => ValueTask.FromResult<object?>("handler-result"));
+
+        var problem = await ExecuteProblemAsync(Assert.IsAssignableFrom<IResult>(result));
+
+        Assert.Equal(StatusCodes.Status500InternalServerError, problem.Status);
+        Assert.Equal("AppSurface auth setup failure", problem.Title);
+        Assert.Equal("SetupFailure", AssertExtension(problem, "appsurfaceAuthOutcome"));
+        Assert.Equal("MissingServices", AssertExtension(problem, "appsurfaceAuthReason"));
+        Assert.Equal(
+            typeof(IAppSurfaceAspNetCorePolicyEvaluator).FullName,
+            AssertExtension(problem, AppSurfaceAspNetCoreAuthMetadataKeys.MissingService));
+    }
+
+    [Fact]
+    public async Task Filter_PassesRequestAbortedCancellationToEvaluator()
+    {
+        var evaluator = new CapturingPolicyEvaluator(AppSurfaceAuthResult.Allowed());
+        var services = new ServiceCollection();
+        services.AddSingleton<IAppSurfaceAspNetCorePolicyEvaluator>(evaluator);
+        await using var provider = services.BuildServiceProvider();
+        using var cancellation = new CancellationTokenSource();
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = provider,
+            RequestAborted = cancellation.Token,
+        };
+        var filter = new AppSurfacePolicyEndpointFilter("docs.publish");
+
+        _ = await filter.InvokeAsync(
+            new TestEndpointFilterInvocationContext(httpContext),
+            _ => ValueTask.FromResult<object?>("handler-result"));
+
+        Assert.Equal("docs.publish", evaluator.PolicyName);
+        Assert.Equal(cancellation.Token, evaluator.CancellationToken);
+    }
+
+    public static TheoryData<AppSurfaceAuthResult, int, string> FailureResults()
+    {
+        return new TheoryData<AppSurfaceAuthResult, int, string>
+        {
+            {
+                AppSurfaceAuthResult.Challenge(
+                    AppSurfaceAuthContext.Anonymous,
+                    metadata: AppSurfaceAspNetCoreAuthDiagnostics.Policy("challenge", "docs.publish")),
+                StatusCodes.Status401Unauthorized,
+                "Authentication required"
+            },
+            {
+                AppSurfaceAuthResult.Forbid(
+                    AppSurfaceAuthContext.Anonymous,
+                    metadata: AppSurfaceAspNetCoreAuthDiagnostics.Policy("forbidden", "docs.publish")),
+                StatusCodes.Status403Forbidden,
+                "Authorization failed"
+            },
+            {
+                AppSurfaceAuthResult.MissingPolicy(
+                    AppSurfaceAuthContext.Anonymous,
+                    metadata: AppSurfaceAspNetCoreAuthDiagnostics.Policy("missing_policy", "docs.publish")),
+                StatusCodes.Status500InternalServerError,
+                "AppSurface auth setup failure"
+            },
+            {
+                AppSurfaceAuthResult.MissingSubject(
+                    AppSurfaceAuthContext.Anonymous,
+                    metadata: AppSurfaceAspNetCoreAuthDiagnostics.Policy("missing_subject_claim", "docs.publish")),
+                StatusCodes.Status500InternalServerError,
+                "AppSurface auth setup failure"
+            },
+        };
+    }
+
+    private static DefaultHttpContext CreateHttpContext(AppSurfaceAuthResult authResult)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IAppSurfaceAspNetCorePolicyEvaluator>(new CapturingPolicyEvaluator(authResult));
+        var provider = services.BuildServiceProvider();
+        return new DefaultHttpContext { RequestServices = provider };
+    }
+
+    private static async Task<ProblemDetails> ExecuteProblemAsync(IResult result)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddProblemDetails();
+        await using var provider = services.BuildServiceProvider();
+        var httpContext = new DefaultHttpContext();
+        httpContext.RequestServices = provider;
+        httpContext.Response.Body = new MemoryStream();
+
+        await result.ExecuteAsync(httpContext);
+
+        httpContext.Response.Body.Position = 0;
+        var problem = await JsonSerializer.DeserializeAsync<ProblemDetails>(
+            httpContext.Response.Body,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        return Assert.IsType<ProblemDetails>(problem);
+    }
+
+    private static string? AssertExtension(ProblemDetails problem, string key)
+    {
+        Assert.True(problem.Extensions.TryGetValue(key, out var value), $"ProblemDetails extension '{key}' was missing.");
+        return value switch
+        {
+            JsonElement element => element.GetString(),
+            string text => text,
+            _ => value?.ToString(),
+        };
+    }
+
+    private sealed class TestEndpointConventionBuilder : IEndpointConventionBuilder
+    {
+        private readonly List<Action<EndpointBuilder>> _conventions = [];
+
+        public void Add(Action<EndpointBuilder> convention)
+        {
+            _conventions.Add(convention);
+        }
+
+        public void Apply(EndpointBuilder endpointBuilder)
+        {
+            foreach (var convention in _conventions)
+            {
+                convention(endpointBuilder);
+            }
+        }
+    }
+
+    private sealed class TestEndpointFilterInvocationContext : EndpointFilterInvocationContext
+    {
+        public TestEndpointFilterInvocationContext(HttpContext httpContext)
+        {
+            HttpContext = httpContext;
+        }
+
+        public override HttpContext HttpContext { get; }
+
+        public override IList<object?> Arguments { get; } = [];
+
+        public override T GetArgument<T>(int index)
+        {
+            return (T)Arguments[index]!;
+        }
+    }
+
+    private sealed class CapturingPolicyEvaluator : IAppSurfaceAspNetCorePolicyEvaluator
+    {
+        private readonly AppSurfaceAuthResult _result;
+
+        public CapturingPolicyEvaluator(AppSurfaceAuthResult result)
+        {
+            _result = result;
+        }
+
+        public string? PolicyName { get; private set; }
+
+        public CancellationToken CancellationToken { get; private set; }
+
+        public Task<AppSurfaceAuthResult> AuthorizeAsync(
+            string policyName,
+            object? resource = null,
+            CancellationToken cancellationToken = default)
+        {
+            PolicyName = policyName;
+            CancellationToken = cancellationToken;
+            return Task.FromResult(_result);
+        }
+    }
+}

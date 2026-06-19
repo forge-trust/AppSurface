@@ -4,7 +4,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
-- Add merged public changes here as they land.
+- `ForgeTrust.AppSurface.Auth.AspNetCore` now includes AppSurface-shaped Minimal API policy helpers: `AddAppSurfacePolicy(...)` keeps policy definition in ASP.NET Core, while `RequireSurfacePolicy(...)` evaluates the named host policy through the existing AppSurface evaluator and returns API-safe ProblemDetails JSON for challenge, forbid, missing-policy, missing-service, and missing-subject outcomes instead of triggering browser redirects.
 
 ## Included in the next coordinated version
 
