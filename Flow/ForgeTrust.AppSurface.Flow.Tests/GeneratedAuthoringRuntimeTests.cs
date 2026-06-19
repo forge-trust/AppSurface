@@ -122,6 +122,41 @@ public partial class GeneratedNullOutcomeFlow
 }
 
 /// <summary>
+/// Test-only generated flow whose start node completes asynchronously.
+/// </summary>
+/// <remarks>
+/// The fixture verifies the generated adapter's asynchronous lowering path separately from the synchronous
+/// <see cref="ValueTask{TResult}"/> fast path used by the main approval flow.
+/// </remarks>
+[FlowAuthoring("generated-async-outcome", Version = "2026-06-19")]
+public partial class GeneratedAsyncOutcomeFlow
+{
+    /// <summary>
+    /// Start node that yields before returning a completion outcome.
+    /// </summary>
+    [FlowStart]
+    [FlowNode("start", typeof(GeneratedStartState))]
+    [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(GeneratedDoneState))]
+    public partial class StartNode : IFlowTransformerNode<GeneratedStartState, StartNodeOutcomes>
+    {
+        /// <summary>
+        /// Executes the asynchronous branch used by generated adapter regression tests.
+        /// </summary>
+        /// <param name="context">Typed execution context supplied by the generated adapter.</param>
+        /// <param name="cancellationToken">Cancellation token supplied by the runner.</param>
+        /// <returns>A generated completion outcome after an asynchronous yield.</returns>
+        public async ValueTask<StartNodeOutcomes> ExecuteAsync(
+            FlowTransformerContext<GeneratedStartState> context,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+
+            return StartNodeOutcomes.Done(new GeneratedDoneState($"async:{context.State.Status}"));
+        }
+    }
+}
+
+/// <summary>
 /// Start-node input state used by generated runtime tests.
 /// </summary>
 /// <param name="Status">Current approval status such as <c>created</c>, <c>waiting</c>, or <c>timed-out</c>.</param>
@@ -295,5 +330,20 @@ public sealed class GeneratedAuthoringRuntimeTests
                 GeneratedNullOutcomeFlow.CreateStartContext(new GeneratedStartState("created"))));
 
         Assert.Contains("Generated flow node 'start' returned null.", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GeneratedDefinition_WhenTransformerCompletesAsynchronously_LowersOutcome()
+    {
+        var definition = GeneratedAsyncOutcomeFlow.BuildDefinition(new GeneratedAsyncOutcomeFlow.StartNode());
+        var runner = new InMemoryFlowRunner<GeneratedAsyncOutcomeFlow.GeneratedAsyncOutcomeFlowContext>(
+            Options.Create(new AppSurfaceFlowOptions()));
+
+        var result = await runner.RunAsync(
+            definition,
+            GeneratedAsyncOutcomeFlow.CreateStartContext(new GeneratedStartState("created")));
+
+        Assert.Equal(FlowRunStatus.Completed, result.Status);
+        Assert.Equal("async:created", result.Context?.GeneratedDoneState?.Status);
     }
 }

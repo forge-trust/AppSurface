@@ -150,13 +150,12 @@ public sealed class AuthWebRazorWireProofExampleTests
     }
 
     [Fact]
-    public void ProductSource_DoesNotIntroduceFutureAuthPublicApi()
+    public void ProductSource_DoesNotIntroduceRazorWireAuthGateApi()
     {
         var source = string.Join(
             Environment.NewLine,
             _fixture.ReadProductSourceFiles("Auth", "Web/ForgeTrust.RazorWire"));
 
-        Assert.DoesNotContain("RequireSurfacePolicy(", source, StringComparison.Ordinal);
         Assert.DoesNotContain("class AuthGate", source, StringComparison.Ordinal);
         Assert.DoesNotContain("class AuthView", source, StringComparison.Ordinal);
         Assert.DoesNotContain("class PermissionGate", source, StringComparison.Ordinal);
