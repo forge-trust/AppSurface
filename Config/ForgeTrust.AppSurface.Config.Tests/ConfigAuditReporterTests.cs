@@ -712,6 +712,7 @@ public class ConfigAuditReporterTests
         var child = Assert.Single(entry.Children);
 
         Assert.Null(child.Element?.KeyCorrelationId);
+        Assert.Null(child.Element?.ComparisonKeyCorrelationId);
         Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, report.Redaction.DictionaryKeyCorrelationMode);
         Assert.Null(report.Redaction.DictionaryKeyCorrelationKeyId);
         Assert.Null(report.Redaction.DictionaryKeyCorrelationApplicationScope);
@@ -774,7 +775,12 @@ public class ConfigAuditReporterTests
             rootKey: "Tenants",
             rawDictionaryKey: "tenant-secret-token");
         var first = GetSingleCorrelationId(firstReport);
+        var firstComparison = GetSingleComparisonCorrelationId(firstReport);
         var duplicate = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token"));
+        var duplicateComparison = GetSingleComparisonCorrelationId(CreateCorrelationReport(
             environmentName: "Production",
             rootKey: "Tenants",
             rawDictionaryKey: "tenant-secret-token"));
@@ -782,11 +788,19 @@ public class ConfigAuditReporterTests
             environmentName: "Production",
             rootKey: "Tenants",
             rawDictionaryKey: "tenant-password"));
+        var differentKeyComparison = GetSingleComparisonCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-password"));
 
         Assert.Equal(first, duplicate);
+        Assert.Equal(firstComparison, duplicateComparison);
         Assert.NotEqual(first, differentKey);
+        Assert.NotEqual(firstComparison, differentKeyComparison);
         Assert.StartsWith("v1:kid-a:", first, StringComparison.Ordinal);
         Assert.Equal("v1:kid-a:".Length + 24, first.Length);
+        Assert.StartsWith("v1c:kid-a:", firstComparison, StringComparison.Ordinal);
+        Assert.Equal("v1c:kid-a:".Length + 24, firstComparison.Length);
         Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac, firstReport.Redaction.DictionaryKeyCorrelationMode);
         Assert.Equal("kid-a", firstReport.Redaction.DictionaryKeyCorrelationKeyId);
         Assert.Equal("app-a", firstReport.Redaction.DictionaryKeyCorrelationApplicationScope);
@@ -799,7 +813,15 @@ public class ConfigAuditReporterTests
             environmentName: "Production",
             rootKey: "Tenants",
             rawDictionaryKey: "tenant-secret-token"));
+        var baselineComparison = GetSingleComparisonCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token"));
         var changedEnvironment = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Staging",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token"));
+        var changedEnvironmentComparison = GetSingleComparisonCorrelationId(CreateCorrelationReport(
             environmentName: "Staging",
             rootKey: "Tenants",
             rawDictionaryKey: "tenant-secret-token"));
@@ -807,7 +829,16 @@ public class ConfigAuditReporterTests
             environmentName: "Production",
             rootKey: "Accounts",
             rawDictionaryKey: "tenant-secret-token"));
+        var changedRootKeyComparison = GetSingleComparisonCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Accounts",
+            rawDictionaryKey: "tenant-secret-token"));
         var changedScope = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            applicationScope: "other-app"));
+        var changedScopeComparison = GetSingleComparisonCorrelationId(CreateCorrelationReport(
             environmentName: "Production",
             rootKey: "Tenants",
             rawDictionaryKey: "tenant-secret-token",
@@ -817,17 +848,32 @@ public class ConfigAuditReporterTests
             rootKey: "Tenants",
             rawDictionaryKey: "tenant-secret-token",
             keyId: "kid-b"));
+        var changedKeyIdComparison = GetSingleComparisonCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            keyId: "kid-b"));
         var changedSecret = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            secretKey: CorrelationSecretB));
+        var changedSecretComparison = GetSingleComparisonCorrelationId(CreateCorrelationReport(
             environmentName: "Production",
             rootKey: "Tenants",
             rawDictionaryKey: "tenant-secret-token",
             secretKey: CorrelationSecretB));
 
         Assert.NotEqual(baseline, changedEnvironment);
+        Assert.Equal(baselineComparison, changedEnvironmentComparison);
         Assert.NotEqual(baseline, changedRootKey);
+        Assert.NotEqual(baselineComparison, changedRootKeyComparison);
         Assert.NotEqual(baseline, changedScope);
+        Assert.NotEqual(baselineComparison, changedScopeComparison);
         Assert.NotEqual(baseline, changedKeyId);
+        Assert.NotEqual(baselineComparison, changedKeyIdComparison);
         Assert.NotEqual(baseline, changedSecret);
+        Assert.NotEqual(baselineComparison, changedSecretComparison);
     }
 
     [Fact]
@@ -844,6 +890,7 @@ public class ConfigAuditReporterTests
         var child = Assert.Single(entry.Children);
 
         Assert.Null(child.Element?.KeyCorrelationId);
+        Assert.Null(child.Element?.ComparisonKeyCorrelationId);
         Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-key-correlation-unavailable");
     }
 
@@ -860,6 +907,7 @@ public class ConfigAuditReporterTests
         var child = Assert.Single(entry.Children);
 
         Assert.Null(child.Element?.KeyCorrelationId);
+        Assert.Null(child.Element?.ComparisonKeyCorrelationId);
         Assert.Contains(
             entry.Diagnostics,
             diagnostic => diagnostic.Code == "config-audit-key-correlation-unavailable"
@@ -880,6 +928,7 @@ public class ConfigAuditReporterTests
         var rendered = new ConfigAuditTextRenderer().Render(report);
 
         Assert.Null(child.Element?.KeyCorrelationId);
+        Assert.Null(child.Element?.ComparisonKeyCorrelationId);
         Assert.Null(report.Redaction.DictionaryKeyCorrelationKeyId);
         Assert.Contains(
             entry.Diagnostics,
@@ -898,8 +947,10 @@ public class ConfigAuditReporterTests
             applicationScope: " app-a ",
             keyId: " kid-a ");
         var correlationId = GetSingleCorrelationId(report);
+        var comparisonCorrelationId = GetSingleComparisonCorrelationId(report);
 
         Assert.StartsWith("v1:kid-a:", correlationId, StringComparison.Ordinal);
+        Assert.StartsWith("v1c:kid-a:", comparisonCorrelationId, StringComparison.Ordinal);
         Assert.Equal("kid-a", report.Redaction.DictionaryKeyCorrelationKeyId);
         Assert.Equal("app-a", report.Redaction.DictionaryKeyCorrelationApplicationScope);
     }
@@ -915,11 +966,14 @@ public class ConfigAuditReporterTests
         var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
         var child = Assert.Single(entry.Children);
         var correlationId = child.Element?.KeyCorrelationId;
+        var comparisonCorrelationId = child.Element?.ComparisonKeyCorrelationId;
         Assert.NotNull(correlationId);
+        Assert.NotNull(comparisonCorrelationId);
         var rendered = new ConfigAuditTextRenderer().Render(report);
         var serialized = JsonSerializer.Serialize(report);
 
         Assert.DoesNotContain(correlationId!, child.Key, StringComparison.Ordinal);
+        Assert.DoesNotContain(comparisonCorrelationId!, child.Key, StringComparison.Ordinal);
         Assert.Contains($"Key correlation: {correlationId}", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("tenant-secret-token", child.Key, StringComparison.Ordinal);
         Assert.DoesNotContain("tenant-secret-token", child.Element?.KeyLabel, StringComparison.Ordinal);
@@ -941,7 +995,9 @@ public class ConfigAuditReporterTests
         var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
         var child = Assert.Single(entry.Children);
         var correlationId = child.Element?.KeyCorrelationId;
+        var comparisonCorrelationId = child.Element?.ComparisonKeyCorrelationId;
         Assert.NotNull(correlationId);
+        Assert.NotNull(comparisonCorrelationId);
         var rendered = new ConfigAuditTextRenderer().Render(report);
         var serialized = JsonSerializer.Serialize(report);
 
@@ -999,7 +1055,9 @@ public class ConfigAuditReporterTests
 
         Assert.Equal(3, unprintableChildren.Count);
         Assert.All(unprintableChildren, child => Assert.Null(child.Element?.KeyCorrelationId));
+        Assert.All(unprintableChildren, child => Assert.Null(child.Element?.ComparisonKeyCorrelationId));
         Assert.NotNull(safeChild.Element?.KeyCorrelationId);
+        Assert.NotNull(safeChild.Element?.ComparisonKeyCorrelationId);
     }
 
     [Fact]
@@ -3356,6 +3414,14 @@ public class ConfigAuditReporterTests
         var child = Assert.Single(entry.Children);
         Assert.NotNull(child.Element?.KeyCorrelationId);
         return child.Element!.KeyCorrelationId!;
+    }
+
+    private static string GetSingleComparisonCorrelationId(ConfigAuditReport report)
+    {
+        var entry = Assert.Single(report.Entries);
+        var child = Assert.Single(entry.Children);
+        Assert.NotNull(child.Element?.ComparisonKeyCorrelationId);
+        return child.Element!.ComparisonKeyCorrelationId!;
     }
 
     private static ConfigAuditEntry AssertEntry(

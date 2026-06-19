@@ -73,6 +73,9 @@ internal sealed record ConfigAuditPath(
                 IsKeyRedacted = isRedacted,
                 KeyCorrelationId = options.DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac && canCreateCorrelationId
                     ? correlation.CreateCorrelationId(rawLabel)
+                    : null,
+                ComparisonKeyCorrelationId = options.DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac && canCreateCorrelationId
+                    ? correlation.CreateComparisonCorrelationId(rawLabel)
                     : null
             },
             CollectionDepth + 1,
