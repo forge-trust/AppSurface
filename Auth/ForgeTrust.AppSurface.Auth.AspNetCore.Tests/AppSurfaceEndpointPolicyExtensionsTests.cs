@@ -14,6 +14,15 @@ namespace ForgeTrust.AppSurface.Auth.AspNetCore.Tests;
 
 public sealed class AppSurfaceEndpointPolicyExtensionsTests
 {
+    [Fact]
+    public void AddAppSurfacePolicy_WithNullOptions_ThrowsArgumentNullException()
+    {
+        AuthorizationOptions options = null!;
+
+        Assert.Throws<ArgumentNullException>(
+            () => options.AddAppSurfacePolicy("docs.publish", policy => policy.RequireAuthenticatedUser()));
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -24,6 +33,14 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
 
         Assert.ThrowsAny<ArgumentException>(
             () => options.AddAppSurfacePolicy(policyName!, policy => policy.RequireAuthenticatedUser()));
+    }
+
+    [Fact]
+    public void AddAppSurfacePolicy_WithNullConfigurePolicy_ThrowsArgumentNullException()
+    {
+        var options = new AuthorizationOptions();
+
+        Assert.Throws<ArgumentNullException>(() => options.AddAppSurfacePolicy("docs.publish", null!));
     }
 
     [Fact]
@@ -39,6 +56,14 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
 
         Assert.NotNull(policy);
         Assert.Contains(policy.Requirements, requirement => requirement is DenyAnonymousAuthorizationRequirement);
+    }
+
+    [Fact]
+    public void RequireSurfacePolicy_WithNullBuilder_ThrowsArgumentNullException()
+    {
+        TestEndpointConventionBuilder builder = null!;
+
+        Assert.Throws<ArgumentNullException>(() => builder.RequireSurfacePolicy("docs.publish"));
     }
 
     [Theory]
@@ -68,6 +93,15 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
             Assert.Single(endpointBuilder.Metadata.OfType<AppSurfacePolicyEndpointMetadata>()));
         Assert.Equal("docs.publish", metadata.PolicyName);
         Assert.Single(endpointBuilder.Metadata.OfType<IAllowAnonymous>());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AppSurfacePolicyEndpointMetadata_WithBlankPolicyName_ThrowsArgumentException(string? policyName)
+    {
+        Assert.ThrowsAny<ArgumentException>(() => new AppSurfacePolicyEndpointMetadata(policyName!));
     }
 
     [Fact]
@@ -116,6 +150,28 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
         Assert.Equal(authResult.Outcome.ToString(), AssertExtension(problem, "appsurfaceAuthOutcome"));
         Assert.Equal(authResult.Reason.ToString(), AssertExtension(problem, "appsurfaceAuthReason"));
         Assert.Equal("docs.publish", AssertExtension(problem, "appsurfacePolicyName"));
+    }
+
+    [Theory]
+    [MemberData(nameof(SessionFailureResults))]
+    public async Task Filter_WhenSessionPolicyFails_ReturnsProblemDetails(
+        AppSurfaceAuthResult authResult,
+        int expectedStatus,
+        string expectedTitle)
+    {
+        var httpContext = CreateHttpContext(authResult);
+        var filter = new AppSurfacePolicyEndpointFilter("docs.publish");
+
+        var result = await filter.InvokeAsync(
+            new TestEndpointFilterInvocationContext(httpContext),
+            _ => ValueTask.FromResult<object?>("handler-result"));
+
+        var problem = await ExecuteProblemAsync(Assert.IsAssignableFrom<IResult>(result));
+
+        Assert.Equal(expectedStatus, problem.Status);
+        Assert.Equal(expectedTitle, problem.Title);
+        Assert.Equal(authResult.Outcome.ToString(), AssertExtension(problem, "appsurfaceAuthOutcome"));
+        Assert.Equal(authResult.Reason.ToString(), AssertExtension(problem, "appsurfaceAuthReason"));
     }
 
     [Fact]
@@ -195,6 +251,23 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
                     metadata: AppSurfaceAspNetCoreAuthDiagnostics.Policy("missing_subject_claim", "docs.publish")),
                 StatusCodes.Status500InternalServerError,
                 "AppSurface auth setup failure"
+            },
+        };
+    }
+
+    public static TheoryData<AppSurfaceAuthResult, int, string> SessionFailureResults()
+    {
+        return new TheoryData<AppSurfaceAuthResult, int, string>
+        {
+            {
+                AppSurfaceAuthResult.UnsafeReturnUrl(),
+                StatusCodes.Status400BadRequest,
+                "Unsafe auth navigation"
+            },
+            {
+                AppSurfaceAuthResult.StaleOrUnknownSession(),
+                StatusCodes.Status401Unauthorized,
+                "Stale or unknown auth session"
             },
         };
     }
