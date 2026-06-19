@@ -18,6 +18,10 @@
   <!-- AppSurface.Flow benchmarks -->
   <ItemGroup Condition="$([System.String]::Copy(';$(DefineConstants);').Contains(';FLOW;'))">
     <ProjectReference Include="../../Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj" />
+    <ProjectReference Include="../../Flow/ForgeTrust.AppSurface.Flow.Generators/ForgeTrust.AppSurface.Flow.Generators.csproj"
+                      ReferenceOutputAssembly="false"
+                      OutputItemType="Analyzer"
+                      PrivateAssets="all" />
   </ItemGroup>
 
   <!-- AppSurface.Console benchmarks -->

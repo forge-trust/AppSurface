@@ -3,6 +3,12 @@ namespace ForgeTrust.AppSurface.Flow.Tests;
 public sealed class FlowExecutionContextTests
 {
     [Fact]
+    public void Type_IsValueType()
+    {
+        Assert.True(typeof(FlowExecutionContext<TestState>).IsValueType);
+    }
+
+    [Fact]
     public void Constructor_CapturesExecutionProperties()
     {
         var state = new TestState("created");
@@ -31,6 +37,18 @@ public sealed class FlowExecutionContextTests
             "review",
             new TestState("created"));
 
+        Assert.Null(context.ResumeEvent);
+    }
+
+    [Fact]
+    public void Default_InstanceHasUnpopulatedMembers()
+    {
+        var context = default(FlowExecutionContext<TestState>);
+
+        Assert.Null(context.FlowId);
+        Assert.Null(context.Version);
+        Assert.Null(context.NodeId);
+        Assert.Null(context.State);
         Assert.Null(context.ResumeEvent);
     }
 
