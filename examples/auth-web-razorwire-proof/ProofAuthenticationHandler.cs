@@ -18,7 +18,7 @@ internal sealed class ProofAuthenticationHandler : AuthenticationHandler<Authent
 {
     public const string SchemeName = "Proof";
     public const string HeaderName = "X-Proof-User";
-    public const string QueryStateName = "proofPersona";
+    public const string QueryStateName = "proofUser";
 
     public ProofAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,

@@ -9,7 +9,6 @@ namespace AuthWebRazorWireProofExample.Controllers;
 /// </summary>
 public sealed class AuthProofController : Controller
 {
-    private const string ProofUserQueryKey = "proofUser";
     private readonly IAppSurfaceAspNetCorePolicyEvaluator _evaluator;
 
     public AuthProofController(IAppSurfaceAspNetCorePolicyEvaluator evaluator)
@@ -20,17 +19,8 @@ public sealed class AuthProofController : Controller
     }
 
     [HttpGet("/")]
-    public async Task<IActionResult> Index([FromQuery(Name = ProofUserQueryKey)] string? proofUser, CancellationToken cancellationToken)
+    public async Task<IActionResult> Index(CancellationToken cancellationToken)
     {
-        if (Request.Query.ContainsKey(ProofUserQueryKey))
-        {
-            var persona = ProofPersona.Normalize(proofUser);
-
-            return persona == ProofPersona.Anonymous
-                ? RedirectToAction(nameof(Index))
-                : RedirectToAction(nameof(Index), new { proofPersona = persona });
-        }
-
         var result = await _evaluator.AuthorizeAsync(AuthProofPolicy.Name, cancellationToken: cancellationToken);
         var apiState = AuthProofState.FromResult(AuthProofSurface.MinimalApi, result);
         var razorWireState = AuthProofState.FromResult(AuthProofSurface.RazorWireState, result);

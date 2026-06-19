@@ -45,6 +45,21 @@ public sealed class AuthWebRazorWireProofExampleTests
         Assert.Equal(expectedSubject, ReadNullableString(json, "subject"));
     }
 
+    [Fact]
+    public async Task ApiProof_UsesProofUserQueryForBrowserParity()
+    {
+        using var client = _fixture.CreateClient();
+
+        using var response = await client.GetAsync("/api/auth-proof?proofUser=viewer");
+        var body = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(body);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal("Forbid", ReadString(json, "outcome"));
+        Assert.Equal("Forbidden", ReadString(json, "reason"));
+        Assert.Equal("viewer-1", ReadNullableString(json, "subject"));
+    }
+
     [Theory]
     [InlineData("anonymous", "anonymous", "Challenge", "Unauthenticated", "unauthenticated", null)]
     [InlineData("unknown", "anonymous", "Challenge", "Unauthenticated", "unauthenticated", null)]
@@ -109,6 +124,7 @@ public sealed class AuthWebRazorWireProofExampleTests
             StringComparison.Ordinal);
         Assert.Contains("Your host owns auth. This sample only changes the local proof persona.", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("The browser switch keeps the selected persona in URL-local proof state.", sampleReadme, StringComparison.Ordinal);
+        Assert.Contains("| `anonymous` | `401` | `Challenge` | `Unauthenticated` | unauthenticated |", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("| `operator` | `200` | `Allowed` | `None` | allowed |", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("X-Proof-User", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("auth-web-razorwire-proof/README.md", authAspNetCoreReadme, StringComparison.Ordinal);

@@ -16,7 +16,7 @@ Open <http://127.0.0.1:5058/> and use the persona switch:
 
 | Persona | API status | AppSurface outcome | AppSurface reason | RazorWire-facing state |
 | --- | ---: | --- | --- | --- |
-| anonymous | `401` | `Challenge` | `Unauthenticated` | unauthenticated |
+| `anonymous` | `401` | `Challenge` | `Unauthenticated` | unauthenticated |
 | `viewer` | `403` | `Forbid` | `Forbidden` | forbidden |
 | `operator` | `200` | `Allowed` | `None` | allowed |
 

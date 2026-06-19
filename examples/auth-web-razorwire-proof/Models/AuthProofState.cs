@@ -47,7 +47,7 @@ public sealed record AuthProofState(
             AppSurfaceAuthOutcome.Allowed => "allowed",
             AppSurfaceAuthOutcome.Challenge => "unauthenticated",
             AppSurfaceAuthOutcome.Forbid => "forbidden",
-            _ => "setup failure",
+            _ => "setup-failure",
         };
     }
 }
