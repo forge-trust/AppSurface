@@ -12,6 +12,25 @@ internal static class AppSurfacePolicyProblemDetailsMapper
     private const string OutcomeExtension = "appsurfaceAuthOutcome";
     private const string ReasonExtension = "appsurfaceAuthReason";
     private const string PolicyNameExtension = "appsurfacePolicyName";
+    private static readonly IReadOnlyDictionary<AppSurfaceAuthOutcome, int> StatusCodesByOutcome =
+        new Dictionary<AppSurfaceAuthOutcome, int>
+        {
+            [AppSurfaceAuthOutcome.Challenge] = StatusCodes.Status401Unauthorized,
+            [AppSurfaceAuthOutcome.Forbid] = StatusCodes.Status403Forbidden,
+            [AppSurfaceAuthOutcome.SetupFailure] = StatusCodes.Status500InternalServerError,
+            [AppSurfaceAuthOutcome.UnsafeNavigation] = StatusCodes.Status400BadRequest,
+            [AppSurfaceAuthOutcome.StaleOrUnknownSession] = StatusCodes.Status401Unauthorized,
+        };
+
+    private static readonly IReadOnlyDictionary<AppSurfaceAuthOutcome, string> TitlesByOutcome =
+        new Dictionary<AppSurfaceAuthOutcome, string>
+        {
+            [AppSurfaceAuthOutcome.Challenge] = "Authentication required",
+            [AppSurfaceAuthOutcome.Forbid] = "Authorization failed",
+            [AppSurfaceAuthOutcome.SetupFailure] = "AppSurface auth setup failure",
+            [AppSurfaceAuthOutcome.UnsafeNavigation] = "Unsafe auth navigation",
+            [AppSurfaceAuthOutcome.StaleOrUnknownSession] = "Stale or unknown auth session",
+        };
 
     /// <summary>
     /// Converts a non-allowed AppSurface auth result into a ProblemDetails result.
@@ -46,28 +65,12 @@ internal static class AppSurfacePolicyProblemDetailsMapper
 
     private static int GetStatusCode(AppSurfaceAuthResult result)
     {
-        return result.Outcome switch
-        {
-            AppSurfaceAuthOutcome.Challenge => StatusCodes.Status401Unauthorized,
-            AppSurfaceAuthOutcome.Forbid => StatusCodes.Status403Forbidden,
-            AppSurfaceAuthOutcome.SetupFailure => StatusCodes.Status500InternalServerError,
-            AppSurfaceAuthOutcome.UnsafeNavigation => StatusCodes.Status400BadRequest,
-            AppSurfaceAuthOutcome.StaleOrUnknownSession => StatusCodes.Status401Unauthorized,
-            _ => StatusCodes.Status500InternalServerError,
-        };
+        return StatusCodesByOutcome[result.Outcome];
     }
 
     private static string GetTitle(AppSurfaceAuthResult result)
     {
-        return result.Outcome switch
-        {
-            AppSurfaceAuthOutcome.Challenge => "Authentication required",
-            AppSurfaceAuthOutcome.Forbid => "Authorization failed",
-            AppSurfaceAuthOutcome.SetupFailure => "AppSurface auth setup failure",
-            AppSurfaceAuthOutcome.UnsafeNavigation => "Unsafe auth navigation",
-            AppSurfaceAuthOutcome.StaleOrUnknownSession => "Stale or unknown auth session",
-            _ => "AppSurface auth failure",
-        };
+        return TitlesByOutcome[result.Outcome];
     }
 
     private static void CopySafeMetadata(AppSurfaceAuthResult result, ProblemDetails problem)
