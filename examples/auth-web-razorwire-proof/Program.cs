@@ -18,7 +18,7 @@ builder.Services
 
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy(
+    options.AddAppSurfacePolicy(
         AuthProofPolicy.Name,
         policy => policy
             .RequireAuthenticatedUser()

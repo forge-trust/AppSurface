@@ -61,7 +61,7 @@ This approach aims to:
 
 ### [Auth](./Auth/ForgeTrust.AppSurface.Auth/README.md)
 
-- [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
+- [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, durable external-subject to app-user-id mapping contracts, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) – ASP.NET Core adapter that maps existing host request auth context and named policies into AppSurface auth results without owning schemes, middleware, challenges, forbids, redirects, or identity-provider setup. Run the [Auth Web/RazorWire proof](./examples/auth-web-razorwire-proof/README.md) to see one host policy drive both API and rendered UI state.
 
 ### [Intelligence](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md)

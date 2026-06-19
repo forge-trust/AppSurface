@@ -156,6 +156,9 @@ public sealed class AuthWebRazorWireProofExampleTests
             StringComparison.Ordinal);
         Assert.Contains("Your host owns auth. This sample only changes the local proof persona.", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("The browser switch keeps the selected persona in URL-local proof state.", sampleReadme, StringComparison.Ordinal);
+        Assert.Contains("registers it with `AddAppSurfacePolicy(...)`", sampleReadme, StringComparison.Ordinal);
+        Assert.Contains("prefer `RequireSurfacePolicy(...)`", sampleReadme, StringComparison.Ordinal);
+        Assert.Contains("This sample calls the evaluator directly", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("| `anonymous` | `401` | `Challenge` | `Unauthenticated` | unauthenticated |", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("| `operator` | `200` | `Allowed` | `None` | allowed |", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("X-Proof-User", sampleReadme, StringComparison.Ordinal);

@@ -46,16 +46,18 @@ Unsupported proof users behave like anonymous requests.
 ## What This Sample Proves
 
 - The host registers the local proof authentication handler.
-- The host owns the `OperatorsOnly` authorization policy.
+- The host owns the `OperatorsOnly` authorization policy and registers it with `AddAppSurfacePolicy(...)`.
 - `AddAppSurfaceAspNetCoreAuth(...)` maps the evaluated ASP.NET Core policy result into `AppSurfaceAuthResult`.
 - The Minimal API endpoint and RazorWire-facing page use the same `IAppSurfaceAspNetCorePolicyEvaluator.AuthorizeAsync("OperatorsOnly")` decision path.
+
+For production Minimal API endpoints that only need to enforce a host policy and return API-safe auth failures, prefer `RequireSurfacePolicy(...)`. This sample calls the evaluator directly so `/api/auth-proof` can return the same canonical outcome matrix that the RazorWire-facing page renders.
 
 ## What This Sample Is Not
 
 - Not production authentication.
 - Not OAuth, OIDC, JWT, cookies, ASP.NET Identity, login, or logout guidance.
 - Not challenge, forbid, redirect, sign-in, or sign-out execution.
-- Not a public Minimal API helper.
+- Not a replacement for `RequireSurfacePolicy(...)` on production Minimal API endpoints.
 - Not an `AuthGate`, `AuthView`, `PermissionGate`, or result-bearing RazorWire auth adapter.
 
 Keep the proof-only `ProofAuthenticationHandler`, URL-local proof state, and persona switch inside this sample. Real applications should keep their existing ASP.NET Core authentication handlers and policies, then let AppSurface observe the populated request principal and named host-policy result.
