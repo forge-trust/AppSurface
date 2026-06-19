@@ -146,7 +146,7 @@ public sealed class ApprovalReviewNode : IFlowNode<ApprovalState>
 - Generated envelopes include concrete nullable context slots and a public serializer constructor so Durable Task JSON round-trip validation can inspect them.
 - Declare every `Next` target in `AddNode`. The builder validates missing targets, and runners reject undeclared runtime targets.
 - The in-memory runner stops at waits. It does not persist state, deliver events, or create timers.
-- The in-memory runner uses prevalidated internal routing metadata from `FlowDefinition<TContext>` so local execution does not repeat graph-existence checks on every `Next` transition. This preserves the public `Nodes` graph view and the runtime `undeclared target` diagnostic.
+- The in-memory runner uses prevalidated internal routing metadata from `FlowDefinition<TContext>` so local execution does not repeat graph-existence checks on every `Next` transition. This preserves the public `Nodes` graph view and the undeclared target diagnostic from `FlowDefinition<TContext>` construction.
 - Flow benchmarks isolate runner orchestration overhead. Use Flow for graph safety, long-running process contracts, and durable-host alignment; use a direct loop when all you need is a pure in-process tight state machine.
 - Use `FlowWait<TContext>.Timeout` as metadata for durable hosts. The core runner reports the timeout request but does not race timers.
 - Keep context types serializer-friendly if you plan to use Durable Task. The Durable Task adapter validates JSON round-trips before evaluating nodes.
