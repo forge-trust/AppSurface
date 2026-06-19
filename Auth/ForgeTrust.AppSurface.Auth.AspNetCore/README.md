@@ -56,7 +56,7 @@ app.MapPost("/operator-work", HandleOperatorWork)
    .RequireSurfacePolicy("OperatorsOnly");
 ```
 
-`RequireSurfacePolicy(...)` evaluates the host policy through `IAppSurfaceAspNetCorePolicyEvaluator`. Allowed requests continue to the endpoint handler. Challenge, forbid, and setup-failure results return `application/problem+json` with safe AppSurface outcome, reason, policy, and diagnostic metadata instead of calling browser challenge or forbid handlers.
+`RequireSurfacePolicy(...)` evaluates the host policy through `IAppSurfaceAspNetCorePolicyEvaluator`. Allowed requests continue to the endpoint handler. Non-allowed results, including challenge, forbid, setup-failure, unsafe-navigation, and stale-or-unknown-session outcomes, return `application/problem+json` with safe AppSurface outcome, reason, policy, and diagnostic metadata instead of calling browser challenge or forbid handlers.
 
 The helper marks the endpoint as anonymous for ASP.NET Core authorization middleware so host fallback policies do not challenge or redirect before the AppSurface endpoint filter runs. The endpoint is not public: the filter still evaluates the named host policy and blocks failed requests.
 
@@ -170,6 +170,8 @@ Failure responses use `application/problem+json`:
 | `Challenge` | 401 | `Authentication required` |
 | `Forbid` | 403 | `Authorization failed` |
 | `SetupFailure` | 500 | `AppSurface auth setup failure` |
+| `UnsafeNavigation` | 400 | `Unsafe auth navigation` |
+| `StaleOrUnknownSession` | 401 | `Stale or unknown auth session` |
 
 ProblemDetails extensions include `appsurfaceAuthOutcome`, `appsurfaceAuthReason`, `appsurfacePolicyName`, and safe adapter metadata such as `appsurface.aspnetcore.diagnostic_code`, `appsurface.aspnetcore.policy_name`, `appsurface.aspnetcore.missing_service`, and `appsurface.aspnetcore.subject_claim_types` when present.
 

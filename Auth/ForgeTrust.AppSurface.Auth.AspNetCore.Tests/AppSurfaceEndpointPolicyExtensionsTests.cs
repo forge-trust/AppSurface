@@ -102,7 +102,8 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
         builder.RequireSurfacePolicy("docs.publish");
         var endpointBuilder = new RouteEndpointBuilder(_ => Task.CompletedTask, RoutePatternFactory.Parse("/"), 0);
         builder.Apply(endpointBuilder);
-        var httpContext = CreateHttpContext(AppSurfaceAuthResult.Allowed());
+        await using var contextScope = CreateHttpContext(AppSurfaceAuthResult.Allowed());
+        var httpContext = contextScope.HttpContext;
         var endpointFilter = Assert.Single(endpointBuilder.FilterFactories)(
             null!,
             _ => ValueTask.FromResult<object?>("handler-result"));
@@ -124,7 +125,8 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
     [Fact]
     public async Task Filter_WhenAllowed_CallsNext()
     {
-        var httpContext = CreateHttpContext(AppSurfaceAuthResult.Allowed());
+        await using var contextScope = CreateHttpContext(AppSurfaceAuthResult.Allowed());
+        var httpContext = contextScope.HttpContext;
         var filter = new AppSurfacePolicyEndpointFilter("docs.publish");
         var nextCalled = false;
 
@@ -147,7 +149,8 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
         int expectedStatus,
         string expectedTitle)
     {
-        var httpContext = CreateHttpContext(authResult);
+        await using var contextScope = CreateHttpContext(authResult);
+        var httpContext = contextScope.HttpContext;
         var filter = new AppSurfacePolicyEndpointFilter("docs.publish");
         var nextCalled = false;
 
@@ -176,7 +179,8 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
         int expectedStatus,
         string expectedTitle)
     {
-        var httpContext = CreateHttpContext(authResult);
+        await using var contextScope = CreateHttpContext(authResult);
+        var httpContext = contextScope.HttpContext;
         var filter = new AppSurfacePolicyEndpointFilter("docs.publish");
 
         var result = await filter.InvokeAsync(
@@ -338,12 +342,9 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
         };
     }
 
-    private static DefaultHttpContext CreateHttpContext(AppSurfaceAuthResult authResult)
+    private static TestHttpContextScope CreateHttpContext(AppSurfaceAuthResult authResult)
     {
-        var services = new ServiceCollection();
-        services.AddSingleton<IAppSurfaceAspNetCorePolicyEvaluator>(new CapturingPolicyEvaluator(authResult));
-        var provider = services.BuildServiceProvider();
-        return new DefaultHttpContext { RequestServices = provider };
+        return new TestHttpContextScope(authResult);
     }
 
     private static async Task<ProblemDetails> ExecuteProblemAsync(IResult result)
@@ -409,6 +410,26 @@ public sealed class AppSurfaceEndpointPolicyExtensionsTests
         public override T GetArgument<T>(int index)
         {
             return (T)Arguments[index]!;
+        }
+    }
+
+    private sealed class TestHttpContextScope : IAsyncDisposable
+    {
+        private readonly ServiceProvider _provider;
+
+        public TestHttpContextScope(AppSurfaceAuthResult authResult)
+        {
+            var services = new ServiceCollection();
+            services.AddSingleton<IAppSurfaceAspNetCorePolicyEvaluator>(new CapturingPolicyEvaluator(authResult));
+            _provider = services.BuildServiceProvider();
+            HttpContext = new DefaultHttpContext { RequestServices = _provider };
+        }
+
+        public DefaultHttpContext HttpContext { get; }
+
+        public ValueTask DisposeAsync()
+        {
+            return _provider.DisposeAsync();
         }
     }
 
