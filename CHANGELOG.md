@@ -15,6 +15,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - AppSurface Config can now compare sanitized audit reports, render deterministic same-host or captured-snapshot evidence, and expose command-framework-agnostic diff workflows with display-safe failures.
+- AppSurface Flow now uses value-type execution contexts and deeper benchmark coverage to reduce and track synchronous in-memory runner allocation overhead.
 
 ## 0.1.0-rc.4 - 2026-06-16
 
