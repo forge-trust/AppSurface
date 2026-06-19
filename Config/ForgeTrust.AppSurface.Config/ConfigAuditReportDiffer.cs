@@ -192,7 +192,12 @@ public sealed class ConfigAuditReportDiffer
         CompareBuckets(
             baseline.Diagnostics,
             target.Diagnostics,
-            diagnostic => $"diagnostic:{diagnostic.Severity}:{diagnostic.Code}:{diagnostic.Key}:{diagnostic.ConfigPath}",
+            diagnostic => Signature(
+                "diagnostic",
+                diagnostic.Severity.ToString(),
+                diagnostic.Code,
+                diagnostic.Key ?? string.Empty,
+                diagnostic.ConfigPath ?? string.Empty),
             DiagnosticSortKey,
             (diagnostic, status) => CreateDiagnosticItem(diagnostic, null, status),
             (diagnostic, status) => CreateDiagnosticItem(null, diagnostic, status),

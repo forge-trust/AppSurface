@@ -613,6 +613,40 @@ public sealed class ConfigAuditDiffTests
     }
 
     [Fact]
+    public void Compare_DiagnosticBucketKeysDoNotCollideWhenFieldsContainSeparators()
+    {
+        var baseline = CreateReport(
+            "Staging",
+            diagnostics:
+            [
+                Diagnostic(ConfigAuditDiagnosticSeverity.Warning, "A:B", "Baseline warning.", key: "C", configPath: "D")
+            ]);
+        var target = CreateReport(
+            "Production",
+            diagnostics:
+            [
+                Diagnostic(ConfigAuditDiagnosticSeverity.Warning, "A", "Target warning.", key: "B:C", configPath: "D")
+            ]);
+
+        var diff = new ConfigAuditReportDiffer().Compare(baseline, target);
+
+        Assert.Contains(
+            diff.Items,
+            item => item.Kind == ConfigAuditDiffItemKind.Diagnostic
+                    && item.Key == "C"
+                    && item.Status == ConfigAuditDiffItemStatus.Removed);
+        Assert.Contains(
+            diff.Items,
+            item => item.Kind == ConfigAuditDiffItemKind.Diagnostic
+                    && item.Key == "B:C"
+                    && item.Status == ConfigAuditDiffItemStatus.Added);
+        Assert.DoesNotContain(
+            diff.Items,
+            item => item.Kind == ConfigAuditDiffItemKind.Diagnostic
+                    && item.Status == ConfigAuditDiffItemStatus.Changed);
+    }
+
+    [Fact]
     public void Render_ManualReportCoversFallbackWordingAndItemDiagnostics()
     {
         var report = new ConfigAuditDiffReport
