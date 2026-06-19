@@ -650,6 +650,44 @@ public class ConfigAuditModelsTests
         Assert.Equal(1, (int)ConfigAuditDiagnosticSeverity.Warning);
         Assert.Equal(2, (int)ConfigAuditDiagnosticSeverity.Error);
 
+        Assert.Equal(0, (int)ConfigAuditDiffEvidenceMode.SameHostNamedEnvironment);
+        Assert.Equal(1, (int)ConfigAuditDiffEvidenceMode.CapturedSnapshot);
+
+        Assert.Equal(0, (int)ConfigAuditDiffItemStatus.Unchanged);
+        Assert.Equal(1, (int)ConfigAuditDiffItemStatus.Added);
+        Assert.Equal(2, (int)ConfigAuditDiffItemStatus.Removed);
+        Assert.Equal(3, (int)ConfigAuditDiffItemStatus.Changed);
+        Assert.Equal(4, (int)ConfigAuditDiffItemStatus.Uncomparable);
+
+        Assert.Equal(0, (int)ConfigAuditDiffSignificance.Unchanged);
+        Assert.Equal(1, (int)ConfigAuditDiffSignificance.Context);
+        Assert.Equal(2, (int)ConfigAuditDiffSignificance.NeedsAttention);
+
+        Assert.Equal(0, (int)ConfigAuditDiffItemKind.KnownEntry);
+        Assert.Equal(1, (int)ConfigAuditDiffItemKind.DiscoveredKey);
+        Assert.Equal(2, (int)ConfigAuditDiffItemKind.Provider);
+        Assert.Equal(3, (int)ConfigAuditDiffItemKind.RedactionPolicy);
+        Assert.Equal(4, (int)ConfigAuditDiffItemKind.Diagnostic);
+        Assert.Equal(5, (int)ConfigAuditDiffItemKind.DictionaryEntry);
+        Assert.Equal(6, (int)ConfigAuditDiffItemKind.Source);
+
+        Assert.Equal(0, (int)ConfigAuditDiffSourceDetail.Summarized);
+        Assert.Equal(1, (int)ConfigAuditDiffSourceDetail.Full);
+
+        Assert.Equal(0, (int)ConfigAuditDiffValueEvidence.None);
+        Assert.Equal(1, (int)ConfigAuditDiffValueEvidence.DisplayValuesComparable);
+        Assert.Equal(2, (int)ConfigAuditDiffValueEvidence.BothRedacted);
+        Assert.Equal(3, (int)ConfigAuditDiffValueEvidence.RedactedVersusShown);
+        Assert.Equal(4, (int)ConfigAuditDiffValueEvidence.Omitted);
+        Assert.Equal(5, (int)ConfigAuditDiffValueEvidence.RedactionPolicyMismatch);
+        Assert.Equal(6, (int)ConfigAuditDiffValueEvidence.Unspecified);
+
+        Assert.Equal(0, (int)ConfigAuditDiffFailureStage.Baseline);
+        Assert.Equal(1, (int)ConfigAuditDiffFailureStage.Target);
+        Assert.Equal(2, (int)ConfigAuditDiffFailureStage.SnapshotParse);
+        Assert.Equal(3, (int)ConfigAuditDiffFailureStage.Compare);
+        Assert.Equal(4, (int)ConfigAuditDiffFailureStage.Render);
+
         var providerKey = new ConfigAuditProviderDiscoveredKey(
             "Discovered.Value",
             RawValue: null,

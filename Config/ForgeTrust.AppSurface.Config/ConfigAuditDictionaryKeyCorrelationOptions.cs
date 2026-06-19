@@ -85,7 +85,9 @@ internal sealed class ConfigAuditDictionaryKeyCorrelator
     /// <remarks>
     /// Available contexts derive ids in the form <c>v1:{keyId}:{24-hex-chars}</c>. The suffix is the first
     /// <c>TruncatedBytes</c> bytes (96 bits) of an HMAC-SHA256 digest over <c>AlgorithmVersion</c>, application scope,
-    /// environment, root key, and raw dictionary key.
+    /// environment, root key, and raw dictionary key. Diff comparison ids derive a separate
+    /// <c>v1c:{keyId}:{24-hex-chars}</c> value that omits the environment by design so captured reports from different
+    /// environments can match the same redacted dictionary key.
     /// </remarks>
     public ConfigAuditDictionaryKeyCorrelationContext CreateContext(string environment, string rootKey)
     {
@@ -184,6 +186,28 @@ internal sealed class ConfigAuditDictionaryKeyCorrelator
         return $"{AlgorithmVersion}:{keyId}:{Convert.ToHexString(hash.AsSpan(0, TruncatedBytes)).ToLowerInvariant()}";
     }
 
+    /// <summary>
+    /// Computes the stable opaque id for comparing a raw dictionary key across report environments.
+    /// </summary>
+    /// <param name="secretKey">The UTF-8 encoded HMAC secret. The array is passed directly to avoid extra copies.</param>
+    /// <param name="keyId">The display-safe key id rendered into the id.</param>
+    /// <param name="applicationScope">The application or product scope included in the HMAC input.</param>
+    /// <param name="rootKey">The root audit key included in the HMAC input.</param>
+    /// <param name="rawDictionaryKey">The unredacted dictionary key included in the HMAC input.</param>
+    /// <returns>A <c>v1c:{keyId}:{24-hex-chars}</c> comparison id with a 96-bit truncated HMAC-SHA256 suffix.</returns>
+    internal static string ComputeComparisonCorrelationId(
+        byte[] secretKey,
+        string keyId,
+        string applicationScope,
+        string rootKey,
+        string rawDictionaryKey)
+    {
+        using var hmac = new HMACSHA256(secretKey);
+        var input = BuildComparisonInput(applicationScope, rootKey, rawDictionaryKey);
+        var hash = hmac.ComputeHash(input);
+        return $"{AlgorithmVersion}c:{keyId}:{Convert.ToHexString(hash.AsSpan(0, TruncatedBytes)).ToLowerInvariant()}";
+    }
+
     private static byte[] BuildInput(
         string applicationScope,
         string environment,
@@ -194,6 +218,19 @@ internal sealed class ConfigAuditDictionaryKeyCorrelator
         AppendPart(builder, AlgorithmVersion);
         AppendPart(builder, applicationScope);
         AppendPart(builder, environment);
+        AppendPart(builder, rootKey);
+        AppendPart(builder, rawDictionaryKey);
+        return Encoding.UTF8.GetBytes(builder.ToString());
+    }
+
+    private static byte[] BuildComparisonInput(
+        string applicationScope,
+        string rootKey,
+        string rawDictionaryKey)
+    {
+        var builder = new StringBuilder();
+        AppendPart(builder, $"{AlgorithmVersion}-comparison");
+        AppendPart(builder, applicationScope);
         AppendPart(builder, rootKey);
         AppendPart(builder, rawDictionaryKey);
         return Encoding.UTF8.GetBytes(builder.ToString());
@@ -299,6 +336,24 @@ internal sealed class ConfigAuditDictionaryKeyCorrelationContext
                 _keyId,
                 _applicationScope,
                 _environment,
+                _rootKey,
+                rawDictionaryKey)
+            : null;
+
+    /// <summary>
+    /// Derives the opaque comparison id for a raw dictionary key when this context is available.
+    /// </summary>
+    /// <param name="rawDictionaryKey">The unredacted dictionary key observed during traversal.</param>
+    /// <returns>
+    /// A <c>v1c:{keyId}:{24-hex-chars}</c> id containing a 96-bit truncated HMAC-SHA256 digest, or
+    /// <see langword="null"/> when this context is unavailable.
+    /// </returns>
+    public string? CreateComparisonCorrelationId(string rawDictionaryKey) =>
+        IsAvailable
+            ? ConfigAuditDictionaryKeyCorrelator.ComputeComparisonCorrelationId(
+                _secretKey,
+                _keyId,
+                _applicationScope,
                 _rootKey,
                 rawDictionaryKey)
             : null;
