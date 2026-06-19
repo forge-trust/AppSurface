@@ -255,12 +255,9 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
 
     private string ResolveRepositoryPath(params string[] relativeParts)
     {
-        foreach (var part in relativeParts)
+        foreach (var rootedPart in relativeParts.Where(Path.IsPathRooted))
         {
-            if (Path.IsPathRooted(part))
-            {
-                throw new ArgumentException($"Repository-relative path segment must not be rooted: '{part}'.", nameof(relativeParts));
-            }
+            throw new ArgumentException($"Repository-relative path segment must not be rooted: '{rootedPart}'.", nameof(relativeParts));
         }
 
         var path = RepositoryRoot;
