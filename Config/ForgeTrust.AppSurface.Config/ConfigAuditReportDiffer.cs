@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 
 namespace ForgeTrust.AppSurface.Config;
 
@@ -121,7 +122,7 @@ public sealed class ConfigAuditReportDiffer
         CompareBuckets(
             baseline.Providers,
             target.Providers,
-            provider => $"provider:{provider.Name}:{provider.IsOverride}",
+            provider => $"provider:{provider.Name}",
             ProviderSortKey,
             (provider, status) => CreateProviderItem(provider, null, status),
             (provider, status) => CreateProviderItem(null, provider, status),
@@ -731,8 +732,7 @@ public sealed class ConfigAuditReportDiffer
         };
 
     private static string EntrySignature(EntryDiffInput input) =>
-        string.Join(
-            "|",
+        Signature(
             EntryValueSignature(input),
             EntrySourceSignature(input),
             DiagnosticSignature(input.Entry.Diagnostics),
@@ -741,8 +741,7 @@ public sealed class ConfigAuditReportDiffer
     private static string EntryValueSignature(EntryDiffInput? input) =>
         input == null
             ? string.Empty
-            : string.Join(
-                "|",
+            : Signature(
                 input.CorrelationPath,
                 input.Entry.State.ToString(),
                 input.Entry.DeclaredType ?? string.Empty,
@@ -756,8 +755,7 @@ public sealed class ConfigAuditReportDiffer
             : SourceSignature(input.Entry.Sources, includeConfigPaths: !input.UsesComparisonIdentity);
 
     private static string DiscoveredKeySignature(ConfigAuditDiscoveredKey key) =>
-        string.Join(
-            "|",
+        Signature(
             DiscoveredKeyValueSignature(key),
             SourceSignature(key.Sources),
             DiagnosticSignature(key.Diagnostics));
@@ -765,8 +763,7 @@ public sealed class ConfigAuditReportDiffer
     private static string DiscoveredKeyValueSignature(ConfigAuditDiscoveredKey? key) =>
         key == null
             ? string.Empty
-            : string.Join(
-                "|",
+            : Signature(
                 key.Key,
                 key.Classification.ToString(),
                 key.DisplayValue ?? "<null>",
@@ -774,16 +771,14 @@ public sealed class ConfigAuditReportDiffer
                 key.ValueDisplayState.ToString());
 
     private static string ProviderSignature(ConfigAuditProvider provider) =>
-        string.Join(
-            "|",
+        Signature(
             provider.Name,
             provider.Priority.ToString(CultureInfo.InvariantCulture),
             provider.Precedence.ToString(CultureInfo.InvariantCulture),
             provider.IsOverride.ToString());
 
     private static string DiagnosticSignature(ConfigAuditDiagnostic diagnostic) =>
-        string.Join(
-            "|",
+        Signature(
             diagnostic.Severity.ToString(),
             diagnostic.Code,
             diagnostic.Message,
@@ -792,24 +787,19 @@ public sealed class ConfigAuditReportDiffer
             SourceSignature(diagnostic.Source));
 
     private static string DiagnosticSignature(IReadOnlyList<ConfigAuditDiagnostic> diagnostics) =>
-        string.Join(
-            "||",
-            diagnostics
-                .OrderBy(DiagnosticSortKey, StringComparer.Ordinal)
-                .Select(DiagnosticSignature));
+        Signature(diagnostics
+            .OrderBy(DiagnosticSortKey, StringComparer.Ordinal)
+            .Select(DiagnosticSignature));
 
     private static string SourceSignature(IReadOnlyList<ConfigAuditSourceRecord> sources, bool includeConfigPaths = true) =>
-        string.Join(
-            "||",
-            sources
-                .OrderBy(source => SourceSignature(source, includeConfigPaths), StringComparer.Ordinal)
-                .Select(source => SourceSignature(source, includeConfigPaths)));
+        Signature(sources
+            .OrderBy(source => SourceSignature(source, includeConfigPaths), StringComparer.Ordinal)
+            .Select(source => SourceSignature(source, includeConfigPaths)));
 
     private static string SourceSignature(ConfigAuditSourceRecord? source, bool includeConfigPaths = true) =>
         source == null
             ? string.Empty
-            : string.Join(
-                "|",
+            : Signature(
                 source.Kind.ToString(),
                 source.ProviderName ?? string.Empty,
                 source.ProviderPriority?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
@@ -823,22 +813,20 @@ public sealed class ConfigAuditReportDiffer
                 source.Location?.ByteColumnNumber.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
 
     private static string RedactionSignature(ConfigAuditRedaction redaction) =>
-        string.Join(
-            "|",
+        Signature(
             redaction.Enabled.ToString(),
             redaction.Placeholder,
             redaction.DictionaryKeyCorrelationMode.ToString(),
             redaction.DictionaryKeyCorrelationKeyId ?? string.Empty,
             redaction.DictionaryKeyCorrelationApplicationScope ?? string.Empty,
-            string.Join(",", redaction.MatchedFragments.OrderBy(fragment => fragment, StringComparer.Ordinal)));
+            Signature(redaction.MatchedFragments.OrderBy(fragment => fragment, StringComparer.Ordinal)));
 
     private static string ElementSignature(ConfigAuditElementIdentity? element, bool comparisonOnly = false) =>
         element == null
             ? string.Empty
             : comparisonOnly
-                ? string.Join("|", element.Kind.ToString(), element.ComparisonKeyCorrelationId ?? string.Empty)
-            : string.Join(
-                "|",
+                ? Signature(element.Kind.ToString(), element.ComparisonKeyCorrelationId ?? string.Empty)
+            : Signature(
                 element.Kind.ToString(),
                 element.Index?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
                 element.KeyLabel ?? string.Empty,
@@ -858,6 +846,22 @@ public sealed class ConfigAuditReportDiffer
     {
         var bracket = key.LastIndexOf("[", StringComparison.Ordinal);
         return bracket <= 0 ? key : key[..bracket];
+    }
+
+    private static string Signature(params string[] parts) =>
+        Signature((IEnumerable<string>)parts);
+
+    private static string Signature(IEnumerable<string> parts)
+    {
+        var builder = new StringBuilder();
+        foreach (var part in parts)
+        {
+            builder.Append(part.Length.ToString(CultureInfo.InvariantCulture));
+            builder.Append(':');
+            builder.Append(part);
+        }
+
+        return builder.ToString();
     }
 
     private static bool StringEquals(string? left, string? right) =>

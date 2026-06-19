@@ -110,7 +110,7 @@ public sealed class ConfigAuditDiffCommandRunner
                 ex);
         }
 
-        return WriteDiff(baseline, target, output, options);
+        return WriteDiff(baseline, target, output, CreateSameHostOptions(options));
     }
 
     /// <summary>
@@ -221,6 +221,14 @@ public sealed class ConfigAuditDiffCommandRunner
 
         return ConfigAuditDiffCommandResult.Success(baseline.Environment, target.Environment);
     }
+
+    private static ConfigAuditDiffOptions CreateSameHostOptions(ConfigAuditDiffOptions? options) =>
+        new()
+        {
+            EvidenceMode = ConfigAuditDiffEvidenceMode.SameHostNamedEnvironment,
+            IncludeUnchangedItems = options?.IncludeUnchangedItems ?? false,
+            SourceDetail = options?.SourceDetail ?? ConfigAuditDiffSourceDetail.Summarized
+        };
 
     private static ConfigAuditReport ParseSnapshot(
         string snapshotJson,

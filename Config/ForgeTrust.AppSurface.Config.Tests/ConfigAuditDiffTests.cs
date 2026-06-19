@@ -153,6 +153,44 @@ public sealed class ConfigAuditDiffTests
     }
 
     [Fact]
+    public void Compare_ProviderOverrideChangeIsSingleChangedItem()
+    {
+        var baseline = CreateReport(
+            "Staging",
+            providers: [Provider("EnvironmentProvider", priority: 0, precedence: 0, isOverride: false)]);
+        var target = CreateReport(
+            "Production",
+            providers: [Provider("EnvironmentProvider", priority: 0, precedence: 0, isOverride: true)]);
+
+        var diff = new ConfigAuditReportDiffer().Compare(baseline, target);
+        var item = Assert.Single(diff.Items, item => item.Kind == ConfigAuditDiffItemKind.Provider);
+
+        Assert.Equal(ConfigAuditDiffItemStatus.Changed, item.Status);
+        Assert.DoesNotContain(
+            diff.Items,
+            item => item.Kind == ConfigAuditDiffItemKind.Provider && item.Status == ConfigAuditDiffItemStatus.Added);
+        Assert.DoesNotContain(
+            diff.Items,
+            item => item.Kind == ConfigAuditDiffItemKind.Provider && item.Status == ConfigAuditDiffItemStatus.Removed);
+    }
+
+    [Fact]
+    public void Compare_EntrySignaturesDoNotCollideWhenValuesContainSeparators()
+    {
+        var baseline = CreateReport(
+            "Staging",
+            entries: [Entry("Collision.Key", "C", declaredType: "A|B")]);
+        var target = CreateReport(
+            "Production",
+            entries: [Entry("Collision.Key", "B|C", declaredType: "A")]);
+
+        var diff = new ConfigAuditReportDiffer().Compare(baseline, target);
+        var item = Assert.Single(diff.Items, item => item.Key == "Collision.Key");
+
+        Assert.Equal(ConfigAuditDiffItemStatus.Changed, item.Status);
+    }
+
+    [Fact]
     public void Compare_DictionaryEntriesMatchByComparisonCorrelationMetadata()
     {
         var baseline = CreateReport(
@@ -645,6 +683,40 @@ public sealed class ConfigAuditDiffTests
     }
 
     [Fact]
+    public void Run_ForcesSameHostEvidenceModeWhilePreservingOtherOptions()
+    {
+        var reporter = A.Fake<IConfigAuditReporter>();
+        A.CallTo(() => reporter.GetReport("Staging")).Returns(
+            CreateReport("Staging", entries: [Entry("Feature.Enabled", "same", sourcePath: "/full/path/staging.json")]));
+        A.CallTo(() => reporter.GetReport("Production")).Returns(
+            CreateReport("Production", entries: [Entry("Feature.Enabled", "same", sourcePath: "/full/path/staging.json")]));
+        using var output = new StringWriter();
+        var runner = new ConfigAuditDiffCommandRunner(
+            reporter,
+            new ConfigAuditReportDiffer(),
+            new ConfigAuditDiffTextRenderer());
+
+        var result = runner.Run(
+            "Staging",
+            "Production",
+            output,
+            new ConfigAuditDiffOptions
+            {
+                EvidenceMode = ConfigAuditDiffEvidenceMode.CapturedSnapshot,
+                IncludeUnchangedItems = true,
+                SourceDetail = ConfigAuditDiffSourceDetail.Full
+            });
+
+        var rendered = output.ToString();
+        Assert.True(result.Succeeded);
+        Assert.Contains("same host comparing named environments", rendered, StringComparison.Ordinal);
+        Assert.Contains("same-host named-environment comparison", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("captured snapshots from the environments they describe", rendered, StringComparison.Ordinal);
+        Assert.Contains("Unchanged KnownEntry: Feature.Enabled", rendered, StringComparison.Ordinal);
+        Assert.Contains("/full/path/staging.json", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Run_OperationalFailuresAreSanitizedWithDocsLink()
     {
         var reporter = A.Fake<IConfigAuditReporter>();
@@ -870,13 +942,14 @@ public sealed class ConfigAuditDiffTests
         string? value,
         bool isRedacted = false,
         string sourcePath = "/config/appsettings.json",
+        string declaredType = "System.String",
         ConfigAuditElementIdentity? element = null,
         IReadOnlyList<ConfigAuditEntry>? children = null,
         IReadOnlyList<ConfigAuditSourceRecord>? sources = null) =>
         new()
         {
             Key = key,
-            DeclaredType = "System.String",
+            DeclaredType = declaredType,
             State = ConfigAuditEntryState.Resolved,
             DisplayValue = value,
             IsRedacted = isRedacted,
