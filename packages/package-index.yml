@@ -19,8 +19,8 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.4.md
     order: 20
-    use_when: Add this when your AppSurface modules need strongly typed configuration primitives instead of ad hoc configuration lookups.
-    includes: AppSurfaceConfigModule, typed config objects, configuration providers, source-aware audit reports, and explicit configuration access patterns.
+    use_when: Add this when your AppSurface modules need strongly typed configuration primitives, source-aware audit reports, or sanitized config-diff support instead of ad hoc configuration lookups.
+    includes: AppSurfaceConfigModule, typed config objects, configuration providers, source-aware audit reports, sanitized audit diff helpers, and explicit configuration access patterns.
     does_not_include: Web hosting, UI docs, caching, LocalSecrets local machine posture, or a remote/team vault system.
     start_here_path: Config/ForgeTrust.AppSurface.Config/README.md
     expected_dependency_package_ids:
