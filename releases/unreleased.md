@@ -12,6 +12,10 @@ This is the living release note for the next coordinated AppSurface version afte
 
 - Add release-facing changes here.
 
+### AppSurface Flow
+
+- Reduce internal `InMemoryFlowRunner<TContext>` routing overhead by using prevalidated `FlowDefinition<TContext>` execution metadata while keeping public Flow APIs unchanged.
+
 ## Migration watch
 
 - Record breaking or behavior-changing guidance here before it moves into the tagged release note.

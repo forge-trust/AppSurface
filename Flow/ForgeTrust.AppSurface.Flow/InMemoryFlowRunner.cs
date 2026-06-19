@@ -32,7 +32,7 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(definition);
-        return ExecuteAsync(definition, definition.StartNodeId, initialContext, null, cancellationToken);
+        return ExecuteAsync(definition, definition.StartExecutionNode, initialContext, null, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -47,7 +47,7 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
         ArgumentNullException.ThrowIfNull(resumeEvent);
         return ExecuteAsync(
             definition,
-            FlowDefinition<TContext>.RequireText(nodeId, nameof(nodeId)),
+            ResolveExecutionNode(definition, FlowDefinition<TContext>.RequireText(nodeId, nameof(nodeId))),
             context,
             resumeEvent,
             cancellationToken);
@@ -55,7 +55,7 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
 
     private async ValueTask<FlowRunResult<TContext>> ExecuteAsync(
         FlowDefinition<TContext> definition,
-        string nodeId,
+        FlowExecutionNode<TContext> executionNode,
         TContext context,
         FlowResumeEvent? resumeEvent,
         CancellationToken cancellationToken)
@@ -66,7 +66,7 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
             throw new InvalidOperationException("AppSurfaceFlowOptions.MaxStepsPerRun must be at least 1.");
         }
 
-        var currentNodeId = nodeId;
+        var currentExecutionNode = executionNode;
         var currentContext = FlowNodeOutcome<TContext>.RequireContext(context);
         var currentResumeEvent = resumeEvent;
 
@@ -74,14 +74,8 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!definition.Nodes.TryGetValue(currentNodeId, out var descriptor))
-            {
-                throw new FlowDefinitionException(
-                    string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"Flow '{definition.FlowId}' version '{definition.Version}' does not contain node '{currentNodeId}'."));
-            }
-
+            var descriptor = currentExecutionNode.Descriptor;
+            var currentNodeId = descriptor.NodeId;
             var executionContext = new FlowExecutionContext<TContext>(
                 definition.FlowId,
                 definition.Version,
@@ -95,8 +89,7 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
             switch (outcome)
             {
                 case FlowNext<TContext> next:
-                    ValidateNextTarget(definition, descriptor, next.NodeId);
-                    currentNodeId = next.NodeId;
+                    currentExecutionNode = ResolveNextExecutionNode(definition, currentExecutionNode, next.NodeId);
                     currentContext = next.Context;
                     break;
                 case FlowWait<TContext> wait:
@@ -113,7 +106,7 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
         }
 
         return FlowRunResult<TContext>.Faulted(
-            currentNodeId,
+            currentExecutionNode.Descriptor.NodeId,
             new FlowFault(
                 "flow.max-steps-exceeded",
                 string.Create(
@@ -121,25 +114,34 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
                     $"Flow '{definition.FlowId}' version '{definition.Version}' exceeded {maxSteps} in-memory steps.")));
     }
 
-    private static void ValidateNextTarget(
+    private static FlowExecutionNode<TContext> ResolveExecutionNode(
         FlowDefinition<TContext> definition,
-        FlowNodeDescriptor<TContext> descriptor,
-        string nextNodeId)
+        string nodeId)
     {
-        if (!descriptor.NextNodeIds.Contains(nextNodeId))
+        if (!definition.ExecutionNodes.TryGetValue(nodeId, out var executionNode))
         {
             throw new FlowDefinitionException(
                 string.Create(
                     CultureInfo.InvariantCulture,
-                    $"Flow '{definition.FlowId}' version '{definition.Version}' node '{descriptor.NodeId}' returned undeclared target '{nextNodeId}'."));
+                    $"Flow '{definition.FlowId}' version '{definition.Version}' does not contain node '{nodeId}'."));
         }
 
-        if (!definition.Nodes.ContainsKey(nextNodeId))
+        return executionNode;
+    }
+
+    private static FlowExecutionNode<TContext> ResolveNextExecutionNode(
+        FlowDefinition<TContext> definition,
+        FlowExecutionNode<TContext> executionNode,
+        string nextNodeId)
+    {
+        if (!executionNode.NextNodes.TryGetValue(nextNodeId, out var nextExecutionNode))
         {
             throw new FlowDefinitionException(
                 string.Create(
                     CultureInfo.InvariantCulture,
-                    $"Flow '{definition.FlowId}' version '{definition.Version}' node '{descriptor.NodeId}' returned missing target '{nextNodeId}'."));
+                    $"Flow '{definition.FlowId}' version '{definition.Version}' node '{executionNode.Descriptor.NodeId}' returned undeclared target '{nextNodeId}'."));
         }
+
+        return nextExecutionNode;
     }
 }

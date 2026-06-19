@@ -33,7 +33,10 @@ public sealed class FlowDefinition<TContext>
         FlowId = RequireText(flowId, nameof(flowId));
         Version = RequireText(version, nameof(version));
         StartNodeId = RequireText(startNodeId, nameof(startNodeId));
-        Nodes = ValidateAndCopyNodes(FlowId, Version, StartNodeId, nodes);
+        var validatedNodes = ValidateAndCopyNodes(FlowId, Version, StartNodeId, nodes);
+        Nodes = validatedNodes.Nodes;
+        ExecutionNodes = validatedNodes.ExecutionNodes;
+        StartExecutionNode = validatedNodes.StartExecutionNode;
     }
 
     /// <summary>
@@ -56,6 +59,20 @@ public sealed class FlowDefinition<TContext>
     /// </summary>
     public IReadOnlyDictionary<string, FlowNodeDescriptor<TContext>> Nodes { get; }
 
+    /// <summary>
+    /// Gets the internal execution view keyed by node id.
+    /// </summary>
+    /// <remarks>
+    /// The execution view is built from the copied and validated node dictionary. It preserves the public
+    /// <see cref="Nodes"/> graph view while giving runners pre-resolved next-node targets.
+    /// </remarks>
+    internal IReadOnlyDictionary<string, FlowExecutionNode<TContext>> ExecutionNodes { get; }
+
+    /// <summary>
+    /// Gets the pre-resolved start node used by in-process runners.
+    /// </summary>
+    internal FlowExecutionNode<TContext> StartExecutionNode { get; }
+
     internal static string RequireText(string value, string parameterName)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -66,7 +83,7 @@ public sealed class FlowDefinition<TContext>
         return value;
     }
 
-    private static IReadOnlyDictionary<string, FlowNodeDescriptor<TContext>> ValidateAndCopyNodes(
+    private static ValidatedFlowNodes ValidateAndCopyNodes(
         string flowId,
         string version,
         string startNodeId,
@@ -121,6 +138,36 @@ public sealed class FlowDefinition<TContext>
             }
         }
 
-        return new ReadOnlyDictionary<string, FlowNodeDescriptor<TContext>>(copy);
+        var publicNodes = new ReadOnlyDictionary<string, FlowNodeDescriptor<TContext>>(copy);
+        var executionNodes = BuildExecutionNodes(copy);
+        return new ValidatedFlowNodes(publicNodes, executionNodes, executionNodes[startNodeId]);
     }
+
+    private static IReadOnlyDictionary<string, FlowExecutionNode<TContext>> BuildExecutionNodes(
+        IReadOnlyDictionary<string, FlowNodeDescriptor<TContext>> nodes)
+    {
+        var executionNodes = new Dictionary<string, FlowExecutionNode<TContext>>(StringComparer.Ordinal);
+        foreach (var item in nodes)
+        {
+            executionNodes.Add(item.Key, new FlowExecutionNode<TContext>(item.Value));
+        }
+
+        foreach (var executionNode in executionNodes.Values)
+        {
+            var nextNodes = new Dictionary<string, FlowExecutionNode<TContext>>(StringComparer.Ordinal);
+            foreach (var nextNodeId in executionNode.Descriptor.NextNodeIds)
+            {
+                nextNodes.Add(nextNodeId, executionNodes[nextNodeId]);
+            }
+
+            executionNode.SetNextNodes(new ReadOnlyDictionary<string, FlowExecutionNode<TContext>>(nextNodes));
+        }
+
+        return new ReadOnlyDictionary<string, FlowExecutionNode<TContext>>(executionNodes);
+    }
+
+    private sealed record ValidatedFlowNodes(
+        IReadOnlyDictionary<string, FlowNodeDescriptor<TContext>> Nodes,
+        IReadOnlyDictionary<string, FlowExecutionNode<TContext>> ExecutionNodes,
+        FlowExecutionNode<TContext> StartExecutionNode);
 }
