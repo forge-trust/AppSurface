@@ -27,6 +27,9 @@ AppSurface publishes coordinated `v0.1.0` release candidates. Before installing 
 - **`FileBasedConfigProvider`**: Loads configuration from files.
 - **`IConfigAuditReporter`**: Builds source-aware configuration audit reports for known config entries.
 - **`ConfigAuditTextRenderer`**: Renders a safe, human-readable audit report from the structured model.
+- **`ConfigAuditReportDiffer`**: Compares two existing sanitized audit reports without re-resolving providers.
+- **`ConfigAuditDiffTextRenderer`**: Renders deterministic diff text with explicit redaction and evidence-mode wording.
+- **`ConfigAuditDiffCommandRunner`**: Runs app-owned same-host or captured-snapshot diff workflows without a command framework dependency.
 - **`ConfigAuditCollectionTraversalAttribute`**: Enables bounded collection element traversal for a discovered config wrapper.
 - **`ConfigAuditDictionaryKeyCorrelationOptions`**: Supplies opt-in scoped HMAC key material for dictionary key correlation ids.
 - **`ConfigDiagnosticsCommandRunner`**: Runs the app-owned text diagnostics workflow for the active AppSurface environment.
@@ -352,6 +355,82 @@ fail during host construction or eager validation before commands execute. AppSu
 the normal Generic Host lifecycle, so unrelated hosted services can start unless your app owns a separate command-only
 startup path.
 
+### Config diff in 10 minutes
+
+Use `ConfigAuditReportDiffer` when support needs to compare two already-built `ConfigAuditReport` snapshots. The differ
+is pure: it does not start a host, read files, call providers, or depend on a command framework. That keeps config diff
+safe to use from console commands, support tooling, tests, or captured-report workflows:
+
+```csharp
+var baseline = auditReporter.GetReport("Staging");
+var target = auditReporter.GetReport("Production");
+
+var diff = differ.Compare(
+    baseline,
+    target,
+    new ConfigAuditDiffOptions
+    {
+        EvidenceMode = ConfigAuditDiffEvidenceMode.SameHostNamedEnvironment
+    });
+
+Console.Write(diffRenderer.Render(diff));
+```
+
+Same-host named-environment comparison is fast triage evidence. It asks the current app host to build both named
+reports, so renderer output includes a warning that it does not prove deployment parity. Use it to spot likely drift,
+but do not treat it as proof that two deployed hosts saw the same files, environment variables, mounts, secret stores,
+or provider startup conditions.
+
+Captured snapshots are stronger evidence. Capture each sanitized `ConfigAuditReport` from the host or deployment it
+describes, store it according to your support-bundle policy, then compare the JSON snapshots later:
+
+```csharp
+var result = diffRunner.RunCapturedSnapshots(
+    File.ReadAllText("staging.config-audit.json"),
+    File.ReadAllText("production.config-audit.json"),
+    console.Output);
+
+if (!result.Succeeded)
+{
+    throw new CommandException(result.Failure?.ToDisplayString() ?? "Configuration diff failed.");
+}
+```
+
+`ConfigAuditDiffCommandRunner` also supports same-host command wrappers:
+
+```csharp
+var result = diffRunner.Run("Staging", "Production", console.Output);
+```
+
+Both runner methods return sanitized `Problem`, `Cause`, `Fix`, `DocsLink`, `Stage`, and `ExceptionType` fields for
+baseline, target, snapshot parse, compare, and render failures. They intentionally omit raw exception messages because
+provider and parser failures can contain attempted values, support paths, or environment-specific details.
+
+Diff reports compare providers, known entries, discovered keys, diagnostics, redaction metadata, and source evidence.
+Duplicate identities are paired deterministically as multimaps instead of being overwritten. Redacted values remain
+uncertain: when both sides render `[redacted]`, the diff says raw equality is unknown. Omitted values, redacted-vs-shown
+values, redaction-policy mismatches, and older manual reports with default value-display enum states also carry typed
+uncertainty.
+
+By default, `ConfigAuditDiffTextRenderer` summarizes source paths to file names. Use full source detail only when the
+operator workflow is allowed to expose source paths already present in the sanitized audit reports:
+
+```csharp
+var diff = differ.Compare(
+    baseline,
+    target,
+    new ConfigAuditDiffOptions
+    {
+        EvidenceMode = ConfigAuditDiffEvidenceMode.CapturedSnapshot,
+        SourceDetail = ConfigAuditDiffSourceDetail.Full
+    });
+```
+
+Dictionary entries need stable comparison identity. Non-sensitive dictionary keys can match by safe label. Redacted or
+hidden dictionary labels such as `[redacted-key-1]` are report-local and are marked uncomparable unless the entry has
+`Element.ComparisonKeyCorrelationId`. Do not use the existing environment-scoped `Element.KeyCorrelationId` for
+staging-to-production matching; it intentionally changes when the environment changes.
+
 Audit entry states are intentionally small:
 
 | State | Meaning |
@@ -463,8 +542,11 @@ Each collection child can include `ConfigAuditEntry.Element`. Array and list ent
 `ArrayItem` or `ListItem` and set `Element.Index`. Dictionary entries set `Element.Kind` to `DictionaryItem` and set
 `Element.KeyLabel` to a display-safe label. Redacted dictionary labels are report-local, for example
 `[redacted-key-1]`; they are not stable identifiers across reports. When dictionary key correlation is explicitly
-enabled and configured, dictionary entries also set `Element.KeyCorrelationId` to a separate opaque identifier. The
-correlation id is metadata; it is never part of `ConfigAuditEntry.Key` or `Element.KeyLabel`.
+enabled and configured, dictionary entries also set `Element.KeyCorrelationId` and
+`Element.ComparisonKeyCorrelationId` to separate opaque identifiers. The ids are metadata; they are never part of
+`ConfigAuditEntry.Key` or `Element.KeyLabel`. `Element.KeyCorrelationId` is environment-scoped for same-environment
+report history. `Element.ComparisonKeyCorrelationId` omits the environment from its HMAC input so config diffs can
+match the same redacted dictionary key across captured staging and production reports.
 
 When wrapper discovery and manual registration use the same key, the wrapper remains the source of wrapper metadata
 and validation behavior. Explicit manual option assignments override wrapper attribute options per property, including
@@ -502,21 +584,30 @@ services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
 });
 ```
 
-The secret key is interpreted as UTF-8 and must contain at least 32 bytes when UTF-8 encoded. AppSurface derives ids with
-HMAC-SHA256 over the algorithm version, application scope, report environment, root audit key, and raw dictionary key,
-then truncates the result to 96 bits. Rendered ids look like `v1:{keyId}:{24-hex-chars}`. The key id is trimmed and can
-contain only ASCII
-letters, digits, `.`, `_`, and `-` so rendered reports remain line-safe. Changing the secret key, key id, application
-scope, environment, or root audit key intentionally changes the id.
+The secret key is interpreted as UTF-8 and must contain at least 32 bytes when UTF-8 encoded. AppSurface derives
+`Element.KeyCorrelationId` with HMAC-SHA256 over the algorithm version, application scope, report environment, root
+audit key, and raw dictionary key, then truncates the result to 96 bits. Rendered ids look like
+`v1:{keyId}:{24-hex-chars}`. This id is environment-scoped by design; changing the secret key, key id, application
+scope, environment, root audit key, or raw key intentionally changes it.
+
+AppSurface also derives `Element.ComparisonKeyCorrelationId` as `v1c:{keyId}:{24-hex-chars}` over the algorithm
+version, application scope, root audit key, and raw dictionary key. It deliberately omits the environment so
+`ConfigAuditReportDiffer` can match captured staging and production reports without trusting report-local redacted
+labels. Changing the secret key, key id, application scope, root audit key, or raw key intentionally changes the
+comparison id. Changing only the environment does not.
+
+The key id is trimmed and can contain only ASCII letters, digits, `.`, `_`, and `-` so rendered reports remain
+line-safe.
 
 If correlation is enabled for an entry but global key material is missing or invalid, the report keeps current
-report-local labels, omits `KeyCorrelationId`, and emits `config-audit-key-correlation-unavailable`. Support bundles may
-include correlation ids, key id, and application scope, but must never include the secret key or a raw-key mapping.
+report-local labels, omits both correlation ids, and emits `config-audit-key-correlation-unavailable`. Support bundles
+may include correlation ids, key id, and application scope, but must never include the secret key or a raw-key mapping.
 
 Treat correlation ids as sensitive support metadata. They reveal equality, absence, recurrence, and churn across
-reports. If an attacker can choose dictionary keys and obtain reports, they can still test chosen inputs against
-correlation output even though HMAC prevents offline guessing without the secret. Keep correlation disabled unless a
-support or operator workflow needs it.
+reports. Comparison ids reveal equality across environments more directly than environment-scoped ids. If an attacker
+can choose dictionary keys and obtain reports, they can still test chosen inputs against correlation output even though
+HMAC prevents offline guessing without the secret. Keep correlation disabled unless a support or operator workflow
+needs it.
 
 ### Collection Examples
 
@@ -524,7 +615,7 @@ support or operator workflow needs it.
 | --- | --- |
 | `string[]` or `List<T>` | Children render as `Key[0]`, `Key[1]`, preserving numeric order in text output. |
 | `Dictionary<string,T>` | Non-sensitive keys render as `Key["name"]`; sensitive keys render as `Key[[redacted-key-1]]`. |
-| dictionary correlation enabled | Dictionary elements include `Element.KeyCorrelationId`; text output renders it as entry metadata. |
+| dictionary correlation enabled | Dictionary elements include environment-scoped `Element.KeyCorrelationId` and cross-environment `Element.ComparisonKeyCorrelationId`; text output renders the environment-scoped id as entry metadata. |
 | null element | Emits an element child with a `null` display value and no grandchildren. |
 | object element | Emits the element and then ordinary public property/field children below it. |
 | non-string dictionary key | Uses the invariant string label for convertible keys when non-sensitive and display is enabled; arbitrary object keys are hidden. |
@@ -623,7 +714,8 @@ provider-only values that should continue appearing in reports.
   traversal limits are too broad or too narrow for that derived key.
 - Attribute values are compile-time metadata. Use manual `AddConfigAuditKey<T>()` options when traversal settings must
   be chosen dynamically at registration time.
-- Sensitive dictionary key labels are report-local. Do not use `[redacted-key-1]` as a durable correlation identifier.
+- Sensitive dictionary key labels are report-local. Do not use `[redacted-key-1]` or descendants such as
+  `Tenants[[redacted-key-1]].Name` as durable correlation identifiers.
 - `ConfigAuditSensitivity.NonSensitive` is not a redaction bypass; it cannot override sensitive fragments, source
   sensitivity, provider sensitivity, or another registration that marks the entry sensitive.
 - Invalid `ConfigAuditSensitivity` enum values emit `config-audit-options-invalid` and redact as sensitive.

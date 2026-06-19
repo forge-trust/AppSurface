@@ -8,11 +8,12 @@ namespace ForgeTrust.AppSurface.Config;
 /// A module that registers configuration management services and automatically discovers and registers configuration objects.
 /// </summary>
 /// <remarks>
-/// <see cref="AppSurfaceConfigModule"/> registers core configuration services immediately, then defers typed
-/// <see cref="IConfig"/> discovery through <see cref="StartupContext.CustomRegistrations"/> so all module dependencies
-/// are known first. The deferred scan inspects dependency module assemblies, the entry assembly, and the root module
-/// assembly. Pitfall: config dependencies should be registered before the custom registration callback runs; otherwise
-/// discovered config objects may activate before their supporting services are available.
+/// <see cref="AppSurfaceConfigModule"/> registers core configuration services immediately, including audit reporting,
+/// diagnostics, sanitized diff comparison, diff rendering, and command-runner helpers, then defers typed
+/// <see cref="IConfig"/> discovery through <see cref="StartupContext.CustomRegistrations"/> so all module
+/// dependencies are known first. The deferred scan inspects dependency module assemblies, the entry assembly, and the
+/// root module assembly. Pitfall: config dependencies should be registered before the custom registration callback
+/// runs; otherwise discovered config objects may activate before their supporting services are available.
 /// </remarks>
 public class AppSurfaceConfigModule : IAppSurfaceModule
 {
@@ -21,10 +22,13 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
     /// </summary>
     /// <remarks>
     /// <see cref="ConfigureServices(StartupContext, IServiceCollection)"/> adds the default manager, providers,
-    /// audit reporter, redactor, and file-location provider, then appends a
-    /// <see cref="StartupContext.CustomRegistrations"/> callback. That callback scans dependency, entry, and
-    /// root-module assemblies for concrete <see cref="IConfig"/> implementations and registers each as a singleton
-    /// initialized from <see cref="IConfigManager"/> and <see cref="IEnvironmentProvider"/>. Wrappers decorated with
+    /// audit reporter, audit redactor, text renderer, diagnostics runner, file-location provider, and sanitized diff
+    /// services, then appends a <see cref="StartupContext.CustomRegistrations"/> callback. The diff registrations include
+    /// <see cref="ConfigAuditReportDiffer"/> for pure typed snapshot comparison, <see cref="ConfigAuditDiffTextRenderer"/>
+    /// for deterministic operator output, and <see cref="ConfigAuditDiffCommandRunner"/> for command-framework-agnostic
+    /// same-host and captured-snapshot workflows. The custom callback scans dependency, entry, and root-module assemblies
+    /// for concrete <see cref="IConfig"/> implementations and registers each as a singleton initialized from
+    /// <see cref="IConfigManager"/> and <see cref="IEnvironmentProvider"/>. Wrappers decorated with
     /// <see cref="ConfigAuditCollectionTraversalAttribute"/> also contribute audit traversal options for their key.
     /// </remarks>
     /// <param name="context">Startup context that supplies assemblies, dependency modules, and the custom registration log.</param>
@@ -35,8 +39,11 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
         services.AddOptions<ConfigAuditDictionaryKeyCorrelationOptions>();
         services.AddSingleton<ConfigDiagnosticsCommandRunner>();
+        services.AddSingleton<ConfigAuditDiffCommandRunner>();
         services.AddSingleton<ConfigAuditRedactor>();
         services.AddSingleton<ConfigAuditTextRenderer>();
+        services.AddSingleton<ConfigAuditReportDiffer>();
+        services.AddSingleton<ConfigAuditDiffTextRenderer>();
         services.AddSingleton<IEnvironmentConfigProvider, EnvironmentConfigProvider>();
         services.AddSingleton<IConfigFileLocationProvider, DefaultConfigFileLocationProvider>();
         services.AddSingleton<IConfigProvider, FileBasedConfigProvider>();
