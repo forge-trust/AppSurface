@@ -31,7 +31,7 @@ Release and readiness:
 ## Also building...
 
 - Add `ForgeTrust.AppSurface.Config.LocalSecrets` after Config when local development secrets need source-aware diagnostics before a remote vault exists.
-- Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results or Minimal API ProblemDetails responses; run `examples/auth-web-razorwire-proof/README.md` for the browser-first Web/RazorWire proof.
+- Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results or Minimal API ProblemDetails responses; run the [Auth Web/RazorWire proof](../examples/auth-web-razorwire-proof/README.md) for the browser-first Web/RazorWire proof.
 - Add `ForgeTrust.AppSurface.Intelligence` when you want vendor-neutral product event contracts and optional host-owned analytics sinks.
 - Add `ForgeTrust.AppSurface.Flow` when you want generated-case typed process graphs, inferred port mapping, and local runner tests.
 - Add `ForgeTrust.AppSurface.Flow.DurableTask` after `ForgeTrust.AppSurface.Flow` when a typed process needs durable execution.

@@ -60,6 +60,38 @@ public sealed class AuthWebRazorWireProofExampleTests
         Assert.Equal("viewer-1", ReadNullableString(json, "subject"));
     }
 
+    [Fact]
+    public async Task ApiProof_HeaderTakesPrecedenceOverProofUserQuery()
+    {
+        using var client = _fixture.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/auth-proof?proofUser=operator");
+        request.Headers.Add("X-Proof-User", "viewer");
+
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(body);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal("Forbid", ReadString(json, "outcome"));
+        Assert.Equal("Forbidden", ReadString(json, "reason"));
+        Assert.Equal("viewer-1", ReadNullableString(json, "subject"));
+    }
+
+    [Fact]
+    public async Task BrowserProof_HeaderTakesPrecedenceOverProofUserQuery()
+    {
+        using var client = _fixture.CreateBrowserClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/?proofUser=operator");
+        request.Headers.Add("X-Proof-User", "unknown");
+
+        var html = await (await client.SendAsync(request)).Content.ReadAsStringAsync();
+
+        Assert.Contains("data-auth-proof-persona=\"anonymous\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-auth-proof-api-outcome=\"Challenge\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-auth-proof-ui-outcome=\"Challenge\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-auth-proof-subject=\"\"", html, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("anonymous", "anonymous", "Challenge", "Unauthenticated", "unauthenticated", null)]
     [InlineData("unknown", "anonymous", "Challenge", "Unauthenticated", "unauthenticated", null)]

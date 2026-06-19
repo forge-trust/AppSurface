@@ -31,10 +31,10 @@ public sealed class AuthProofController : Controller
 
     private string ResolveCurrentPersona()
     {
-        var headerPersona = ProofPersona.Normalize(Request.Headers[ProofAuthenticationHandler.HeaderName].ToString());
-        if (headerPersona != ProofPersona.Anonymous)
+        var headerValue = Request.Headers[ProofAuthenticationHandler.HeaderName].ToString();
+        if (!string.IsNullOrWhiteSpace(headerValue))
         {
-            return headerPersona;
+            return ProofPersona.Normalize(headerValue);
         }
 
         return ProofPersona.Normalize(Request.Query[ProofAuthenticationHandler.QueryStateName].ToString());

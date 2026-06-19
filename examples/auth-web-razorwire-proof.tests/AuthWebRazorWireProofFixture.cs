@@ -7,12 +7,26 @@ using CliCommandResult = CliWrap.CommandResult;
 
 namespace AuthWebRazorWireProofExample.Tests;
 
+/// <summary>
+/// xUnit collection used to share a single hosted proof app instance across the black-box sample tests.
+/// </summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class AuthWebRazorWireProofCollection : ICollectionFixture<AuthWebRazorWireProofFixture>
 {
+    /// <summary>
+    /// Stable xUnit collection name for tests that depend on the hosted proof app fixture.
+    /// </summary>
     public const string Name = "AuthWebRazorWireProofCollection";
 }
 
+/// <summary>
+/// Starts the Auth Web/RazorWire proof sample as an external ASP.NET Core process for black-box tests.
+/// </summary>
+/// <remarks>
+/// The fixture intentionally exercises the sample through HTTP and rendered HTML rather than internal
+/// members. Repository file helpers only accept repository-relative path segments and reject rooted or
+/// escaping paths so docs contract checks cannot read outside the checkout.
+/// </remarks>
 public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
 {
     private readonly object _logGate = new();
@@ -21,10 +35,19 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
     private readonly TaskCompletionSource<string> _boundBaseUrlSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private CliWrapProcessLease? _appProcess;
 
+    /// <summary>
+    /// Base URL published by the hosted proof app after startup.
+    /// </summary>
     public string BaseUrl { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Absolute repository root resolved from the test output directory.
+    /// </summary>
     public string RepositoryRoot { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Starts the sample app and waits until the root proof console responds successfully.
+    /// </summary>
     public async Task InitializeAsync()
     {
         RepositoryRoot = FindRepositoryRoot(AppContext.BaseDirectory);
@@ -70,6 +93,9 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
         await WaitForAppReadyAsync(TimeSpan.FromSeconds(60));
     }
 
+    /// <summary>
+    /// Stops the hosted proof app process and releases its cancellation source.
+    /// </summary>
     public async Task DisposeAsync()
     {
         if (_appProcess is not null)
@@ -79,6 +105,10 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Creates a non-redirecting HTTP client bound to <see cref="BaseUrl"/>.
+    /// </summary>
+    /// <returns>An HTTP client for direct API checks against the proof app.</returns>
     public HttpClient CreateClient()
     {
         return new HttpClient
@@ -87,6 +117,10 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
         };
     }
 
+    /// <summary>
+    /// Creates a browser-like HTTP client bound to <see cref="BaseUrl"/>.
+    /// </summary>
+    /// <returns>An HTTP client configured to follow redirects for rendered-page checks.</returns>
     public HttpClient CreateBrowserClient()
     {
         return new HttpClient(new HttpClientHandler
@@ -98,11 +132,21 @@ public sealed partial class AuthWebRazorWireProofFixture : IAsyncLifetime
         };
     }
 
+    /// <summary>
+    /// Reads a UTF-8/ASCII text file from the repository checkout.
+    /// </summary>
+    /// <param name="pathParts">Repository-relative path segments. Rooted or escaping paths are rejected.</param>
+    /// <returns>The file contents.</returns>
     public string ReadRepositoryFile(params string[] pathParts)
     {
         return File.ReadAllText(ResolveRepositoryPath(pathParts));
     }
 
+    /// <summary>
+    /// Reads C# product source files under one or more repository-relative roots.
+    /// </summary>
+    /// <param name="roots">Repository-relative source roots to scan.</param>
+    /// <returns>File contents for matching source files, excluding build output directories.</returns>
     public IEnumerable<string> ReadProductSourceFiles(params string[] roots)
     {
         foreach (var absoluteRoot in roots.Select(root => ResolveRepositoryPath(root)))
