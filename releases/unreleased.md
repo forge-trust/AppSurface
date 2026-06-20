@@ -5,12 +5,14 @@ This is the living release note for the next coordinated AppSurface version afte
 ## What is taking shape
 
 - Sanitized AppSurface Config audit diffs for comparing captured runtime configuration reports.
+- AppSurface Observability package defaults for sending app-side logs, traces, and metrics to Aspire or another OTLP collector.
 
 ## Included in the next coordinated version
 
 ### Release and docs surface
 
 - AppSurface Config now exposes a sanitized config audit diff surface. `ConfigAuditReportDiffer` compares two existing `ConfigAuditReport` snapshots without re-resolving providers, `ConfigAuditDiffTextRenderer` renders deterministic same-host or captured-snapshot evidence with redaction uncertainty called out, and `ConfigAuditDiffCommandRunner` gives apps command-framework-agnostic same-host and captured JSON workflows with display-safe problem/cause/fix/docs-link failures.
+- AppSurface Observability adds `ForgeTrust.AppSurface.Observability` with module-first OpenTelemetry logging, tracing, and metrics registration, endpoint-driven OTLP exporter setup, service identity resource metadata, and docs for Aspire and non-Aspire adoption paths.
 
 ### AppSurface Flow
 

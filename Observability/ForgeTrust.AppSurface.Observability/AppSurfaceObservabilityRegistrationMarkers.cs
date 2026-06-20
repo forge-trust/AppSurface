@@ -1,0 +1,5 @@
+namespace ForgeTrust.AppSurface.Observability;
+
+internal sealed class AppSurfaceObservabilityServicesRegistrationMarker;
+
+internal sealed class AppSurfaceObservabilityLoggingRegistrationMarker;

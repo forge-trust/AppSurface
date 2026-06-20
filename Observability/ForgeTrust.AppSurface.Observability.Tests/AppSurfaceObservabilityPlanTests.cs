@@ -1,0 +1,124 @@
+using ForgeTrust.AppSurface.Core;
+using Microsoft.Extensions.Configuration;
+
+namespace ForgeTrust.AppSurface.Observability.Tests;
+
+public sealed class AppSurfaceObservabilityPlanTests
+{
+    [Fact]
+    public void Resolve_WhenEndpointConfiguredWithoutEndpoint_SkipsExporterAndLogsDiagnostic()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(),
+            environment: new TestEnvironmentReader());
+
+        Assert.Equal(AppSurfaceOtlpExporterMode.WhenEndpointConfigured, plan.ExporterMode);
+        Assert.Null(plan.Endpoint);
+        Assert.False(plan.ShouldRegisterExporter);
+        Assert.True(plan.ShouldLogSkippedExporterDiagnostic);
+        Assert.Equal("Catalog API", plan.ServiceName);
+    }
+
+    [Fact]
+    public void Resolve_WithConfiguredEndpoint_RegistersExporter()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("AppSurfaceObservability:OtlpEndpoint", "http://collector:4317")),
+            environment: new TestEnvironmentReader());
+
+        Assert.True(plan.ShouldRegisterExporter);
+        Assert.False(plan.ShouldLogSkippedExporterDiagnostic);
+        Assert.Equal(new Uri("http://collector:4317"), plan.Endpoint);
+    }
+
+    [Fact]
+    public void Resolve_ConfiguredEndpointWinsOverOtelEnvironment()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("AppSurfaceObservability:OtlpEndpoint", "http://appsurface:4317")),
+            environment: new TestEnvironmentReader(("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel:4317")));
+
+        Assert.Equal(new Uri("http://appsurface:4317"), plan.Endpoint);
+    }
+
+    [Fact]
+    public void Resolve_OtelEnvironmentEndpointEnablesWhenEndpointConfigured()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(),
+            environment: new TestEnvironmentReader(("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel:4317")));
+
+        Assert.True(plan.ShouldRegisterExporter);
+        Assert.Equal(new Uri("http://otel:4317"), plan.Endpoint);
+    }
+
+    [Fact]
+    public void Resolve_AlwaysRegistersExporterWithoutEndpoint()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("AppSurfaceObservability:ExporterMode", "Always")),
+            environment: new TestEnvironmentReader());
+
+        Assert.True(plan.ShouldRegisterExporter);
+        Assert.False(plan.ShouldLogSkippedExporterDiagnostic);
+        Assert.Null(plan.Endpoint);
+    }
+
+    [Fact]
+    public void Resolve_NeverSkipsExporterEvenWithEndpoint()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(
+                ("AppSurfaceObservability:ExporterMode", "Never"),
+                ("AppSurfaceObservability:OtlpEndpoint", "http://collector:4317")),
+            environment: new TestEnvironmentReader());
+
+        Assert.False(plan.ShouldRegisterExporter);
+        Assert.False(plan.ShouldLogSkippedExporterDiagnostic);
+        Assert.Equal(new Uri("http://collector:4317"), plan.Endpoint);
+    }
+
+    [Fact]
+    public void Resolve_ServiceNameOverrideWinsOverStartupContextApplicationName()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(
+                ("AppSurfaceObservability:ServiceName", "orders-api"),
+                ("AppSurfaceObservability:ServiceVersion", "2026.6.19")),
+            environment: new TestEnvironmentReader());
+
+        Assert.Equal("orders-api", plan.ServiceName);
+        Assert.Equal("2026.6.19", plan.ServiceVersion);
+    }
+
+    [Fact]
+    public void Resolve_InvalidEnvironmentEndpointThrowsClearMessage()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            AppSurfaceObservabilityPlan.Resolve(
+                CreateContext("Catalog API"),
+                CreateConfiguration(),
+                environment: new TestEnvironmentReader(("OTEL_EXPORTER_OTLP_ENDPOINT", "not a uri"))));
+
+        Assert.Contains("OTEL_EXPORTER_OTLP_ENDPOINT must be an absolute URI", exception.Message);
+    }
+
+    private static StartupContext CreateContext(string applicationName)
+    {
+        return new StartupContext([], new TestHostModule(), applicationName);
+    }
+
+    private static IConfiguration CreateConfiguration(params (string Key, string Value)[] values)
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(values.Select(value => new KeyValuePair<string, string?>(value.Key, value.Value)))
+            .Build();
+    }
+}

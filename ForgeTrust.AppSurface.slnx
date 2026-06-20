@@ -65,6 +65,10 @@
     <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj" />
     <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence.Tests/ForgeTrust.AppSurface.Intelligence.Tests.csproj" />
   </Folder>
+  <Folder Name="/Observability/">
+    <Project Path="Observability/ForgeTrust.AppSurface.Observability/ForgeTrust.AppSurface.Observability.csproj" />
+    <Project Path="Observability/ForgeTrust.AppSurface.Observability.Tests/ForgeTrust.AppSurface.Observability.Tests.csproj" />
+  </Folder>
   <Folder Name="/Examples/razorwire-mvc/">
     <Project Path="examples/razorwire-mvc/RazorWireWebExample.csproj" />
   </Folder>
