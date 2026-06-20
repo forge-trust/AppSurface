@@ -1,0 +1,101 @@
+@model AuthProofPageModel
+@{
+    ViewData["Title"] = "AppSurface Auth Web/RazorWire Proof";
+}
+
+<header class="proof-header" data-auth-proof-persona="@Model.Persona">
+    <div class="proof-kicker">Host policy: @Model.Api.Policy</div>
+    <h1>AppSurface Auth Web/RazorWire Proof</h1>
+    <p class="proof-copy">
+        Your host owns auth. This sample only changes the local proof persona, then asks the same ASP.NET Core
+        policy through AppSurface and renders matching Minimal API and RazorWire-facing states.
+    </p>
+</header>
+
+<nav class="persona-switch" aria-label="Proof persona">
+    <a class="persona-link"
+       href="/?proofUser=anonymous"
+       data-auth-proof-select-persona="anonymous"
+       aria-current="@(Model.Persona == ProofPersona.Anonymous ? "true" : "false")">Anonymous</a>
+    <a class="persona-link"
+       href="/?proofUser=viewer"
+       data-auth-proof-select-persona="viewer"
+       aria-current="@(Model.Persona == ProofPersona.Viewer ? "true" : "false")">viewer</a>
+    <a class="persona-link"
+       href="/?proofUser=operator"
+       data-auth-proof-select-persona="operator"
+       aria-current="@(Model.Persona == ProofPersona.Operator ? "true" : "false")">operator</a>
+</nav>
+
+<section class="state-grid" aria-label="Auth proof states">
+    <article id="api-proof-state"
+             class="state-card"
+             data-auth-proof-persona="@Model.Persona"
+             data-auth-proof-api-outcome="@Model.Api.Outcome"
+             data-auth-proof-ui-outcome="@Model.RazorWire.Outcome"
+             data-auth-proof-ui-reason="@Model.RazorWire.Reason"
+             data-auth-proof-subject="@Model.Api.Subject"
+             data-auth-proof-state="@Model.Api.UiState">
+        <h2>Minimal API</h2>
+        <dl>
+            <div class="state-row"><dt>Status</dt><dd>@Model.Api.StatusCode</dd></div>
+            <div class="state-row"><dt>Outcome</dt><dd>@Model.Api.Outcome</dd></div>
+            <div class="state-row"><dt>Reason</dt><dd>@Model.Api.Reason</dd></div>
+            <div class="state-row"><dt>Subject</dt><dd>@(Model.Api.Subject ?? "none")</dd></div>
+        </dl>
+    </article>
+
+    <article id="razorwire-proof-state"
+             class="state-card"
+             data-auth-proof-persona="@Model.Persona"
+             data-auth-proof-api-outcome="@Model.Api.Outcome"
+             data-auth-proof-ui-outcome="@Model.RazorWire.Outcome"
+             data-auth-proof-ui-reason="@Model.RazorWire.Reason"
+             data-auth-proof-subject="@Model.RazorWire.Subject"
+             data-auth-proof-state="@Model.RazorWire.UiState">
+        <h2>RazorWire-facing state</h2>
+        <dl>
+            <div class="state-row"><dt>State</dt><dd>@Model.RazorWire.UiState</dd></div>
+            <div class="state-row"><dt>Outcome</dt><dd>@Model.RazorWire.Outcome</dd></div>
+            <div class="state-row"><dt>Reason</dt><dd>@Model.RazorWire.Reason</dd></div>
+            <div class="state-row"><dt>Subject</dt><dd>@(Model.RazorWire.Subject ?? "none")</dd></div>
+        </dl>
+    </article>
+</section>
+
+<section class="matrix" aria-label="Canonical proof matrix">
+    <table>
+        <thead>
+        <tr>
+            <th>Persona</th>
+            <th>API status</th>
+            <th>Outcome</th>
+            <th>Reason</th>
+            <th>RazorWire state</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td>anonymous</td>
+            <td>401</td>
+            <td>Challenge</td>
+            <td>Unauthenticated</td>
+            <td>unauthenticated</td>
+        </tr>
+        <tr>
+            <td>viewer</td>
+            <td>403</td>
+            <td>Forbid</td>
+            <td>Forbidden</td>
+            <td>forbidden</td>
+        </tr>
+        <tr>
+            <td>operator</td>
+            <td>200</td>
+            <td>Allowed</td>
+            <td>None</td>
+            <td>allowed</td>
+        </tr>
+        </tbody>
+    </table>
+</section>

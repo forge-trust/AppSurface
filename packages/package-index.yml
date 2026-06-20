@@ -63,12 +63,13 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.4.md
+    release_notes_path: releases/unreleased.md
     order: 35
-    use_when: Add this when authoring AppSurface modules or host integrations that need passive cross-surface auth vocabulary without depending on ASP.NET Core.
-    includes: AppSurfaceAuthModule, AppSurfaceAuthOptions, neutral user/session/context contracts, auth outcome and reason results, passive login/logout prompts, passive audit event descriptions, and reserved metadata keys.
-    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policies, middleware, endpoint filters, runtime auth context accessors, challenges, forbids, redirects, audit sinks, or UI.
+    use_when: Add this when authoring AppSurface modules or host integrations that need passive cross-surface auth vocabulary or durable app-user mapping contracts without depending on ASP.NET Core.
+    includes: AppSurfaceAuthModule, AppSurfaceAuthOptions, neutral user/session/context contracts, auth outcome and reason results, durable external-subject to app-user-id mapping contracts, passive login/logout prompts, passive audit event descriptions, and reserved metadata keys.
+    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policies, middleware, endpoint filters, runtime auth context accessors, user stores, provisioning implementations, database schema, challenges, forbids, redirects, audit sinks, or UI.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth` when reusable modules need host-neutral auth results or app-owned identity mapping boundaries without taking a web or persistence dependency.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj
@@ -77,13 +78,13 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.1.0-rc.4.md
+    release_notes_path: releases/unreleased.md
     order: 36
-    use_when: Add this in an ASP.NET Core host that already owns authentication and authorization when AppSurface modules need mapped request auth context or named host-policy results.
-    includes: AppSurfaceAspNetCoreAuthModule, AddAppSurfaceAspNetCoreAuth registration, ASP.NET Core request auth context mapping, named host-policy evaluation, AppSurfaceAuthResult mapping, and safe setup diagnostics.
-    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policy definitions, middleware, endpoint filters, challenge or forbid execution, redirects, audit sinks, RazorWire UI, or Minimal API helpers.
+    use_when: Add this in an ASP.NET Core host that already owns authentication and authorization when AppSurface modules need mapped request auth context, named host-policy results, or Minimal API endpoints with AppSurface-shaped auth failure responses.
+    includes: AppSurfaceAspNetCoreAuthModule, AddAppSurfaceAspNetCoreAuth registration, AddAppSurfacePolicy policy naming, RequireSurfacePolicy Minimal API endpoint filters with fallback-policy opt-out metadata, ASP.NET Core request auth context mapping, named host-policy evaluation, AppSurfaceAuthResult mapping, ProblemDetails auth failure responses, and safe setup diagnostics.
+    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policy definitions, middleware insertion, ASP.NET Core authorization middleware replacement, browser challenge or forbid execution, redirects, audit sinks, RazorWire UI, or MVC/controller auth helpers.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results.
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results or Minimal API ProblemDetails responses; run the [Auth Web/RazorWire proof](../examples/auth-web-razorwire-proof/README.md) for the browser-first Web/RazorWire proof.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth
   - project: Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj

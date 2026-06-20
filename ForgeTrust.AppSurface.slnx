@@ -40,6 +40,8 @@
   </Folder>
   <Folder Name="/Examples/">
     <Project Path="examples/auth-aspnetcore-bridge/AuthAspNetCoreBridgeExample.csproj" />
+    <Project Path="examples/auth-web-razorwire-proof/AuthWebRazorWireProofExample.csproj" />
+    <Project Path="examples/auth-web-razorwire-proof.tests/AuthWebRazorWireProofExample.Tests.csproj" />
     <Project Path="examples/aspire-apphost/AspireAppHostExample.csproj" />
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />

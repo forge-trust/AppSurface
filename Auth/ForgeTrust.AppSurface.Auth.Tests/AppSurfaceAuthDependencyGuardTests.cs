@@ -14,7 +14,7 @@ public sealed class AppSurfaceAuthDependencyGuardTests
 
     [Theory]
     [MemberData(nameof(SurfaceNeutralProjects))]
-    public void SurfaceNeutralProject_DoesNotReferenceAspNetCore(string projectPath, Assembly assembly)
+    public void SurfaceNeutralProject_DoesNotReferenceHostAuthOrPersistenceStacks(string projectPath, Assembly assembly)
     {
         _ = assembly;
         var project = LoadProject(projectPath);
@@ -28,14 +28,27 @@ public sealed class AppSurfaceAuthDependencyGuardTests
             frameworkReferences,
             value => string.Equals(value, "Microsoft.AspNetCore.App", StringComparison.OrdinalIgnoreCase));
 
+        var forbiddenPackagePrefixes = new[]
+        {
+            "Microsoft.AspNetCore",
+            "Microsoft.EntityFrameworkCore",
+            "Microsoft.IdentityModel",
+            "System.IdentityModel",
+            "Aspire",
+            "Keycloak",
+        };
+
         var packageReferences = project.Descendants()
             .Where(element => element.Name.LocalName == "PackageReference")
             .Select(element => (string?)element.Attribute("Include"))
             .Where(value => !string.IsNullOrWhiteSpace(value));
 
-        Assert.DoesNotContain(
-            packageReferences,
-            value => value!.StartsWith("Microsoft.AspNetCore", StringComparison.OrdinalIgnoreCase));
+        foreach (var prefix in forbiddenPackagePrefixes)
+        {
+            Assert.DoesNotContain(
+                packageReferences,
+                value => value!.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        }
 
         var projectReferences = project.Descendants()
             .Where(element => element.Name.LocalName == "ProjectReference")
@@ -43,7 +56,19 @@ public sealed class AppSurfaceAuthDependencyGuardTests
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Select(value => value!.Replace('\\', '/'));
 
-        Assert.DoesNotContain(projectReferences, value => value.Contains("/Web/", StringComparison.OrdinalIgnoreCase));
+        var forbiddenProjectSegments = new[]
+        {
+            "/Auth.AspNetCore/",
+            "/Aspire/",
+            "/Web/",
+        };
+
+        foreach (var segment in forbiddenProjectSegments)
+        {
+            Assert.DoesNotContain(
+                projectReferences,
+                value => value.Contains(segment, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     [Theory]
