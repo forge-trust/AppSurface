@@ -123,7 +123,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         public override string Name => "macOS Keychain";
 
-        protected override AppSurfaceLocalSecretResult ReadValue(AppSurfaceLocalSecretIdentity identity)
+        protected override AppSurfaceLocalSecretResult ReadStoredValue(AppSurfaceLocalSecretIdentity identity)
         {
             var names = BuildKeychainName(identity);
             var status = SecKeychainFindGenericPassword(
@@ -157,7 +157,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             }
         }
 
-        protected override AppSurfaceLocalSecretResult WriteValue(AppSurfaceLocalSecretIdentity identity, string value)
+        protected override AppSurfaceLocalSecretResult WriteStoredValue(AppSurfaceLocalSecretIdentity identity, string value)
         {
             var names = BuildKeychainName(identity);
             var password = Encoding.UTF8.GetBytes(value);
@@ -182,15 +182,10 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 return MapMacOsStatus(status, "write");
             }
 
-            if (string.Equals(identity.Key, IndexKey, StringComparison.Ordinal))
-            {
-                return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
-            }
-
-            return UpdateIndex(identity, add: true);
+            return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
         }
 
-        protected override AppSurfaceLocalSecretResult DeleteValue(AppSurfaceLocalSecretIdentity identity)
+        protected override AppSurfaceLocalSecretResult DeleteStoredValue(AppSurfaceLocalSecretIdentity identity)
         {
             var status = FindItem(identity, out var itemRef);
             try
@@ -216,12 +211,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 ReleaseIfNeeded(itemRef);
             }
 
-            if (string.Equals(identity.Key, IndexKey, StringComparison.Ordinal))
-            {
-                return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
-            }
-
-            return UpdateIndex(identity, add: false);
+            return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
         }
 
         protected override AppSurfaceLocalSecretResult DoctorStore(string applicationName, string environment, string? keyPrefix) =>
@@ -377,7 +367,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         public override string Name => "Linux Secret Service";
 
-        protected override AppSurfaceLocalSecretResult ReadValue(AppSurfaceLocalSecretIdentity identity)
+        protected override AppSurfaceLocalSecretResult ReadStoredValue(AppSurfaceLocalSecretIdentity identity)
         {
             var result = Run(
                 _secretToolPath,
@@ -393,7 +383,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 : MapCommandFailure(result, "read");
         }
 
-        protected override AppSurfaceLocalSecretResult WriteValue(AppSurfaceLocalSecretIdentity identity, string value)
+        protected override AppSurfaceLocalSecretResult WriteStoredValue(AppSurfaceLocalSecretIdentity identity, string value)
         {
             var label = $"AppSurface {identity.ApplicationName} {identity.Environment} {identity.Key}";
             var result = Run(
@@ -405,15 +395,10 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 return MapCommandFailure(result, "write");
             }
 
-            if (string.Equals(identity.Key, IndexKey, StringComparison.Ordinal))
-            {
-                return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
-            }
-
-            return UpdateIndex(identity, add: true);
+            return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
         }
 
-        protected override AppSurfaceLocalSecretResult DeleteValue(AppSurfaceLocalSecretIdentity identity)
+        protected override AppSurfaceLocalSecretResult DeleteStoredValue(AppSurfaceLocalSecretIdentity identity)
         {
             var result = Run(
                 _secretToolPath,
@@ -426,12 +411,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                     : MapCommandFailure(result, "delete");
             }
 
-            if (string.Equals(identity.Key, IndexKey, StringComparison.Ordinal))
-            {
-                return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
-            }
-
-            return UpdateIndex(identity, add: false);
+            return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
         }
 
         protected override AppSurfaceLocalSecretResult DoctorStore(string applicationName, string environment, string? keyPrefix)
@@ -482,7 +462,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         public override string Name => "Windows Credential Manager";
 
-        protected override AppSurfaceLocalSecretResult ReadValue(AppSurfaceLocalSecretIdentity identity)
+        protected override AppSurfaceLocalSecretResult ReadStoredValue(AppSurfaceLocalSecretIdentity identity)
         {
             if (!CredReadW(TargetName(identity), CredentialTypeGeneric, 0, out var credentialPointer))
             {
@@ -509,7 +489,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             }
         }
 
-        protected override AppSurfaceLocalSecretResult WriteValue(AppSurfaceLocalSecretIdentity identity, string value)
+        protected override AppSurfaceLocalSecretResult WriteStoredValue(AppSurfaceLocalSecretIdentity identity, string value)
         {
             var targetName = TargetName(identity);
             var blob = Encoding.Unicode.GetBytes(value);
@@ -546,15 +526,10 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 blobHandle.Free();
             }
 
-            if (string.Equals(identity.Key, IndexKey, StringComparison.Ordinal))
-            {
-                return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
-            }
-
-            return UpdateIndex(identity, add: true);
+            return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
         }
 
-        protected override AppSurfaceLocalSecretResult DeleteValue(AppSurfaceLocalSecretIdentity identity)
+        protected override AppSurfaceLocalSecretResult DeleteStoredValue(AppSurfaceLocalSecretIdentity identity)
         {
             if (!CredDeleteW(TargetName(identity), CredentialTypeGeneric, 0))
             {
@@ -563,12 +538,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                     : WindowsFailure("delete", LocalSecretResultStatus.Unavailable);
             }
 
-            if (string.Equals(identity.Key, IndexKey, StringComparison.Ordinal))
-            {
-                return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
-            }
-
-            return UpdateIndex(identity, add: false);
+            return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
         }
 
         protected override AppSurfaceLocalSecretResult DoctorStore(string applicationName, string environment, string? keyPrefix)
@@ -579,14 +549,14 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 keyPrefix,
                 "__appsurface_doctor__",
                 $"appsurface:{applicationName}:{environment}:{keyPrefix}:__appsurface_doctor__");
-            var write = WriteValue(probeIdentity, "ready");
+            var write = WriteStoredValue(probeIdentity, "ready");
             if (write.Status != LocalSecretResultStatus.Found)
             {
                 return write;
             }
 
-            var read = ReadValue(probeIdentity);
-            _ = DeleteValue(probeIdentity);
+            var read = ReadStoredValue(probeIdentity);
+            _ = DeleteStoredValue(probeIdentity);
             return read.Status == LocalSecretResultStatus.Found
                 ? AppSurfaceLocalSecretResult.NotFound(
                     LocalSecretResultStatus.Missing,
@@ -653,86 +623,213 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         public abstract string Name { get; }
 
-        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) => ReadValue(identity);
+        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) => ReadStoredValue(identity);
 
-        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value) => WriteValue(identity, value);
-
-        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) => DeleteValue(identity);
-
-        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix)
+        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value)
         {
-            var indexIdentity = new AppSurfaceLocalSecretIdentity(applicationName, environment, keyPrefix, IndexKey, $"appsurface:{applicationName}:{environment}:{keyPrefix}:{IndexKey}");
-            var result = ReadValue(indexIdentity);
-            if (result.Status == LocalSecretResultStatus.Missing)
+            if (IsIndexIdentity(identity))
             {
-                return AppSurfaceLocalSecretListResult.Found([], Name);
+                return WriteStoredValue(identity, value);
             }
 
-            if (result.Status != LocalSecretResultStatus.Found || result.Value == null)
-            {
-                return AppSurfaceLocalSecretListResult.Failed(result.Status, result.Diagnostic!, Name);
-            }
-
-            try
-            {
-                var keys = JsonSerializer.Deserialize<string[]>(result.Value) ?? [];
-                return AppSurfaceLocalSecretListResult.Found(keys.Where(key => !string.Equals(key, IndexKey, StringComparison.Ordinal)), Name);
-            }
-            catch (JsonException)
-            {
-                return AppSurfaceLocalSecretListResult.Failed(
-                    LocalSecretResultStatus.ProviderFailed,
-                    new AppSurfaceLocalSecretDiagnostic(
-                        "local-secret-index-invalid",
-                        "Local secret index is invalid.",
-                        "The platform store index entry could not be parsed.",
-                        "Delete and recreate the LocalSecrets namespace with `appsurface secrets init`.",
-                        "local-secrets-troubleshooting"),
-                    Name);
-            }
+            var write = WriteStoredValue(identity, value);
+            return write.Status == LocalSecretResultStatus.Found
+                ? AddToIndex(identity)
+                : write;
         }
 
-        public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
-            DoctorStore(applicationName, environment, keyPrefix);
-
-        protected abstract AppSurfaceLocalSecretResult ReadValue(AppSurfaceLocalSecretIdentity identity);
-
-        protected abstract AppSurfaceLocalSecretResult WriteValue(AppSurfaceLocalSecretIdentity identity, string value);
-
-        protected abstract AppSurfaceLocalSecretResult DeleteValue(AppSurfaceLocalSecretIdentity identity);
-
-        protected abstract AppSurfaceLocalSecretResult DoctorStore(string applicationName, string environment, string? keyPrefix);
-
-        protected AppSurfaceLocalSecretResult UpdateIndex(AppSurfaceLocalSecretIdentity identity, bool add)
+        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity)
         {
-            var current = List(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
-            if (current.Status != LocalSecretResultStatus.Found)
+            if (IsIndexIdentity(identity))
             {
-                return AppSurfaceLocalSecretResult.NotFound(current.Status, current.Diagnostic!, Name);
+                return DeleteStoredValue(identity);
             }
 
-            var keys = current.Keys.ToHashSet(StringComparer.Ordinal);
-            if (add)
+            var delete = DeleteStoredValue(identity);
+            if (delete.Status != LocalSecretResultStatus.Found && delete.Status != LocalSecretResultStatus.Missing)
             {
-                keys.Add(identity.Key);
-            }
-            else
-            {
-                keys.Remove(identity.Key);
+                return delete;
             }
 
-            var indexIdentity = identity with
+            var index = ReadIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
+            if (index.Status != LocalSecretResultStatus.Found)
             {
-                Key = IndexKey,
-                StorageName = $"appsurface:{identity.ApplicationName}:{identity.Environment}:{identity.KeyPrefix}:{IndexKey}"
-            };
-            var index = JsonSerializer.Serialize(keys.Order(StringComparer.OrdinalIgnoreCase).ToArray());
-            var write = WriteValue(indexIdentity, index);
+                return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
+            }
+
+            var keys = index.Keys.ToHashSet(StringComparer.Ordinal);
+            var wasIndexed = keys.Remove(identity.Key);
+            if (!wasIndexed)
+            {
+                return delete.Status == LocalSecretResultStatus.Found
+                    ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
+                    : delete;
+            }
+
+            var write = WriteIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix, keys);
             return write.Status == LocalSecretResultStatus.Found
                 ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
                 : write;
         }
 
+        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix)
+        {
+            var index = ReadIndex(applicationName, environment, keyPrefix);
+            if (index.Status != LocalSecretResultStatus.Found)
+            {
+                return AppSurfaceLocalSecretListResult.Failed(index.Status, index.Diagnostic!, Name);
+            }
+
+            var liveKeys = new HashSet<string>(StringComparer.Ordinal);
+            var needsRepair = index.NeedsRepair;
+
+            foreach (var key in index.Keys)
+            {
+                var keyIdentity = KeyIdentity(applicationName, environment, keyPrefix, key);
+                if (!keyIdentity.Succeeded)
+                {
+                    return AppSurfaceLocalSecretListResult.Failed(
+                        LocalSecretResultStatus.ProviderFailed,
+                        InvalidIndexDiagnostic("The platform store index entry contains an invalid local secret key."),
+                        Name);
+                }
+
+                var value = ReadStoredValue(keyIdentity.Identity!);
+                if (value.Status == LocalSecretResultStatus.Found)
+                {
+                    liveKeys.Add(key);
+                    continue;
+                }
+
+                if (value.Status == LocalSecretResultStatus.Missing)
+                {
+                    needsRepair = true;
+                    continue;
+                }
+
+                return AppSurfaceLocalSecretListResult.Failed(value.Status, value.Diagnostic!, Name);
+            }
+
+            if (needsRepair)
+            {
+                var write = WriteIndex(applicationName, environment, keyPrefix, liveKeys);
+                if (write.Status != LocalSecretResultStatus.Found)
+                {
+                    return AppSurfaceLocalSecretListResult.Failed(write.Status, write.Diagnostic!, Name);
+                }
+            }
+
+            return AppSurfaceLocalSecretListResult.Found(liveKeys, Name);
+        }
+
+        public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
+            DoctorStore(applicationName, environment, keyPrefix);
+
+        protected abstract AppSurfaceLocalSecretResult ReadStoredValue(AppSurfaceLocalSecretIdentity identity);
+
+        protected abstract AppSurfaceLocalSecretResult WriteStoredValue(AppSurfaceLocalSecretIdentity identity, string value);
+
+        protected abstract AppSurfaceLocalSecretResult DeleteStoredValue(AppSurfaceLocalSecretIdentity identity);
+
+        protected abstract AppSurfaceLocalSecretResult DoctorStore(string applicationName, string environment, string? keyPrefix);
+
+        private static bool IsIndexIdentity(AppSurfaceLocalSecretIdentity identity) =>
+            string.Equals(identity.Key, IndexKey, StringComparison.Ordinal);
+
+        private AppSurfaceLocalSecretResult AddToIndex(AppSurfaceLocalSecretIdentity identity)
+        {
+            var index = ReadIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
+            if (index.Status != LocalSecretResultStatus.Found)
+            {
+                return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
+            }
+
+            var keys = index.Keys.ToHashSet(StringComparer.Ordinal);
+            keys.Add(identity.Key);
+            return WriteIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix, keys);
+        }
+
+        private AppSurfaceLocalSecretResult WriteIndex(
+            string applicationName,
+            string environment,
+            string? keyPrefix,
+            IEnumerable<string> keys)
+        {
+            var index = JsonSerializer.Serialize(keys.Order(StringComparer.OrdinalIgnoreCase).ToArray());
+            var write = WriteStoredValue(IndexIdentity(applicationName, environment, keyPrefix), index);
+            return write.Status == LocalSecretResultStatus.Found
+                ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
+                : write;
+        }
+
+        private IndexReadResult ReadIndex(string applicationName, string environment, string? keyPrefix)
+        {
+            var result = ReadStoredValue(IndexIdentity(applicationName, environment, keyPrefix));
+            if (result.Status == LocalSecretResultStatus.Missing)
+            {
+                return IndexReadResult.Found([], needsRepair: false);
+            }
+
+            if (result.Status != LocalSecretResultStatus.Found || result.Value == null)
+            {
+                return IndexReadResult.Failed(result.Status, result.Diagnostic!);
+            }
+
+            string?[] indexedKeys;
+            try
+            {
+                indexedKeys = JsonSerializer.Deserialize<string?[]>(result.Value) ?? [];
+            }
+            catch (JsonException)
+            {
+                return IndexReadResult.Failed(LocalSecretResultStatus.ProviderFailed, InvalidIndexDiagnostic("The platform store index entry could not be parsed."));
+            }
+
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            var needsRepair = false;
+            foreach (var key in indexedKeys)
+            {
+                if (string.IsNullOrWhiteSpace(key) || string.Equals(key, IndexKey, StringComparison.Ordinal))
+                {
+                    needsRepair = true;
+                    continue;
+                }
+
+                if (!keys.Add(key))
+                {
+                    needsRepair = true;
+                }
+            }
+
+            return IndexReadResult.Found(keys, needsRepair);
+        }
+
+        private static AppSurfaceLocalSecretIdentity IndexIdentity(string applicationName, string environment, string? keyPrefix) =>
+            new(applicationName, environment, keyPrefix, IndexKey, $"appsurface:{applicationName}:{environment}:{keyPrefix}:{IndexKey}");
+
+        private static AppSurfaceLocalSecretIdentityResult KeyIdentity(string applicationName, string environment, string? keyPrefix, string key) =>
+            new AppSurfaceLocalSecretIdentityNormalizer().Normalize(applicationName, environment, keyPrefix, key);
+
+        private static AppSurfaceLocalSecretDiagnostic InvalidIndexDiagnostic(string cause) =>
+            new(
+                "local-secret-index-invalid",
+                "Local secret index is invalid.",
+                cause,
+                "Remove the invalid platform index entry, then set the intended LocalSecrets keys again.",
+                "local-secrets-troubleshooting");
+
+        private sealed record IndexReadResult(
+            LocalSecretResultStatus Status,
+            IReadOnlyCollection<string> Keys,
+            bool NeedsRepair,
+            AppSurfaceLocalSecretDiagnostic? Diagnostic)
+        {
+            public static IndexReadResult Found(IReadOnlyCollection<string> keys, bool needsRepair) =>
+                new(LocalSecretResultStatus.Found, keys, needsRepair, null);
+
+            public static IndexReadResult Failed(LocalSecretResultStatus status, AppSurfaceLocalSecretDiagnostic diagnostic) =>
+                new(status, [], false, diagnostic);
+        }
     }
 
     internal abstract class CommandBackedLocalSecretStore : IndexedLocalSecretStore

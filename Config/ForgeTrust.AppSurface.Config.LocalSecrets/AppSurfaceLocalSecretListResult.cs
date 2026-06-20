@@ -4,7 +4,7 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// Describes a local secret list operation.
 /// </summary>
 /// <param name="Status">The list status.</param>
-/// <param name="Keys">The display-safe logical config keys.</param>
+/// <param name="Keys">The display-safe logical config keys that the store could verify as currently retrievable.</param>
 /// <param name="Diagnostic">The display-safe diagnostic for non-success states.</param>
 /// <param name="Source">The display-safe source name.</param>
 public sealed record AppSurfaceLocalSecretListResult(
@@ -16,7 +16,7 @@ public sealed record AppSurfaceLocalSecretListResult(
     /// <summary>
     /// Creates a successful list result.
     /// </summary>
-    /// <param name="keys">The display-safe logical config keys.</param>
+    /// <param name="keys">The display-safe logical config keys that the store could verify as currently retrievable.</param>
     /// <param name="source">The display-safe source name.</param>
     /// <returns>A list result.</returns>
     public static AppSurfaceLocalSecretListResult Found(IEnumerable<string> keys, string source) =>
