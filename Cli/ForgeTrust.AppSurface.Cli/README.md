@@ -102,6 +102,21 @@ points to a normal per-user file path or OS-backed storage. On Unix, the file fa
 `0700` mode bits and tightens JSON file mode bits to `0600`; existing loose parent directories are rejected rather than
 chmodded. v1 does not claim Windows ACL hardening or universal POSIX ACL proof.
 
+On Linux, the OS-backed store runs Secret Service through `secret-tool`, but AppSurface does not execute `secret-tool`
+from `PATH`. It uses `/usr/bin/secret-tool`, then `/bin/secret-tool`, unless you pass an explicit trusted absolute path:
+
+```bash
+SECRET_TOOL=/absolute/path/to/secret-tool
+test -x "$SECRET_TOOL"
+appsurface secrets doctor --app MyApp --environment Development --secret-tool-path "$SECRET_TOOL"
+printf '%s' "<secret>" | appsurface secrets set Stripe:ApiKey --app MyApp --environment Development --secret-tool-path "$SECRET_TOOL" --stdin
+```
+
+Use `--secret-tool-path` for Nix, Linuxbrew, Guix, or custom prefixes after verifying the binary. The flag applies only
+to the current CLI invocation; configure `AppSurfaceLocalSecretsOptions.LinuxSecretToolPath` in the app for runtime use.
+`--secret-tool-path` and `--store-file` are mutually exclusive so `doctor` cannot report file-store readiness when you
+meant to verify the Linux platform store.
+
 ### `appsurface coverage run`
 
 Run instrumented .NET test projects and merge private Cobertura artifacts.

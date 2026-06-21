@@ -11,6 +11,8 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Observability package defaults for sending app-side logs, traces, and metrics to Aspire or another OTLP collector.
 - LocalSecrets platform-index self-healing so `appsurface secrets list` no longer surfaces stale names whose stored
   values are missing.
+- LocalSecrets Linux `secret-tool` resolution now uses trusted system candidates or an explicit absolute override instead
+  of executing the first `secret-tool` discovered on `PATH`.
 - `ForgeTrust.AppSurface.Web` now rejects the literal CORS origin wildcard `*` outside Development when AppSurface owns
   the CORS policy, so permissive production APIs must either name explicit browser origins or register host-owned
   ASP.NET Core CORS.
@@ -32,6 +34,10 @@ This is the living release note for the next coordinated AppSurface version afte
   `appsurface secrets list`. Missing values are pruned from the index when validation and repair succeed, and
   `appsurface secrets delete KEY` repairs a stale indexed name when the value is already gone while preserving
   `local-secret-missing` for keys that never existed.
+- AppSurface LocalSecrets now hardens Linux Secret Service command selection. Linux uses `/usr/bin/secret-tool`, then
+  `/bin/secret-tool`, or an explicit trusted absolute path through `AppSurfaceLocalSecretsOptions.LinuxSecretToolPath`
+  and `appsurface secrets --secret-tool-path`. PATH matches are reported only as ignored diagnostic context, invalid
+  overrides fail before command launch, and `--secret-tool-path` cannot be combined with `--store-file`.
 - AppSurface Web CORS startup validation now fails closed before policy registration when non-development
   `CorsOptions.AllowedOrigins` includes the exact literal `*`, while preserving Development all-origin convenience and
   wildcard subdomain origins such as `https://*.example.com`.

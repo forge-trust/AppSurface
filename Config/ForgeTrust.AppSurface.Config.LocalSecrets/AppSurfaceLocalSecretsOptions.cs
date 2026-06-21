@@ -34,6 +34,17 @@ public sealed class AppSurfaceLocalSecretsOptions
     public string DocsHint { get; set; } = "local-secrets-without-a-remote-vault";
 
     /// <summary>
+    /// Gets or sets an explicit Linux <c>secret-tool</c> executable path for nonstandard trusted installs.
+    /// </summary>
+    /// <remarks>
+    /// Leave unset to use AppSurface's trusted Linux system candidates only: <c>/usr/bin/secret-tool</c>, then
+    /// <c>/bin/secret-tool</c>. Set this only when the binary is trusted and verified with a command such as
+    /// <c>test -x /absolute/path/to/secret-tool</c>. Relative, empty, missing, directory, and non-executable paths are
+    /// rejected. This option is Linux-only; macOS and Windows use their native credential stores.
+    /// </remarks>
+    public string? LinuxSecretToolPath { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether local store failures stop lower-priority provider resolution.
     /// </summary>
     /// <remarks>

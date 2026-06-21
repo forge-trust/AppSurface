@@ -107,6 +107,30 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void Doctor_Should_ReportReadyForExistingStrictUnixFileInSecureDirectory()
+    {
+        if (!IsUnix())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create();
+        var directory = Path.Join(temp.Path, "nested");
+        var path = Path.Join(directory, "secrets.json");
+        Directory.CreateDirectory(directory, SecretDirectoryMode);
+        File.WriteAllText(path, "{}");
+        new FileInfo(path).UnixFileMode = SecretFileMode;
+        var store = new FileAppSurfaceLocalSecretStore(path);
+
+        var result = store.Doctor("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.Missing, result.Status);
+        Assert.Equal("local-secret-store-ready", result.Diagnostic?.Code);
+        Assert.Equal(SecretDirectoryMode, new DirectoryInfo(directory).UnixFileMode);
+        Assert.Equal(SecretFileMode, new FileInfo(path).UnixFileMode);
+    }
+
+    [Fact]
     public void Set_Should_CreateUnixFileAndDirectoryWithRestrictiveModes()
     {
         if (!IsUnix())

@@ -14,6 +14,10 @@ dotnet package add ForgeTrust.AppSurface.Config.LocalSecrets
 Register `AppSurfaceLocalSecretsModule` beside your Config module. Environment variables still win, LocalSecrets sits
 above file configuration, and only a true missing local secret falls through to files.
 
+For Linux, AppSurface treats `secret-tool` as an external command with an explicit trust boundary. By default it uses
+only `/usr/bin/secret-tool`, then `/bin/secret-tool`. It does not execute `secret-tool` from `PATH`; a PATH match is
+reported only as ignored diagnostic context.
+
 ## First Secret
 
 ```bash
@@ -55,6 +59,32 @@ The command prints `Problem`, `Cause`, `Fix`, `Docs`, and `Retryable` without pr
 `local-secret-file-posture-degraded` as usable only for explicit local/test fallback workflows; prefer the OS-backed
 store for normal local development.
 
+### Linux Nonstandard `secret-tool`
+
+Use this only when your trusted Linux `secret-tool` install lives outside `/usr/bin` or `/bin`, such as a Nix,
+Linuxbrew, Guix, or custom prefix install.
+
+```bash
+SECRET_TOOL=/absolute/path/to/secret-tool
+test -x "$SECRET_TOOL"
+appsurface secrets doctor --app MyApp --environment Development --secret-tool-path "$SECRET_TOOL"
+printf '%s' "<secret>" | appsurface secrets set Stripe:ApiKey --app MyApp --environment Development --secret-tool-path "$SECRET_TOOL" --stdin
+```
+
+Use the package option for app runtime configuration:
+
+```csharp
+services.ConfigureAppSurfaceLocalSecrets(options =>
+{
+    options.LinuxSecretToolPath = "/absolute/path/to/secret-tool";
+});
+```
+
+The override must be an absolute path to an executable file. Empty, relative, missing, directory, non-executable, and
+non-Linux overrides fail before command launch with `Problem`, `Cause`, `Fix`, `Docs`, and `Retryable` diagnostics.
+`--secret-tool-path` cannot be combined with `--store-file`; `--store-file` is the deterministic example/test store, not
+a platform-store verification path.
+
 ## Listing And Cleanup
 
 `appsurface secrets list` prints only currently retrievable logical key names, never values. Platform-backed stores keep
@@ -92,9 +122,35 @@ provider should fall through to lower-priority configuration.
 | Platform | Adapter | Notes |
 | --- | --- | --- |
 | macOS | Keychain generic passwords through Security.framework | Requires an interactive user session when Keychain prompts. |
-| Linux | Secret Service through `secret-tool` | Requires DBus/session secret service availability. |
+| Linux | Secret Service through trusted `secret-tool` paths | Uses `/usr/bin/secret-tool`, then `/bin/secret-tool`, or an explicit absolute `LinuxSecretToolPath`/`--secret-tool-path`. Requires DBus/session secret service availability. |
 | Windows | Credential Manager generic credentials for the current user | Requires an interactive user profile; use environment variables/key-per-file for services, CI, and containers. |
 | Explicit file fallback | JSON file at `--store-file <path>` | Unix mode-bit hardening only; Windows and unknown filesystem ACL posture is reported as degraded. |
+
+## Escape Hatches, Safest First
+
+1. Keep the trusted Linux defaults when `secret-tool` is in `/usr/bin` or `/bin`.
+2. Set `AppSurfaceLocalSecretsOptions.LinuxSecretToolPath` or pass `--secret-tool-path` for a trusted nonstandard Linux
+   executable that you verified with `test -x`.
+3. Use `--store-file <path>` only for deterministic examples, tests, and docs snippets.
+4. Replace the store with `UseAppSurfaceLocalSecretStore(...)` for controlled integration tests or app-specific local
+   development behavior.
+5. Change `FailClosedOnStoreFailure = false` only as a last resort. It can make unavailable local stores behave like
+   missing values and hide secrets from lower-priority file providers.
+
+## Linux Smoke Checklist
+
+Deterministic tests cover resolver branches with fakes. Before release, run a live Linux desktop session smoke when DBus
+and a Secret Service implementation are available:
+
+```bash
+appsurface secrets doctor --app MyApp --environment Development
+printf '%s' "smoke-value" | appsurface secrets set Smoke:Value --app MyApp --environment Development --stdin
+appsurface secrets get Smoke:Value --app MyApp --environment Development
+appsurface secrets list --names-only --app MyApp --environment Development
+appsurface secrets delete Smoke:Value --app MyApp --environment Development
+```
+
+For nonstandard installs, repeat the same commands with `--secret-tool-path "$SECRET_TOOL"` after `test -x "$SECRET_TOOL"`.
 
 ## Migration Ladder
 

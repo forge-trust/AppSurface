@@ -3,6 +3,7 @@ using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Config.LocalSecrets;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Cli;
 
@@ -196,6 +197,12 @@ internal abstract class SecretsCommandBase : ICommand
     public string? StoreFile { get; set; }
 
     /// <summary>
+    /// Gets or sets an explicit Linux secret-tool executable path for nonstandard trusted installs.
+    /// </summary>
+    [CommandOption("secret-tool-path", Description = "Linux-only trusted absolute path to secret-tool. Not used with --store-file.")]
+    public string? SecretToolPath { get; set; }
+
+    /// <summary>
     /// Executes the command.
     /// </summary>
     /// <param name="console">CliFx console used for command output.</param>
@@ -215,8 +222,16 @@ internal abstract class SecretsCommandBase : ICommand
             throw new CommandException(probe.Diagnostic!.ToDisplayString());
         }
 
+        if (StoreFile != null && SecretToolPath != null)
+        {
+            throw new CommandException("Use either --store-file or --secret-tool-path for `appsurface secrets`, not both.");
+        }
+
         IAppSurfaceLocalSecretStore store = string.IsNullOrWhiteSpace(StoreFile)
-            ? new PlatformAppSurfaceLocalSecretStore()
+            ? CreatePlatformStore(new AppSurfaceLocalSecretsOptions
+            {
+                LinuxSecretToolPath = SecretToolPath
+            })
             : new FileAppSurfaceLocalSecretStore(StoreFile);
 
         return new SecretsCommandContext(
@@ -226,6 +241,14 @@ internal abstract class SecretsCommandBase : ICommand
             probe.Identity.Environment,
             probe.Identity.KeyPrefix);
     }
+
+    /// <summary>
+    /// Creates the OS-backed LocalSecrets store for commands that do not use the deterministic file store.
+    /// </summary>
+    /// <param name="options">Options derived from the CLI command line.</param>
+    /// <returns>The platform-backed local secret store.</returns>
+    protected virtual IAppSurfaceLocalSecretStore CreatePlatformStore(AppSurfaceLocalSecretsOptions options) =>
+        new PlatformAppSurfaceLocalSecretStore(Options.Create(options));
 
     /// <summary>
     /// Writes a command result.
