@@ -8,7 +8,7 @@
 window.RazorWire = window.RazorWire || {};
 
 /**
- * Optional island module manifest that maps logical `data-rw-module` names to approved module URLs before RazorWire imports them.
+ * Optional island module manifest that maps logical `data-rw-module` names to host-provided module specifiers before RazorWire imports them.
  * @public
  * @namespace RazorWire
  * @config window.RazorWireIslandModules
@@ -417,7 +417,7 @@ window.RazorWire = window.RazorWire || {};
  * @attribute data-rw-module
  * @target [data-rw-module]
  * @type {string}
- * @description Logical module name, import-map specifier, or safe module URL. Hosts may define `window.RazorWireIslandModules` to map logical names to pre-approved module URLs before RazorWire calls dynamic import.
+ * @description Logical module name, import-map specifier, or safe module URL. Hosts may define `window.RazorWireIslandModules` to map logical names to host-provided module specifiers before RazorWire calls dynamic import. Inline `data:` module content and protocol-relative URLs are rejected.
  */
 
 /**

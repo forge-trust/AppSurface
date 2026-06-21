@@ -30,6 +30,20 @@ public sealed class RazorWireCliReadmeContractTests
     }
 
     [Fact]
+    public void Readme_Should_Document_ArtifactRedirectProvenance_Boundary()
+    {
+        var readme = File.ReadAllText(GetRazorWireCliReadmePath());
+
+        Assert.Contains("Exporter-managed artifact fetches own their HTTP redirect chain", readme, StringComparison.Ordinal);
+        Assert.Contains("redirects outside that export origin and app path fail with `RWEXPORT008`", readme, StringComparison.Ordinal);
+        Assert.Contains("host-registered redirect aliases (`RWEXPORT005`)", readme, StringComparison.Ordinal);
+        Assert.Contains("URL-source readiness probing", readme, StringComparison.Ordinal);
+        Assert.Contains("`RWEXPORT008`: an exporter-managed artifact fetch was redirected outside the configured export origin and app path", readme, StringComparison.Ordinal);
+        Assert.Contains("Route normalization validates requested URLs before the exporter fetches them. Redirect enforcement validates the response chain before artifact content is read or written.", readme, StringComparison.Ordinal);
+        Assert.Contains("Hybrid export also fails unsafe artifact redirects with `RWEXPORT008`", readme, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Readme_Should_CrossReference_HybridHostingGuide()
     {
         var readme = File.ReadAllText(GetRazorWireCliReadmePath());
