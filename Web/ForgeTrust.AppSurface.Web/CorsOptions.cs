@@ -10,7 +10,9 @@ namespace ForgeTrust.AppSurface.Web;
 /// defaults. Empty <see cref="AllowedHeaders"/> or <see cref="AllowedMethods"/> collections do not opt into permissive
 /// preflight behavior in production; configure the exact browser contract an application supports. Pitfall: enabling
 /// CORS in non-development environments still requires at least one allowed origin unless development-only all-origin
-/// behavior applies.
+/// behavior applies, and the literal wildcard origin <c>*</c> is rejected outside development for AppSurface-managed
+/// CORS. Use explicit origins, wildcard subdomains such as <c>https://*.example.com</c>, or host-owned ASP.NET Core
+/// CORS policy registration for intentionally public wildcard APIs.
 /// </remarks>
 public record CorsOptions
 {
@@ -30,6 +32,12 @@ public record CorsOptions
     /// Gets or sets the collection of origins permitted to make cross-origin requests.
     /// Defaults to an empty array.
     /// </summary>
+    /// <remarks>
+    /// Use exact origins such as <c>https://app.example.com</c>. AppSurface also preserves ASP.NET Core wildcard
+    /// subdomain support for origins such as <c>https://*.example.com</c>. The exact literal <c>*</c> is allowed only
+    /// for the existing development compatibility path; non-development startup fails before registering the
+    /// AppSurface-managed CORS policy when this collection contains <c>*</c>.
+    /// </remarks>
     public string[] AllowedOrigins { get; set; } = [];
 
     /// <summary>
