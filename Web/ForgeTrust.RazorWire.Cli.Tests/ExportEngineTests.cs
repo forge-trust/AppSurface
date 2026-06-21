@@ -4924,22 +4924,26 @@ public class ExportEngineTests
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
     }
 
-    private static Task<HttpResponseMessage> Redirect(
+    private static async Task<HttpResponseMessage> Redirect(
         string location,
         UriKind uriKind = UriKind.RelativeOrAbsolute)
     {
-        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
+        await Task.Yield();
+
+        return new HttpResponseMessage(HttpStatusCode.Found)
         {
             Headers =
             {
                 Location = new Uri(location, uriKind)
             }
-        });
+        };
     }
 
-    private static Task<HttpResponseMessage> RedirectWithoutLocation()
+    private static async Task<HttpResponseMessage> RedirectWithoutLocation()
     {
-        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found));
+        await Task.Yield();
+
+        return new HttpResponseMessage(HttpStatusCode.Found);
     }
 
     private static void AssertRedirectProvenanceDiagnostic(
