@@ -81,6 +81,21 @@ through to file secrets. Use `--store-file <path>` only for deterministic exampl
 should use the OS-backed store when the platform adapter is available. Use environment variables, key-per-file, or a
 remote vault for CI, containers, team environments, and production.
 
+For explicit file fallback, `doctor` can render these value-safe posture codes:
+
+```text
+local-secret-store-ready
+local-secret-file-posture-repaired
+local-secret-file-posture-degraded
+local-secret-file-posture-unsupported
+```
+
+`ready`, `repaired`, and `degraded` are doctor-style readiness results and exit successfully so setup scripts can keep
+moving. `degraded` still means the file fallback is weaker than the OS-backed store. `unsupported` fails the command and
+points to a normal per-user file path or OS-backed storage. On Unix, the file fallback creates missing directories with
+`0700` mode bits and tightens JSON file mode bits to `0600`; existing loose parent directories are rejected rather than
+chmodded. v1 does not claim Windows ACL hardening or universal POSIX ACL proof.
+
 ### `appsurface coverage run`
 
 Run instrumented .NET test projects and merge private Cobertura artifacts.

@@ -103,7 +103,7 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task SecretsDoctorCommand_Should_RenderReadyDiagnosticWithoutPrintingSecretValue()
+    public async Task SecretsDoctorCommand_Should_RenderReadinessDiagnosticWithoutPrintingSecretValue()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");
         var storePath = Path.Join(temp.Path, "local-secrets.json");
@@ -113,7 +113,29 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Ready: local secret namespace", result.AllText, StringComparison.Ordinal);
-        Assert.Contains("local-secret-store-ready", result.AllText, StringComparison.Ordinal);
+        Assert.Contains(OperatingSystem.IsWindows() ? "local-secret-file-posture-degraded" : "local-secret-store-ready", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsDoctorCommand_Should_TreatRepairedPostureAsSuccess()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+        File.WriteAllText(storePath, "{}");
+        new FileInfo(storePath).UnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "doctor", "--app", "MyApp", "--environment", "Development", "--store-file", storePath]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Ready: local secret namespace", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("local-secret-file-posture-repaired", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
     }
 
@@ -213,7 +235,7 @@ public sealed class ProgramEntryPointTests
             ["secrets", "doctor", "--store-file", temp.Path]);
 
         Assert.NotEqual(0, result.ExitCode);
-        Assert.Contains("local-secret-store", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("local-secret-file-posture-unsupported", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
     }
 
@@ -3726,6 +3748,11 @@ public sealed class ProgramEntryPointTests
                 System.IO.Path.GetTempPath(),
                 prefix + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(path);
+            if (!OperatingSystem.IsWindows())
+            {
+                new DirectoryInfo(path).UnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+            }
+
             return new TempDirectory(path);
         }
 
