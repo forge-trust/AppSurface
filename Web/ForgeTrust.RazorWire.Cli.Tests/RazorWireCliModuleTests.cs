@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -24,6 +27,30 @@ public class RazorWireCliModuleTests
     }
 
     [Fact]
+    public async Task ConfigureServices_Should_Disable_Automatic_Redirects_For_ExportEngine_Client()
+    {
+        var module = new RazorWireCliModule();
+        var services = new ServiceCollection();
+        var context = new StartupContext([], new TestHostModule());
+
+        module.ConfigureServices(context, services);
+        using var provider = services.BuildServiceProvider();
+        using var listener = new TcpListener(IPAddress.Loopback, port: 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var serverTask = ServeRedirectThenOkAsync(listener);
+
+        using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("ExportEngine");
+        using var response = await client.GetAsync($"http://127.0.0.1:{port}/redirect");
+
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        Assert.Equal($"/target", response.Headers.Location?.OriginalString);
+
+        listener.Stop();
+        await serverTask;
+    }
+
+    [Fact]
     public void Noop_Host_Methods_Should_Not_Throw()
     {
         var module = new RazorWireCliModule();
@@ -42,5 +69,57 @@ public class RazorWireCliModuleTests
         public void RegisterDependentModules(ModuleDependencyBuilder builder) { }
         public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder) { }
         public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder) { }
+    }
+
+    private static async Task ServeRedirectThenOkAsync(TcpListener listener)
+    {
+        try
+        {
+            using var redirectClient = await listener.AcceptTcpClientAsync();
+            await DrainRequestAsync(redirectClient);
+            await WriteResponseAsync(
+                redirectClient,
+                "HTTP/1.1 302 Found\r\nLocation: /target\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+            try
+            {
+                using var targetClient = await listener.AcceptTcpClientAsync(timeoutCts.Token);
+                await DrainRequestAsync(targetClient);
+                await WriteResponseAsync(
+                    targetClient,
+                    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            }
+            catch (OperationCanceledException)
+            {
+                // Automatic redirects are disabled, so the optional follow-up request should time out.
+                return;
+            }
+        }
+        catch (SocketException ex) when (ex.SocketErrorCode is SocketError.OperationAborted
+                                             or SocketError.Interrupted
+                                             or SocketError.ConnectionReset)
+        {
+            // Listener shutdown can interrupt the in-test socket server after the assertion completes.
+            return;
+        }
+        catch (ObjectDisposedException)
+        {
+            // Test cleanup can dispose the listener before this helper observes another connection.
+            return;
+        }
+    }
+
+    private static async Task DrainRequestAsync(TcpClient client)
+    {
+        var buffer = new byte[1024];
+        var stream = client.GetStream();
+        _ = await stream.ReadAsync(buffer);
+    }
+
+    private static async Task WriteResponseAsync(TcpClient client, string response)
+    {
+        var bytes = Encoding.ASCII.GetBytes(response);
+        await client.GetStream().WriteAsync(bytes);
     }
 }
