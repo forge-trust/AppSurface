@@ -318,8 +318,7 @@ public sealed class RazorWireMvcPlaywrightTests
         await page.EvaluateAsync(
             """
             () => {
-                const moduleUrl = `data:text/javascript,${encodeURIComponent('export function mount(root, props) { root.textContent = `client:${props.label}`; root.dataset.clientMounted = "true"; }')}`;
-                window.RazorWireIslandModules = { PlaywrightClientIsland: moduleUrl };
+                window.RazorWireIslandModules = { PlaywrightClientIsland: "/js/playwright-client-island.js" };
                 const island = document.createElement('section');
                 island.id = 'playwright-client-island';
                 island.setAttribute('data-rw-module', 'PlaywrightClientIsland');

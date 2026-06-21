@@ -13,6 +13,7 @@ Use this package when you want:
 - `IAspireComponent<TResource>` classes that can be injected, reused, ordered, and resolved once through `AspireStartupContext`.
 
 This package is a local AppHost composition surface. It does not add deployment support, secret management, or automatic forwarding of arbitrary Aspire CLI arguments.
+It also does not configure application-side OpenTelemetry exporters. Use [`ForgeTrust.AppSurface.Observability`](../../Observability/ForgeTrust.AppSurface.Observability/README.md) in each app project that should publish logs, traces, and metrics to Aspire or another OTLP collector.
 
 ## Release Guidance
 
@@ -41,6 +42,7 @@ aspire run --apphost examples/aspire-apphost/AspireAppHostExample.csproj -- loca
 ```
 
 The `-- local` token selects the AppSurface `AspireProfile` command. Aspire opens the dashboard and shows the `web` project resource.
+The web example registers `ForgeTrust.AppSurface.Observability`, so hitting the web app should produce app-side telemetry in the Aspire dashboard when Aspire supplies `OTEL_EXPORTER_OTLP_ENDPOINT`.
 
 ## Minimal Shape
 

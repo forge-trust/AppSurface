@@ -284,7 +284,7 @@ Product intelligence answers product questions: Which docs paths fail readers? W
 
 PostHog is one possible product analytics UI and transport. Use it after the AppSurface event contract is clear.
 
-OpenTelemetry remains the operational telemetry path for logs, metrics, and traces. Use `Meter` and `ActivitySource` for performance, health, and debugging. Product-intelligence events may carry correlation IDs so a host can join analytics back to traces, but AppSurface does not force product analytics through OTel.
+OpenTelemetry remains the operational telemetry path for logs, metrics, and traces. Use `ForgeTrust.AppSurface.Observability` to register AppSurface's OpenTelemetry logging, tracing, metrics, and OTLP exporter defaults for Aspire or another collector. Product-intelligence events may carry correlation IDs so a host can join analytics back to traces, but AppSurface does not force product analytics through OTel.
 
 Use AppSurface.Intelligence when you want reusable semantic contracts, lifecycle metadata, privacy-shape validation, safe diagnostics, and freedom to forward to any product analytics backend. Use a local validator when a host app is iterating before the package surface is available or before a contract pack is ready to publish. Use PostHog directly only when you intentionally accept a vendor-specific event shape and a separate privacy-review process.
 

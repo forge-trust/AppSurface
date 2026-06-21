@@ -100,9 +100,9 @@ internal sealed partial class SecretsGetCommand : SecretsKeyCommandBase
 }
 
 /// <summary>
-/// Lists local secret names in a namespace.
+/// Lists currently retrievable local secret names in a namespace.
 /// </summary>
-[Command("secrets list", Description = "List AppSurface local secret names without values.")]
+[Command("secrets list", Description = "List currently retrievable AppSurface local secret names without values.")]
 internal sealed partial class SecretsListCommand : SecretsCommandBase
 {
     /// <summary>

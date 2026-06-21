@@ -54,6 +54,8 @@ public class ExportEngine
     private const string DocsStaticPartialsMetaName = "rw-docs-static-partials";
     private const string DocsStaticPartialsMetaTag = "<meta name=\"rw-docs-static-partials\" content=\"1\" />";
     private const string AppSurfaceDocsClientConfigMarker = "window.__appSurfaceDocsConfig";
+    private const int MaxArtifactRedirects = 10;
+    private const string RedirectProvenanceDiagnosticCode = "RWEXPORT008";
 
     private static readonly Regex TurboFrameOpenTagRegex = new(
         @"<turbo-frame\b[^>]*>",
@@ -193,10 +195,7 @@ public class ExportEngine
 
         try
         {
-            using var response = await client.GetAsync(
-                $"{context.BaseUrl}{route}",
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+            using var response = await SendArtifactRequestAsync(client, context, route, route, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -262,6 +261,10 @@ public class ExportEngine
             }
         }
         catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (ExportValidationException)
         {
             throw;
         }
@@ -1130,6 +1133,177 @@ public class ExportEngine
         return false;
     }
 
+    private async Task<HttpResponseMessage> SendArtifactRequestAsync(
+        HttpClient client,
+        ExportContext context,
+        string artifactRoute,
+        string fetchRoute,
+        CancellationToken cancellationToken)
+    {
+        var baseUri = CreateExportBaseUri(context);
+        var currentUri = CreateArtifactRequestUri(context, fetchRoute);
+
+        for (var redirectCount = 0; redirectCount <= MaxArtifactRedirects; redirectCount++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
+            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var finalUri = response.RequestMessage?.RequestUri ?? currentUri;
+            if (!IsWithinExportBoundary(finalUri, baseUri))
+            {
+                response.Dispose();
+                ThrowRedirectProvenanceFailure(
+                    context,
+                    artifactRoute,
+                    $"Export route '{artifactRoute}' received a response from '{SanitizeUriForDiagnostic(finalUri)}', which is outside the configured export origin and app path. Fix: keep export redirects on the same scheme, host, port, and base path, or make the reference external instead of exporter-managed.");
+            }
+
+            if (!IsRedirectStatusCode(response.StatusCode))
+            {
+                return response;
+            }
+
+            var location = response.Headers.Location;
+            if (location is null)
+            {
+                response.Dispose();
+                ThrowRedirectProvenanceFailure(
+                    context,
+                    artifactRoute,
+                    $"Export route '{artifactRoute}' returned redirect status {(int)response.StatusCode} without a Location header. Fix: return a final artifact response or a redirect target inside the configured export origin and app path.");
+            }
+
+            var redirectUri = ResolveRedirectUri(finalUri, location);
+            if (!IsWithinExportBoundary(redirectUri, baseUri))
+            {
+                response.Dispose();
+                ThrowRedirectProvenanceFailure(
+                    context,
+                    artifactRoute,
+                    $"Export route '{artifactRoute}' redirected to '{SanitizeUriForDiagnostic(redirectUri)}', which is outside the configured export origin and app path. Fix: keep export redirects on the same scheme, host, port, and base path, or make the reference external instead of exporter-managed.");
+            }
+
+            response.Dispose();
+            currentUri = redirectUri;
+        }
+
+        ThrowRedirectProvenanceFailure(
+            context,
+            artifactRoute,
+            $"Export route '{artifactRoute}' exceeded the artifact redirect limit of {MaxArtifactRedirects}. Fix: remove the redirect loop or return a final response inside the configured export origin and app path.");
+
+        throw new InvalidOperationException("Artifact redirect validation reached an unreachable state.");
+    }
+
+    private static Uri CreateExportBaseUri(ExportContext context)
+    {
+        return new Uri(EnsureTrailingSlash(context.BaseUrl), UriKind.Absolute);
+    }
+
+    private static Uri CreateArtifactRequestUri(ExportContext context, string route)
+    {
+        return new Uri(context.BaseUrl.TrimEnd('/') + route, UriKind.Absolute);
+    }
+
+    private static bool IsWithinExportBoundary(Uri uri, Uri baseUri)
+    {
+        return uri.IsAbsoluteUri
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+            && HasSameOrigin(uri, baseUri)
+            && HasSafeEscapedPathSegments(uri)
+            && HasSafeEscapedPathSegments(baseUri)
+            && TryGetAppRelativeRoute(uri, baseUri, out _);
+    }
+
+    private static bool HasSafeEscapedPathSegments(Uri uri)
+    {
+        foreach (var segment in uri.AbsolutePath.Split('/', StringSplitOptions.None))
+        {
+            if (segment.Length == 0)
+            {
+                continue;
+            }
+
+            string unescapedSegment;
+            try
+            {
+                unescapedSegment = Uri.UnescapeDataString(segment);
+            }
+            catch (UriFormatException)
+            {
+                return false;
+            }
+
+            if (unescapedSegment is "." or ".."
+                || unescapedSegment.Contains('/', StringComparison.Ordinal)
+                || unescapedSegment.Contains('\\', StringComparison.Ordinal)
+                || unescapedSegment.Any(char.IsControl))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsRedirectStatusCode(HttpStatusCode statusCode)
+    {
+        return statusCode is HttpStatusCode.Moved
+            or HttpStatusCode.Redirect
+            or HttpStatusCode.RedirectMethod
+            or HttpStatusCode.TemporaryRedirect
+            or HttpStatusCode.PermanentRedirect;
+    }
+
+    private static Uri ResolveRedirectUri(Uri currentUri, Uri location)
+    {
+        return location.IsAbsoluteUri
+            ? location
+            : new Uri(currentUri, location);
+    }
+
+    [DoesNotReturn]
+    private static void ThrowRedirectProvenanceFailure(
+        ExportContext context,
+        string route,
+        string message)
+    {
+        AddRedirectProvenanceDiagnostic(context, route, message);
+        throw new ExportValidationException(context.Diagnostics);
+    }
+
+    private static void AddRedirectProvenanceDiagnostic(
+        ExportContext context,
+        string route,
+        string message)
+    {
+        if (context.Diagnostics.Any(diagnostic => diagnostic.Code == RedirectProvenanceDiagnosticCode
+                                                  && diagnostic.Route == route
+                                                  && diagnostic.Message == message))
+        {
+            return;
+        }
+
+        context.Diagnostics.Add(new ExportDiagnostic(RedirectProvenanceDiagnosticCode, message, route));
+    }
+
+    private static string SanitizeUriForDiagnostic(Uri uri)
+    {
+        if (!uri.IsAbsoluteUri)
+        {
+            return uri.OriginalString;
+        }
+
+        var builder = new UriBuilder(uri)
+        {
+            UserName = string.Empty,
+            Password = string.Empty,
+            Query = string.Empty,
+            Fragment = string.Empty
+        };
+
+        return builder.Uri.ToString();
+    }
+
     private async Task WriteHtmlRouteAsync(
         string route,
         string filePath,
@@ -1656,9 +1830,11 @@ public class ExportEngine
     {
         try
         {
-            using var response = await client.GetAsync(
-                $"{context.BaseUrl}{BrowserStatusPageDefaults.ReservedNotFoundRoute}",
-                HttpCompletionOption.ResponseHeadersRead,
+            using var response = await SendArtifactRequestAsync(
+                client,
+                context,
+                "/404.html",
+                BrowserStatusPageDefaults.ReservedNotFoundRoute,
                 cancellationToken);
 
             if (!response.IsSuccessStatusCode)
@@ -1698,6 +1874,10 @@ public class ExportEngine
             }
         }
         catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (ExportValidationException)
         {
             throw;
         }
