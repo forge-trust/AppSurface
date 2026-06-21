@@ -1,4 +1,4 @@
-<!-- /autoplan restore point: /Users/andrew/.gstack/projects/forge-trust-Runnable/codex-localsecrets-secret-tool-autoplan-autoplan-restore-20260621-021027.md -->
+<!-- /autoplan restore point: /Users/andrew/.gstack/projects/forge-trust-AppSurface/codex-localsecrets-secret-tool-autoplan-autoplan-restore-20260621-021027.md -->
 
 # Design: LocalSecrets Linux Trusted secret-tool Resolution
 
@@ -317,7 +317,7 @@ Target developer persona:
 | --- | --- |
 | Who | Solo or small-team .NET developer adding AppSurface LocalSecrets before a remote vault exists |
 | Context | Local Linux development, often with Nix/Linuxbrew/custom installs or a distro where `secret-tool` is not in `/usr/bin` |
-| Tolerance | 5 minutes to diagnose and recover; low tolerance for security docs that do not give a runnable command |
+| Tolerance | 5 minutes to diagnose and recover; low tolerance for security docs that do not give a copy-ready command |
 | Expects | Safe defaults, explicit override, no secret printing, and error text that says exactly what to run next |
 
 Developer perspective:
