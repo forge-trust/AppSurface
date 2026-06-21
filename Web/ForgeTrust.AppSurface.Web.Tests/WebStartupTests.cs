@@ -700,7 +700,7 @@ public class WebStartupTests
     }
 
     [Fact]
-    public async Task ConfigureServices_Cors_WildcardInProduction_LogsWarning()
+    public void ConfigureServices_Cors_WildcardInProduction_Throws()
     {
         var previous = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
         try
@@ -717,20 +717,14 @@ public class WebStartupTests
 
             var context = new StartupContext([], root);
             var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
-            using var host = builder.Build();
 
-            // Verify CORS service is registered
-            Assert.NotNull(host.Services.GetService<ICorsService>());
+            var exception = Assert.Throws<InvalidOperationException>(() => builder.Build());
 
-            // Verify policy allows any origin
-            var corsService = host.Services
-                .GetRequiredService<ICorsPolicyProvider>();
-            var policy = await corsService.GetPolicyAsync(
-                new DefaultHttpContext(),
-                "DefaultCorsPolicy");
-
-            Assert.NotNull(policy);
-            Assert.True(policy.AllowAnyOrigin);
+            Assert.Contains("CorsOptions.AllowedOrigins", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("Cors:AllowedOrigins", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("https://app.example.com", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("EnableAllOriginsInDevelopment", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("ASP.NET Core CORS", exception.Message, StringComparison.Ordinal);
         }
         finally
         {
@@ -739,7 +733,34 @@ public class WebStartupTests
     }
 
     [Fact]
-    public void ConfigureServices_Cors_WildcardInDevelopment_DoesNotLogWarning()
+    public void ConfigureServices_Cors_WildcardInCommandLineProduction_Throws()
+    {
+        var previous = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        try
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", Environments.Development);
+
+            var root = new TestWebModule();
+            var startup = new TestWebStartup(root);
+            startup.WithOptions(o =>
+            {
+                o.Cors.EnableCors = true;
+                o.Cors.AllowedOrigins = ["*"];
+            });
+
+            var context = new StartupContext(["--environment", Environments.Production], root);
+            var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previous);
+        }
+    }
+
+    [Fact]
+    public void ConfigureServices_Cors_WildcardInDevelopment_DoesNotThrow()
     {
         var previous = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
         try

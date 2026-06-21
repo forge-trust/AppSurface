@@ -79,8 +79,9 @@ Support for MVC approaches can be configured via `WebOptions`:
 
 ### CORS
 Built-in support for CORS configuration:
-*   **Enforced Origin Safety**: When `EnableCors` is true, you MUST specify at least one origin in `AllowedOrigins`, unless running in Development with `EnableAllOriginsInDevelopment` enabled (the default). If `AllowedOrigins` is empty in production or when `EnableAllOriginsInDevelopment` is disabled, the application will throw a startup exception to prevent unintended security openness (verified by tests `EmptyOrigins_WithEnableCors_ThrowsException` and `EnableAllOriginsInDevelopment_AllowsAnyOrigin`).
+*   **Enforced Origin Safety**: When `EnableCors` is true, you MUST specify at least one origin in `AllowedOrigins`, unless running in Development with `EnableAllOriginsInDevelopment` enabled (the default). If `AllowedOrigins` is empty in production or when `EnableAllOriginsInDevelopment` is disabled, the application will throw a startup exception to prevent unintended security openness (verified by tests `EmptyOrigins_WithEnableCors_ThrowsException` and `EnableAllOriginsInDevelopment_AllowsAnyOrigin`). A literal origin wildcard (`["*"]`) is also rejected outside Development for AppSurface-managed CORS; use explicit browser origins such as `["https://app.example.com"]`.
 *   **Development Convenience**: `EnableAllOriginsInDevelopment` (enabled by default) automatically allows any origin when the environment is `Development`. When `AllowedHeaders` and `AllowedMethods` are empty or omitted, the `DefaultCorsPolicy` also allows any header and method for local convenience; configured values keep those header and method restrictions enforced even in Development.
+*   **Origin Wildcards Are Not All The Same**: `AllowedOrigins = ["*"]` means every origin and is only available through the development compatibility path. `AllowedOrigins = ["https://*.example.com"]` is ASP.NET Core wildcard-subdomain matching and remains supported. Host binding wildcards such as `http://*:5000` decide which network interfaces Kestrel listens on; they do not make browser CORS responses public.
 *   **Header and Method Control**: `AllowedHeaders` and `AllowedMethods` default to empty arrays in production, so AppSurface does not silently allow every preflight header and method once CORS is enabled. Set each collection to the browser contract the app actually supports, for example `["Content-Type", "X-Request-Id"]` and `[HttpMethods.Get, HttpMethods.Post]`. Use `["*"]` only when a production app intentionally wants `AllowAnyHeader()` or `AllowAnyMethod()`.
 *   **Default Policy**: Configures a policy named "DefaultCorsPolicy" (configurable) and automatically registers the CORS middleware.
 
@@ -99,7 +100,23 @@ await WebApp<MyRootModule>.RunAsync(
 The production default is deliberately stricter than older AppSurface previews: `AllowedOrigins` decides which browser
 frontends may read cross-origin responses, while `AllowedHeaders` and `AllowedMethods` decide which preflighted browser
 requests are accepted from those origins. Keep them explicit for production APIs, especially when credentials are
-allowed.
+allowed. Migrate older permissive production configuration from:
+
+```csharp
+options.Cors.EnableCors = true;
+options.Cors.AllowedOrigins = ["*"];
+```
+
+to:
+
+```csharp
+options.Cors.EnableCors = true;
+options.Cors.AllowedOrigins = ["https://app.example.com"];
+```
+
+For an intentionally public API that must own wildcard CORS in production, do not use the AppSurface-managed policy for
+that surface. Register and apply the host's ASP.NET Core CORS policy directly so the public contract is visible in the
+application's own startup code.
 
 ### Endpoint Routing
 

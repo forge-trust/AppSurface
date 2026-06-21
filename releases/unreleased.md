@@ -5,6 +5,9 @@ This is the living release note for the next coordinated AppSurface version afte
 ## What is taking shape
 
 - Add merged public changes here as they land.
+- `ForgeTrust.AppSurface.Web` now rejects the literal CORS origin wildcard `*` outside Development when AppSurface owns
+  the CORS policy, so permissive production APIs must either name explicit browser origins or register host-owned
+  ASP.NET Core CORS.
 
 ## Included in the next coordinated version
 
@@ -12,8 +15,16 @@ This is the living release note for the next coordinated AppSurface version afte
 
 - RazorWire hybrid islands now reject inline `data:` module specifiers from both `client-module`/`data-rw-module` and `window.RazorWireIslandModules`, and also reject protocol-relative `//...` module URLs. Move any prototype inline module such as `data:text/javascript,...` into a served module like `/js/my-island.js` that exports `mount(root, props)`.
 - RazorWire export now owns HTTP redirect handling for artifact-producing fetches, including crawled routes and conventional `404.html` staging. Same-origin redirects remain supported, while redirects outside the configured export origin and base path fail with `RWEXPORT008` before response content is read or written; routes that intentionally point to a different host or app path should be modeled as external references instead of exporter-managed artifacts.
+- AppSurface Web CORS startup validation now fails closed before policy registration when non-development
+  `CorsOptions.AllowedOrigins` includes the exact literal `*`, while preserving Development all-origin convenience and
+  wildcard subdomain origins such as `https://*.example.com`.
 
 ## Migration watch
 
+- Production AppSurface-managed CORS no longer accepts `AllowedOrigins = ["*"]`. Replace the literal wildcard with
+  explicit origins such as `["https://app.example.com"]`; keep local permissive behavior behind
+  `EnableAllOriginsInDevelopment`; use wildcard subdomains such as `["https://*.example.com"]` only when matching
+  subdomains; and register/apply host-owned ASP.NET Core CORS when an API is intentionally public to every browser
+  origin.
 - Record breaking or behavior-changing guidance here before it moves into the tagged release note.
 - RazorWire no longer treats `data:text/javascript,...` values in `window.RazorWireIslandModules` as importable modules. Use a relative, root-relative, same-origin, explicit HTTPS, or bare import-map module specifier instead.
