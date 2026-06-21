@@ -135,14 +135,6 @@
         "resolved": "2025.2.2",
         "contentHash": "0X56ZRizuHdrnPpgXjWV7f2tQO1FlQg5O1967OGKnI/4ZRNOK642J8L7brM1nYvrxTTU5TP1yRyXLRLaXLPQ8A=="
       },
-      "Microsoft.AspNetCore.Authentication.OpenIdConnect": {
-        "type": "Transitive",
-        "resolved": "10.0.7",
-        "contentHash": "Q7c2IKS/EwKScck80dp5zps1g62Dbqpteeh/mGMReFKuiP+88yWT4jB+mcP4cIFA+wsuIxh9uFJa6GHK4/9rzQ==",
-        "dependencies": {
-          "Microsoft.IdentityModel.Protocols.OpenIdConnect": "8.0.1"
-        }
-      },
       "Microsoft.Bcl.AsyncInterfaces": {
         "type": "Transitive",
         "resolved": "10.0.7",
@@ -821,6 +813,15 @@
         "requested": "[3.10.1, )",
         "resolved": "3.10.1",
         "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
+      },
+      "Microsoft.AspNetCore.Authentication.OpenIdConnect": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.8, )",
+        "resolved": "10.0.8",
+        "contentHash": "2MesCKax5PzSvBxJCRndskS6QSel4I7rNBCugpOcoarUhEKcdqSjZ3qSsv5NzGZEne3JZHK+JD+q0qIT8KnvSA==",
+        "dependencies": {
+          "Microsoft.IdentityModel.Protocols.OpenIdConnect": "8.0.1"
+        }
       },
       "Microsoft.AspNetCore.OpenApi": {
         "type": "CentralTransitive",
