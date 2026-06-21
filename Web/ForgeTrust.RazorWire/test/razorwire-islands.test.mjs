@@ -4,15 +4,17 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 
 const islandsPath = new URL('../wwwroot/razorwire/razorwire.islands.js', import.meta.url);
+const mountFixture = './test/fixtures/razorwire-test-island.mjs';
+const missingMountFixture = './test/fixtures/razorwire-missing-mount.mjs';
 
 test('load strategy hydrates generated output and passes parsed props', async () => {
   const island = new FakeElement('div');
   island.setAttribute('data-rw-module', 'test-load');
-  island.setAttribute('data-rw-props', '{"answer":"42"}');
+  island.setAttribute('data-rw-props', '{"attributeName":"data-mounted-props","attributeValue":"42"}');
 
   loadIslands([island], {
     islandModules: {
-      'test-load': moduleWithMount('root.setAttribute("data-mounted-props", props.answer);')
+      'test-load': mountFixture
     }
   });
   await flushHydration();
@@ -26,10 +28,11 @@ test('only strategy clears server content before mounting', async () => {
   island.innerHTML = '<p>server content</p>';
   island.setAttribute('data-rw-module', 'test-only');
   island.setAttribute('data-rw-strategy', 'only');
+  island.setAttribute('data-rw-props', '{"recordChildCountAttribute":"data-child-count"}');
 
   loadIslands([island], {
     islandModules: {
-      'test-only': moduleWithMount('root.setAttribute("data-child-count", String(root.children.length));')
+      'test-only': mountFixture
     }
   });
   await flushHydration();
@@ -45,7 +48,7 @@ test('missing mount marks island failed and prevents duplicate hydration', async
 
   const { document } = loadIslands([island], {
     islandModules: {
-      'test-missing-mount': 'data:text/javascript,export const value = 1;'
+      'test-missing-mount': missingMountFixture
     }
   });
   await waitForAttributeValue(island, 'data-rw-hydrated', 'failed');
@@ -73,7 +76,7 @@ test('unknown strategy does not hydrate and reports the invalid strategy', async
 
   const { warnings } = loadIslands([island], {
     islandModules: {
-      'test-unknown': moduleWithMount('root.setAttribute("data-mounted", "true");')
+      'test-unknown': mountFixture
     }
   });
   await flushHydration();
@@ -87,11 +90,12 @@ test('idle strategy uses requestIdleCallback when available', async () => {
   const island = new FakeElement('div');
   island.setAttribute('data-rw-module', 'test-idle');
   island.setAttribute('data-rw-strategy', 'idle');
+  island.setAttribute('data-rw-props', '{"attributeName":"data-mounted","attributeValue":"idle"}');
   const idleCallbacks = [];
 
   loadIslands([island], {
     islandModules: {
-      'test-idle': moduleWithMount('root.setAttribute("data-mounted", "idle");')
+      'test-idle': mountFixture
     },
     requestIdleCallback: callback => {
       idleCallbacks.push(callback);
@@ -111,11 +115,12 @@ test('visible strategy waits for intersection before hydrating', async () => {
   const island = new FakeElement('div');
   island.setAttribute('data-rw-module', 'test-visible');
   island.setAttribute('data-rw-strategy', 'visible');
+  island.setAttribute('data-rw-props', '{"attributeName":"data-mounted","attributeValue":"visible"}');
   const observers = [];
 
   loadIslands([island], {
     islandModules: {
-      'test-visible': moduleWithMount('root.setAttribute("data-mounted", "visible");')
+      'test-visible': mountFixture
     },
     IntersectionObserver: class {
       constructor(callback) {
@@ -140,15 +145,111 @@ test('visible strategy waits for intersection before hydrating', async () => {
   assert.equal(island.getAttribute('data-mounted'), 'visible');
 });
 
-test('dangerous direct module schemes are rejected before dynamic import', async () => {
-  const island = new FakeElement('div');
-  island.setAttribute('data-rw-module', 'javascript:alert(1)');
+test('allowed direct module specifiers pass validation before strategy handling', async () => {
+  const cases = [
+    './test/fixtures/razorwire-test-island.mjs',
+    '/js/island.js',
+    'http://example.test/js/island.js',
+    'https://cdn.example.test/island.js',
+    'test-import-map-island'
+  ];
 
-  const { warnings } = loadIslands([island]);
-  await flushHydration();
+  for (const moduleSpecifier of cases) {
+    const island = new FakeElement('div');
+    island.setAttribute('data-rw-module', moduleSpecifier);
+    island.setAttribute('data-rw-strategy', 'manual');
 
-  assert.equal(island.hasAttribute('data-rw-hydrated'), false);
-  assert.equal(warnings.warns.some(entry => entry[0].startsWith('RazorWire island module')), true);
+    const { warnings } = loadIslands([island]);
+    await flushHydration();
+
+    assert.equal(island.hasAttribute('data-rw-hydrated'), false);
+    assert.equal(warnings.warns.some(entry => entry[0] === 'Unknown island strategy: manual'), true, moduleSpecifier);
+    assert.equal(warnings.warns.some(entry => entry[0].startsWith('RazorWire island module')), false, moduleSpecifier);
+  }
+});
+
+test('allowed manifest module specifiers pass validation before strategy handling', async () => {
+  const cases = [
+    './test/fixtures/razorwire-test-island.mjs',
+    '/js/island.js',
+    'http://example.test/js/island.js',
+    'https://cdn.example.test/island.js',
+    'test-import-map-island'
+  ];
+
+  for (const moduleSpecifier of cases) {
+    const island = new FakeElement('div');
+    island.setAttribute('data-rw-module', 'test-manifest-entry');
+    island.setAttribute('data-rw-strategy', 'manual');
+
+    const { warnings } = loadIslands([island], {
+      islandModules: {
+        'test-manifest-entry': moduleSpecifier
+      }
+    });
+    await flushHydration();
+
+    assert.equal(island.hasAttribute('data-rw-hydrated'), false);
+    assert.equal(warnings.warns.some(entry => entry[0] === 'Unknown island strategy: manual'), true, moduleSpecifier);
+    assert.equal(warnings.warns.some(entry => entry[0].startsWith('RazorWire island module')), false, moduleSpecifier);
+  }
+});
+
+test('blocked direct module specifiers are rejected before dynamic import', async () => {
+  const cases = [
+    'data:text/javascript,export function mount() {}',
+    'data:text/javascript;base64,ZXhwb3J0IGZ1bmN0aW9uIG1vdW50KCkge30=',
+    'data:application/json,{}',
+    'javascript:alert(1)',
+    'blob:https://example.test/module',
+    'file:///tmp/island.js',
+    '//cdn.example.test/island.js',
+    '',
+    '   '
+  ];
+
+  for (const moduleSpecifier of cases) {
+    const island = new FakeElement('div');
+    island.setAttribute('data-rw-module', moduleSpecifier);
+    island.setAttribute('data-rw-strategy', 'manual');
+
+    const { warnings } = loadIslands([island]);
+    await flushHydration();
+
+    assert.equal(island.hasAttribute('data-rw-hydrated'), false);
+    assert.equal(warnings.warns.some(entry => entry[0] === 'Unknown island strategy: manual'), false, moduleSpecifier);
+    assert.equal(warnings.warns.some(entry => blockedWarningMatches(entry, 'data-rw-module')), true, moduleSpecifier);
+  }
+});
+
+test('blocked manifest module specifiers are rejected before dynamic import', async () => {
+  const cases = [
+    'data:text/javascript,export function mount() {}',
+    'data:text/javascript;base64,ZXhwb3J0IGZ1bmN0aW9uIG1vdW50KCkge30=',
+    'data:application/json,{}',
+    'javascript:alert(1)',
+    'blob:https://example.test/module',
+    'file:///tmp/island.js',
+    '//cdn.example.test/island.js',
+    '   '
+  ];
+
+  for (const moduleSpecifier of cases) {
+    const island = new FakeElement('div');
+    island.setAttribute('data-rw-module', 'blocked-mapping');
+    island.setAttribute('data-rw-strategy', 'manual');
+
+    const { warnings } = loadIslands([island], {
+      islandModules: {
+        'blocked-mapping': moduleSpecifier
+      }
+    });
+    await flushHydration();
+
+    assert.equal(island.hasAttribute('data-rw-hydrated'), false);
+    assert.equal(warnings.warns.some(entry => entry[0] === 'Unknown island strategy: manual'), false, moduleSpecifier);
+    assert.equal(warnings.warns.some(entry => blockedWarningMatches(entry, 'window.RazorWireIslandModules')), true, moduleSpecifier);
+  }
 });
 
 test('non-string manifest module mappings are skipped without throwing', async () => {
@@ -157,13 +258,13 @@ test('non-string manifest module mappings are skipped without throwing', async (
 
   const { warnings } = loadIslands([island], {
     islandModules: {
-      'bad-mapping': { path: moduleWithMount('root.setAttribute("data-mounted", "true");') }
+      'bad-mapping': { path: mountFixture }
     }
   });
   await flushHydration();
 
   assert.equal(island.hasAttribute('data-rw-hydrated'), false);
-  assert.equal(warnings.warns.some(entry => entry[0] === 'RazorWire island module "bad-mapping" resolved to an empty module specifier.'), true);
+  assert.equal(warnings.warns.some(entry => blockedWarningMatches(entry, 'window.RazorWireIslandModules')), true);
 });
 
 function loadIslands(islands, overrides = {}) {
@@ -171,7 +272,8 @@ function loadIslands(islands, overrides = {}) {
   const warnings = { errors: [], warns: [] };
   const window = {
     RazorWireIslandsInitialized: false,
-    RazorWireIslandModules: overrides.islandModules
+    RazorWireIslandModules: overrides.islandModules,
+    location: { origin: 'http://example.test' }
   };
   if (overrides.requestIdleCallback) {
     window.requestIdleCallback = overrides.requestIdleCallback;
@@ -189,6 +291,7 @@ function loadIslands(islands, overrides = {}) {
     },
     setTimeout: callback => callback(),
     IntersectionObserver: overrides.IntersectionObserver,
+    URL,
     globalThis: null
   };
   context.globalThis = context;
@@ -222,8 +325,10 @@ async function waitForCondition(predicate) {
   assert.fail(`waitForCondition timed out after ${maxAttempts} attempts`);
 }
 
-function moduleWithMount(body) {
-  return `data:text/javascript,${encodeURIComponent(`export async function mount(root, props) { ${body} }`)}`;
+function blockedWarningMatches(entry, source) {
+  return entry[0].startsWith('RazorWire island module')
+    && entry[0].includes(`from ${source}`)
+    && entry[0].includes('Use a relative, root-relative, same-origin, explicit HTTPS, or bare import-map module specifier.');
 }
 
 class FakeDocument {
