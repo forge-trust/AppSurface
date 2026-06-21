@@ -443,6 +443,7 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @event razorwire:form-toggle:before-change
  * @target [data-rw-form-toggle]
+ * @firesWhen A form toggle value changes and RazorWire has resolved the same-form targets that may be shown or hidden.
  * @property {HTMLFormElement} detail.form - Owning form.
  * @property {HTMLElement} detail.control - Toggle control.
  * @property {HTMLElement} detail.target - First matched target.
@@ -457,6 +458,7 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @event razorwire:form-toggle:change
  * @target [data-rw-form-toggle]
+ * @firesWhen RazorWire finishes applying visibility, state hooks, and optional disabled state for a conditional form target.
  * @property {HTMLFormElement} detail.form - Owning form.
  * @property {HTMLElement} detail.control - Toggle control.
  * @property {HTMLElement} detail.target - First matched target.
@@ -471,6 +473,7 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @event razorwire:form-collection:before-add
  * @target [data-rw-form-collection-add]
+ * @firesWhen An add command has cloned the app-authored template and allocated a sparse collection index, before insertion.
  * @property {HTMLFormElement} detail.form - Owning form.
  * @property {HTMLElement} detail.root - Collection root.
  * @property {HTMLElement} detail.control - Command button.
@@ -487,10 +490,13 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @event razorwire:form-collection:add
  * @target [data-rw-form-collection-add]
+ * @firesWhen RazorWire inserts a new collection row and enables its hidden `.index` marker.
  * @property {HTMLFormElement} detail.form - Owning form.
  * @property {HTMLElement} detail.root - Collection root.
+ * @property {HTMLElement} detail.control - Command button.
  * @property {HTMLElement} detail.row - Inserted row.
  * @property {string} detail.index - New sparse model-binding index.
+ * @property {"add"} detail.action - Collection action.
  * @bubbles true
  * @cancelable false
  */
@@ -501,8 +507,10 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @event razorwire:form-collection:before-duplicate
  * @target [data-rw-form-collection-duplicate]
+ * @firesWhen A duplicate command has cloned the source row, rewritten index tokens, and prepared copyable user values before insertion.
  * @property {HTMLFormElement} detail.form - Owning form.
  * @property {HTMLElement} detail.root - Collection root.
+ * @property {HTMLElement} detail.control - Command button.
  * @property {HTMLElement} detail.row - Cloned row that will be inserted.
  * @property {string|null} detail.previousIndex - Source row index.
  * @property {string} detail.index - New sparse model-binding index.
@@ -517,9 +525,14 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @event razorwire:form-collection:duplicate
  * @target [data-rw-form-collection-duplicate]
+ * @firesWhen RazorWire inserts a duplicated collection row with a new sparse model-binding index.
+ * @property {HTMLFormElement} detail.form - Owning form.
+ * @property {HTMLElement} detail.root - Collection root.
+ * @property {HTMLElement} detail.control - Command button.
  * @property {HTMLElement} detail.row - Inserted clone.
  * @property {string|null} detail.previousIndex - Source row index.
  * @property {string} detail.index - New sparse model-binding index.
+ * @property {"duplicate"} detail.action - Collection action.
  * @bubbles true
  * @cancelable false
  */
@@ -530,6 +543,10 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @event razorwire:form-collection:before-remove
  * @target [data-rw-form-collection-remove]
+ * @firesWhen A remove command resolves its physical-remove or mark-remove mode, before RazorWire mutates the row.
+ * @property {HTMLFormElement} detail.form - Owning form.
+ * @property {HTMLElement} detail.root - Collection root.
+ * @property {HTMLElement} detail.control - Command button.
  * @property {HTMLElement} detail.row - Row that will be removed or marked.
  * @property {"physical-remove"|"mark-remove"} detail.action - Remove action.
  * @property {"physical"|"mark"} detail.removeMode - Remove mode.
@@ -544,6 +561,10 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @event razorwire:form-collection:remove
  * @target [data-rw-form-collection-remove]
+ * @firesWhen RazorWire finishes physically removing a row or marking it for app-owned deletion.
+ * @property {HTMLFormElement} detail.form - Owning form.
+ * @property {HTMLElement} detail.root - Collection root.
+ * @property {HTMLElement} detail.control - Command button.
  * @property {HTMLElement} detail.row - Row that was removed or marked.
  * @property {"physical-remove"|"mark-remove"} detail.action - Remove action.
  * @property {"physical"|"mark"} detail.removeMode - Remove mode.
