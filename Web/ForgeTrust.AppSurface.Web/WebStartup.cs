@@ -355,7 +355,7 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
     /// </summary>
     /// <param name="context">Startup context providing environment information and the entry-point assembly.</param>
     /// <param name="services">The service collection to register MVC and CORS services into.</param>
-    /// <exception cref="InvalidOperationException">Thrown when CORS is enabled but no allowed origins are specified, except when all origins are explicitly allowed in development, or when non-development configuration includes the literal wildcard origin <c>*</c>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when CORS is enabled but no allowed origins are specified outside the development all-origins path, or when non-development configuration includes the literal wildcard origin <c>*</c>.</exception>
     protected sealed override void ConfigureServicesForAppType(StartupContext context, IServiceCollection services)
     {
         BuildModules(context);
