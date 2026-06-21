@@ -146,6 +146,45 @@ public class ExportSourceResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_Should_Treat_Url_Source_Redirect_As_Reachability_Without_Following()
+    {
+        var requestPaths = new List<string>();
+        var fakeProcess = new FakeTargetAppProcess();
+        var factory = new FakeTargetAppProcessFactory(_ => fakeProcess);
+        var resolver = CreateResolver(
+            factory,
+            new TestHttpHelpers.Factory(request =>
+            {
+                requestPaths.Add(request.RequestUri?.AbsolutePath ?? "/");
+
+                if (request.RequestUri?.AbsolutePath == "/")
+                {
+                    return new HttpResponseMessage(System.Net.HttpStatusCode.Found)
+                    {
+                        Headers =
+                        {
+                            Location = new Uri("/target", UriKind.Relative)
+                        }
+                    };
+                }
+
+                return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+            }));
+        var request = new ExportSourceRequest(
+            ExportSourceKind.Url,
+            "http://localhost:5233",
+            null,
+            [],
+            false);
+
+        await using var result = await resolver.ResolveAsync(request);
+
+        Assert.Equal("http://localhost:5233", result.BaseUrl);
+        Assert.Equal(["/"], requestPaths);
+        Assert.False(fakeProcess.Started);
+    }
+
+    [Fact]
     public async Task ResolveAsync_Should_Throw_CommandException_When_Url_Source_Is_Unreachable()
     {
         var createCallCount = 0;
