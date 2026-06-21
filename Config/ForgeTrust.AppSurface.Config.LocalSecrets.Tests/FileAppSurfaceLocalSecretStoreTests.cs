@@ -762,6 +762,53 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void DefaultFileSystem_Should_ReportReady_WhenFutureDirectoryAncestorDoesNotExist()
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "missing", "nested", "secrets.json");
+
+        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.InspectReadPath(path);
+
+        Assert.Equal(FileSecretPostureKind.Ready, result.Kind);
+    }
+
+    [Fact]
+    public void DefaultFileSystem_Should_RejectFileAncestorDuringReadPosture()
+    {
+        using var temp = TempDirectory.Create();
+        var fileAncestor = Path.Join(temp.Path, "not-a-directory");
+        File.WriteAllText(fileAncestor, "content");
+        var path = Path.Join(fileAncestor, "secrets.json");
+
+        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.InspectReadPath(path);
+
+        Assert.Equal(FileSecretPostureKind.Unsupported, result.Kind);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Code);
+    }
+
+    [Fact]
+    public void DefaultFileSystem_Should_RejectNonSystemSymlinkDirectoryDuringReadPosture()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create();
+        var targetDirectory = Path.Join(temp.Path, "target");
+        var linkDirectory = Path.Join(temp.Path, "linked");
+        Directory.CreateDirectory(targetDirectory);
+        Directory.CreateSymbolicLink(linkDirectory, targetDirectory);
+        var path = Path.Join(linkDirectory, "secrets.json");
+        var fileSystem = new DefaultFileAppSurfaceLocalSecretStoreFileSystem(() => true, () => true);
+
+        var result = fileSystem.InspectReadPath(path);
+
+        Assert.Equal(FileSecretPostureKind.Unsupported, result.Kind);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Code);
+    }
+
+    [Fact]
     public void DefaultFileSystem_Should_RejectLooseUnixContainingDirectoryDuringReadPosture()
     {
         if (!IsUnix())

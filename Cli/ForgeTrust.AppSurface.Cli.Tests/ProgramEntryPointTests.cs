@@ -104,6 +104,21 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task SecretsListCommand_Should_RenderDiagnostic_WhenStoreFileIsInvalidJson()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+        await File.WriteAllTextAsync(storePath, "{");
+        var shared = new[] { "--app", "MyApp", "--environment", "Development", "--store-file", storePath };
+
+        var list = await InvokeProgramEntryPointAsync(["secrets", "list", .. shared]);
+
+        Assert.NotEqual(0, list.ExitCode);
+        Assert.Contains("local-secret-file-posture-degraded", list.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", list.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SecretsDoctorCommand_Should_RenderReadinessDiagnosticWithoutPrintingSecretValue()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");
