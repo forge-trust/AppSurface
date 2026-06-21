@@ -2,6 +2,9 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets.Tests;
 
 public sealed class PlatformAppSurfaceLocalSecretStoreTests
 {
+    private const string UsrSecretTool = "/usr/bin/secret-tool";
+    private const string BinSecretTool = "/bin/secret-tool";
+
     private static readonly AppSurfaceLocalSecretIdentity Identity = new(
         "MyApp",
         "Development",
@@ -65,7 +68,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     public void LinuxGet_Should_ReturnUnavailable_WhenSecretToolTimesOut()
     {
         var store = new PlatformAppSurfaceLocalSecretStore.LinuxSecretServiceLocalSecretStore(
-            "/usr/bin/secret-tool",
+            UsrSecretTool,
             new FixedCommandRunner(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.TimedOut));
 
         var result = store.Get(Identity);
@@ -73,6 +76,20 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
         Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
         Assert.True(result.Diagnostic?.Retryable);
+    }
+
+    [Fact]
+    public void LinuxGet_Should_ReturnUnavailable_WhenSecretToolCannotStart()
+    {
+        var store = new PlatformAppSurfaceLocalSecretStore.LinuxSecretServiceLocalSecretStore(
+            UsrSecretTool,
+            new FixedCommandRunner(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.StartFailed(new InvalidOperationException("bad executable"))));
+
+        var result = store.Get(Identity);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
+        Assert.Contains("exit code -2", result.Diagnostic?.Cause, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -95,6 +112,144 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.TimedOutExitCode, result.ExitCode);
         Assert.Empty(result.Output);
         Assert.Contains("Timed out", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DefaultCommandRunner_Should_ReturnStartFailedResult_WhenCommandCannotStart()
+    {
+        var runner = new PlatformAppSurfaceLocalSecretStore.DefaultPlatformSecretCommandRunner(TimeSpan.FromSeconds(1));
+
+        var result = runner.Run(Path.Join(Path.GetTempPath(), $"appsurface-missing-command-{Guid.NewGuid():N}"), [], null);
+
+        Assert.Equal(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.StartFailedExitCode, result.ExitCode);
+        Assert.Empty(result.Output);
+        Assert.Contains("Could not start", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LinuxSecretToolResolver_Should_SelectUsrBinBeforeBin_WhenBothTrustedCandidatesExist()
+    {
+        var resolver = Resolver(new Dictionary<string, PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState>
+        {
+            [UsrSecretTool] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.ExecutableFile,
+            [BinSecretTool] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.ExecutableFile
+        });
+
+        var result = resolver.Resolve(null);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(UsrSecretTool, result.Path);
+    }
+
+    [Fact]
+    public void LinuxSecretToolResolver_Should_FallBackToBin_WhenUsrBinCandidateIsMissing()
+    {
+        var resolver = Resolver(new Dictionary<string, PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState>
+        {
+            [UsrSecretTool] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.Missing,
+            [BinSecretTool] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.ExecutableFile
+        });
+
+        var result = resolver.Resolve(null);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(BinSecretTool, result.Path);
+    }
+
+    [Fact]
+    public void LinuxSecretToolResolver_Should_IgnorePathCandidateAndExplainWhy()
+    {
+        var fakePath = "/tmp/appsurface-fake/secret-tool";
+        var resolver = Resolver(
+            new Dictionary<string, PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState>
+            {
+                [UsrSecretTool] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.Missing,
+                [BinSecretTool] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.Missing,
+                [fakePath] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.ExecutableFile
+            },
+            "/tmp/appsurface-fake");
+
+        var result = resolver.Resolve(null);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
+        Assert.Equal("local-secret-store-command-untrusted", result.Diagnostic?.Code);
+        Assert.Contains(fakePath, result.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.Contains("ignores PATH", result.Diagnostic?.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LinuxSecretToolResolver_Should_AcceptAbsoluteExecutableOverride()
+    {
+        var overridePath = "/nix/store/appsurface-secret-tool/bin/secret-tool";
+        var resolver = Resolver(new Dictionary<string, PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState>
+        {
+            [overridePath] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.ExecutableFile
+        });
+
+        var result = resolver.Resolve(overridePath);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(overridePath, result.Path);
+    }
+
+    [Fact]
+    public void CreateInnerStoreForTests_Should_PassConfiguredLinuxSecretToolPathToResolver_WhenLinux()
+    {
+        var overridePath = "/nix/store/appsurface-secret-tool/bin/secret-tool";
+        string? inspectedPath = null;
+        var resolver = new PlatformAppSurfaceLocalSecretStore.LinuxSecretToolResolver(
+            [UsrSecretTool, BinSecretTool],
+            path =>
+            {
+                inspectedPath = path;
+                return PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.ExecutableFile;
+            },
+            () => null);
+
+        var store = PlatformAppSurfaceLocalSecretStore.CreateInnerStoreForTests(
+            new AppSurfaceLocalSecretsOptions
+            {
+                LinuxSecretToolPath = overridePath
+            },
+            resolver,
+            PlatformAppSurfaceLocalSecretStore.LocalSecretsPlatform.Linux);
+
+        Assert.Equal("Linux Secret Service", store.Name);
+        Assert.Equal(overridePath, inspectedPath);
+    }
+
+    [Theory]
+    [InlineData("", "empty")]
+    [InlineData("relative/secret-tool", "not absolute")]
+    [InlineData("/missing/secret-tool", "does not exist")]
+    [InlineData("/opt/secret-tool-dir", "directory")]
+    [InlineData("/opt/secret-tool-not-executable", "not executable")]
+    public void LinuxSecretToolResolver_Should_RejectInvalidOverrides(string overridePath, string expectedCause)
+    {
+        var resolver = Resolver(new Dictionary<string, PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState>
+        {
+            ["/opt/secret-tool-dir"] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.Directory,
+            ["/opt/secret-tool-not-executable"] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.NotExecutableFile
+        });
+
+        var result = resolver.Resolve(overridePath);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.Equal("local-secret-store-command-invalid", result.Diagnostic?.Code);
+        Assert.Contains(expectedCause, result.Diagnostic?.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LinuxSecretToolResolver_Should_ReturnUnsupportedDiagnostic_WhenOverrideIsConfiguredOffLinux()
+    {
+        var result = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolResolver.UnsupportedPlatformOverride("/usr/local/bin/secret-tool");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
+        Assert.Equal("local-secret-store-command-unsupported", result.Diagnostic?.Code);
+        Assert.Contains("Linux-only", result.Diagnostic?.Cause, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -323,6 +478,14 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
             string? standardInput) =>
             result;
     }
+
+    private static PlatformAppSurfaceLocalSecretStore.LinuxSecretToolResolver Resolver(
+        IReadOnlyDictionary<string, PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState> paths,
+        string? pathEnvironment = null) =>
+        new(
+            [UsrSecretTool, BinSecretTool],
+            path => paths.GetValueOrDefault(path, PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.Missing),
+            () => pathEnvironment);
 
     private static (string FileName, IReadOnlyList<string> Arguments) SlowCommand()
     {

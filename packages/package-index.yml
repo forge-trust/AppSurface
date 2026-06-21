@@ -34,8 +34,8 @@ packages:
     release_notes_path: releases/v0.1.0-rc.4.md
     order: 25
     use_when: Add this after Config when a solo or hobbyist AppSurface app needs local development secrets before adopting a remote vault.
-    includes: AppSurfaceLocalSecretsModule, OS-backed local secret store adapters, fail-closed posture modes, local secret identity normalization, structured source diagnostics, test seams, and the `appsurface secrets` workflow.
-    does_not_include: Team secret sharing, CI/container secret injection, production rotation, remote vault storage, cloud secret managers, or generic vault abstractions.
+    includes: AppSurfaceLocalSecretsModule, OS-backed local secret store adapters, trusted Linux `secret-tool` resolution, fail-closed posture modes, local secret identity normalization, structured source diagnostics, test seams, and the `appsurface secrets` workflow.
+    does_not_include: Team secret sharing, CI/container secret injection, production rotation, remote vault storage, cloud secret managers, generic vault abstractions, or PATH-based executable discovery.
     start_here_path: Config/ForgeTrust.AppSurface.Config.LocalSecrets/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Config.LocalSecrets` after Config when local development secrets need source-aware diagnostics before a remote vault exists.
     depends_on:

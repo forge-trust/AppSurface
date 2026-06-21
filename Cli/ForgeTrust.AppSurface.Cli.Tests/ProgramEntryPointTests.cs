@@ -6,6 +6,7 @@ using System.Text.Json;
 
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Caching;
+using ForgeTrust.AppSurface.Config.LocalSecrets;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs;
@@ -115,6 +116,48 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("Ready: local secret namespace", result.AllText, StringComparison.Ordinal);
         Assert.Contains("local-secret-store-ready", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsDoctorCommand_Should_RejectSecretToolPathWithStoreFile()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "doctor", "--store-file", storePath, "--secret-tool-path", "/usr/local/bin/secret-tool"]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Use either --store-file or --secret-tool-path", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsSetCommand_Should_RejectSecretToolPathWithStoreFile()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "set", "Stripe:ApiKey", "--stdin", "--store-file", storePath, "--secret-tool-path", "/usr/local/bin/secret-tool"],
+            standardInput: "sk_test_secret");
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Use either --store-file or --secret-tool-path", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SecretsCommandBase_Should_PassSecretToolPathToPlatformStoreFactory()
+    {
+        var command = new CapturingSecretsCommand
+        {
+            SecretToolPath = "/nix/store/appsurface-secret-tool/bin/secret-tool"
+        };
+
+        var context = command.BuildContextForTests();
+
+        Assert.Equal(command.SecretToolPath, command.PlatformOptions?.LinuxSecretToolPath);
+        Assert.Same(command.Store, context.Store);
     }
 
     [Fact]
@@ -3709,6 +3752,43 @@ public sealed class ProgramEntryPointTests
             {
             }
         }
+    }
+
+    private sealed class CapturingSecretsCommand : SecretsCommandBase
+    {
+        public IAppSurfaceLocalSecretStore Store { get; } = new CapturedLocalSecretStore();
+
+        public AppSurfaceLocalSecretsOptions? PlatformOptions { get; private set; }
+
+        public SecretsCommandContext BuildContextForTests() => BuildContext();
+
+        public override ValueTask ExecuteAsync(IConsole console) => ValueTask.CompletedTask;
+
+        protected override IAppSurfaceLocalSecretStore CreatePlatformStore(AppSurfaceLocalSecretsOptions options)
+        {
+            PlatformOptions = options;
+            return Store;
+        }
+    }
+
+    private sealed class CapturedLocalSecretStore : IAppSurfaceLocalSecretStore
+    {
+        public string Name => nameof(CapturedLocalSecretStore);
+
+        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) =>
+            throw new NotSupportedException("This test store only captures platform-store construction.");
+
+        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value) =>
+            throw new NotSupportedException("This test store only captures platform-store construction.");
+
+        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) =>
+            throw new NotSupportedException("This test store only captures platform-store construction.");
+
+        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
+            throw new NotSupportedException("This test store only captures platform-store construction.");
+
+        public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
+            throw new NotSupportedException("This test store only captures platform-store construction.");
     }
 
     private sealed class TempDirectory : IDisposable

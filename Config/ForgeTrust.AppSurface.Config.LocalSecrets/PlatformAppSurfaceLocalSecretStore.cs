@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 
@@ -19,14 +20,30 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
     Justification = "Real OS credential stores depend on desktop session state, prompts, and native services; deterministic tests cover fake stores and status mapping.")]
 public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
 {
+    private static readonly string[] LinuxSecretToolTrustedCandidates = ["/usr/bin/secret-tool", "/bin/secret-tool"];
+
     private readonly IAppSurfaceLocalSecretStore _inner;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PlatformAppSurfaceLocalSecretStore"/> class.
     /// </summary>
     public PlatformAppSurfaceLocalSecretStore()
+        : this(new AppSurfaceLocalSecretsOptions())
     {
-        _inner = CreateInnerStore();
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PlatformAppSurfaceLocalSecretStore"/> class.
+    /// </summary>
+    /// <param name="options">LocalSecrets options that may configure Linux platform-store resolution.</param>
+    public PlatformAppSurfaceLocalSecretStore(IOptions<AppSurfaceLocalSecretsOptions> options)
+        : this(options?.Value ?? throw new ArgumentNullException(nameof(options)))
+    {
+    }
+
+    private PlatformAppSurfaceLocalSecretStore(AppSurfaceLocalSecretsOptions options)
+    {
+        _inner = CreateInnerStore(options, LinuxSecretToolResolver.Default);
     }
 
     /// <inheritdoc />
@@ -49,8 +66,29 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
     public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
         _inner.Doctor(applicationName, environment, keyPrefix);
 
-    private static IAppSurfaceLocalSecretStore CreateInnerStore()
+    private static IAppSurfaceLocalSecretStore CreateInnerStore(
+        AppSurfaceLocalSecretsOptions options,
+        LinuxSecretToolResolver linuxSecretToolResolver,
+        LocalSecretsPlatform? platformOverride = null)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(linuxSecretToolResolver);
+
+        if (platformOverride == LocalSecretsPlatform.Linux)
+        {
+            return CreateLinuxStore(options, linuxSecretToolResolver);
+        }
+
+        if (platformOverride == LocalSecretsPlatform.Unsupported)
+        {
+            return CreateUnsupportedStore();
+        }
+
+        if (options.LinuxSecretToolPath != null && !RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            return DiagnosticLocalSecretStore.FromResolution(LinuxSecretToolResolver.UnsupportedPlatformOverride(options.LinuxSecretToolPath));
+        }
+
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
             return new MacOsKeychainLocalSecretStore();
@@ -58,10 +96,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            var secretTool = FindOnPath("secret-tool");
-            return secretTool == null
-                ? new UnsupportedPlatformLocalSecretStore("Linux Secret Service command `secret-tool` is unavailable in this session.")
-                : new LinuxSecretServiceLocalSecretStore(secretTool);
+            return CreateLinuxStore(options, linuxSecretToolResolver);
         }
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -69,25 +104,244 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             return new WindowsCredentialManagerLocalSecretStore();
         }
 
-        return new UnsupportedPlatformLocalSecretStore("This operating system does not have an AppSurface LocalSecrets adapter.");
+        return CreateUnsupportedStore();
     }
 
-    private static string? FindOnPath(string fileName)
+    private static IAppSurfaceLocalSecretStore CreateLinuxStore(
+        AppSurfaceLocalSecretsOptions options,
+        LinuxSecretToolResolver linuxSecretToolResolver)
     {
-        if (string.IsNullOrWhiteSpace(fileName) || Path.IsPathRooted(fileName))
+        var secretTool = linuxSecretToolResolver.Resolve(options.LinuxSecretToolPath);
+        return secretTool.Succeeded
+            ? new LinuxSecretServiceLocalSecretStore(secretTool.Path!)
+            : DiagnosticLocalSecretStore.FromResolution(secretTool);
+    }
+
+    private static IAppSurfaceLocalSecretStore CreateUnsupportedStore() =>
+        DiagnosticLocalSecretStore.Unsupported(
+            new AppSurfaceLocalSecretDiagnostic(
+                "local-secret-store-unsupported",
+                "Local secret store is unsupported in this session.",
+                "This operating system does not have an AppSurface LocalSecrets adapter.",
+                "Use environment variables or key-per-file in this session, or run on a supported desktop user session.",
+                "local-secrets-platform-compatibility"));
+
+    /// <summary>
+    /// Creates the platform-specific inner store with deterministic platform selection for tests.
+    /// </summary>
+    /// <param name="options">LocalSecrets options used by platform resolution.</param>
+    /// <param name="linuxSecretToolResolver">Linux resolver seam used when the selected platform is Linux.</param>
+    /// <param name="platformOverride">Optional platform override; when unset, the current runtime platform is used.</param>
+    /// <returns>The store selected for the requested platform and options.</returns>
+    internal static IAppSurfaceLocalSecretStore CreateInnerStoreForTests(
+        AppSurfaceLocalSecretsOptions options,
+        LinuxSecretToolResolver linuxSecretToolResolver,
+        LocalSecretsPlatform? platformOverride = null) =>
+        CreateInnerStore(options, linuxSecretToolResolver, platformOverride);
+
+    /// <summary>
+    /// Represents platform selections used by deterministic platform-store tests.
+    /// </summary>
+    internal enum LocalSecretsPlatform
+    {
+        /// <summary>
+        /// Linux Secret Service-backed local secret storage through <c>secret-tool</c>.
+        /// </summary>
+        Linux,
+
+        /// <summary>
+        /// A platform without a LocalSecrets platform adapter.
+        /// </summary>
+        Unsupported
+    }
+
+    internal sealed class LinuxSecretToolResolver
+    {
+        private const string FileName = "secret-tool";
+        private static readonly char[] PathSeparators = [Path.PathSeparator];
+
+        private readonly IReadOnlyList<string> _trustedCandidates;
+        private readonly Func<string, LinuxSecretToolPathState> _inspectPath;
+        private readonly Func<string?> _getPath;
+
+        public LinuxSecretToolResolver(
+            IEnumerable<string> trustedCandidates,
+            Func<string, LinuxSecretToolPathState> inspectPath,
+            Func<string?> getPath)
         {
+            ArgumentNullException.ThrowIfNull(trustedCandidates);
+            ArgumentNullException.ThrowIfNull(inspectPath);
+            ArgumentNullException.ThrowIfNull(getPath);
+
+            _trustedCandidates = trustedCandidates.ToArray();
+            _inspectPath = inspectPath;
+            _getPath = getPath;
+        }
+
+        public static LinuxSecretToolResolver Default { get; } =
+            new(LinuxSecretToolTrustedCandidates, InspectFileSystemPath, () => Environment.GetEnvironmentVariable("PATH"));
+
+        public LinuxSecretToolResolution Resolve(string? overridePath)
+        {
+            if (overridePath != null)
+            {
+                return ResolveOverride(overridePath);
+            }
+
+            foreach (var candidate in _trustedCandidates)
+            {
+                if (_inspectPath(candidate) == LinuxSecretToolPathState.ExecutableFile)
+                {
+                    return LinuxSecretToolResolution.Found(candidate);
+                }
+            }
+
+            return LinuxSecretToolResolution.Failed(
+                LocalSecretResultStatus.UnsupportedPlatform,
+                new AppSurfaceLocalSecretDiagnostic(
+                    "local-secret-store-command-untrusted",
+                    "Linux Secret Service command is not trusted.",
+                    BuildNoTrustedCandidateCause(),
+                    "Install `secret-tool` in `/usr/bin` or `/bin`, or verify a trusted nonstandard binary with `test -x /absolute/path/to/secret-tool` and pass `--secret-tool-path /absolute/path/to/secret-tool`. For app runtime, set `AppSurfaceLocalSecretsOptions.LinuxSecretToolPath`.",
+                    "local-secrets-platform-compatibility"));
+        }
+
+        public static LinuxSecretToolResolution UnsupportedPlatformOverride(string overridePath) =>
+            LinuxSecretToolResolution.Failed(
+                LocalSecretResultStatus.UnsupportedPlatform,
+                new AppSurfaceLocalSecretDiagnostic(
+                    "local-secret-store-command-unsupported",
+                    "Linux Secret Service command override is unsupported on this platform.",
+                    $"`secret-tool` overrides are Linux-only, but `{overridePath}` was configured for a non-Linux platform.",
+                    "Remove `--secret-tool-path` or `AppSurfaceLocalSecretsOptions.LinuxSecretToolPath` on macOS/Windows and use the native platform store.",
+                    "local-secrets-platform-compatibility"));
+
+        private LinuxSecretToolResolution ResolveOverride(string overridePath)
+        {
+            if (string.IsNullOrWhiteSpace(overridePath))
+            {
+                return InvalidOverride(overridePath, "The configured `secret-tool` override path is empty.");
+            }
+
+            if (!Path.IsPathFullyQualified(overridePath))
+            {
+                return InvalidOverride(overridePath, "The configured `secret-tool` override path is not absolute.");
+            }
+
+            var state = _inspectPath(overridePath);
+            return state switch
+            {
+                LinuxSecretToolPathState.ExecutableFile => LinuxSecretToolResolution.Found(overridePath),
+                LinuxSecretToolPathState.Directory => InvalidOverride(overridePath, "The configured `secret-tool` override path is a directory."),
+                LinuxSecretToolPathState.NotExecutableFile => InvalidOverride(overridePath, "The configured `secret-tool` override path exists but is not executable."),
+                _ => InvalidOverride(overridePath, "The configured `secret-tool` override path does not exist.")
+            };
+        }
+
+        private static LinuxSecretToolResolution InvalidOverride(string overridePath, string cause) =>
+            LinuxSecretToolResolution.Failed(
+                LocalSecretResultStatus.Unavailable,
+                new AppSurfaceLocalSecretDiagnostic(
+                    "local-secret-store-command-invalid",
+                    "Linux Secret Service command override is invalid.",
+                    cause,
+                    $"Verify the binary with `test -x /absolute/path/to/secret-tool`, then pass `--secret-tool-path /absolute/path/to/secret-tool`. Current value: `{overridePath}`.",
+                    "local-secrets-platform-compatibility"));
+
+        private string BuildNoTrustedCandidateCause()
+        {
+            var checkedPaths = string.Join(", ", _trustedCandidates);
+            var ignoredPathCandidate = FindIgnoredPathCandidate();
+            if (ignoredPathCandidate == null)
+            {
+                return $"Checked trusted candidates: {checkedPaths}. AppSurface does not search PATH for `secret-tool`.";
+            }
+
+            return $"Checked trusted candidates: {checkedPaths}. Found `{ignoredPathCandidate}` on PATH, but AppSurface ignores PATH for `secret-tool` to avoid executing an untrusted command.";
+        }
+
+        private string? FindIgnoredPathCandidate()
+        {
+            var path = _getPath();
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            var trusted = _trustedCandidates.ToHashSet(StringComparer.Ordinal);
+            foreach (var directory in path.Split(PathSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var candidate = Path.Join(directory, FileName);
+                if (!trusted.Contains(candidate) && _inspectPath(candidate) != LinuxSecretToolPathState.Missing)
+                {
+                    return candidate;
+                }
+            }
+
             return null;
         }
 
-        var paths = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator);
-        return paths
-            .Select(path => Path.Join(path, fileName))
-            .FirstOrDefault(File.Exists);
+        private static LinuxSecretToolPathState InspectFileSystemPath(string path)
+        {
+            if (Directory.Exists(path))
+            {
+                return LinuxSecretToolPathState.Directory;
+            }
+
+            if (!File.Exists(path))
+            {
+                return LinuxSecretToolPathState.Missing;
+            }
+
+            if (OperatingSystem.IsWindows())
+            {
+                return LinuxSecretToolPathState.ExecutableFile;
+            }
+
+            try
+            {
+                const UnixFileMode executeBits = UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+                return (File.GetUnixFileMode(path) & executeBits) == 0
+                    ? LinuxSecretToolPathState.NotExecutableFile
+                    : LinuxSecretToolPathState.ExecutableFile;
+            }
+            catch (IOException)
+            {
+                return LinuxSecretToolPathState.NotExecutableFile;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return LinuxSecretToolPathState.NotExecutableFile;
+            }
+        }
     }
 
-    private sealed class UnsupportedPlatformLocalSecretStore(string cause) : IAppSurfaceLocalSecretStore
+    internal enum LinuxSecretToolPathState
     {
-        public string Name => nameof(UnsupportedPlatformLocalSecretStore);
+        Missing,
+        Directory,
+        NotExecutableFile,
+        ExecutableFile
+    }
+
+    internal sealed record LinuxSecretToolResolution(
+        bool Succeeded,
+        string? Path,
+        LocalSecretResultStatus Status,
+        AppSurfaceLocalSecretDiagnostic? Diagnostic)
+    {
+        public static LinuxSecretToolResolution Found(string path) =>
+            new(true, path, LocalSecretResultStatus.Found, null);
+
+        public static LinuxSecretToolResolution Failed(LocalSecretResultStatus status, AppSurfaceLocalSecretDiagnostic diagnostic) =>
+            new(false, null, status, diagnostic);
+    }
+
+    private sealed class DiagnosticLocalSecretStore(
+        LocalSecretResultStatus status,
+        AppSurfaceLocalSecretDiagnostic diagnostic) : IAppSurfaceLocalSecretStore
+    {
+        public string Name => nameof(DiagnosticLocalSecretStore);
 
         public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) => Unsupported();
 
@@ -96,20 +350,18 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) => Unsupported();
 
         public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
-            AppSurfaceLocalSecretListResult.Failed(LocalSecretResultStatus.UnsupportedPlatform, Diagnostic(), Name);
+            AppSurfaceLocalSecretListResult.Failed(status, diagnostic, Name);
 
         public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) => Unsupported();
 
         private AppSurfaceLocalSecretResult Unsupported() =>
-            AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.UnsupportedPlatform, Diagnostic(), Name);
+            AppSurfaceLocalSecretResult.NotFound(status, diagnostic, Name);
 
-        private AppSurfaceLocalSecretDiagnostic Diagnostic() =>
-            new(
-                "local-secret-store-unsupported",
-                "Local secret store is unsupported in this session.",
-                cause,
-                "Use environment variables or key-per-file in this session, or run on a supported desktop user session.",
-                "local-secrets-platform-compatibility");
+        public static DiagnosticLocalSecretStore FromResolution(LinuxSecretToolResolution resolution) =>
+            new(resolution.Status, resolution.Diagnostic ?? throw new ArgumentException("Failed resolution requires a diagnostic.", nameof(resolution)));
+
+        public static DiagnosticLocalSecretStore Unsupported(AppSurfaceLocalSecretDiagnostic diagnostic) =>
+            new(LocalSecretResultStatus.UnsupportedPlatform, diagnostic);
     }
 
     internal sealed partial class MacOsKeychainLocalSecretStore : IndexedLocalSecretStore
@@ -945,7 +1197,22 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             process.StartInfo.RedirectStandardError = true;
             process.StartInfo.RedirectStandardInput = standardInput != null;
             process.StartInfo.UseShellExecute = false;
-            process.Start();
+            try
+            {
+                process.Start();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return PlatformSecretCommandResult.StartFailed(ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return PlatformSecretCommandResult.StartFailed(ex);
+            }
+            catch (Win32Exception ex)
+            {
+                return PlatformSecretCommandResult.StartFailed(ex);
+            }
 
             var outputTask = process.StandardOutput.ReadToEndAsync();
             var errorTask = process.StandardError.ReadToEndAsync();
@@ -998,8 +1265,15 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
     internal sealed record PlatformSecretCommandResult(int ExitCode, string Output, string Error)
     {
         internal const int TimedOutExitCode = -1;
+        internal const int StartFailedExitCode = -2;
 
         public static PlatformSecretCommandResult TimedOut { get; } =
             new(TimedOutExitCode, string.Empty, "Timed out waiting for the platform secret command to finish.");
+
+        public static PlatformSecretCommandResult StartFailed(Exception exception) =>
+            new(
+                StartFailedExitCode,
+                string.Empty,
+                $"Could not start the platform secret command. Exception={exception.GetType().Name}; Message={exception.Message}");
     }
 }

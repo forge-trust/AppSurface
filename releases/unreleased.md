@@ -9,6 +9,8 @@ This is the living release note for the next coordinated AppSurface version afte
 - Sanitized AppSurface Config audit diffs for comparing captured runtime configuration reports.
 - LocalSecrets platform-index self-healing so `appsurface secrets list` no longer surfaces stale names whose stored
   values are missing.
+- LocalSecrets Linux `secret-tool` resolution now uses trusted system candidates or an explicit absolute override instead
+  of executing the first `secret-tool` discovered on `PATH`.
 
 ## Included in the next coordinated version
 
@@ -22,6 +24,10 @@ This is the living release note for the next coordinated AppSurface version afte
   `appsurface secrets list`. Missing values are pruned from the index when validation and repair succeed, and
   `appsurface secrets delete KEY` repairs a stale indexed name when the value is already gone while preserving
   `local-secret-missing` for keys that never existed.
+- AppSurface LocalSecrets now hardens Linux Secret Service command selection. Linux uses `/usr/bin/secret-tool`, then
+  `/bin/secret-tool`, or an explicit trusted absolute path through `AppSurfaceLocalSecretsOptions.LinuxSecretToolPath`
+  and `appsurface secrets --secret-tool-path`. PATH matches are reported only as ignored diagnostic context, invalid
+  overrides fail before command launch, and `--secret-tool-path` cannot be combined with `--store-file`.
 
 ### AppSurface Flow
 

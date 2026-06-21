@@ -18,6 +18,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - `ForgeTrust.AppSurface.Auth.AspNetCore` can now protect Minimal API endpoints with host-owned ASP.NET Core policies while returning AppSurface-shaped ProblemDetails JSON for API callers.
 - AppSurface Config can now compare sanitized audit reports, render deterministic same-host or captured-snapshot evidence, and expose command-framework-agnostic diff workflows with display-safe failures.
 - AppSurface LocalSecrets platform-backed stores now validate indexed names against live stored values during `appsurface secrets list`, prune stale names after successful repair, and let `appsurface secrets delete KEY` clean stale indexed names whose values are already gone.
+- AppSurface LocalSecrets now hardens Linux `secret-tool` resolution by using trusted system candidates or an explicit absolute override instead of executing the first PATH-discovered command.
 - AppSurface Flow now uses value-type execution contexts and deeper benchmark coverage to reduce and track synchronous in-memory runner allocation overhead.
 
 ## 0.1.0-rc.4 - 2026-06-16
