@@ -107,7 +107,7 @@ interface Window {
     function validateIslandModuleSpecifier(specifier, moduleName, fromManifest) {
         const value = typeof specifier === 'string' ? specifier.trim() : '';
         if (!value) {
-            warnBlockedIslandModuleSpecifier(moduleName, value, fromManifest, 'an empty or non-string module specifier');
+            warnBlockedIslandModuleSpecifier(moduleName, specifier, fromManifest, 'an empty or non-string module specifier');
             return null;
         }
 
@@ -139,11 +139,11 @@ interface Window {
         return value;
     }
 
-    function warnBlockedIslandModuleSpecifier(moduleName, value, fromManifest, reason) {
+    function warnBlockedIslandModuleSpecifier(moduleName, diagnosticValue, fromManifest, reason) {
         const source = fromManifest ? 'window.RazorWireIslandModules' : 'data-rw-module';
         console.warn(
             `RazorWire island module "${moduleName}" from ${source} uses ${reason}. Use a relative, root-relative, same-origin, explicit HTTPS, or bare import-map module specifier.`,
-            value
+            diagnosticValue
         );
     }
 

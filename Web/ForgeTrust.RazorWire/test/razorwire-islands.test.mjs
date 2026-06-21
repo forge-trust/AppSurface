@@ -259,16 +259,19 @@ test('blocked manifest module specifiers are rejected before dynamic import', as
 test('non-string manifest module mappings are skipped without throwing', async () => {
   const island = new FakeElement('div');
   island.setAttribute('data-rw-module', 'bad-mapping');
+  const mappingValue = { path: mountFixture };
 
   const { warnings } = loadIslands([island], {
     islandModules: {
-      'bad-mapping': { path: mountFixture }
+      'bad-mapping': mappingValue
     }
   });
   await flushHydration();
 
   assert.equal(island.hasAttribute('data-rw-hydrated'), false);
-  assert.equal(warnings.warns.some(entry => blockedWarningMatches(entry, 'window.RazorWireIslandModules')), true);
+  const warning = warnings.warns.find(entry => blockedWarningMatches(entry, 'window.RazorWireIslandModules'));
+  assert.ok(warning);
+  assert.equal(warning[1], mappingValue);
 });
 
 function loadIslands(islands, overrides = {}) {
