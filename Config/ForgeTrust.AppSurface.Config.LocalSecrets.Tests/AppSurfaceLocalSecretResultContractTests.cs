@@ -69,6 +69,16 @@ public sealed class AppSurfaceLocalSecretResultContractTests
     }
 
     [Fact]
+    public void ListFound_Should_OrderCaseVariantsDeterministically()
+    {
+        var result = AppSurfaceLocalSecretListResult.Found(
+            ["stripe:apikey", "SendGrid:ApiKey", "Stripe:ApiKey"],
+            "Fixed");
+
+        Assert.Equal(["SendGrid:ApiKey", "Stripe:ApiKey", "stripe:apikey"], result.Keys);
+    }
+
+    [Fact]
     public void IdentityFactories_Should_RejectNullContractInputs()
     {
         var valid = Assert.Throws<ArgumentNullException>(() => AppSurfaceLocalSecretIdentityResult.Valid(null!));
