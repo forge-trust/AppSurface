@@ -81,7 +81,7 @@ app.MapGet(
     });
 ```
 
-For a local proof with fake authentication, see [the ASP.NET Core auth bridge example](../../examples/auth-aspnetcore-bridge/README.md).
+For a local proof with fake selectable personas, use [`ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth`](../ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) and [the DevAuth example](../../examples/auth-aspnetcore-dev-auth/README.md). The older [ASP.NET Core auth bridge example](../../examples/auth-aspnetcore-bridge/README.md) remains a low-level adapter proof for hosts that already own their authentication scheme.
 
 ## What The Package Includes
 

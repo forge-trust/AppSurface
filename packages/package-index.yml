@@ -87,6 +87,21 @@ packages:
     recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results or Minimal API ProblemDetails responses.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth
+  - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 37
+    use_when: Add this in Development-only ASP.NET Core hosts when package consumers need selectable fake personas, a visible local control page, and AppSurface policy proof without configuring an external identity provider.
+    includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, MapAppSurfaceDevAuth control endpoints, seeded personas, protected persona cookie, loopback-only status JSON, visible development marker, startup safety diagnostics, and ASDEV diagnostic codes.
+    does_not_include: Production authentication, OIDC, JWT validation, ASP.NET Identity, password handling, durable app-user mapping, user stores, tenant authority, audit sinks, deployment auth, automatic host HTML injection, RazorWire auth UI components, or the future automated test harness.
+    start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts that need fake local personas to prove AppSurface policy results.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Auth.AspNetCore
   - project: Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj
     classification: public
     publish_decision: publish
@@ -94,7 +109,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.4.md
-    order: 37
+    order: 38
     use_when: Add this when your AppSurface modules or host integrations need product-intelligence event contracts before choosing an analytics vendor.
     includes: AppSurfaceProductIntelligenceModule, IAppSurfaceProductIntelligence, AppSurfaceProductEvent, typed product-event registry, validation, sanitization, lifecycle states, selected experimental event allowlists, sensitivity classes, and host-owned sink contracts.
     does_not_include: PostHog SDKs, OpenTelemetry exporters, analytics storage, retention policy, dashboards, browser autocapture, session replay, cookies, or request-body capture.
