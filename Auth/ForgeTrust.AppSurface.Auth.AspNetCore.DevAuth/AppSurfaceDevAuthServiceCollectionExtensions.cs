@@ -89,16 +89,18 @@ public static class AppSurfaceDevAuthServiceCollectionExtensions
                 "ASDEV003 Problem: AppSurface DevAuth requires at least one seeded persona. Cause: no users were added to AppSurfaceDevAuthOptions.Users. Fix: add a local persona such as 'admin' or remove DevAuth. Docs: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#diagnostics.");
         }
 
-        foreach (var persona in options.Users.Personas.Values)
+        foreach (var persona in options.Users.Personas.Values.Where(IsMissingSubjectClaim))
         {
-            if (!persona.Claims.Any(claim =>
-                    string.Equals(claim.Type, persona.SubjectClaimType, StringComparison.Ordinal) &&
-                    !string.IsNullOrWhiteSpace(claim.Value)))
-            {
-                throw new AppSurfaceDevAuthException(
-                    AppSurfaceDevAuthDiagnostics.MissingSubjectClaim,
-                    $"ASDEV004 Problem: DevAuth persona '{persona.Id}' is missing subject claim '{persona.SubjectClaimType}'. Cause: AppSurface Auth.AspNetCore cannot map authenticated users without a stable subject. Fix: call Subject(...) and keep it aligned with MapSubjectClaim(...). Docs: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#diagnostics.");
-            }
+            throw new AppSurfaceDevAuthException(
+                AppSurfaceDevAuthDiagnostics.MissingSubjectClaim,
+                $"ASDEV004 Problem: DevAuth persona '{persona.Id}' is missing subject claim '{persona.SubjectClaimType}'. Cause: AppSurface Auth.AspNetCore cannot map authenticated users without a stable subject. Fix: call Subject(...) and keep it aligned with MapSubjectClaim(...). Docs: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#diagnostics.");
         }
+    }
+
+    private static bool IsMissingSubjectClaim(AppSurfaceDevAuthPersona persona)
+    {
+        return !persona.Claims.Any(claim =>
+            string.Equals(claim.Type, persona.SubjectClaimType, StringComparison.Ordinal) &&
+            !string.IsNullOrWhiteSpace(claim.Value));
     }
 }

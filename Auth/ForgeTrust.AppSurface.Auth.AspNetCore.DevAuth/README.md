@@ -85,7 +85,7 @@ The control page lets you select a seeded persona, clear the persona cookie, ins
 
 Persona IDs must be route-safe local identifiers containing only ASCII letters, digits, `.`, `_`, or `-`. The dot-segment IDs `.` and `..` are not allowed, and ids that look like tokens, secrets, passwords, keys, credentials, or emails are rejected. Persona IDs are used in the selection endpoint path and stored as the protected cookie payload.
 
-Persona state is stored in a protected, HttpOnly, SameSite=Strict cookie that contains only the persona id. Blank, unknown, stale, reset, or tampered cookie state authenticates as no result.
+Persona state is stored in a protected, HttpOnly, Secure, SameSite=Strict cookie that contains only the persona id. Blank, unknown, stale, reset, or tampered cookie state authenticates as no result.
 
 The authentication handler issues every seeded persona claim, but the control page does not display every issued claim. Claims are rendered only when their type is in `DisplayClaimTypes`, their value is short, and neither the type nor the value looks like a token, secret, password, key, credential, or email. Display names and subjects that look sensitive are redacted from HTML and status JSON. Hidden claims are counted without showing their values.
 
@@ -145,4 +145,4 @@ Remove DevAuth before deploying a host:
 4. Remove DevAuth scheme references from policies.
 5. Configure real ASP.NET Core authentication and keep `ForgeTrust.AppSurface.Auth.AspNetCore` only for AppSurface result mapping.
 
-For a runnable proof, see [the DevAuth example](../../examples/auth-aspnetcore-dev-auth/README.md).
+For a working proof, see [the DevAuth example](../../examples/auth-aspnetcore-dev-auth/README.md).

@@ -79,6 +79,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains(AppSurfaceDevAuthDefaults.CookieName, setCookie, StringComparison.Ordinal);
         Assert.Contains("httponly", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("secure", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("role", html, StringComparison.Ordinal);
         Assert.Contains("operator", html, StringComparison.Ordinal);
         Assert.Contains("claim(s) hidden from preview", html, StringComparison.Ordinal);

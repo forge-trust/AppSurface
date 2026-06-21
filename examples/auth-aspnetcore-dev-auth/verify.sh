@@ -7,8 +7,9 @@ port="${APP_SURFACE_DEV_AUTH_PORT:-61258}"
 base_url="http://127.0.0.1:$port"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/appsurface-dev-auth.XXXXXX")"
 app_log="$work_dir/app.log"
-cookie_jar="$work_dir/cookies.txt"
 app_pid=""
+cookie_name=".AppSurface.DevAuth.Persona"
+devauth_cookie=""
 
 cleanup() {
   if [[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null; then
@@ -31,13 +32,23 @@ request() {
   local path="$3"
   local body_file="$work_dir/$name.body"
   local status_file="$work_dir/$name.status"
+  local cookie_header="Cookie:"
+  [[ -n "$devauth_cookie" ]] && cookie_header="Cookie: $devauth_cookie"
 
-  curl -sS -X "$method" -c "$cookie_jar" -b "$cookie_jar" -L \
+  curl -sS -X "$method" -L \
     -D "$work_dir/$name.headers" \
     -o "$body_file" \
     -w "%{http_code}" \
+    -H "$cookie_header" \
     "$base_url$path" > "$status_file" \
     || fail "$name transport failed"
+
+  local set_cookie
+  set_cookie="$(grep -i "^set-cookie: $cookie_name=" "$work_dir/$name.headers" | head -1 | tr -d '\r' || true)"
+  if [[ -n "$set_cookie" ]]; then
+    devauth_cookie="${set_cookie#*: }"
+    devauth_cookie="${devauth_cookie%%;*}"
+  fi
 }
 
 assert_status() {

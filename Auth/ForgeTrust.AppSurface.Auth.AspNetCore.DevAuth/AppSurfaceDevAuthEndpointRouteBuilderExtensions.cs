@@ -187,7 +187,14 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
     {
         SetNoStoreHeaders(httpContext);
         var devAuthOptions = options.Value;
-        httpContext.Response.Cookies.Delete(devAuthOptions.CookieName, new CookieOptions { Path = "/" });
+        httpContext.Response.Cookies.Delete(
+            devAuthOptions.CookieName,
+            new CookieOptions
+            {
+                Path = "/",
+                SameSite = SameSiteMode.Strict,
+                Secure = true,
+            });
 
         var status = new AppSurfaceDevAuthStatus(
             Enabled: environment.IsDevelopment(),
@@ -211,7 +218,7 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             IsEssential = true,
             Path = "/",
             SameSite = SameSiteMode.Strict,
-            Secure = false,
+            Secure = true,
         };
     }
 

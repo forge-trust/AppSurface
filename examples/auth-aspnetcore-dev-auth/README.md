@@ -19,11 +19,10 @@ open http://127.0.0.1:5058/_appsurface/dev-auth
 Or prove the flow with curl:
 
 ```bash
-cookies="$(mktemp)"
-curl -s -c "$cookies" -b "$cookies" -X POST -L http://127.0.0.1:5058/_appsurface/dev-auth/select/admin
-curl -s -b "$cookies" http://127.0.0.1:5058/api/auth-proof
-curl -s -c "$cookies" -b "$cookies" -X POST -L http://127.0.0.1:5058/_appsurface/dev-auth/select/viewer
-curl -s -b "$cookies" http://127.0.0.1:5058/api/auth-proof
+cookie="$(curl -is -X POST -L http://127.0.0.1:5058/_appsurface/dev-auth/select/admin | awk 'tolower($0) ~ /^set-cookie: \.appsurface\.devauth\.persona=/{sub(/^[^:]*: /,""); sub(/;.*/,""); print; exit}')"
+curl -s -H "Cookie: $cookie" http://127.0.0.1:5058/api/auth-proof
+cookie="$(curl -is -X POST -L http://127.0.0.1:5058/_appsurface/dev-auth/select/viewer | awk 'tolower($0) ~ /^set-cookie: \.appsurface\.devauth\.persona=/{sub(/^[^:]*: /,""); sub(/;.*/,""); print; exit}')"
+curl -s -H "Cookie: $cookie" http://127.0.0.1:5058/api/auth-proof
 ```
 
 Expected outcomes:
