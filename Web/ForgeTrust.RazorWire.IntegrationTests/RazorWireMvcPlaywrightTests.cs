@@ -50,6 +50,71 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task FormInteractionsSample_ReplacesPageLocalJavaScriptForConditionalAndCollectionRows()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        var browserMessages = CaptureBrowserMessages(page);
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Reactivity/FormInteractions");
+        await WaitForFormInteractionsReadyAsync(page, browserMessages);
+
+        Assert.True(await page.Locator("script[src*='/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js']").CountAsync() > 0);
+        Assert.Equal(0, await page.Locator("[data-form-interactions-proof] script").CountAsync());
+
+        await page.ClickAsync("[data-rw-form-collection-duplicate]");
+        await page.WaitForSelectorAsync("input[name='Actions[1].Title']");
+        Assert.Equal("Call parent", await page.InputValueAsync("input[name='Actions[1].Title']"));
+        Assert.Equal(string.Empty, await page.InputValueAsync("input[name='Actions[1].Id']"));
+
+        await page.ClickAsync("[data-rw-form-collection-add]");
+        await page.WaitForSelectorAsync("input[name='Actions[2].Title']");
+        await page.FillAsync("input[name='Actions[2].Title']", "Email teacher");
+
+        await page.ClickAsync("button[data-rw-form-collection-remove='mark']");
+        var markData = await page.EvaluateAsync<FormDataProbe>(
+            """
+            () => {
+              const form = document.querySelector('[data-form-interactions-proof]');
+              const data = new FormData(form);
+              return {
+                DeleteValue: data.get('Actions[0].Delete'),
+                TitleValue: data.get('Actions[0].Title'),
+                IndexValues: data.getAll('Actions.index')
+              };
+            }
+            """);
+
+        Assert.Equal("true", markData.DeleteValue);
+        Assert.Null(markData.TitleValue);
+        Assert.Contains("0", markData.IndexValues);
+
+        await page.CheckAsync("input[name='ExpectedNoAction']");
+        await page.WaitForFunctionAsync(
+            """
+            () => document.getElementById('draft-action')?.hidden === true
+              && [...document.querySelectorAll('#draft-action input[name$=".Title"]')].every(input => input.disabled)
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var hiddenData = await page.EvaluateAsync<FormDataProbe>(
+            """
+            () => {
+              const data = new FormData(document.querySelector('[data-form-interactions-proof]'));
+              return {
+                DeleteValue: data.get('Actions[0].Delete'),
+                TitleValue: data.get('Actions[2].Title'),
+                IndexValues: data.getAll('Actions.index')
+              };
+            }
+            """);
+
+        Assert.Null(hiddenData.TitleValue);
+        Assert.DoesNotContain("2", hiddenData.IndexValues);
+    }
+
+    [Fact]
     public async Task PageNavigationSample_TracksHashActiveStateAndClosesMobilePanel()
     {
         await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
@@ -766,6 +831,32 @@ public sealed class RazorWireMvcPlaywrightTests
         public string IslandsScriptPath { get; set; } = string.Empty;
     }
 
+    private sealed class FormDataProbe
+    {
+        public string? DeleteValue { get; set; }
+
+        public string? TitleValue { get; set; }
+
+        public string[] IndexValues { get; set; } = [];
+    }
+
+    private sealed class FormInteractionsReadinessProbe
+    {
+        public bool HasToggleMarker { get; set; }
+
+        public bool HasCollectionMarker { get; set; }
+
+        public bool HasRuntimeScript { get; set; }
+
+        public bool Initialized { get; set; }
+
+        public bool HasManager { get; set; }
+
+        public bool Enhanced { get; set; }
+
+        public string[] Diagnostics { get; set; } = [];
+    }
+
     /// <summary>
     /// Describes the Playwright-to-C# deserialization contract for the page-navigation active-link reveal probe.
     /// </summary>
@@ -1128,6 +1219,61 @@ public sealed class RazorWireMvcPlaywrightTests
             "path => window.location.pathname === path",
             expectedPath,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
+    }
+
+    private static List<string> CaptureBrowserMessages(IPage page)
+    {
+        var messages = new List<string>();
+        page.Console += (_, message) =>
+        {
+            messages.Add($"{message.Type}: {message.Text}");
+        };
+        page.PageError += (_, exception) =>
+        {
+            messages.Add($"pageerror: {exception}");
+        };
+        page.RequestFailed += (_, request) =>
+        {
+            messages.Add($"requestfailed: {request.Url} {request.Failure}");
+        };
+
+        return messages;
+    }
+
+    private static async Task WaitForFormInteractionsReadyAsync(IPage page, IReadOnlyList<string> browserMessages)
+    {
+        try
+        {
+            await page.WaitForFunctionAsync(
+                """
+                () => window.RazorWire?.formInteractionsManager
+                  && document.querySelector('[data-rw-form-interactions-enhanced="true"]')
+                """,
+                null,
+                new PageWaitForFunctionOptions { Timeout = 15_000 });
+        }
+        catch (TimeoutException exception)
+        {
+            var probe = await page.EvaluateAsync<FormInteractionsReadinessProbe>(
+                """
+                () => ({
+                    HasToggleMarker: Boolean(document.querySelector('[data-rw-form-toggle]')),
+                    HasCollectionMarker: Boolean(document.querySelector('[data-rw-form-collection]')),
+                    HasRuntimeScript: Boolean(document.querySelector('script[src*="/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js"]')),
+                    Initialized: window.RazorWireFormInteractionsInitialized === true,
+                    HasManager: Boolean(window.RazorWire?.formInteractionsManager),
+                    Enhanced: Boolean(document.querySelector('[data-rw-form-interactions-enhanced="true"]')),
+                    Diagnostics: window.RazorWire?.formInteractionsManager?.getDiagnostics?.().map(diagnostic => diagnostic.message) ?? []
+                })
+                """);
+            var message = $"""
+                Timed out waiting for RazorWire form interactions to enhance the sample form.
+                Probe: markers toggle={probe.HasToggleMarker}, collection={probe.HasCollectionMarker}; script={probe.HasRuntimeScript}; initialized={probe.Initialized}; manager={probe.HasManager}; enhanced={probe.Enhanced}; diagnostics=[{string.Join("; ", probe.Diagnostics)}].
+                Browser messages: {string.Join(" | ", browserMessages)}
+                """;
+
+            throw new TimeoutException(message, exception);
+        }
     }
 
     private static async Task PlantNoRefreshMarkerAsync(IPage page)

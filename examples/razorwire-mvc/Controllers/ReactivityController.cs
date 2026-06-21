@@ -46,6 +46,15 @@ public class ReactivityController : Controller
     }
 
     /// <summary>
+    /// Renders the RazorWire form-interactions demonstration page.
+    /// </summary>
+    /// <returns>An <see cref="IActionResult"/> that renders the form-interactions UX sample.</returns>
+    public IActionResult FormInteractions()
+    {
+        return View(CreateFormInteractionsSample());
+    }
+
+    /// <summary>
     /// Renders the sidebar inside a RazorWire frame with the ID "permanent-island".
     /// </summary>
     /// <returns>An <see cref="IActionResult"/> that produces the RazorWire frame containing the sidebar content.</returns>
@@ -230,6 +239,46 @@ public class ReactivityController : Controller
     }
 
     /// <summary>
+    /// Validates the form-interactions sample and redisplays posted collection indices on validation failure.
+    /// </summary>
+    /// <param name="model">The posted sample model.</param>
+    /// <returns>The sample view with validation feedback or a success summary.</returns>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public IActionResult SubmitFormInteractions(FormInteractionsSampleModel model)
+    {
+        var activeActions = model.Actions
+            .Where(action => !action.Delete && !string.IsNullOrWhiteSpace(action.Title))
+            .ToList();
+
+        if (!model.ExpectedNoAction && activeActions.Count == 0)
+        {
+            ModelState.AddModelError(
+                nameof(FormInteractionsSampleModel.Actions),
+                "Add at least one draft action or mark that no action is expected.");
+        }
+
+        if (model.ExpectedNoAction && activeActions.Count > 0)
+        {
+            ModelState.AddModelError(
+                nameof(FormInteractionsSampleModel.ExpectedNoAction),
+                "Clear draft action rows before marking that no action is expected.");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
+            return View(nameof(FormInteractions), model);
+        }
+
+        model.Result = model.ExpectedNoAction
+            ? "Saved: no follow-up action expected."
+            : $"Saved {activeActions.Count} action row(s).";
+
+        return View(nameof(FormInteractions), model);
+    }
+
+    /// <summary>
     /// Endpoint used by the sample page to demonstrate RazorWire's development anti-forgery diagnostics.
     /// </summary>
     /// <returns>An OK result when anti-forgery succeeds; the action body is not reached by the intentional sample failure.</returns>
@@ -296,5 +345,18 @@ public class ReactivityController : Controller
             .RenderAsync(viewContext);
 
         await _hub.PublishAsync("reactivity", streamHtml);
+    }
+
+    private static FormInteractionsSampleModel CreateFormInteractionsSample()
+    {
+        var model = new FormInteractionsSampleModel();
+        model.Actions.Add(new FormInteractionActionModel
+        {
+            ClientIndex = "0",
+            Id = "saved-action-1",
+            Title = "Call parent"
+        });
+
+        return model;
     }
 }

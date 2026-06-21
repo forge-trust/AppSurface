@@ -103,6 +103,40 @@ dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.App
 
 For failed submissions, RazorWire also ships a convention-based form UX stack: default form-local fallbacks for unhandled failures, server helpers for validation errors, anti-forgery diagnostics in development, and styling/event hooks for consumers. See [Failed Form UX](Docs/form-failures.md) or run the sample and visit `/Reactivity/FormFailures`.
 
+## Form Interactions in 3 Minutes
+
+Use RazorWire form interactions when a server-rendered form needs conditional fields or one-dimensional model-bound collection rows without page-local JavaScript.
+
+```cshtml
+<input type="checkbox" name="ExpectedNoAction" rw-form-toggle="draft-action" rw-form-toggle-invert="true" />
+
+<fieldset rw-form-toggle-target="draft-action" rw-form-toggle-disable-when-hidden="true">
+    <input type="hidden" name="Actions.index" value="0" />
+    <label for="Actions_0__Title">Title</label>
+    <input name="Actions[0].Title" id="Actions_0__Title" />
+</fieldset>
+
+<div rw-form-collection="Actions" rw-form-collection-label="action">
+    <fieldset rw-form-collection-row rw-form-index="0">
+        <input type="hidden" name="Actions.index" value="0" />
+        <input name="Actions[0].Title" id="Actions_0__Title" />
+        <button rw-form-collection-duplicate>Duplicate</button>
+        <button rw-form-collection-remove>Remove</button>
+    </fieldset>
+
+    <template rw-form-collection-template>
+        <fieldset rw-form-collection-row>
+            <input type="hidden" name="Actions.index" value="__index__" />
+            <input name="Actions[__index__].Title" id="Actions___index____Title" />
+        </fieldset>
+    </template>
+
+    <button rw-form-collection-add>Add action</button>
+</div>
+```
+
+RazorWire owns local behavior, state attributes, sparse `.index` allocation, and accessibility status hooks. Your app owns fields, labels, layout, styling, persistence, and server validation. See the full contract in [Form Interactions](Docs/form-interactions.md).
+
 ## Page Navigation in 3 Minutes
 
 Use RazorWire page navigation when a server-rendered page needs same-page section links, active state, and optional mobile-panel close behavior without app-specific JavaScript.
@@ -178,7 +212,7 @@ RazorWire markup only lights up when your views import the package TagHelpers an
 ```
 <!-- /appsurface:snippet -->
 
-Plain `<rw:scripts/>` is enough for page navigation and section copy. RazorWire emits small detectors that load `page-navigation.js` only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup and `section-copy.js` only when it contains `data-rw-section-copy` / `data-rw-section-copy-target` markup, including after Turbo page or frame renders. The optional `page-navigation="true"` and `section-copy="true"` attributes are eager-load escape hatches, but they are not required for normal adoption.
+Plain `<rw:scripts/>` is enough for page navigation, section copy, and form interactions. RazorWire emits small detectors that load `page-navigation.js` only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup, `section-copy.js` only when it contains `data-rw-section-copy` / `data-rw-section-copy-target` markup, and `form-interactions.js` only when it contains `data-rw-form-toggle` or `data-rw-form-collection` markup, including after Turbo page or frame renders. The optional `page-navigation="true"`, `section-copy="true"`, and `form-interactions="true"` attributes are eager-load escape hatches, but they are not required for normal adoption.
 
 ## Configure Services (Optional)
 

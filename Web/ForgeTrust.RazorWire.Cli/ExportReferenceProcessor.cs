@@ -29,6 +29,11 @@ internal sealed partial class ExportReferenceProcessor
     /// </remarks>
     private const string SectionCopyRuntimePath = "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js";
 
+    /// <summary>
+    /// Managed runtime path for the RazorWire form-interactions client script: <c>/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js</c>.
+    /// </summary>
+    private const string FormInteractionsRuntimePath = "/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js";
+
     private static readonly Uri ManagedUrlBase = new("http://dummy");
 
     private static readonly HashSet<string> SourceNavigationAnchorExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -122,6 +127,9 @@ internal sealed partial class ExportReferenceProcessor
     private const string RazorWireSectionCopyRuntimeMarker = "data-rw-section-copy-runtime";
     private const string RazorWireSectionCopyButtonSelectorMarker = "[data-rw-section-copy]";
     private const string RazorWireSectionCopyTargetSelectorMarker = "[data-rw-section-copy-target]";
+    private const string RazorWireFormInteractionsRuntimeMarker = "data-rw-form-interactions-runtime";
+    private const string RazorWireFormToggleSelectorMarker = "[data-rw-form-toggle]";
+    private const string RazorWireFormCollectionSelectorMarker = "[data-rw-form-collection]";
 
     private readonly HtmlParser _htmlParser = new();
     private readonly ILogger _logger;
@@ -342,6 +350,7 @@ internal sealed partial class ExportReferenceProcessor
         }
 
         AddRazorWireSectionCopyAutoloadReferences(references, document, currentRoute, attributeLookup);
+        AddRazorWireFormInteractionsAutoloadReferences(references, document, currentRoute, attributeLookup);
 
         return references;
     }
@@ -439,6 +448,58 @@ internal sealed partial class ExportReferenceProcessor
         AddReference(
             references,
             SectionCopyRuntimePath,
+            ExportReferenceKind.ScriptSrc,
+            currentRoute,
+            CreateHtmlProvenance(marker, attributeName, attributeLookup));
+    }
+
+    private void AddRazorWireFormInteractionsAutoloadReferences(
+        ICollection<ExportReference> references,
+        IDocument document,
+        string currentRoute,
+        IReadOnlyDictionary<HtmlAttributeLookupKey, HtmlAttributeSpan> attributeLookup)
+    {
+        var hasFormInteractionsRuntime = document.QuerySelectorAll("script[src]")
+            .Any(element => (element.GetAttribute("src") ?? string.Empty)
+                .Contains("/razorwire/form-interactions.js", StringComparison.OrdinalIgnoreCase));
+        if (hasFormInteractionsRuntime)
+        {
+            return;
+        }
+
+        var marker = document.QuerySelector("[data-rw-form-toggle], [data-rw-form-collection]");
+        if (marker is null)
+        {
+            return;
+        }
+
+        foreach (var match in document.QuerySelectorAll("script:not([src])")
+            .Select(element => element.TextContent)
+            .Select(script =>
+            {
+                var hasSource = TryExtractJavaScriptStringAssignment(script, "source", out var source);
+                return new { Script = script, HasSource = hasSource, Source = source };
+            })
+            .Where(match => match.Script.Contains(RazorWireFormInteractionsRuntimeMarker, StringComparison.Ordinal)
+                            && match.Script.Contains(RazorWireFormToggleSelectorMarker, StringComparison.Ordinal)
+                            && match.Script.Contains(RazorWireFormCollectionSelectorMarker, StringComparison.Ordinal)
+                            && match.HasSource))
+        {
+            AddReference(
+                references,
+                match.Source,
+                ExportReferenceKind.ScriptSrc,
+                currentRoute,
+                CreateInlineScriptProvenance("RazorWire form-interactions autoload source"));
+            return;
+        }
+
+        var attributeName = marker.HasAttribute("data-rw-form-toggle")
+            ? "data-rw-form-toggle"
+            : "data-rw-form-collection";
+        AddReference(
+            references,
+            FormInteractionsRuntimePath,
             ExportReferenceKind.ScriptSrc,
             currentRoute,
             CreateHtmlProvenance(marker, attributeName, attributeLookup));
