@@ -188,12 +188,13 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 return ResolveOverride(overridePath);
             }
 
-            foreach (var candidate in _trustedCandidates)
+            var trustedCandidate = _trustedCandidates
+                .Where(candidate => _inspectPath(candidate) == LinuxSecretToolPathState.ExecutableFile)
+                .FirstOrDefault();
+
+            if (trustedCandidate != null)
             {
-                if (_inspectPath(candidate) == LinuxSecretToolPathState.ExecutableFile)
-                {
-                    return LinuxSecretToolResolution.Found(candidate);
-                }
+                return LinuxSecretToolResolution.Found(trustedCandidate);
             }
 
             return LinuxSecretToolResolution.Failed(
@@ -269,16 +270,10 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             }
 
             var trusted = _trustedCandidates.ToHashSet(StringComparer.Ordinal);
-            foreach (var directory in path.Split(PathSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                var candidate = Path.Join(directory, FileName);
-                if (!trusted.Contains(candidate) && _inspectPath(candidate) != LinuxSecretToolPathState.Missing)
-                {
-                    return candidate;
-                }
-            }
-
-            return null;
+            return path
+                .Split(PathSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(directory => Path.Join(directory, FileName))
+                .FirstOrDefault(candidate => !trusted.Contains(candidate) && _inspectPath(candidate) != LinuxSecretToolPathState.Missing);
         }
 
         private static LinuxSecretToolPathState InspectFileSystemPath(string path)
