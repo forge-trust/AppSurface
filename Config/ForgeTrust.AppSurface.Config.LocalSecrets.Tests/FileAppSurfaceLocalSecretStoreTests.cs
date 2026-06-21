@@ -827,9 +827,11 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
             }
             catch (OperationCanceledException)
             {
+                Assert.True(cancellation.IsCancellationRequested);
             }
             catch (TimeoutException)
             {
+                Assert.False(racer.IsCompletedSuccessfully);
             }
 
             if (result.Kind != FileSecretPostureKind.Unsupported)
