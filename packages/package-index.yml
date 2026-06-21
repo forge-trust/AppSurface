@@ -87,6 +87,22 @@ packages:
     recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results or Minimal API ProblemDetails responses; run the [Auth Web/RazorWire proof](../examples/auth-web-razorwire-proof/README.md) for the browser-first Web/RazorWire proof.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth
+  - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 36
+    use_when: Add this in an ASP.NET Core web host that already chose an OpenID Connect provider and wants named AppSurface cookie/OIDC schemes with safe defaults and diagnostics.
+    includes: AddAppSurfaceOidcAuth registration, AppSurfaceOidcAuthOptions, named cookie and OpenID Connect schemes, authorization-code defaults, SaveTokens false by default, local-only passive login/logout prompt helpers, OIDC subject mapping handoff, event chaining, and stable safe diagnostic codes.
+    does_not_include: User stores, ASP.NET Identity replacement, identity-provider hosting, OAuth/OIDC server behavior, provider SDKs, EF Core, persistence, middleware insertion, active redirects, challenge execution, sign-in or sign-out execution, silent default-scheme takeover, token storage by default, Aspire Keycloak, Dev Auth, or app-user provisioning.
+    start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` after `ForgeTrust.AppSurface.Auth.AspNetCore` when a host wants AppSurface-named cookie/OIDC schemes while preserving ASP.NET Core ownership of middleware, defaults, and provider behavior.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Auth.AspNetCore
+      - ForgeTrust.AppSurface.Auth
   - project: Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj
     classification: public
     publish_decision: publish

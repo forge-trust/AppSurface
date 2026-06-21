@@ -16,6 +16,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - `ForgeTrust.AppSurface.Auth` now defines durable external-subject to app-user-id mapping contracts, with Auth core staying free of user-store, ASP.NET Core, OIDC, persistence, and tenant-authority ownership.
 - `ForgeTrust.AppSurface.Auth.AspNetCore` can now protect Minimal API endpoints with host-owned ASP.NET Core policies while returning AppSurface-shaped ProblemDetails JSON for API callers.
+- `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` now provides a thin ASP.NET Core cookie plus OpenID Connect convenience package with named schemes, safe defaults, passive prompts, event composition, and redacted diagnostics.
 - AppSurface Config can now compare sanitized audit reports, render deterministic same-host or captured-snapshot evidence, and expose command-framework-agnostic diff workflows with display-safe failures.
 - AppSurface Flow now uses value-type execution contexts and deeper benchmark coverage to reduce and track synchronous in-memory runner allocation overhead.
 
