@@ -142,7 +142,7 @@ Durable external-subject-to-app-user mapping belongs to the AppSurface app-user 
 
 ## Local Proof
 
-For a runnable no-secret proof of the registration surface, see [the ASP.NET Core OIDC example](../../examples/auth-aspnetcore-oidc/README.md).
+For a no-secret demonstration of the registration surface, see [the ASP.NET Core OIDC example](../../examples/auth-aspnetcore-oidc/README.md).
 
 ## Pitfalls
 

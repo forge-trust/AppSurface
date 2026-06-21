@@ -63,7 +63,7 @@ public sealed class AppSurfaceOidcAuthDependencyGuardTests
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "ForgeTrust.AppSurface.slnx")))
+        while (directory is not null && directory.GetFiles("ForgeTrust.AppSurface.slnx").Length == 0)
         {
             directory = directory.Parent;
         }

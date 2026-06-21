@@ -264,6 +264,32 @@ public sealed class AppSurfaceOidcAuthRegistrationTests
     }
 
     [Fact]
+    public void OpenIdConnectOptionsValidator_WhenNameDoesNotMatchScheme_Skips()
+    {
+        var validator = new AppSurfaceOidcOpenIdConnectOptionsValidator(new AppSurfaceOidcAuthOptions());
+
+        var result = validator.Validate("Other.Oidc", new OpenIdConnectOptions());
+
+        Assert.True(result.Skipped);
+    }
+
+    [Fact]
+    public void OpenIdConnectOptionsValidator_WhenRequiredValuesArePresent_Succeeds()
+    {
+        var validator = new AppSurfaceOidcOpenIdConnectOptionsValidator(new AppSurfaceOidcAuthOptions());
+        var options = new OpenIdConnectOptions
+        {
+            Authority = "https://issuer.example",
+            ClientId = "client-id",
+            ClientSecret = "client-secret",
+        };
+
+        var result = validator.Validate(AppSurfaceOidcAuthOptions.DefaultOidcScheme, options);
+
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
     public void AddAppSurfaceOidcAuth_PreservesHostConfiguredOidcEvents()
     {
         var services = new ServiceCollection();
@@ -288,6 +314,38 @@ public sealed class AppSurfaceOidcAuthRegistrationTests
 
         Assert.Same(messageReceived, oidcOptions.Events.OnMessageReceived);
         Assert.Same(remoteSignOut, oidcOptions.Events.OnRemoteSignOut);
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceOidcAuth_WhenSubjectClaimIsPresent_PreservesExistingEventWithoutDiagnostic()
+    {
+        var existingEventInvoked = false;
+        var oidcOptions = ResolveOidcOptions(options =>
+        {
+            options.ConfigureOpenIdConnect(oidc =>
+            {
+                oidc.Events.OnTokenValidated = _ =>
+                {
+                    existingEventInvoked = true;
+                    return Task.CompletedTask;
+                };
+            });
+        });
+        var properties = new AuthenticationProperties();
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("sub", "subject")],
+            authenticationType: "oidc"));
+        var context = new TokenValidatedContext(
+            new DefaultHttpContext(),
+            CreateOidcScheme(),
+            oidcOptions,
+            principal,
+            properties);
+
+        await oidcOptions.Events.TokenValidated(context);
+
+        Assert.True(existingEventInvoked);
+        Assert.False(properties.Items.ContainsKey(AppSurfaceOidcAuthMetadataKeys.DiagnosticCode));
     }
 
     [Fact]
@@ -339,6 +397,22 @@ public sealed class AppSurfaceOidcAuthRegistrationTests
     }
 
     [Fact]
+    public async Task AddAppSurfaceOidcAuth_WhenRemoteFailureHasNoProperties_DoesNotThrow()
+    {
+        var oidcOptions = ResolveOidcOptions();
+        var context = new RemoteFailureContext(
+            new DefaultHttpContext(),
+            CreateOidcScheme(),
+            oidcOptions,
+            new InvalidOperationException("provider response"))
+        {
+            Properties = null!,
+        };
+
+        await oidcOptions.Events.RemoteFailure(context);
+    }
+
+    [Fact]
     public async Task AddAppSurfaceOidcAuth_WhenSaveTokensIsEnabled_AddsTokenPersistenceDiagnostic()
     {
         var oidcOptions = ResolveOidcOptions(options => options.SaveTokens = true);
@@ -355,6 +429,41 @@ public sealed class AppSurfaceOidcAuthRegistrationTests
 
         await oidcOptions.Events.TicketReceived(context);
 
+        Assert.Equal(
+            AppSurfaceOidcAuthDiagnosticCodes.TokenPersistenceEnabled,
+            properties.Items[AppSurfaceOidcAuthMetadataKeys.DiagnosticCode]);
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceOidcAuth_WhenSaveTokensIsEnabled_PreservesExistingTicketEvent()
+    {
+        var existingEventInvoked = false;
+        var oidcOptions = ResolveOidcOptions(options =>
+        {
+            options.SaveTokens = true;
+            options.ConfigureOpenIdConnect(oidc =>
+            {
+                oidc.Events.OnTicketReceived = _ =>
+                {
+                    existingEventInvoked = true;
+                    return Task.CompletedTask;
+                };
+            });
+        });
+        var properties = new AuthenticationProperties();
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("sub", "subject")],
+            authenticationType: "oidc"));
+        var ticket = new AuthenticationTicket(principal, properties, AppSurfaceOidcAuthOptions.DefaultOidcScheme);
+        var context = new TicketReceivedContext(
+            new DefaultHttpContext(),
+            CreateOidcScheme(),
+            oidcOptions,
+            ticket);
+
+        await oidcOptions.Events.TicketReceived(context);
+
+        Assert.True(existingEventInvoked);
         Assert.Equal(
             AppSurfaceOidcAuthDiagnosticCodes.TokenPersistenceEnabled,
             properties.Items[AppSurfaceOidcAuthMetadataKeys.DiagnosticCode]);
