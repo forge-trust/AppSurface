@@ -41,13 +41,8 @@ internal sealed record AppSurfaceObservabilityPlan(
             ?? ResolveUri(configuration[AppSurfaceObservabilityOptions.OtlpEndpointEnvironmentVariable])
             ?? ResolveUri(environment.GetEnvironmentVariable(AppSurfaceObservabilityOptions.OtlpEndpointEnvironmentVariable));
 
-        var shouldRegisterExporter = options.ExporterMode switch
-        {
-            AppSurfaceOtlpExporterMode.Always => true,
-            AppSurfaceOtlpExporterMode.Never => false,
-            AppSurfaceOtlpExporterMode.WhenEndpointConfigured => endpoint is not null,
-            _ => false
-        };
+        var shouldRegisterExporter = options.ExporterMode == AppSurfaceOtlpExporterMode.Always
+            || (options.ExporterMode == AppSurfaceOtlpExporterMode.WhenEndpointConfigured && endpoint is not null);
 
         var serviceName = string.IsNullOrWhiteSpace(options.ServiceName)
             ? context.ApplicationName

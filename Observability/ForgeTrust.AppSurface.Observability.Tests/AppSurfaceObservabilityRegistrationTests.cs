@@ -4,8 +4,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OpenTelemetry;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Logs;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
 
 namespace ForgeTrust.AppSurface.Observability.Tests;
 
@@ -209,6 +212,36 @@ public sealed class AppSurfaceObservabilityRegistrationTests
         AppSurfaceObservabilityServiceCollectionExtensions.ConfigureExporter(exporterOptions, plan);
 
         Assert.Same(originalEndpoint, exporterOptions.Endpoint);
+    }
+
+    [Fact]
+    public void ConfigureTracing_AddsExporterWhenPlanRequiresExport()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("AppSurfaceObservability:ExporterMode", "Always")),
+            environment: new TestEnvironmentReader());
+
+        var builder = Sdk.CreateTracerProviderBuilder();
+        AppSurfaceObservabilityServiceCollectionExtensions.ConfigureTracing(builder, plan);
+        using var provider = builder.Build();
+
+        Assert.NotNull(provider);
+    }
+
+    [Fact]
+    public void ConfigureMetrics_AddsExporterWhenPlanRequiresExport()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("AppSurfaceObservability:ExporterMode", "Always")),
+            environment: new TestEnvironmentReader());
+
+        var builder = Sdk.CreateMeterProviderBuilder();
+        AppSurfaceObservabilityServiceCollectionExtensions.ConfigureMetrics(builder, plan);
+        using var provider = builder.Build();
+
+        Assert.NotNull(provider);
     }
 
     [Fact]
