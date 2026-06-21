@@ -85,6 +85,18 @@ public sealed class AppSurfaceObservabilityPlanTests
     }
 
     [Fact]
+    public void Resolve_OtelConfigurationEndpointEnablesWhenEndpointConfigured()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("OTEL_EXPORTER_OTLP_ENDPOINT", "http://configured-otel:4317")),
+            environment: new TestEnvironmentReader());
+
+        Assert.True(plan.ShouldRegisterExporter);
+        Assert.Equal(new Uri("http://configured-otel:4317"), plan.Endpoint);
+    }
+
+    [Fact]
     public void Resolve_ServiceNameOverrideWinsOverStartupContextApplicationName()
     {
         var plan = AppSurfaceObservabilityPlan.Resolve(
@@ -96,6 +108,46 @@ public sealed class AppSurfaceObservabilityPlanTests
 
         Assert.Equal("orders-api", plan.ServiceName);
         Assert.Equal("2026.6.19", plan.ServiceVersion);
+    }
+
+    [Fact]
+    public void Resolve_BlankServiceVersionIsNotEmitted()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("AppSurfaceObservability:ServiceVersion", "   ")),
+            environment: new TestEnvironmentReader());
+
+        Assert.Null(plan.ServiceVersion);
+    }
+
+    [Fact]
+    public void Resolve_InvalidExporterModeThrowsClearMessage()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            AppSurfaceObservabilityPlan.Resolve(
+                CreateContext("Catalog API"),
+                CreateConfiguration(),
+                options => options.ExporterMode = (AppSurfaceOtlpExporterMode)999,
+                new TestEnvironmentReader()));
+
+        Assert.Contains(
+            "AppSurfaceObservability:ExporterMode must be one of WhenEndpointConfigured, Always, or Never",
+            exception.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_RelativeConfiguredEndpointThrowsClearMessage()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            AppSurfaceObservabilityPlan.Resolve(
+                CreateContext("Catalog API"),
+                CreateConfiguration(),
+                options => options.OtlpEndpoint = new Uri("/relative", UriKind.Relative),
+                new TestEnvironmentReader()));
+
+        Assert.Contains("AppSurfaceObservability:OtlpEndpoint must be an absolute URI", exception.Message);
     }
 
     [Fact]

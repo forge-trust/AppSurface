@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Logs;
 
 namespace ForgeTrust.AppSurface.Observability.Tests;
 
@@ -165,6 +167,51 @@ public sealed class AppSurfaceObservabilityRegistrationTests
     }
 
     [Fact]
+    public void ConfigureLogging_AddsExporterWhenPlanRequiresExport()
+    {
+        var options = new OpenTelemetryLoggerOptions();
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("AppSurfaceObservability:ExporterMode", "Always")),
+            environment: new TestEnvironmentReader());
+
+        AppSurfaceObservabilityLoggingBuilderExtensions.ConfigureLogging(options, plan);
+
+        Assert.True(options.IncludeFormattedMessage);
+        Assert.True(options.IncludeScopes);
+        Assert.True(options.ParseStateValues);
+    }
+
+    [Fact]
+    public void ConfigureExporter_AppliesConfiguredEndpoint()
+    {
+        var exporterOptions = new OtlpExporterOptions();
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("AppSurfaceObservability:OtlpEndpoint", "http://collector:4317")),
+            environment: new TestEnvironmentReader());
+
+        AppSurfaceObservabilityServiceCollectionExtensions.ConfigureExporter(exporterOptions, plan);
+
+        Assert.Equal(new Uri("http://collector:4317"), exporterOptions.Endpoint);
+    }
+
+    [Fact]
+    public void ConfigureExporter_LeavesHostDefaultsWhenEndpointIsNotConfigured()
+    {
+        var originalEndpoint = new Uri("http://host-default:4317");
+        var exporterOptions = new OtlpExporterOptions { Endpoint = originalEndpoint };
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("AppSurfaceObservability:ExporterMode", "Always")),
+            environment: new TestEnvironmentReader());
+
+        AppSurfaceObservabilityServiceCollectionExtensions.ConfigureExporter(exporterOptions, plan);
+
+        Assert.Same(originalEndpoint, exporterOptions.Endpoint);
+    }
+
+    [Fact]
     public void ConfigureAppSurfaceObservability_RepeatedHostBuilderCallsKeepFirstConfiguration()
     {
         var context = CreateContext("Catalog API");
@@ -211,6 +258,36 @@ public sealed class AppSurfaceObservabilityRegistrationTests
     }
 
     [Fact]
+    public async Task StartupDiagnostic_DoesNotLogWhenExporterDiagnosticIsDisabled()
+    {
+        var logger = new CapturingLogger<AppSurfaceObservabilityStartupDiagnostic>();
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("AppSurfaceObservability:ExporterMode", "Never")),
+            environment: new TestEnvironmentReader());
+        var diagnostic = new AppSurfaceObservabilityStartupDiagnostic(plan, logger);
+
+        await diagnostic.StartAsync(CancellationToken.None);
+
+        Assert.Empty(logger.Messages);
+    }
+
+    [Fact]
+    public async Task StartupDiagnostic_StopAsyncCompletesWithoutWork()
+    {
+        var logger = new CapturingLogger<AppSurfaceObservabilityStartupDiagnostic>();
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(),
+            environment: new TestEnvironmentReader());
+        var diagnostic = new AppSurfaceObservabilityStartupDiagnostic(plan, logger);
+
+        await diagnostic.StopAsync(CancellationToken.None);
+
+        Assert.Empty(logger.Messages);
+    }
+
+    [Fact]
     public void Module_UsesHostBuilderHooksToRegisterObservability()
     {
         var module = new AppSurfaceObservabilityModule();
@@ -235,6 +312,17 @@ public sealed class AppSurfaceObservabilityRegistrationTests
 
         var options = host.Services.GetRequiredService<IOptions<AppSurfaceObservabilityOptions>>().Value;
         Assert.Equal(AppSurfaceOtlpExporterMode.Never, options.ExporterMode);
+    }
+
+    [Fact]
+    public void Module_RegisterDependentModulesDoesNotAddDependencies()
+    {
+        var module = new AppSurfaceObservabilityModule();
+        var builder = new ModuleDependencyBuilder();
+
+        module.RegisterDependentModules(builder);
+
+        Assert.Empty(builder.Modules);
     }
 
     private static StartupContext CreateContext(string applicationName)
