@@ -17,6 +17,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - `ForgeTrust.AppSurface.Auth` now defines durable external-subject to app-user-id mapping contracts, with Auth core staying free of user-store, ASP.NET Core, OIDC, persistence, and tenant-authority ownership.
 - `ForgeTrust.AppSurface.Auth.AspNetCore` can now protect Minimal API endpoints with host-owned ASP.NET Core policies while returning AppSurface-shaped ProblemDetails JSON for API callers.
 - AppSurface Config can now compare sanitized audit reports, render deterministic same-host or captured-snapshot evidence, and expose command-framework-agnostic diff workflows with display-safe failures.
+- RazorWire export now fails artifact-producing redirects with `RWEXPORT008` when the final response leaves the configured export origin or base path before content is read or written.
 - AppSurface Flow now uses value-type execution contexts and deeper benchmark coverage to reduce and track synchronous in-memory runner allocation overhead.
 
 ## 0.1.0-rc.4 - 2026-06-16
