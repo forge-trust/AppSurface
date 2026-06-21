@@ -19,6 +19,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Config can now compare sanitized audit reports, render deterministic same-host or captured-snapshot evidence, and expose command-framework-agnostic diff workflows with display-safe failures.
 - AppSurface LocalSecrets platform-backed stores now validate indexed names against live stored values during `appsurface secrets list`, prune stale names after successful repair, and let `appsurface secrets delete KEY` clean stale indexed names whose values are already gone.
 - AppSurface Flow now uses value-type execution contexts and deeper benchmark coverage to reduce and track synchronous in-memory runner allocation overhead.
+- `ForgeTrust.AppSurface.Web` now fails startup for AppSurface-managed production CORS when `CorsOptions.AllowedOrigins` contains the literal origin wildcard `*`; replace it with explicit origins such as `https://app.example.com`, keep permissive all-origin behavior to Development through `EnableAllOriginsInDevelopment`, or register host-owned ASP.NET Core CORS for intentionally public wildcard APIs.
 
 ## 0.1.0-rc.4 - 2026-06-16
 

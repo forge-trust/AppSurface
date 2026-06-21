@@ -355,7 +355,7 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
     /// </summary>
     /// <param name="context">Startup context providing environment information and the entry-point assembly.</param>
     /// <param name="services">The service collection to register MVC and CORS services into.</param>
-    /// <exception cref="InvalidOperationException">Thrown when CORS is enabled but no allowed origins are specified, except when all origins are explicitly allowed in development.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when CORS is enabled but no allowed origins are specified, except when all origins are explicitly allowed in development, or when non-development configuration includes the literal wildcard origin <c>*</c>.</exception>
     protected sealed override void ConfigureServicesForAppType(StartupContext context, IServiceCollection services)
     {
         BuildModules(context);
@@ -424,6 +424,13 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
                     "CORS is enabled but AllowedOrigins is empty. To prevent security surprises, you must specify allowed origins or rely on 'EnableAllOriginsInDevelopment' only during development.");
             }
 
+            if (!context.IsDevelopment
+                && _options.Cors.AllowedOrigins.Any(origin => string.Equals(origin, "*", StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException(
+                    "CorsOptions.AllowedOrigins contains the literal wildcard origin '*', which AppSurface-managed CORS rejects outside Development. Configure Cors:AllowedOrigins with explicit origins such as 'https://app.example.com', use EnableAllOriginsInDevelopment only for local development, or own ASP.NET Core CORS policy registration in the host for intentionally public wildcard APIs.");
+            }
+
             // The user has configured CORS options, so we need to add CORS services
             services.AddCors(o =>
                 o.AddPolicy(
@@ -440,14 +447,6 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
                         {
                             if (_options.Cors.AllowedOrigins.Contains("*"))
                             {
-                                if (!context.IsDevelopment)
-                                {
-                                    // Log a warning if wildcard is used in production
-                                    GetStartupLogger()
-                                        .LogWarning(
-                                            "CORS is enabled with a wildcard origin ('*'). It is recommended to set specific AllowedOrigins for production environments.");
-                                }
-
                                 builder.AllowAnyOrigin();
                             }
                             else
