@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 29
-- Evidence status: manifest evidence complete: 19; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
-- Product families: AppSurface: 18; Forge Trust: 2; Internal support: 7; RazorWire: 2
+- Packages: 30
+- Evidence status: manifest evidence complete: 20; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
+- Product families: AppSurface: 19; Forge Trust: 2; Internal support: 7; RazorWire: 2
 
 ## Package evidence matrix
 
@@ -20,6 +20,7 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Caching` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Caching/ForgeTrust.AppSurface.Caching/README.md) | [notes](../releases/v0.1.0-rc.4.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Auth/ForgeTrust.AppSurface.Auth/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth.AspNetCore` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth` | [README](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) | [notes](../releases/unreleased.md) |
+| AppSurface | `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth.AspNetCore`<br />`ForgeTrust.AppSurface.Auth` | [README](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Intelligence` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Intelligence/ForgeTrust.AppSurface.Intelligence/README.md) | [notes](../releases/v0.1.0-rc.4.md) |
 | AppSurface | `ForgeTrust.AppSurface.Observability` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Observability/ForgeTrust.AppSurface.Observability/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Flow` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Flow/ForgeTrust.AppSurface.Flow/README.md) | [notes](../releases/v0.1.0-rc.4.md) |
