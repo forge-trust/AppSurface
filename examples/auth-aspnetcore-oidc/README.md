@@ -27,10 +27,10 @@ Expected diagnostic shape:
   "saveTokens": false,
   "hasAuthority": true,
   "hasClientId": true,
-  "hasClientSecret": true
+  "hasClientSecret": false
 }
 ```
 
-The placeholder authority and client settings are for local registration proof only. Real applications should supply provider values through configuration, register callback URLs with the provider, keep secrets out of source control, and keep `UseAuthentication()` before `UseAuthorization()`.
+The placeholder authority and client id are for local registration proof only. Real applications should supply provider values through configuration, register callback URLs with the provider, provide `Authentication:Oidc:ClientSecret` only from secret-backed configuration when required, and keep `UseAuthentication()` before `UseAuthorization()`.
 
 The example calls `AddAuthorization()` because authorization services and middleware remain host-owned ASP.NET Core setup. The OIDC convenience package does not insert middleware or create authorization policies for the host.

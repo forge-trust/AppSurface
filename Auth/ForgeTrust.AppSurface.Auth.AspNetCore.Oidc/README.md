@@ -13,7 +13,7 @@ AppSurface publishes coordinated `v0.1.0` release candidates. Before installing 
 Install the package:
 
 ```bash
-dotnet package add ForgeTrust.AppSurface.Auth.AspNetCore.Oidc
+dotnet add package ForgeTrust.AppSurface.Auth.AspNetCore.Oidc
 ```
 
 Register AppSurface OIDC auth:

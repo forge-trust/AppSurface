@@ -6,11 +6,16 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAppSurfaceOidcAuth(options =>
 {
+    options.RequireClientSecret = false;
     options.ConfigureOpenIdConnect(oidc =>
     {
         oidc.Authority = builder.Configuration["Authentication:Oidc:Authority"] ?? "https://issuer.example";
         oidc.ClientId = builder.Configuration["Authentication:Oidc:ClientId"] ?? "appsurface-example";
-        oidc.ClientSecret = builder.Configuration["Authentication:Oidc:ClientSecret"] ?? "local-placeholder";
+        var clientSecret = builder.Configuration["Authentication:Oidc:ClientSecret"];
+        if (!string.IsNullOrWhiteSpace(clientSecret))
+        {
+            oidc.ClientSecret = clientSecret;
+        }
     });
 });
 builder.Services.AddAuthorization();

@@ -143,6 +143,14 @@ public sealed class AppSurfaceOidcAuthOptions
         return new AppSurfaceLogoutPrompt(safeTarget, displayText, PromptMetadata());
     }
 
+    /// <summary>
+    /// Applies registered cookie configurators to the AppSurface cookie handler options.
+    /// </summary>
+    /// <param name="options">The ASP.NET Core cookie handler options registered for <see cref="CookieScheme"/>.</param>
+    /// <remarks>
+    /// Configurators run in the order they were added through <see cref="ConfigureCookie(Action{CookieAuthenticationOptions})"/>.
+    /// Host values assigned by later configurators can therefore replace values assigned by earlier configurators.
+    /// </remarks>
     internal void ApplyCookie(CookieAuthenticationOptions options)
     {
         foreach (var configure in _cookieConfigurators)
@@ -151,6 +159,15 @@ public sealed class AppSurfaceOidcAuthOptions
         }
     }
 
+    /// <summary>
+    /// Applies registered OpenID Connect configurators to the AppSurface OIDC handler options.
+    /// </summary>
+    /// <param name="options">The ASP.NET Core OpenID Connect handler options registered for <see cref="OidcScheme"/>.</param>
+    /// <remarks>
+    /// Configurators run in the order they were added through
+    /// <see cref="ConfigureOpenIdConnect(Action{OpenIdConnectOptions})"/> after package defaults are assigned, so host
+    /// configuration can intentionally override default handler values.
+    /// </remarks>
     internal void ApplyOpenIdConnect(OpenIdConnectOptions options)
     {
         foreach (var configure in _openIdConnectConfigurators)
@@ -159,6 +176,17 @@ public sealed class AppSurfaceOidcAuthOptions
         }
     }
 
+    /// <summary>
+    /// Validates AppSurface OIDC scheme names, subject mapping, and callback paths before registration.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// Thrown when a scheme or subject claim is blank, a callback path is blank or unsafe, or
+    /// <see cref="CookieScheme"/> and <see cref="OidcScheme"/> use the same value.
+    /// </exception>
+    /// <remarks>
+    /// Callback paths must be safe app-relative paths accepted by
+    /// <see cref="AppSurfaceOidcReturnUrlOptions.IsSafeAppRelativePath(string)"/>.
+    /// </remarks>
     internal void Validate()
     {
         ValidateName(CookieScheme, nameof(CookieScheme));
