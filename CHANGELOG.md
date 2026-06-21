@@ -21,6 +21,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - RazorWire export now fails artifact-producing redirects with `RWEXPORT008` when the final response leaves the configured export origin or base path before content is read or written.
 - AppSurface LocalSecrets platform-backed stores now validate indexed names against live stored values during `appsurface secrets list`, prune stale names after successful repair, and let `appsurface secrets delete KEY` clean stale indexed names whose values are already gone.
 - AppSurface Flow now uses value-type execution contexts and deeper benchmark coverage to reduce and track synchronous in-memory runner allocation overhead.
+- RazorWire hybrid islands now block inline `data:` module specifiers and protocol-relative `//...` module URLs; serve client modules from relative, root-relative, same-origin, explicit HTTPS, or import-map specifiers instead.
 
 ## 0.1.0-rc.4 - 2026-06-16
 
