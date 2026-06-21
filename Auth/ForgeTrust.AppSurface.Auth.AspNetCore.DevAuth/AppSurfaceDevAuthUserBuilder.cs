@@ -73,14 +73,18 @@ public sealed class AppSurfaceDevAuthUserBuilder
 
     internal AppSurfaceDevAuthPersona Build()
     {
-        var subject = string.IsNullOrWhiteSpace(_subject) ? Id : _subject;
+        var hasSubject = !string.IsNullOrWhiteSpace(_subject);
+        var subject = hasSubject ? _subject! : string.Empty;
         var displayName = string.IsNullOrWhiteSpace(_displayName) ? Id : _displayName;
         var claims = _claims
-            .Where(claim => !string.Equals(claim.Type, _subjectClaimType, StringComparison.Ordinal))
-            .Prepend(new Claim(_subjectClaimType, subject))
-            .ToArray();
+            .Where(claim => !string.Equals(claim.Type, _subjectClaimType, StringComparison.Ordinal));
 
-        return new AppSurfaceDevAuthPersona(Id, displayName, _subjectClaimType, subject, claims);
+        if (hasSubject)
+        {
+            claims = claims.Prepend(new Claim(_subjectClaimType, subject));
+        }
+
+        return new AppSurfaceDevAuthPersona(Id, displayName, _subjectClaimType, subject, claims.ToArray());
     }
 
     internal static string NormalizePersonaId(string id)
@@ -102,16 +106,28 @@ public sealed class AppSurfaceDevAuthUserBuilder
     {
         return new AppSurfaceDevAuthException(
             AppSurfaceDevAuthDiagnostics.InvalidPersonaId,
-            "ASDEV006 Problem: DevAuth persona ids must be URL-safe local identifiers. Cause: a persona id was blank, a URI dot segment, or contained a character outside letters, digits, '.', '_', or '-'. Fix: use ids such as 'admin', 'viewer', or 'anonymous'. Docs: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#diagnostics.");
+            "ASDEV006 Problem: DevAuth persona ids must be URL-safe local identifiers. Cause: a persona id was blank, a URI dot segment, looked sensitive, or contained a character outside letters, digits, '.', '_', or '-'. Fix: use ids such as 'admin', 'viewer', or 'anonymous'. Docs: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#diagnostics.");
     }
 
     private static bool IsInvalidPersonaId(string value)
     {
-        return value is "." or ".." || !value.All(IsPersonaIdCharacter);
+        return value is "." or ".." || ContainsSensitiveToken(value) || !value.All(IsPersonaIdCharacter);
     }
 
     private static bool IsPersonaIdCharacter(char value)
     {
         return value is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or (>= '0' and <= '9') or '.' or '_' or '-';
+    }
+
+    private static bool ContainsSensitiveToken(string value)
+    {
+        return value.Contains("token", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("password", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("credential", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("email", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("mail", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("key", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains('@', StringComparison.Ordinal);
     }
 }

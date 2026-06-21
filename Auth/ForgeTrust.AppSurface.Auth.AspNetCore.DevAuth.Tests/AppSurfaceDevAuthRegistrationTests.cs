@@ -59,6 +59,19 @@ public sealed class AppSurfaceDevAuthRegistrationTests
     }
 
     [Fact]
+    public void AddAppSurfaceDevAuth_WithoutExplicitSubject_ThrowsSafeDiagnostic()
+    {
+        var services = new ServiceCollection();
+
+        var ex = Assert.Throws<AppSurfaceDevAuthException>(() =>
+            services.AddAppSurfaceDevAuth(Development(), options =>
+                options.Users.Add("admin", user => user.DisplayName("Local Admin"))));
+
+        Assert.Equal(AppSurfaceDevAuthDiagnostics.MissingSubjectClaim, ex.DiagnosticCode);
+        Assert.Contains("ASDEV004 Problem:", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AddAppSurfaceDevAuth_WithDuplicatePersona_ThrowsSafeDiagnostic()
     {
         var services = new ServiceCollection();
@@ -79,6 +92,9 @@ public sealed class AppSurfaceDevAuthRegistrationTests
     [InlineData("admin#viewer")]
     [InlineData("admin%2Fviewer")]
     [InlineData("admin+viewer")]
+    [InlineData("secret-token")]
+    [InlineData("api-key")]
+    [InlineData("admin-email")]
     [InlineData(".")]
     [InlineData("..")]
     [InlineData(" ")]

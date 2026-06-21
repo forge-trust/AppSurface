@@ -19,6 +19,7 @@ namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
 {
     private const string ProtectorPurpose = "ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Persona.v1";
+    private const string RedactedValue = "(hidden)";
 
     /// <summary>
     /// Maps the AppSurface DevAuth control page, status JSON, select persona, and clear persona endpoints.
@@ -99,12 +100,8 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
 
         return Results.Problem(
             title: "AppSurface DevAuth local request required",
-            detail: "ASDEV001 Problem: AppSurface DevAuth control endpoints only accept loopback requests. Cause: fake local auth tooling was requested from a non-local address. Fix: use localhost/127.0.0.1 or remove DevAuth from this host. Docs: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#diagnostics.",
-            statusCode: StatusCodes.Status403Forbidden,
-            extensions: new Dictionary<string, object?>
-            {
-                [AppSurfaceDevAuthDiagnostics.DiagnosticCodeKey] = AppSurfaceDevAuthDiagnostics.NonDevelopmentEnvironment,
-            });
+            detail: "Problem: AppSurface DevAuth control endpoints only accept loopback requests. Cause: fake local auth tooling was requested from a non-local address. Fix: use localhost/127.0.0.1 or remove DevAuth from this host. Docs: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#diagnostics.",
+            statusCode: StatusCodes.Status403Forbidden);
     }
 
     private static IResult RenderControlPageAsync(
@@ -166,8 +163,8 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             Scheme: devAuthOptions.SchemeName,
             PathPrefix: devAuthOptions.PathPrefix,
             PersonaId: persona.Id,
-            DisplayName: persona.DisplayName,
-            Subject: persona.Subject,
+            DisplayName: SafeStatusValue(persona.DisplayName),
+            Subject: SafeStatusValue(persona.Subject),
             IsAnonymous: false,
             Warnings: []);
 
@@ -254,8 +251,8 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             Scheme: options.SchemeName,
             PathPrefix: options.PathPrefix,
             PersonaId: persona?.Id,
-            DisplayName: persona?.DisplayName,
-            Subject: persona?.Subject,
+            DisplayName: SafeStatusValue(persona?.DisplayName),
+            Subject: SafeStatusValue(persona?.Subject),
             IsAnonymous: persona is null,
             Warnings: warnings);
     }
@@ -283,14 +280,14 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         builder.AppendLine("<section class=\"grid\" aria-label=\"Current DevAuth state\">");
         builder.AppendLine($"<div class=\"panel\"><strong>Environment</strong><br>{html.Encode(status.Environment)}</div>");
         builder.AppendLine($"<div class=\"panel\"><strong>Scheme</strong><br><code>{html.Encode(status.Scheme)}</code></div>");
-        builder.AppendLine($"<div class=\"panel\"><strong>Current persona</strong><br>{html.Encode(status.DisplayName ?? "Anonymous")}</div>");
-        builder.AppendLine($"<div class=\"panel\"><strong>Subject</strong><br><code>{html.Encode(status.Subject ?? "(none)")}</code></div>");
+        builder.AppendLine($"<div class=\"panel\"><strong>Current persona</strong><br>{html.Encode(DisplayStatusPersonaName(status))}</div>");
+        builder.AppendLine($"<div class=\"panel\"><strong>Subject</strong><br><code>{html.Encode(DisplayStatusSubject(status))}</code></div>");
         builder.AppendLine("</section>");
         builder.AppendLine("<section class=\"panel\" aria-label=\"Select persona\"><h2>Select persona</h2><div class=\"actions\">");
         foreach (var persona in options.Users.Personas.Values)
         {
             var selected = string.Equals(status.PersonaId, persona.Id, StringComparison.Ordinal);
-            builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(options.PathPrefix)}/select/{html.Encode(persona.Id)}\"><button class=\"{(selected ? "selected" : string.Empty)}\" aria-current=\"{(selected ? "true" : "false")}\">{html.Encode(persona.DisplayName)}</button></form>");
+            builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(options.PathPrefix)}/select/{html.Encode(persona.Id)}\"><button class=\"{(selected ? "selected" : string.Empty)}\" aria-current=\"{(selected ? "true" : "false")}\">{html.Encode(DisplayPersonaName(persona))}</button></form>");
         }
 
         builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(options.PathPrefix)}/clear\"><button>Clear persona</button></form>");
@@ -326,7 +323,7 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
 
         builder.AppendLine("</section>");
         builder.AppendLine("<section class=\"panel\" aria-label=\"Marker preview\"><h2>Marker preview</h2>");
-        builder.AppendLine($"<p><a href=\"{html.Encode(options.PathPrefix)}/\">DEV AUTH: {html.Encode(status.DisplayName ?? "Anonymous")} ({html.Encode(status.Scheme)})</a></p>");
+        builder.AppendLine($"<p><a href=\"{html.Encode(options.PathPrefix)}/\">DEV AUTH: {html.Encode(DisplayStatusPersonaName(status))} ({html.Encode(status.Scheme)})</a></p>");
         builder.AppendLine("</section>");
         if (status.Warnings.Count > 0)
         {
@@ -358,6 +355,33 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         }
 
         return !ContainsSensitiveToken(type) && !ContainsSensitiveToken(value);
+    }
+
+    private static string DisplayPersonaName(AppSurfaceDevAuthPersona persona)
+    {
+        return SafeStatusValue(persona.DisplayName) ?? RedactedValue;
+    }
+
+    private static string DisplayStatusPersonaName(AppSurfaceDevAuthStatus status)
+    {
+        return status.DisplayName ?? (status.PersonaId is null ? "Anonymous" : RedactedValue);
+    }
+
+    private static string DisplayStatusSubject(AppSurfaceDevAuthStatus status)
+    {
+        return status.Subject ?? (status.PersonaId is null ? "(none)" : RedactedValue);
+    }
+
+    private static string? SafeStatusValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            value.Length > 128 ||
+            ContainsSensitiveToken(value))
+        {
+            return null;
+        }
+
+        return value;
     }
 
     private static bool ContainsSensitiveToken(string value)

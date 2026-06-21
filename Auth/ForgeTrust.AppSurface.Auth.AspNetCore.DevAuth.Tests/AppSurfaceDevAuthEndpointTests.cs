@@ -115,6 +115,26 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.True(context.Response.Headers.SetCookie.Count == 0, "Invalid persona selection must not set a cookie.");
     }
 
+    [Theory]
+    [InlineData("secret-token")]
+    [InlineData("api-key")]
+    [InlineData("admin-email")]
+    public async Task SelectPersona_WithSensitivePersonaId_ReturnsSafeDiagnostic(string personaId)
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var context = CreateContext(app.Services);
+        context.Request.RouteValues["personaId"] = personaId;
+
+        await endpoint.RequestDelegate!(context);
+
+        var body = await ReadBodyAsync(context);
+        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+        Assert.Contains(AppSurfaceDevAuthDiagnostics.InvalidPersonaId, body, StringComparison.Ordinal);
+        Assert.DoesNotContain(personaId, body, StringComparison.Ordinal);
+        Assert.True(context.Response.Headers.SetCookie.Count == 0, "Sensitive persona selection must not set a cookie.");
+    }
+
     [Fact]
     public async Task SelectPersona_WithBlankPersonaId_ReturnsSafeDiagnostic()
     {
@@ -185,6 +205,52 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
         var body = await ReadBodyAsync(context);
         Assert.Contains("AppSurface DevAuth local request required", body, StringComparison.Ordinal);
+        Assert.DoesNotContain(AppSurfaceDevAuthDiagnostics.NonDevelopmentEnvironment, body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ControlAndStatus_RedactSensitiveDisplayNameAndSubject()
+    {
+        await using var app = BuildApp(options =>
+        {
+            options.Users.Add(
+                "sensitive",
+                user => user
+                    .DisplayName("admin@example.com")
+                    .Subject("secret-token")
+                    .Claim("role", "operator"));
+        });
+        var controlEndpoint = FindEndpoint(app, "/_appsurface/dev-auth/", HttpMethods.Get);
+        var controlContext = CreateContext(app.Services);
+
+        await controlEndpoint.RequestDelegate!(controlContext);
+
+        var controlHtml = await ReadBodyAsync(controlContext);
+        Assert.DoesNotContain("admin@example.com", controlHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", controlHtml, StringComparison.Ordinal);
+        Assert.Contains("(hidden)", controlHtml, StringComparison.Ordinal);
+
+        var selectEndpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var selectContext = CreateContext(app.Services);
+        selectContext.Request.RouteValues["personaId"] = "sensitive";
+
+        await selectEndpoint.RequestDelegate!(selectContext);
+
+        var selectedHtml = await ReadBodyAsync(selectContext);
+        Assert.DoesNotContain("admin@example.com", selectedHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", selectedHtml, StringComparison.Ordinal);
+        Assert.Contains("(hidden)", selectedHtml, StringComparison.Ordinal);
+
+        var statusEndpoint = FindEndpoint(app, "/_appsurface/dev-auth/status", HttpMethods.Get);
+        var statusContext = CreateContext(app.Services);
+        statusContext.Request.Headers.Cookie = selectContext.Response.Headers.SetCookie.ToString().Split(';', 2)[0];
+
+        await statusEndpoint.RequestDelegate!(statusContext);
+
+        var statusJson = await ReadBodyAsync(statusContext);
+        Assert.DoesNotContain("admin@example.com", statusJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", statusJson, StringComparison.Ordinal);
+        Assert.Contains("\"personaId\":\"sensitive\"", statusJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -231,6 +297,11 @@ public sealed class AppSurfaceDevAuthEndpointTests
 
     private static WebApplication BuildApp(bool mapProofEndpoint = false)
     {
+        return BuildApp(AddDefaultPersonas, mapProofEndpoint);
+    }
+
+    private static WebApplication BuildApp(Action<AppSurfaceDevAuthOptions> configureDevAuth, bool mapProofEndpoint = false)
+    {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             EnvironmentName = Environments.Development,
@@ -247,23 +318,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
                     .RequireClaim("role", "operator"));
         });
         builder.Services.AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim("sub"));
-        builder.Services.AddAppSurfaceDevAuth(builder.Environment, options =>
-        {
-            options.Users.Add(
-                "admin",
-                user => user
-                    .DisplayName("Local Admin")
-                    .Subject("admin-1")
-                    .Claim("role", "operator")
-                    .Claim("email", "admin@example.com")
-                    .Claim("access_token", "secret-token"));
-            options.Users.Add(
-                "viewer",
-                user => user
-                    .DisplayName("Local Viewer")
-                    .Subject("viewer-1")
-                    .Claim("role", "viewer"));
-        });
+        builder.Services.AddAppSurfaceDevAuth(builder.Environment, configureDevAuth);
 
         var app = builder.Build();
         app.MapAppSurfaceDevAuth();
@@ -274,6 +329,24 @@ public sealed class AppSurfaceDevAuthEndpointTests
         }
 
         return app;
+    }
+
+    private static void AddDefaultPersonas(AppSurfaceDevAuthOptions options)
+    {
+        options.Users.Add(
+            "admin",
+            user => user
+                .DisplayName("Local Admin")
+                .Subject("admin-1")
+                .Claim("role", "operator")
+                .Claim("email", "admin@example.com")
+                .Claim("access_token", "secret-token"));
+        options.Users.Add(
+            "viewer",
+            user => user
+                .DisplayName("Local Viewer")
+                .Subject("viewer-1")
+                .Claim("role", "viewer"));
     }
 
     private static RouteEndpoint FindEndpoint(WebApplication app, string pattern, string method)

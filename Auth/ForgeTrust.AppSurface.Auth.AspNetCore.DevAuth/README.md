@@ -83,11 +83,11 @@ The control page lets you select a seeded persona, clear the persona cookie, ins
 - `AppSurfaceDevAuthOptions.RequireLoopbackControlRequests` is on by default.
 - `AppSurfaceDevAuthOptions.DisplayClaimTypes` controls which issued claims may appear in the local HTML preview. It defaults to `sub`, `role`, and `tenant`.
 
-Persona IDs must be route-safe local identifiers containing only ASCII letters, digits, `.`, `_`, or `-`. The dot-segment IDs `.` and `..` are not allowed. Persona IDs are used in the selection endpoint path and stored as the protected cookie payload.
+Persona IDs must be route-safe local identifiers containing only ASCII letters, digits, `.`, `_`, or `-`. The dot-segment IDs `.` and `..` are not allowed, and ids that look like tokens, secrets, passwords, keys, credentials, or emails are rejected. Persona IDs are used in the selection endpoint path and stored as the protected cookie payload.
 
 Persona state is stored in a protected, HttpOnly, SameSite=Strict cookie that contains only the persona id. Blank, unknown, stale, reset, or tampered cookie state authenticates as no result.
 
-The authentication handler issues every seeded persona claim, but the control page does not display every issued claim. Claims are rendered only when their type is in `DisplayClaimTypes`, their value is short, and neither the type nor the value looks like a token, secret, password, key, credential, or email. Hidden claims are counted without showing their values.
+The authentication handler issues every seeded persona claim, but the control page does not display every issued claim. Claims are rendered only when their type is in `DisplayClaimTypes`, their value is short, and neither the type nor the value looks like a token, secret, password, key, credential, or email. Display names and subjects that look sensitive are redacted from HTML and status JSON. Hidden claims are counted without showing their values.
 
 ## DevAuth Versus Other Auth Packages
 
@@ -116,7 +116,7 @@ DevAuth diagnostics use `Problem:`, `Cause:`, `Fix:`, and `Docs:` wording and th
 
 | Code | Meaning |
 | --- | --- |
-| `ASDEV001` | DevAuth was enabled outside Development or a control endpoint was requested from a non-local address. |
+| `ASDEV001` | DevAuth was enabled outside Development. |
 | `ASDEV002` | DevAuth detected an existing real authentication scheme or default. |
 | `ASDEV003` | DevAuth was enabled without seeded personas. |
 | `ASDEV004` | A selected persona did not contain the configured subject claim. |
@@ -131,8 +131,8 @@ Diagnostics, HTML, and status JSON do not include raw tokens, secrets, passwords
 - Call `UseAuthorization()` before AppSurface policy-protected endpoints when your host uses normal ASP.NET Core authorization middleware.
 - Call `MapAppSurfaceDevAuth()` so the persona lab and status JSON exist.
 - Add `AppSurfaceDevAuthDefaults.AuthenticationScheme` to policies that should evaluate DevAuth personas.
-- Use simple route-safe persona IDs such as `admin`, `viewer`, or `qa.local_1`; dot segments, query strings, fragments, encoded slashes, spaces, and other punctuation are rejected with `ASDEV006`.
-- Keep `Subject(...)` aligned with `AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim(...))`.
+- Use simple route-safe persona IDs such as `admin`, `viewer`, or `qa.local_1`; dot segments, sensitive-looking ids, query strings, fragments, encoded slashes, spaces, and other punctuation are rejected with `ASDEV006`.
+- Call `Subject(...)` for every persona and keep it aligned with `AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim(...))`.
 - Keep the DevAuth marker visible in local sample pages so fake auth is impossible to miss.
 
 ## Upgrade And Removal
