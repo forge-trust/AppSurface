@@ -15,6 +15,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - RazorWire export now fails artifact-producing redirects with `RWEXPORT008` when the final response leaves the configured export origin or base path before content is read or written.
+- RazorWire hybrid islands now block inline `data:` module specifiers and protocol-relative `//...` module URLs; serve client modules from relative, root-relative, same-origin, explicit HTTPS, or import-map specifiers instead.
 
 ## 0.1.0-rc.4 - 2026-06-16
 
