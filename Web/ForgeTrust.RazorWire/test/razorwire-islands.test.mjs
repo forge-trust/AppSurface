@@ -204,6 +204,8 @@ test('blocked direct module specifiers are rejected before dynamic import', asyn
     'blob:https://example.test/module',
     'file:///tmp/island.js',
     '//cdn.example.test/island.js',
+    'http://other.example.test/island.js',
+    'ftp://example.test/island.js',
     '',
     '   '
   ];
@@ -231,6 +233,8 @@ test('blocked manifest module specifiers are rejected before dynamic import', as
     'blob:https://example.test/module',
     'file:///tmp/island.js',
     '//cdn.example.test/island.js',
+    'http://other.example.test/island.js',
+    'ftp://example.test/island.js',
     '   '
   ];
 
