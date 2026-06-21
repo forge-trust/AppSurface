@@ -4,6 +4,10 @@
 
 DevAuth is development tooling. It is not production authentication, a user store, durable app-user mapping, OIDC, token validation, tenant authority, audit logging, or the future test harness.
 
+## Release Guidance
+
+AppSurface publishes coordinated `v0.1.0` release candidates. Before installing this package from a prerelease feed, read the [v0.1.0 RC 4 release note](../../releases/v0.1.0-rc.4.md), the [unreleased proof artifact](../../releases/unreleased.md), and the current [package chooser](../../packages/README.md) for release risk and package readiness.
+
 ## Quickstart
 
 Install the package in an ASP.NET Core app:
