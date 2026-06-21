@@ -743,6 +743,25 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void DefaultFileSystem_Should_ReturnDegradedDiagnostics_WhenUnixModeChecksAreUnavailable()
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "nested", "secrets.json");
+        var fileSystem = new DefaultFileAppSurfaceLocalSecretStoreFileSystem(() => false, () => true);
+
+        var prepare = fileSystem.PrepareWrite(path);
+        var write = fileSystem.WriteAllTextWithPosture(path, "{}");
+        var inspect = fileSystem.InspectExistingFilePosture(path);
+        var doctor = fileSystem.Doctor(path);
+
+        Assert.Equal(FileSecretPostureKind.Degraded, prepare.Kind);
+        Assert.Equal(FileSecretPostureKind.Degraded, write.Kind);
+        Assert.Equal(FileSecretPostureKind.Ready, inspect.Kind);
+        Assert.Equal(FileSecretPostureKind.Degraded, doctor.Kind);
+        Assert.Equal("{}", File.ReadAllText(path));
+    }
+
+    [Fact]
     public void DefaultFileSystem_Should_RejectLooseUnixContainingDirectoryDuringReadPosture()
     {
         if (!IsUnix())

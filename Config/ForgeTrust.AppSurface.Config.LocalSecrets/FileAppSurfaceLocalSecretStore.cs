@@ -394,6 +394,28 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
 
     public static DefaultFileAppSurfaceLocalSecretStoreFileSystem Instance { get; } = new();
 
+    private readonly Func<bool> _isUnix;
+    private readonly Func<bool> _isMacOs;
+
+    private DefaultFileAppSurfaceLocalSecretStoreFileSystem()
+        : this(() => !OperatingSystem.IsWindows(), OperatingSystem.IsMacOS)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance with platform probes for deterministic posture tests.
+    /// </summary>
+    /// <param name="isUnix">Returns whether Unix mode checks are available.</param>
+    /// <param name="isMacOs">Returns whether macOS directory-alias exceptions should apply.</param>
+    internal DefaultFileAppSurfaceLocalSecretStoreFileSystem(Func<bool> isUnix, Func<bool> isMacOs)
+    {
+        ArgumentNullException.ThrowIfNull(isUnix);
+        ArgumentNullException.ThrowIfNull(isMacOs);
+
+        _isUnix = isUnix;
+        _isMacOs = isMacOs;
+    }
+
     public bool FileExists(string path) => File.Exists(path);
 
     public string ReadAllText(string path) => File.ReadAllText(path);
@@ -546,7 +568,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         return FileSecretPostureResult.Ready();
     }
 
-    private static FileSecretPostureResult PrepareDirectory(string directory)
+    private FileSecretPostureResult PrepareDirectory(string directory)
     {
         if (IsUnix() && !Directory.Exists(directory))
         {
@@ -569,7 +591,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
                 "Move the fallback file under a dedicated directory that AppSurface can create, or choose the OS-backed LocalSecrets store.");
     }
 
-    private static FileSecretPostureResult ValidateExistingPathShape(string path, bool finalMustBeFile)
+    private FileSecretPostureResult ValidateExistingPathShape(string path, bool finalMustBeFile)
     {
         var fullPath = Path.GetFullPath(path);
         var directory = Path.GetDirectoryName(fullPath);
@@ -609,7 +631,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         return FileSecretPostureResult.Ready();
     }
 
-    private static FileSecretPostureResult ValidateDirectoryAncestors(string directory)
+    private FileSecretPostureResult ValidateDirectoryAncestors(string directory)
     {
         var fullDirectory = Path.GetFullPath(directory);
         var root = Path.GetPathRoot(fullDirectory);
@@ -658,9 +680,9 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         return FileSecretPostureResult.Ready();
     }
 
-    private static bool IsAllowedSystemDirectoryAlias(string path, FileSystemInfo info)
+    private bool IsAllowedSystemDirectoryAlias(string path, FileSystemInfo info)
     {
-        if (!OperatingSystem.IsMacOS() || info.LinkTarget is not { } target)
+        if (!_isMacOs() || info.LinkTarget is not { } target)
         {
             return false;
         }
@@ -711,7 +733,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
     private static bool IsFileModeReady(UnixFileMode mode) => mode == SecretFileMode;
 
     [UnsupportedOSPlatformGuard("windows")]
-    private static bool IsUnix() => !OperatingSystem.IsWindows();
+    private bool IsUnix() => _isUnix();
 }
 
 /// <summary>
