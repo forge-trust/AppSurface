@@ -417,6 +417,35 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void Delete_Should_NotRead_WhenWritePreflightRejectsPath()
+    {
+        var readCalled = false;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(
+                read: () =>
+                {
+                    readCalled = true;
+                    return ToSecretJson("sk_test_secret");
+                },
+                prepareWrite: () => FileSecretPostureResult.Unsupported(
+                    "local-secret-file-posture-unsupported",
+                    "Local secret file path is unsupported.",
+                    "The fallback path is not safe to read or write.",
+                    "Choose a normal per-user file path.")));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var result = store.Delete(identity);
+
+        Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
+        Assert.False(readCalled);
+        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Get_Should_ReturnPostureFailure_WhenPathBecomesUnsafeAfterRead()
     {
         var postureChecks = 0;
@@ -663,6 +692,143 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(SecretFileMode, new FileInfo(path).UnixFileMode);
         Assert.Empty(store.List("MyApp", "Development", null).Keys);
         Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DefaultFileSystem_Should_ReportReady_WhenReadPathDoesNotExist()
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "missing.json");
+
+        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.InspectReadPath(path);
+
+        Assert.Equal(FileSecretPostureKind.Ready, result.Kind);
+        Assert.Equal("local-secret-store-ready", result.Code);
+    }
+
+    [Fact]
+    public void DefaultFileSystem_Should_ReportReady_WhenExistingFilePosturePathDoesNotExist()
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "missing.json");
+
+        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.InspectExistingFilePosture(path);
+
+        Assert.Equal(FileSecretPostureKind.Ready, result.Kind);
+        Assert.Equal("local-secret-store-ready", result.Code);
+    }
+
+    [Fact]
+    public void DefaultFileSystem_Should_RejectLooseUnixContainingDirectoryDuringReadPosture()
+    {
+        if (!IsUnix())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create();
+        var directory = Path.Join(temp.Path, "shared");
+        Directory.CreateDirectory(directory);
+        var looseMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead;
+        new DirectoryInfo(directory).UnixFileMode = looseMode;
+        var path = Path.Join(directory, "secrets.json");
+        File.WriteAllText(path, "{}");
+        new FileInfo(path).UnixFileMode = SecretFileMode;
+
+        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.InspectExistingFilePosture(path);
+
+        Assert.Equal(FileSecretPostureKind.Unsupported, result.Kind);
+        Assert.Equal("local-secret-file-posture-degraded", result.Code);
+        Assert.Equal(looseMode, new DirectoryInfo(directory).UnixFileMode);
+    }
+
+    [Fact]
+    public void DefaultFileSystem_Should_PrepareRelativeFileWithoutContainingDirectory()
+    {
+        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.PrepareWrite("secrets.json");
+
+        Assert.NotEqual(FileSecretPostureKind.Unsupported, result.Kind);
+    }
+
+    [Fact]
+    public void DefaultFileSystem_Should_ReturnPreflightFailure_WhenWriteTargetIsDirectory()
+    {
+        using var temp = TempDirectory.Create();
+
+        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.WriteAllTextWithPosture(temp.Path, "{}");
+
+        Assert.Equal(FileSecretPostureKind.Unsupported, result.Kind);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Code);
+    }
+
+    [Fact]
+    public void DefaultFileSystem_Should_InspectRootDirectoryPathWithoutRejectingRootAlias()
+    {
+        var root = Path.GetPathRoot(Path.GetFullPath(Path.GetTempPath()));
+        Assert.False(string.IsNullOrEmpty(root));
+        var path = Path.Join(root, $"appsurface-missing-{Guid.NewGuid():N}.json");
+
+        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.InspectReadPath(path);
+
+        Assert.Equal(FileSecretPostureKind.Ready, result.Kind);
+    }
+
+    [Fact]
+    public async Task DefaultFileSystem_Should_DeleteTempFile_WhenFinalTargetBecomesDirectoryBeforeMove()
+    {
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            using var temp = TempDirectory.Create();
+            var path = Path.Join(temp.Path, "secrets.json");
+            using var cancellation = new CancellationTokenSource();
+            var racer = Task.Run(
+                () =>
+                {
+                    while (!cancellation.IsCancellationRequested)
+                    {
+                        if (Directory.EnumerateFiles(temp.Path, ".secrets.json.*.tmp").Any())
+                        {
+                            Directory.CreateDirectory(path);
+                            return;
+                        }
+                    }
+                },
+                cancellation.Token);
+
+            var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.WriteAllTextWithPosture(path, new string('x', 5_000_000));
+            cancellation.Cancel();
+            try
+            {
+                await racer.WaitAsync(TimeSpan.FromSeconds(1));
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (TimeoutException)
+            {
+            }
+
+            if (result.Kind != FileSecretPostureKind.Unsupported)
+            {
+                continue;
+            }
+
+            Assert.Equal("local-secret-file-posture-unsupported", result.Code);
+            Assert.Empty(Directory.EnumerateFiles(temp.Path, ".secrets.json.*.tmp"));
+            return;
+        }
+
+        Assert.Fail("The final target did not become a directory before the temp-file move.");
+    }
+
+    [Fact]
+    public void FileSecretPostureResult_Should_CreateDegradedDiagnostic()
+    {
+        var result = FileSecretPostureResult.Degraded();
+
+        Assert.Equal(FileSecretPostureKind.Degraded, result.Kind);
+        Assert.Equal("local-secret-file-posture-degraded", result.Code);
+        Assert.Equal("local-secrets-without-a-remote-vault", result.ToDiagnostic().Docs);
     }
 
     private static string ToSecretJson(string value) =>

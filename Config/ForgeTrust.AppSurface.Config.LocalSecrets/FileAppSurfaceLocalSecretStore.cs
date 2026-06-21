@@ -428,16 +428,13 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         }
 
         var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+        if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory) && !IsDirectoryModeReady(new DirectoryInfo(directory).UnixFileMode))
         {
-            if (!IsDirectoryModeReady(new DirectoryInfo(directory).UnixFileMode))
-            {
-                return FileSecretPostureResult.Unsupported(
-                    "local-secret-file-posture-degraded",
-                    "Local secret directory posture is degraded.",
-                    "The fallback secret directory does not use owner-only read/write/execute mode bits.",
-                    "Move the fallback file under a dedicated directory that AppSurface can create, or choose the OS-backed LocalSecrets store.");
-            }
+            return FileSecretPostureResult.Unsupported(
+                "local-secret-file-posture-degraded",
+                "Local secret directory posture is degraded.",
+                "The fallback secret directory does not use owner-only read/write/execute mode bits.",
+                "Move the fallback file under a dedicated directory that AppSurface can create, or choose the OS-backed LocalSecrets store.");
         }
 
         return FileSecretPostureResult.Ready();
@@ -621,11 +618,8 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
             return FileSecretPostureResult.Ready();
         }
 
-        var current = Path.TrimEndingDirectorySeparator(root);
-        if (string.IsNullOrEmpty(current))
-        {
-            current = root;
-        }
+        var trimmedRoot = Path.TrimEndingDirectorySeparator(root);
+        var current = string.IsNullOrEmpty(trimmedRoot) ? root : trimmedRoot;
 
         var relative = Path.GetRelativePath(root, fullDirectory);
         foreach (var segment in relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
