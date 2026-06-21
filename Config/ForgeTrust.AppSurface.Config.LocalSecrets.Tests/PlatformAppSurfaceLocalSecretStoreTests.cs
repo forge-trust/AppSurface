@@ -179,6 +179,25 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void LinuxSecretToolResolver_Should_ExplainTrustedCandidates_WhenPathHasNoSecretTool()
+    {
+        var resolver = Resolver(new Dictionary<string, PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState>
+        {
+            [UsrSecretTool] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.Missing,
+            [BinSecretTool] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.Missing
+        });
+
+        var result = resolver.Resolve(null);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
+        Assert.Equal("local-secret-store-command-untrusted", result.Diagnostic?.Code);
+        Assert.Contains("/usr/bin/secret-tool", result.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.Contains("/bin/secret-tool", result.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.Contains("does not search PATH", result.Diagnostic?.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LinuxSecretToolResolver_Should_AcceptAbsoluteExecutableOverride()
     {
         var overridePath = "/nix/store/appsurface-secret-tool/bin/secret-tool";
@@ -217,6 +236,27 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
 
         Assert.Equal("Linux Secret Service", store.Name);
         Assert.Equal(overridePath, inspectedPath);
+    }
+
+    [Fact]
+    public void CreateInnerStoreForTests_Should_ReturnDiagnosticStore_WhenLinuxResolverFails()
+    {
+        var resolver = Resolver(new Dictionary<string, PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState>
+        {
+            [UsrSecretTool] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.Missing,
+            [BinSecretTool] = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolPathState.Missing
+        });
+
+        var store = PlatformAppSurfaceLocalSecretStore.CreateInnerStoreForTests(
+            new AppSurfaceLocalSecretsOptions(),
+            resolver,
+            PlatformAppSurfaceLocalSecretStore.LocalSecretsPlatform.Linux);
+
+        var result = store.Get(Identity);
+
+        Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
+        Assert.Equal("local-secret-store-command-untrusted", result.Diagnostic?.Code);
+        Assert.Equal(store.Name, result.Source);
     }
 
     [Theory]
