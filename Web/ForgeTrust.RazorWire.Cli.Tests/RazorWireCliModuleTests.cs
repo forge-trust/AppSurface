@@ -92,13 +92,21 @@ public class RazorWireCliModuleTests
             }
             catch (OperationCanceledException)
             {
+                // Automatic redirects are disabled, so the optional follow-up request should time out.
+                return;
             }
         }
-        catch (SocketException)
+        catch (SocketException ex) when (ex.SocketErrorCode is SocketError.OperationAborted
+                                             or SocketError.Interrupted
+                                             or SocketError.ConnectionReset)
         {
+            // Listener shutdown can interrupt the in-test socket server after the assertion completes.
+            return;
         }
         catch (ObjectDisposedException)
         {
+            // Test cleanup can dispose the listener before this helper observes another connection.
+            return;
         }
     }
 

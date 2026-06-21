@@ -4924,6 +4924,24 @@ public class ExportEngineTests
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
     }
 
+    private static Task<HttpResponseMessage> Redirect(
+        string location,
+        UriKind uriKind = UriKind.RelativeOrAbsolute)
+    {
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
+        {
+            Headers =
+            {
+                Location = new Uri(location, uriKind)
+            }
+        });
+    }
+
+    private static Task<HttpResponseMessage> RedirectWithoutLocation()
+    {
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found));
+    }
+
     private static void AssertRedirectProvenanceDiagnostic(
         ExportValidationException exception,
         string route,
@@ -5109,13 +5127,7 @@ public class ExportEngineTests
 
             if (path == RootStylesheetPath)
             {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
-                {
-                    Headers =
-                    {
-                        Location = new Uri(_redirectLocation, UriKind.RelativeOrAbsolute)
-                    }
-                });
+                return Redirect(_redirectLocation);
             }
 
             if (path == PackagedStylesheetPath)
@@ -5150,13 +5162,7 @@ public class ExportEngineTests
 
             if (path == "/css/site.css")
             {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
-                {
-                    Headers =
-                    {
-                        Location = new Uri(_redirectLocation, UriKind.RelativeOrAbsolute)
-                    }
-                });
+                return Redirect(_redirectLocation);
             }
 
             return NotFound();
@@ -5175,7 +5181,7 @@ public class ExportEngineTests
             }
 
             return path == "/css/site.css"
-                ? Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found))
+                ? RedirectWithoutLocation()
                 : NotFound();
         }
     }
@@ -5200,13 +5206,7 @@ public class ExportEngineTests
 
             if (path == "/app/css/site.css")
             {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
-                {
-                    Headers =
-                    {
-                        Location = new Uri(_redirectLocation, UriKind.RelativeOrAbsolute)
-                    }
-                });
+                return Redirect(_redirectLocation);
             }
 
             if (path == "/app/_content/pkg/site.css")
@@ -5396,13 +5396,7 @@ public class ExportEngineTests
 
             if (path == BrowserStatusPageDefaults.ReservedNotFoundRoute)
             {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
-                {
-                    Headers =
-                    {
-                        Location = new Uri("/errors/not-found", UriKind.Relative)
-                    }
-                });
+                return Redirect("/errors/not-found", UriKind.Relative);
             }
 
             if (path == "/errors/not-found")
@@ -5427,13 +5421,7 @@ public class ExportEngineTests
 
             if (path == BrowserStatusPageDefaults.ReservedNotFoundRoute)
             {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
-                {
-                    Headers =
-                    {
-                        Location = new Uri("http://169.254.169.254/latest/meta-data/", UriKind.Absolute)
-                    }
-                });
+                return Redirect("http://169.254.169.254/latest/meta-data/", UriKind.Absolute);
             }
 
             if (path == "/" || path == "/index")
@@ -5567,13 +5555,7 @@ public class ExportEngineTests
 
             if (path == "/")
             {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
-                {
-                    Headers =
-                    {
-                        Location = new Uri("/docs", UriKind.Relative)
-                    }
-                });
+                return Redirect("/docs", UriKind.Relative);
             }
 
             if (path == "/docs")
@@ -5629,13 +5611,7 @@ public class ExportEngineTests
                 return Html("""<html><body><link rel="stylesheet" href="/css/site.css"></body></html>""");
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
-            {
-                Headers =
-                {
-                    Location = new Uri("/loop", UriKind.Relative)
-                }
-            });
+            return Redirect("/loop", UriKind.Relative);
         }
     }
 
