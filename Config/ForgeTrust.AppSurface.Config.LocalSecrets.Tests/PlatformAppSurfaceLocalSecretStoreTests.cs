@@ -213,6 +213,49 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void LinuxSecretToolResolverDefault_Should_InspectOverridePathState()
+    {
+        var tempPath = Path.Join(Path.GetTempPath(), $"appsurface-secret-tool-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempPath);
+        try
+        {
+            var executablePath = Path.Join(tempPath, "secret-tool");
+            var notExecutablePath = Path.Join(tempPath, "secret-tool-not-executable");
+            var directoryPath = Path.Join(tempPath, "secret-tool-dir");
+            File.WriteAllText(executablePath, "#!/bin/sh\nexit 0\n");
+            File.WriteAllText(notExecutablePath, "#!/bin/sh\nexit 0\n");
+            Directory.CreateDirectory(directoryPath);
+
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(
+                    executablePath,
+                    UnixFileMode.UserRead | UnixFileMode.UserExecute);
+                File.SetUnixFileMode(notExecutablePath, UnixFileMode.UserRead);
+            }
+
+            var executable = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolResolver.Default.Resolve(executablePath);
+            var missing = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolResolver.Default.Resolve(Path.Join(tempPath, "missing-secret-tool"));
+            var directory = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolResolver.Default.Resolve(directoryPath);
+            var notExecutable = PlatformAppSurfaceLocalSecretStore.LinuxSecretToolResolver.Default.Resolve(notExecutablePath);
+
+            Assert.True(executable.Succeeded);
+            Assert.Equal(executablePath, executable.Path);
+            Assert.Equal("local-secret-store-command-invalid", missing.Diagnostic?.Code);
+            Assert.Contains("does not exist", missing.Diagnostic?.Cause, StringComparison.Ordinal);
+            Assert.Contains("directory", directory.Diagnostic?.Cause, StringComparison.Ordinal);
+            if (!OperatingSystem.IsWindows())
+            {
+                Assert.Contains("not executable", notExecutable.Diagnostic?.Cause, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempPath, recursive: true);
+        }
+    }
+
+    [Fact]
     public void CreateInnerStoreForTests_Should_PassConfiguredLinuxSecretToolPathToResolver_WhenLinux()
     {
         var overridePath = "/nix/store/appsurface-secret-tool/bin/secret-tool";

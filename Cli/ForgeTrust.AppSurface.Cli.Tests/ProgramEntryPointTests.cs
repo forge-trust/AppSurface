@@ -161,6 +161,16 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public void SecretsCommandBase_Should_CreateDefaultPlatformStore_WhenStoreFileIsNotConfigured()
+    {
+        var command = new DefaultPlatformSecretsCommand();
+
+        var context = command.BuildContextForTests();
+
+        Assert.IsType<PlatformAppSurfaceLocalSecretStore>(context.Store);
+    }
+
+    [Fact]
     public async Task SecretsSetCommand_Should_RejectConflictingValueSources()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");
@@ -3789,6 +3799,13 @@ public sealed class ProgramEntryPointTests
 
         public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
             throw new NotSupportedException("This test store only captures platform-store construction.");
+    }
+
+    private sealed class DefaultPlatformSecretsCommand : SecretsCommandBase
+    {
+        public SecretsCommandContext BuildContextForTests() => BuildContext();
+
+        public override ValueTask ExecuteAsync(IConsole console) => ValueTask.CompletedTask;
     }
 
     private sealed class TempDirectory : IDisposable
