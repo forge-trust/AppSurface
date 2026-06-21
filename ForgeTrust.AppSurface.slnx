@@ -6,6 +6,8 @@
   <Folder Name="/Auth/">
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.csproj" />
+    <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.Tests/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.Tests.csproj" />
+    <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Tests/ForgeTrust.AppSurface.Auth.AspNetCore.Tests.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.Tests/ForgeTrust.AppSurface.Auth.Tests.csproj" />
@@ -43,6 +45,9 @@
   <Folder Name="/Examples/">
     <Project Path="examples/auth-aspnetcore-dev-auth/AuthAspNetCoreDevAuthExample.csproj" />
     <Project Path="examples/auth-aspnetcore-bridge/AuthAspNetCoreBridgeExample.csproj" />
+    <Project Path="examples/auth-aspnetcore-oidc/AuthAspNetCoreOidcExample.csproj" />
+    <Project Path="examples/auth-web-razorwire-proof/AuthWebRazorWireProofExample.csproj" />
+    <Project Path="examples/auth-web-razorwire-proof.tests/AuthWebRazorWireProofExample.Tests.csproj" />
     <Project Path="examples/aspire-apphost/AspireAppHostExample.csproj" />
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
@@ -67,6 +72,10 @@
   <Folder Name="/Intelligence/">
     <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj" />
     <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence.Tests/ForgeTrust.AppSurface.Intelligence.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Observability/">
+    <Project Path="Observability/ForgeTrust.AppSurface.Observability/ForgeTrust.AppSurface.Observability.csproj" />
+    <Project Path="Observability/ForgeTrust.AppSurface.Observability.Tests/ForgeTrust.AppSurface.Observability.Tests.csproj" />
   </Folder>
   <Folder Name="/Examples/razorwire-mvc/">
     <Project Path="examples/razorwire-mvc/RazorWireWebExample.csproj" />

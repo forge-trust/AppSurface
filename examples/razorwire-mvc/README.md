@@ -105,6 +105,23 @@ The sample uses `rw:island` to load and persist independent UI regions.
 - `ReactivityController.UserList()` returns the `UserList` view component inside its own island.
 - `Views/Home/Index.cshtml`, `Views/Reactivity/Index.cshtml`, and `Views/Navigation/Index.cshtml` all reuse the same `permanent-island` so it can persist across page transitions.
 
+Hybrid client islands should point at normal served JavaScript modules rather
+than inline module bytes. The Playwright proof uses
+`wwwroot/js/playwright-client-island.js` as a same-origin module fixture:
+
+```js
+export function mount(root, props) {
+  root.textContent = `client:${props.label}`;
+  root.dataset.clientMounted = 'true';
+}
+```
+
+Hosts can reference that shape directly with `client-module="/js/my-island.js"`
+or indirectly with `window.RazorWireIslandModules = { MyIsland: "/js/my-island.js" }`.
+RazorWire rejects `data:` module content, `file:`,
+`blob:`, `javascript:`, and protocol-relative `//...` specifiers before
+calling dynamic `import()`.
+
 ### Live Updates over SSE
 
 The sample also demonstrates live multi-client updates.

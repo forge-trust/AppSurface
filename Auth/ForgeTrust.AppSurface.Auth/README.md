@@ -231,15 +231,6 @@ The ASP.NET Core adapter keeps schemes, policies, middleware, challenges, forbid
 
 Today, `AppSurfaceUser.Id` from the ASP.NET Core adapter is the stable host-owned subject claim selected by the adapter. Treat it as an external subject, not as your durable app-owned user id. A future adapter slice can compose `ExternalSubject` with `IAppSurfaceUserIdentityResolver` asynchronously without adding ASP.NET Core dependencies to this package.
 
-## Future Consumers
-
-The next auth slices map host behavior into these contracts:
-
-- #418 adds the ASP.NET Core adapter package for request context and named host-policy results.
-- #419 maps Minimal API policy decisions to correct challenge and forbid behavior.
-- #421 adds a result-bearing RazorWire auth adapter while preserving boolean authorizer compatibility.
-- #422 projects the same auth result states into RazorWire UI components.
-
 ## Composition
 
 Register `AppSurfaceAuthModule` from another AppSurface module when you need the auth boundary present in the module graph:

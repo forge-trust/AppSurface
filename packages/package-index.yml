@@ -84,7 +84,7 @@ packages:
     includes: AppSurfaceAspNetCoreAuthModule, AddAppSurfaceAspNetCoreAuth registration, AddAppSurfacePolicy policy naming, RequireSurfacePolicy Minimal API endpoint filters with fallback-policy opt-out metadata, ASP.NET Core request auth context mapping, named host-policy evaluation, AppSurfaceAuthResult mapping, ProblemDetails auth failure responses, and safe setup diagnostics.
     does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policy definitions, middleware insertion, ASP.NET Core authorization middleware replacement, browser challenge or forbid execution, redirects, audit sinks, RazorWire UI, or MVC/controller auth helpers.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results or Minimal API ProblemDetails responses.
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results or Minimal API ProblemDetails responses; run the [Auth Web/RazorWire proof](../examples/auth-web-razorwire-proof/README.md) for the browser-first Web/RazorWire proof.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth
   - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.csproj
@@ -102,6 +102,22 @@ packages:
     recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts that need fake local personas to prove AppSurface policy results.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
+  - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 38
+    use_when: Add this in an ASP.NET Core web host that already chose an OpenID Connect provider and wants AppSurface-named cookie/OIDC schemes with safe defaults and diagnostics.
+    includes: AddAppSurfaceOidcAuth registration, AppSurfaceOidcAuthOptions, named cookie and OpenID Connect schemes, authorization-code defaults, SaveTokens false by default, local-only passive login/logout prompt helpers, OIDC subject mapping handoff, event chaining, and stable safe diagnostic codes.
+    does_not_include: User stores, ASP.NET Identity replacement, identity-provider hosting, OAuth/OIDC server behavior, provider SDKs, EF Core, persistence, middleware insertion, active redirects, challenge execution, sign-in or sign-out execution, silent default-scheme takeover, token storage by default, Aspire Keycloak, Dev Auth, or app-user provisioning.
+    start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` after `ForgeTrust.AppSurface.Auth.AspNetCore` when a host wants AppSurface-named cookie/OIDC schemes while preserving ASP.NET Core ownership of middleware, defaults, and provider behavior.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Auth.AspNetCore
+      - ForgeTrust.AppSurface.Auth
   - project: Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj
     classification: public
     publish_decision: publish
@@ -109,12 +125,27 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.4.md
-    order: 38
+    order: 39
     use_when: Add this when your AppSurface modules or host integrations need product-intelligence event contracts before choosing an analytics vendor.
     includes: AppSurfaceProductIntelligenceModule, IAppSurfaceProductIntelligence, AppSurfaceProductEvent, typed product-event registry, validation, sanitization, lifecycle states, selected experimental event allowlists, sensitivity classes, and host-owned sink contracts.
     does_not_include: PostHog SDKs, OpenTelemetry exporters, analytics storage, retention policy, dashboards, browser autocapture, session replay, cookies, or request-body capture.
     start_here_path: Intelligence/ForgeTrust.AppSurface.Intelligence/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Intelligence` when you want vendor-neutral product event contracts and optional host-owned analytics sinks.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Core
+  - project: Observability/ForgeTrust.AppSurface.Observability/ForgeTrust.AppSurface.Observability.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 40
+    use_when: Add this when an AppSurface app should publish operational logs, traces, and metrics to Aspire or another OTLP collector.
+    includes: AppSurfaceObservabilityModule, OpenTelemetry logging/tracing/metrics registration, endpoint-driven OTLP exporter setup, service identity resource metadata, source and meter naming constants, and safe no-endpoint diagnostics.
+    does_not_include: Aspire AppHost resources, product analytics, dashboards, request-body capture, package-specific AppSurface spans, sampling policy design, or non-OTLP exporters.
+    start_here_path: Observability/ForgeTrust.AppSurface.Observability/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Observability` when an AppSurface app should send logs, traces, and metrics to Aspire or an OTLP collector.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj
@@ -124,7 +155,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.4.md
-    order: 38
+    order: 41
     use_when: Add this when your app or module needs typed input/output port flow definitions, generated-case authoring, inferred graph mapping, and local runner tests before durable hosting.
     includes: AppSurfaceFlowModule, FlowNodeOutcome discriminated outcome records, generated Flow authoring attributes and analyzer, IFlowTransformerNode, typed port graph inference, IFlowNode, FlowDefinition, FlowGraphBuilder, flow definition registry, and the in-memory runner.
     does_not_include: Durable persistence, timers, external-event delivery, ASP.NET endpoints, UI, Semantic Kernel, or preview C# union syntax.
@@ -140,7 +171,7 @@ packages:
     release_status: excluded
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
-    order: 39
+    order: 42
     note: Private source generator and diagnostics used by `ForgeTrust.AppSurface.Flow`; consume it only through the packed Flow package.
   - project: Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj
     classification: public
@@ -149,7 +180,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.4.md
-    order: 40
+    order: 43
     use_when: Add this after Flow when the same typed definitions need Durable Task persistence, replay, timers, and authorized resume events.
     includes: AppSurfaceFlowDurableTaskModule, durable flow runner and client services, resume-event authorization contract, timeout and late-event mapping, retry policy decisions, and context serialization validation.
     does_not_include: Durable Task worker/client hosting, storage providers, ASP.NET endpoints, authentication handlers, UI, or Semantic Kernel.
@@ -167,7 +198,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.4.md
-    order: 41
+    order: 44
     use_when: Start here for CLI apps and worker-style entry points that should run through the AppSurface startup pipeline with CliFx.
     includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx source-generated command discovery through AppSurface modules.
     does_not_include: ASP.NET Core hosting, OpenAPI surfaces, or Razor-based UI composition.
