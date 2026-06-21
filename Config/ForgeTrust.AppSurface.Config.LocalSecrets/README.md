@@ -55,6 +55,18 @@ The command prints `Problem`, `Cause`, `Fix`, `Docs`, and `Retryable` without pr
 `local-secret-file-posture-degraded` as usable only for explicit local/test fallback workflows; prefer the OS-backed
 store for normal local development.
 
+## Listing And Cleanup
+
+`appsurface secrets list` prints only currently retrievable logical key names, never values. Platform-backed stores keep
+a local name index so they can list safely across macOS Keychain, Linux Secret Service, and Windows Credential Manager.
+When `list` can read the index and validate the named values, it silently prunes indexed names whose values are already
+missing. If the platform store is locked, unavailable, or the index is corrupt, `list` fails with a paste-safe diagnostic
+instead of hiding names it could not verify.
+
+`appsurface secrets delete KEY` is narrowly idempotent for stale indexed names: if the value is already missing but the
+platform index still contains `KEY`, delete removes the stale name and reports success. A key that has no value and no
+index entry still reports `local-secret-missing`.
+
 ## Posture Modes
 
 - `DevelopmentOnly` is the default. It permits `Development`, `Local`, and `Dev`.

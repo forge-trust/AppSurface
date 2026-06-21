@@ -1,6 +1,7 @@
 # Aspire AppHost Example
 
 This example proves the local `ForgeTrust.AppSurface.Aspire` adoption path. It starts an Aspire AppHost through `AspireApp<TModule>`, selects a profile command with CliFx, and composes the existing web example through reusable Aspire components.
+The web example registers `ForgeTrust.AppSurface.Observability`, so Aspire-provided OTLP configuration flows into the app-side OpenTelemetry logging, tracing, and metrics setup.
 
 ## Run It
 
@@ -17,6 +18,7 @@ aspire run --apphost examples/aspire-apphost/AspireAppHostExample.csproj -- loca
 ```
 
 The `-- local` token selects the AppSurface `LocalProfile` command. Aspire opens the dashboard and shows the `web` project resource for `examples/web-app`.
+Open the `web` endpoint and inspect the dashboard's logs, traces, and metrics tabs. The app should appear under the AppSurface service name rather than under the AppHost library identity.
 
 ## What This Example Shows
 
@@ -24,6 +26,7 @@ The `-- local` token selects the AppSurface `LocalProfile` command. Aspire opens
 - `LocalProfile` is a CliFx command that chooses which Aspire components participate in the resource graph.
 - `WebAppProjectComponent` registers the web example with `AddProject<Projects.WebAppExample>("web")`.
 - `WebAppEnvironmentComponent` depends on `WebAppProjectComponent`, resolves it through `AspireStartupContext.Resolve(...)`, and applies an environment variable.
+- `examples/web-app` registers `AppSurfaceObservabilityModule`, which uses Aspire's `OTEL_EXPORTER_OTLP_ENDPOINT` to export application telemetry.
 - The AppSurface project reference is marked `IsAspireProjectResource=false` so only the web app becomes an Aspire resource.
 
 ## What This Example Does Not Show
@@ -32,6 +35,7 @@ The `-- local` token selects the AppSurface `LocalProfile` command. Aspire opens
 - Automatic forwarding of arbitrary Aspire or deployment arguments.
 - Cross-assembly component discovery.
 - Secret management, hosting policy, or production orchestration.
+- Custom AppSurface Flow/Auth/Docs spans; the observability proof is standard OpenTelemetry wiring only.
 
 ## Project Reference Shape
 

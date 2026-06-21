@@ -63,10 +63,15 @@ This approach aims to:
 
 - [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, durable external-subject to app-user-id mapping contracts, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) – ASP.NET Core adapter that maps existing host request auth context and named policies into AppSurface auth results without owning schemes, middleware, challenges, forbids, redirects, or identity-provider setup. Run the [Auth Web/RazorWire proof](./examples/auth-web-razorwire-proof/README.md) to see one host policy drive both API and rendered UI state.
+- [**ForgeTrust.AppSurface.Auth.AspNetCore.Oidc**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) – ASP.NET Core cookie + OIDC convenience registration with explicit AppSurface scheme names, conservative token defaults, passive prompt helpers, and safe diagnostics without silent default-scheme takeover or identity-provider ownership.
 
 ### [Intelligence](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md)
 
 - [**ForgeTrust.AppSurface.Intelligence**](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md) - Product-intelligence event contracts, lifecycle metadata, privacy validation, and host-owned sink hooks for forwarding sanitized AppSurface product events to systems such as PostHog without taking a vendor dependency.
+
+### [Observability](./Observability/README.md)
+
+- [**ForgeTrust.AppSurface.Observability**](./Observability/ForgeTrust.AppSurface.Observability/README.md) – Application-side OpenTelemetry logging, tracing, and metrics registration for Aspire or another OTLP collector.
 
 ### [Flow](./Flow/README.md)
 

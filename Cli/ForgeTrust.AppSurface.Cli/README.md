@@ -75,11 +75,17 @@ appsurface secrets list --names-only --app MyApp --environment Development
 appsurface secrets get Stripe:ApiKey --app MyApp --environment Development
 ```
 
-`get` verifies presence and source without printing the secret value. `doctor` reports `Problem`, `Cause`, `Fix`,
-`Docs`, and `Retryable` so unsupported platforms, locked stores, and headless sessions fail closed instead of falling
-through to file secrets. Use `--store-file <path>` only for deterministic examples and tests; normal local development
-should use the OS-backed store when the platform adapter is available. Use environment variables, key-per-file, or a
-remote vault for CI, containers, team environments, and production.
+`get` verifies presence and source without printing the secret value. `list` prints currently retrievable names only:
+platform-backed stores validate indexed names against live values and silently remove stale names when validation and
+repair succeed. If the platform store is locked, unavailable, or the index is corrupt, `list` fails with a paste-safe
+diagnostic instead of hiding names it could not verify. `delete KEY` also repairs stale indexed names when the value is
+already gone, while keys that never existed still report `local-secret-missing`.
+
+`doctor` reports `Problem`, `Cause`, `Fix`, `Docs`, and `Retryable` so unsupported platforms, locked stores, and
+headless sessions fail closed instead of falling through to file secrets. Use `--store-file <path>` only for
+deterministic examples and tests; normal local development should use the OS-backed store when the platform adapter is
+available. Use environment variables, key-per-file, or a remote vault for CI, containers, team environments, and
+production.
 
 For explicit file fallback, `doctor` can render these value-safe posture codes:
 
