@@ -725,12 +725,55 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
             DoctorStore(applicationName, environment, keyPrefix);
 
+        /// <summary>
+        /// Reads one raw platform-stored value without applying indexed-store policy.
+        /// </summary>
+        /// <param name="identity">The normalized storage identity to read.</param>
+        /// <returns>
+        /// <see cref="LocalSecretResultStatus.Found"/> with the stored secret value when the value exists,
+        /// <see cref="LocalSecretResultStatus.Missing"/> when the platform confirms absence, or a terminal failure such as
+        /// <see cref="LocalSecretResultStatus.Locked"/>, <see cref="LocalSecretResultStatus.Unavailable"/>,
+        /// <see cref="LocalSecretResultStatus.UnsupportedPlatform"/>, or <see cref="LocalSecretResultStatus.ProviderFailed"/>
+        /// when the platform cannot safely answer. <see cref="List"/> depends on these statuses to distinguish stale
+        /// indexed names from stores it could not verify.
+        /// </returns>
         protected abstract AppSurfaceLocalSecretResult ReadStoredValue(AppSurfaceLocalSecretIdentity identity);
 
+        /// <summary>
+        /// Writes one raw platform-stored value without applying indexed-store policy.
+        /// </summary>
+        /// <param name="identity">The normalized storage identity to write.</param>
+        /// <param name="value">The secret value or index JSON to store.</param>
+        /// <returns>
+        /// <see cref="LocalSecretResultStatus.Found"/> with no display value when the platform write succeeds, or a
+        /// terminal failure when the platform is locked, unavailable, unsupported, or rejects the write. <see cref="Set"/>
+        /// and index repair only report success after this method succeeds for both the value and any required index write.
+        /// </returns>
         protected abstract AppSurfaceLocalSecretResult WriteStoredValue(AppSurfaceLocalSecretIdentity identity, string value);
 
+        /// <summary>
+        /// Deletes one raw platform-stored value without applying indexed-store policy.
+        /// </summary>
+        /// <param name="identity">The normalized storage identity to delete.</param>
+        /// <returns>
+        /// <see cref="LocalSecretResultStatus.Found"/> when the platform deleted an existing value,
+        /// <see cref="LocalSecretResultStatus.Missing"/> when the platform confirms absence, or a terminal failure when the
+        /// platform cannot safely delete or confirm absence. <see cref="Delete"/> uses the result together with an index
+        /// read to decide whether to remove a stale indexed name, preserve a confirmed missing result, or fail closed.
+        /// </returns>
         protected abstract AppSurfaceLocalSecretResult DeleteStoredValue(AppSurfaceLocalSecretIdentity identity);
 
+        /// <summary>
+        /// Verifies raw platform store availability for a namespace.
+        /// </summary>
+        /// <param name="applicationName">The normalized application namespace.</param>
+        /// <param name="environment">The normalized environment namespace.</param>
+        /// <param name="keyPrefix">The optional normalized key prefix.</param>
+        /// <returns>
+        /// A display-safe readiness result. Implementations should exercise raw platform read/write/delete behavior without
+        /// adding probe names to the user-visible index and should propagate locked, unavailable, unsupported, or provider
+        /// failures so CLI diagnostics remain fail-closed.
+        /// </returns>
         protected abstract AppSurfaceLocalSecretResult DoctorStore(string applicationName, string environment, string? keyPrefix);
 
         private static bool IsIndexIdentity(AppSurfaceLocalSecretIdentity identity) =>
@@ -755,7 +798,8 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             string? keyPrefix,
             IEnumerable<string> keys)
         {
-            var index = JsonSerializer.Serialize(keys.Order(StringComparer.OrdinalIgnoreCase).ToArray());
+            var index = JsonSerializer.Serialize(
+                keys.OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ThenBy(static key => key, StringComparer.Ordinal).ToArray());
             var write = WriteStoredValue(IndexIdentity(applicationName, environment, keyPrefix), index);
             return write.Status == LocalSecretResultStatus.Found
                 ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)

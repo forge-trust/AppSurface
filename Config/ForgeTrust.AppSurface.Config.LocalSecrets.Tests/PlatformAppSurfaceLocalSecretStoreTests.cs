@@ -178,6 +178,20 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void IndexedStoreSet_Should_WriteCaseVariantIndexInDeterministicOrder()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var lower = normalizer.Normalize("MyApp", "Development", null, "stripe:apikey").Identity!;
+        var upper = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+
+        store.Set(lower, "lower-secret");
+        store.Set(upper, "upper-secret");
+
+        Assert.Equal(["Stripe:ApiKey", "stripe:apikey"], store.ReadIndexKeys("MyApp", "Development", null));
+    }
+
+    [Fact]
     public void IndexedStoreList_Should_PruneStaleIndexedKeys()
     {
         var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();

@@ -20,7 +20,11 @@ public sealed record AppSurfaceLocalSecretListResult(
     /// <param name="source">The display-safe source name.</param>
     /// <returns>A list result.</returns>
     public static AppSurfaceLocalSecretListResult Found(IEnumerable<string> keys, string source) =>
-        new(LocalSecretResultStatus.Found, keys.Order(StringComparer.OrdinalIgnoreCase).ToArray(), null, source);
+        new(
+            LocalSecretResultStatus.Found,
+            keys.OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ThenBy(static key => key, StringComparer.Ordinal).ToArray(),
+            null,
+            source);
 
     /// <summary>
     /// Creates a non-success list result.

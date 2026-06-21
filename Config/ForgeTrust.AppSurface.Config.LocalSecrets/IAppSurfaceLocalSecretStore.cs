@@ -36,7 +36,8 @@ public interface IAppSurfaceLocalSecretStore
     /// <returns>
     /// The store result. Platform-indexed stores may return <see cref="LocalSecretResultStatus.Found"/> when the value was
     /// already missing but a stale indexed name was removed; keys that were never stored still return
-    /// <see cref="LocalSecretResultStatus.Missing"/>.
+    /// <see cref="LocalSecretResultStatus.Missing"/> when the store can confirm no stale index entry remains. If the
+    /// platform index cannot be read, platform-indexed stores fail closed instead of assuming the key was never indexed.
     /// </returns>
     AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity);
 
