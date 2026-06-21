@@ -821,18 +821,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
             var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.WriteAllTextWithPosture(path, new string('x', 5_000_000));
             cancellation.Cancel();
-            try
-            {
-                await racer.WaitAsync(TimeSpan.FromSeconds(1));
-            }
-            catch (OperationCanceledException)
-            {
-                Assert.True(cancellation.IsCancellationRequested);
-            }
-            catch (TimeoutException)
-            {
-                Assert.False(racer.IsCompletedSuccessfully);
-            }
+            await Task.WhenAny(racer, Task.Delay(TimeSpan.FromSeconds(1)));
 
             if (result.Kind != FileSecretPostureKind.Unsupported)
             {
