@@ -23,22 +23,30 @@ public static class AppSurfaceTelemetrySources
     /// <summary>
     /// Gets common .NET activity source names that AppSurface opts into when they are emitted by the host runtime.
     /// </summary>
-    public static readonly string[] StandardActivitySourceNames =
-    [
-        ActivitySourceName,
-        "Microsoft.AspNetCore",
-        "System.Net.Http"
-    ];
+    /// <remarks>
+    /// The returned list is read-only so callers cannot mutate global source registration for the current process.
+    /// Copy the values into a new collection before adding application-specific sources.
+    /// </remarks>
+    public static IReadOnlyList<string> StandardActivitySourceNames { get; } = Array.AsReadOnly(
+        [
+            ActivitySourceName,
+            "Microsoft.AspNetCore",
+            "System.Net.Http"
+        ]);
 
     /// <summary>
     /// Gets common .NET meter names that AppSurface opts into when they are emitted by the host runtime.
     /// </summary>
-    public static readonly string[] StandardMeterNames =
-    [
-        MeterName,
-        "Microsoft.AspNetCore.Hosting",
-        "Microsoft.AspNetCore.Server.Kestrel",
-        "System.Net.Http",
-        "System.Runtime"
-    ];
+    /// <remarks>
+    /// The returned list is read-only so callers cannot mutate global meter registration for the current process.
+    /// Copy the values into a new collection before adding application-specific meters.
+    /// </remarks>
+    public static IReadOnlyList<string> StandardMeterNames { get; } = Array.AsReadOnly(
+        [
+            MeterName,
+            "Microsoft.AspNetCore.Hosting",
+            "Microsoft.AspNetCore.Server.Kestrel",
+            "System.Net.Http",
+            "System.Runtime"
+        ]);
 }

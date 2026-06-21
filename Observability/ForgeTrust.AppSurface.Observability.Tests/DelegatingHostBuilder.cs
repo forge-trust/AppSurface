@@ -5,7 +5,9 @@ using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.AppSurface.Observability.Tests;
 
-internal sealed class DelegatingHostBuilder(IServiceCollection services) : IHostBuilder
+internal sealed class DelegatingHostBuilder(
+    IServiceCollection services,
+    IReadOnlyDictionary<string, string?>? configurationValues = null) : IHostBuilder
 {
     public IDictionary<object, object> Properties { get; } = new Dictionary<object, object>();
 
@@ -32,10 +34,12 @@ internal sealed class DelegatingHostBuilder(IServiceCollection services) : IHost
     public IHostBuilder ConfigureServices(Action<HostBuilderContext, IServiceCollection> configureDelegate)
     {
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["AppSurfaceObservability:ExporterMode"] = "Never"
-            })
+            .AddInMemoryCollection(
+                configurationValues
+                ?? new Dictionary<string, string?>
+                {
+                    ["AppSurfaceObservability:ExporterMode"] = "Never"
+                })
             .Build();
         configureDelegate(new HostBuilderContext(Properties) { Configuration = configuration }, services);
         return this;

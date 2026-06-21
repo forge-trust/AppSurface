@@ -97,6 +97,18 @@ public sealed class AppSurfaceObservabilityPlanTests
     }
 
     [Fact]
+    public void Resolve_AppSurfaceEnvironmentEndpointWinsOverOtelConfigurationEndpoint()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("OTEL_EXPORTER_OTLP_ENDPOINT", "http://configured-otel:4317")),
+            environment: new TestEnvironmentReader(("AppSurfaceObservability__OtlpEndpoint", "http://appsurface-env:4317")));
+
+        Assert.True(plan.ShouldRegisterExporter);
+        Assert.Equal(new Uri("http://appsurface-env:4317"), plan.Endpoint);
+    }
+
+    [Fact]
     public void Resolve_ServiceNameOverrideWinsOverStartupContextApplicationName()
     {
         var plan = AppSurfaceObservabilityPlan.Resolve(
@@ -119,6 +131,20 @@ public sealed class AppSurfaceObservabilityPlanTests
             environment: new TestEnvironmentReader());
 
         Assert.Null(plan.ServiceVersion);
+    }
+
+    [Fact]
+    public void Resolve_ServiceMetadataValuesAreTrimmed()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(
+                ("AppSurfaceObservability:ServiceName", "  orders-api  "),
+                ("AppSurfaceObservability:ServiceVersion", "  2026.6.19  ")),
+            environment: new TestEnvironmentReader());
+
+        Assert.Equal("orders-api", plan.ServiceName);
+        Assert.Equal("2026.6.19", plan.ServiceVersion);
     }
 
     [Fact]
@@ -160,6 +186,64 @@ public sealed class AppSurfaceObservabilityPlanTests
                 environment: new TestEnvironmentReader(("OTEL_EXPORTER_OTLP_ENDPOINT", "not a uri"))));
 
         Assert.Contains("OTEL_EXPORTER_OTLP_ENDPOINT must be an absolute URI", exception.Message);
+    }
+
+    [Fact]
+    public void Resolve_InvalidAppSurfaceEnvironmentEndpointThrowsClearMessage()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            AppSurfaceObservabilityPlan.Resolve(
+                CreateContext("Catalog API"),
+                CreateConfiguration(),
+                environment: new TestEnvironmentReader(("AppSurfaceObservability__OtlpEndpoint", "not a uri"))));
+
+        Assert.Contains("AppSurfaceObservability__OtlpEndpoint must be an absolute URI", exception.Message);
+    }
+
+    [Fact]
+    public void Resolve_NullContextThrowsArgumentNullException()
+    {
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            AppSurfaceObservabilityPlan.Resolve(
+                null!,
+                CreateConfiguration(),
+                environment: new TestEnvironmentReader()));
+
+        Assert.Equal("context", exception.ParamName);
+    }
+
+    [Fact]
+    public void Resolve_NullConfigurationThrowsArgumentNullException()
+    {
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            AppSurfaceObservabilityPlan.Resolve(
+                CreateContext("Catalog API"),
+                null!,
+                environment: new TestEnvironmentReader()));
+
+        Assert.Equal("configuration", exception.ParamName);
+    }
+
+    [Fact]
+    public void Resolve_NullEnvironmentUsesDefaultReader()
+    {
+        var plan = AppSurfaceObservabilityPlan.Resolve(
+            CreateContext("Catalog API"),
+            CreateConfiguration(("AppSurfaceObservability:OtlpEndpoint", "http://collector:4317")),
+            environment: null);
+
+        Assert.Equal(new Uri("http://collector:4317"), plan.Endpoint);
+    }
+
+    [Theory]
+    [InlineData(AppSurfaceOtlpExporterMode.WhenEndpointConfigured, 0)]
+    [InlineData(AppSurfaceOtlpExporterMode.Always, 1)]
+    [InlineData(AppSurfaceOtlpExporterMode.Never, 2)]
+    public void AppSurfaceOtlpExporterMode_NumericValuesAreStable(
+        AppSurfaceOtlpExporterMode value,
+        int expected)
+    {
+        Assert.Equal(expected, (int)value);
     }
 
     private static StartupContext CreateContext(string applicationName)

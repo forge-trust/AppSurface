@@ -12,7 +12,7 @@ internal sealed class AppSurfaceObservabilityStartupDiagnostic(
         if (plan.ShouldLogSkippedExporterDiagnostic)
         {
             logger.LogInformation(
-                "AppSurface observability registered logging, tracing, and metrics without OTLP export because no endpoint was configured. Set {Section}:OtlpEndpoint, {Section}__OtlpEndpoint, or {OtlpEndpointEnvironmentVariable}, or set ExporterMode to Always or Never.",
+                "AppSurface observability registered tracing and metrics without OTLP export because no endpoint was configured. Set {Section}:OtlpEndpoint, {Section}__OtlpEndpoint, or {OtlpEndpointEnvironmentVariable}, or set ExporterMode to Always or Never.",
                 AppSurfaceObservabilityOptions.SectionName,
                 AppSurfaceObservabilityOptions.SectionName,
                 AppSurfaceObservabilityOptions.OtlpEndpointEnvironmentVariable);

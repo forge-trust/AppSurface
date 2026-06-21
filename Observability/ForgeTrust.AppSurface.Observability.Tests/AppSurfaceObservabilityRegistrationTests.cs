@@ -221,12 +221,20 @@ public sealed class AppSurfaceObservabilityRegistrationTests
             CreateContext("Catalog API"),
             CreateConfiguration(("AppSurfaceObservability:ExporterMode", "Always")),
             environment: new TestEnvironmentReader());
-
         var builder = Sdk.CreateTracerProviderBuilder();
-        AppSurfaceObservabilityServiceCollectionExtensions.ConfigureTracing(builder, plan);
-        using var provider = builder.Build();
+        var exporterWasRequested = false;
 
-        Assert.NotNull(provider);
+        AppSurfaceObservabilityServiceCollectionExtensions.ConfigureTracing(
+            builder,
+            plan,
+            (actualBuilder, actualPlan) =>
+            {
+                Assert.Same(builder, actualBuilder);
+                Assert.Same(plan, actualPlan);
+                exporterWasRequested = true;
+            });
+
+        Assert.True(exporterWasRequested);
     }
 
     [Fact]
@@ -236,12 +244,20 @@ public sealed class AppSurfaceObservabilityRegistrationTests
             CreateContext("Catalog API"),
             CreateConfiguration(("AppSurfaceObservability:ExporterMode", "Always")),
             environment: new TestEnvironmentReader());
-
         var builder = Sdk.CreateMeterProviderBuilder();
-        AppSurfaceObservabilityServiceCollectionExtensions.ConfigureMetrics(builder, plan);
-        using var provider = builder.Build();
+        var exporterWasRequested = false;
 
-        Assert.NotNull(provider);
+        AppSurfaceObservabilityServiceCollectionExtensions.ConfigureMetrics(
+            builder,
+            plan,
+            (actualBuilder, actualPlan) =>
+            {
+                Assert.Same(builder, actualBuilder);
+                Assert.Same(plan, actualPlan);
+                exporterWasRequested = true;
+            });
+
+        Assert.True(exporterWasRequested);
     }
 
     [Fact]
@@ -283,11 +299,10 @@ public sealed class AppSurfaceObservabilityRegistrationTests
         var diagnostic = new AppSurfaceObservabilityStartupDiagnostic(plan, logger);
 
         await diagnostic.StartAsync(CancellationToken.None);
-        await diagnostic.StartAsync(CancellationToken.None);
 
-        Assert.Equal(2, logger.Messages.Count);
-        Assert.All(logger.Messages, message =>
-            Assert.Contains("no endpoint was configured", message, StringComparison.OrdinalIgnoreCase));
+        var message = Assert.Single(logger.Messages);
+        Assert.Contains("registered tracing and metrics", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no endpoint was configured", message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -345,6 +360,11 @@ public sealed class AppSurfaceObservabilityRegistrationTests
 
         var options = host.Services.GetRequiredService<IOptions<AppSurfaceObservabilityOptions>>().Value;
         Assert.Equal(AppSurfaceOtlpExporterMode.Never, options.ExporterMode);
+        Assert.NotNull(host.Services.GetRequiredService<AppSurfaceObservabilityLoggingRegistrationMarker>());
+        Assert.NotNull(host.Services.GetRequiredService<AppSurfaceObservabilityServicesRegistrationMarker>());
+        Assert.Contains(
+            host.Services.GetServices<IHostedService>(),
+            static service => service is AppSurfaceObservabilityStartupDiagnostic);
     }
 
     [Fact]
@@ -356,6 +376,20 @@ public sealed class AppSurfaceObservabilityRegistrationTests
         module.RegisterDependentModules(builder);
 
         Assert.Empty(builder.Modules);
+    }
+
+    [Fact]
+    public void TelemetrySources_StandardListsAreReadOnly()
+    {
+        var activitySources = Assert.IsAssignableFrom<IList<string>>(
+            AppSurfaceTelemetrySources.StandardActivitySourceNames);
+        var meters = Assert.IsAssignableFrom<IList<string>>(
+            AppSurfaceTelemetrySources.StandardMeterNames);
+
+        Assert.True(activitySources.IsReadOnly);
+        Assert.True(meters.IsReadOnly);
+        Assert.Throws<NotSupportedException>(() => activitySources[0] = "changed");
+        Assert.Throws<NotSupportedException>(() => meters[0] = "changed");
     }
 
     private static StartupContext CreateContext(string applicationName)

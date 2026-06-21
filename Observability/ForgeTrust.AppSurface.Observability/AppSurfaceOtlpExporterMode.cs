@@ -15,15 +15,15 @@ public enum AppSurfaceOtlpExporterMode
     /// <summary>
     /// Adds OTLP exporters only when an endpoint is configured through AppSurface options or standard OTLP environment.
     /// </summary>
-    WhenEndpointConfigured,
+    WhenEndpointConfigured = 0,
 
     /// <summary>
     /// Always adds OTLP exporters, using AppSurface's endpoint when present and OpenTelemetry defaults otherwise.
     /// </summary>
-    Always,
+    Always = 1,
 
     /// <summary>
     /// Never adds AppSurface-owned OTLP exporters.
     /// </summary>
-    Never
+    Never = 2
 }

@@ -22,6 +22,11 @@ public sealed class AppSurfaceObservabilityOptions
     public const string OtlpEndpointEnvironmentVariable = "OTEL_EXPORTER_OTLP_ENDPOINT";
 
     /// <summary>
+    /// Gets the environment-variable form of <c>AppSurfaceObservability:OtlpEndpoint</c>.
+    /// </summary>
+    public const string AppSurfaceOtlpEndpointEnvironmentVariable = "AppSurfaceObservability__OtlpEndpoint";
+
+    /// <summary>
     /// Gets or sets when AppSurface should add OTLP exporters.
     /// </summary>
     public AppSurfaceOtlpExporterMode ExporterMode { get; set; } =
@@ -33,7 +38,7 @@ public sealed class AppSurfaceObservabilityOptions
     /// <remarks>
     /// When set, this endpoint takes precedence over <c>OTEL_EXPORTER_OTLP_ENDPOINT</c>. Use
     /// <c>AppSurfaceObservability:OtlpEndpoint</c> in JSON-style configuration or
-    /// <c>AppSurfaceObservability__OtlpEndpoint</c> in environment-variable configuration.
+    /// <see cref="AppSurfaceOtlpEndpointEnvironmentVariable"/> in environment-variable configuration.
     /// </remarks>
     public Uri? OtlpEndpoint { get; set; }
 
