@@ -1,4 +1,5 @@
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Observability;
 using ForgeTrust.AppSurface.Web;
 using ForgeTrust.AppSurface.Web.Scalar;
 
@@ -13,6 +14,7 @@ public class ExampleModule : IAppSurfaceWebModule
 
     public void RegisterDependentModules(ModuleDependencyBuilder builder)
     {
+        builder.AddModule<AppSurfaceObservabilityModule>();
         builder.AddModule<AppSurfaceWebScalarModule>();
     }
 

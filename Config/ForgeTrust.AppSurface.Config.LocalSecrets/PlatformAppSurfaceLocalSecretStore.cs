@@ -155,6 +155,14 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         Unsupported
     }
 
+    /// <summary>
+    /// Resolves the Linux <c>secret-tool</c> executable from AppSurface-trusted defaults or an explicit absolute override.
+    /// </summary>
+    /// <remarks>
+    /// The resolver is the trust boundary for Linux Secret Service command execution. It intentionally ignores arbitrary
+    /// <c>PATH</c> matches for command selection and reports them only as diagnostic context so package consumers do not
+    /// accidentally execute a spoofed <c>secret-tool</c> binary.
+    /// </remarks>
     internal sealed class LinuxSecretToolResolver
     {
         private const string FileName = "secret-tool";
@@ -164,6 +172,25 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         private readonly Func<string, LinuxSecretToolPathState> _inspectPath;
         private readonly Func<string?> _getPath;
 
+        /// <summary>
+        /// Initializes a resolver with deterministic candidate paths, file-system inspection, and environment lookup seams.
+        /// </summary>
+        /// <param name="trustedCandidates">
+        /// Absolute paths that may be selected without an override. Candidates are evaluated in order; the first executable
+        /// file wins.
+        /// </param>
+        /// <param name="inspectPath">
+        /// Function that classifies a candidate path without executing it. Tests supply this seam to verify every resolution
+        /// branch without depending on the host file system.
+        /// </param>
+        /// <param name="getPath">
+        /// Function that reads the current <c>PATH</c> value for ignored-candidate diagnostics. The returned value never
+        /// influences the selected executable.
+        /// </param>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="trustedCandidates"/>, <paramref name="inspectPath"/>, or <paramref name="getPath"/>
+        /// is <see langword="null"/>.
+        /// </exception>
         public LinuxSecretToolResolver(
             IEnumerable<string> trustedCandidates,
             Func<string, LinuxSecretToolPathState> inspectPath,
@@ -178,9 +205,27 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             _getPath = getPath;
         }
 
+        /// <summary>
+        /// Gets the production resolver that trusts <c>/usr/bin/secret-tool</c>, then <c>/bin/secret-tool</c>.
+        /// </summary>
         public static LinuxSecretToolResolver Default { get; } =
             new(LinuxSecretToolTrustedCandidates, InspectFileSystemPath, () => Environment.GetEnvironmentVariable("PATH"));
 
+        /// <summary>
+        /// Resolves the executable path that the Linux platform store may launch.
+        /// </summary>
+        /// <param name="overridePath">
+        /// Optional explicit override path from <see cref="AppSurfaceLocalSecretsOptions.LinuxSecretToolPath"/> or the
+        /// CLI <c>--secret-tool-path</c> option. Overrides must be absolute executable files.
+        /// </param>
+        /// <returns>
+        /// A successful resolution with a trusted executable path, or a failed resolution containing a display-safe
+        /// diagnostic that explains why command execution is blocked.
+        /// </returns>
+        /// <remarks>
+        /// Passing <see langword="null"/> uses the trusted default candidates only. Passing an empty, relative, missing,
+        /// directory, or non-executable override fails before any process is launched.
+        /// </remarks>
         public LinuxSecretToolResolution Resolve(string? overridePath)
         {
             if (overridePath != null)
@@ -207,6 +252,11 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                     "local-secrets-platform-compatibility"));
         }
 
+        /// <summary>
+        /// Creates the diagnostic result used when a Linux-only override is configured on a non-Linux platform.
+        /// </summary>
+        /// <param name="overridePath">The configured override path that cannot be used on the current platform.</param>
+        /// <returns>A failed resolution instructing callers to remove the Linux-only override.</returns>
         public static LinuxSecretToolResolution UnsupportedPlatformOverride(string overridePath) =>
             LinuxSecretToolResolution.Failed(
                 LocalSecretResultStatus.UnsupportedPlatform,
@@ -311,23 +361,75 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         }
     }
 
+    /// <summary>
+    /// Describes the file-system state of a candidate Linux <c>secret-tool</c> path.
+    /// </summary>
+    /// <remarks>
+    /// The states deliberately separate existence from executability so diagnostics can distinguish missing binaries,
+    /// directory mistakes, and files that exist but cannot be launched.
+    /// </remarks>
     internal enum LinuxSecretToolPathState
     {
+        /// <summary>
+        /// The candidate path does not exist.
+        /// </summary>
         Missing,
+
+        /// <summary>
+        /// The candidate path exists but is a directory, not an executable file.
+        /// </summary>
         Directory,
+
+        /// <summary>
+        /// The candidate path exists as a file but does not have executable permissions.
+        /// </summary>
         NotExecutableFile,
+
+        /// <summary>
+        /// The candidate path exists as a file and is executable by at least one Unix permission class.
+        /// </summary>
         ExecutableFile
     }
 
+    /// <summary>
+    /// Immutable outcome from resolving the Linux <c>secret-tool</c> command path.
+    /// </summary>
+    /// <param name="Succeeded">
+    /// <see langword="true"/> when <paramref name="Path"/> contains a command path that may be launched.
+    /// </param>
+    /// <param name="Path">
+    /// The trusted executable path for successful resolutions, or <see langword="null"/> for failed resolutions.
+    /// </param>
+    /// <param name="Status">
+    /// The LocalSecrets result status callers should surface when resolution fails.
+    /// </param>
+    /// <param name="Diagnostic">
+    /// Display-safe diagnostic details for failed resolutions, or <see langword="null"/> when resolution succeeds.
+    /// </param>
+    /// <remarks>
+    /// Callers should use <see cref="Found(string)"/> and <see cref="Failed(LocalSecretResultStatus, AppSurfaceLocalSecretDiagnostic)"/>
+    /// so success results never carry diagnostics and failed results always carry the user-facing cause/fix guidance.
+    /// </remarks>
     internal sealed record LinuxSecretToolResolution(
         bool Succeeded,
         string? Path,
         LocalSecretResultStatus Status,
         AppSurfaceLocalSecretDiagnostic? Diagnostic)
     {
+        /// <summary>
+        /// Creates a successful resolution for a trusted executable path.
+        /// </summary>
+        /// <param name="path">The absolute command path that the Linux platform store may launch.</param>
+        /// <returns>A resolution with <see cref="Succeeded"/> set and no diagnostic.</returns>
         public static LinuxSecretToolResolution Found(string path) =>
             new(true, path, LocalSecretResultStatus.Found, null);
 
+        /// <summary>
+        /// Creates a failed resolution with the status and diagnostic callers should surface.
+        /// </summary>
+        /// <param name="status">The LocalSecrets status that best describes the failure category.</param>
+        /// <param name="diagnostic">Display-safe details explaining why command resolution failed and how to fix it.</param>
+        /// <returns>A resolution with no executable path and <see cref="Succeeded"/> unset.</returns>
         public static LinuxSecretToolResolution Failed(LocalSecretResultStatus status, AppSurfaceLocalSecretDiagnostic diagnostic) =>
             new(false, null, status, diagnostic);
     }

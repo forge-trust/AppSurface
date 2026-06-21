@@ -69,6 +69,10 @@ This approach aims to:
 
 - [**ForgeTrust.AppSurface.Intelligence**](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md) - Product-intelligence event contracts, lifecycle metadata, privacy validation, and host-owned sink hooks for forwarding sanitized AppSurface product events to systems such as PostHog without taking a vendor dependency.
 
+### [Observability](./Observability/README.md)
+
+- [**ForgeTrust.AppSurface.Observability**](./Observability/ForgeTrust.AppSurface.Observability/README.md) – Application-side OpenTelemetry logging, tracing, and metrics registration for Aspire or another OTLP collector.
+
 ### [Flow](./Flow/README.md)
 
 - [**ForgeTrust.AppSurface.Flow**](./Flow/ForgeTrust.AppSurface.Flow/README.md) – Typed long-running process contracts, generated-case authoring, graph validation, definition registry, and an in-memory runner for local tests and hello-world flows.
