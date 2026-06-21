@@ -925,6 +925,60 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_Should_Write_404Html_When_ReservedRoute_Redirects_Inside_ExportBoundary()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new SafeRedirectingNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var notFoundFile = Path.Join(tempDir, "404.html");
+            Assert.True(File.Exists(notFoundFile));
+            var html = await File.ReadAllTextAsync(notFoundFile);
+            Assert.Contains("Redirected 404 page", html);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fail_When_ReservedRoute_Redirects_Outside_ExportBoundary()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new UnsafeRedirectingNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            AssertRedirectProvenanceDiagnostic(exception, "/404.html", "http://169.254.169.254/latest/meta-data/");
+            Assert.False(File.Exists(Path.Join(tempDir, "404.html")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Preserve_Reserved_404Html_When_SeedFile_Includes_404Html()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
@@ -1130,8 +1184,7 @@ public class ExportEngineTests
 
         try
         {
-            using var client = new HttpClient(
-                new RedirectFollowingHandler(new RedirectedStylesheetHandler()))
+            using var client = new HttpClient(new RedirectedStylesheetHandler())
             {
                 BaseAddress = new Uri("http://localhost:5000")
             };
@@ -1145,6 +1198,248 @@ public class ExportEngineTests
 
             var stylesheet = await File.ReadAllTextAsync(rootStylesheetPath);
             Assert.Contains(".docs-content { color: cyan; }", stylesheet);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fail_When_Route_Redirects_To_Metadata_Url()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new UnsafeStylesheetRedirectHandler("http://169.254.169.254/latest/meta-data/"))
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            AssertRedirectProvenanceDiagnostic(exception, "/css/site.css", "http://169.254.169.254/latest/meta-data/");
+            Assert.False(File.Exists(Path.Join(tempDir, "css", "site.css")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_Should_Fail_When_Route_Redirects_Outside_ExportBoundary()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new UnsafeStylesheetRedirectHandler("https://cdn.example.com/site.css"))
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html);
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            AssertRedirectProvenanceDiagnostic(exception, "/css/site.css", "https://cdn.example.com/site.css");
+            Assert.False(File.Exists(Path.Join(tempDir, "css", "site.css")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Export_Absolute_Redirected_Stylesheet_Inside_ExportBoundary()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new RedirectedStylesheetHandler("http://localhost:5000/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css"))
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var rootStylesheetPath = Path.Join(tempDir, "css", "site.gen.css");
+            Assert.True(File.Exists(rootStylesheetPath));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Export_Redirected_Stylesheet_Inside_PathBase()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new PathBaseRedirectedStylesheetHandler(redirectLocation: "/app/_content/pkg/site.css"))
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000/app");
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Join(tempDir, "css", "site.css")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("http://example.com/site.css")]
+    [InlineData("https://localhost:5000/site.css")]
+    [InlineData("http://localhost:5001/site.css")]
+    [InlineData("//example.com/site.css")]
+    [InlineData("file:///etc/passwd")]
+    public async Task RunAsync_Should_Fail_When_Redirect_Target_Leaves_ExportBoundary(string redirectLocation)
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new UnsafeStylesheetRedirectHandler(redirectLocation))
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            AssertRedirectProvenanceDiagnostic(exception, "/css/site.css");
+            Assert.False(File.Exists(Path.Join(tempDir, "css", "site.css")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fail_When_Redirect_Target_Escapes_PathBase()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new PathBaseRedirectedStylesheetHandler(redirectLocation: "/admin/site.css"))
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000/app");
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            AssertRedirectProvenanceDiagnostic(exception, "/css/site.css", "http://localhost:5000/admin/site.css");
+            Assert.False(File.Exists(Path.Join(tempDir, "css", "site.css")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fail_When_Redirect_Is_Missing_Location()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new MissingLocationStylesheetRedirectHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            AssertRedirectProvenanceDiagnostic(exception, "/css/site.css");
+            Assert.Contains("without a Location header", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fail_When_Redirect_Limit_Is_Exceeded()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new RedirectLoopHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            AssertRedirectProvenanceDiagnostic(exception, "/css/site.css");
+            Assert.Contains("exceeded the artifact redirect limit", exception.Message, StringComparison.Ordinal);
         }
         finally
         {
@@ -2244,7 +2539,7 @@ public class ExportEngineTests
 
         try
         {
-            using var client = new HttpClient(new RedirectFollowingHandler(new IgnoredRootRecoveryNotFoundPageHandler()))
+            using var client = new HttpClient(new IgnoredRootRecoveryNotFoundPageHandler())
             {
                 BaseAddress = new Uri("http://localhost:5000")
             };
@@ -3555,22 +3850,6 @@ public class ExportEngineTests
     }
 
     [Fact]
-    public async Task RedirectFollowingHandler_Should_StopAfterConfiguredRedirectLimit()
-    {
-        var loopHandler = new RedirectLoopHandler();
-        using var client = new HttpClient(new RedirectFollowingHandler(loopHandler, maxRedirects: 3))
-        {
-            BaseAddress = new Uri("http://localhost:5000")
-        };
-
-        using var response = await client.GetAsync("/");
-
-        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
-        Assert.Equal("/loop", response.Headers.Location?.OriginalString);
-        Assert.Equal(4, loopHandler.CallCount);
-    }
-
-    [Fact]
     public void MapHtmlFilePathToPartialPath_Should_Append_Partial_Suffix()
     {
         var htmlPath = Path.Join("dist", "docs", "topic.html");
@@ -4645,6 +4924,19 @@ public class ExportEngineTests
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
     }
 
+    private static void AssertRedirectProvenanceDiagnostic(
+        ExportValidationException exception,
+        string route,
+        string? rejectedTarget = null)
+    {
+        var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT008" && item.Route == route);
+        if (rejectedTarget is not null)
+        {
+            Assert.Contains("outside the configured export origin and app path", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains(rejectedTarget, diagnostic.Message, StringComparison.Ordinal);
+        }
+    }
+
     private class TestHttpMessageHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -4793,6 +5085,12 @@ public class ExportEngineTests
     {
         private const string RootStylesheetPath = "/css/site.gen.css";
         private const string PackagedStylesheetPath = "/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css";
+        private readonly string _redirectLocation;
+
+        public RedirectedStylesheetHandler(string redirectLocation = PackagedStylesheetPath)
+        {
+            _redirectLocation = redirectLocation;
+        }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -4815,7 +5113,7 @@ public class ExportEngineTests
                 {
                     Headers =
                     {
-                        Location = new Uri(PackagedStylesheetPath, UriKind.Relative)
+                        Location = new Uri(_redirectLocation, UriKind.RelativeOrAbsolute)
                     }
                 });
             }
@@ -4829,6 +5127,94 @@ public class ExportEngineTests
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class UnsafeStylesheetRedirectHandler : HttpMessageHandler
+    {
+        private readonly string _redirectLocation;
+
+        public UnsafeStylesheetRedirectHandler(string redirectLocation)
+        {
+            _redirectLocation = redirectLocation;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+
+            if (path == "/" || path == "/index")
+            {
+                return Html("""<html><body><link rel="stylesheet" href="/css/site.css"></body></html>""");
+            }
+
+            if (path == "/css/site.css")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
+                {
+                    Headers =
+                    {
+                        Location = new Uri(_redirectLocation, UriKind.RelativeOrAbsolute)
+                    }
+                });
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class MissingLocationStylesheetRedirectHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+
+            if (path == "/" || path == "/index")
+            {
+                return Html("""<html><body><link rel="stylesheet" href="/css/site.css"></body></html>""");
+            }
+
+            return path == "/css/site.css"
+                ? Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found))
+                : NotFound();
+        }
+    }
+
+    private sealed class PathBaseRedirectedStylesheetHandler : HttpMessageHandler
+    {
+        private readonly string _redirectLocation;
+
+        public PathBaseRedirectedStylesheetHandler(string redirectLocation)
+        {
+            _redirectLocation = redirectLocation;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+
+            if (path == "/app/" || path == "/app/index")
+            {
+                return Html("""<html><body><link rel="stylesheet" href="css/site.css"></body></html>""");
+            }
+
+            if (path == "/app/css/site.css")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
+                {
+                    Headers =
+                    {
+                        Location = new Uri(_redirectLocation, UriKind.RelativeOrAbsolute)
+                    }
+                });
+            }
+
+            if (path == "/app/_content/pkg/site.css")
+            {
+                return Text(".path-base { color: green; }", "text/css");
+            }
+
+            return NotFound();
         }
     }
 
@@ -4999,6 +5385,63 @@ public class ExportEngineTests
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class SafeRedirectingNotFoundPageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+
+            if (path == BrowserStatusPageDefaults.ReservedNotFoundRoute)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
+                {
+                    Headers =
+                    {
+                        Location = new Uri("/errors/not-found", UriKind.Relative)
+                    }
+                });
+            }
+
+            if (path == "/errors/not-found")
+            {
+                return Html("<html><body><h1>Redirected 404 page</h1></body></html>");
+            }
+
+            if (path == "/" || path == "/index")
+            {
+                return Html("<html><body><h1>Home</h1></body></html>");
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class UnsafeRedirectingNotFoundPageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+
+            if (path == BrowserStatusPageDefaults.ReservedNotFoundRoute)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
+                {
+                    Headers =
+                    {
+                        Location = new Uri("http://169.254.169.254/latest/meta-data/", UriKind.Absolute)
+                    }
+                });
+            }
+
+            if (path == "/" || path == "/index")
+            {
+                return Html("<html><body><h1>Home</h1></body></html>");
+            }
+
+            return NotFound();
         }
     }
 
@@ -5174,6 +5617,17 @@ public class ExportEngineTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             CallCount++;
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+
+            if (path == BrowserStatusPageDefaults.ReservedNotFoundRoute)
+            {
+                return NotFound();
+            }
+
+            if (path == "/" || path == "/index")
+            {
+                return Html("""<html><body><link rel="stylesheet" href="/css/site.css"></body></html>""");
+            }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
             {
@@ -5221,67 +5675,6 @@ public class ExportEngineTests
         catch (PlatformNotSupportedException)
         {
             return false;
-        }
-    }
-
-    private sealed class RedirectFollowingHandler : DelegatingHandler
-    {
-        private readonly int _maxRedirects;
-
-        public RedirectFollowingHandler(HttpMessageHandler innerHandler, int maxRedirects = 10)
-            : base(innerHandler)
-        {
-            _maxRedirects = maxRedirects;
-        }
-
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            var currentRequest = request;
-            HttpRequestMessage? ownedRedirectRequest = null;
-            var response = await base.SendAsync(currentRequest, cancellationToken);
-
-            try
-            {
-                for (var redirectCount = 0; redirectCount < _maxRedirects; redirectCount++)
-                {
-                    if (!IsRedirect(response.StatusCode) || response.Headers.Location is null)
-                    {
-                        return response;
-                    }
-
-                    var currentRequestUri = currentRequest.RequestUri;
-                    if (currentRequestUri is null || !currentRequestUri.IsAbsoluteUri)
-                    {
-                        return response;
-                    }
-
-                    var redirectUri = response.Headers.Location.IsAbsoluteUri
-                        ? response.Headers.Location
-                        : new Uri(currentRequestUri, response.Headers.Location);
-
-                    response.Dispose();
-                    ownedRedirectRequest?.Dispose();
-
-                    ownedRedirectRequest = new HttpRequestMessage(currentRequest.Method, redirectUri);
-                    currentRequest = ownedRedirectRequest;
-                    response = await base.SendAsync(currentRequest, cancellationToken);
-                }
-
-                return response;
-            }
-            finally
-            {
-                ownedRedirectRequest?.Dispose();
-            }
-        }
-
-        private static bool IsRedirect(HttpStatusCode statusCode)
-        {
-            return statusCode is HttpStatusCode.Moved
-                or HttpStatusCode.Redirect
-                or HttpStatusCode.RedirectMethod
-                or HttpStatusCode.TemporaryRedirect
-                or HttpStatusCode.PermanentRedirect;
         }
     }
 
