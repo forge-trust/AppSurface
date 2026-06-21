@@ -1209,7 +1209,40 @@ public class ExportEngine
         return uri.IsAbsoluteUri
             && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
             && HasSameOrigin(uri, baseUri)
+            && HasSafeEscapedPathSegments(uri)
+            && HasSafeEscapedPathSegments(baseUri)
             && TryGetAppRelativeRoute(uri, baseUri, out _);
+    }
+
+    private static bool HasSafeEscapedPathSegments(Uri uri)
+    {
+        foreach (var segment in uri.AbsolutePath.Split('/', StringSplitOptions.None))
+        {
+            if (segment.Length == 0)
+            {
+                continue;
+            }
+
+            string unescapedSegment;
+            try
+            {
+                unescapedSegment = Uri.UnescapeDataString(segment);
+            }
+            catch (UriFormatException)
+            {
+                return false;
+            }
+
+            if (unescapedSegment is "." or ".."
+                || unescapedSegment.Contains('/', StringComparison.Ordinal)
+                || unescapedSegment.Contains('\\', StringComparison.Ordinal)
+                || unescapedSegment.Any(char.IsControl))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsRedirectStatusCode(HttpStatusCode statusCode)

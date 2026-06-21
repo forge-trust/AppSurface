@@ -1392,6 +1392,39 @@ public class ExportEngineTests
         }
     }
 
+    [Theory]
+    [InlineData("/app/%2e%2e/admin/site.css")]
+    [InlineData("/app/%2fadmin/site.css")]
+    [InlineData("/app/%5cadmin/site.css")]
+    [InlineData("/app/%0dadmin/site.css")]
+    public async Task RunAsync_Should_Fail_When_Redirect_Target_Uses_Encoded_Path_Escape(string redirectLocation)
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new PathBaseRedirectedStylesheetHandler(redirectLocation))
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000/app");
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            AssertRedirectProvenanceDiagnostic(exception, "/css/site.css");
+            Assert.False(File.Exists(Path.Join(tempDir, "css", "site.css")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
     [Fact]
     public async Task RunAsync_Should_Fail_When_Redirect_Is_Missing_Location()
     {
