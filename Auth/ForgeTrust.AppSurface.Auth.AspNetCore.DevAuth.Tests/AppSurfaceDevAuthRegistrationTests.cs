@@ -2,6 +2,7 @@ using ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests;
 
@@ -120,6 +121,24 @@ public sealed class AppSurfaceDevAuthRegistrationTests
             options.Users.Add("admin.local_1-test", user => user.Subject("admin-1")));
     }
 
+    [Theory]
+    [InlineData("dev-auth")]
+    [InlineData("/dev-auth/")]
+    public void AddAppSurfaceDevAuth_WithInvalidPathPrefix_ThrowsSafeDiagnostic(string pathPrefix)
+    {
+        var services = new ServiceCollection();
+
+        var ex = Assert.Throws<AppSurfaceDevAuthException>(() =>
+            services.AddAppSurfaceDevAuth(Development(), options =>
+            {
+                options.PathPrefix = pathPrefix;
+                AddAdmin(options);
+            }));
+
+        Assert.Equal(AppSurfaceDevAuthDiagnostics.ReservedPathConflict, ex.DiagnosticCode);
+        Assert.Contains("ASDEV005 Problem:", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task StartupValidator_WithRealSchemeConflict_ThrowsSafeDiagnostic()
     {
@@ -164,9 +183,44 @@ public sealed class AppSurfaceDevAuthRegistrationTests
         await hostedService.StartAsync(CancellationToken.None);
     }
 
+    [Fact]
+    public async Task StartupValidator_OutsideDevelopment_ThrowsSafeDiagnostic()
+    {
+        var validator = new AppSurfaceDevAuthStartupValidator(
+            new AuthenticationSchemeProvider(Options.Create(new AuthenticationOptions())),
+            new TestHostEnvironment("Staging"),
+            Options.Create(new AuthenticationOptions()),
+            Options.Create(CreateOptions(AddAdmin)));
+
+        var ex = await Assert.ThrowsAsync<AppSurfaceDevAuthException>(() =>
+            validator.StartAsync(CancellationToken.None));
+
+        Assert.Equal(AppSurfaceDevAuthDiagnostics.NonDevelopmentEnvironment, ex.DiagnosticCode);
+        Assert.Contains("ASDEV001 Problem:", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StartupValidator_StopAsync_Completes()
+    {
+        var validator = new AppSurfaceDevAuthStartupValidator(
+            new AuthenticationSchemeProvider(Options.Create(new AuthenticationOptions())),
+            Development(),
+            Options.Create(new AuthenticationOptions()),
+            Options.Create(CreateOptions(AddAdmin)));
+
+        await validator.StopAsync(CancellationToken.None);
+    }
+
     private static TestHostEnvironment Development()
     {
         return new TestHostEnvironment(Environments.Development);
+    }
+
+    private static AppSurfaceDevAuthOptions CreateOptions(Action<AppSurfaceDevAuthOptions> configure)
+    {
+        var options = new AppSurfaceDevAuthOptions();
+        configure(options);
+        return options;
     }
 
     private static void AddAdmin(AppSurfaceDevAuthOptions options)

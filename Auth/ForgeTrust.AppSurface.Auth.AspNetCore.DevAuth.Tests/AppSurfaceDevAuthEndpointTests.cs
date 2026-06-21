@@ -6,6 +6,7 @@ using ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -116,6 +117,23 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.True(context.Response.Headers.SetCookie.Count == 0, "Invalid persona selection must not set a cookie.");
     }
 
+    [Fact]
+    public async Task SelectPersona_WithUnknownRouteSafePersonaId_ReturnsSafeDiagnostic()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var context = CreateContext(app.Services);
+        context.Request.RouteValues["personaId"] = "ghost";
+
+        await endpoint.RequestDelegate!(context);
+
+        var body = await ReadBodyAsync(context);
+        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+        Assert.Contains(AppSurfaceDevAuthDiagnostics.InvalidPersonaId, body, StringComparison.Ordinal);
+        Assert.DoesNotContain("ghost", body, StringComparison.Ordinal);
+        Assert.True(context.Response.Headers.SetCookie.Count == 0, "Unknown persona selection must not set a cookie.");
+    }
+
     [Theory]
     [InlineData("secret-token")]
     [InlineData("api-key")]
@@ -194,6 +212,66 @@ public sealed class AppSurfaceDevAuthEndpointTests
     }
 
     [Fact]
+    public async Task MissingPersonaCookie_AuthenticatesAsNoResult()
+    {
+        await using var app = BuildApp();
+        using var scope = app.Services.CreateScope();
+        var authContext = CreateContext(scope.ServiceProvider);
+
+        var result = await scope.ServiceProvider.GetRequiredService<IAuthenticationService>()
+            .AuthenticateAsync(authContext, AppSurfaceDevAuthDefaults.AuthenticationScheme);
+
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Principal);
+    }
+
+    [Fact]
+    public async Task StaleProtectedPersonaCookie_AuthenticatesAsNoResultAndControlPageWarns()
+    {
+        await using var app = BuildApp();
+        var staleCookie = ProtectPersonaId(app.Services, "ghost");
+
+        using var scope = app.Services.CreateScope();
+        var authContext = CreateContext(scope.ServiceProvider);
+        authContext.Request.Headers.Cookie = $"{AppSurfaceDevAuthDefaults.CookieName}={staleCookie}";
+
+        var result = await scope.ServiceProvider.GetRequiredService<IAuthenticationService>()
+            .AuthenticateAsync(authContext, AppSurfaceDevAuthDefaults.AuthenticationScheme);
+
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Principal);
+
+        var controlEndpoint = FindEndpoint(app, "/_appsurface/dev-auth/", HttpMethods.Get);
+        var controlContext = CreateContext(app.Services);
+        controlContext.Request.Headers.Cookie = $"{AppSurfaceDevAuthDefaults.CookieName}={staleCookie}";
+
+        await controlEndpoint.RequestDelegate!(controlContext);
+
+        var html = await ReadBodyAsync(controlContext);
+        Assert.Contains("Status warnings", html, StringComparison.Ordinal);
+        Assert.Contains(AppSurfaceDevAuthDiagnostics.InvalidPersonaId, html, StringComparison.Ordinal);
+        Assert.DoesNotContain("ghost", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ClearPersona_DeletesSecureCookieAndRendersAnonymousState()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/clear", HttpMethods.Post);
+        var context = CreateContext(app.Services);
+
+        await endpoint.RequestDelegate!(context);
+
+        var setCookie = context.Response.Headers.SetCookie.ToString();
+        var html = await ReadBodyAsync(context);
+        Assert.Contains(AppSurfaceDevAuthDefaults.CookieName, setCookie, StringComparison.Ordinal);
+        Assert.Contains("expires=Thu, 01 Jan 1970", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("samesite=strict", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("secure", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DEV AUTH: Anonymous (AppSurface.DevAuth)", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ControlEndpoints_RejectNonLoopbackRequests()
     {
         await using var app = BuildApp();
@@ -265,6 +343,24 @@ public sealed class AppSurfaceDevAuthEndpointTests
             options.Users.Add("admin", user => user.Subject("admin-1")));
         var app = builder.Build();
         app.MapGet("/_appsurface/dev-auth/status", () => Results.Ok());
+
+        var ex = Assert.Throws<AppSurfaceDevAuthException>(() => app.MapAppSurfaceDevAuth());
+
+        Assert.Equal(AppSurfaceDevAuthDiagnostics.ReservedPathConflict, ex.DiagnosticCode);
+        Assert.Contains("ASDEV005 Problem:", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MapAppSurfaceDevAuth_WithReservedPathConflictWithoutLeadingSlash_ThrowsSafeDiagnostic()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = Environments.Development,
+        });
+        builder.Services.AddAppSurfaceDevAuth(builder.Environment, options =>
+            options.Users.Add("admin", user => user.Subject("admin-1")));
+        var app = builder.Build();
+        app.MapGet("_appsurface/dev-auth/status", () => Results.Ok());
 
         var ex = Assert.Throws<AppSurfaceDevAuthException>(() => app.MapAppSurfaceDevAuth());
 
@@ -374,6 +470,13 @@ public sealed class AppSurfaceDevAuthEndpointTests
                 RemoteIpAddress = IPAddress.Loopback,
             },
         };
+    }
+
+    private static string ProtectPersonaId(IServiceProvider services, string personaId)
+    {
+        return services.GetRequiredService<IDataProtectionProvider>()
+            .CreateProtector("ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Persona.v1")
+            .Protect(personaId);
     }
 
     private static async Task<string> ReadBodyAsync(HttpContext context)
