@@ -809,6 +809,28 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void DefaultFileSystem_Should_RejectSymlinkDirectoryWhenMacAliasChecksAreDisabled()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create();
+        var targetDirectory = Path.Join(temp.Path, "target");
+        var linkDirectory = Path.Join(temp.Path, "linked");
+        Directory.CreateDirectory(targetDirectory);
+        Directory.CreateSymbolicLink(linkDirectory, targetDirectory);
+        var path = Path.Join(linkDirectory, "secrets.json");
+        var fileSystem = new DefaultFileAppSurfaceLocalSecretStoreFileSystem(() => true, () => false);
+
+        var result = fileSystem.InspectReadPath(path);
+
+        Assert.Equal(FileSecretPostureKind.Unsupported, result.Kind);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Code);
+    }
+
+    [Fact]
     public void DefaultFileSystem_Should_RejectLooseUnixContainingDirectoryDuringReadPosture()
     {
         if (!IsUnix())
@@ -838,6 +860,26 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.PrepareWrite("secrets.json");
 
         Assert.NotEqual(FileSecretPostureKind.Unsupported, result.Kind);
+    }
+
+    [Fact]
+    public void DefaultFileSystem_Should_WriteRelativeFileWithoutContainingDirectory()
+    {
+        using var temp = TempDirectory.Create();
+        var previousCurrentDirectory = Directory.GetCurrentDirectory();
+        try
+        {
+            Directory.SetCurrentDirectory(temp.Path);
+
+            var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.WriteAllTextWithPosture("secrets.json", "{}");
+
+            Assert.NotEqual(FileSecretPostureKind.Unsupported, result.Kind);
+            Assert.Equal("{}", File.ReadAllText(Path.Join(temp.Path, "secrets.json")));
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(previousCurrentDirectory);
+        }
     }
 
     [Fact]
