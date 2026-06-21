@@ -22,6 +22,18 @@ public sealed class AppSurfaceOidcAuthPromptTests
         Assert.Equal(AppSurfaceOidcAuthOptions.DefaultOidcScheme, prompt.Metadata[AppSurfaceOidcAuthMetadataKeys.OidcScheme]);
     }
 
+    [Fact]
+    public void AllowLocalOnly_WhenCalled_ReturnsSamePolicyAndKeepsSafeTargets()
+    {
+        var options = new AppSurfaceOidcAuthOptions();
+
+        var returned = options.ReturnUrls.AllowLocalOnly();
+        var prompt = options.CreateLoginPrompt("/account/continue");
+
+        Assert.Same(options.ReturnUrls, returned);
+        Assert.Equal("/account/continue", prompt.TargetPath);
+    }
+
     [Theory]
     [InlineData("relative")]
     [InlineData("//example.com")]

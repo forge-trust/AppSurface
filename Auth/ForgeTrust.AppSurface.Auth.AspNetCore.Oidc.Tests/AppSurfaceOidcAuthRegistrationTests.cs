@@ -172,6 +172,36 @@ public sealed class AppSurfaceOidcAuthRegistrationTests
     }
 
     [Fact]
+    public void ConfigureCookie_WhenConfigured_AppliesCookieOptions()
+    {
+        var services = new ServiceCollection();
+        var configureInvoked = false;
+
+        services.AddAppSurfaceOidcAuth(options =>
+        {
+            var returned = options.ConfigureCookie(cookie =>
+            {
+                configureInvoked = true;
+                cookie.Cookie.Name = "AppSurface.Auth";
+            });
+            Assert.Same(options, returned);
+            options.ConfigureOpenIdConnect(oidc =>
+            {
+                oidc.Authority = "https://issuer.example";
+                oidc.ClientId = "client-id";
+                oidc.ClientSecret = "client-secret";
+            });
+        });
+
+        using var provider = services.BuildServiceProvider();
+        var cookieOptions = provider.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(AppSurfaceOidcAuthOptions.DefaultCookieScheme);
+
+        Assert.True(configureInvoked);
+        Assert.Equal("AppSurface.Auth", cookieOptions.Cookie.Name);
+    }
+
+    [Fact]
     public void ConfigureOpenIdConnect_WhenConfigureIsNull_Throws()
     {
         var options = new AppSurfaceOidcAuthOptions();
