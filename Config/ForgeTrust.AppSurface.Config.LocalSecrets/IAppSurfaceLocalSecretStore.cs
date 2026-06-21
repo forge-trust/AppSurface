@@ -33,16 +33,25 @@ public interface IAppSurfaceLocalSecretStore
     /// Deletes a local secret.
     /// </summary>
     /// <param name="identity">The normalized local secret identity.</param>
-    /// <returns>The store result.</returns>
+    /// <returns>
+    /// The store result. Platform-indexed stores may return <see cref="LocalSecretResultStatus.Found"/> when the value was
+    /// already missing but a stale indexed name was removed; keys that were never stored still return
+    /// <see cref="LocalSecretResultStatus.Missing"/> when the store can confirm no stale index entry remains. If the
+    /// platform index cannot be read, platform-indexed stores fail closed instead of assuming the key was never indexed.
+    /// </returns>
     AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity);
 
     /// <summary>
-    /// Lists known local secret config keys for an application/environment namespace.
+    /// Lists currently retrievable local secret config keys for an application/environment namespace.
     /// </summary>
     /// <param name="applicationName">The normalized application name.</param>
     /// <param name="environment">The normalized environment name.</param>
     /// <param name="keyPrefix">The optional normalized key prefix.</param>
-    /// <returns>The list result.</returns>
+    /// <returns>
+    /// The list result. Platform-indexed stores validate indexed names against live stored values and may prune missing
+    /// entries after a successful validation pass. Corrupt indexes and terminal platform failures return display-safe
+    /// diagnostics instead of hiding unverified names.
+    /// </returns>
     AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix);
 
     /// <summary>
