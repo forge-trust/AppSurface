@@ -199,6 +199,7 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
     public async Task MissingDocsRoute_ShouldNotTakeOverNonBrowserRequests()
     {
         await using var runningHost = await StartStandaloneHostAsync();
+        await WaitForDocsHarvestAsync(runningHost.Client);
 
         using var jsonRequest = new HttpRequestMessage(HttpMethod.Get, "/docs/missing-page");
         jsonRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -337,6 +338,11 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         string path)
     {
         return await GetResponseAfterHarvestAsync(client, path, "text/html");
+    }
+
+    private static async Task WaitForDocsHarvestAsync(HttpClient client)
+    {
+        _ = await GetBrowserHtmlAfterHarvestAsync(client, "/docs/missing-page");
     }
 
     private static async Task<(HttpStatusCode StatusCode, string Body)> GetResponseAfterHarvestAsync(
