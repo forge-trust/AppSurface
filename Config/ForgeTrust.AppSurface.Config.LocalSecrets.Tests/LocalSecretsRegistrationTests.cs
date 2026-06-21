@@ -40,6 +40,21 @@ public sealed class LocalSecretsRegistrationTests
     }
 
     [Fact]
+    public void ConfigureServices_Should_RegisterOptionsAwarePlatformStoreByDefault()
+    {
+        var services = new ServiceCollection();
+        services.ConfigureAppSurfaceLocalSecrets(options => options.LinuxSecretToolPath = "/usr/local/bin/secret-tool");
+        var module = new AppSurfaceLocalSecretsModule();
+
+        module.ConfigureServices(new StartupContext([], new TestHostModule()), services);
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceLocalSecretsOptions>>().Value;
+        Assert.Equal("/usr/local/bin/secret-tool", options.LinuxSecretToolPath);
+        Assert.IsType<PlatformAppSurfaceLocalSecretStore>(provider.GetRequiredService<IAppSurfaceLocalSecretStore>());
+    }
+
+    [Fact]
     public void UseAppSurfaceLocalSecretStore_Should_RegisterStoreType()
     {
         var services = new ServiceCollection();
