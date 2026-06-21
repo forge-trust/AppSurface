@@ -95,7 +95,7 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/unreleased.md
     order: 37
-    use_when: Add this in an ASP.NET Core web host that already chose an OpenID Connect provider and wants named AppSurface cookie/OIDC schemes with safe defaults and diagnostics.
+    use_when: Add this in an ASP.NET Core web host that already chose an OpenID Connect provider and wants AppSurface-named cookie/OIDC schemes with safe defaults and diagnostics.
     includes: AddAppSurfaceOidcAuth registration, AppSurfaceOidcAuthOptions, named cookie and OpenID Connect schemes, authorization-code defaults, SaveTokens false by default, local-only passive login/logout prompt helpers, OIDC subject mapping handoff, event chaining, and stable safe diagnostic codes.
     does_not_include: User stores, ASP.NET Identity replacement, identity-provider hosting, OAuth/OIDC server behavior, provider SDKs, EF Core, persistence, middleware insertion, active redirects, challenge execution, sign-in or sign-out execution, silent default-scheme takeover, token storage by default, Aspire Keycloak, Dev Auth, or app-user provisioning.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md

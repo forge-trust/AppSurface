@@ -170,7 +170,7 @@ public sealed class AppSurfaceObservabilityRegistrationTests
     }
 
     [Fact]
-    public void ConfigureLogging_AddsExporterWhenPlanRequiresExport()
+    public void ConfigureLogging_SetsStructuredLoggingDefaults()
     {
         var options = new OpenTelemetryLoggerOptions();
         var plan = AppSurfaceObservabilityPlan.Resolve(
@@ -301,7 +301,7 @@ public sealed class AppSurfaceObservabilityRegistrationTests
         await diagnostic.StartAsync(CancellationToken.None);
 
         var message = Assert.Single(logger.Messages);
-        Assert.Contains("registered tracing and metrics", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("registered logging, tracing, and metrics", message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("no endpoint was configured", message, StringComparison.OrdinalIgnoreCase);
     }
 
