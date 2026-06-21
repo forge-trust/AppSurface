@@ -7,6 +7,8 @@ This is the living release note for the next coordinated AppSurface version afte
 - `ForgeTrust.AppSurface.Auth` now defines durable external-subject to app-user-id mapping contracts without taking on user-store, ASP.NET Core, OIDC, EF Core, Aspire, or tenant-authority responsibilities.
 - `ForgeTrust.AppSurface.Auth.AspNetCore` now includes AppSurface-shaped Minimal API policy helpers: `AddAppSurfacePolicy(...)` keeps policy definition in ASP.NET Core, while `RequireSurfacePolicy(...)` evaluates the named host policy through the existing AppSurface evaluator and returns API-safe ProblemDetails JSON for challenge, forbid, missing-policy, missing-service, and missing-subject outcomes instead of triggering browser redirects.
 - Sanitized AppSurface Config audit diffs for comparing captured runtime configuration reports.
+- LocalSecrets platform-index self-healing so `appsurface secrets list` no longer surfaces stale names whose stored
+  values are missing.
 
 ## Included in the next coordinated version
 
@@ -17,6 +19,10 @@ This is the living release note for the next coordinated AppSurface version afte
 - `ForgeTrust.AppSurface.Auth.AspNetCore` documents the new Minimal API policy helper flow, package chooser metadata, safe ProblemDetails failure shape, and when native ASP.NET Core `RequireAuthorization(...)` remains the better choice.
 - AppSurface Config now exposes a sanitized config audit diff surface. `ConfigAuditReportDiffer` compares two existing `ConfigAuditReport` snapshots without re-resolving providers, `ConfigAuditDiffTextRenderer` renders deterministic same-host or captured-snapshot evidence with redaction uncertainty called out, and `ConfigAuditDiffCommandRunner` gives apps command-framework-agnostic same-host and captured JSON workflows with display-safe problem/cause/fix/docs-link failures.
 - RazorWire export now owns HTTP redirect handling for artifact-producing fetches, including crawled routes and conventional `404.html` staging. Same-origin redirects remain supported, while redirects outside the configured export origin and base path fail with `RWEXPORT008` before response content is read or written; routes that intentionally point to a different host or app path should be modeled as external references instead of exporter-managed artifacts.
+- AppSurface LocalSecrets platform-backed stores now validate indexed names against live stored values during
+  `appsurface secrets list`. Missing values are pruned from the index when validation and repair succeed, and
+  `appsurface secrets delete KEY` repairs a stale indexed name when the value is already gone while preserving
+  `local-secret-missing` for keys that never existed.
 
 ### AppSurface Flow
 

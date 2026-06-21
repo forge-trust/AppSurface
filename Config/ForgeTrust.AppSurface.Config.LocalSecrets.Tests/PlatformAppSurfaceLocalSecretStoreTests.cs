@@ -177,6 +177,143 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal("upper-secret", store.Get(upper).Value);
     }
 
+    [Fact]
+    public void IndexedStoreSet_Should_WriteCaseVariantIndexInDeterministicOrder()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var lower = normalizer.Normalize("MyApp", "Development", null, "stripe:apikey").Identity!;
+        var upper = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+
+        store.Set(lower, "lower-secret");
+        store.Set(upper, "upper-secret");
+
+        Assert.Equal(["Stripe:ApiKey", "stripe:apikey"], store.ReadIndexKeys("MyApp", "Development", null));
+    }
+
+    [Fact]
+    public void IndexedStoreList_Should_PruneStaleIndexedKeys()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var live = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+        var stale = normalizer.Normalize("MyApp", "Development", null, "SendGrid:ApiKey").Identity!;
+        store.SeedStoredValue(live, "live-secret");
+        store.SeedIndex("MyApp", "Development", null, live.Key, stale.Key);
+
+        var result = store.List("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.Found, result.Status);
+        Assert.Equal(["Stripe:ApiKey"], result.Keys);
+        Assert.Equal(["Stripe:ApiKey"], store.ReadIndexKeys("MyApp", "Development", null));
+    }
+
+    [Fact]
+    public void IndexedStoreDelete_Should_RemoveStaleIndexedKey_WhenValueIsMissing()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var stale = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+        store.SeedIndex("MyApp", "Development", null, stale.Key);
+
+        var result = store.Delete(stale);
+
+        Assert.Equal(LocalSecretResultStatus.Found, result.Status);
+        Assert.Empty(store.ReadIndexKeys("MyApp", "Development", null));
+    }
+
+    [Fact]
+    public void IndexedStoreDelete_Should_PreserveMissing_WhenValueAndIndexEntryAreMissing()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var missing = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+
+        var result = store.Delete(missing);
+
+        Assert.Equal(LocalSecretResultStatus.Missing, result.Status);
+        Assert.False(store.HasIndex("MyApp", "Development", null));
+    }
+
+    [Fact]
+    public void IndexedStoreList_Should_NotRewriteIndex_WhenIndexedValueReadFails()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var live = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+        var locked = normalizer.Normalize("MyApp", "Development", null, "SendGrid:ApiKey").Identity!;
+        store.SeedStoredValue(live, "live-secret");
+        store.SeedStoredValue(locked, "locked-secret");
+        store.SeedIndex("MyApp", "Development", null, live.Key, locked.Key);
+        store.FailRead(locked, LocalSecretResultStatus.Locked);
+
+        var result = store.List("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
+        Assert.Equal(["Stripe:ApiKey", "SendGrid:ApiKey"], store.ReadIndexKeys("MyApp", "Development", null));
+    }
+
+    [Fact]
+    public void IndexedStoreList_Should_ReturnProviderFailedAndNotRepair_WhenIndexIsCorrupt()
+    {
+        var store = new IndexedMemoryStore();
+        store.SeedRawIndex("MyApp", "Development", null, "not json");
+
+        var result = store.List("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, result.Status);
+        Assert.Equal("local-secret-index-invalid", result.Diagnostic?.Code);
+        Assert.Contains("Remove the invalid platform index entry", result.Diagnostic?.Fix, StringComparison.Ordinal);
+        Assert.Equal("not json", store.ReadRawIndex("MyApp", "Development", null));
+    }
+
+    [Fact]
+    public void IndexedStoreDelete_Should_ReturnProviderFailedAndNotRepair_WhenIndexIsCorrupt()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var stale = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+        store.SeedRawIndex("MyApp", "Development", null, "not json");
+
+        var result = store.Delete(stale);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, result.Status);
+        Assert.Equal("local-secret-index-invalid", result.Diagnostic?.Code);
+        Assert.Contains("Remove the invalid platform index entry", result.Diagnostic?.Fix, StringComparison.Ordinal);
+        Assert.Equal("not json", store.ReadRawIndex("MyApp", "Development", null));
+    }
+
+    [Fact]
+    public void IndexedStoreList_Should_Fail_WhenRepairWriteFails()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var stale = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+        store.SeedIndex("MyApp", "Development", null, stale.Key);
+        store.FailNextWrite(LocalSecretResultStatus.Unavailable);
+
+        var result = store.List("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.Equal(["Stripe:ApiKey"], store.ReadIndexKeys("MyApp", "Development", null));
+    }
+
+    [Fact]
+    public void IndexedStoreList_Should_PruneDuplicateAndReservedIndexEntries()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var live = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+        store.SeedStoredValue(live, "live-secret");
+        store.SeedIndex("MyApp", "Development", null, live.Key, live.Key, "__appsurface_index__", null, " ");
+
+        var result = store.List("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.Found, result.Status);
+        Assert.Equal(["Stripe:ApiKey"], result.Keys);
+        Assert.Equal(["Stripe:ApiKey"], store.ReadIndexKeys("MyApp", "Development", null));
+    }
+
     private sealed class FixedCommandRunner(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult result)
         : PlatformAppSurfaceLocalSecretStore.IPlatformSecretCommandRunner
     {
@@ -200,38 +337,65 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     private sealed class IndexedMemoryStore : PlatformAppSurfaceLocalSecretStore.IndexedLocalSecretStore
     {
         private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, AppSurfaceLocalSecretResult> _readFailures = new(StringComparer.Ordinal);
+        private LocalSecretResultStatus? _nextWriteFailure;
 
         public override string Name => nameof(IndexedMemoryStore);
 
-        protected override AppSurfaceLocalSecretResult ReadValue(AppSurfaceLocalSecretIdentity identity) =>
-            _values.TryGetValue(identity.StorageName, out var value)
-                ? AppSurfaceLocalSecretResult.Found(value, Name)
-                : AppSurfaceLocalSecretResult.Missing(Name);
+        public void SeedStoredValue(AppSurfaceLocalSecretIdentity identity, string value) => _values[identity.StorageName] = value;
 
-        protected override AppSurfaceLocalSecretResult WriteValue(AppSurfaceLocalSecretIdentity identity, string value)
+        public void SeedIndex(string applicationName, string environment, string? keyPrefix, params string?[] keys) =>
+            SeedRawIndex(applicationName, environment, keyPrefix, System.Text.Json.JsonSerializer.Serialize(keys));
+
+        public void SeedRawIndex(string applicationName, string environment, string? keyPrefix, string value) =>
+            _values[IndexStorageName(applicationName, environment, keyPrefix)] = value;
+
+        public string? ReadRawIndex(string applicationName, string environment, string? keyPrefix) =>
+            _values.GetValueOrDefault(IndexStorageName(applicationName, environment, keyPrefix));
+
+        public string[] ReadIndexKeys(string applicationName, string environment, string? keyPrefix) =>
+            System.Text.Json.JsonSerializer.Deserialize<string[]>(ReadRawIndex(applicationName, environment, keyPrefix) ?? "[]") ?? [];
+
+        public bool HasIndex(string applicationName, string environment, string? keyPrefix) =>
+            _values.ContainsKey(IndexStorageName(applicationName, environment, keyPrefix));
+
+        public void FailRead(AppSurfaceLocalSecretIdentity identity, LocalSecretResultStatus status) =>
+            _readFailures[identity.StorageName] = Failure(status);
+
+        public void FailNextWrite(LocalSecretResultStatus status) => _nextWriteFailure = status;
+
+        protected override AppSurfaceLocalSecretResult ReadStoredValue(AppSurfaceLocalSecretIdentity identity)
         {
-            _values[identity.StorageName] = value;
-            if (string.Equals(identity.Key, IndexKey, StringComparison.Ordinal))
+            if (_readFailures.TryGetValue(identity.StorageName, out var failure))
             {
-                return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
+                return failure;
             }
 
-            return UpdateIndex(identity, add: true);
+            return _values.TryGetValue(identity.StorageName, out var value)
+                ? AppSurfaceLocalSecretResult.Found(value, Name)
+                : AppSurfaceLocalSecretResult.Missing(Name);
         }
 
-        protected override AppSurfaceLocalSecretResult DeleteValue(AppSurfaceLocalSecretIdentity identity)
+        protected override AppSurfaceLocalSecretResult WriteStoredValue(AppSurfaceLocalSecretIdentity identity, string value)
+        {
+            if (_nextWriteFailure is { } status)
+            {
+                _nextWriteFailure = null;
+                return Failure(status);
+            }
+
+            _values[identity.StorageName] = value;
+            return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
+        }
+
+        protected override AppSurfaceLocalSecretResult DeleteStoredValue(AppSurfaceLocalSecretIdentity identity)
         {
             if (!_values.Remove(identity.StorageName))
             {
                 return AppSurfaceLocalSecretResult.Missing(Name);
             }
 
-            if (string.Equals(identity.Key, IndexKey, StringComparison.Ordinal))
-            {
-                return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
-            }
-
-            return UpdateIndex(identity, add: false);
+            return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
         }
 
         protected override AppSurfaceLocalSecretResult DoctorStore(string applicationName, string environment, string? keyPrefix) =>
@@ -242,6 +406,19 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
                     "Indexed memory store is ready.",
                     "The fake store is available.",
                     "No action required."),
+                Name);
+
+        private static string IndexStorageName(string applicationName, string environment, string? keyPrefix) =>
+            $"appsurface:{applicationName}:{environment}:{keyPrefix}:{IndexKey}";
+
+        private AppSurfaceLocalSecretResult Failure(LocalSecretResultStatus status) =>
+            AppSurfaceLocalSecretResult.NotFound(
+                status,
+                new AppSurfaceLocalSecretDiagnostic(
+                    $"test-{status.ToString().ToLowerInvariant()}",
+                    "Injected local secret failure.",
+                    "The indexed memory store was configured to fail this operation.",
+                    "Clear the injected failure."),
                 Name);
     }
 }
