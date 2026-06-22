@@ -259,8 +259,8 @@ internal abstract class SecretsCommandBase : ICommand
     /// <returns>A value task that completes when output is written.</returns>
     /// <remarks>
     /// LocalSecrets treats <see cref="LocalSecretResultStatus.Missing"/> as failure everywhere except doctor-style
-    /// readiness probes that return the <c>local-secret-store-ready</c> diagnostic. Keep that exception explicit when
-    /// adding commands so ordinary missing secrets do not report success.
+    /// readiness probes that return a ready-class posture diagnostic. Keep that exception explicit when adding commands
+    /// so ordinary missing secrets do not report success.
     /// </remarks>
     protected static async ValueTask WriteResultAsync(
         IConsole console,
@@ -269,7 +269,7 @@ internal abstract class SecretsCommandBase : ICommand
     {
         if (result.Status == LocalSecretResultStatus.Found
             || result.Status == LocalSecretResultStatus.Missing
-            && result.Diagnostic?.Code == "local-secret-store-ready")
+            && IsDoctorSuccessDiagnostic(result.Diagnostic?.Code))
         {
             await console.Output.WriteLineAsync($"{successVerb}: local secret namespace");
             await console.Output.WriteLineAsync($"Source: {result.Source}");
@@ -288,6 +288,11 @@ internal abstract class SecretsCommandBase : ICommand
 
         throw new CommandException(result.Diagnostic?.ToDisplayString() ?? "Local secret command failed.");
     }
+
+    private static bool IsDoctorSuccessDiagnostic(string? code) =>
+        code is "local-secret-store-ready"
+            or "local-secret-file-posture-repaired"
+            or "local-secret-file-posture-degraded";
 }
 
 /// <summary>
