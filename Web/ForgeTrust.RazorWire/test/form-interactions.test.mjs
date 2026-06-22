@@ -47,6 +47,39 @@ test('form toggle hides targets, disables only runtime-owned controls, and resto
   assert.equal(authoredDisabled.disabled, true);
 });
 
+test('button form toggles sync on click without relying on change events', () => {
+  const { context, document } = loadRuntime();
+  const form = document.createElement('form');
+  const toggle = document.createElement('button');
+  toggle.value = 'pressed';
+  toggle.setAttribute('data-rw-form-toggle', 'no-action');
+  toggle.setAttribute('data-rw-form-toggle-invert', 'true');
+  const target = document.createElement('fieldset');
+  target.setAttribute('data-rw-form-toggle-target', 'no-action');
+  target.setAttribute('data-rw-form-toggle-disable-when-hidden', 'true');
+  const title = document.createElement('input');
+  title.name = 'Actions[0].Title';
+  target.appendChild(title);
+  form.append(toggle, target);
+  document.body.appendChild(form);
+
+  context.window.RazorWire.formInteractionsManager.scan();
+
+  assert.equal(target.hidden, true);
+  assert.equal(title.disabled, true);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+
+  toggle.setAttribute('aria-expanded', 'true');
+  toggle.value = '';
+  const event = createEvent('click');
+  toggle.dispatchEvent(event);
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(target.hidden, false);
+  assert.equal(title.disabled, false);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+});
+
 test('collection add allocates sparse index markers and focuses the new editable field', () => {
   const { context, document } = loadRuntime();
   const { root, add, template } = buildCollection(document);
@@ -100,6 +133,28 @@ test('collection duplicate copies editable values, rewrites references, and clea
   assert.equal(clone.querySelector('[data-valmsg-for]').textContent, '');
 });
 
+test('collection duplicate aborts when the source sparse index cannot be resolved', () => {
+  const { context, document } = loadRuntime();
+  const { root, duplicate } = buildCollection(document);
+  const row = root.querySelector('[data-rw-form-collection-row]');
+  row.removeAttribute('data-rw-form-index');
+  row.querySelector('input[name="Actions.index"]').value = '';
+  const form = document.createElement('form');
+  form.appendChild(root);
+  document.body.appendChild(form);
+
+  context.window.RazorWire.formInteractionsManager.scan();
+  context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+  duplicate.dispatchEvent(createEvent('click'));
+
+  assert.equal(root.querySelectorAll('[data-rw-form-collection-row]').length, 1);
+  assert.equal(
+    context.window.RazorWire.formInteractionsManager
+      .getDiagnostics()
+      .some(diagnostic => /duplicate command has no source row index/.test(diagnostic.message)),
+    true);
+});
+
 test('collection remove supports physical and mark-for-removal lanes', () => {
   const { context, document } = loadRuntime();
   const { root, remove } = buildCollection(document);
@@ -141,6 +196,46 @@ test('collection remove supports physical and mark-for-removal lanes', () => {
   assert.equal(marker.disabled, false);
   assert.equal(id.disabled, false);
   assert.equal(second.root.querySelector('input[name="Actions[0].Title"]').disabled, true);
+});
+
+test('mark-for-removal handles selector fields and invalid selectors safely', () => {
+  const { context, document } = loadRuntime();
+  const { root, remove } = buildCollection(document);
+  root.setAttribute('data-rw-form-collection-remove-mode', 'mark');
+  root.setAttribute('data-rw-form-collection-delete-field', 'input[name="Actions[0].Delete"]');
+  const deleteField = root.querySelector('input[name="Actions[0].Delete"]');
+  const form = document.createElement('form');
+  form.appendChild(root);
+  document.body.appendChild(form);
+
+  context.window.RazorWire.formInteractionsManager.scan();
+  remove.dispatchEvent(createEvent('click'));
+
+  assert.equal(deleteField.getAttribute('data-rw-form-collection-delete-field'), 'true');
+  assert.equal(deleteField.disabled, false);
+
+  const second = buildCollection(document);
+  second.root.setAttribute('data-rw-form-collection-remove-mode', 'mark');
+  second.root.setAttribute('data-rw-form-collection-delete-field', '[');
+  const form2 = document.createElement('form');
+  form2.appendChild(second.root);
+  document.body.appendChild(form2);
+
+  context.window.RazorWire.formInteractionsManager.scan();
+  context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+  const originalQuerySelector = second.row.querySelector.bind(second.row);
+  second.row.querySelector = selector => {
+    if (selector === '[') throw new Error('invalid selector');
+    return originalQuerySelector(selector);
+  };
+  second.remove.dispatchEvent(createEvent('click'));
+
+  assert.equal(second.row.hidden, false);
+  assert.equal(
+    context.window.RazorWire.formInteractionsManager
+      .getDiagnostics()
+      .some(diagnostic => /invalid delete-field selector/.test(diagnostic.message)),
+    true);
 });
 
 test('collection remove focus skips hidden marked rows and disabled commands', () => {

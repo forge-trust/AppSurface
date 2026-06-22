@@ -18,6 +18,21 @@ public sealed class FormInteractionTagHelperTests
         Assert.False(output.Attributes.ContainsName("rw-form-toggle-invert"));
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("true")]
+    [InlineData("rw-form-toggle")]
+    public void Toggle_Process_NormalizesSentinelValuesToTrue(string? targetName)
+    {
+        var output = CreateOutput("input", "rw-form-toggle", "true");
+
+        new FormToggleTagHelper { TargetName = targetName }.Process(CreateContext("input"), output);
+
+        Assert.Equal("true", output.Attributes["data-rw-form-toggle"].Value);
+    }
+
     [Fact]
     public void ToggleTarget_Process_EmitsDisableWhenHiddenWhenRequested()
     {
@@ -29,6 +44,21 @@ public sealed class FormInteractionTagHelperTests
         Assert.Equal("no-action", output.Attributes["data-rw-form-toggle-target"].Value);
         Assert.Equal("true", output.Attributes["data-rw-form-toggle-disable-when-hidden"].Value);
         Assert.False(output.Attributes.ContainsName("rw-form-toggle-target"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("true")]
+    [InlineData("rw-form-toggle-target")]
+    public void ToggleTarget_Process_NormalizesSentinelValuesToTrue(string? targetName)
+    {
+        var output = CreateOutput("fieldset", "rw-form-toggle-target", "true");
+
+        new FormToggleTargetTagHelper { TargetName = targetName }.Process(CreateContext("fieldset"), output);
+
+        Assert.Equal("true", output.Attributes["data-rw-form-toggle-target"].Value);
     }
 
     [Fact]
@@ -108,6 +138,21 @@ public sealed class FormInteractionTagHelperTests
 
         Assert.Equal("submit", output.Attributes["type"].Value);
         Assert.Equal("mark", output.Attributes["data-rw-form-collection-remove"].Value);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("true")]
+    [InlineData("rw-form-collection-remove")]
+    public void Remove_Process_NormalizesDefaultModeToPhysical(string? mode)
+    {
+        var output = CreateOutput("button", "rw-form-collection-remove", "true");
+
+        new FormCollectionRemoveTagHelper { Mode = mode }.Process(CreateContext("button"), output);
+
+        Assert.Equal("physical", output.Attributes["data-rw-form-collection-remove"].Value);
     }
 
     private static TagHelperContext CreateContext(string tagName)

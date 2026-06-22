@@ -32,6 +32,11 @@ internal sealed partial class ExportReferenceProcessor
     /// <summary>
     /// Managed runtime path for the RazorWire form-interactions client script: <c>/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js</c>.
     /// </summary>
+    /// <remarks>
+    /// Static export uses this package-relative path only for internal synthetic script registration when form-interaction
+    /// markers exist without an explicit runtime script reference. The value must match the RazorWire static web asset and
+    /// embedded fallback route; callers should not rewrite it at runtime or use it as an application-specific override point.
+    /// </remarks>
     private const string FormInteractionsRuntimePath = "/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js";
 
     private static readonly Uri ManagedUrlBase = new("http://dummy");
@@ -453,6 +458,20 @@ internal sealed partial class ExportReferenceProcessor
             CreateHtmlProvenance(marker, attributeName, attributeLookup));
     }
 
+    /// <summary>
+    /// Adds a synthetic static-export reference for the RazorWire form-interactions runtime when lazy markup requires it.
+    /// </summary>
+    /// <param name="references">The export references collected for the current HTML document.</param>
+    /// <param name="document">The parsed HTML document being scanned.</param>
+    /// <param name="currentRoute">The route that owns relative URL resolution for synthesized references.</param>
+    /// <param name="attributeLookup">The source-span lookup used to attach marker provenance to fallback references.</param>
+    /// <remarks>
+    /// The exporter first honors any explicit <c>form-interactions.js</c> script tag, then prefers the inline autoload
+    /// block's <c>source</c> value when the lazy detector is present, and finally falls back to the managed package path.
+    /// This order preserves host-owned eager loading while still materializing the split runtime for exported pages that
+    /// rely on <c>&lt;rw:scripts /&gt;</c> lazy loading. The scan is intentionally limited to top-level form-toggle and
+    /// form-collection markers; malformed collection templates remain runtime diagnostics rather than export blockers.
+    /// </remarks>
     private void AddRazorWireFormInteractionsAutoloadReferences(
         ICollection<ExportReference> references,
         IDocument document,

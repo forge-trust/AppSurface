@@ -349,6 +349,15 @@ public class ReactivityController : Controller
         await _hub.PublishAsync("reactivity", streamHtml);
     }
 
+    /// <summary>
+    /// Creates the initial model used to render the form-interactions sample page.
+    /// </summary>
+    /// <remarks>
+    /// This is sample bootstrap data only. It seeds one persisted-looking action row with
+    /// <c>ClientIndex</c> set to <c>0</c>, <c>Id</c> set to <c>saved-action-1</c>, and
+    /// <c>Title</c> set to <c>Call parent</c> so the page can demonstrate duplicate,
+    /// physical remove, and mark-for-removal behavior without a backing database.
+    /// </remarks>
     private static FormInteractionsSampleModel CreateFormInteractionsSample()
     {
         var model = new FormInteractionsSampleModel();

@@ -82,7 +82,7 @@ Command TagHelpers set `type="button"` when the app did not already specify a ty
 | `data-rw-form-toggle-invert="true"` | toggle | Inverts checkbox/radio/value state. |
 | `data-rw-form-toggle-target="name"` | fieldset, section, div | Target shown or hidden by matching toggles in the same form. |
 | `data-rw-form-toggle-disable-when-hidden="true"` | target | Disables descendant controls while hidden so stale values do not submit. |
-| `data-rw-form-collection="Actions"` | collection root | Marks one one-dimensional collection. |
+| `data-rw-form-collection="Actions"` | collection root | Marks one-dimensional collection. |
 | `data-rw-form-collection-label="action"` | collection root | Reader-facing copy for generated status messages. |
 | `data-rw-form-collection-row` | row | Marks one app-authored row. |
 | `data-rw-form-index="0"` | row | Optional current row index. |
@@ -144,6 +144,6 @@ Diagnostics report missing or cross-form toggle targets, missing or malformed co
 | Toggle does nothing | Missing matching target in the same form. | Match `data-rw-form-toggle` and `data-rw-form-toggle-target` values. |
 | Hidden fields still submit | Target is hidden but not configured to disable controls. | Add `data-rw-form-toggle-disable-when-hidden="true"`. |
 | Added row does not bind | Template lacks `.index` marker or `__index__`. | Include `name="Actions.index" value="__index__"` and use `__index__` in row names. |
-| Duplicate copies database identity | Hidden identity field is marked copyable or not recognized. | Remove `data-rw-form-collection-copyable` or clear identity fields in a cancelable before-event handler. |
+| Duplicated identity values persist | Hidden identity field is marked copyable or not recognized. | Remove `data-rw-form-collection-copyable` or clear identity fields in a cancelable before-event handler. |
 | Saved row is not deleted | Physical remove was used for a persisted row. | Use mark-for-removal with an app-owned delete field. |
 | Diagnostic says nested collection | A collection root appears inside another collection root. | Keep RazorWire collections one-dimensional. |

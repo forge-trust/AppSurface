@@ -44,7 +44,7 @@ public sealed class FormInteractionActionModel
     public bool Delete { get; set; }
 
     /// <summary>
-    /// Gets or sets the action title.
+    /// Gets or sets the action title, limited to 40 characters.
     /// </summary>
     [StringLength(40)]
     public string? Title { get; set; }

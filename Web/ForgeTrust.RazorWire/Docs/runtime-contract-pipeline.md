@@ -45,7 +45,12 @@ Generated outputs stay committed because Razor Class Library static web assets, 
 
 The TypeScript migration preserves the public browser surface:
 
-- Script paths: `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`, `/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js`, `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js`, `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`, and `/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js`.
+- Script paths:
+  - `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`
+  - `/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js`
+  - `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js`
+  - `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`
+  - `/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js`
 - Tag helper output: `<rw:scripts />`, Turbo attributes, optional Turbo CDN URL, SRI, `crossorigin`, and lazy/eager split-runtime detectors.
 - Global state: `window.RazorWire`, `window.RazorWire.config`, `connectionManager`, `localTimeFormatter`, `formFailureManager`, `pageNavigationManager`, and `sectionCopyManager`.
 - Form events: `razorwire:form:submit-start`, `razorwire:form:failure`, `razorwire:form:diagnostic`, and `razorwire:form:submit-end`.

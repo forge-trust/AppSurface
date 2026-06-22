@@ -165,6 +165,13 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             const target = event.target;
             if (!(target instanceof Element)) return;
 
+            const toggleButton = target.closest('button[data-rw-form-toggle]');
+            if (toggleButton && this.form.contains(toggleButton)) {
+                event.preventDefault();
+                this.syncToggle(toggleButton as HTMLElement);
+                return;
+            }
+
             const add = target.closest('[data-rw-form-collection-add]');
             if (add && this.form.contains(add)) {
                 if (!this.shouldHandleCollectionCommand(add)) return;
@@ -324,13 +331,21 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
             const collection = this.collectionName(root);
             const sourceIndex = this.rowIndex(sourceRow, collection);
+            if (!sourceIndex) {
+                this.manager.recordDiagnostic(
+                    `Collection "${collection}" duplicate command has no source row index.`,
+                    'RazorWire cannot safely rewrite cloned field names, ids, labels, or validation references without the source sparse index.',
+                    `Add an enabled <input type="hidden" name="${collection}.index" value="..."> marker or data-rw-form-index to the row before enabling duplicate.`);
+                return;
+            }
+
             const index = this.allocateIndex(root, collection);
             const row = sourceRow.cloneNode(true) as HTMLElement;
-            this.rewriteAttributes(row, sourceIndex ?? '', index);
+            this.rewriteAttributes(row, sourceIndex, index);
             row.setAttribute('data-rw-form-index', index);
             this.ensureIndexMarker(row, collection, index);
             this.copyRowValues(sourceRow, row);
-            this.rewriteHiddenIndexValues(row, sourceIndex ?? '', index);
+            this.rewriteHiddenIndexValues(row, sourceIndex, index);
             this.clearValidationState(row);
 
             if (!this.dispatchCollectionEvent(root, command, row, 'razorwire:form-collection:before-duplicate', 'duplicate', index, true, sourceIndex)) {
@@ -705,7 +720,17 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
         private markRowForRemoval(root: HTMLElement, row: HTMLElement) {
             const selector = root.getAttribute('data-rw-form-collection-delete-field') || '[data-rw-form-collection-delete-field]';
-            const field = row.querySelector(selector) as HTMLInputElement | null;
+            let field: HTMLInputElement | null = null;
+            try {
+                field = row.querySelector(selector) as HTMLInputElement | null;
+            } catch {
+                this.manager.recordDiagnostic(
+                    `Collection "${this.collectionName(root)}" uses an invalid delete-field selector "${selector}".`,
+                    'RazorWire cannot resolve the delete field for mark-remove mode.',
+                    'Provide a valid CSS selector or use [data-rw-form-collection-delete-field] on the delete input.');
+                return false;
+            }
+
             if (!field) {
                 this.manager.recordDiagnostic(
                     `Collection "${this.collectionName(root)}" mark-remove has no app-owned delete field.`,
@@ -714,6 +739,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 return false;
             }
 
+            field.setAttribute('data-rw-form-collection-delete-field', 'true');
             row.hidden = true;
             row.setAttribute('data-rw-form-collection-row-state', 'removed');
             field.disabled = false;
@@ -836,7 +862,6 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 this.generatedStatus.setAttribute('data-rw-form-collection-status-generated', 'true');
                 this.generatedStatus.setAttribute('aria-live', 'polite');
                 this.generatedStatus.setAttribute('role', 'status');
-                this.generatedStatus.hidden = true;
                 this.form.appendChild(this.generatedStatus);
             }
 
