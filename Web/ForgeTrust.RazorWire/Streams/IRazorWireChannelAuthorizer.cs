@@ -24,7 +24,8 @@ public interface IRazorWireChannelAuthorizer
 /// <see cref="ForgeTrust.RazorWire.RazorWireStreamAuthorizationMode.DenyAll"/> for production defaults, set
 /// <see cref="ForgeTrust.RazorWire.RazorWireStreamOptions.AuthorizationMode"/> to
 /// <see cref="ForgeTrust.RazorWire.RazorWireStreamAuthorizationMode.AllowAll"/> only for public/demo streams, and register a
-/// custom <see cref="IRazorWireChannelAuthorizer"/> for user, tenant, or workflow-specific channels.
+/// custom <see cref="IRazorWireStreamAuthorizer"/> for user, tenant, or workflow-specific channels. Use this bool
+/// authorizer contract when simple legacy allow/deny compatibility is enough.
 /// </remarks>
 public sealed class DenyAllRazorWireChannelAuthorizer : IRazorWireChannelAuthorizer
 {
@@ -53,8 +54,9 @@ public sealed class AllowAllRazorWireChannelAuthorizer : IRazorWireChannelAuthor
     /// Determines whether the request represented by the <paramref name="context"/> may subscribe to the specified channel.
     /// </summary>
     /// <remarks>
-    /// Prefer a custom <see cref="IRazorWireChannelAuthorizer"/> for production streams that depend on
-    /// <see cref="HttpContext.User"/> or other request state.
+    /// Prefer a custom <see cref="IRazorWireStreamAuthorizer"/> for production streams that depend on
+    /// <see cref="HttpContext.User"/> or other request state. Use <see cref="IRazorWireChannelAuthorizer"/> when a simple
+    /// legacy allow/deny decision is enough.
     /// </remarks>
     /// <param name="context">The HTTP context of the requesting client.</param>
     /// <param name="channel">The name of the channel to subscribe to.</param>
