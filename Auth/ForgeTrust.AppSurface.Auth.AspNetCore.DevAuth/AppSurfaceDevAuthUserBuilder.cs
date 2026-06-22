@@ -1,11 +1,12 @@
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 
 namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 
 /// <summary>
 /// Builds a seeded local-development persona for AppSurface DevAuth.
 /// </summary>
-public sealed class AppSurfaceDevAuthUserBuilder
+public sealed partial class AppSurfaceDevAuthUserBuilder
 {
     private readonly List<Claim> _claims = [];
     private string? _displayName;
@@ -71,6 +72,15 @@ public sealed class AppSurfaceDevAuthUserBuilder
         return this;
     }
 
+    /// <summary>
+    /// Builds the immutable persona that will be stored in <see cref="AppSurfaceDevAuthOptions.Users"/>.
+    /// </summary>
+    /// <returns>A persona with a default display name of the persona id when no display name was supplied.</returns>
+    /// <remarks>
+    /// The configured subject claim is prepended when <see cref="Subject(string, string)"/> was called. Any previously
+    /// added claim with the same subject claim type is replaced so the persona has one stable subject value. Registration
+    /// validation rejects personas that were built without an explicit subject.
+    /// </remarks>
     internal AppSurfaceDevAuthPersona Build()
     {
         var hasSubject = !string.IsNullOrWhiteSpace(_subject);
@@ -87,6 +97,19 @@ public sealed class AppSurfaceDevAuthUserBuilder
         return new AppSurfaceDevAuthPersona(Id, displayName, _subjectClaimType, subject, claims.ToArray());
     }
 
+    /// <summary>
+    /// Validates and returns a route-safe local persona id.
+    /// </summary>
+    /// <param name="id">Candidate persona id, such as <c>admin</c>, <c>viewer</c>, or <c>qa.local_1</c>.</param>
+    /// <returns>The original id when it is safe for route values and local cookie payloads.</returns>
+    /// <exception cref="AppSurfaceDevAuthException">
+    /// Thrown with <c>ASDEV006</c> when the id is blank, a URI dot segment, contains unsupported characters, or includes
+    /// a sensitive-looking token segment such as <c>secret</c>, <c>token</c>, <c>key</c>, or <c>email</c>.
+    /// </exception>
+    /// <remarks>
+    /// Use this before accepting route-supplied persona ids. The validation is intentionally strict because persona ids
+    /// are visible in the local selection URL and are the only payload stored in the protected persona cookie.
+    /// </remarks>
     internal static string NormalizePersonaId(string id)
     {
         if (string.IsNullOrWhiteSpace(id))
@@ -121,13 +144,10 @@ public sealed class AppSurfaceDevAuthUserBuilder
 
     private static bool ContainsSensitiveToken(string value)
     {
-        return value.Contains("token", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("password", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("credential", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("email", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("mail", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("key", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains('@', StringComparison.Ordinal);
+        return value.Contains('@', StringComparison.Ordinal) ||
+            SensitiveTokenRegex().IsMatch(value);
     }
+
+    [GeneratedRegex(@"(^|[^A-Za-z0-9])(token|secret|password|credential|email|mail|key)([^A-Za-z0-9]|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SensitiveTokenRegex();
 }

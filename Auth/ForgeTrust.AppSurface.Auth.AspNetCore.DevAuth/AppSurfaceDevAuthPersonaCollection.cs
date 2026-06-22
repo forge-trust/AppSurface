@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+
 namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 
 /// <summary>
@@ -6,6 +8,15 @@ namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 public sealed class AppSurfaceDevAuthPersonaCollection
 {
     private readonly Dictionary<string, AppSurfaceDevAuthPersona> _personas = new(StringComparer.Ordinal);
+    private readonly IReadOnlyDictionary<string, AppSurfaceDevAuthPersona> _readOnlyPersonas;
+
+    /// <summary>
+    /// Creates an empty collection of seeded local-development personas.
+    /// </summary>
+    public AppSurfaceDevAuthPersonaCollection()
+    {
+        _readOnlyPersonas = new ReadOnlyDictionary<string, AppSurfaceDevAuthPersona>(_personas);
+    }
 
     /// <summary>
     /// Adds a local-development persona.
@@ -34,5 +45,5 @@ public sealed class AppSurfaceDevAuthPersonaCollection
     /// <summary>
     /// Gets the configured local-development personas.
     /// </summary>
-    public IReadOnlyDictionary<string, AppSurfaceDevAuthPersona> Personas => _personas;
+    public IReadOnlyDictionary<string, AppSurfaceDevAuthPersona> Personas => _readOnlyPersonas;
 }

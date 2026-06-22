@@ -76,12 +76,16 @@ The control page lets you select a seeded persona, clear the persona cookie, ins
 
 ## API Reference
 
-- `AddAppSurfaceDevAuth(IHostEnvironment environment, Action<AppSurfaceDevAuthOptions> configure)` registers the named DevAuth authentication scheme and startup safety validation.
+- `AddAppSurfaceDevAuth(IHostEnvironment environment, Action<AppSurfaceDevAuthOptions> configure)` registers the named DevAuth authentication scheme and startup safety validation. The `configure` callback is evaluated once during registration, and the same validated options are used for both scheme registration and runtime DevAuth behavior.
 - `MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)` maps the local-only control page, status JSON, select persona endpoint, and clear persona endpoint.
 - `AppSurfaceDevAuthDefaults.AuthenticationScheme` is `AppSurface.DevAuth`.
 - `AppSurfaceDevAuthDefaults.PathPrefix` is `/_appsurface/dev-auth`.
+- `AppSurfaceDevAuthDefaults.CookieName` is `.AppSurface.DevAuth.Persona`.
 - `AppSurfaceDevAuthDefaults.SubjectClaimType` is `sub`.
 - `AppSurfaceDevAuthOptions.Users` contains seeded local personas.
+- `AppSurfaceDevAuthOptions.SchemeName` overrides the registered authentication scheme. It defaults to `AppSurfaceDevAuthDefaults.AuthenticationScheme`.
+- `AppSurfaceDevAuthOptions.PathPrefix` overrides the local control-page and status endpoint path prefix. It defaults to `AppSurfaceDevAuthDefaults.PathPrefix`.
+- `AppSurfaceDevAuthOptions.CookieName` overrides the selected-persona cookie name. It defaults to `AppSurfaceDevAuthDefaults.CookieName`.
 - `AppSurfaceDevAuthOptions.UseAsDefaultSchemeForLocalProof` is off by default. Enable it only for throwaway local proof hosts where DevAuth intentionally owns the whole auth stack.
 - `AppSurfaceDevAuthOptions.AllowDevAuthOverrideForLocalProof` is off by default. Enable it only when a local proof intentionally composes DevAuth with other registered auth schemes.
 - `AppSurfaceDevAuthOptions.RequireLoopbackControlRequests` is on by default.
@@ -89,7 +93,7 @@ The control page lets you select a seeded persona, clear the persona cookie, ins
 
 Persona IDs must be route-safe local identifiers containing only ASCII letters, digits, `.`, `_`, or `-`. The dot-segment IDs `.` and `..` are not allowed, and ids that look like tokens, secrets, passwords, keys, credentials, or emails are rejected. Persona IDs are used in the selection endpoint path and stored as the protected cookie payload.
 
-Persona state is stored in a protected, HttpOnly, Secure, SameSite=Strict cookie that contains only the persona id. Blank, unknown, stale, reset, or tampered cookie state authenticates as no result.
+Persona state is stored in a protected, HttpOnly, SameSite=Strict cookie that contains only the persona id. DevAuth adds the `Secure` cookie attribute on HTTPS requests and omits it on plain HTTP localhost so browser-based local proof works. Blank, unknown, stale, reset, or tampered cookie state authenticates as no result.
 
 The authentication handler issues every seeded persona claim, but the control page does not display every issued claim. Claims are rendered only when their type is in `DisplayClaimTypes`, their value is short, and neither the type nor the value looks like a token, secret, password, key, credential, or email. Display names and subjects that look sensitive are redacted from HTML and status JSON. Hidden claims are counted without showing their values.
 

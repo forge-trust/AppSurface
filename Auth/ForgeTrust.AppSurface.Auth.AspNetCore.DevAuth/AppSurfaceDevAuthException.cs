@@ -11,7 +11,7 @@ public sealed class AppSurfaceDevAuthException : InvalidOperationException
     /// <param name="diagnosticCode">Stable AppSurface DevAuth diagnostic code.</param>
     /// <param name="message">Safe diagnostic message.</param>
     public AppSurfaceDevAuthException(string diagnosticCode, string message)
-        : base(message)
+        : base(ValidateMessage(message))
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(diagnosticCode);
         DiagnosticCode = diagnosticCode;
@@ -21,4 +21,10 @@ public sealed class AppSurfaceDevAuthException : InvalidOperationException
     /// Gets the stable AppSurface DevAuth diagnostic code.
     /// </summary>
     public string DiagnosticCode { get; }
+
+    private static string ValidateMessage(string message)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        return message;
+    }
 }

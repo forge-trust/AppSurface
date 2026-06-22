@@ -112,6 +112,17 @@ public sealed class AppSurfaceDevAuthRegistrationTests
         Assert.Contains("ASDEV006 Problem:", ex.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("monkey")]
+    [InlineData("mailbox")]
+    public void AddAppSurfaceDevAuth_WithInnocentTokenSubstrings_AllowsPersonaId(string personaId)
+    {
+        var services = new ServiceCollection();
+
+        services.AddAppSurfaceDevAuth(Development(), options =>
+            options.Users.Add(personaId, user => user.Subject("subject-1")));
+    }
+
     [Fact]
     public void AddAppSurfaceDevAuth_WithSlugPersonaId_AllowsSafeRouteCharacters()
     {
@@ -119,6 +130,54 @@ public sealed class AppSurfaceDevAuthRegistrationTests
 
         services.AddAppSurfaceDevAuth(Development(), options =>
             options.Users.Add("admin.local_1-test", user => user.Subject("admin-1")));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDevAuth_MaterializesOptionsOnceForSchemeAndRuntime()
+    {
+        var services = new ServiceCollection();
+        var configureCallCount = 0;
+
+        services.AddAppSurfaceDevAuth(Development(), options =>
+        {
+            configureCallCount++;
+            options.SchemeName = configureCallCount == 1 ? "Preview.DevAuth" : "Runtime.DevAuth";
+            AddAdmin(options);
+        });
+
+        await using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDevAuthOptions>>().Value;
+        var schemeProvider = provider.GetRequiredService<IAuthenticationSchemeProvider>();
+        var schemes = await schemeProvider.GetAllSchemesAsync();
+        var hostedService = provider.GetServices<IHostedService>()
+            .OfType<AppSurfaceDevAuthStartupValidator>()
+            .Single();
+
+        await hostedService.StartAsync(CancellationToken.None);
+
+        Assert.Equal(1, configureCallCount);
+        Assert.Equal("Preview.DevAuth", options.SchemeName);
+        Assert.Contains(schemes, scheme => string.Equals(scheme.Name, "Preview.DevAuth", StringComparison.Ordinal));
+        Assert.DoesNotContain(schemes, scheme => string.Equals(scheme.Name, "Runtime.DevAuth", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task StartupValidator_UsesExistingHostEnvironmentRegistration()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IHostEnvironment>(new TestHostEnvironment("Production"));
+        services.AddAppSurfaceDevAuth(Development(), AddAdmin);
+
+        await using var provider = services.BuildServiceProvider();
+        var hostedService = provider.GetServices<IHostedService>()
+            .OfType<AppSurfaceDevAuthStartupValidator>()
+            .Single();
+
+        var ex = await Assert.ThrowsAsync<AppSurfaceDevAuthException>(() =>
+            hostedService.StartAsync(CancellationToken.None));
+
+        Assert.Equal(AppSurfaceDevAuthDiagnostics.NonDevelopmentEnvironment, ex.DiagnosticCode);
+        Assert.Contains("ASDEV001 Problem:", ex.Message, StringComparison.Ordinal);
     }
 
     [Theory]

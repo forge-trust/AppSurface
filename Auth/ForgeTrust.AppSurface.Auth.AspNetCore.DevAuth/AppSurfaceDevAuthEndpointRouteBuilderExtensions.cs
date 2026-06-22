@@ -3,6 +3,7 @@ using System.Net.Mime;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -16,7 +17,7 @@ namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 /// <summary>
 /// Maps AppSurface DevAuth local-only control and status endpoints.
 /// </summary>
-public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
+public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
 {
     private const string ProtectorPurpose = "ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Persona.v1";
     private const string RedactedValue = "(hidden)";
@@ -26,6 +27,12 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
     /// </summary>
     /// <param name="endpoints">Endpoint route builder that receives the local-only endpoints.</param>
     /// <returns>The same endpoint route builder for chaining.</returns>
+    /// <remarks>
+    /// Map this after building the app and before relying on the persona lab in a local proof host. The method validates
+    /// the same materialized options used by the authentication handler, reserves the configured path prefix, and rejects
+    /// existing endpoints whose route templates are equivalent to DevAuth control routes even when parameter names differ.
+    /// Control endpoints stay loopback-only by default and set no-store headers on every response.
+    /// </remarks>
     public static IEndpointRouteBuilder MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -81,9 +88,17 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             normalized = "/" + normalized;
         }
 
-        return normalized.Length > 1 && normalized.EndsWith("/", StringComparison.Ordinal)
-            ? normalized[..^1]
-            : normalized;
+        if (normalized.Length > 1 && normalized.EndsWith("/", StringComparison.Ordinal))
+        {
+            normalized = normalized[..^1];
+        }
+
+        return NormalizeParameterNames(normalized);
+    }
+
+    private static string NormalizeParameterNames(string routePattern)
+    {
+        return RouteParameterRegex().Replace(routePattern, "{}");
     }
 
     private static async ValueTask<object?> RequireLocalControlRequestAsync(
@@ -155,7 +170,7 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         httpContext.Response.Cookies.Append(
             devAuthOptions.CookieName,
             protector.Protect(normalized),
-            CreatePersonaCookieOptions());
+            CreatePersonaCookieOptions(httpContext.Request));
 
         var status = new AppSurfaceDevAuthStatus(
             Enabled: environment.IsDevelopment(),
@@ -193,7 +208,7 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             {
                 Path = "/",
                 SameSite = SameSiteMode.Strict,
-                Secure = true,
+                Secure = httpContext.Request.IsHttps,
             });
 
         var status = new AppSurfaceDevAuthStatus(
@@ -210,7 +225,7 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         return Results.Content(RenderControlPage(status, devAuthOptions), MediaTypeNames.Text.Html, Encoding.UTF8);
     }
 
-    private static CookieOptions CreatePersonaCookieOptions()
+    private static CookieOptions CreatePersonaCookieOptions(HttpRequest request)
     {
         return new CookieOptions
         {
@@ -218,7 +233,7 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             IsEssential = true,
             Path = "/",
             SameSite = SameSiteMode.Strict,
-            Secure = true,
+            Secure = request.IsHttps,
         };
     }
 
@@ -349,7 +364,7 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
 
     private static bool IsLoopback(IPAddress? remoteAddress)
     {
-        return remoteAddress is null || IPAddress.IsLoopback(remoteAddress);
+        return remoteAddress is not null && IPAddress.IsLoopback(remoteAddress);
     }
 
     private static bool IsDisplaySafeClaim(string type, string value, AppSurfaceDevAuthOptions options)
@@ -393,14 +408,8 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
 
     private static bool ContainsSensitiveToken(string value)
     {
-        return value.Contains("token", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("password", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("credential", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("email", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("mail", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("key", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains('@', StringComparison.Ordinal);
+        return value.Contains('@', StringComparison.Ordinal) ||
+            SensitiveTokenRegex().IsMatch(value);
     }
 
     private static void SetNoStoreHeaders(HttpContext httpContext)
@@ -410,6 +419,12 @@ public static class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         httpContext.Response.Headers.Expires = "0";
         httpContext.Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
     }
+
+    [GeneratedRegex(@"\{[^}/]+\}", RegexOptions.CultureInvariant)]
+    private static partial Regex RouteParameterRegex();
+
+    [GeneratedRegex(@"(^|[^A-Za-z0-9])(token|secret|password|credential|email|mail|key)([^A-Za-z0-9]|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SensitiveTokenRegex();
 }
 
 internal sealed record AppSurfaceDevAuthStatus(

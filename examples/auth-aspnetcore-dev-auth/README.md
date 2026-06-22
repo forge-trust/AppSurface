@@ -13,7 +13,12 @@ DOTNET_ENVIRONMENT=Development dotnet run --project examples/auth-aspnetcore-dev
 Open the control page:
 
 ```bash
+# macOS
 open http://127.0.0.1:5058/_appsurface/dev-auth
+# Linux
+xdg-open http://127.0.0.1:5058/_appsurface/dev-auth
+# Windows (PowerShell)
+Start-Process http://127.0.0.1:5058/_appsurface/dev-auth
 ```
 
 Or prove the flow with curl:

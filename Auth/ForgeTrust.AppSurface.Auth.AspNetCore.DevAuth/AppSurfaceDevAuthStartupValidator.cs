@@ -4,6 +4,15 @@ using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 
+/// <summary>
+/// Performs DevAuth startup validation after the host service provider has been built.
+/// </summary>
+/// <remarks>
+/// Registration validates the caller-supplied Development environment early, but this hosted service re-checks the real
+/// environment resolved from dependency injection and inspects the final authentication defaults and schemes. It rejects
+/// non-Development hosts and real authentication scheme conflicts unless the consumer explicitly enabled the local-proof
+/// override. This service is internal infrastructure for <see cref="AppSurfaceDevAuthServiceCollectionExtensions"/>.
+/// </remarks>
 internal sealed class AppSurfaceDevAuthStartupValidator : IHostedService
 {
     private readonly IAuthenticationSchemeProvider _schemeProvider;
@@ -11,6 +20,13 @@ internal sealed class AppSurfaceDevAuthStartupValidator : IHostedService
     private readonly IOptions<AuthenticationOptions> _authenticationOptions;
     private readonly IOptions<AppSurfaceDevAuthOptions> _devAuthOptions;
 
+    /// <summary>
+    /// Creates a validator over the final host authentication and environment services.
+    /// </summary>
+    /// <param name="schemeProvider">Authentication scheme provider used to inspect all registered schemes.</param>
+    /// <param name="environment">Host environment resolved from dependency injection.</param>
+    /// <param name="authenticationOptions">ASP.NET Core authentication defaults resolved from dependency injection.</param>
+    /// <param name="devAuthOptions">Materialized DevAuth options registered by <c>AddAppSurfaceDevAuth</c>.</param>
     public AppSurfaceDevAuthStartupValidator(
         IAuthenticationSchemeProvider schemeProvider,
         IHostEnvironment environment,
@@ -28,6 +44,15 @@ internal sealed class AppSurfaceDevAuthStartupValidator : IHostedService
         _devAuthOptions = devAuthOptions;
     }
 
+    /// <summary>
+    /// Validates that DevAuth is running in Development and is not silently coexisting with real authentication.
+    /// </summary>
+    /// <param name="cancellationToken">Startup cancellation token; validation performs only in-memory inspection.</param>
+    /// <returns>A completed task when the final host configuration is safe for local DevAuth.</returns>
+    /// <exception cref="AppSurfaceDevAuthException">
+    /// Thrown with <c>ASDEV001</c> outside Development, with option diagnostics when materialized options are invalid,
+    /// or with <c>ASDEV002</c> when real schemes/defaults are present without the explicit override.
+    /// </exception>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         if (!_environment.IsDevelopment())
@@ -72,6 +97,11 @@ internal sealed class AppSurfaceDevAuthStartupValidator : IHostedService
         }
     }
 
+    /// <summary>
+    /// Stops the validator.
+    /// </summary>
+    /// <param name="cancellationToken">Stop cancellation token.</param>
+    /// <returns>A completed task because the validator does not own background work.</returns>
     public Task StopAsync(CancellationToken cancellationToken)
     {
         return Task.CompletedTask;

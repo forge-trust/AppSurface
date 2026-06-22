@@ -80,7 +80,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains(AppSurfaceDevAuthDefaults.CookieName, setCookie, StringComparison.Ordinal);
         Assert.Contains("httponly", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", setCookie, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("secure", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secure", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("role", html, StringComparison.Ordinal);
         Assert.Contains("operator", html, StringComparison.Ordinal);
         Assert.Contains("claim(s) hidden from preview", html, StringComparison.Ordinal);
@@ -98,6 +98,21 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.True(result.Succeeded);
         Assert.Equal("admin-1", result.Principal?.FindFirst("sub")?.Value);
         Assert.Equal("operator", result.Principal?.FindFirst("role")?.Value);
+    }
+
+    [Fact]
+    public async Task SelectPersona_OnHttps_SetsSecureCookie()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var selectContext = CreateContext(app.Services);
+        selectContext.Request.Scheme = "https";
+        selectContext.Request.RouteValues["personaId"] = "admin";
+
+        await endpoint.RequestDelegate!(selectContext);
+
+        var setCookie = selectContext.Response.Headers.SetCookie.ToString();
+        Assert.Contains("secure", setCookie, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -267,7 +282,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains(AppSurfaceDevAuthDefaults.CookieName, setCookie, StringComparison.Ordinal);
         Assert.Contains("expires=Thu, 01 Jan 1970", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", setCookie, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("secure", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secure", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DEV AUTH: Anonymous (AppSurface.DevAuth)", html, StringComparison.Ordinal);
     }
 
@@ -285,6 +300,19 @@ public sealed class AppSurfaceDevAuthEndpointTests
         var body = await ReadBodyAsync(context);
         Assert.Contains("AppSurface DevAuth local request required", body, StringComparison.Ordinal);
         Assert.DoesNotContain(AppSurfaceDevAuthDiagnostics.NonDevelopmentEnvironment, body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ControlEndpoints_RejectRequestsWithUnknownRemoteAddress()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/status", HttpMethods.Get);
+        var context = CreateContext(app.Services);
+        context.Connection.RemoteIpAddress = null;
+
+        await endpoint.RequestDelegate!(context);
+
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
     }
 
     [Fact]
@@ -330,6 +358,24 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.DoesNotContain("admin@example.com", statusJson, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-token", statusJson, StringComparison.Ordinal);
         Assert.Contains("\"personaId\":\"sensitive\"", statusJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MapAppSurfaceDevAuth_WithEquivalentParameterNameReservedPathConflict_ThrowsSafeDiagnostic()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = Environments.Development,
+        });
+        builder.Services.AddAppSurfaceDevAuth(builder.Environment, options =>
+            options.Users.Add("admin", user => user.Subject("admin-1")));
+        var app = builder.Build();
+        app.MapPost("/_appsurface/dev-auth/select/{id}", () => Results.Ok());
+
+        var ex = Assert.Throws<AppSurfaceDevAuthException>(() => app.MapAppSurfaceDevAuth());
+
+        Assert.Equal(AppSurfaceDevAuthDiagnostics.ReservedPathConflict, ex.DiagnosticCode);
+        Assert.Contains("ASDEV005 Problem:", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
