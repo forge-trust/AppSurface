@@ -8,8 +8,10 @@ public sealed class AppSurfaceCliReadmeContractTests
     public void Readme_Should_Link_AuthenticatedCommandDesign()
     {
         var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
+        var standaloneAppSettings = File.ReadAllText(GetStandaloneDocsAppSettingsPath());
 
         Assert.Contains("[authenticated command design](docs/authenticated-command-design.md)", readme, StringComparison.Ordinal);
+        Assert.Contains("\"Cli/**/docs/**/*.md\"", standaloneAppSettings, StringComparison.Ordinal);
         Assert.Contains("appsurface docs publish --archive ./dist/docs --site <site>", readme, StringComparison.Ordinal);
         Assert.Contains("RFC 8628 device flow", readme, StringComparison.Ordinal);
         Assert.Contains("CI no-prompt behavior", readme, StringComparison.Ordinal);
@@ -125,5 +127,15 @@ public sealed class AppSurfaceCliReadmeContractTests
             "ForgeTrust.AppSurface.Cli",
             "docs",
             "authenticated-command-design.md");
+    }
+
+    private static string GetStandaloneDocsAppSettingsPath()
+    {
+        var repositoryRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        return Path.Join(
+            repositoryRoot,
+            "Web",
+            "ForgeTrust.AppSurface.Docs.Standalone",
+            "appsettings.json");
     }
 }
