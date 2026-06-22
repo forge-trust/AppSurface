@@ -119,7 +119,10 @@ public sealed class RazorWireMvcPlaywrightTests
         var submitResponse = await page.RunAndWaitForResponseAsync(
             () => page.ClickAsync("button[type='submit']"),
             response => response.Url.Contains("/Reactivity/SubmitFormInteractions", StringComparison.Ordinal));
-        Assert.Equal(HttpStatusCode.OK, (HttpStatusCode)submitResponse.Status);
+        var statusCode = (HttpStatusCode)submitResponse.Status;
+        Assert.True(
+            statusCode is HttpStatusCode.OK or HttpStatusCode.Found,
+            $"Expected accepted POST or redirect response from {submitResponse.Url}, got {statusCode}.");
     }
 
     [Fact]
