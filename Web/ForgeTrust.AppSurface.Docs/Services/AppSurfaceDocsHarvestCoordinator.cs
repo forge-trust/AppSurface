@@ -175,7 +175,7 @@ public sealed class AppSurfaceDocsHarvestCoordinator
         {
             await activeHarvest.ConfigureAwait(false);
         }
-        catch (Exception exception) when (!IsFatalException(exception))
+        catch (Exception exception) when (!IsFatalHarvestException(exception))
         {
             // A failed active run still yields to the queued rebuild. The final failure is already represented by
             // the harvest reporter and health snapshot path.
@@ -194,7 +194,13 @@ public sealed class AppSurfaceDocsHarvestCoordinator
         }
     }
 
-    private static bool IsFatalException(Exception exception)
+    /// <summary>
+    /// Determines whether a queued rebuild continuation should avoid catching an exception that represents process-level
+    /// failure rather than recoverable harvest failure.
+    /// </summary>
+    /// <param name="exception">The exception observed from the active harvest task.</param>
+    /// <returns><see langword="true"/> for process-fatal exception types; otherwise <see langword="false"/>.</returns>
+    internal static bool IsFatalHarvestException(Exception exception)
     {
         return exception is OutOfMemoryException or StackOverflowException or AccessViolationException;
     }

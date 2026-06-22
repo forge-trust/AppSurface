@@ -320,6 +320,19 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
         Assert.Equal(2, harvester.CallCount);
     }
 
+    [Theory]
+    [InlineData(typeof(InvalidOperationException), false)]
+    [InlineData(typeof(OperationCanceledException), false)]
+    [InlineData(typeof(OutOfMemoryException), true)]
+    [InlineData(typeof(StackOverflowException), true)]
+    [InlineData(typeof(AccessViolationException), true)]
+    public void IsFatalHarvestException_ShouldClassifyProcessFatalFailures(Type exceptionType, bool expected)
+    {
+        var exception = (Exception)Activator.CreateInstance(exceptionType)!;
+
+        Assert.Equal(expected, AppSurfaceDocsHarvestCoordinator.IsFatalHarvestException(exception));
+    }
+
     private static AppSurfaceDocsHarvestCoordinator CreateCoordinator(
         IDocHarvester harvester,
         IMemoryCache cache,

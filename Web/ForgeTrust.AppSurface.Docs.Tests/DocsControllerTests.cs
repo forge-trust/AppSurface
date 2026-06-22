@@ -3942,6 +3942,116 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestHealth_ShouldRenderUnauthenticatedRebuildState_WhenOperatorPolicyRequiresUser()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorWritePolicy = "DocsWrite"
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester);
+        using (memo)
+        using (cache)
+        {
+            controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+            {
+                RequestServices = CreateAuthorizationServices(
+                    policyName: "DocsWrite",
+                    policy => policy.RequireAuthenticatedUser())
+            });
+
+            var result = Assert.IsType<ViewResult>(await controller.HarvestHealth());
+            var model = Assert.IsType<AppSurfaceDocsHarvestHealthResponse>(result.Model);
+
+            Assert.NotNull(model.RebuildForm);
+            Assert.False(model.RebuildForm.IsAuthorized);
+            Assert.Equal("Unauthorized", model.RebuildForm.Status);
+            Assert.Contains("Sign in", model.RebuildForm.Description, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestHealth_ShouldRenderUnavailableRebuildState_WhenOperatorPolicyIsMissing()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorWritePolicy = "MissingDocsWrite"
+            }
+        };
+        var services = new ServiceCollection()
+            .AddLogging()
+            .AddControllersWithViews()
+            .Services
+            .AddAuthorization()
+            .BuildServiceProvider();
+        var (controller, cache, memo) = CreateController(options, harvester);
+        using (services)
+        using (memo)
+        using (cache)
+        {
+            controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+            {
+                RequestServices = services,
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+                    authenticationType: "test-auth"))
+            });
+
+            var result = Assert.IsType<ViewResult>(await controller.HarvestHealth());
+            var model = Assert.IsType<AppSurfaceDocsHarvestHealthResponse>(result.Model);
+
+            Assert.NotNull(model.RebuildForm);
+            Assert.False(model.RebuildForm.IsAuthorized);
+            Assert.Equal("Unavailable", model.RebuildForm.Status);
+            Assert.Contains("policy was not found", model.RebuildForm.Description, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestHealthJson_ShouldRenderUnavailableRebuildState_WhenAuthorizationServicesAreMissing()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorWritePolicy = "DocsWrite"
+            }
+        };
+        var services = new ServiceCollection().BuildServiceProvider();
+        var (controller, cache, memo) = CreateController(options, harvester);
+        using (services)
+        using (memo)
+        using (cache)
+        {
+            controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+            {
+                RequestServices = services
+            });
+
+            var result = Assert.IsType<JsonResult>(await controller.HarvestHealthJson());
+            var model = Assert.IsType<AppSurfaceDocsHarvestHealthResponse>(result.Value);
+
+            Assert.NotNull(model.RebuildForm);
+            Assert.False(model.RebuildForm.IsAuthorized);
+            Assert.Equal("Unavailable", model.RebuildForm.Status);
+            Assert.Contains("policy is not available", model.RebuildForm.Description, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
     public async Task HarvestHealth_ShouldReturnNotFound_WhenRoutesAreNotExposedForEnvironment()
     {
         var harvester = A.Fake<IDocHarvester>();
@@ -5123,6 +5233,15 @@ public class DocsControllerTests : IDisposable
             result,
             "/docs/search?q=api",
             canUseLiveProgress: true);
+    }
+
+    [Fact]
+    public void GetHarvestRebuildRequestResultQueryValue_ShouldReturnEmptyString_ForUnknownEnumValue()
+    {
+        var value = DocsController.GetHarvestRebuildRequestResultQueryValue(
+            (AppSurfaceDocsHarvestRebuildRequestResult)999);
+
+        Assert.Equal(string.Empty, value);
     }
 
     [Fact]

@@ -1186,7 +1186,12 @@ public class DocsController : Controller
         };
     }
 
-    private static string GetHarvestRebuildRequestResultQueryValue(AppSurfaceDocsHarvestRebuildRequestResult result)
+    /// <summary>
+    /// Gets the stable query-string marker used to carry a harvest rebuild request result into the observatory view.
+    /// </summary>
+    /// <param name="result">The rebuild request result returned by the shared harvest coordinator.</param>
+    /// <returns>The stable marker for a known result, or an empty string for an unknown enum value.</returns>
+    internal static string GetHarvestRebuildRequestResultQueryValue(AppSurfaceDocsHarvestRebuildRequestResult result)
     {
         return result switch
         {

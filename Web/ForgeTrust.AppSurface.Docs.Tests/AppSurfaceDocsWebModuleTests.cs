@@ -912,6 +912,41 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
+    public async Task HarvestRebuildUnsupportedMethodEndpoint_ShouldReturnMethodNotAllowed_WhenStatusPagesAreAbsent()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var endpoint = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Single(
+                endpoint =>
+                {
+                    var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                    return endpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_harvest/rebuild"
+                        && methods is not null
+                        && methods.Contains(HttpMethods.Get)
+                        && !methods.Contains(HttpMethods.Post);
+                });
+        await using var responseBody = new MemoryStream();
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = responseBody;
+
+        await endpoint.RequestDelegate!(httpContext);
+        await httpContext.Response.StartAsync();
+
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, httpContext.Response.StatusCode);
+        Assert.Equal(DocsUrlBuilder.HarvestRebuildMethod, httpContext.Response.Headers.Allow);
+    }
+
+    [Fact]
     public async Task SearchIndexRefreshUnsupportedMethodEndpoint_ShouldReturnMethodNotAllowedAndDisableStatusPages()
     {
         var context = CreateStartupContext();
