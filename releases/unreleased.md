@@ -11,6 +11,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Observability package defaults for sending app-side logs, traces, and metrics to Aspire or another OTLP collector.
 - LocalSecrets platform-index self-healing so `appsurface secrets list` no longer surfaces stale names whose stored
   values are missing.
+- The AppSurface CLI now carries the design contract for future authenticated command execution. The design keeps `ForgeTrust.AppSurface.Auth` passive, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the protected command wedge, treats RFC 8628 device flow as one auth method rather than the whole CLI story, and requires secure token-cache boundaries, CI no-prompt behavior, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 
 ## Included in the next coordinated version
 
@@ -28,6 +29,7 @@ This is the living release note for the next coordinated AppSurface version afte
   `appsurface secrets list`. Missing values are pruned from the index when validation and repair succeed, and
   `appsurface secrets delete KEY` repairs a stale indexed name when the value is already gone while preserving
   `local-secret-missing` for keys that never existed.
+- `Cli/ForgeTrust.AppSurface.Cli/docs/authenticated-command-design.md` documents the future CLI auth ladder, including browser/loopback PKCE, RFC 8628 device flow, non-interactive CI tokens, command-gate state, token-cache threat modeling, deterministic auth diagnostics, and follow-up issue slices.
 
 ### AppSurface Flow
 
