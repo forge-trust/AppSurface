@@ -37,6 +37,26 @@ public sealed partial class RepositoryReadmePolicyTests
                 "Intelligence/ForgeTrust.AppSurface.Intelligence/README.md",
                 AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(
+            policy.ShouldIncludeFilePath(
+                "Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/local-secrets-without-a-remote-vault.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(
+            policy.ShouldIncludeFilePath(
+                "Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/migrate-from-dotenv.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(
+            policy.ShouldIncludeFilePath(
+                "Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/migrate-from-user-secrets.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(
+            policy.ShouldIncludeFilePath(
+                "Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/move-to-future-remote-vault.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(
+            policy.ShouldIncludeFilePath(
+                "Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/use-env-or-key-per-file-in-ci-and-containers.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/generated/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/TestResults/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.False(policy.ShouldIncludeFilePath("unpublished/scratch/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
