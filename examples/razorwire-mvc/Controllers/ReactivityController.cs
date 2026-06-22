@@ -51,7 +51,9 @@ public class ReactivityController : Controller
     /// <returns>An <see cref="IActionResult"/> that renders the form-interactions UX sample.</returns>
     public IActionResult FormInteractions()
     {
-        return View(CreateFormInteractionsSample());
+        var model = CreateFormInteractionsSample();
+        model.Result = TempData["FormInteractionsResult"] as string;
+        return View(model);
     }
 
     /// <summary>
@@ -271,11 +273,11 @@ public class ReactivityController : Controller
             return View(nameof(FormInteractions), model);
         }
 
-        model.Result = model.ExpectedNoAction
+        TempData["FormInteractionsResult"] = model.ExpectedNoAction
             ? "Saved: no follow-up action expected."
             : $"Saved {activeActions.Count} action row(s).";
 
-        return View(nameof(FormInteractions), model);
+        return RedirectToAction(nameof(FormInteractions));
     }
 
     /// <summary>

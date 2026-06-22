@@ -167,6 +167,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
             const add = target.closest('[data-rw-form-collection-add]');
             if (add && this.form.contains(add)) {
+                if (!this.shouldHandleCollectionCommand(add)) return;
                 event.preventDefault();
                 this.addRow(add as HTMLElement);
                 return;
@@ -174,6 +175,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
             const duplicate = target.closest('[data-rw-form-collection-duplicate]');
             if (duplicate && this.form.contains(duplicate)) {
+                if (!this.shouldHandleCollectionCommand(duplicate)) return;
                 event.preventDefault();
                 this.duplicateRow(duplicate as HTMLElement);
                 return;
@@ -181,6 +183,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
             const remove = target.closest('[data-rw-form-collection-remove]');
             if (remove && this.form.contains(remove)) {
+                if (!this.shouldHandleCollectionCommand(remove)) return;
                 event.preventDefault();
                 this.removeRow(remove as HTMLElement);
             }
@@ -301,6 +304,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             }
 
             this.clearRowValues(row, false);
+            this.rewriteHiddenIndexValues(row, '__index__', index);
             this.insertRow(root, template, row);
             row.setAttribute('data-rw-form-index', index);
             this.ensureIndexMarker(row, collection, index);
@@ -322,6 +326,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             row.setAttribute('data-rw-form-index', index);
             this.ensureIndexMarker(row, collection, index);
             this.copyRowValues(sourceRow, row);
+            this.rewriteHiddenIndexValues(row, sourceIndex ?? '', index);
             this.clearValidationState(row);
 
             if (!this.dispatchCollectionEvent(root, command, row, 'razorwire:form-collection:before-duplicate', 'duplicate', index, true, sourceIndex)) {
@@ -459,6 +464,13 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             return root;
         }
 
+        private shouldHandleCollectionCommand(command: Element) {
+            if (command.tagName === 'BUTTON') return true;
+
+            this.resolveCollectionRoot(command);
+            return false;
+        }
+
         private resolveTemplate(root: HTMLElement) {
             const template = root.querySelector('template[data-rw-form-collection-template]') as HTMLTemplateElement | null;
             const name = this.collectionName(root);
@@ -528,6 +540,33 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             return value
                 .replaceAll(`[${oldIndex}]`, `[${newIndex}]`)
                 .replaceAll(`_${oldIndex}__`, `_${newIndex}__`);
+        }
+
+        private rewriteHiddenIndexValues(row: HTMLElement, oldIndex: string, newIndex: string) {
+            if (!oldIndex) return;
+
+            for (const input of Array.from(row.querySelectorAll('input[type="hidden"]')) as HTMLInputElement[]) {
+                if (input.name.endsWith('.index')) continue;
+
+                const nextValue = this.rewriteIndexCarrierValue(input.value, input.name, oldIndex, newIndex);
+                if (nextValue !== input.value) {
+                    input.value = nextValue;
+                }
+
+                const attributeValue = input.getAttribute('value');
+                if (attributeValue === null) continue;
+
+                const nextAttributeValue = this.rewriteIndexCarrierValue(attributeValue, input.name, oldIndex, newIndex);
+                if (nextAttributeValue !== attributeValue) {
+                    input.setAttribute('value', nextAttributeValue);
+                }
+            }
+        }
+
+        private rewriteIndexCarrierValue(value: string, name: string, oldIndex: string, newIndex: string) {
+            if (value === '__index__') return newIndex;
+            if (value === oldIndex && /(^|\.)(clientindex|rowindex)$/i.test(name)) return newIndex;
+            return this.rewriteIndexReference(value, oldIndex, newIndex);
         }
 
         private ensureIndexMarker(row: HTMLElement, collection: string, index: string) {
@@ -700,10 +739,35 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
         private resolveRemoveFocusTarget(root: HTMLElement, row: HTMLElement) {
             const rows = Array.from(root.querySelectorAll('[data-rw-form-collection-row]')) as HTMLElement[];
             const index = rows.indexOf(row);
-            const next = rows[index + 1]?.querySelector('[data-rw-form-collection-remove], [data-rw-form-collection-duplicate]') as HTMLElement | null;
-            const previous = rows[index - 1]?.querySelector('[data-rw-form-collection-remove], [data-rw-form-collection-duplicate]') as HTMLElement | null;
+            for (const candidate of rows.slice(index + 1)) {
+                const command = this.firstFocusableCollectionCommand(candidate);
+                if (command) return command;
+            }
+
+            for (const candidate of rows.slice(0, index).reverse()) {
+                const command = this.firstFocusableCollectionCommand(candidate);
+                if (command) return command;
+            }
+
             const add = root.querySelector('[data-rw-form-collection-add]') as HTMLElement | null;
-            return next ?? previous ?? add;
+            return add && this.canReceiveFocus(add) ? add : null;
+        }
+
+        private firstFocusableCollectionCommand(row: HTMLElement) {
+            return Array.from(row.querySelectorAll('[data-rw-form-collection-remove], [data-rw-form-collection-duplicate]'))
+                .find(command => command instanceof HTMLElement && this.canReceiveFocus(command)) as HTMLElement | undefined;
+        }
+
+        private canReceiveFocus(element: HTMLElement) {
+            if ((element as HTMLButtonElement).disabled) return false;
+
+            let current: HTMLElement | null = element;
+            while (current) {
+                if (current.hidden) return false;
+                current = current.parentElement;
+            }
+
+            return true;
         }
 
         private dispatchToggleEvent(toggle: HTMLElement, target: HTMLElement, type: string, visible: boolean, cancelable: boolean) {

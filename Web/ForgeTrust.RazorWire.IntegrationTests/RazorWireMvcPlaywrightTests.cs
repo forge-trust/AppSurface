@@ -112,6 +112,9 @@ public sealed class RazorWireMvcPlaywrightTests
 
         Assert.Null(hiddenData.TitleValue);
         Assert.DoesNotContain("2", hiddenData.IndexValues);
+
+        await page.ClickAsync("button[type='submit']");
+        await page.WaitForSelectorAsync("text=Saved: no follow-up action expected.");
     }
 
     [Fact]

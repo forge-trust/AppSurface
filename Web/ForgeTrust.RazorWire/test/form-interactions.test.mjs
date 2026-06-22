@@ -62,6 +62,7 @@ test('collection add allocates sparse index markers and focuses the new editable
   const added = rows[1];
   assert.equal(added.getAttribute('data-rw-form-index'), '1');
   assert.equal(added.querySelector('input[name="Actions.index"]').value, '1');
+  assert.equal(added.querySelector('input[name="Actions[1].ClientIndex"]').value, '1');
   assert.equal(added.querySelector('input[name="Actions[1].Title"]').id, 'Actions_1__Title');
   assert.equal(added.querySelector('label').getAttribute('for'), 'Actions_1__Title');
   assert.equal(document.activeElement, added.querySelector('input[name="Actions[1].Title"]'));
@@ -78,6 +79,7 @@ test('collection duplicate copies editable values, rewrites references, and clea
   const sourceTitle = root.querySelector('input[name="Actions[0].Title"]');
   sourceTitle.value = 'Call parent';
   root.querySelector('input[name="Actions[0].Id"]').value = 'persisted-1';
+  root.querySelector('input[name="Actions[0].ClientIndex"]').value = '0';
   const form = document.createElement('form');
   form.appendChild(root);
   document.body.appendChild(form);
@@ -91,6 +93,7 @@ test('collection duplicate copies editable values, rewrites references, and clea
   assert.equal(clone.getAttribute('class'), 'rounded-md border border-slate-200 p-4');
   assert.equal(clone.getAttribute('data-consumer-state'), 'step-0');
   assert.equal(clone.querySelector('input[name="Actions.index"]').value, '1');
+  assert.equal(clone.querySelector('input[name="Actions[1].ClientIndex"]').value, '1');
   assert.equal(clone.querySelector('input[name="Actions[1].Title"]').value, 'Call parent');
   assert.equal(clone.querySelector('input[name="Actions[1].Id"]').value, '');
   assert.equal(clone.querySelector('[data-valmsg-for]').getAttribute('data-valmsg-for'), 'Actions[1].Title');
@@ -127,6 +130,54 @@ test('collection remove supports physical and mark-for-removal lanes', () => {
   assert.equal(deleteField.disabled, false);
   assert.equal(id.disabled, false);
   assert.equal(second.root.querySelector('input[name="Actions[0].Title"]').disabled, true);
+});
+
+test('collection remove focus skips hidden marked rows and disabled commands', () => {
+  const { context, document } = loadRuntime();
+  const { root, remove, add } = buildCollection(document);
+  root.setAttribute('data-rw-form-collection-remove-mode', 'mark');
+  const deleteField = root.querySelector('input[name="Actions[0].Delete"]');
+  deleteField.setAttribute('data-rw-form-collection-delete-field', 'true');
+  const form = document.createElement('form');
+  form.appendChild(root);
+  document.body.appendChild(form);
+
+  context.window.RazorWire.formInteractionsManager.scan();
+  remove.dispatchEvent(createEvent('click'));
+  root.setAttribute('data-rw-form-collection-remove-mode', 'physical');
+  add.dispatchEvent(createEvent('click'));
+
+  const addedRemove = root.querySelector('input[name="Actions[1].Title"]')
+    .closest('[data-rw-form-collection-row]')
+    .querySelector('[data-rw-form-collection-remove]');
+  addedRemove.dispatchEvent(createEvent('click'));
+
+  assert.equal(document.activeElement, add);
+});
+
+test('non-button collection commands are diagnosed without preventing fallback clicks', () => {
+  const { context, document } = loadRuntime();
+  const { root } = buildCollection(document);
+  const link = document.createElement('a');
+  link.setAttribute('href', '#fallback');
+  link.setAttribute('data-rw-form-collection-add', 'true');
+  root.appendChild(link);
+  const form = document.createElement('form');
+  form.appendChild(root);
+  document.body.appendChild(form);
+
+  context.window.RazorWire.formInteractionsManager.scan();
+  context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+  const event = createEvent('click');
+  link.dispatchEvent(event);
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(root.querySelectorAll('[data-rw-form-collection-row]').length, 1);
+  assert.equal(
+    context.window.RazorWire.formInteractionsManager
+      .getDiagnostics()
+      .some(diagnostic => /a uses a collection command attribute but is not a button/.test(diagnostic.message)),
+    true);
 });
 
 test('cancelable collection before events prevent mutation', () => {
@@ -221,6 +272,7 @@ function buildCollection(document) {
     hidden(document, 'Actions.index', '0'),
     input(document, 'Actions[0].Id', 'hidden'),
     input(document, 'Actions[0].Delete', 'hidden'),
+    hidden(document, 'Actions[0].ClientIndex', '0'),
     label(document, 'Actions_0__Title'),
     input(document, 'Actions[0].Title', 'text', 'Actions_0__Title'),
     validation(document, 'Actions[0].Title'),
@@ -240,10 +292,16 @@ function buildCollection(document) {
     hidden(document, 'Actions.index', '__index__'),
     input(document, 'Actions[__index__].Id', 'hidden'),
     input(document, 'Actions[__index__].Delete', 'hidden'),
+    hidden(document, 'Actions[__index__].ClientIndex', '__index__'),
     label(document, 'Actions___index____Title'),
     input(document, 'Actions[__index__].Title', 'text', 'Actions___index____Title'),
     validation(document, 'Actions[__index__].Title'),
   );
+  const templateDuplicate = document.createElement('button');
+  templateDuplicate.setAttribute('data-rw-form-collection-duplicate', 'true');
+  const templateRemove = document.createElement('button');
+  templateRemove.setAttribute('data-rw-form-collection-remove', 'true');
+  templateRow.append(templateDuplicate, templateRemove);
   template.content.appendChild(templateRow);
 
   const add = document.createElement('button');
