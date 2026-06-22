@@ -393,35 +393,42 @@ The `Testing*Delay*Milliseconds` options are local/manual testing knobs. The def
 
 When the harvest completes successfully, AppSurface Docs first publishes the completed observatory state with replay enabled, then publishes a live-only RazorWire `rw-visit` command for active subscribers. Replay stays state-only, so late subscribers see the completed state and the plain continuation link without being auto-navigated by an old command. The completion view also renders a normal return link so no-JavaScript users can continue manually.
 
-The harvest progress stream is authorized with the same route-exposure policy as the operator health endpoints and, outside Development, with a host-owned RazorWire channel authorizer. In Development it is exposed by default. In non-development hosts, `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` exposes the health routes but does not by itself authorize the live progress stream.
+The harvest progress stream is authorized with the same route-exposure policy as the operator health endpoints and, outside Development, with a host-owned RazorWire stream authorizer. In Development it is exposed by default. In non-development hosts, `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` exposes the health routes but does not by itself authorize the live progress stream.
 
 ### Production live harvest stream authorization
 
-Production or preview hosts that want users to see live harvest progress must register a custom `IRazorWireChannelAuthorizer` before calling `AddAppSurfaceDocs()`. Use `AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel)` instead of hardcoding the channel name:
+Production or preview hosts that want users to see live harvest progress should register a custom `IRazorWireStreamAuthorizer` before calling `AddAppSurfaceDocs()`. Use `AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(context.Channel)` instead of hardcoding the channel name:
 
 ```csharp
+using ForgeTrust.AppSurface.Auth;
 using ForgeTrust.AppSurface.Docs;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.RazorWire.Streams;
-using Microsoft.AspNetCore.Http;
 
-public sealed class DocsHarvestStreamAuthorizer : IRazorWireChannelAuthorizer
+public sealed class DocsHarvestStreamAuthorizer : IRazorWireStreamAuthorizer
 {
-    public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+    public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
     {
-        if (!AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel))
+        if (!AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(context.Channel))
         {
-            return new ValueTask<bool>(false);
+            return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Forbidden());
         }
 
-        var allowed = context.User.Identity?.IsAuthenticated == true
-                      && context.User.IsInRole("DocsOperator");
+        if (context.HttpContext.User.Identity?.IsAuthenticated != true)
+        {
+            return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Unauthenticated());
+        }
 
-        return new ValueTask<bool>(allowed);
+        if (!context.HttpContext.User.IsInRole("DocsOperator"))
+        {
+            return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Forbidden());
+        }
+
+        return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Allowed());
     }
 }
 
-services.AddSingleton<IRazorWireChannelAuthorizer, DocsHarvestStreamAuthorizer>();
+services.AddSingleton<IRazorWireStreamAuthorizer, DocsHarvestStreamAuthorizer>();
 services.AddAppSurfaceDocs();
 ```
 
@@ -439,7 +446,7 @@ And enable the harvest health routes so the custom authorizer can approve the li
 }
 ```
 
-The built-in RazorWire `AllowAll` mode is not treated as production authorization for the AppSurface Docs harvest progress stream. Registering `IRazorWireChannelAuthorizer` after `AddAppSurfaceDocs()` is an advanced replacement mode: the later authorizer replaces the AppSurface Docs wrapper and must apply the harvest-progress predicate itself.
+The built-in RazorWire `AllowAll` mode is not treated as production authorization for the AppSurface Docs harvest progress stream. Existing `IRazorWireChannelAuthorizer` implementations still work as legacy allow/deny compatibility when registered before `AddAppSurfaceDocs()`. Registering `IRazorWireStreamAuthorizer` or `IRazorWireChannelAuthorizer` after `AddAppSurfaceDocs()` is an advanced replacement mode: the later authorizer replaces the AppSurface Docs wrapper and must apply the harvest-progress predicate itself.
 
 Pitfalls:
 

@@ -70,12 +70,13 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// <see cref="AppSurfaceDocsHarvestProgressReporter"/>, and <see cref="AppSurfaceDocsHarvestPathPolicy"/>.
     /// </para>
     /// <para>
-    /// If an <see cref="IRazorWireChannelAuthorizer"/> is already registered, AppSurface Docs wraps that authorizer with
-    /// <see cref="AppSurfaceDocsHarvestChannelAuthorizer"/> so its harvest-progress channel rules run before delegating
-    /// to the existing authorizer. Register a custom authorizer before calling this method to participate in that
-    /// wrapper. Registering an authorizer after this method is an advanced replacement mode: the application replaces
-    /// the AppSurface Docs wrapper and must apply any AppSurface Docs harvest-progress checks itself, typically with
-    /// <see cref="AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(string?)"/>. In non-development
+    /// If an <see cref="IRazorWireStreamAuthorizer"/> is already registered, AppSurface Docs wraps that result-bearing
+    /// authorizer so its harvest-progress channel rules run before delegating to the existing authorizer. Existing
+    /// <see cref="IRazorWireChannelAuthorizer"/> registrations still work through the legacy bool facade when plain
+    /// allow/deny compatibility is sufficient. Register a custom authorizer before calling this method to participate in
+    /// that wrapper. Registering an authorizer after this method is an advanced replacement mode: the application
+    /// replaces the AppSurface Docs wrapper and must apply any AppSurface Docs harvest-progress checks itself, typically
+    /// with <see cref="AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(string?)"/>. In non-development
     /// environments, <c>AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always</c> exposes the health routes but does not
     /// authorize the live harvest stream unless a custom authorizer allows it. Built-in RazorWire allow-all/deny-all
     /// authorizers are not considered custom authorization for that docs-owned stream. Call this method once during
