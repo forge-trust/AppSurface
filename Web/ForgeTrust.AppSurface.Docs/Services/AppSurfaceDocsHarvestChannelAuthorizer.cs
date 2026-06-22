@@ -1,5 +1,7 @@
+using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
@@ -9,9 +11,7 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// </summary>
 internal sealed class AppSurfaceDocsHarvestChannelAuthorizer : IRazorWireChannelAuthorizer
 {
-    private readonly AppSurfaceDocsOptions _options;
-    private readonly IHostEnvironment _environment;
-    private readonly IRazorWireChannelAuthorizer? _inner;
+    private readonly IRazorWireStreamAuthorizer _streamAuthorizer;
 
     /// <summary>
     /// Creates an authorizer that applies docs-harvest route visibility to the harvest progress stream.
@@ -30,10 +30,17 @@ internal sealed class AppSurfaceDocsHarvestChannelAuthorizer : IRazorWireChannel
         AppSurfaceDocsOptions options,
         IHostEnvironment environment,
         IRazorWireChannelAuthorizer? inner = null)
+        : this(new AppSurfaceDocsHarvestStreamAuthorizer(options, environment, innerChannelAuthorizer: inner))
     {
-        _options = options ?? throw new ArgumentNullException(nameof(options));
-        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
-        _inner = inner;
+    }
+
+    /// <summary>
+    /// Creates a bool facade over the effective result-bearing Docs harvest stream authorizer.
+    /// </summary>
+    /// <param name="streamAuthorizer">The effective stream authorizer used by the RazorWire endpoint.</param>
+    public AppSurfaceDocsHarvestChannelAuthorizer(IRazorWireStreamAuthorizer streamAuthorizer)
+    {
+        _streamAuthorizer = streamAuthorizer ?? throw new ArgumentNullException(nameof(streamAuthorizer));
     }
 
     /// <summary>
@@ -56,28 +63,11 @@ internal sealed class AppSurfaceDocsHarvestChannelAuthorizer : IRazorWireChannel
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (!AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel))
-        {
-            return _inner is not null && await _inner.CanSubscribeAsync(context, channel);
-        }
-
-        if (!AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment))
-        {
-            return false;
-        }
-
-        if (_environment.IsDevelopment())
-        {
-            return true;
-        }
-
-        return _inner is not null
-               && !IsBuiltInAuthorizer(_inner)
-               && await _inner.CanSubscribeAsync(context, channel);
-    }
-
-    private static bool IsBuiltInAuthorizer(IRazorWireChannelAuthorizer authorizer)
-    {
-        return authorizer is DenyAllRazorWireChannelAuthorizer or AllowAllRazorWireChannelAuthorizer;
+        return (await _streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                channel,
+                context.RequestServices?.GetService<RazorWireOptions>()?.Streams.AuthorizationMode
+                ?? RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed;
     }
 }

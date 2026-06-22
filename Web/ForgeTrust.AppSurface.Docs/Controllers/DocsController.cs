@@ -3,6 +3,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.ViewComponents;
 using ForgeTrust.AppSurface.Intelligence;
+using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Bridge;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Authorization;
@@ -967,24 +968,40 @@ public class DocsController : Controller
 
     private async ValueTask<bool> CanUseLiveHarvestProgressAsync()
     {
-        // CanUseLiveHarvestProgressAsync delegates to the effective IRazorWireChannelAuthorizer because the
-        // AddAppSurfaceDocs-installed AppSurfaceDocsHarvestChannelAuthorizer wrapper owns the same harvest-progress
-        // decision as the RazorWire endpoint. In non-development environments that wrapper denies HarvestProgress
-        // when the inner authorizer is AllowAllRazorWireChannelAuthorizer or DenyAllRazorWireChannelAuthorizer, so
-        // the built-in allow-all cannot enable live progress in production unless a host intentionally replaces the
-        // AppSurfaceDocsHarvestChannelAuthorizer wrapper after AddAppSurfaceDocs as an advanced replacement mode.
-        var authorizer = HttpContext.RequestServices.GetService<IRazorWireChannelAuthorizer>();
+        // The Docs-installed result authorizer owns the same harvest-progress decision as the RazorWire endpoint. The
+        // legacy bool authorizer remains a facade over that result path for existing callers and tests.
+        var authorizer = HttpContext.RequestServices.GetService<IRazorWireStreamAuthorizer>();
         if (authorizer is null)
         {
+            var channelAuthorizer = HttpContext.RequestServices.GetService<IRazorWireChannelAuthorizer>();
+            if (channelAuthorizer is not null)
+            {
+                try
+                {
+                    return await channelAuthorizer.CanSubscribeAsync(
+                        HttpContext,
+                        AppSurfaceDocsStreamAuthorization.HarvestProgressChannel);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException || !HttpContext.RequestAborted.IsCancellationRequested)
+                {
+                    return LogLiveHarvestProgressAuthorizationFailure(exception);
+                }
+            }
+
             return AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment)
                    && _environment.IsDevelopment();
         }
 
         try
         {
-            return await authorizer.CanSubscribeAsync(
-                HttpContext,
-                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel);
+            var result = await authorizer.AuthorizeAsync(
+                new RazorWireStreamAuthorizationContext(
+                    HttpContext,
+                    AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                    HttpContext.RequestServices.GetService<RazorWireOptions>()?.Streams.AuthorizationMode
+                    ?? RazorWireStreamAuthorizationMode.DenyAll));
+
+            return result.IsAllowed;
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !HttpContext.RequestAborted.IsCancellationRequested)
         {

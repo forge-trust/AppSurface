@@ -230,14 +230,16 @@ packages:
     release_notes_path: releases/v0.1.0-rc.3.md
     order: 100
     use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, or islands without moving to a separate frontend app.
-    includes: RazorWire modules, TagHelpers, stream helpers, Razor fragment updates, and hybrid island support.
-    does_not_include: OpenAPI generation, API reference UI, or Tailwind asset compilation.
+    includes: RazorWire modules, TagHelpers, stream helpers, result-bearing stream authorization, Razor fragment updates, and hybrid island support.
+    does_not_include: OpenAPI generation, API reference UI, Tailwind asset compilation, ASP.NET Core authentication schemes, challenge/forbid execution, redirects, or policy definitions.
     start_here_path: Web/ForgeTrust.RazorWire/README.md
     recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, and server-rendered islands.
     depends_on:
+      - ForgeTrust.AppSurface.Auth
       - ForgeTrust.AppSurface.Intelligence
       - ForgeTrust.AppSurface.Web
     expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Auth
       - ForgeTrust.AppSurface.Intelligence
       - ForgeTrust.AppSurface.Web
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj
@@ -284,6 +286,7 @@ packages:
     start_here_path: Web/ForgeTrust.AppSurface.Docs/README.md
     start_here_label: AppSurface Docs README
     expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Auth
       - ForgeTrust.AppSurface.Caching
       - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Intelligence

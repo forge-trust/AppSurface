@@ -31,6 +31,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Auth\ForgeTrust.AppSurface.Auth\ForgeTrust.AppSurface.Auth.csproj" />
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config\ForgeTrust.AppSurface.Config.csproj" />
     <ProjectReference Include="..\..\tests\ForgeTrust.AppSurface.Testing\ForgeTrust.AppSurface.Testing.csproj" />
     <ProjectReference Include="..\ForgeTrust.AppSurface.Docs\ForgeTrust.AppSurface.Docs.csproj" />

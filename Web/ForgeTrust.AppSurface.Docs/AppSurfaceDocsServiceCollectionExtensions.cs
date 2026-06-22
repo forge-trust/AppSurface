@@ -261,17 +261,39 @@ public static class AppSurfaceDocsServiceCollectionExtensions
 
     private static void TryAddHarvestChannelAuthorizer(IServiceCollection services)
     {
-        var existing = services.LastOrDefault(descriptor => descriptor.ServiceType == typeof(IRazorWireChannelAuthorizer));
+        var existingStream = services.LastOrDefault(descriptor => descriptor.ServiceType == typeof(IRazorWireStreamAuthorizer));
+        var existingChannel = services.LastOrDefault(descriptor => descriptor.ServiceType == typeof(IRazorWireChannelAuthorizer));
+        var lifetime = GetHarvestAuthorizerLifetime(existingStream, existingChannel);
+
+        services.RemoveAll<IRazorWireStreamAuthorizer>();
         services.RemoveAll<IRazorWireChannelAuthorizer>();
-        var lifetime = existing?.Lifetime ?? ServiceLifetime.Singleton;
+        services.Add(
+            ServiceDescriptor.Describe(
+                typeof(IRazorWireStreamAuthorizer),
+                provider => new AppSurfaceDocsHarvestStreamAuthorizer(
+                    provider.GetRequiredService<AppSurfaceDocsOptions>(),
+                    ResolveHostEnvironment(provider),
+                    CreateInnerStreamAuthorizer(provider, existingStream),
+                    CreateInnerChannelAuthorizer(provider, existingChannel)),
+                lifetime));
         services.Add(
             ServiceDescriptor.Describe(
                 typeof(IRazorWireChannelAuthorizer),
                 provider => new AppSurfaceDocsHarvestChannelAuthorizer(
-                    provider.GetRequiredService<AppSurfaceDocsOptions>(),
-                    ResolveHostEnvironment(provider),
-                    CreateInnerChannelAuthorizer(provider, existing)),
+                    provider.GetRequiredService<IRazorWireStreamAuthorizer>()),
                 lifetime));
+    }
+
+    private static ServiceLifetime GetHarvestAuthorizerLifetime(
+        ServiceDescriptor? streamDescriptor,
+        ServiceDescriptor? channelDescriptor)
+    {
+        if (streamDescriptor is not null && !IsRazorWireBoolChannelAuthorizerAdapter(streamDescriptor))
+        {
+            return streamDescriptor.Lifetime;
+        }
+
+        return channelDescriptor?.Lifetime ?? ServiceLifetime.Singleton;
     }
 
     private static IHostEnvironment ResolveHostEnvironment(IServiceProvider provider)
@@ -312,10 +334,42 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         return null;
     }
 
+    private static IRazorWireStreamAuthorizer? CreateInnerStreamAuthorizer(
+        IServiceProvider provider,
+        ServiceDescriptor? descriptor)
+    {
+        if (descriptor is null || IsRazorWireBoolChannelAuthorizerAdapter(descriptor))
+        {
+            return null;
+        }
+
+        if (descriptor.ImplementationInstance is IRazorWireStreamAuthorizer instance)
+        {
+            return instance;
+        }
+
+        if (descriptor.ImplementationFactory is not null)
+        {
+            return descriptor.ImplementationFactory(provider) as IRazorWireStreamAuthorizer;
+        }
+
+        return descriptor.ImplementationType is not null
+            ? (IRazorWireStreamAuthorizer)ActivatorUtilities.CreateInstance(provider, descriptor.ImplementationType)
+            : null;
+    }
+
     private static IRazorWireChannelAuthorizer? FilterBuiltInDenyAllAuthorizer(
         IRazorWireChannelAuthorizer? authorizer)
     {
         return authorizer is DenyAllRazorWireChannelAuthorizer ? null : authorizer;
+    }
+
+    private static bool IsRazorWireBoolChannelAuthorizerAdapter(ServiceDescriptor descriptor)
+    {
+        const string adapterTypeName = "ForgeTrust.RazorWire.Streams.RazorWireBoolChannelAuthorizerAdapter";
+
+        return descriptor.ImplementationType?.FullName == adapterTypeName
+               || descriptor.ImplementationInstance?.GetType().FullName == adapterTypeName;
     }
 
     private static void TryAddMarkdownHarvester(IServiceCollection services)

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using FakeItEasy;
+using ForgeTrust.AppSurface.Auth;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs.Controllers;
@@ -98,6 +99,10 @@ public class AppSurfaceDocsWebModuleTests
             services,
             s => s.ServiceType == typeof(IRazorWireChannelAuthorizer)
                  && s.ImplementationFactory is not null);
+        Assert.Contains(
+            services,
+            s => s.ServiceType == typeof(IRazorWireStreamAuthorizer)
+                 && s.ImplementationFactory is not null);
         Assert.Contains(services, s => s.ServiceType == typeof(AppSurfaceDocsHarvestPathPolicy));
         Assert.Contains(
             services,
@@ -124,6 +129,7 @@ public class AppSurfaceDocsWebModuleTests
         Assert.NotNull(serviceProvider.GetRequiredService<RazorWireOptions>());
         Assert.NotNull(serviceProvider.GetRequiredService<IRazorWireStreamHub>());
         Assert.NotNull(serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>());
+        Assert.NotNull(serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>());
         Assert.NotNull(serviceProvider.GetRequiredService<DocAggregator>());
         Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestProgressReporter>());
         Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestCoordinator>());
@@ -566,10 +572,82 @@ public class AppSurfaceDocsWebModuleTests
 
         await using var serviceProvider = services.BuildServiceProvider();
         var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
         var context = new DefaultHttpContext { RequestServices = serviceProvider };
 
         Assert.IsType<AllowAllChannelAuthorizer>(authorizer);
         Assert.True(await authorizer.CanSubscribeAsync(context, AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+        Assert.True((await streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed);
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerIsRegisteredBeforeDocs_AllowsVisibleHarvestChannel()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireStreamAuthorizer, AllowAllStreamAuthorizer>();
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var channelAuthorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.True((await streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed);
+        Assert.True(await channelAuthorizer.CanSubscribeAsync(context, AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+        Assert.True(await channelAuthorizer.CanSubscribeAsync(context, "host-channel"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerIsRegisteredAfterDocs_ReplacesDocsWrapper()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Never"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+        services.AddSingleton<IRazorWireStreamAuthorizer, AllowAllStreamAuthorizer>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.IsType<AllowAllStreamAuthorizer>(streamAuthorizer);
+        Assert.True((await streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed);
     }
 
     [Fact]
@@ -2140,6 +2218,14 @@ public class AppSurfaceDocsWebModuleTests
         public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
         {
             return new ValueTask<bool>(false);
+        }
+    }
+
+    private sealed class AllowAllStreamAuthorizer : IRazorWireStreamAuthorizer
+    {
+        public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Allowed());
         }
     }
 

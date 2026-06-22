@@ -1,4 +1,6 @@
+using ForgeTrust.AppSurface.Auth;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.FileProviders;
@@ -120,6 +122,51 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         Assert.True(await allowAll.CanSubscribeAsync(context, "public-host-channel"));
     }
 
+    [Fact]
+    public async Task StreamAuthorizeAsync_WhenChannelIsNotHarvestProgress_DelegatesToInnerResultAuthorizer()
+    {
+        var authorizer = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Never),
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            new TestStreamAuthorizer(AppSurfaceAuthResult.Unauthenticated()));
+
+        var result = await authorizer.AuthorizeAsync(Context("app-notifications"));
+
+        Assert.Equal(AppSurfaceAuthOutcome.Challenge, result.Outcome);
+    }
+
+    [Fact]
+    public async Task StreamAuthorizeAsync_WhenProductionHarvestProgressHasInnerResultAuthorizer_RequiresInnerAllowedResult()
+    {
+        var context = Context(AppSurfaceDocsStreamAuthorization.HarvestProgressChannel);
+        var allowed = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Always),
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            new TestStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+        var denied = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Always),
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            new TestStreamAuthorizer(AppSurfaceAuthResult.Forbidden()));
+
+        Assert.True((await allowed.AuthorizeAsync(context)).IsAllowed);
+        Assert.Equal(AppSurfaceAuthOutcome.Forbid, (await denied.AuthorizeAsync(context)).Outcome);
+    }
+
+    [Fact]
+    public async Task StreamAuthorizeAsync_WhenProductionHarvestProgressHasBuiltInBoolAuthorizer_DeniesHarvestButDelegatesHostChannels()
+    {
+        var authorizer = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Always),
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            innerChannelAuthorizer: new AllowAllRazorWireChannelAuthorizer());
+
+        var harvest = await authorizer.AuthorizeAsync(Context(AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+        var host = await authorizer.AuthorizeAsync(Context("public-host-channel"));
+
+        Assert.Equal(AppSurfaceAuthOutcome.Forbid, harvest.Outcome);
+        Assert.True(host.IsAllowed);
+    }
+
     [Theory]
     [InlineData(null, false)]
     [InlineData("", false)]
@@ -161,6 +208,22 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
         {
             return new ValueTask<bool>(allow);
+        }
+    }
+
+    private static RazorWireStreamAuthorizationContext Context(string channel)
+    {
+        return new RazorWireStreamAuthorizationContext(
+            new DefaultHttpContext(),
+            channel,
+            RazorWireStreamAuthorizationMode.DenyAll);
+    }
+
+    private sealed class TestStreamAuthorizer(AppSurfaceAuthResult result) : IRazorWireStreamAuthorizer
+    {
+        public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            return new ValueTask<AppSurfaceAuthResult>(result);
         }
     }
 }

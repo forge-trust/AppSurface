@@ -216,10 +216,49 @@ IP fairness, load-balancer limits, or cluster-wide counters. Use ASP.NET Core ra
 limits, SignalR, or managed pub/sub when public traffic needs client fairness, distributed fanout, groups, durable
 delivery, or cross-node capacity planning.
 
-For user, tenant, or workflow-specific streams, register a custom authorizer instead:
+For user, tenant, or workflow-specific streams, prefer a result-bearing stream authorizer:
 
 ```csharp
-public sealed class TenantStreamAuthorizer : IRazorWireChannelAuthorizer
+using ForgeTrust.AppSurface.Auth;
+using ForgeTrust.RazorWire.Streams;
+
+public sealed class TenantStreamAuthorizer : IRazorWireStreamAuthorizer
+{
+    public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+    {
+        var tenantId = context.HttpContext.User.FindFirst("tenant_id")?.Value;
+
+        if (tenantId is null)
+        {
+            return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Unauthenticated());
+        }
+
+        return context.Channel == $"tenant:{tenantId}:updates"
+            ? new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Allowed())
+            : new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Forbidden());
+    }
+}
+
+services.AddSingleton<IRazorWireStreamAuthorizer, TenantStreamAuthorizer>();
+services.AddRazorWire();
+```
+
+Add one stream source that uses the same finite channel scheme:
+
+```razor
+<rw:stream-source channel="tenant:@Model.TenantId:updates" replay="true" />
+```
+
+Run the app, sign in as a user with a matching `tenant_id` claim, and open the page. Allowed requests open the
+Server-Sent Events stream. Unauthenticated requests return `401`, forbidden tenant mismatches return `403`, setup
+failures return `500`, unsafe navigation returns `400`, and stale sessions return `401` before any SSE headers, hub
+subscription, or admission lease. In Development, RazorWire writes safe `Problem`, `Cause`, `Fix`, and `Docs` text; in
+Production, denial bodies stay empty.
+
+Legacy bool authorizers still work and are useful for simple allow/deny compatibility:
+
+```csharp
+public sealed class TenantBoolStreamAuthorizer : IRazorWireChannelAuthorizer
 {
     public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
     {
@@ -228,9 +267,27 @@ public sealed class TenantStreamAuthorizer : IRazorWireChannelAuthorizer
     }
 }
 
-services.AddSingleton<IRazorWireChannelAuthorizer, TenantStreamAuthorizer>();
+services.AddSingleton<IRazorWireChannelAuthorizer, TenantBoolStreamAuthorizer>();
 services.AddRazorWire();
 ```
+
+Use `IRazorWireStreamAuthorizer` when diagnostics need unauthenticated, forbidden, stale-session, unsafe-navigation, or
+setup-failure outcomes. Use `IRazorWireChannelAuthorizer` only when a plain allow/deny answer is enough. Registration
+order follows Microsoft DI single-service resolution:
+
+| Registration shape | Effective stream authorization |
+|---|---|
+| No custom authorizer | Built-in bool authorizer selected by `RazorWireOptions.Streams.AuthorizationMode`, adapted to results. |
+| `IRazorWireChannelAuthorizer` before or after `AddRazorWire` | Legacy bool authorizer is adapted to `Allowed` or `Forbidden`. |
+| `IRazorWireStreamAuthorizer` before `AddRazorWire` | Result authorizer suppresses the bool adapter and wins. |
+| `IRazorWireStreamAuthorizer` after `AddRazorWire` | Result authorizer wins through last-registration behavior. |
+| Both result and bool authorizers | The result authorizer wins unless it explicitly delegates to a bool authorizer. |
+| `AddAppSurfaceDocs` | Docs installs a result-aware harvest wrapper and a legacy bool facade over the same decision. |
+| Custom result or bool authorizer after `AddAppSurfaceDocs` | Advanced replacement mode; the host owns harvest-channel safety. |
+
+For ASP.NET Core host policies, keep policy evaluation in the host or `ForgeTrust.AppSurface.Auth.AspNetCore`, then
+return the resulting `AppSurfaceAuthResult` from `IRazorWireStreamAuthorizer`. RazorWire does not call
+`ChallengeAsync`, `ForbidAsync`, redirect, mutate cookies, register schemes, or evaluate policies itself.
 
 Package-owned sensitive streams may impose stricter rules than the global RazorWire `AllowAll` shortcut. For example, AppSurface Docs harvest progress requires a custom host authorizer outside Development even when the host exposes docs harvest health routes.
 
@@ -352,7 +409,9 @@ RazorWire is designed for a fast feedback loop during development:
 
 Replay is opt-in and intentionally small. The in-memory hub keeps up to 25 retained fragments per replay channel and prunes inactive replay channels when more than 256 replay channels are retained, dropping the oldest retained fragments and inactive replay channels first. Replay subscriptions to channels with no retained messages do not allocate durable per-channel replay metadata. Use replay for idempotent state snapshots, progress indicators, and other "latest known UI" streams where a late subscriber should catch up. Do not use replay for one-time commands, sensitive personal data, secrets, or unbounded event logs.
 
-Endpoint admission is separate from hub delivery. The default endpoint validates channel names, authorizes, and admits a live subscription before calling `Subscribe`. Apps that call a custom `IRazorWireStreamHub` directly do not get endpoint admission automatically.
+Endpoint admission is separate from hub delivery. The default endpoint validates channel names, authorizes with
+`IRazorWireStreamAuthorizer`, and admits a live subscription before calling `Subscribe`. Apps that call a custom
+`IRazorWireStreamHub` directly do not get endpoint admission automatically.
 
 ### `RazorWireStreamOptions`
 
@@ -366,16 +425,30 @@ Endpoint admission is separate from hub delivery. The default endpoint validates
 All numeric admission limits must be greater than zero and are validated at startup. Raising them increases connection,
 memory, and request-slot pressure in the current process; it does not create distributed fairness.
 
+### `IRazorWireStreamAuthorizer`
+
+- `AuthorizeAsync(RazorWireStreamAuthorizationContext)` returns a passive `AppSurfaceAuthResult`.
+- `Allowed` continues to admission and SSE; `Challenge` maps to `401`; `Forbid` maps to `403`; `SetupFailure` maps to
+  `500`; `UnsafeNavigation` maps to `400`; `StaleOrUnknownSession` maps to `401`.
+- RazorWire treats app-supplied `AppSurfaceAuthResult.Message` and `Metadata` as untrusted. Development diagnostics are
+  synthesized from safe enum/status/configuration facts; production bodies stay empty.
+- The response mapper is not an extension point in v1. Customize authorization decisions by registering a different
+  `IRazorWireStreamAuthorizer`.
+- See [Stream Authorization](Docs/stream-authorization.md) for the full status matrix, DI precedence, logging caveats,
+  and host-policy recipe.
+
 ### `IRazorWireChannelAuthorizer`
 
 - `CanSubscribeAsync(HttpContext, channel)` decides whether the current request may subscribe to a stream channel.
 - The built-in `DenyAllRazorWireChannelAuthorizer` is selected by default through `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.DenyAll`.
 - `AllowAllRazorWireChannelAuthorizer` is selected by `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll` and should only be used for public/demo streams.
-- Register a custom implementation for auth-context-aware decisions based on `HttpContext.User`, claims, tenant membership, workflow state, or route data.
+- Register a custom implementation only when a plain allow/deny answer is enough. New user, tenant, or workflow streams
+  should generally use `IRazorWireStreamAuthorizer` for richer denial semantics.
 
 ### `RazorWireStreamAuthorizationMode`
 
-- `DenyAll = 0`: default; every subscription returns `403` unless a custom `IRazorWireChannelAuthorizer` is registered.
+- `DenyAll = 0`: default; every subscription returns `403` unless a custom `IRazorWireStreamAuthorizer` or legacy
+  `IRazorWireChannelAuthorizer` is registered.
 - `AllowAll = 1`: permits every subscription; intended for public/demo streams only.
 - Unknown enum values fail with a clear configuration exception instead of falling through to an unsafe mode.
 
