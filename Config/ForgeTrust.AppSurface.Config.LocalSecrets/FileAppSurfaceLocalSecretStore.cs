@@ -72,15 +72,19 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
                 return failure;
             }
 
-            if (!data.TryGetValue(identity.StorageName, out var entry))
+            if (!TryInspectExistingFilePosture(out var posture, out failure))
             {
-                return AppSurfaceLocalSecretResult.Missing(Name);
+                return failure;
             }
 
-            var posture = _fileSystem.InspectExistingFilePosture(_path);
-            return posture.Kind == FileSecretPostureKind.Unsupported
-                ? PostureFailure(posture)
-                : AppSurfaceLocalSecretResult.Found(entry.Value, Name);
+            if (posture.Kind == FileSecretPostureKind.Unsupported)
+            {
+                return PostureFailure(posture);
+            }
+
+            return data.TryGetValue(identity.StorageName, out var entry)
+                ? AppSurfaceLocalSecretResult.Found(entry.Value, Name)
+                : AppSurfaceLocalSecretResult.Missing(Name);
         }
     }
 
@@ -92,13 +96,17 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
 
         lock (_gate)
         {
-            var preflight = _fileSystem.PrepareWrite(_path);
+            if (!TryPrepareWrite(out var preflight, out var failure))
+            {
+                return failure;
+            }
+
             if (preflight.Kind == FileSecretPostureKind.Unsupported)
             {
                 return PostureFailure(preflight);
             }
 
-            if (!TryRead(out var data, out var failure))
+            if (!TryRead(out var data, out failure))
             {
                 return failure;
             }
@@ -121,13 +129,17 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
 
         lock (_gate)
         {
-            var preflight = _fileSystem.PrepareWrite(_path);
+            if (!TryPrepareWrite(out var preflight, out var failure))
+            {
+                return failure;
+            }
+
             if (preflight.Kind == FileSecretPostureKind.Unsupported)
             {
                 return PostureFailure(preflight);
             }
 
-            if (!TryRead(out var data, out var failure))
+            if (!TryRead(out var data, out failure))
             {
                 return failure;
             }
@@ -157,7 +169,11 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
                 return AppSurfaceLocalSecretListResult.Failed(failure.Status, failure.Diagnostic!, Name);
             }
 
-            var posture = _fileSystem.InspectExistingFilePosture(_path);
+            if (!TryInspectExistingFilePosture(out var posture, out failure))
+            {
+                return AppSurfaceLocalSecretListResult.Failed(failure.Status, failure.Diagnostic!, Name);
+            }
+
             if (posture.Kind == FileSecretPostureKind.Unsupported)
             {
                 var postureFailure = PostureFailure(posture);
@@ -203,7 +219,12 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
     {
         try
         {
-            var posture = _fileSystem.InspectExistingFilePosture(_path);
+            if (!TryInspectExistingFilePosture(out var posture, out failure))
+            {
+                data = [];
+                return false;
+            }
+
             if (posture.Kind == FileSecretPostureKind.Unsupported)
             {
                 data = [];
@@ -229,24 +250,13 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
         catch (UnauthorizedAccessException)
         {
             data = [];
-            failure = Failure(
-                LocalSecretResultStatus.Locked,
-                "local-secret-store-locked",
-                "Local secret file store cannot be read.",
-                "The current user cannot read the configured local secret file.",
-                "Fix file permissions or choose an OS-backed store.");
+            failure = ReadLockedFailure();
             return false;
         }
         catch (IOException)
         {
             data = [];
-            failure = Failure(
-                LocalSecretResultStatus.Unavailable,
-                "local-secret-store-unavailable",
-                "Local secret file store is unavailable.",
-                "The configured local secret file could not be read.",
-                "Close other processes using the file and retry.",
-                retryable: true);
+            failure = ReadUnavailableFailure();
             return false;
         }
     }
@@ -279,27 +289,98 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
         }
         catch (UnauthorizedAccessException)
         {
-            return Failure(
-                LocalSecretResultStatus.Locked,
-                "local-secret-store-locked",
-                "Local secret file store cannot be written.",
-                "The current user cannot write the configured local secret file.",
-                "Fix file permissions or choose an OS-backed store.");
+            return WriteLockedFailure();
         }
         catch (IOException)
         {
-            return Failure(
-                LocalSecretResultStatus.Unavailable,
-                "local-secret-store-unavailable",
-                "Local secret file store is unavailable.",
-                "The configured local secret file could not be written.",
-                "Close other processes using the file and retry.",
-                retryable: true);
+            return WriteUnavailableFailure();
         }
     }
 
     private FileSecretPostureResult Write(Dictionary<string, FileSecretEntry> data) =>
         _fileSystem.WriteAllTextWithPosture(_path, JsonSerializer.Serialize(data, JsonOptions));
+
+    private bool TryInspectExistingFilePosture(
+        out FileSecretPostureResult posture,
+        out AppSurfaceLocalSecretResult failure)
+    {
+        try
+        {
+            posture = _fileSystem.InspectExistingFilePosture(_path);
+            failure = null!;
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            posture = FileSecretPostureResult.Ready();
+            failure = ReadLockedFailure();
+            return false;
+        }
+        catch (IOException)
+        {
+            posture = FileSecretPostureResult.Ready();
+            failure = ReadUnavailableFailure();
+            return false;
+        }
+    }
+
+    private bool TryPrepareWrite(
+        out FileSecretPostureResult posture,
+        out AppSurfaceLocalSecretResult failure)
+    {
+        try
+        {
+            posture = _fileSystem.PrepareWrite(_path);
+            failure = null!;
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            posture = FileSecretPostureResult.Ready();
+            failure = WriteLockedFailure();
+            return false;
+        }
+        catch (IOException)
+        {
+            posture = FileSecretPostureResult.Ready();
+            failure = WriteUnavailableFailure();
+            return false;
+        }
+    }
+
+    private AppSurfaceLocalSecretResult ReadLockedFailure() =>
+        Failure(
+            LocalSecretResultStatus.Locked,
+            "local-secret-store-locked",
+            "Local secret file store cannot be read.",
+            "The current user cannot read the configured local secret file.",
+            "Fix file permissions or choose an OS-backed store.");
+
+    private AppSurfaceLocalSecretResult ReadUnavailableFailure() =>
+        Failure(
+            LocalSecretResultStatus.Unavailable,
+            "local-secret-store-unavailable",
+            "Local secret file store is unavailable.",
+            "The configured local secret file could not be read.",
+            "Close other processes using the file and retry.",
+            retryable: true);
+
+    private AppSurfaceLocalSecretResult WriteLockedFailure() =>
+        Failure(
+            LocalSecretResultStatus.Locked,
+            "local-secret-store-locked",
+            "Local secret file store cannot be written.",
+            "The current user cannot write the configured local secret file.",
+            "Fix file permissions or choose an OS-backed store.");
+
+    private AppSurfaceLocalSecretResult WriteUnavailableFailure() =>
+        Failure(
+            LocalSecretResultStatus.Unavailable,
+            "local-secret-store-unavailable",
+            "Local secret file store is unavailable.",
+            "The configured local secret file could not be written.",
+            "Close other processes using the file and retry.",
+            retryable: true);
 
     private AppSurfaceLocalSecretResult Failure(
         LocalSecretResultStatus status,
@@ -387,15 +468,26 @@ internal interface IFileAppSurfaceLocalSecretStoreFileSystem
     FileSecretPostureResult Doctor(string path);
 }
 
+/// <summary>
+/// Default filesystem adapter for the explicit file-backed LocalSecrets store.
+/// </summary>
+/// <remarks>
+/// The adapter validates path shape, Unix mode posture, and write ordering without broad filesystem mutation. Missing
+/// fallback directories may be created, but existing loose directories are reported for the caller to fix deliberately.
+/// </remarks>
 internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileAppSurfaceLocalSecretStoreFileSystem
 {
     private const UnixFileMode SecretDirectoryMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
     private const UnixFileMode SecretFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
+    /// <summary>
+    /// Gets the singleton production adapter.
+    /// </summary>
     public static DefaultFileAppSurfaceLocalSecretStoreFileSystem Instance { get; } = new();
 
     private readonly Func<bool> _isUnix;
     private readonly Func<bool> _isMacOs;
+    private readonly Action<string>? _beforeMove;
 
     private DefaultFileAppSurfaceLocalSecretStoreFileSystem()
         : this(() => !OperatingSystem.IsWindows(), OperatingSystem.IsMacOS)
@@ -407,32 +499,41 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
     /// </summary>
     /// <param name="isUnix">Returns whether Unix mode checks are available.</param>
     /// <param name="isMacOs">Returns whether macOS directory-alias exceptions should apply.</param>
-    internal DefaultFileAppSurfaceLocalSecretStoreFileSystem(Func<bool> isUnix, Func<bool> isMacOs)
+    /// <param name="beforeMove">Optional deterministic test hook invoked after the temporary file is ready.</param>
+    internal DefaultFileAppSurfaceLocalSecretStoreFileSystem(
+        Func<bool> isUnix,
+        Func<bool> isMacOs,
+        Action<string>? beforeMove = null)
     {
         ArgumentNullException.ThrowIfNull(isUnix);
         ArgumentNullException.ThrowIfNull(isMacOs);
 
         _isUnix = isUnix;
         _isMacOs = isMacOs;
+        _beforeMove = beforeMove;
     }
 
+    /// <inheritdoc />
     public bool FileExists(string path) => File.Exists(path);
 
+    /// <inheritdoc />
     public string ReadAllText(string path) => File.ReadAllText(path);
 
+    /// <inheritdoc />
     public FileSecretPostureResult InspectReadPath(string path) => ValidateExistingPathShape(path, finalMustBeFile: true);
 
+    /// <inheritdoc />
     public FileSecretPostureResult InspectExistingFilePosture(string path)
     {
-        if (!File.Exists(path))
-        {
-            return FileSecretPostureResult.Ready();
-        }
-
         var shape = ValidateExistingPathShape(path, finalMustBeFile: true);
         if (shape.Kind == FileSecretPostureKind.Unsupported)
         {
             return shape;
+        }
+
+        if (!File.Exists(path))
+        {
+            return FileSecretPostureResult.Ready();
         }
 
         if (!IsUnix())
@@ -462,6 +563,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         return FileSecretPostureResult.Ready();
     }
 
+    /// <inheritdoc />
     public FileSecretPostureResult PrepareWrite(string path)
     {
         var shape = ValidateExistingPathShape(path, finalMustBeFile: true);
@@ -490,6 +592,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
             : FileSecretPostureResult.Ready();
     }
 
+    /// <inheritdoc />
     public FileSecretPostureResult WriteAllTextWithPosture(string path, string contents)
     {
         var preflight = PrepareWrite(path);
@@ -515,6 +618,8 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
                 new FileInfo(tempPath).UnixFileMode = SecretFileMode;
             }
 
+            _beforeMove?.Invoke(tempPath);
+
             var shape = ValidateExistingPathShape(path, finalMustBeFile: true);
             if (shape.Kind == FileSecretPostureKind.Unsupported)
             {
@@ -539,6 +644,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         }
     }
 
+    /// <inheritdoc />
     public FileSecretPostureResult Doctor(string path)
     {
         var preflight = PrepareWrite(path);
@@ -573,7 +679,13 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         if (IsUnix() && !Directory.Exists(directory))
         {
             Directory.CreateDirectory(directory, SecretDirectoryMode);
-            return FileSecretPostureResult.Ready();
+            return IsDirectoryModeReady(new DirectoryInfo(directory).UnixFileMode)
+                ? FileSecretPostureResult.Ready()
+                : FileSecretPostureResult.Unsupported(
+                    "local-secret-file-posture-degraded",
+                    "Local secret directory posture is degraded.",
+                    "The fallback secret directory could not be created with owner-only read/write/execute mode bits.",
+                    "Move the fallback file under a dedicated owner-only directory or choose the OS-backed LocalSecrets store.");
         }
 
         Directory.CreateDirectory(directory);
@@ -658,7 +770,8 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
                 break;
             }
 
-            if (IsSymbolicLink(info) && !IsAllowedSystemDirectoryAlias(current, info))
+            var allowedSystemAlias = IsSymbolicLink(info) && IsAllowedSystemDirectoryAlias(current, info);
+            if (IsSymbolicLink(info) && !allowedSystemAlias)
             {
                 return FileSecretPostureResult.Unsupported(
                     "local-secret-file-posture-unsupported",
@@ -674,6 +787,19 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
                     "Local secret directory path is unsupported.",
                     "A fallback secret path component is not a directory.",
                     "Choose a JSON file path under normal per-user directories or use the OS-backed LocalSecrets store.");
+            }
+
+            if (IsUnix()
+                && !allowedSystemAlias
+                && info is DirectoryInfo directoryInfo
+                && IsDirectoryWritableByGroupOrOther(directoryInfo.UnixFileMode)
+                && !IsStickyDirectory(directoryInfo.UnixFileMode))
+            {
+                return FileSecretPostureResult.Unsupported(
+                    "local-secret-file-posture-degraded",
+                    "Local secret directory posture is degraded.",
+                    "A fallback secret directory ancestor is writable by group or other users.",
+                    "Move the fallback file under a dedicated owner-only directory or choose the OS-backed LocalSecrets store.");
             }
         }
 
@@ -731,6 +857,11 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
     private static bool IsDirectoryModeReady(UnixFileMode mode) => mode == SecretDirectoryMode;
 
     private static bool IsFileModeReady(UnixFileMode mode) => mode == SecretFileMode;
+
+    private static bool IsDirectoryWritableByGroupOrOther(UnixFileMode mode) =>
+        mode.HasFlag(UnixFileMode.GroupWrite) || mode.HasFlag(UnixFileMode.OtherWrite);
+
+    private static bool IsStickyDirectory(UnixFileMode mode) => mode.HasFlag(UnixFileMode.StickyBit);
 
     [UnsupportedOSPlatformGuard("windows")]
     private bool IsUnix() => _isUnix();

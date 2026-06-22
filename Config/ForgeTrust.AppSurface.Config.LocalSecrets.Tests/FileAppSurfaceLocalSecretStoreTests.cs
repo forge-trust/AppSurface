@@ -1,5 +1,12 @@
 namespace ForgeTrust.AppSurface.Config.LocalSecrets.Tests;
 
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class FileAppSurfaceLocalSecretStoreCollection
+{
+    public const string Name = "FileAppSurfaceLocalSecretStore process state";
+}
+
+[Collection(FileAppSurfaceLocalSecretStoreCollection.Name)]
 public sealed class FileAppSurfaceLocalSecretStoreTests
 {
     private const UnixFileMode SecretDirectoryMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
@@ -128,6 +135,33 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-store-ready", result.Diagnostic?.Code);
         Assert.Equal(SecretDirectoryMode, new DirectoryInfo(directory).UnixFileMode);
         Assert.Equal(SecretFileMode, new FileInfo(path).UnixFileMode);
+    }
+
+    [Fact]
+    public void Doctor_Should_ReturnLockedDiagnostic_WhenFileSystemDoctorIsUnauthorized()
+    {
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(doctor: () => throw new UnauthorizedAccessException()));
+
+        var result = store.Doctor("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
+        Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void Doctor_Should_ReturnUnavailableDiagnostic_WhenFileSystemDoctorFailsWithIoException()
+    {
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(doctor: () => throw new IOException()));
+
+        var result = store.Doctor("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
+        Assert.True(result.Diagnostic?.Retryable);
     }
 
     [Fact]
@@ -498,6 +532,61 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void Get_Should_ReturnPostureFailure_WhenMissingKeyAfterReadPathBecomesUnsafe()
+    {
+        var postureChecks = 0;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(
+                existingFilePosture: () => ++postureChecks == 1
+                    ? FileSecretPostureResult.Ready()
+                    : FileSecretPostureResult.Unsupported(
+                        "local-secret-file-posture-degraded",
+                        "Local secret file posture is degraded.",
+                        "The fallback path became unsafe before returning missing status.",
+                        "Choose a normal per-user file path.")));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var result = store.Get(identity);
+
+        Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
+        Assert.Equal("local-secret-file-posture-degraded", result.Diagnostic?.Code);
+        Assert.Equal(2, postureChecks);
+    }
+
+    [Fact]
+    public void Get_Should_ReturnLockedDiagnostic_WhenPostReadPostureIsUnauthorized()
+    {
+        var postureChecks = 0;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(
+                read: () => ToSecretJson("sk_test_secret"),
+                existingFilePosture: () =>
+                {
+                    if (++postureChecks == 1)
+                    {
+                        return FileSecretPostureResult.Ready();
+                    }
+
+                    throw new UnauthorizedAccessException();
+                }));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var result = store.Get(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
+        Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
+        Assert.Null(result.Value);
+        Assert.Equal(2, postureChecks);
+        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void List_Should_ReturnPostureFailure_WhenPathBecomesUnsafeAfterRead()
     {
         var postureChecks = 0;
@@ -517,6 +606,33 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-degraded", result.Diagnostic?.Code);
+        Assert.Equal(2, postureChecks);
+        Assert.Empty(result.Keys);
+    }
+
+    [Fact]
+    public void List_Should_ReturnUnavailableDiagnostic_WhenPostReadPostureFailsWithIoException()
+    {
+        var postureChecks = 0;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(
+                read: () => ToSecretJson("sk_test_secret"),
+                existingFilePosture: () =>
+                {
+                    if (++postureChecks == 1)
+                    {
+                        return FileSecretPostureResult.Ready();
+                    }
+
+                    throw new IOException();
+                }));
+
+        var result = store.List("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
+        Assert.True(result.Diagnostic?.Retryable);
         Assert.Equal(2, postureChecks);
         Assert.Empty(result.Keys);
     }
@@ -552,6 +668,23 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var store = new FileAppSurfaceLocalSecretStore(
             "secrets.json",
             new ThrowingFileSystem(write: _ => throw new UnauthorizedAccessException()));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var result = store.Set(identity, "sk_test_secret");
+
+        Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
+        Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
+        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Set_Should_ReturnLockedDiagnostic_WhenWritePreflightIsUnauthorized()
+    {
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(prepareWrite: () => throw new UnauthorizedAccessException()));
         var identity = new AppSurfaceLocalSecretIdentityNormalizer()
             .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
             .Identity!;
@@ -693,6 +826,23 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void Delete_Should_ReturnUnavailableDiagnostic_WhenWritePreflightFailsWithIoException()
+    {
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(prepareWrite: () => throw new IOException()));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var result = store.Delete(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
+        Assert.True(result.Diagnostic?.Retryable);
+    }
+
+    [Fact]
     public void Delete_Should_RepairLooseUnixFileModeInSecureDirectory()
     {
         if (!IsUnix())
@@ -740,6 +890,17 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(FileSecretPostureKind.Ready, result.Kind);
         Assert.Equal("local-secret-store-ready", result.Code);
+    }
+
+    [Fact]
+    public void DefaultFileSystem_Should_RejectDirectoryDuringExistingFilePosture()
+    {
+        using var temp = TempDirectory.Create();
+
+        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.InspectExistingFilePosture(temp.Path);
+
+        Assert.Equal(FileSecretPostureKind.Unsupported, result.Kind);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Code);
     }
 
     [Fact]
@@ -855,9 +1016,34 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void DefaultFileSystem_Should_RejectGroupWritableAncestorDuringReadPosture()
+    {
+        if (!IsUnix())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create();
+        var ancestor = Path.Join(temp.Path, "shared");
+        var nested = Path.Join(ancestor, "nested");
+        Directory.CreateDirectory(nested);
+        var looseMode = SecretDirectoryMode | UnixFileMode.GroupWrite;
+        new DirectoryInfo(ancestor).UnixFileMode = looseMode;
+        new DirectoryInfo(nested).UnixFileMode = SecretDirectoryMode;
+        var path = Path.Join(nested, "secrets.json");
+
+        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.InspectReadPath(path);
+
+        Assert.Equal(FileSecretPostureKind.Unsupported, result.Kind);
+        Assert.Equal("local-secret-file-posture-degraded", result.Code);
+    }
+
+    [Fact]
     public void DefaultFileSystem_Should_PrepareRelativeFileWithoutContainingDirectory()
     {
-        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.PrepareWrite("secrets.json");
+        var fileName = $"secrets-{Guid.NewGuid():N}.json";
+
+        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.PrepareWrite(fileName);
 
         Assert.NotEqual(FileSecretPostureKind.Unsupported, result.Kind);
     }
@@ -867,14 +1053,15 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     {
         using var temp = TempDirectory.Create();
         var previousCurrentDirectory = Directory.GetCurrentDirectory();
+        var fileName = $"secrets-{Guid.NewGuid():N}.json";
         try
         {
             Directory.SetCurrentDirectory(temp.Path);
 
-            var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.WriteAllTextWithPosture("secrets.json", "{}");
+            var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.WriteAllTextWithPosture(fileName, "{}");
 
             Assert.NotEqual(FileSecretPostureKind.Unsupported, result.Kind);
-            Assert.Equal("{}", File.ReadAllText(Path.Join(temp.Path, "secrets.json")));
+            Assert.Equal("{}", File.ReadAllText(fileName));
         }
         finally
         {
@@ -906,42 +1093,20 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
-    public async Task DefaultFileSystem_Should_DeleteTempFile_WhenFinalTargetBecomesDirectoryBeforeMove()
+    public void DefaultFileSystem_Should_DeleteTempFile_WhenFinalTargetBecomesDirectoryBeforeMove()
     {
-        for (var attempt = 0; attempt < 5; attempt++)
-        {
-            using var temp = TempDirectory.Create();
-            var path = Path.Join(temp.Path, "secrets.json");
-            using var cancellation = new CancellationTokenSource();
-            var racer = Task.Run(
-                () =>
-                {
-                    while (!cancellation.IsCancellationRequested)
-                    {
-                        if (Directory.EnumerateFiles(temp.Path, ".secrets.json.*.tmp").Any())
-                        {
-                            Directory.CreateDirectory(path);
-                            return;
-                        }
-                    }
-                },
-                cancellation.Token);
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "secrets.json");
+        var fileSystem = new DefaultFileAppSurfaceLocalSecretStoreFileSystem(
+            () => IsUnix(),
+            OperatingSystem.IsMacOS,
+            _ => Directory.CreateDirectory(path));
 
-            var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.WriteAllTextWithPosture(path, new string('x', 5_000_000));
-            cancellation.Cancel();
-            await Task.WhenAny(racer, Task.Delay(TimeSpan.FromSeconds(1)));
+        var result = fileSystem.WriteAllTextWithPosture(path, "{}");
 
-            if (result.Kind != FileSecretPostureKind.Unsupported)
-            {
-                continue;
-            }
-
-            Assert.Equal("local-secret-file-posture-unsupported", result.Code);
-            Assert.Empty(Directory.EnumerateFiles(temp.Path, ".secrets.json.*.tmp"));
-            return;
-        }
-
-        Assert.Fail("The final target did not become a directory before the temp-file move.");
+        Assert.Equal(FileSecretPostureKind.Unsupported, result.Kind);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Code);
+        Assert.Empty(Directory.EnumerateFiles(temp.Path, ".secrets.json.*.tmp"));
     }
 
     [Fact]

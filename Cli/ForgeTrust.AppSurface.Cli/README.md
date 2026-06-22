@@ -97,10 +97,11 @@ local-secret-file-posture-unsupported
 ```
 
 `ready`, `repaired`, and `degraded` are doctor-style readiness results and exit successfully so setup scripts can keep
-moving. `degraded` still means the file fallback is weaker than the OS-backed store. `unsupported` fails the command and
-points to a normal per-user file path or OS-backed storage. On Unix, the file fallback creates missing directories with
-`0700` mode bits and tightens JSON file mode bits to `0600`; existing loose parent directories are rejected rather than
-chmodded. v1 does not claim Windows ACL hardening or universal POSIX ACL proof.
+moving. `degraded` still means the file fallback is weaker than the OS-backed store; on Windows it is expected because
+v1 does not claim Windows ACL hardening, and on Unix it means AppSurface could not fully prove the owner-only posture.
+`unsupported` fails the command and points to a normal per-user file path or OS-backed storage. On Unix, the file
+fallback creates missing directories with `0700` mode bits and tightens JSON file mode bits to `0600`; existing loose
+parent directories are rejected rather than chmodded. v1 does not claim universal POSIX ACL proof.
 
 On Linux, the OS-backed store runs Secret Service through `secret-tool`, but AppSurface does not execute `secret-tool`
 from `PATH`. It uses `/usr/bin/secret-tool`, then `/bin/secret-tool`, unless you pass an explicit trusted absolute path:
