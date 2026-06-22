@@ -96,6 +96,11 @@ public sealed class AppSurfaceDevAuthRegistrationTests
     [InlineData("secret-token")]
     [InlineData("api-key")]
     [InlineData("admin-email")]
+    [InlineData("apiKey")]
+    [InlineData("passwordHash")]
+    [InlineData("accessToken")]
+    [InlineData("secretToken")]
+    [InlineData("credentialId")]
     [InlineData(".")]
     [InlineData("..")]
     [InlineData(" ")]
@@ -115,6 +120,8 @@ public sealed class AppSurfaceDevAuthRegistrationTests
     [Theory]
     [InlineData("monkey")]
     [InlineData("mailbox")]
+    [InlineData("turkey")]
+    [InlineData("keynote")]
     public void AddAppSurfaceDevAuth_WithInnocentTokenSubstrings_AllowsPersonaId(string personaId)
     {
         var services = new ServiceCollection();

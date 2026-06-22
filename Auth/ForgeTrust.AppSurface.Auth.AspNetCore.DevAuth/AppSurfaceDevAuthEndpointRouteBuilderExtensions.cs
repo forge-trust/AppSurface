@@ -408,8 +408,7 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
 
     private static bool ContainsSensitiveToken(string value)
     {
-        return value.Contains('@', StringComparison.Ordinal) ||
-            SensitiveTokenRegex().IsMatch(value);
+        return AppSurfaceDevAuthSensitiveValue.ContainsSensitiveToken(value);
     }
 
     private static void SetNoStoreHeaders(HttpContext httpContext)
@@ -423,8 +422,6 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
     [GeneratedRegex(@"\{[^}/]+\}", RegexOptions.CultureInvariant)]
     private static partial Regex RouteParameterRegex();
 
-    [GeneratedRegex(@"(^|[^A-Za-z0-9])(token|secret|password|credential|email|mail|key)([^A-Za-z0-9]|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex SensitiveTokenRegex();
 }
 
 internal sealed record AppSurfaceDevAuthStatus(

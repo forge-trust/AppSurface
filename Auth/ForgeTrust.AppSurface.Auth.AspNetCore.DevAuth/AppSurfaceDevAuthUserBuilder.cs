@@ -1,12 +1,11 @@
 using System.Security.Claims;
-using System.Text.RegularExpressions;
 
 namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 
 /// <summary>
 /// Builds a seeded local-development persona for AppSurface DevAuth.
 /// </summary>
-public sealed partial class AppSurfaceDevAuthUserBuilder
+public sealed class AppSurfaceDevAuthUserBuilder
 {
     private readonly List<Claim> _claims = [];
     private string? _displayName;
@@ -134,7 +133,9 @@ public sealed partial class AppSurfaceDevAuthUserBuilder
 
     private static bool IsInvalidPersonaId(string value)
     {
-        return value is "." or ".." || ContainsSensitiveToken(value) || !value.All(IsPersonaIdCharacter);
+        return value is "." or ".." ||
+            AppSurfaceDevAuthSensitiveValue.ContainsSensitiveToken(value) ||
+            !value.All(IsPersonaIdCharacter);
     }
 
     private static bool IsPersonaIdCharacter(char value)
@@ -142,12 +143,4 @@ public sealed partial class AppSurfaceDevAuthUserBuilder
         return value is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or (>= '0' and <= '9') or '.' or '_' or '-';
     }
 
-    private static bool ContainsSensitiveToken(string value)
-    {
-        return value.Contains('@', StringComparison.Ordinal) ||
-            SensitiveTokenRegex().IsMatch(value);
-    }
-
-    [GeneratedRegex(@"(^|[^A-Za-z0-9])(token|secret|password|credential|email|mail|key)([^A-Za-z0-9]|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex SensitiveTokenRegex();
 }

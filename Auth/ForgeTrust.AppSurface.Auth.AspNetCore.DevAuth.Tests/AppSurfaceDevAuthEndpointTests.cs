@@ -320,12 +320,18 @@ public sealed class AppSurfaceDevAuthEndpointTests
     {
         await using var app = BuildApp(options =>
         {
+            options.DisplayClaimTypes.Add("passwordHash");
+            options.DisplayClaimTypes.Add("apiKey");
+            options.DisplayClaimTypes.Add("accessToken");
             options.Users.Add(
                 "sensitive",
                 user => user
                     .DisplayName("admin@example.com")
                     .Subject("secret-token")
-                    .Claim("role", "operator"));
+                    .Claim("role", "operator")
+                    .Claim("passwordHash", "hash-for-local-proof")
+                    .Claim("apiKey", "local-api-key")
+                    .Claim("accessToken", "local-access-token"));
         });
         var controlEndpoint = FindEndpoint(app, "/_appsurface/dev-auth/", HttpMethods.Get);
         var controlContext = CreateContext(app.Services);
@@ -346,6 +352,12 @@ public sealed class AppSurfaceDevAuthEndpointTests
         var selectedHtml = await ReadBodyAsync(selectContext);
         Assert.DoesNotContain("admin@example.com", selectedHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-token", selectedHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("passwordHash", selectedHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("hash-for-local-proof", selectedHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("apiKey", selectedHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("local-api-key", selectedHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("accessToken", selectedHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("local-access-token", selectedHtml, StringComparison.Ordinal);
         Assert.Contains("(hidden)", selectedHtml, StringComparison.Ordinal);
 
         var statusEndpoint = FindEndpoint(app, "/_appsurface/dev-auth/status", HttpMethods.Get);
