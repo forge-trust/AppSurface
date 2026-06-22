@@ -84,7 +84,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var result = store.Doctor("MyApp", "Development", null);
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
-        Assert.Equal("local-secret-file-posture-degraded", result.Diagnostic?.Code);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.OtherRead, new DirectoryInfo(directory).UnixFileMode);
         Assert.Equal(SecretFileMode, new FileInfo(path).UnixFileMode);
     }
@@ -209,7 +209,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var result = store.Set(identity, "sk_test_secret");
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
-        Assert.Equal("local-secret-file-posture-degraded", result.Diagnostic?.Code);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal(looseMode, new DirectoryInfo(directory).UnixFileMode);
         Assert.False(File.Exists(path));
         Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
@@ -303,7 +303,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var result = store.Get(identity);
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
-        Assert.Equal("local-secret-file-posture-degraded", result.Diagnostic?.Code);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Null(result.Value);
         Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
     }
@@ -328,7 +328,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var result = store.Get(identity);
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
-        Assert.Equal("local-secret-file-posture-degraded", result.Diagnostic?.Code);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Null(result.Value);
         Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
     }
@@ -431,7 +431,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
                     return ToSecretJson("sk_test_secret");
                 },
                 existingFilePosture: () => FileSecretPostureResult.Unsupported(
-                    "local-secret-file-posture-degraded",
+                    "local-secret-file-posture-unsupported",
                     "Local secret file posture is degraded.",
                     "The fallback path is not safe to read.",
                     "Choose a normal per-user file path.")));
@@ -540,7 +540,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
                 existingFilePosture: () => ++postureChecks == 1
                     ? FileSecretPostureResult.Ready()
                     : FileSecretPostureResult.Unsupported(
-                        "local-secret-file-posture-degraded",
+                        "local-secret-file-posture-unsupported",
                         "Local secret file posture is degraded.",
                         "The fallback path became unsafe before returning the value.",
                         "Choose a normal per-user file path.")));
@@ -551,7 +551,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var result = store.Get(identity);
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
-        Assert.Equal("local-secret-file-posture-degraded", result.Diagnostic?.Code);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal(2, postureChecks);
         Assert.Null(result.Value);
         Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
@@ -567,7 +567,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
                 existingFilePosture: () => ++postureChecks == 1
                     ? FileSecretPostureResult.Ready()
                     : FileSecretPostureResult.Unsupported(
-                        "local-secret-file-posture-degraded",
+                        "local-secret-file-posture-unsupported",
                         "Local secret file posture is degraded.",
                         "The fallback path became unsafe before returning missing status.",
                         "Choose a normal per-user file path.")));
@@ -578,7 +578,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var result = store.Get(identity);
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
-        Assert.Equal("local-secret-file-posture-degraded", result.Diagnostic?.Code);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal(2, postureChecks);
     }
 
@@ -623,7 +623,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
                 existingFilePosture: () => ++postureChecks == 1
                     ? FileSecretPostureResult.Ready()
                     : FileSecretPostureResult.Unsupported(
-                        "local-secret-file-posture-degraded",
+                        "local-secret-file-posture-unsupported",
                         "Local secret file posture is degraded.",
                         "The fallback path became unsafe before returning key names.",
                         "Choose a normal per-user file path.")));
@@ -631,7 +631,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var result = store.List("MyApp", "Development", null);
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
-        Assert.Equal("local-secret-file-posture-degraded", result.Diagnostic?.Code);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal(2, postureChecks);
         Assert.Empty(result.Keys);
     }
@@ -1037,7 +1037,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.InspectExistingFilePosture(path);
 
         Assert.Equal(FileSecretPostureKind.Unsupported, result.Kind);
-        Assert.Equal("local-secret-file-posture-degraded", result.Code);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Code);
         Assert.Equal(looseMode, new DirectoryInfo(directory).UnixFileMode);
     }
 
@@ -1061,17 +1061,27 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.InspectReadPath(path);
 
         Assert.Equal(FileSecretPostureKind.Unsupported, result.Kind);
-        Assert.Equal("local-secret-file-posture-degraded", result.Code);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Code);
     }
 
     [Fact]
     public void DefaultFileSystem_Should_PrepareRelativeFileWithoutContainingDirectory()
     {
+        using var temp = TempDirectory.Create();
+        var previousCurrentDirectory = Directory.GetCurrentDirectory();
         var fileName = $"secrets-{Guid.NewGuid():N}.json";
+        try
+        {
+            Directory.SetCurrentDirectory(temp.Path);
 
-        var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.PrepareWrite(fileName);
+            var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.PrepareWrite(fileName);
 
-        Assert.NotEqual(FileSecretPostureKind.Unsupported, result.Kind);
+            Assert.NotEqual(FileSecretPostureKind.Unsupported, result.Kind);
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(previousCurrentDirectory);
+        }
     }
 
     [Fact]

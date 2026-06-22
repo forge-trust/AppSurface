@@ -37,8 +37,8 @@ with a paste-safe diagnostic.
 
 - `local-secret-store-ready`: the file can be opened and its checked posture is ready.
 - `local-secret-file-posture-repaired`: Unix file mode bits were tightened to `0600`.
-- `local-secret-file-posture-degraded`: the file can be opened, but v1 cannot prove owner-only ACL posture for this platform path.
-- `local-secret-file-posture-unsupported`: the path shape is unsafe for fallback storage.
+- `local-secret-file-posture-degraded`: the file can be opened and `doctor` can exit successfully, but v1 cannot prove owner-only ACL posture for this platform path.
+- `local-secret-file-posture-unsupported`: the path shape or checked Unix posture is unsafe for fallback storage, including symbolic links, directory targets, loose mode bits, and writable non-sticky ancestors.
 
 This is mode-bit hardening, not a universal ACL guarantee. Windows file fallback is degraded by design in v1; use
 Windows Credential Manager through the OS-backed store for normal local development.

@@ -46,8 +46,8 @@ silently serving a risky file. `doctor` may report:
 | --- | --- |
 | `local-secret-store-ready` | The fallback file can be opened and posture is already ready. |
 | `local-secret-file-posture-repaired` | `doctor` or a write tightened Unix file mode bits. |
-| `local-secret-file-posture-degraded` | The fallback can be opened, but this platform path does not prove owner-only posture in v1. |
-| `local-secret-file-posture-unsupported` | The path shape is unsafe for fallback storage, such as a symbolic link or directory path. |
+| `local-secret-file-posture-degraded` | The fallback can be opened and `doctor` can exit successfully, but this platform path does not prove owner-only posture in v1. |
+| `local-secret-file-posture-unsupported` | The path shape or checked Unix posture is unsafe for fallback storage, such as a symbolic link, directory path, loose mode bits, or writable non-sticky ancestor. |
 
 Example deterministic file fallback check:
 
@@ -55,9 +55,10 @@ Example deterministic file fallback check:
 appsurface secrets doctor --app MyApp --environment Development --store-file ./.appsurface/local-secrets.json
 ```
 
-The command prints `Problem`, `Cause`, `Fix`, `Docs`, and `Retryable` without printing secret values. Treat
-`local-secret-file-posture-degraded` as usable only for explicit local/test fallback workflows; prefer the OS-backed
-store for normal local development.
+The command prints `Problem`, `Cause`, `Fix`, `Docs`, and `Retryable` without printing secret values.
+`local-secret-file-posture-degraded` is a degraded readiness result for explicit local/test fallback workflows;
+`local-secret-file-posture-unsupported` is a fail-closed result that stops reads and writes until the path is moved or
+repaired. Prefer the OS-backed store for normal local development.
 
 ### Linux Nonstandard `secret-tool`
 

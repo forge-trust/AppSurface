@@ -544,7 +544,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         if (!IsFileModeReady(new FileInfo(path).UnixFileMode))
         {
             return FileSecretPostureResult.Unsupported(
-                "local-secret-file-posture-degraded",
+                "local-secret-file-posture-unsupported",
                 "Local secret file posture is degraded.",
                 "The fallback secret file does not use owner-only read/write mode bits.",
                 "Run `appsurface secrets doctor` or set the secret again to repair Unix mode bits; prefer the OS-backed LocalSecrets store for normal development.");
@@ -554,7 +554,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory) && !IsDirectoryModeReady(new DirectoryInfo(directory).UnixFileMode))
         {
             return FileSecretPostureResult.Unsupported(
-                "local-secret-file-posture-degraded",
+                "local-secret-file-posture-unsupported",
                 "Local secret directory posture is degraded.",
                 "The fallback secret directory does not use owner-only read/write/execute mode bits.",
                 "Move the fallback file under a dedicated directory that AppSurface can create, or choose the OS-backed LocalSecrets store.");
@@ -690,7 +690,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
             return IsDirectoryModeReady(new DirectoryInfo(directory).UnixFileMode)
                 ? FileSecretPostureResult.Ready()
                 : FileSecretPostureResult.Unsupported(
-                    "local-secret-file-posture-degraded",
+                    "local-secret-file-posture-unsupported",
                     "Local secret directory posture is degraded.",
                     "The fallback secret directory could not be created with owner-only read/write/execute mode bits.",
                     "Move the fallback file under a dedicated owner-only directory or choose the OS-backed LocalSecrets store.");
@@ -705,7 +705,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         return IsDirectoryModeReady(directoryInfo.UnixFileMode)
             ? FileSecretPostureResult.Ready()
             : FileSecretPostureResult.Unsupported(
-                "local-secret-file-posture-degraded",
+                "local-secret-file-posture-unsupported",
                 "Local secret directory posture is degraded.",
                 "The fallback secret directory already exists without owner-only read/write/execute mode bits.",
                 "Move the fallback file under a dedicated directory that AppSurface can create, or choose the OS-backed LocalSecrets store.");
@@ -793,7 +793,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
                 && !IsStickyDirectory(directoryInfo.UnixFileMode))
             {
                 return FileSecretPostureResult.Unsupported(
-                    "local-secret-file-posture-degraded",
+                    "local-secret-file-posture-unsupported",
                     "Local secret directory posture is degraded.",
                     "A fallback secret directory ancestor is writable by group or other users.",
                     "Move the fallback file under a dedicated owner-only directory or choose the OS-backed LocalSecrets store.");
