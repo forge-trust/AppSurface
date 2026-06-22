@@ -29,9 +29,9 @@ appsurface secrets get Stripe:ApiKey --app MyApp --environment Development --sto
 
 The fallback JSON file contains raw secret values. On Unix, AppSurface creates missing fallback directories with `0700`
 mode bits and writes or repairs the file with `0600` mode bits during `set`, `delete`, and `doctor`. Existing parent
-directories are inspected, not chmodded; loose parent directories fail closed with a paste-safe diagnostic. Reads inspect
-existing files before returning a value; symbolic-link paths, directory paths, and non-canonical mode bits fail closed
-with a paste-safe diagnostic.
+directories are inspected, not modified in place; loose parent directories fail closed with a paste-safe diagnostic.
+Reads inspect existing files before returning a value; symbolic-link paths, directory paths, and non-canonical mode bits
+fail closed with a paste-safe diagnostic.
 
 `doctor` distinguishes posture states:
 

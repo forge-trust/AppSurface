@@ -102,8 +102,8 @@ v1 does not claim Windows ACL hardening, and on Unix it is reserved for paths Ap
 prove. `unsupported` fails the command and points to a normal per-user file path or OS-backed storage. On Unix, unsafe
 path shapes, loose existing directories, loose file mode bits, and writable non-sticky ancestors use `unsupported`
 rather than `degraded`. The file fallback creates missing directories with `0700` mode bits and tightens JSON file mode
-bits to `0600`; existing loose parent directories are rejected rather than chmodded. v1 does not claim universal POSIX
-ACL proof.
+bits to `0600`; existing loose parent directories are rejected rather than modified in place. v1 does not claim
+universal POSIX ACL proof.
 
 On Linux, the OS-backed store runs Secret Service through `secret-tool`, but AppSurface does not execute `secret-tool`
 from `PATH`. It uses `/usr/bin/secret-tool`, then `/bin/secret-tool`, unless you pass an explicit trusted absolute path:

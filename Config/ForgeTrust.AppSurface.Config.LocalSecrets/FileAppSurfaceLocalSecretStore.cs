@@ -488,6 +488,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
     private readonly Func<bool> _isUnix;
     private readonly Func<bool> _isMacOs;
     private readonly Action<string>? _beforeMove;
+    private readonly Action<string>? _afterDirectoryCreate;
 
     private DefaultFileAppSurfaceLocalSecretStoreFileSystem()
         : this(() => !OperatingSystem.IsWindows(), OperatingSystem.IsMacOS)
@@ -500,10 +501,12 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
     /// <param name="isUnix">Returns whether Unix mode checks are available.</param>
     /// <param name="isMacOs">Returns whether macOS directory-alias exceptions should apply.</param>
     /// <param name="beforeMove">Optional deterministic test hook invoked after the temporary file is ready.</param>
+    /// <param name="afterDirectoryCreate">Optional deterministic test hook invoked after fallback directory creation.</param>
     internal DefaultFileAppSurfaceLocalSecretStoreFileSystem(
         Func<bool> isUnix,
         Func<bool> isMacOs,
-        Action<string>? beforeMove = null)
+        Action<string>? beforeMove = null,
+        Action<string>? afterDirectoryCreate = null)
     {
         ArgumentNullException.ThrowIfNull(isUnix);
         ArgumentNullException.ThrowIfNull(isMacOs);
@@ -511,6 +514,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         _isUnix = isUnix;
         _isMacOs = isMacOs;
         _beforeMove = beforeMove;
+        _afterDirectoryCreate = afterDirectoryCreate;
     }
 
     /// <inheritdoc />
@@ -687,6 +691,14 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         if (IsUnix() && !Directory.Exists(directory))
         {
             Directory.CreateDirectory(directory, SecretDirectoryMode);
+            _afterDirectoryCreate?.Invoke(directory);
+
+            var ancestorPosture = ValidateDirectoryAncestors(directory);
+            if (ancestorPosture.Kind == FileSecretPostureKind.Unsupported)
+            {
+                return ancestorPosture;
+            }
+
             return IsDirectoryModeReady(new DirectoryInfo(directory).UnixFileMode)
                 ? FileSecretPostureResult.Ready()
                 : FileSecretPostureResult.Unsupported(

@@ -1069,6 +1069,40 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void DefaultFileSystem_Should_RecheckCreatedDirectoryAncestorsDuringPrepareWrite()
+    {
+        if (!IsUnix())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create();
+        var ancestor = Path.Join(temp.Path, "shared");
+        var nested = Path.Join(ancestor, "nested");
+        var path = Path.Join(nested, "secrets.json");
+        var looseMode = SecretDirectoryMode | UnixFileMode.GroupWrite;
+        var fileSystem = new DefaultFileAppSurfaceLocalSecretStoreFileSystem(
+            () => true,
+            OperatingSystem.IsMacOS,
+            afterDirectoryCreate: _ =>
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    return;
+                }
+
+                new DirectoryInfo(ancestor).UnixFileMode = looseMode;
+            });
+
+        var result = fileSystem.PrepareWrite(path);
+
+        Assert.Equal(FileSecretPostureKind.Unsupported, result.Kind);
+        Assert.Equal("local-secret-file-posture-unsupported", result.Code);
+        Assert.Equal("Local secret directory posture is unsupported.", result.Problem);
+        Assert.Equal(looseMode, new DirectoryInfo(ancestor).UnixFileMode);
+    }
+
+    [Fact]
     public void DefaultFileSystem_Should_PrepareRelativeFileWithoutContainingDirectory()
     {
         using var temp = TempDirectory.Create();

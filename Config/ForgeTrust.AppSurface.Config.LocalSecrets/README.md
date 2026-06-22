@@ -38,9 +38,9 @@ Credential Manager.
 
 On Unix platforms, the file fallback creates missing directories with `0700` mode bits and writes or repairs the JSON
 file with `0600` mode bits during `set`, `delete`, and `doctor`. Existing parent directories are inspected, not
-chmodded; loose parent directories stop resolution with a paste-safe diagnostic. Reads inspect existing files before
-returning a secret value: symbolic-link paths, directory paths, and non-canonical mode bits stop resolution instead of
-silently serving a risky file. `doctor` may report:
+modified in place; loose parent directories stop resolution with a paste-safe diagnostic. Reads inspect existing files
+before returning a secret value: symbolic-link paths, directory paths, and non-canonical mode bits stop resolution
+instead of silently serving a risky file. `doctor` may report:
 
 | Diagnostic code | Meaning |
 | --- | --- |
