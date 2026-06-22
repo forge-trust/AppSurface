@@ -619,6 +619,41 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
+    public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerIsRegisteredBeforeDocs_DoesNotResolveLegacyBoolAuthorizer()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireStreamAuthorizer, AllowAllStreamAuthorizer>();
+        services.AddSingleton<IRazorWireChannelAuthorizer>(
+            _ => throw new InvalidOperationException("The legacy bool authorizer should not be resolved."));
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var channelAuthorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.True((await streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed);
+        Assert.True(await channelAuthorizer.CanSubscribeAsync(context, "host-channel"));
+    }
+
+    [Fact]
     public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerIsRegisteredAfterDocs_ReplacesDocsWrapper()
     {
         var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };

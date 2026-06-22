@@ -270,11 +270,16 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.Add(
             ServiceDescriptor.Describe(
                 typeof(IRazorWireStreamAuthorizer),
-                provider => new AppSurfaceDocsHarvestStreamAuthorizer(
-                    provider.GetRequiredService<AppSurfaceDocsOptions>(),
-                    ResolveHostEnvironment(provider),
-                    CreateInnerStreamAuthorizer(provider, existingStream),
-                    CreateInnerChannelAuthorizer(provider, existingChannel)),
+                provider =>
+                {
+                    var innerStreamAuthorizer = CreateInnerStreamAuthorizer(provider, existingStream);
+
+                    return new AppSurfaceDocsHarvestStreamAuthorizer(
+                        provider.GetRequiredService<AppSurfaceDocsOptions>(),
+                        ResolveHostEnvironment(provider),
+                        innerStreamAuthorizer,
+                        innerStreamAuthorizer is null ? CreateInnerChannelAuthorizer(provider, existingChannel) : null);
+                },
                 lifetime));
         services.Add(
             ServiceDescriptor.Describe(
