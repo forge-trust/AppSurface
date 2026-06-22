@@ -12,6 +12,11 @@ This is the living release note for the next coordinated AppSurface version afte
 - LocalSecrets platform-index self-healing so `appsurface secrets list` no longer surfaces stale names whose stored
   values are missing.
 - The AppSurface CLI now carries the design contract for future authenticated command execution. The design keeps `ForgeTrust.AppSurface.Auth` passive, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the protected command wedge, treats RFC 8628 device flow as one auth method rather than the whole CLI story, and requires secure token-cache boundaries, CI no-prompt behavior, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
+- LocalSecrets Linux `secret-tool` resolution now uses trusted system candidates or an explicit absolute override instead
+  of executing the first `secret-tool` discovered on `PATH`.
+- `ForgeTrust.AppSurface.Web` now rejects the literal CORS origin wildcard `*` outside Development when AppSurface owns
+  the CORS policy, so permissive production APIs must either name explicit browser origins or register host-owned
+  ASP.NET Core CORS.
 
 ## Included in the next coordinated version
 
@@ -30,6 +35,13 @@ This is the living release note for the next coordinated AppSurface version afte
   `appsurface secrets delete KEY` repairs a stale indexed name when the value is already gone while preserving
   `local-secret-missing` for keys that never existed.
 - `Cli/ForgeTrust.AppSurface.Cli/docs/authenticated-command-design.md` documents the future CLI auth ladder, including browser/loopback PKCE, RFC 8628 device flow, non-interactive CI tokens, command-gate state, token-cache threat modeling, deterministic auth diagnostics, and follow-up issue slices.
+- AppSurface LocalSecrets now hardens Linux Secret Service command selection. Linux uses `/usr/bin/secret-tool`, then
+  `/bin/secret-tool`, or an explicit trusted absolute path through `AppSurfaceLocalSecretsOptions.LinuxSecretToolPath`
+  and `appsurface secrets --secret-tool-path`. PATH matches are reported only as ignored diagnostic context, invalid
+  overrides fail before command launch, and `--secret-tool-path` cannot be combined with `--store-file`.
+- AppSurface Web CORS startup validation now fails closed before policy registration when non-development
+  `CorsOptions.AllowedOrigins` includes the exact literal `*`, while preserving Development all-origin convenience and
+  wildcard subdomain origins such as `https://*.example.com`.
 
 ### AppSurface Flow
 
@@ -40,6 +52,11 @@ This is the living release note for the next coordinated AppSurface version afte
 ## Migration watch
 
 - `AppSurfaceUser.Id` remains a host-owned subject identifier in the existing ASP.NET Core adapter. Consumers that need durable app-owned users should resolve that subject through the new identity resolver contract instead of treating the mapped subject claim as an app user id.
+- Production AppSurface-managed CORS no longer accepts `AllowedOrigins = ["*"]`. Replace the literal wildcard with
+  explicit origins such as `["https://app.example.com"]`; keep local permissive behavior behind
+  `EnableAllOriginsInDevelopment`; use wildcard subdomains such as `["https://*.example.com"]` only when matching
+  subdomains; and register/apply host-owned ASP.NET Core CORS when an API is intentionally public to every browser
+  origin.
 - Hosts adopting `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` must still call `UseAuthentication()` and `UseAuthorization()` in ASP.NET Core order and must explicitly configure default schemes if they want host-wide defaults.
 - Record breaking or behavior-changing guidance here before it moves into the tagged release note.
 - `FlowExecutionContext<TContext>` is now a readonly record struct instead of a sealed record class. Most node implementations continue to read `FlowId`, `Version`, `NodeId`, `State`, and `ResumeEvent` the same way, but code that depended on reference identity, nullable context parameters, or `context is null` checks should switch to checking the populated members it requires.
