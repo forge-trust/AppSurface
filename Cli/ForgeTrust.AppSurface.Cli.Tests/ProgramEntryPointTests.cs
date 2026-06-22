@@ -110,12 +110,17 @@ public sealed class ProgramEntryPointTests
         using var temp = TempDirectory.Create("appsurface-secrets-");
         var storePath = Path.Join(temp.Path, "local-secrets.json");
         await File.WriteAllTextAsync(storePath, "{");
+        if (!OperatingSystem.IsWindows())
+        {
+            new FileInfo(storePath).UnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
         var shared = new[] { "--app", "MyApp", "--environment", "Development", "--store-file", storePath };
 
         var list = await InvokeProgramEntryPointAsync(["secrets", "list", .. shared]);
 
         Assert.NotEqual(0, list.ExitCode);
-        Assert.Contains("local-secret-file-posture-degraded", list.AllText, StringComparison.Ordinal);
+        Assert.Contains("local-secret-store-invalid", list.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("sk_test_secret", list.AllText, StringComparison.Ordinal);
     }
 

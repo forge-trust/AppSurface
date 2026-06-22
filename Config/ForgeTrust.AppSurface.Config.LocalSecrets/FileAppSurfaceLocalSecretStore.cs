@@ -605,7 +605,15 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         var tempPath = Path.Join(string.IsNullOrWhiteSpace(directory) ? "." : directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
         try
         {
-            using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            var options = new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew,
+                Access = FileAccess.Write,
+                Share = FileShare.None
+            };
+            SetUnixCreateModeIfSupported(options);
+
+            using (var stream = File.Open(tempPath, options))
             using (var writer = new StreamWriter(stream))
             {
                 writer.Write(contents);
@@ -809,6 +817,15 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
             : Path.Join(Path.GetPathRoot(normalizedPath), target));
         return normalizedPath == "/var" && normalizedTarget == "/private/var"
             || normalizedPath == "/tmp" && normalizedTarget == "/private/tmp";
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "This helper only guards a Unix-only file creation option from Windows; Unix write behavior is covered through WriteAllTextWithPosture.")]
+    private void SetUnixCreateModeIfSupported(FileStreamOptions options)
+    {
+        if (IsUnix())
+        {
+            options.UnixCreateMode = SecretFileMode;
+        }
     }
 
     private static FileSystemInfo? GetExistingFileSystemInfo(string path)
