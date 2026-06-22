@@ -262,6 +262,10 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
             for (const control of this.getControls(target)) {
                 if (!visible) {
+                    if (this.shouldPreserveRemovedRowSubmissionControl(control)) {
+                        continue;
+                    }
+
                     if (!control.disabled) {
                         control.disabled = true;
                         control.setAttribute('data-rw-disabled-by-form-toggle', 'true');
@@ -725,6 +729,17 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             }
 
             return true;
+        }
+
+        private shouldPreserveRemovedRowSubmissionControl(control: FormControl) {
+            const row = control.closest('[data-rw-form-collection-row]') as HTMLElement | null;
+            if (row?.getAttribute('data-rw-form-collection-row-state') !== 'removed') {
+                return false;
+            }
+
+            return control.name.endsWith('.index')
+                || control.hasAttribute('data-rw-form-collection-delete-field')
+                || control.hasAttribute('data-rw-form-collection-preserve');
         }
 
         private resolveRemoveMode(root: HTMLElement, command: HTMLElement) {

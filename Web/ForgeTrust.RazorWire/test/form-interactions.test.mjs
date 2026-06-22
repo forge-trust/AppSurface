@@ -113,21 +113,32 @@ test('collection remove supports physical and mark-for-removal lanes', () => {
 
   const second = buildCollection(document);
   second.root.setAttribute('data-rw-form-collection-remove-mode', 'mark');
+  second.root.setAttribute('data-rw-form-toggle-target', 'draft-action');
+  second.root.setAttribute('data-rw-form-toggle-disable-when-hidden', 'true');
+  const toggle = document.createElement('input');
+  toggle.type = 'checkbox';
+  toggle.setAttribute('data-rw-form-toggle', 'draft-action');
+  toggle.setAttribute('data-rw-form-toggle-invert', 'true');
   const deleteField = second.root.querySelector('input[name="Actions[0].Delete"]');
   deleteField.setAttribute('data-rw-form-collection-delete-field', 'true');
+  const marker = second.root.querySelector('input[name="Actions.index"]');
   const id = second.root.querySelector('input[name="Actions[0].Id"]');
   id.setAttribute('data-rw-form-collection-preserve', 'true');
   const form2 = document.createElement('form');
-  form2.appendChild(second.root);
+  form2.append(toggle, second.root);
   document.body.appendChild(form2);
   context.window.RazorWire.formInteractionsManager.scan();
   second.remove.dispatchEvent(createEvent('click'));
+  toggle.checked = true;
+  toggle.dispatchEvent(createEvent('change'));
 
   const row = second.root.querySelector('[data-rw-form-collection-row]');
+  assert.equal(second.root.hidden, true);
   assert.equal(row.hidden, true);
   assert.equal(row.getAttribute('data-rw-form-collection-row-state'), 'removed');
   assert.equal(deleteField.value, 'true');
   assert.equal(deleteField.disabled, false);
+  assert.equal(marker.disabled, false);
   assert.equal(id.disabled, false);
   assert.equal(second.root.querySelector('input[name="Actions[0].Title"]').disabled, true);
 });

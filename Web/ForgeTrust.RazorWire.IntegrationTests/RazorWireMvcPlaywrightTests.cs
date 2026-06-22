@@ -110,7 +110,9 @@ public sealed class RazorWireMvcPlaywrightTests
             }
             """);
 
+        Assert.Equal("true", hiddenData.DeleteValue);
         Assert.Null(hiddenData.TitleValue);
+        Assert.Contains("0", hiddenData.IndexValues);
         Assert.DoesNotContain("2", hiddenData.IndexValues);
 
         await page.ClickAsync("button[type='submit']");
