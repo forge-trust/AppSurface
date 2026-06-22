@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text.Json;
 
+using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Config.LocalSecrets;
@@ -205,6 +206,54 @@ public sealed class ProgramEntryPointTests
         var context = command.BuildContextForTests();
 
         Assert.IsType<PlatformAppSurfaceLocalSecretStore>(context.Store);
+    }
+
+    [Theory]
+    [InlineData("local-secret-store-ready")]
+    [InlineData("local-secret-file-posture-repaired")]
+    [InlineData("local-secret-file-posture-degraded")]
+    public async Task SecretsCommandBase_Should_TreatDoctorReadinessDiagnosticsAsSuccess(string diagnosticCode)
+    {
+        using var console = new FakeInMemoryConsole();
+        var result = AppSurfaceLocalSecretResult.NotFound(
+            LocalSecretResultStatus.Missing,
+            CreateLocalSecretDiagnostic(diagnosticCode),
+            "test-store");
+
+        await CapturingSecretsCommand.WriteResultForTestsAsync(console, result, "Ready");
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Ready: local secret namespace", output, StringComparison.Ordinal);
+        Assert.Contains("Source: test-store", output, StringComparison.Ordinal);
+        Assert.Contains(diagnosticCode, output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsCommandBase_Should_RejectOrdinaryMissingDiagnostic()
+    {
+        using var console = new FakeInMemoryConsole();
+        var result = AppSurfaceLocalSecretResult.Missing("test-store");
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await CapturingSecretsCommand.WriteResultForTestsAsync(console, result, "Found"));
+
+        Assert.Contains("local-secret-missing", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsCommandBase_Should_RejectProviderFailureWithoutDiagnostic()
+    {
+        using var console = new FakeInMemoryConsole();
+        var result = new AppSurfaceLocalSecretResult(
+            LocalSecretResultStatus.ProviderFailed,
+            null,
+            null,
+            "test-store");
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await CapturingSecretsCommand.WriteResultForTestsAsync(console, result, "Found"));
+
+        Assert.Equal("Local secret command failed.", exception.Message);
     }
 
     [Fact]
@@ -3809,6 +3858,12 @@ public sealed class ProgramEntryPointTests
 
         public SecretsCommandContext BuildContextForTests() => BuildContext();
 
+        public static ValueTask WriteResultForTestsAsync(
+            IConsole console,
+            AppSurfaceLocalSecretResult result,
+            string successVerb) =>
+            WriteResultAsync(console, result, successVerb);
+
         public override ValueTask ExecuteAsync(IConsole console) => ValueTask.CompletedTask;
 
         protected override IAppSurfaceLocalSecretStore CreatePlatformStore(AppSurfaceLocalSecretsOptions options)
@@ -3817,6 +3872,14 @@ public sealed class ProgramEntryPointTests
             return Store;
         }
     }
+
+    private static AppSurfaceLocalSecretDiagnostic CreateLocalSecretDiagnostic(string code) =>
+        new(
+            code,
+            "Local secret posture was inspected.",
+            "The local secret namespace is safe to use.",
+            "No action is required.",
+            "local-secrets-without-a-remote-vault");
 
     private sealed class CapturedLocalSecretStore : IAppSurfaceLocalSecretStore
     {

@@ -447,6 +447,32 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void Get_Should_ReturnLockedDiagnostic_WhenInitialPostureIsUnauthorized()
+    {
+        var readCalled = false;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "secrets.json",
+            new ThrowingFileSystem(
+                read: () =>
+                {
+                    readCalled = true;
+                    return ToSecretJson("sk_test_secret");
+                },
+                existingFilePosture: () => throw new UnauthorizedAccessException()));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var result = store.Get(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
+        Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
+        Assert.Null(result.Value);
+        Assert.False(readCalled);
+        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Set_Should_NotRead_WhenWritePreflightRejectsPath()
     {
         var readCalled = false;
@@ -1062,6 +1088,31 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
             Assert.NotEqual(FileSecretPostureKind.Unsupported, result.Kind);
             Assert.Equal("{}", File.ReadAllText(fileName));
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(previousCurrentDirectory);
+        }
+    }
+
+    [Fact]
+    public void DefaultFileSystem_Should_InspectExistingRelativeFileWithoutContainingDirectory()
+    {
+        using var temp = TempDirectory.Create();
+        var previousCurrentDirectory = Directory.GetCurrentDirectory();
+        var fileName = $"secrets-{Guid.NewGuid():N}.json";
+        try
+        {
+            Directory.SetCurrentDirectory(temp.Path);
+            File.WriteAllText(fileName, "{}");
+            if (IsUnix())
+            {
+                new FileInfo(fileName).UnixFileMode = SecretFileMode;
+            }
+
+            var result = DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.InspectExistingFilePosture(fileName);
+
+            Assert.Equal(FileSecretPostureKind.Ready, result.Kind);
         }
         finally
         {

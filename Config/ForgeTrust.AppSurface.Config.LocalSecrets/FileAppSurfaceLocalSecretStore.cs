@@ -632,8 +632,8 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
                 return FileSecretPostureResult.Degraded();
             }
 
-            var repaired = RepairFileMode(path);
-            return repaired ? FileSecretPostureResult.Repaired() : FileSecretPostureResult.Ready();
+            RepairFileMode(path);
+            return FileSecretPostureResult.Ready();
         }
         finally
         {
@@ -688,13 +688,13 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
                     "Move the fallback file under a dedicated owner-only directory or choose the OS-backed LocalSecrets store.");
         }
 
-        Directory.CreateDirectory(directory);
+        var directoryInfo = Directory.CreateDirectory(directory);
         if (!IsUnix())
         {
             return FileSecretPostureResult.Degraded();
         }
 
-        return IsDirectoryModeReady(new DirectoryInfo(directory).UnixFileMode)
+        return IsDirectoryModeReady(directoryInfo.UnixFileMode)
             ? FileSecretPostureResult.Ready()
             : FileSecretPostureResult.Unsupported(
                 "local-secret-file-posture-degraded",
@@ -746,23 +746,12 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
     private FileSecretPostureResult ValidateDirectoryAncestors(string directory)
     {
         var fullDirectory = Path.GetFullPath(directory);
-        var root = Path.GetPathRoot(fullDirectory);
-        if (string.IsNullOrEmpty(root))
-        {
-            return FileSecretPostureResult.Ready();
-        }
-
-        var trimmedRoot = Path.TrimEndingDirectorySeparator(root);
-        var current = string.IsNullOrEmpty(trimmedRoot) ? root : trimmedRoot;
+        var root = Path.GetPathRoot(fullDirectory)!;
+        var current = root;
 
         var relative = Path.GetRelativePath(root, fullDirectory);
         foreach (var segment in relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
         {
-            if (string.IsNullOrWhiteSpace(segment) || segment == ".")
-            {
-                continue;
-            }
-
             current = Path.Join(current, segment);
             var info = GetExistingFileSystemInfo(current);
             if (info == null)
@@ -806,6 +795,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
         return FileSecretPostureResult.Ready();
     }
 
+    [ExcludeFromCodeCoverage(Justification = "The allowed /var and /tmp alias combinations depend on macOS system symlink layout; deterministic non-system symlink rejection is covered.")]
     private bool IsAllowedSystemDirectoryAlias(string path, FileSystemInfo info)
     {
         if (!_isMacOs() || info.LinkTarget is not { } target)
