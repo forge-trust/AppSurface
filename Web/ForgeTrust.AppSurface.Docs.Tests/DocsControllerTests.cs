@@ -3869,6 +3869,79 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestHealth_ShouldRenderAuthorizedRebuildForm_WhenOperatorPolicyAllowsUser()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorWritePolicy = "DocsWrite"
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester);
+        using (memo)
+        using (cache)
+        {
+            controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+            {
+                RequestServices = CreateAuthorizationServices(
+                    policyName: "DocsWrite",
+                    policy => policy.RequireAuthenticatedUser()),
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+                    authenticationType: "test-auth"))
+            });
+
+            var result = Assert.IsType<ViewResult>(await controller.HarvestHealth());
+            var model = Assert.IsType<AppSurfaceDocsHarvestHealthResponse>(result.Model);
+
+            Assert.NotNull(model.RebuildForm);
+            Assert.True(model.RebuildForm.IsAuthorized);
+            Assert.Equal("Ready", model.RebuildForm.Status);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestHealth_ShouldRenderUnauthorizedRebuildState_WhenOperatorPolicyDeniesUser()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorWritePolicy = "DocsWrite"
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester);
+        using (memo)
+        using (cache)
+        {
+            controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+            {
+                RequestServices = CreateAuthorizationServices(
+                    policyName: "DocsWrite",
+                    policy => policy.RequireClaim("scope", "docs.write")),
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.NameIdentifier, "reader") },
+                    authenticationType: "test-auth"))
+            });
+
+            var result = Assert.IsType<ViewResult>(await controller.HarvestHealth());
+            var model = Assert.IsType<AppSurfaceDocsHarvestHealthResponse>(result.Model);
+
+            Assert.NotNull(model.RebuildForm);
+            Assert.False(model.RebuildForm.IsAuthorized);
+            Assert.Equal("Unauthorized", model.RebuildForm.Status);
+            Assert.Contains("not authorized", model.RebuildForm.Description, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
     public async Task HarvestHealth_ShouldReturnNotFound_WhenRoutesAreNotExposedForEnvironment()
     {
         var harvester = A.Fake<IDocHarvester>();
@@ -4792,6 +4865,35 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task AuthorizeSearchIndexRefreshAsync_ShouldPreferOperatorWritePolicy_WhenBothPoliciesAreConfigured()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorWritePolicy = "DocsWrite",
+                SearchIndexRefreshPolicy = "LegacyRefresh"
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+        controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+        {
+            RequestServices = CreateAuthorizationServices(
+                policyName: "DocsWrite",
+                policy => policy.RequireAuthenticatedUser()),
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+                authenticationType: "test-auth"))
+        });
+
+        var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
+
+        Assert.True(result.IsAllowed);
+    }
+
+    [Fact]
     public async Task RefreshSearchIndex_ShouldReturnForbidden_WhenAuthorizationFails()
     {
         var options = new AppSurfaceDocsOptions();
@@ -4803,6 +4905,76 @@ public class DocsControllerTests : IDisposable
 
         var status = Assert.IsType<StatusCodeResult>(result);
         Assert.Equal(StatusCodes.Status403Forbidden, status.StatusCode);
+    }
+
+    [Fact]
+    public async Task RebuildHarvest_ShouldRedirectToHarvestObservatory_WhenAuthorized()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/_health",
+            exposure: AppSurfaceDocsHarvestHealthExposure.Always,
+            configureOptions: options => options.Diagnostics.OperatorWritePolicy = "DocsWrite");
+        pending.Controller.ControllerContext.HttpContext.RequestServices = CreateAuthorizationServices(
+            policyName: "DocsWrite",
+            policy => policy.RequireAuthenticatedUser());
+        pending.Controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+            authenticationType: "test-auth"));
+
+        var result = await pending.Controller.RebuildHarvest("/docs/search?q=api");
+
+        var redirect = Assert.IsType<RedirectResult>(result);
+        Assert.Equal("/docs/_harvest?returnUrl=%2Fdocs%2Fsearch%3Fq%3Dapi&rebuild=queued", redirect.Url);
+    }
+
+    [Fact]
+    public async Task RebuildHarvest_ShouldReturnNotFound_WhenHarvestRoutesAreHidden()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/_harvest/rebuild",
+            exposure: AppSurfaceDocsHarvestHealthExposure.Never,
+            configureOptions: options => options.Diagnostics.OperatorWritePolicy = "DocsWrite");
+
+        var result = await pending.Controller.RebuildHarvest("/docs/search");
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task RebuildHarvest_ShouldRedirectWithAlreadyQueuedState_WhenRebuildIsAlreadyQueued()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/_health",
+            exposure: AppSurfaceDocsHarvestHealthExposure.Always,
+            configureOptions: options => options.Diagnostics.OperatorWritePolicy = "DocsWrite");
+        pending.Controller.ControllerContext.HttpContext.RequestServices = CreateAuthorizationServices(
+            policyName: "DocsWrite",
+            policy => policy.RequireAuthenticatedUser());
+        pending.Controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+            authenticationType: "test-auth"));
+
+        var queued = Assert.IsType<RedirectResult>(await pending.Controller.RebuildHarvest("/docs/search?q=api"));
+        var alreadyQueued = Assert.IsType<RedirectResult>(await pending.Controller.RebuildHarvest("/docs/search?q=api"));
+
+        Assert.Equal("/docs/_harvest?returnUrl=%2Fdocs%2Fsearch%3Fq%3Dapi&rebuild=queued", queued.Url);
+        Assert.Equal("/docs/_harvest?returnUrl=%2Fdocs%2Fsearch%3Fq%3Dapi&rebuild=already-queued", alreadyQueued.Url);
+    }
+
+    [Fact]
+    public async Task Harvest_ShouldRenderAlreadyQueuedRequestState_WhenQueryContainsKnownMarker()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/_harvest",
+            exposure: AppSurfaceDocsHarvestHealthExposure.Always);
+
+        var result = await pending.Controller.Harvest("/docs/search?q=api", "already-queued");
+
+        AssertHarvestingView(
+            result,
+            "/docs/search?q=api",
+            canUseLiveProgress: true,
+            AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued);
     }
 
     [Fact]
@@ -5337,6 +5509,7 @@ public class DocsControllerTests : IDisposable
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddControllersWithViews();
         services.AddAuthorization(
             options =>
             {
@@ -5462,7 +5635,8 @@ public class DocsControllerTests : IDisposable
         string environmentName = "Development",
         AppSurfaceDocsHarvestHealthExposure exposure = AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
         IRazorWireChannelAuthorizer? authorizer = null,
-        bool registerAuthorizer = true)
+        bool registerAuthorizer = true,
+        Action<AppSurfaceDocsOptions>? configureOptions = null)
     {
         var release = new TaskCompletionSource<IReadOnlyList<DocNode>>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -5480,6 +5654,7 @@ public class DocsControllerTests : IDisposable
                 }
             }
         };
+        configureOptions?.Invoke(options);
         var cache = new MemoryCache(new MemoryCacheOptions());
         var memo = new Memo(cache);
         var environment = A.Fake<IWebHostEnvironment>();
@@ -5545,13 +5720,15 @@ public class DocsControllerTests : IDisposable
     private static void AssertHarvestingView(
         IActionResult result,
         string expectedReturnUrl,
-        bool canUseLiveProgress)
+        bool canUseLiveProgress,
+        AppSurfaceDocsHarvestRebuildRequestResult? expectedRebuildRequestResult = null)
     {
         var viewResult = Assert.IsType<ViewResult>(result);
         Assert.Equal("Harvesting", viewResult.ViewName);
         var model = Assert.IsType<AppSurfaceDocsHarvestingViewModel>(viewResult.Model);
         Assert.Equal(expectedReturnUrl, model.ReturnUrl);
         Assert.Equal(canUseLiveProgress, model.CanUseLiveProgress);
+        Assert.Equal(expectedRebuildRequestResult, model.RebuildRequestResult);
     }
 
     private static DocFeaturedPageGroupDefinition FeaturedGroup(params DocFeaturedPageDefinition[] pages)

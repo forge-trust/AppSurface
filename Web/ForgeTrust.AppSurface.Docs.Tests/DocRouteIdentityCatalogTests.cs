@@ -213,9 +213,11 @@ public sealed class DocRouteIdentityCatalogTests
     }
 
     [Theory]
+    [InlineData("_harvest")]
+    [InlineData("_harvest/rebuild")]
     [InlineData("_routes")]
     [InlineData("_routes.json")]
-    public void Create_ShouldReserveRouteInspectorRoutesAndRejectAliases(string requestedRoute)
+    public void Create_ShouldReserveOperatorRoutesAndRejectAliases(string requestedRoute)
     {
         var catalog = CreateCatalog(
             new DocNode(

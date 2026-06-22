@@ -20,7 +20,9 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
     private readonly IServiceProvider _services;
     private readonly ILogger<AppSurfaceDocsHarvestProgressReporter> _logger;
     private readonly object _gate = new();
+    private readonly HashSet<string> _completionVisitSuppressedRunIds = new(StringComparer.Ordinal);
     private AppSurfaceDocsHarvestProgressSnapshot _snapshot = AppSurfaceDocsHarvestProgressSnapshot.Idle;
+    private bool _suppressNextCompletionVisit;
 
     /// <summary>
     /// Initializes a new instance of the harvest progress reporter.
@@ -78,6 +80,12 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
             var harvesters = harvesterTypes
                 .Select(type => new AppSurfaceDocsHarvesterProgress(type, "Waiting", 0))
                 .ToArray();
+            if (_suppressNextCompletionVisit)
+            {
+                _completionVisitSuppressedRunIds.Add(runId);
+                _suppressNextCompletionVisit = false;
+            }
+
             snapshot = new AppSurfaceDocsHarvestProgressSnapshot
             {
                 RunId = runId,
@@ -93,6 +101,50 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
 
         await PublishAsync(snapshot);
         return runId;
+    }
+
+    /// <summary>
+    /// Suppresses the terminal browser visit for the active run, or for the next run if the coordinator has scheduled
+    /// work before the run has published its identifier.
+    /// </summary>
+    internal void SuppressCompletionVisitForCurrentOrNextRun()
+    {
+        lock (_gate)
+        {
+            if (_snapshot.State == AppSurfaceDocsHarvestRunState.Running
+                && !string.IsNullOrWhiteSpace(_snapshot.RunId))
+            {
+                _completionVisitSuppressedRunIds.Add(_snapshot.RunId);
+                return;
+            }
+
+            _suppressNextCompletionVisit = true;
+        }
+    }
+
+    /// <summary>
+    /// Records that a trusted rebuild is queued behind the active run.
+    /// </summary>
+    /// <returns>A task that completes after any snapshot publication attempt.</returns>
+    internal async ValueTask RebuildQueuedAsync()
+    {
+        AppSurfaceDocsHarvestProgressSnapshot snapshot;
+        lock (_gate)
+        {
+            if (_snapshot.State != AppSurfaceDocsHarvestRunState.Running)
+            {
+                return;
+            }
+
+            snapshot = _snapshot with
+            {
+                Status = "Harvesting (rebuild queued)",
+                Activity = AddActivity(_snapshot.Activity, "A rebuild is queued and will start after this run finishes.")
+            };
+            _snapshot = snapshot;
+        }
+
+        await PublishAsync(snapshot);
     }
 
     /// <summary>
@@ -215,8 +267,10 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                 Activity = AddActivity(_snapshot.Activity, $"Harvest completed with {health.TotalDocs.ToString(CultureInfo.InvariantCulture)} docs.")
             };
             _snapshot = snapshot;
+            var suppressCompletionVisit = _completionVisitSuppressedRunIds.Remove(runId);
             publishCompletionVisit = previousState != AppSurfaceDocsHarvestRunState.Completed
-                                     && snapshot.State == AppSurfaceDocsHarvestRunState.Completed;
+                                     && snapshot.State == AppSurfaceDocsHarvestRunState.Completed
+                                     && !suppressCompletionVisit;
         }
 
         await PublishAsync(snapshot, publishCompletionVisit);

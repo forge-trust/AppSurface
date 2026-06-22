@@ -354,10 +354,14 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// </para>
     /// <para>
     /// The operator-facing diagnostics route patterns are always registered before the catch-all docs route so
-    /// <c>{DocsRootPath}/_health</c>, <c>{DocsRootPath}/_health.json</c>, <c>{DocsRootPath}/_routes</c>, and
-    /// <c>{DocsRootPath}/_routes.json</c> remain reserved operator paths rather than falling through to document lookup.
-    /// The route named <c>appsurfacedocs_harvest_health</c> maps the current docs root health pattern from
-    /// <see cref="DocsUrlBuilder.BuildHealthUrl"/> to <c>DocsController.HarvestHealth</c>, and
+    /// <c>{DocsRootPath}/_harvest</c>, <c>{DocsRootPath}/_harvest/rebuild</c>, <c>{DocsRootPath}/_health</c>,
+    /// <c>{DocsRootPath}/_health.json</c>, <c>{DocsRootPath}/_routes</c>, and <c>{DocsRootPath}/_routes.json</c>
+    /// remain reserved operator paths rather than falling through to document lookup.
+    /// The route named <c>appsurfacedocs_harvest</c> maps the current docs root harvest observatory pattern from
+    /// <see cref="DocsUrlBuilder.BuildHarvestUrl"/> to <c>DocsController.Harvest</c>. The route named
+    /// <c>appsurfacedocs_harvest_rebuild</c> maps <see cref="DocsUrlBuilder.BuildHarvestRebuildUrl"/> to
+    /// <c>DocsController.RebuildHarvest</c>. The route named <c>appsurfacedocs_harvest_health</c> maps the current docs
+    /// root health pattern from <see cref="DocsUrlBuilder.BuildHealthUrl"/> to <c>DocsController.HarvestHealth</c>, and
     /// <c>appsurfacedocs_harvest_health_json</c> maps <see cref="DocsUrlBuilder.BuildHealthJsonUrl"/> to
     /// <c>DocsController.HarvestHealthJson</c>. Route inspector routes map
     /// <see cref="DocsUrlBuilder.BuildRouteInspectorUrl"/> and <see cref="DocsUrlBuilder.BuildRouteInspectorJsonUrl"/>
@@ -460,6 +464,8 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var currentSearchPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchUrl());
         var currentSearchIndexPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchIndexUrl());
         var currentSearchIndexRefreshPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchIndexRefreshUrl());
+        var currentHarvestPattern = TrimLeadingSlash(docsUrlBuilder.BuildHarvestUrl());
+        var currentHarvestRebuildPattern = TrimLeadingSlash(docsUrlBuilder.BuildHarvestRebuildUrl());
         var currentHealthPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthUrl());
         var currentHealthJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthJsonUrl());
         var currentRouteInspectorPattern = TrimLeadingSlash(docsUrlBuilder.BuildRouteInspectorUrl());
@@ -521,6 +527,37 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 {
                     controller = "Docs",
                     action = "RefreshSearchIndex"
+                })
+            .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
+
+        endpoints.MapControllerRoute(
+            name: "appsurfacedocs_harvest",
+            pattern: currentHarvestPattern,
+            defaults: new
+            {
+                controller = "Docs",
+                action = "Harvest"
+            });
+
+        endpoints.MapMethods(
+            currentHarvestRebuildPattern,
+            [
+                HttpMethods.Delete,
+                HttpMethods.Get,
+                HttpMethods.Head,
+                HttpMethods.Options,
+                HttpMethods.Patch,
+                HttpMethods.Put
+            ],
+            RejectHarvestRebuildUnsupportedMethodAsync);
+
+        endpoints.MapControllerRoute(
+                name: "appsurfacedocs_harvest_rebuild",
+                pattern: currentHarvestRebuildPattern,
+                defaults: new
+                {
+                    controller = "Docs",
+                    action = "RebuildHarvest"
                 })
             .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
 
@@ -729,6 +766,27 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             },
             context);
         context.Response.Headers["Allow"] = DocsUrlBuilder.SearchIndexRefreshMethod;
+        context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+        return Task.CompletedTask;
+    }
+
+    private static Task RejectHarvestRebuildUnsupportedMethodAsync(HttpContext context)
+    {
+        var statusCodePages = context.Features.Get<IStatusCodePagesFeature>();
+        if (statusCodePages is not null)
+        {
+            statusCodePages.Enabled = false;
+        }
+
+        context.Response.OnStarting(
+            static state =>
+            {
+                var httpContext = (HttpContext)state;
+                httpContext.Response.Headers["Allow"] = DocsUrlBuilder.HarvestRebuildMethod;
+                return Task.CompletedTask;
+            },
+            context);
+        context.Response.Headers["Allow"] = DocsUrlBuilder.HarvestRebuildMethod;
         context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
         return Task.CompletedTask;
     }

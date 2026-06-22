@@ -612,6 +612,26 @@
     min-height: min(45rem, calc(100vh - 8rem));
 }
 
+.docs-harvest-request-state {
+    margin: 0 0 1rem;
+    border: 1px solid var(--docs-search-color-border-accent-muted);
+    border-radius: 0.5rem;
+    background: var(--docs-search-color-state-active-fill);
+    padding: 0.9rem 1rem;
+}
+
+.docs-harvest-request-state h2 {
+    margin: 0;
+    color: var(--docs-search-color-text-strong);
+    font-size: 1rem;
+}
+
+.docs-harvest-request-state p {
+    margin: 0.35rem 0 0;
+    color: var(--docs-search-color-text-muted);
+    line-height: 1.5;
+}
+
 .docs-harvest-observatory {
     display: grid;
     gap: 1.25rem;

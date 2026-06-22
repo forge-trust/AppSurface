@@ -870,6 +870,7 @@ public sealed class AppSurfaceDocsOptionsTests
     [InlineData("search")]
     [InlineData("search-index.json")]
     [InlineData("_search-index")]
+    [InlineData("_harvest")]
     [InlineData("_health")]
     [InlineData("_health.json")]
     [InlineData("_routes")]
@@ -997,7 +998,8 @@ public sealed class AppSurfaceDocsOptionsTests
                     new Dictionary<string, string?>
                     {
                         ["AppSurfaceDocs:Diagnostics:ExposeRouteInspector"] = "Always",
-                        ["AppSurfaceDocs:Diagnostics:ShowChrome"] = "Never"
+                        ["AppSurfaceDocs:Diagnostics:ShowChrome"] = "Never",
+                        ["AppSurfaceDocs:Diagnostics:OperatorWritePolicy"] = " DocsWrite "
                     })
                 .Build());
 
@@ -1008,6 +1010,7 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Diagnostics.ShowChrome);
+        Assert.Equal("DocsWrite", options.Diagnostics.OperatorWritePolicy);
     }
 
     [Fact]
@@ -1497,6 +1500,7 @@ public sealed class AppSurfaceDocsOptionsTests
         {
             ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always,
             ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never,
+            OperatorWritePolicy = " DocsWrite ",
             SearchIndexRefreshPolicy = " DocsRefresh "
         };
         var bundle = new AppSurfaceDocsBundleOptions { Path = " /tmp/docs.bundle.json " };
@@ -1556,6 +1560,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Diagnostics.ShowChrome);
+        Assert.Equal("DocsWrite", options.Diagnostics.OperatorWritePolicy);
         Assert.Equal("DocsRefresh", options.Diagnostics.SearchIndexRefreshPolicy);
         Assert.Equal("/tmp/docs.bundle.json", options.Bundle.Path);
         Assert.Equal(["Contoso.Product."], options.Sidebar.NamespacePrefixes);

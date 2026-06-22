@@ -478,7 +478,9 @@ public class DocsController : Controller
     /// <remarks>
     /// This endpoint is intentionally POST-only and side-effecting. Readers should fetch <see cref="SearchIndex"/>; host
     /// operators should post to <see cref="DocsUrlBuilder.Routes"/>.<c>SearchIndexRefresh</c> with a valid anti-forgery
-    /// token and a user that satisfies <see cref="AppSurfaceDocsDiagnosticsOptions.SearchIndexRefreshPolicy"/>.
+    /// token and a user that satisfies the effective AppSurface Docs operator-write policy. New hosts should configure
+    /// <see cref="AppSurfaceDocsDiagnosticsOptions.OperatorWritePolicy"/>; existing hosts may keep
+    /// <see cref="AppSurfaceDocsDiagnosticsOptions.SearchIndexRefreshPolicy"/> as the compatibility fallback.
     /// </remarks>
     [HttpPost]
     [ValidateAntiForgeryToken]
@@ -498,6 +500,92 @@ public class DocsController : Controller
         _logger.LogInformation("AppSurface Docs search-index cache invalidated by an authorized operator.");
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// Displays the live harvest observatory for a trusted operator rebuild or an active startup harvest.
+    /// </summary>
+    /// <param name="returnUrl">
+    /// Optional app-relative docs URL to revisit after the active harvest completes. Unsafe values and harvest-loop
+    /// targets fall back to the current docs home.
+    /// </param>
+    /// <param name="rebuild">
+    /// Optional rebuild request result emitted by <see cref="RebuildHarvest"/> so the observatory can show whether the
+    /// operator request started, queued, or was already queued.
+    /// </param>
+    /// <returns>
+    /// The harvest observatory while a harvest is active or queued; otherwise a redirect to the validated return URL.
+    /// </returns>
+    [HttpGet]
+    public async Task<IActionResult> Harvest(string? returnUrl = null, string? rebuild = null)
+    {
+        if (!AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment))
+        {
+            return NotFound();
+        }
+
+        var safeReturnUrl = ResolveHarvestReturnUrl(returnUrl);
+        if (_harvestCoordinator is null || !_harvestCoordinator.HasActiveOrQueuedHarvest)
+        {
+            return Redirect(safeReturnUrl);
+        }
+
+        SetNoStoreCacheControl();
+        ViewData["Title"] = "Docs Harvest";
+        return View(
+            "Harvesting",
+            new AppSurfaceDocsHarvestingViewModel
+            {
+                Progress = _harvestCoordinator.CurrentProgress,
+                ReturnUrl = safeReturnUrl,
+                CompletionNavigationDelayMilliseconds = _harvestCoordinator.CompletionDelay,
+                CanUseLiveProgress = await CanUseLiveHarvestProgressAsync(),
+                RebuildRequestResult = ParseHarvestRebuildRequestResult(rebuild)
+            });
+    }
+
+    /// <summary>
+    /// Starts or queues a full source-backed AppSurface Docs harvest rebuild after trusted operator authorization.
+    /// </summary>
+    /// <param name="returnUrl">
+    /// Optional app-relative docs URL to revisit after rebuild completion. Unsafe values, non-docs paths, and harvest
+    /// loop targets fall back to the current docs home.
+    /// </param>
+    /// <returns>
+    /// A redirect to the live harvest observatory when authorization succeeds; otherwise HTTP 403. MVC anti-forgery
+    /// validation runs before this action body.
+    /// </returns>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RebuildHarvest([FromForm] string? returnUrl = null)
+    {
+        if (!AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment))
+        {
+            return NotFound();
+        }
+
+        var authorization = await AuthorizeSearchIndexRefreshAsync(HttpContext.RequestAborted);
+        if (!authorization.IsAllowed)
+        {
+            _logger.LogWarning(
+                "Denied AppSurface Docs harvest rebuild attempt. Reason: {Reason}",
+                authorization.Reason);
+
+            return StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (_harvestCoordinator is null)
+        {
+            _logger.LogWarning("Denied AppSurface Docs harvest rebuild because no harvest coordinator is registered.");
+            return StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var rebuild = await _harvestCoordinator.RequestRebuildAsync(HttpContext.RequestAborted);
+        _logger.LogInformation(
+            "AppSurface Docs harvest rebuild request accepted with result {Result}.",
+            rebuild);
+
+        return Redirect(BuildHarvestUrlWithReturnUrl(ResolveHarvestReturnUrl(returnUrl), rebuild));
     }
 
     /// <summary>
@@ -732,7 +820,8 @@ public class DocsController : Controller
     /// </returns>
     /// <remarks>
     /// The decision flow is intentionally ordered from host configuration to caller identity: a missing or blank
-    /// <see cref="AppSurfaceDocsDiagnosticsOptions.SearchIndexRefreshPolicy"/> returns
+    /// no effective <see cref="AppSurfaceDocsDiagnosticsOptions.OperatorWritePolicy"/> or
+    /// <see cref="AppSurfaceDocsDiagnosticsOptions.SearchIndexRefreshPolicy"/> fallback returns
     /// <see cref="SearchIndexRefreshAuthorizationFailure.MissingPolicyOption"/>; missing <see cref="HttpContext"/>,
     /// request services, or <see cref="IAuthorizationPolicyProvider"/> returns
     /// <see cref="SearchIndexRefreshAuthorizationFailure.MissingPolicyProvider"/>; a missing
@@ -747,7 +836,7 @@ public class DocsController : Controller
     internal async Task<SearchIndexRefreshAuthorizationResult> AuthorizeSearchIndexRefreshAsync(
         CancellationToken cancellationToken)
     {
-        var policyName = _options.Diagnostics?.SearchIndexRefreshPolicy;
+        var policyName = ResolveDocsOperatorWritePolicyName();
         if (string.IsNullOrWhiteSpace(policyName))
         {
             return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.MissingPolicyOption);
@@ -803,7 +892,28 @@ public class DocsController : Controller
     private async Task<AppSurfaceDocsHarvestHealthResponse> BuildHarvestHealthResponseAsync()
     {
         var health = await _aggregator.GetHarvestHealthAsync(HttpContext.RequestAborted);
-        return AppSurfaceDocsHarvestHealthResponse.FromSnapshot(health);
+        var response = AppSurfaceDocsHarvestHealthResponse.FromSnapshot(health);
+        var policyName = ResolveDocsOperatorWritePolicyName();
+        if (!string.IsNullOrWhiteSpace(policyName))
+        {
+            var authorization = await AuthorizeSearchIndexRefreshAsync(HttpContext.RequestAborted);
+            response = response with
+            {
+                RebuildForm = new AppSurfaceDocsHarvestRebuildForm
+                {
+                    Action = PathBaseAware(_docsUrlBuilder.BuildHarvestRebuildUrl()),
+                    Method = DocsUrlBuilder.HarvestRebuildMethod,
+                    ReturnUrl = ResolveHarvestReturnUrl(Request.Query["returnUrl"].FirstOrDefault()),
+                    IsAuthorized = authorization.IsAllowed,
+                    Status = authorization.IsAllowed ? "Ready" : GetRebuildAuthorizationStatus(authorization.Reason),
+                    Description = authorization.IsAllowed
+                        ? "Rebuild the live docs snapshot from source and watch progress before returning to this docs context."
+                        : GetRebuildAuthorizationDescription(authorization.Reason)
+                }
+            };
+        }
+
+        return response;
     }
 
     private async Task<AppSurfaceDocsRouteInspectorResponse> BuildRouteInspectorResponseAsync(string? path)
@@ -1016,6 +1126,134 @@ public class DocsController : Controller
         return PathBaseAware(_docsUrlBuilder.BuildHomeUrl());
     }
 
+    private string BuildHarvestUrlWithReturnUrl(
+        string returnUrl,
+        AppSurfaceDocsHarvestRebuildRequestResult? rebuild = null)
+    {
+        var harvestUrl = PathBaseAware(_docsUrlBuilder.BuildHarvestUrl());
+        var separator = "?";
+        if (!string.IsNullOrWhiteSpace(returnUrl))
+        {
+            harvestUrl = string.Concat(harvestUrl, separator, "returnUrl=", Uri.EscapeDataString(returnUrl));
+            separator = "&";
+        }
+
+        return rebuild is null
+            ? harvestUrl
+            : string.Concat(harvestUrl, separator, "rebuild=", GetHarvestRebuildRequestResultQueryValue(rebuild.Value));
+    }
+
+    private string ResolveHarvestReturnUrl(string? returnUrl)
+    {
+        if (IsSafeDocsHarvestReturnUrl(
+                returnUrl,
+                Request.PathBase.Value,
+                _docsUrlBuilder.CurrentDocsRootPath))
+        {
+            return returnUrl!;
+        }
+
+        return PathBaseAware(_docsUrlBuilder.BuildHomeUrl());
+    }
+
+    private string? ResolveDocsOperatorWritePolicyName()
+    {
+        return string.IsNullOrWhiteSpace(_options.Diagnostics?.OperatorWritePolicy)
+            ? _options.Diagnostics?.SearchIndexRefreshPolicy
+            : _options.Diagnostics.OperatorWritePolicy;
+    }
+
+    private static string GetRebuildAuthorizationStatus(SearchIndexRefreshAuthorizationFailure? failure)
+    {
+        return failure is SearchIndexRefreshAuthorizationFailure.Unauthenticated
+            or SearchIndexRefreshAuthorizationFailure.AuthorizationFailed
+            ? "Unauthorized"
+            : "Unavailable";
+    }
+
+    private static string GetRebuildAuthorizationDescription(SearchIndexRefreshAuthorizationFailure? failure)
+    {
+        return failure switch
+        {
+            SearchIndexRefreshAuthorizationFailure.Unauthenticated =>
+                "Sign in as a docs operator before rebuilding the live docs snapshot.",
+            SearchIndexRefreshAuthorizationFailure.AuthorizationFailed =>
+                "Your account is not authorized to rebuild the live docs snapshot.",
+            SearchIndexRefreshAuthorizationFailure.PolicyNotFound =>
+                "The configured docs operator policy was not found, so rebuild requests are disabled.",
+            _ =>
+                "The docs operator policy is not available for this request, so rebuild requests are disabled."
+        };
+    }
+
+    private static string GetHarvestRebuildRequestResultQueryValue(AppSurfaceDocsHarvestRebuildRequestResult result)
+    {
+        return result switch
+        {
+            AppSurfaceDocsHarvestRebuildRequestResult.Started => "started",
+            AppSurfaceDocsHarvestRebuildRequestResult.Queued => "queued",
+            AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued => "already-queued",
+            _ => string.Empty
+        };
+    }
+
+    private static AppSurfaceDocsHarvestRebuildRequestResult? ParseHarvestRebuildRequestResult(string? value)
+    {
+        return value switch
+        {
+            "started" => AppSurfaceDocsHarvestRebuildRequestResult.Started,
+            "queued" => AppSurfaceDocsHarvestRebuildRequestResult.Queued,
+            "already-queued" => AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued,
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Determines whether a harvest completion return URL stays inside the active docs surface and cannot loop back to
+    /// the harvest observatory.
+    /// </summary>
+    /// <param name="url">The candidate app-relative return URL.</param>
+    /// <param name="pathBase">The active request path base, or <see langword="null"/> when none is mounted.</param>
+    /// <param name="docsRootPath">The configured current docs root path.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="url"/> is a safe app-relative path under the current docs root and
+    /// not <c>_harvest</c> or <c>_harvest/rebuild</c>; otherwise <see langword="false"/>.
+    /// </returns>
+    internal static bool IsSafeDocsHarvestReturnUrl(string? url, string? pathBase, string docsRootPath)
+    {
+        if (!IsSafeAppRelativeUrl(url))
+        {
+            return false;
+        }
+
+        var pathEnd = url!.IndexOfAny(['?', '#']);
+        var path = pathEnd >= 0 ? url[..pathEnd] : url;
+        var normalizedPathBase = NormalizeReturnUrlPath(pathBase);
+        var candidate = NormalizeReturnUrlPath(path);
+        if (!string.IsNullOrWhiteSpace(normalizedPathBase)
+            && (string.Equals(candidate, normalizedPathBase, StringComparison.OrdinalIgnoreCase)
+                || candidate.StartsWith(normalizedPathBase + "/", StringComparison.OrdinalIgnoreCase)))
+        {
+            candidate = candidate.Length == normalizedPathBase.Length
+                ? "/"
+                : candidate[normalizedPathBase.Length..];
+        }
+
+        var normalizedDocsRoot = NormalizeReturnUrlPath(docsRootPath);
+        if (!IsUnderPath(candidate, normalizedDocsRoot))
+        {
+            return false;
+        }
+
+        var relativePath = candidate.Length == normalizedDocsRoot.Length
+            ? string.Empty
+            : candidate[(normalizedDocsRoot == "/" ? 1 : normalizedDocsRoot.Length + 1)..];
+
+        return !relativePath.Equals("_harvest", StringComparison.OrdinalIgnoreCase)
+               && !relativePath.Equals("_harvest/rebuild", StringComparison.OrdinalIgnoreCase)
+               && !relativePath.StartsWith("_harvest/", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Determines whether a return URL is safe to use as an app-relative navigation target.
     /// </summary>
@@ -1048,6 +1286,38 @@ public class DocsController : Controller
         }
 
         return true;
+    }
+
+    private static string NormalizeReturnUrlPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = path.Trim();
+        if (!trimmed.StartsWith("/", StringComparison.Ordinal))
+        {
+            trimmed = "/" + trimmed;
+        }
+
+        while (trimmed.Length > 1 && trimmed.EndsWith("/", StringComparison.Ordinal))
+        {
+            trimmed = trimmed[..^1];
+        }
+
+        return trimmed;
+    }
+
+    private static bool IsUnderPath(string candidatePath, string rootPath)
+    {
+        if (string.Equals(rootPath, "/", StringComparison.Ordinal))
+        {
+            return candidatePath.StartsWith("/", StringComparison.Ordinal);
+        }
+
+        return string.Equals(candidatePath, rootPath, StringComparison.OrdinalIgnoreCase)
+               || candidatePath.StartsWith(rootPath + "/", StringComparison.OrdinalIgnoreCase);
     }
 
     private void SetNoStoreCacheControl()

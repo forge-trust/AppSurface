@@ -1665,6 +1665,133 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task HarvestHealthView_ShouldRenderRebuildForm_WhenFormMetadataIsPresent()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new AppSurfaceDocsHarvestHealthResponse
+        {
+            Status = "Healthy",
+            GeneratedUtc = new DateTimeOffset(2026, 5, 9, 12, 0, 0, TimeSpan.Zero),
+            Verification = new AppSurfaceDocsHarvestHealthVerification
+            {
+                Ok = true,
+                HttpStatusCode = StatusCodes.Status200OK
+            },
+            RebuildForm = new AppSurfaceDocsHarvestRebuildForm
+            {
+                Action = "/docs/_harvest/rebuild",
+                Method = DocsUrlBuilder.HarvestRebuildMethod,
+                ReturnUrl = "/docs/search?q=api"
+            }
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/HarvestHealth.cshtml",
+            model);
+
+        Assert.Contains("Rebuild docs", html);
+        Assert.Contains("action=\"/docs/_harvest/rebuild\"", html);
+        Assert.Contains("method=\"POST\"", html);
+        Assert.Contains("name=\"returnUrl\" value=\"/docs/search?q=api\"", html);
+        Assert.Contains("__RequestVerificationToken", html);
+    }
+
+    [Fact]
+    public async Task HarvestHealthView_ShouldRenderDisabledRebuildState_WhenUserIsNotAuthorized()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new AppSurfaceDocsHarvestHealthResponse
+        {
+            Status = "Healthy",
+            GeneratedUtc = new DateTimeOffset(2026, 5, 9, 12, 0, 0, TimeSpan.Zero),
+            Verification = new AppSurfaceDocsHarvestHealthVerification
+            {
+                Ok = true,
+                HttpStatusCode = StatusCodes.Status200OK
+            },
+            RebuildForm = new AppSurfaceDocsHarvestRebuildForm
+            {
+                Action = "/docs/_harvest/rebuild",
+                Method = DocsUrlBuilder.HarvestRebuildMethod,
+                ReturnUrl = "/docs/search?q=api",
+                IsAuthorized = false,
+                Status = "Unauthorized",
+                Description = "Your account is not authorized to rebuild the live docs snapshot."
+            }
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/HarvestHealth.cshtml",
+            model);
+
+        Assert.Contains("Rebuild unauthorized", html);
+        Assert.Contains("not authorized", html);
+        Assert.Contains("disabled", html);
+        Assert.Contains("aria-disabled=\"true\"", html);
+        Assert.DoesNotContain("method=\"POST\"", html);
+        Assert.DoesNotContain("__RequestVerificationToken", html);
+    }
+
+    [Fact]
+    public async Task HarvestingView_ShouldRenderFallbacks_WhenLiveProgressIsDisabled()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new AppSurfaceDocsHarvestingViewModel
+        {
+            Progress = new AppSurfaceDocsHarvestProgressSnapshot
+            {
+                State = AppSurfaceDocsHarvestRunState.Running,
+                Status = "Harvesting",
+                StartedUtc = new DateTimeOffset(2026, 5, 9, 12, 0, 0, TimeSpan.Zero)
+            },
+            ReturnUrl = "/docs/search?q=api",
+            CompletionNavigationDelayMilliseconds = 900,
+            CanUseLiveProgress = false
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/Harvesting.cshtml",
+            model);
+
+        Assert.Contains("id=\"docs-harvest-observatory\" aria-live=\"polite\"", html);
+        Assert.Contains("Live progress is disabled", html);
+        Assert.Contains("<noscript>", html);
+        Assert.Contains("href=\"/docs/search?q=api\"", html);
+        Assert.DoesNotContain("<rw:stream-source", html);
+    }
+
+    [Fact]
+    public async Task HarvestingView_ShouldRenderAlreadyQueuedRebuildState()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new AppSurfaceDocsHarvestingViewModel
+        {
+            Progress = new AppSurfaceDocsHarvestProgressSnapshot
+            {
+                State = AppSurfaceDocsHarvestRunState.Running,
+                Status = "Harvesting",
+                StartedUtc = new DateTimeOffset(2026, 5, 9, 12, 0, 0, TimeSpan.Zero)
+            },
+            ReturnUrl = "/docs/search?q=api",
+            CompletionNavigationDelayMilliseconds = 900,
+            CanUseLiveProgress = true,
+            RebuildRequestResult = AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/Harvesting.cshtml",
+            model);
+
+        Assert.Contains("Rebuild already queued", html);
+        Assert.Contains("no duplicate harvest was scheduled", html);
+        Assert.Contains("role=\"status\"", html);
+    }
+
+    [Fact]
     public async Task RouteInspectorView_ShouldRenderProbeAliasesAndDiagnostics()
     {
         using var services = CreateServiceProvider(CreateDocs());

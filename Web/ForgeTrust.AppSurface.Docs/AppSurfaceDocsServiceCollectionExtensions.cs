@@ -145,6 +145,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Harvest.Paths.DefaultExclusions =
                         NormalizeDefaultExclusions(options.Harvest.Paths.DefaultExclusions);
                     options.Harvest.Paths.VcsIgnore.AllowGlobs = NormalizeGlobArray(options.Harvest.Paths.VcsIgnore.AllowGlobs);
+                    options.Diagnostics.OperatorWritePolicy = NormalizeOrNull(options.Diagnostics.OperatorWritePolicy);
                     options.Diagnostics.SearchIndexRefreshPolicy = NormalizeOrNull(options.Diagnostics.SearchIndexRefreshPolicy);
                     options.Metrics.BrowserCollector.EndpointUrl =
                         AppSurfaceDocsOptionsValidator.NormalizeMetricsEndpointUrlOrNull(

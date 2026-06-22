@@ -120,6 +120,49 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     }
 
     [Fact]
+    public async Task ProgressReporter_ShouldSuppressCompletionVisitForCurrentRun()
+    {
+        var hub = new RecordingRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        reporter.SuppressCompletionVisitForCurrentOrNextRun();
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+
+        Assert.Contains(
+            hub.Published,
+            item => item.Message.Contains("data-appsurface-docs-harvest-complete=\"true\"", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            hub.Published,
+            item => item.Message.Contains("action=\"rw-visit\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldSuppressCompletionVisitForNextRun_WhenSuppressionIsRequestedBeforeBegin()
+    {
+        var hub = new RecordingRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        reporter.SuppressCompletionVisitForCurrentOrNextRun();
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+
+        Assert.DoesNotContain(
+            hub.Published,
+            item => item.Message.Contains("action=\"rw-visit\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ProgressReporter_ShouldReplayFailedTerminalStateWithoutVisit()
     {
         var hub = new InMemoryRazorWireStreamHub();
