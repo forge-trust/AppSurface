@@ -527,7 +527,7 @@ public class DocsController : Controller
         var safeReturnUrl = ResolveHarvestReturnUrl(returnUrl);
         if (_harvestCoordinator is null || !_harvestCoordinator.HasActiveOrQueuedHarvest)
         {
-            return Redirect(safeReturnUrl);
+            return LocalRedirect(safeReturnUrl);
         }
 
         SetNoStoreCacheControl();
@@ -585,7 +585,7 @@ public class DocsController : Controller
             "AppSurface Docs harvest rebuild request accepted with result {Result}.",
             rebuild);
 
-        return Redirect(BuildHarvestUrlWithReturnUrl(ResolveHarvestReturnUrl(returnUrl), rebuild));
+        return LocalRedirect(BuildHarvestUrlWithReturnUrl(ResolveHarvestReturnUrl(returnUrl), rebuild));
     }
 
     /// <summary>

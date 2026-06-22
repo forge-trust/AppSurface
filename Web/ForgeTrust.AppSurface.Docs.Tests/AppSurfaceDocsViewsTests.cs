@@ -1763,8 +1763,14 @@ public class AppSurfaceDocsViewsTests
         Assert.DoesNotContain("<rw:stream-source", html);
     }
 
-    [Fact]
-    public async Task HarvestingView_ShouldRenderAlreadyQueuedRebuildState()
+    [Theory]
+    [InlineData(AppSurfaceDocsHarvestRebuildRequestResult.Started, "Rebuild started", "running now")]
+    [InlineData(AppSurfaceDocsHarvestRebuildRequestResult.Queued, "Rebuild queued", "will run after the active harvest")]
+    [InlineData(AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued, "Rebuild already queued", "no duplicate harvest was scheduled")]
+    public async Task HarvestingView_ShouldRenderRebuildRequestState(
+        AppSurfaceDocsHarvestRebuildRequestResult rebuildRequestResult,
+        string expectedStatus,
+        string expectedDescription)
     {
         using var services = CreateServiceProvider(CreateDocs());
         var model = new AppSurfaceDocsHarvestingViewModel
@@ -1778,7 +1784,7 @@ public class AppSurfaceDocsViewsTests
             ReturnUrl = "/docs/search?q=api",
             CompletionNavigationDelayMilliseconds = 900,
             CanUseLiveProgress = true,
-            RebuildRequestResult = AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued
+            RebuildRequestResult = rebuildRequestResult
         };
 
         var html = await RenderViewAsync(
@@ -1786,8 +1792,8 @@ public class AppSurfaceDocsViewsTests
             "/Views/Docs/Harvesting.cshtml",
             model);
 
-        Assert.Contains("Rebuild already queued", html);
-        Assert.Contains("no duplicate harvest was scheduled", html);
+        Assert.Contains(expectedStatus, html);
+        Assert.Contains(expectedDescription, html);
         Assert.Contains("role=\"status\"", html);
     }
 

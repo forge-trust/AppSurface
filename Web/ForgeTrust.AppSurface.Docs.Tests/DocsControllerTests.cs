@@ -4923,7 +4923,7 @@ public class DocsControllerTests : IDisposable
 
         var result = await pending.Controller.RebuildHarvest("/docs/search?q=api");
 
-        var redirect = Assert.IsType<RedirectResult>(result);
+        var redirect = Assert.IsType<LocalRedirectResult>(result);
         Assert.Equal("/docs/_harvest?returnUrl=%2Fdocs%2Fsearch%3Fq%3Dapi&rebuild=queued", redirect.Url);
     }
 
@@ -4954,11 +4954,59 @@ public class DocsControllerTests : IDisposable
             new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
             authenticationType: "test-auth"));
 
-        var queued = Assert.IsType<RedirectResult>(await pending.Controller.RebuildHarvest("/docs/search?q=api"));
-        var alreadyQueued = Assert.IsType<RedirectResult>(await pending.Controller.RebuildHarvest("/docs/search?q=api"));
+        var queued = Assert.IsType<LocalRedirectResult>(await pending.Controller.RebuildHarvest("/docs/search?q=api"));
+        var alreadyQueued = Assert.IsType<LocalRedirectResult>(await pending.Controller.RebuildHarvest("/docs/search?q=api"));
 
         Assert.Equal("/docs/_harvest?returnUrl=%2Fdocs%2Fsearch%3Fq%3Dapi&rebuild=queued", queued.Url);
         Assert.Equal("/docs/_harvest?returnUrl=%2Fdocs%2Fsearch%3Fq%3Dapi&rebuild=already-queued", alreadyQueued.Url);
+    }
+
+    [Fact]
+    public async Task RebuildHarvest_ShouldFallbackUnsafeReturnUrlToDocsHome_WhenAuthorized()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/_health",
+            exposure: AppSurfaceDocsHarvestHealthExposure.Always,
+            configureOptions: options => options.Diagnostics.OperatorWritePolicy = "DocsWrite");
+        pending.Controller.ControllerContext.HttpContext.RequestServices = CreateAuthorizationServices(
+            policyName: "DocsWrite",
+            policy => policy.RequireAuthenticatedUser());
+        pending.Controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+            authenticationType: "test-auth"));
+
+        var result = await pending.Controller.RebuildHarvest("https://evil.example/docs/search");
+
+        var redirect = Assert.IsType<LocalRedirectResult>(result);
+        Assert.Equal("/docs/_harvest?returnUrl=%2Fdocs&rebuild=queued", redirect.Url);
+    }
+
+    [Fact]
+    public async Task Harvest_ShouldLocalRedirectToValidatedReturnUrl_WhenNoHarvestIsActive()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/_harvest",
+            exposure: AppSurfaceDocsHarvestHealthExposure.Always);
+        await pending.CompleteAsync();
+
+        var result = await pending.Controller.Harvest("/docs/search?q=api");
+
+        var redirect = Assert.IsType<LocalRedirectResult>(result);
+        Assert.Equal("/docs/search?q=api", redirect.Url);
+    }
+
+    [Fact]
+    public async Task Harvest_ShouldFallbackUnsafeReturnUrlToDocsHome_WhenNoHarvestIsActive()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/_harvest",
+            exposure: AppSurfaceDocsHarvestHealthExposure.Always);
+        await pending.CompleteAsync();
+
+        var result = await pending.Controller.Harvest("//evil.example/docs/search");
+
+        var redirect = Assert.IsType<LocalRedirectResult>(result);
+        Assert.Equal("/docs", redirect.Url);
     }
 
     [Fact]
@@ -4975,6 +5023,21 @@ public class DocsControllerTests : IDisposable
             "/docs/search?q=api",
             canUseLiveProgress: true,
             AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued);
+    }
+
+    [Fact]
+    public async Task Harvest_ShouldIgnoreUnknownRebuildRequestState_WhenQueryContainsUnknownMarker()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/_harvest",
+            exposure: AppSurfaceDocsHarvestHealthExposure.Always);
+
+        var result = await pending.Controller.Harvest("/docs/search?q=api", "surprise");
+
+        AssertHarvestingView(
+            result,
+            "/docs/search?q=api",
+            canUseLiveProgress: true);
     }
 
     [Fact]
@@ -5845,14 +5908,19 @@ public class DocsControllerTests : IDisposable
 
         public DocsController Controller { get; }
 
+        public async Task CompleteAsync()
+        {
+            _release.TrySetResult([]);
+            await _initialHarvest.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+
         public async ValueTask DisposeAsync()
         {
             using var cache = _cache;
             using var memo = _memo;
             await _requestServices.DisposeAsync();
 
-            _release.TrySetResult([]);
-            await _initialHarvest.WaitAsync(TimeSpan.FromSeconds(3));
+            await CompleteAsync();
         }
     }
 
