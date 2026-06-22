@@ -30,6 +30,36 @@ appsurface config diagnostics
 
 The diagnostics path reports where a value came from without printing the raw secret value.
 
+### File fallback posture
+
+The OS-backed stores are the normal LocalSecrets path. The `--store-file <path>` fallback exists for deterministic
+examples, unsupported local environments, and tests. It is not equivalent to Keychain, Secret Service, or Windows
+Credential Manager.
+
+On Unix platforms, the file fallback creates missing directories with `0700` mode bits and writes or repairs the JSON
+file with `0600` mode bits during `set`, `delete`, and `doctor`. Existing parent directories are inspected, not
+modified in place; loose parent directories stop resolution with a paste-safe diagnostic. Reads inspect existing files
+before returning a secret value: symbolic-link paths, directory paths, and non-canonical mode bits stop resolution
+instead of silently serving a risky file. `doctor` may report:
+
+| Diagnostic code | Meaning |
+| --- | --- |
+| `local-secret-store-ready` | The fallback file can be opened and posture is already ready. |
+| `local-secret-file-posture-repaired` | `doctor` or a write tightened Unix file mode bits. |
+| `local-secret-file-posture-degraded` | The fallback can be opened and `doctor` can exit successfully, but this platform path does not prove owner-only posture in v1. |
+| `local-secret-file-posture-unsupported` | The path shape or checked Unix posture is unsafe for fallback storage, such as a symbolic link, directory path, loose mode bits, or writable non-sticky ancestor. |
+
+Example deterministic file fallback check:
+
+```bash
+appsurface secrets doctor --app MyApp --environment Development --store-file ./.appsurface/local-secrets.json
+```
+
+The command prints `Problem`, `Cause`, `Fix`, `Docs`, and `Retryable` without printing secret values.
+`local-secret-file-posture-degraded` is a degraded readiness result for explicit local/test fallback workflows;
+`local-secret-file-posture-unsupported` is a fail-closed result that stops reads and writes until the path is moved or
+repaired. Prefer the OS-backed store for normal local development.
+
 ### Linux Nonstandard `secret-tool`
 
 Use this only when your trusted Linux `secret-tool` install lives outside `/usr/bin` or `/bin`, such as a Nix,
@@ -95,6 +125,7 @@ provider should fall through to lower-priority configuration.
 | macOS | Keychain generic passwords through Security.framework | Requires an interactive user session when Keychain prompts. |
 | Linux | Secret Service through trusted `secret-tool` paths | Uses `/usr/bin/secret-tool`, then `/bin/secret-tool`, or an explicit absolute `LinuxSecretToolPath`/`--secret-tool-path`. Requires DBus/session secret service availability. |
 | Windows | Credential Manager generic credentials for the current user | Requires an interactive user profile; use environment variables/key-per-file for services, CI, and containers. |
+| Explicit file fallback | JSON file at `--store-file <path>` | Unix mode-bit hardening only; Windows and unknown filesystem ACL posture is reported as degraded. |
 
 ## Escape Hatches, Safest First
 
