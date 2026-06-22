@@ -5172,6 +5172,26 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task RebuildHarvest_ShouldFallbackBlankReturnUrlToDocsHome_WhenAuthorized()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/_health",
+            exposure: AppSurfaceDocsHarvestHealthExposure.Always,
+            configureOptions: options => options.Diagnostics.OperatorWritePolicy = "DocsWrite");
+        pending.Controller.ControllerContext.HttpContext.RequestServices = CreateAuthorizationServices(
+            policyName: "DocsWrite",
+            policy => policy.RequireAuthenticatedUser());
+        pending.Controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+            authenticationType: "test-auth"));
+
+        var result = await pending.Controller.RebuildHarvest("   ");
+
+        var redirect = Assert.IsType<LocalRedirectResult>(result);
+        Assert.Equal("/docs/_harvest?returnUrl=%2Fdocs&rebuild=queued", redirect.Url);
+    }
+
+    [Fact]
     public async Task Harvest_ShouldLocalRedirectToValidatedReturnUrl_WhenNoHarvestIsActive()
     {
         await using var pending = CreatePendingHarvestController(

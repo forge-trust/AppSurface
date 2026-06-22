@@ -778,14 +778,6 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             statusCodePages.Enabled = false;
         }
 
-        context.Response.OnStarting(
-            static state =>
-            {
-                var httpContext = (HttpContext)state;
-                httpContext.Response.Headers["Allow"] = DocsUrlBuilder.HarvestRebuildMethod;
-                return Task.CompletedTask;
-            },
-            context);
         context.Response.Headers["Allow"] = DocsUrlBuilder.HarvestRebuildMethod;
         context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
         return Task.CompletedTask;

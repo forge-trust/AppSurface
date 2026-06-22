@@ -1128,19 +1128,15 @@ public class DocsController : Controller
 
     private string BuildHarvestUrlWithReturnUrl(
         string returnUrl,
-        AppSurfaceDocsHarvestRebuildRequestResult? rebuild = null)
+        AppSurfaceDocsHarvestRebuildRequestResult rebuild)
     {
         var harvestUrl = PathBaseAware(_docsUrlBuilder.BuildHarvestUrl());
-        var separator = "?";
-        if (!string.IsNullOrWhiteSpace(returnUrl))
-        {
-            harvestUrl = string.Concat(harvestUrl, separator, "returnUrl=", Uri.EscapeDataString(returnUrl));
-            separator = "&";
-        }
-
-        return rebuild is null
-            ? harvestUrl
-            : string.Concat(harvestUrl, separator, "rebuild=", GetHarvestRebuildRequestResultQueryValue(rebuild.Value));
+        return string.Concat(
+            harvestUrl,
+            "?returnUrl=",
+            Uri.EscapeDataString(returnUrl),
+            "&rebuild=",
+            GetHarvestRebuildRequestResultQueryValue(rebuild));
     }
 
     private string ResolveHarvestReturnUrl(string? returnUrl)
