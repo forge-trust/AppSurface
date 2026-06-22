@@ -1798,6 +1798,34 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task HarvestingView_ShouldRenderFallbackRebuildRequestState_WhenValueIsUnknown()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new AppSurfaceDocsHarvestingViewModel
+        {
+            Progress = new AppSurfaceDocsHarvestProgressSnapshot
+            {
+                State = AppSurfaceDocsHarvestRunState.Running,
+                Status = "Harvesting",
+                StartedUtc = new DateTimeOffset(2026, 5, 9, 12, 0, 0, TimeSpan.Zero)
+            },
+            ReturnUrl = "/docs/search?q=api",
+            CompletionNavigationDelayMilliseconds = 900,
+            CanUseLiveProgress = true,
+            RebuildRequestResult = (AppSurfaceDocsHarvestRebuildRequestResult)99
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/Harvesting.cshtml",
+            model);
+
+        Assert.Contains("Rebuild requested", html);
+        Assert.Contains("Watch this page for the current harvest state", html);
+        Assert.Contains("role=\"status\"", html);
+    }
+
+    [Fact]
     public async Task RouteInspectorView_ShouldRenderProbeAliasesAndDiagnostics()
     {
         using var services = CreateServiceProvider(CreateDocs());

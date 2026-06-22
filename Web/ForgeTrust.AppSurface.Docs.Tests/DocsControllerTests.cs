@@ -4941,6 +4941,65 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task Harvest_ShouldReturnNotFound_WhenHarvestRoutesAreHidden()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/_harvest",
+            exposure: AppSurfaceDocsHarvestHealthExposure.Never);
+
+        var result = await pending.Controller.Harvest("/docs/search");
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task RebuildHarvest_ShouldReturnForbidden_WhenAuthorizationFails()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/_harvest/rebuild",
+            exposure: AppSurfaceDocsHarvestHealthExposure.Always,
+            configureOptions: options => options.Diagnostics.OperatorWritePolicy = "DocsWrite");
+
+        var result = await pending.Controller.RebuildHarvest("/docs/search");
+
+        var status = Assert.IsType<StatusCodeResult>(result);
+        Assert.Equal(StatusCodes.Status403Forbidden, status.StatusCode);
+    }
+
+    [Fact]
+    public async Task RebuildHarvest_ShouldReturnForbidden_WhenCoordinatorIsNotRegistered()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorWritePolicy = "DocsWrite"
+            },
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Always
+                }
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+        controller.ControllerContext.HttpContext.RequestServices = CreateAuthorizationServices(
+            policyName: "DocsWrite",
+            policy => policy.RequireAuthenticatedUser());
+        controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+            authenticationType: "test-auth"));
+
+        var result = await controller.RebuildHarvest("/docs/search");
+
+        var status = Assert.IsType<StatusCodeResult>(result);
+        Assert.Equal(StatusCodes.Status403Forbidden, status.StatusCode);
+    }
+
+    [Fact]
     public async Task RebuildHarvest_ShouldRedirectWithAlreadyQueuedState_WhenRebuildIsAlreadyQueued()
     {
         await using var pending = CreatePendingHarvestController(
@@ -4959,6 +5018,27 @@ public class DocsControllerTests : IDisposable
 
         Assert.Equal("/docs/_harvest?returnUrl=%2Fdocs%2Fsearch%3Fq%3Dapi&rebuild=queued", queued.Url);
         Assert.Equal("/docs/_harvest?returnUrl=%2Fdocs%2Fsearch%3Fq%3Dapi&rebuild=already-queued", alreadyQueued.Url);
+    }
+
+    [Fact]
+    public async Task RebuildHarvest_ShouldRedirectWithStartedState_WhenNoHarvestIsActive()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/_health",
+            exposure: AppSurfaceDocsHarvestHealthExposure.Always,
+            configureOptions: options => options.Diagnostics.OperatorWritePolicy = "DocsWrite");
+        pending.Controller.ControllerContext.HttpContext.RequestServices = CreateAuthorizationServices(
+            policyName: "DocsWrite",
+            policy => policy.RequireAuthenticatedUser());
+        pending.Controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+            authenticationType: "test-auth"));
+        await pending.CompleteAsync();
+
+        var result = await pending.Controller.RebuildHarvest("/docs/search?q=api");
+
+        var redirect = Assert.IsType<LocalRedirectResult>(result);
+        Assert.Equal("/docs/_harvest?returnUrl=%2Fdocs%2Fsearch%3Fq%3Dapi&rebuild=started", redirect.Url);
     }
 
     [Fact]
@@ -5009,20 +5089,25 @@ public class DocsControllerTests : IDisposable
         Assert.Equal("/docs", redirect.Url);
     }
 
-    [Fact]
-    public async Task Harvest_ShouldRenderAlreadyQueuedRequestState_WhenQueryContainsKnownMarker()
+    [Theory]
+    [InlineData("started", AppSurfaceDocsHarvestRebuildRequestResult.Started)]
+    [InlineData("queued", AppSurfaceDocsHarvestRebuildRequestResult.Queued)]
+    [InlineData("already-queued", AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued)]
+    public async Task Harvest_ShouldRenderKnownRebuildRequestState_WhenQueryContainsKnownMarker(
+        string marker,
+        AppSurfaceDocsHarvestRebuildRequestResult expectedResult)
     {
         await using var pending = CreatePendingHarvestController(
             "/docs/_harvest",
             exposure: AppSurfaceDocsHarvestHealthExposure.Always);
 
-        var result = await pending.Controller.Harvest("/docs/search?q=api", "already-queued");
+        var result = await pending.Controller.Harvest("/docs/search?q=api", marker);
 
         AssertHarvestingView(
             result,
             "/docs/search?q=api",
             canUseLiveProgress: true,
-            AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued);
+            expectedResult);
     }
 
     [Fact]

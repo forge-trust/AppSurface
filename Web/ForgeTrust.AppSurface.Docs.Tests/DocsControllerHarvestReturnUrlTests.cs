@@ -30,6 +30,8 @@ public sealed class DocsControllerHarvestReturnUrlTests
     [InlineData("/docs", null, "/docs")]
     [InlineData("/docs/search?q=api", null, "/docs")]
     [InlineData("/base/docs/packages/README.md.html", "/base", "/docs")]
+    [InlineData("/base/docs/search", "base/", "docs/")]
+    [InlineData("/base", "base", "/")]
     [InlineData("/search?q=api", null, "/")]
     public void IsSafeDocsHarvestReturnUrl_WhenUrlStaysInDocsAndAvoidsHarvestLoop_ReturnsTrue(
         string url,
