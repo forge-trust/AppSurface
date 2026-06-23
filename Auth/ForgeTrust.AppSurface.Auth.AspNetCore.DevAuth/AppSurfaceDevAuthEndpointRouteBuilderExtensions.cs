@@ -406,23 +406,17 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
 
         if (request.Headers.TryGetValue(OriginHeaderName, out var origins))
         {
-            foreach (var origin in origins)
+            if (origins.Any(origin => !IsSameOrigin(origin, request)))
             {
-                if (!IsSameOrigin(origin, request))
-                {
-                    return true;
-                }
+                return true;
             }
         }
 
         if (request.Headers.TryGetValue(RefererHeaderName, out var referers))
         {
-            foreach (var referer in referers)
+            if (referers.Any(referer => !IsSameOrigin(referer, request)))
             {
-                if (!IsSameOrigin(referer, request))
-                {
-                    return true;
-                }
+                return true;
             }
         }
 

@@ -121,16 +121,12 @@ public static class AppSurfaceDevAuthMarker
 
     private static string NormalizeCssClassToken(string value)
     {
-        var builder = new StringBuilder(value.Length);
-        foreach (var character in value)
-        {
-            if (char.IsAsciiLetterOrDigit(character) || character is '-' or '_')
-            {
-                builder.Append(character);
-            }
-        }
+        return new string(value.Where(IsCssClassTokenCharacter).ToArray());
+    }
 
-        return builder.ToString();
+    private static bool IsCssClassTokenCharacter(char value)
+    {
+        return char.IsAsciiLetterOrDigit(value) || value is '-' or '_';
     }
 
     private static string CreateCurrentReturnUrl(HttpContext httpContext)
