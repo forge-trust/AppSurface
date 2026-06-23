@@ -22,12 +22,16 @@ public sealed class AppSurfaceProductEventValidationResult
     /// <param name="sanitizedProperties">Sanitized properties safe to emit; pass an empty dictionary when none exist.</param>
     /// <param name="rejectedProperties">Property names rejected during validation; pass an empty list when none exist.</param>
     /// <param name="diagnostics">Safe diagnostics that do not echo rejected values; pass an empty list when none exist.</param>
+    /// <param name="reasonCodes">Stable safe reason codes for rejected event or property decisions.</param>
+    /// <param name="fixHint">Optional safe remediation hint.</param>
     internal AppSurfaceProductEventValidationResult(
         AppSurfaceProductEventContract? contract,
         bool isValid,
         IReadOnlyDictionary<string, string> sanitizedProperties,
         IReadOnlyList<string> rejectedProperties,
-        IReadOnlyList<string> diagnostics)
+        IReadOnlyList<string> diagnostics,
+        IReadOnlyList<AppSurfaceProductEventValidationFailureReason>? reasonCodes = null,
+        string? fixHint = null)
     {
         ArgumentNullException.ThrowIfNull(sanitizedProperties);
         ArgumentNullException.ThrowIfNull(rejectedProperties);
@@ -39,6 +43,8 @@ public sealed class AppSurfaceProductEventValidationResult
             sanitizedProperties.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal));
         RejectedProperties = Array.AsReadOnly(rejectedProperties.ToArray());
         Diagnostics = Array.AsReadOnly(diagnostics.ToArray());
+        ReasonCodes = Array.AsReadOnly((reasonCodes ?? []).ToArray());
+        FixHint = AppSurfaceProductEventMetadata.NormalizeOptionalText(fixHint);
     }
 
     /// <summary>
@@ -65,4 +71,14 @@ public sealed class AppSurfaceProductEventValidationResult
     /// Gets safe diagnostics that describe rejected schema decisions without echoing rejected values.
     /// </summary>
     public IReadOnlyList<string> Diagnostics { get; }
+
+    /// <summary>
+    /// Gets stable safe reason codes for validation decisions that rejected the event or individual properties.
+    /// </summary>
+    public IReadOnlyList<AppSurfaceProductEventValidationFailureReason> ReasonCodes { get; }
+
+    /// <summary>
+    /// Gets a safe remediation hint when validation can suggest a direct fix.
+    /// </summary>
+    public string? FixHint { get; }
 }

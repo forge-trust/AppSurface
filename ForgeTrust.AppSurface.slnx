@@ -4,6 +4,8 @@
     <Project Path="Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" />
   </Folder>
   <Folder Name="/Auth/">
+    <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.Tests/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.Tests.csproj" />
+    <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Tests/ForgeTrust.AppSurface.Auth.AspNetCore.Tests.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.Tests/ForgeTrust.AppSurface.Auth.Tests.csproj" />
@@ -25,6 +27,8 @@
     <Project Path="Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj" />
   </Folder>
   <Folder Name="/Config/">
+    <Project Path="Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/ForgeTrust.AppSurface.Config.LocalSecrets.Tests.csproj" />
+    <Project Path="Config/ForgeTrust.AppSurface.Config.LocalSecrets/ForgeTrust.AppSurface.Config.LocalSecrets.csproj" />
     <Project Path="Config/ForgeTrust.AppSurface.Config.Tests/ForgeTrust.AppSurface.Config.Tests.csproj" />
     <Project Path="Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj" />
   </Folder>
@@ -38,9 +42,13 @@
   </Folder>
   <Folder Name="/Examples/">
     <Project Path="examples/auth-aspnetcore-bridge/AuthAspNetCoreBridgeExample.csproj" />
+    <Project Path="examples/auth-aspnetcore-oidc/AuthAspNetCoreOidcExample.csproj" />
+    <Project Path="examples/auth-web-razorwire-proof/AuthWebRazorWireProofExample.csproj" />
+    <Project Path="examples/auth-web-razorwire-proof.tests/AuthWebRazorWireProofExample.Tests.csproj" />
     <Project Path="examples/aspire-apphost/AspireAppHostExample.csproj" />
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
+    <Project Path="examples/local-secrets/LocalSecretsExample.csproj" />
     <Project Path="examples/flow-generated-authoring/FlowGeneratedAuthoringExample.csproj" />
     <Project Path="examples/flow-approval-local/FlowApprovalLocalExample.csproj" />
     <Project Path="examples/product-readiness-lab/ProductReadinessLab.csproj" />
@@ -61,6 +69,10 @@
   <Folder Name="/Intelligence/">
     <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj" />
     <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence.Tests/ForgeTrust.AppSurface.Intelligence.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Observability/">
+    <Project Path="Observability/ForgeTrust.AppSurface.Observability/ForgeTrust.AppSurface.Observability.csproj" />
+    <Project Path="Observability/ForgeTrust.AppSurface.Observability.Tests/ForgeTrust.AppSurface.Observability.Tests.csproj" />
   </Folder>
   <Folder Name="/Examples/razorwire-mvc/">
     <Project Path="examples/razorwire-mvc/RazorWireWebExample.csproj" />

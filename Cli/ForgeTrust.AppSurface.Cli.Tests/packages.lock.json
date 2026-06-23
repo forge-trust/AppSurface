@@ -410,6 +410,7 @@
         "dependencies": {
           "CliFx": "[3.0.0, )",
           "CliWrap": "[3.10.1, )",
+          "ForgeTrust.AppSurface.Config.LocalSecrets": "[0.1.0, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.Docs.Standalone": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
@@ -420,6 +421,14 @@
       "forgetrust.appsurface.config": {
         "type": "Project",
         "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "Microsoft.Extensions.Options": "[10.0.8, )"
+        }
+      },
+      "forgetrust.appsurface.config.localsecrets": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Config": "[0.1.0, )",
           "ForgeTrust.AppSurface.Core": "[0.1.0, )",
           "Microsoft.Extensions.Options": "[10.0.8, )"
         }

@@ -4,7 +4,7 @@
 
 ## Release Guidance
 
-AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 3 release note](../../releases/v0.1.0-rc.3.md) for current release risk, migration guidance, and package readiness.
+AppSurface publishes coordinated `v0.1.0` release candidates. Before installing this package from a prerelease feed, read the [v0.1.0 RC 4 release note](../../releases/v0.1.0-rc.4.md) for current release risk, migration guidance, and package readiness.
 
 ## What It Includes
 
@@ -144,8 +144,11 @@ public sealed class ApprovalReviewNode : IFlowNode<ApprovalState>
 - The compact `BuildDefinition(nodeInstances...)` overload calls the generated default graph mapping. Prefer it when the typed ports make every `Next` transition unambiguous.
 - The explicit `BuildDefinition(graph => ..., nodeInstances...)` overload requires every declared outcome to be mapped or marked terminal. Use it when graph visibility matters. `Complete`, `Fault`, `Wait`, and `TimedOut` outcomes use generated `Mark...Terminal()` methods because they do not declare `FlowNext<TContext>` targets in the low-level graph.
 - Generated envelopes include concrete nullable context slots and a public serializer constructor so Durable Task JSON round-trip validation can inspect them.
+- `FlowExecutionContext<TContext>` is an immutable value-type snapshot. Runners populate it for each node call so tight synchronous flows avoid allocating a reference context per step. Do not treat `default(FlowExecutionContext<TContext>)` as a valid execution context; structs can be default-created without flow ids, node ids, or state.
 - Declare every `Next` target in `AddNode`. The builder validates missing targets, and runners reject undeclared runtime targets.
 - The in-memory runner stops at waits. It does not persist state, deliver events, or create timers.
+- The in-memory runner uses prevalidated internal routing metadata from `FlowDefinition<TContext>` so local execution does not repeat graph-existence checks on every `Next` transition. This preserves the public `Nodes` graph view and the undeclared target diagnostic from `FlowDefinition<TContext>` construction.
+- Flow benchmarks isolate runner orchestration overhead. Use Flow for graph safety, long-running process contracts, and durable-host alignment; use a direct loop when all you need is a pure in-process tight state machine.
 - Use `FlowWait<TContext>.Timeout` as metadata for durable hosts. The core runner reports the timeout request but does not race timers.
 - Keep context types serializer-friendly if you plan to use Durable Task. The Durable Task adapter validates JSON round-trips before evaluating nodes.
 - Native C# discriminated unions can become authoring sugar later, but this package intentionally ships stable sealed records today.

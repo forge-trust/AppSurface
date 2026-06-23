@@ -254,7 +254,9 @@ public sealed class ConfigAuditSourceLocation
 /// Array and list entries use zero-based <see cref="Index"/> values. Dictionary entries use <see cref="KeyLabel"/>,
 /// which is either the non-sensitive key label, a display-suppressed placeholder, or an in-report redaction label such
 /// as <c>[redacted-key-1]</c>. Labels are intended for display and comparison within one report only. When configured,
-/// <see cref="KeyCorrelationId"/> is the separate opaque value for comparing dictionary keys across reports.
+/// <see cref="KeyCorrelationId"/> is the separate environment-scoped opaque value for comparing dictionary keys inside
+/// one named environment's report history. Use <see cref="ComparisonKeyCorrelationId"/> for explicit cross-environment
+/// config diff matching.
 /// </remarks>
 public sealed class ConfigAuditElementIdentity
 {
@@ -283,10 +285,23 @@ public sealed class ConfigAuditElementIdentity
     /// </summary>
     /// <remarks>
     /// This value is populated only when entry options enable dictionary key correlation and global correlation key
-    /// material is valid. It is not reversible, is not part of the display path, and should still be treated as
-    /// sensitive support metadata because it reveals equality and churn across reports.
+    /// material is valid. It includes the report environment in its derivation, is not reversible, is not part of the
+    /// display path, and should still be treated as sensitive support metadata because it reveals equality and churn
+    /// across reports from the same environment.
     /// </remarks>
     public string? KeyCorrelationId { get; init; }
+
+    /// <summary>
+    /// Gets the opt-in opaque identifier for matching the same dictionary key across compared environments.
+    /// </summary>
+    /// <remarks>
+    /// This value is populated only when entry options enable dictionary key correlation and global correlation key
+    /// material is valid. Unlike <see cref="KeyCorrelationId"/>, the environment name is deliberately omitted from the
+    /// derivation so <see cref="ConfigAuditReportDiffer"/> can match captured staging and production reports without
+    /// trusting report-local redacted labels. It is not reversible and should still be treated as support-sensitive
+    /// equality metadata.
+    /// </remarks>
+    public string? ComparisonKeyCorrelationId { get; init; }
 }
 
 /// <summary>

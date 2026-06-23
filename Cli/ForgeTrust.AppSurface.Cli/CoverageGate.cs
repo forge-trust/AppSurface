@@ -898,6 +898,39 @@ internal static class PatchCoverageEvaluator
         }
     }
 
+    private struct PatchDiffParserState
+    {
+        public bool CurrentDiffStarted;
+        public string? CurrentFile;
+        public int? CurrentNewLine;
+        public bool CurrentDiffHasOldFileMarker;
+        public bool CurrentDiffHasNewFileMarker;
+        public bool CurrentDiffHasHunk;
+        public bool CurrentHunkActive;
+        public int CurrentHunkOldLinesRemaining;
+        public int CurrentHunkNewLinesRemaining;
+        public bool PreviousLineWasHunkBodyLine;
+        public bool CurrentDiffHasOldMode;
+        public bool CurrentDiffHasNewMode;
+        public bool CurrentDiffHasRenameFrom;
+        public bool CurrentDiffHasRenameTo;
+        public bool CurrentDiffHasCopyFrom;
+        public bool CurrentDiffHasCopyTo;
+        public bool CurrentDiffHasNewFileMode;
+        public bool CurrentDiffHasDeletedFileMode;
+        public bool CurrentDiffHasIndex;
+        public bool CurrentDiffHasEmptyFileIndex;
+        public bool CurrentDiffHasBinaryMarker;
+        public bool CurrentDiffHasBinaryPatchMarker;
+        public bool CurrentDiffHasBinaryPatchBody;
+        public bool CurrentDiffHasBinaryPatchPayload;
+
+        public static PatchDiffParserState StartedEntry() => new()
+        {
+            CurrentDiffStarted = true,
+        };
+    }
+
     /// <summary>
     /// Evaluates changed-line and changed-branch coverage by reading <c>git diff</c> and the Cobertura line map.
     /// </summary>
@@ -1028,39 +1061,16 @@ internal static class PatchCoverageEvaluator
     internal static PatchDiffParseResult ParseChangedLinesDetailed(string diffText)
     {
         var changedLines = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
-        string? currentFile = null;
-        int? currentNewLine = null;
+        var state = new PatchDiffParserState();
         var sawDiffHeader = false;
         var sawFileMarker = false;
         var sawHunk = false;
-        var currentDiffStarted = false;
-        var currentDiffHasOldFileMarker = false;
-        var currentDiffHasNewFileMarker = false;
-        var currentDiffHasHunk = false;
-        var currentHunkActive = false;
-        var currentHunkOldLinesRemaining = 0;
-        var currentHunkNewLinesRemaining = 0;
-        var previousLineWasHunkBodyLine = false;
-        var currentDiffHasOldMode = false;
-        var currentDiffHasNewMode = false;
-        var currentDiffHasRenameFrom = false;
-        var currentDiffHasRenameTo = false;
-        var currentDiffHasCopyFrom = false;
-        var currentDiffHasCopyTo = false;
-        var currentDiffHasNewFileMode = false;
-        var currentDiffHasDeletedFileMode = false;
-        var currentDiffHasIndex = false;
-        var currentDiffHasEmptyFileIndex = false;
-        var currentDiffHasBinaryMarker = false;
-        var currentDiffHasBinaryPatchMarker = false;
-        var currentDiffHasBinaryPatchBody = false;
-        var currentDiffHasBinaryPatchPayload = false;
 
         foreach (var line in SplitLines(diffText))
         {
             if (line.StartsWith("diff --git ", StringComparison.Ordinal))
             {
-                if (currentDiffStarted && (!IsCurrentHunkComplete() || !IsCompleteDiffEntry()))
+                if (state.CurrentDiffStarted && (!IsCurrentHunkComplete() || !IsCompleteDiffEntry()))
                 {
                     return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                 }
@@ -1070,61 +1080,61 @@ internal static class PatchCoverageEvaluator
                 continue;
             }
 
-            if (currentHunkActive && !IsCurrentHunkComplete())
+            if (state.CurrentHunkActive && !IsCurrentHunkComplete())
             {
                 if (line.Equals("\\ No newline at end of file", StringComparison.Ordinal))
                 {
-                    if (!previousLineWasHunkBodyLine)
+                    if (!state.PreviousLineWasHunkBodyLine)
                     {
                         return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                     }
 
-                    previousLineWasHunkBodyLine = false;
+                    state.PreviousLineWasHunkBodyLine = false;
                     continue;
                 }
 
                 if (line.StartsWith("-", StringComparison.Ordinal))
                 {
-                    currentHunkOldLinesRemaining--;
-                    if (currentHunkOldLinesRemaining < 0)
+                    state.CurrentHunkOldLinesRemaining--;
+                    if (state.CurrentHunkOldLinesRemaining < 0)
                     {
                         return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                     }
 
-                    previousLineWasHunkBodyLine = true;
+                    state.PreviousLineWasHunkBodyLine = true;
                     continue;
                 }
 
-                if (currentFile is null || currentNewLine is null)
+                if (state.CurrentFile is null || state.CurrentNewLine is null)
                 {
                     return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                 }
 
                 if (line.StartsWith("+", StringComparison.Ordinal))
                 {
-                    currentHunkNewLinesRemaining--;
-                    if (currentHunkNewLinesRemaining < 0)
+                    state.CurrentHunkNewLinesRemaining--;
+                    if (state.CurrentHunkNewLinesRemaining < 0)
                     {
                         return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                     }
 
-                    AddChangedLine(changedLines, currentFile, currentNewLine.Value);
-                    currentNewLine++;
-                    previousLineWasHunkBodyLine = true;
+                    AddChangedLine(changedLines, state.CurrentFile, state.CurrentNewLine.Value);
+                    state.CurrentNewLine = state.CurrentNewLine.Value + 1;
+                    state.PreviousLineWasHunkBodyLine = true;
                     continue;
                 }
 
                 if (line.StartsWith(" ", StringComparison.Ordinal))
                 {
-                    currentHunkOldLinesRemaining--;
-                    currentHunkNewLinesRemaining--;
-                    if (currentHunkOldLinesRemaining < 0 || currentHunkNewLinesRemaining < 0)
+                    state.CurrentHunkOldLinesRemaining--;
+                    state.CurrentHunkNewLinesRemaining--;
+                    if (state.CurrentHunkOldLinesRemaining < 0 || state.CurrentHunkNewLinesRemaining < 0)
                     {
                         return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                     }
 
-                    currentNewLine++;
-                    previousLineWasHunkBodyLine = true;
+                    state.CurrentNewLine = state.CurrentNewLine.Value + 1;
+                    state.PreviousLineWasHunkBodyLine = true;
                     continue;
                 }
 
@@ -1143,14 +1153,14 @@ internal static class PatchCoverageEvaluator
                     ResetCurrentDiffEntry();
                 }
 
-                currentDiffStarted = true;
+                state.CurrentDiffStarted = true;
                 sawFileMarker = true;
-                if (currentDiffHasOldFileMarker || currentDiffHasNewFileMarker)
+                if (state.CurrentDiffHasOldFileMarker || state.CurrentDiffHasNewFileMarker)
                 {
                     return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                 }
 
-                currentDiffHasOldFileMarker = true;
+                state.CurrentDiffHasOldFileMarker = true;
                 continue;
             }
 
@@ -1161,20 +1171,20 @@ internal static class PatchCoverageEvaluator
                     return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                 }
 
-                if (!currentDiffHasOldFileMarker || currentDiffHasNewFileMarker)
+                if (!state.CurrentDiffHasOldFileMarker || state.CurrentDiffHasNewFileMarker)
                 {
                     return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                 }
 
-                currentDiffStarted = true;
+                state.CurrentDiffStarted = true;
                 sawFileMarker = true;
-                currentDiffHasNewFileMarker = true;
-                currentFile = NormalizeDiffPath(line["+++ ".Length..]);
-                currentNewLine = null;
+                state.CurrentDiffHasNewFileMarker = true;
+                state.CurrentFile = NormalizeDiffPath(line["+++ ".Length..]);
+                state.CurrentNewLine = null;
                 continue;
             }
 
-            if (currentDiffStarted)
+            if (state.CurrentDiffStarted)
             {
                 if (HasPatchBodyStarted() && IsDiffMetadataLine(line))
                 {
@@ -1183,37 +1193,37 @@ internal static class PatchCoverageEvaluator
 
                 if (line.StartsWith("old mode ", StringComparison.Ordinal))
                 {
-                    currentDiffHasOldMode = true;
+                    state.CurrentDiffHasOldMode = true;
                     continue;
                 }
 
                 if (line.StartsWith("new mode ", StringComparison.Ordinal))
                 {
-                    currentDiffHasNewMode = true;
+                    state.CurrentDiffHasNewMode = true;
                     continue;
                 }
 
                 if (line.StartsWith("rename from ", StringComparison.Ordinal))
                 {
-                    currentDiffHasRenameFrom = true;
+                    state.CurrentDiffHasRenameFrom = true;
                     continue;
                 }
 
                 if (line.StartsWith("rename to ", StringComparison.Ordinal))
                 {
-                    currentDiffHasRenameTo = true;
+                    state.CurrentDiffHasRenameTo = true;
                     continue;
                 }
 
                 if (line.StartsWith("copy from ", StringComparison.Ordinal))
                 {
-                    currentDiffHasCopyFrom = true;
+                    state.CurrentDiffHasCopyFrom = true;
                     continue;
                 }
 
                 if (line.StartsWith("copy to ", StringComparison.Ordinal))
                 {
-                    currentDiffHasCopyTo = true;
+                    state.CurrentDiffHasCopyTo = true;
                     continue;
                 }
 
@@ -1225,20 +1235,20 @@ internal static class PatchCoverageEvaluator
 
                 if (line.StartsWith("new file mode ", StringComparison.Ordinal))
                 {
-                    currentDiffHasNewFileMode = true;
+                    state.CurrentDiffHasNewFileMode = true;
                     continue;
                 }
 
                 if (line.StartsWith("deleted file mode ", StringComparison.Ordinal))
                 {
-                    currentDiffHasDeletedFileMode = true;
+                    state.CurrentDiffHasDeletedFileMode = true;
                     continue;
                 }
 
                 if (line.StartsWith("index ", StringComparison.Ordinal))
                 {
-                    currentDiffHasIndex = true;
-                    currentDiffHasEmptyFileIndex = IsEmptyFileIndexLine(line);
+                    state.CurrentDiffHasIndex = true;
+                    state.CurrentDiffHasEmptyFileIndex = IsEmptyFileIndexLine(line);
                     continue;
                 }
 
@@ -1249,7 +1259,7 @@ internal static class PatchCoverageEvaluator
                         return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                     }
 
-                    currentDiffHasBinaryMarker = true;
+                    state.CurrentDiffHasBinaryMarker = true;
                     continue;
                 }
 
@@ -1260,29 +1270,29 @@ internal static class PatchCoverageEvaluator
                         return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                     }
 
-                    currentDiffHasBinaryPatchMarker = true;
+                    state.CurrentDiffHasBinaryPatchMarker = true;
                     continue;
                 }
 
-                if (currentDiffHasBinaryPatchMarker
+                if (state.CurrentDiffHasBinaryPatchMarker
                     && (line.StartsWith("literal ", StringComparison.Ordinal)
                         || line.StartsWith("delta ", StringComparison.Ordinal)))
                 {
-                    currentDiffHasBinaryPatchBody = true;
+                    state.CurrentDiffHasBinaryPatchBody = true;
                     continue;
                 }
 
-                if (currentDiffHasBinaryPatchBody && line.Length > 0)
+                if (state.CurrentDiffHasBinaryPatchBody && line.Length > 0)
                 {
-                    currentDiffHasBinaryPatchPayload = true;
+                    state.CurrentDiffHasBinaryPatchPayload = true;
                     continue;
                 }
             }
 
             if (line.StartsWith("@@ ", StringComparison.Ordinal))
             {
-                if (!currentDiffHasOldFileMarker
-                    || !currentDiffHasNewFileMarker
+                if (!state.CurrentDiffHasOldFileMarker
+                    || !state.CurrentDiffHasNewFileMarker
                     || !IsCurrentHunkComplete()
                     || !TryReadHunkRange(line, out var start, out var oldCount, out var newCount))
                 {
@@ -1290,25 +1300,25 @@ internal static class PatchCoverageEvaluator
                 }
 
                 sawHunk = true;
-                currentDiffHasHunk = true;
-                currentHunkActive = true;
-                currentHunkOldLinesRemaining = oldCount;
-                currentHunkNewLinesRemaining = newCount;
-                currentNewLine = currentFile is null ? null : start;
-                previousLineWasHunkBodyLine = false;
+                state.CurrentDiffHasHunk = true;
+                state.CurrentHunkActive = true;
+                state.CurrentHunkOldLinesRemaining = oldCount;
+                state.CurrentHunkNewLinesRemaining = newCount;
+                state.CurrentNewLine = state.CurrentFile is null ? null : start;
+                state.PreviousLineWasHunkBodyLine = false;
                 continue;
             }
 
             if (line.StartsWith("\\ ", StringComparison.Ordinal))
             {
-                if (!currentHunkActive
-                    || !previousLineWasHunkBodyLine
+                if (!state.CurrentHunkActive
+                    || !state.PreviousLineWasHunkBodyLine
                     || !line.Equals("\\ No newline at end of file", StringComparison.Ordinal))
                 {
                     return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
                 }
 
-                previousLineWasHunkBodyLine = false;
+                state.PreviousLineWasHunkBodyLine = false;
                 continue;
             }
 
@@ -1319,14 +1329,14 @@ internal static class PatchCoverageEvaluator
                 return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
             }
 
-            if (currentDiffHasBinaryPatchMarker && line.Length == 0)
+            if (state.CurrentDiffHasBinaryPatchMarker && line.Length == 0)
             {
                 continue;
             }
 
-            if (currentFile is null || currentNewLine is null)
+            if (state.CurrentFile is null || state.CurrentNewLine is null)
             {
-                if (line.Length == 0 && !currentDiffStarted)
+                if (line.Length == 0 && !state.CurrentDiffStarted)
                 {
                     continue;
                 }
@@ -1348,7 +1358,7 @@ internal static class PatchCoverageEvaluator
             return new PatchDiffParseResult(readOnly, PatchDiffParseStatus.Malformed);
         }
 
-        if (currentDiffStarted && (!IsCurrentHunkComplete() || !IsCompleteDiffEntry()))
+        if (!IsCurrentHunkComplete() || !IsCompleteDiffEntry())
         {
             return new PatchDiffParseResult(readOnly, PatchDiffParseStatus.Malformed);
         }
@@ -1359,20 +1369,20 @@ internal static class PatchCoverageEvaluator
         return new PatchDiffParseResult(readOnly, status);
 
         bool IsCompleteDiffEntry()
-            => currentDiffHasHunk
-                || currentDiffHasBinaryMarker
-                || (currentDiffHasBinaryPatchMarker && currentDiffHasBinaryPatchBody && currentDiffHasBinaryPatchPayload)
-                || ((currentDiffHasNewFileMode || currentDiffHasDeletedFileMode) && currentDiffHasEmptyFileIndex)
+            => state.CurrentDiffHasHunk
+                || state.CurrentDiffHasBinaryMarker
+                || (state.CurrentDiffHasBinaryPatchMarker && state.CurrentDiffHasBinaryPatchBody && state.CurrentDiffHasBinaryPatchPayload)
+                || ((state.CurrentDiffHasNewFileMode || state.CurrentDiffHasDeletedFileMode) && state.CurrentDiffHasEmptyFileIndex)
                 || (!HasContentChangeIndicator()
-                    && ((currentDiffHasOldMode && currentDiffHasNewMode)
-                        || (currentDiffHasRenameFrom && currentDiffHasRenameTo)
-                        || (currentDiffHasCopyFrom && currentDiffHasCopyTo)));
+                    && ((state.CurrentDiffHasOldMode && state.CurrentDiffHasNewMode)
+                        || (state.CurrentDiffHasRenameFrom && state.CurrentDiffHasRenameTo)
+                        || (state.CurrentDiffHasCopyFrom && state.CurrentDiffHasCopyTo)));
 
         bool HasContentChangeIndicator()
-            => currentDiffHasIndex || currentDiffHasOldFileMarker || currentDiffHasNewFileMarker;
+            => state.CurrentDiffHasIndex || state.CurrentDiffHasOldFileMarker || state.CurrentDiffHasNewFileMarker;
 
         bool HasPatchBodyStarted()
-            => currentDiffHasHunk || currentDiffHasBinaryMarker || currentDiffHasBinaryPatchMarker;
+            => state.CurrentDiffHasHunk || state.CurrentDiffHasBinaryMarker || state.CurrentDiffHasBinaryPatchMarker;
 
         static bool IsDiffMetadataLine(string line)
             => line.StartsWith("old mode ", StringComparison.Ordinal)
@@ -1388,34 +1398,11 @@ internal static class PatchCoverageEvaluator
                 || line.StartsWith("index ", StringComparison.Ordinal);
 
         bool IsCurrentHunkComplete()
-            => !currentHunkActive || (currentHunkOldLinesRemaining == 0 && currentHunkNewLinesRemaining == 0);
+            => !state.CurrentHunkActive || (state.CurrentHunkOldLinesRemaining == 0 && state.CurrentHunkNewLinesRemaining == 0);
 
         void ResetCurrentDiffEntry()
         {
-            currentDiffStarted = true;
-            currentFile = null;
-            currentNewLine = null;
-            currentDiffHasOldFileMarker = false;
-            currentDiffHasNewFileMarker = false;
-            currentDiffHasHunk = false;
-            currentHunkActive = false;
-            currentHunkOldLinesRemaining = 0;
-            currentHunkNewLinesRemaining = 0;
-            previousLineWasHunkBodyLine = false;
-            currentDiffHasOldMode = false;
-            currentDiffHasNewMode = false;
-            currentDiffHasRenameFrom = false;
-            currentDiffHasRenameTo = false;
-            currentDiffHasCopyFrom = false;
-            currentDiffHasCopyTo = false;
-            currentDiffHasNewFileMode = false;
-            currentDiffHasDeletedFileMode = false;
-            currentDiffHasIndex = false;
-            currentDiffHasEmptyFileIndex = false;
-            currentDiffHasBinaryMarker = false;
-            currentDiffHasBinaryPatchMarker = false;
-            currentDiffHasBinaryPatchBody = false;
-            currentDiffHasBinaryPatchPayload = false;
+            state = PatchDiffParserState.StartedEntry();
         }
     }
 

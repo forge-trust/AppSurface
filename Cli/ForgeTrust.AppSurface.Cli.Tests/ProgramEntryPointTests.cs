@@ -4,8 +4,10 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text.Json;
 
+using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Caching;
+using ForgeTrust.AppSurface.Config.LocalSecrets;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs;
@@ -43,8 +45,320 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("docs", result.AllText, StringComparison.Ordinal);
         Assert.Contains("docs export", result.AllText, StringComparison.Ordinal);
         Assert.Contains("coverage", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("secrets", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_Should_Print_Secrets_Help_Without_Lifecycle_Noise()
+    {
+        var result = await InvokeEntryPointAsync(["secrets", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Manage AppSurface local development secrets.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("set", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("doctor", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("appsurface secrets [command] --help", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsCommands_Should_Set_List_Get_And_Delete_Without_PrintingSecretValue()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+        var shared = new[] { "--app", "MyApp", "--environment", "Development", "--store-file", storePath };
+
+        var init = await InvokeProgramEntryPointAsync(["secrets", "init", .. shared]);
+        var set = await InvokeProgramEntryPointAsync(["secrets", "set", "Stripe:ApiKey", "--stdin", .. shared], standardInput: "sk_test_secret\n");
+        var list = await InvokeProgramEntryPointAsync(["secrets", "list", .. shared]);
+        var get = await InvokeProgramEntryPointAsync(["secrets", "get", "Stripe:ApiKey", .. shared]);
+        var delete = await InvokeProgramEntryPointAsync(["secrets", "delete", "Stripe:ApiKey", .. shared]);
+
+        Assert.Equal(0, init.ExitCode);
+        Assert.Equal(0, set.ExitCode);
+        Assert.Equal(0, list.ExitCode);
+        Assert.Equal(0, get.ExitCode);
+        Assert.Equal(0, delete.ExitCode);
+        Assert.Contains("Stripe:ApiKey", list.AllText, StringComparison.Ordinal);
+        Assert.Contains("Found: local secret namespace", get.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", init.AllText + set.AllText + list.AllText + get.AllText + delete.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsListCommand_Should_PrintOnlyNames_WhenNamesOnlyIsSet()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+        var shared = new[] { "--app", "MyApp", "--environment", "Development", "--store-file", storePath };
+
+        var set = await InvokeProgramEntryPointAsync(["secrets", "set", "Stripe:ApiKey", "--stdin", .. shared], standardInput: "sk_test_secret\n");
+        var list = await InvokeProgramEntryPointAsync(["secrets", "list", "--names-only", .. shared]);
+
+        Assert.Equal(0, set.ExitCode);
+        Assert.Equal(0, list.ExitCode);
+        Assert.Contains("Stripe:ApiKey", list.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Source:", list.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", list.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsListCommand_Should_RenderDiagnostic_WhenStoreFileIsInvalidJson()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+        await File.WriteAllTextAsync(storePath, "{");
+        if (!OperatingSystem.IsWindows())
+        {
+            new FileInfo(storePath).UnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
+        var shared = new[] { "--app", "MyApp", "--environment", "Development", "--store-file", storePath };
+
+        var list = await InvokeProgramEntryPointAsync(["secrets", "list", .. shared]);
+
+        Assert.NotEqual(0, list.ExitCode);
+        Assert.Contains("local-secret-store-invalid", list.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", list.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsDoctorCommand_Should_RenderReadinessDiagnosticWithoutPrintingSecretValue()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "doctor", "--app", "MyApp", "--environment", "Development", "--store-file", storePath]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Ready: local secret namespace", result.AllText, StringComparison.Ordinal);
+        Assert.Contains(OperatingSystem.IsWindows() ? "local-secret-file-posture-degraded" : "local-secret-store-ready", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsDoctorCommand_Should_TreatRepairedPostureAsSuccess()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+        File.WriteAllText(storePath, "{}");
+        new FileInfo(storePath).UnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "doctor", "--app", "MyApp", "--environment", "Development", "--store-file", storePath]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Ready: local secret namespace", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("local-secret-file-posture-repaired", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsDoctorCommand_Should_RejectSecretToolPathWithStoreFile()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "doctor", "--store-file", storePath, "--secret-tool-path", "/usr/local/bin/secret-tool"]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Use either --store-file or --secret-tool-path", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsSetCommand_Should_RejectSecretToolPathWithStoreFile()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "set", "Stripe:ApiKey", "--stdin", "--store-file", storePath, "--secret-tool-path", "/usr/local/bin/secret-tool"],
+            standardInput: "sk_test_secret");
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Use either --store-file or --secret-tool-path", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SecretsCommandBase_Should_PassSecretToolPathToPlatformStoreFactory()
+    {
+        var command = new CapturingSecretsCommand
+        {
+            SecretToolPath = "/nix/store/appsurface-secret-tool/bin/secret-tool"
+        };
+
+        var context = command.BuildContextForTests();
+
+        Assert.Equal(command.SecretToolPath, command.PlatformOptions?.LinuxSecretToolPath);
+        Assert.Same(command.Store, context.Store);
+    }
+
+    [Fact]
+    public void SecretsCommandBase_Should_CreateDefaultPlatformStore_WhenStoreFileIsNotConfigured()
+    {
+        var command = new DefaultPlatformSecretsCommand();
+
+        var context = command.BuildContextForTests();
+
+        Assert.IsType<PlatformAppSurfaceLocalSecretStore>(context.Store);
+    }
+
+    [Theory]
+    [InlineData("local-secret-store-ready")]
+    [InlineData("local-secret-file-posture-repaired")]
+    [InlineData("local-secret-file-posture-degraded")]
+    public async Task SecretsCommandBase_Should_TreatDoctorReadinessDiagnosticsAsSuccess(string diagnosticCode)
+    {
+        using var console = new FakeInMemoryConsole();
+        var result = AppSurfaceLocalSecretResult.NotFound(
+            LocalSecretResultStatus.Missing,
+            CreateLocalSecretDiagnostic(diagnosticCode),
+            "test-store");
+
+        await CapturingSecretsCommand.WriteResultForTestsAsync(console, result, "Ready");
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Ready: local secret namespace", output, StringComparison.Ordinal);
+        Assert.Contains("Source: test-store", output, StringComparison.Ordinal);
+        Assert.Contains(diagnosticCode, output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsCommandBase_Should_RejectOrdinaryMissingDiagnostic()
+    {
+        using var console = new FakeInMemoryConsole();
+        var result = AppSurfaceLocalSecretResult.Missing("test-store");
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await CapturingSecretsCommand.WriteResultForTestsAsync(console, result, "Found"));
+
+        Assert.Contains("local-secret-missing", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsCommandBase_Should_RejectProviderFailureWithoutDiagnostic()
+    {
+        using var console = new FakeInMemoryConsole();
+        var result = new AppSurfaceLocalSecretResult(
+            LocalSecretResultStatus.ProviderFailed,
+            null,
+            null,
+            "test-store");
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await CapturingSecretsCommand.WriteResultForTestsAsync(console, result, "Found"));
+
+        Assert.Equal("Local secret command failed.", exception.Message);
+    }
+
+    [Fact]
+    public async Task SecretsSetCommand_Should_RejectConflictingValueSources()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "set", "Stripe:ApiKey", "--value", "sk_test_secret", "--stdin", "--store-file", storePath],
+            standardInput: "sk_other_secret");
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Use either --value or --stdin", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_other_secret", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsSetCommand_Should_SetValueOptionWithoutPrintingSecretValue()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var set = await InvokeProgramEntryPointAsync(
+            ["secrets", "set", "Stripe:ApiKey", "--value", "sk_test_secret", "--store-file", storePath]);
+        var get = await InvokeProgramEntryPointAsync(
+            ["secrets", "get", "Stripe:ApiKey", "--store-file", storePath]);
+
+        Assert.Equal(0, set.ExitCode);
+        Assert.Equal(0, get.ExitCode);
+        Assert.Contains("Set: local secret namespace", set.AllText, StringComparison.Ordinal);
+        Assert.Contains("Found: local secret namespace", get.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", set.AllText + get.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsSetCommand_Should_RejectMissingValue()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "set", "Stripe:ApiKey", "--store-file", storePath]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Missing secret value", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsGetCommand_Should_ReturnPasteSafeFailure_WhenSecretIsMissing()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "get", "Stripe:ApiKey", "--store-file", storePath]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Local secret was not found", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsCommand_Should_ReturnIdentityDiagnostic_WhenNamespaceIsInvalid()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "init", "--app", "Bad/App", "--store-file", storePath]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("local-secret-applicationName-invalid-character", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsCommand_Should_ReturnIdentityDiagnostic_WhenKeyIsInvalid()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "get", "Stripe\nApiKey", "--store-file", storePath]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("local-secret-key-invalid-character", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsDoctorCommand_Should_ReturnStoreFailure_WhenStoreFileIsDirectory()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "doctor", "--store-file", temp.Path]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("local-secret-file-posture-unsupported", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2600,9 +2914,15 @@ public sealed class ProgramEntryPointTests
 
     private static async Task<CapturedCliRun> InvokeProgramEntryPointAsync(
         string[] args,
-        Action<ConsoleOptions>? configureOptions = null)
+        Action<ConsoleOptions>? configureOptions = null,
+        string? standardInput = null)
     {
         var console = new FakeInMemoryConsole();
+        if (standardInput != null)
+        {
+            console.WriteInput(standardInput);
+        }
+
         var loggerProvider = new InMemoryLoggerProvider();
         var originalExitCode = Environment.ExitCode;
 
@@ -3535,6 +3855,64 @@ public sealed class ProgramEntryPointTests
         }
     }
 
+    private sealed class CapturingSecretsCommand : SecretsCommandBase
+    {
+        public IAppSurfaceLocalSecretStore Store { get; } = new CapturedLocalSecretStore();
+
+        public AppSurfaceLocalSecretsOptions? PlatformOptions { get; private set; }
+
+        public SecretsCommandContext BuildContextForTests() => BuildContext();
+
+        public static ValueTask WriteResultForTestsAsync(
+            IConsole console,
+            AppSurfaceLocalSecretResult result,
+            string successVerb) =>
+            WriteResultAsync(console, result, successVerb);
+
+        public override ValueTask ExecuteAsync(IConsole console) => ValueTask.CompletedTask;
+
+        protected override IAppSurfaceLocalSecretStore CreatePlatformStore(AppSurfaceLocalSecretsOptions options)
+        {
+            PlatformOptions = options;
+            return Store;
+        }
+    }
+
+    private static AppSurfaceLocalSecretDiagnostic CreateLocalSecretDiagnostic(string code) =>
+        new(
+            code,
+            "Local secret posture was inspected.",
+            "The local secret namespace is safe to use.",
+            "No action is required.",
+            "local-secrets-without-a-remote-vault");
+
+    private sealed class CapturedLocalSecretStore : IAppSurfaceLocalSecretStore
+    {
+        public string Name => nameof(CapturedLocalSecretStore);
+
+        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) =>
+            throw new NotSupportedException("This test store only captures platform-store construction.");
+
+        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value) =>
+            throw new NotSupportedException("This test store only captures platform-store construction.");
+
+        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) =>
+            throw new NotSupportedException("This test store only captures platform-store construction.");
+
+        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
+            throw new NotSupportedException("This test store only captures platform-store construction.");
+
+        public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
+            throw new NotSupportedException("This test store only captures platform-store construction.");
+    }
+
+    private sealed class DefaultPlatformSecretsCommand : SecretsCommandBase
+    {
+        public SecretsCommandContext BuildContextForTests() => BuildContext();
+
+        public override ValueTask ExecuteAsync(IConsole console) => ValueTask.CompletedTask;
+    }
+
     private sealed class TempDirectory : IDisposable
     {
         private TempDirectory(string path)
@@ -3550,6 +3928,11 @@ public sealed class ProgramEntryPointTests
                 System.IO.Path.GetTempPath(),
                 prefix + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(path);
+            if (!OperatingSystem.IsWindows())
+            {
+                new DirectoryInfo(path).UnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+            }
+
             return new TempDirectory(path);
         }
 

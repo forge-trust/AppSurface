@@ -1,34 +1,63 @@
 # Unreleased
 
-This is the living release note for the next coordinated AppSurface version after `0.1.0-rc.3`. It stays provisional until the next tag is cut.
+This is the living release note for the next coordinated AppSurface version after `0.1.0-rc.4`. It stays provisional until the next tag is cut.
 
 ## What is taking shape
 
-- AppSurface CI can now prove the default full-solution coverage lane through the `appsurface coverage run` command, running from source via `dotnet run --project`, without waiting on matrix fan-in workflows.
-- Patch coverage gates can now use Git refs, unified diff files, or piped unified diff text without forcing full-history checkout.
-- Reader-intent relevance for AppSurface Docs search.
-- Product-readiness evaluation now has a report-first lab and an Aspire AppHost verifier that proves local Postgres product-state persistence without claiming Durable Task backend ownership.
-- More trustworthy AppSurface Docs search typing for multi-word queries.
-- CodeQL JavaScript/TypeScript analysis now ignores the intentionally malformed parser-decision fixture while the docs tests still exercise the same parse-failure bytes.
+- `ForgeTrust.AppSurface.Auth` now defines durable external-subject to app-user-id mapping contracts without taking on user-store, ASP.NET Core, OIDC, EF Core, Aspire, or tenant-authority responsibilities.
+- `ForgeTrust.AppSurface.Auth.AspNetCore` now includes AppSurface-shaped Minimal API policy helpers: `AddAppSurfacePolicy(...)` keeps policy definition in ASP.NET Core, while `RequireSurfacePolicy(...)` evaluates the named host policy through the existing AppSurface evaluator and returns API-safe ProblemDetails JSON for challenge, forbid, missing-policy, missing-service, and missing-subject outcomes instead of triggering browser redirects.
+- Add `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc`, a public preview ASP.NET Core cookie + OIDC convenience package with explicit AppSurface scheme names, `SaveTokens=false` by default, passive prompt helpers, safe diagnostics, event chaining, and package chooser/readiness coverage.
+- Sanitized AppSurface Config audit diffs for comparing captured runtime configuration reports.
+- AppSurface Observability package defaults for sending app-side logs, traces, and metrics to Aspire or another OTLP collector.
+- LocalSecrets platform-index self-healing so `appsurface secrets list` no longer surfaces stale names whose stored
+  values are missing.
+- LocalSecrets Linux `secret-tool` resolution now uses trusted system candidates or an explicit absolute override instead
+  of executing the first `secret-tool` discovered on `PATH`.
+- `ForgeTrust.AppSurface.Web` now rejects the literal CORS origin wildcard `*` outside Development when AppSurface owns
+  the CORS policy, so permissive production APIs must either name explicit browser origins or register host-owned
+  ASP.NET Core CORS.
 
 ## Included in the next coordinated version
 
 ### Release and docs surface
 
-- AppSurface CI coverage now dogfoods the `appsurface coverage run` command, running from source via `dotnet run --project`, for the default full-solution lane. The lane preserves the existing merged Cobertura, managed JUnit, slow-test diagnostics, Codecov, and `coverage gate` evidence paths while `scripts/coverage-solution.sh` keeps legacy compatibility for grouped runs, group listing, merge-only runs, `TEST_GROUP`, and `BUILD_SOLUTION=false`.
-- Patch coverage gates now accept exactly one diff source: `--diff-base` for local Git history, `--diff-file` for CI-produced unified diff artifacts, or `--diff-stdin` for piped unified diff text. External diff artifacts are bounded, empty external diffs are treated as valid empty patches, malformed non-empty external diffs fail closed before coverage evaluation, and JSON plus Markdown reports record patch diff provenance.
-- `appsurface coverage run` now supports `--test-results junit` for AppSurface-managed top-level JUnit artifacts. `--slow-test-diagnostics` implies managed JUnit results and writes diagnostics from those files; `junit` is the only managed result format in this release, with TRX/TUnit compatibility reserved for #491.
-- Package artifact validation now runs a pre-publish consumer proof for the packed `ForgeTrust.AppSurface.Cli` tool. The proof installs the local artifact into an isolated clean fixture, runs `coverage run`, `coverage merge`, a passing `coverage gate`, and an intentionally failing `coverage gate`, then writes `coverage-cli-consumer-proof.md` so publish manifests are blocked when packaged consumer behavior breaks.
-- Coverage runs now emit `slow-test-diagnostics.md` and `slow-test-diagnostics.json` next to the merged coverage artifacts. The diagnostics rank project and JUnit test-case timings, preserve best-effort parser warnings without changing coverage exit codes, record metadata completeness, and report diagnostic aggregation overhead in seconds and as a percent of elapsed runner time at diagnostics generation.
-- AppSurface Docs search now hydrates MiniSearch candidates from the normalized docs payload and applies deterministic reader-intent ranking before both sidebar and full-page rendering. Exact title, path, source, alias, keyword, and entry-point matches stay protected; broad task queries prefer reader-facing guides; explicit API/internal filters override broad-task boosts; and contributor/internal docs are demoted unless the query asks for them directly.
-- The package chooser now resolves the public Intelligence package start-here link inside hosted AppSurface Docs by keeping top-level Intelligence READMEs inside the standalone harvest boundary.
-- `examples/product-readiness-lab` now gives adopters a SaaS-shaped local evaluator whose readiness report is the primary artifact. The paired `examples/product-readiness-lab-apphost` verifier starts local Postgres, probes the public readiness endpoint, and fails unless product/domain state becomes `proven-locally`; Durable Task worker/client startup, hosting, timers, late-event handling, and storage-provider boundaries stay documented as host-owned.
-- AppSurface Docs search now preserves multi-word spacing while readers type, so pausing after a separator in either the full-page search workspace or sidebar search no longer joins words together.
-- RazorWire now includes a hybrid-hosting guide for split-origin deployments that serve exported static pages from one origin while Cloud Run or another container host serves RazorWire streams, islands, and lazy anti-forgery forms from a live origin.
+- `examples/auth-web-razorwire-proof` now gives package adopters a five-minute browser proof for `ForgeTrust.AppSurface.Auth.AspNetCore`: one host-owned `OperatorsOnly` policy drives both a Minimal API response and a RazorWire-facing rendered state while all fake auth and persona switching stays sample-local.
+- Added `ExternalSubject`, `AppUserId`, `IAppSurfaceUserIdentityResolver`, `AppSurfaceUserIdentityResolutionContext`, `AppSurfaceUserIdentityResult`, and `AppSurfaceUserIdentityStatus`, with README guidance for uniqueness, idempotency, cancellation, concurrency, PII-safe diagnostics, and ASP.NET Core adapter integration planning.
+- `ForgeTrust.AppSurface.Auth.AspNetCore` documents the new Minimal API policy helper flow, package chooser metadata, safe ProblemDetails failure shape, and when native ASP.NET Core `RequireAuthorization(...)` remains the better choice.
+- Document the AppSurface OIDC package boundary, including when to use raw ASP.NET Core OIDC or provider SDKs instead, and add a no-secret local registration proof example.
+- AppSurface Config now exposes a sanitized config audit diff surface. `ConfigAuditReportDiffer` compares two existing `ConfigAuditReport` snapshots without re-resolving providers, `ConfigAuditDiffTextRenderer` renders deterministic same-host or captured-snapshot evidence with redaction uncertainty called out, and `ConfigAuditDiffCommandRunner` gives apps command-framework-agnostic same-host and captured JSON workflows with display-safe problem/cause/fix/docs-link failures.
+- `ForgeTrust.AppSurface.Config.LocalSecrets` hardens the explicit file fallback path. Unix fallback directories are created with `0700` mode bits when missing, existing loose parent directories fail closed instead of being modified in place, and JSON files are written or repaired with `0600` mode bits during `set`, `delete`, and `doctor`; reads reject symbolic-link paths and non-canonical mode bits before returning a secret value. `appsurface secrets doctor --store-file` now treats `ready`, `repaired`, and `degraded` posture diagnostics as doctor-style success while keeping `unsupported` path shapes terminal. This is Unix mode-bit hardening, not Windows ACL hardening or a universal POSIX ACL proof; OS-backed LocalSecrets stores remain the recommended local-development path.
+- AppSurface Observability adds `ForgeTrust.AppSurface.Observability` with module-first OpenTelemetry logging, tracing, and metrics registration, endpoint-driven OTLP exporter setup, service identity resource metadata, and docs for Aspire and non-Aspire adoption paths.
+- RazorWire hybrid islands now reject inline `data:` module specifiers from both `client-module`/`data-rw-module` and `window.RazorWireIslandModules`, and also reject protocol-relative `//...` module URLs. Move any prototype inline module such as `data:text/javascript,...` into a served module like `/js/my-island.js` that exports `mount(root, props)`.
+- RazorWire export now owns HTTP redirect handling for artifact-producing fetches, including crawled routes and conventional `404.html` staging. Same-origin redirects remain supported, while redirects outside the configured export origin and base path fail with `RWEXPORT008` before response content is read or written; routes that intentionally point to a different host or app path should be modeled as external references instead of exporter-managed artifacts.
 - RazorWire stream authorization can now return `AppSurfaceAuthResult` through `IRazorWireStreamAuthorizer`, preserving legacy bool authorizers while mapping challenge, forbid, setup failure, unsafe navigation, and stale session outcomes before SSE starts.
-- Package validation now treats redistributed package payload provenance as an enforced release gate. `verify-packages` reads `packages/third-party-payloads.yml`, proves notice, generated-first-party, or audited coverage for suspicious payloads, and renders package report rows with notice paths, evidence kind, version source, and suspicious payload counts.
-- AppSurface Docs parser-decision fixtures now keep the deliberate malformed JavaScript sample under a non-JavaScript suffix so repository-level JavaScript/TypeScript scanners do not treat the negative parser test as product source.
+- AppSurface LocalSecrets platform-backed stores now validate indexed names against live stored values during
+  `appsurface secrets list`. Missing values are pruned from the index when validation and repair succeed, and
+  `appsurface secrets delete KEY` repairs a stale indexed name when the value is already gone while preserving
+  `local-secret-missing` for keys that never existed.
+- AppSurface LocalSecrets now hardens Linux Secret Service command selection. Linux uses `/usr/bin/secret-tool`, then
+  `/bin/secret-tool`, or an explicit trusted absolute path through `AppSurfaceLocalSecretsOptions.LinuxSecretToolPath`
+  and `appsurface secrets --secret-tool-path`. PATH matches are reported only as ignored diagnostic context, invalid
+  overrides fail before command launch, and `--secret-tool-path` cannot be combined with `--store-file`.
+- AppSurface Web CORS startup validation now fails closed before policy registration when non-development
+  `CorsOptions.AllowedOrigins` includes the exact literal `*`, while preserving Development all-origin convenience and
+  wildcard subdomain origins such as `https://*.example.com`.
+
+### AppSurface Flow
+
+- Reduce internal `InMemoryFlowRunner<TContext>` routing overhead by using prevalidated `FlowDefinition<TContext>` execution metadata while keeping public Flow APIs unchanged.
+- Reduce synchronous in-memory runner allocations by making `FlowExecutionContext<TContext>` an immutable value-type snapshot passed into each node execution.
+- Expand the Flow benchmark suite with runner-shape, generated-authoring, and outcome-allocation lanes so future performance work can attribute remaining overhead before changing public APIs.
 
 ## Migration watch
 
+- `AppSurfaceUser.Id` remains a host-owned subject identifier in the existing ASP.NET Core adapter. Consumers that need durable app-owned users should resolve that subject through the new identity resolver contract instead of treating the mapped subject claim as an app user id.
+- Production AppSurface-managed CORS no longer accepts `AllowedOrigins = ["*"]`. Replace the literal wildcard with
+  explicit origins such as `["https://app.example.com"]`; keep local permissive behavior behind
+  `EnableAllOriginsInDevelopment`; use wildcard subdomains such as `["https://*.example.com"]` only when matching
+  subdomains; and register/apply host-owned ASP.NET Core CORS when an API is intentionally public to every browser
+  origin.
+- Hosts adopting `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` must still call `UseAuthentication()` and `UseAuthorization()` in ASP.NET Core order and must explicitly configure default schemes if they want host-wide defaults.
 - Record breaking or behavior-changing guidance here before it moves into the tagged release note.
+- `FlowExecutionContext<TContext>` is now a readonly record struct instead of a sealed record class. Most node implementations continue to read `FlowId`, `Version`, `NodeId`, `State`, and `ResumeEvent` the same way, but code that depended on reference identity, nullable context parameters, or `context is null` checks should switch to checking the populated members it requires.
+- RazorWire no longer treats `data:text/javascript,...` values in `window.RazorWireIslandModules` as importable modules. Use a relative, root-relative, same-origin, explicit HTTPS, or bare import-map module specifier instead.

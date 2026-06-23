@@ -21,7 +21,7 @@ When consuming package builds from a configured feed, reference `ForgeTrust.Razo
 
 ## Release Guidance
 
-AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 3 release note](../../releases/v0.1.0-rc.3.md) for current release risk, migration guidance, and package readiness.
+AppSurface publishes coordinated `v0.1.0` release candidates. Before installing this package from a prerelease feed, read the [v0.1.0 RC 4 release note](../../releases/v0.1.0-rc.4.md) for current release risk, migration guidance, and package readiness.
 
 ## Hero Proof
 
@@ -479,7 +479,7 @@ Wraps content in a `<turbo-frame>`.
 - `loading`: load strategy such as `lazy`.
 - `permanent`: persists the element across Turbo page transitions.
 - `swr`: enables stale-while-revalidate behavior.
-- `client-module`: client module path or name to mount for hybrid islands.
+- `client-module`: client module specifier to mount for hybrid islands. Use a relative path, root-relative path, same-origin URL, explicit HTTPS URL, or bare import-map specifier.
 - `client-strategy`: mount timing such as `load`, `visible`, or `idle`.
 - `client-props`: JSON payload passed to the client module's mount function.
 
@@ -570,7 +570,46 @@ RazorWire also supports hybrid islands where a server-rendered region mounts a c
 </rw:island>
 ```
 
-`client-module` can be a relative path, root-relative path, same-origin URL, HTTPS URL, or bare import-map specifier. Hosts that prefer logical names can set `window.RazorWireIslandModules = { ChartComponent: "/js/chart-component.js" }` before hydration; RazorWire resolves the rendered `data-rw-module` name through that manifest before calling dynamic `import()`. Direct `javascript:`, `blob:`, `file:`, and unapproved `data:` module specifiers are rejected.
+`client-module` can be a relative path, root-relative path, same-origin URL, explicit HTTPS URL, or bare import-map specifier. Hosts that prefer logical names can set `window.RazorWireIslandModules = { ChartComponent: "/js/chart-component.js" }` before hydration; RazorWire resolves the rendered `data-rw-module` name through that host-provided specifier map before calling dynamic `import()`. The manifest is not a security allowlist and does not allow inline module bytes.
+
+```js
+// /wwwroot/js/chart-component.js
+export function mount(root, props) {
+  root.textContent = `chart points: ${props.data.length}`;
+}
+```
+
+| Specifier form | Direct `client-module` / `data-rw-module` | `window.RazorWireIslandModules` value |
+| --- | --- | --- |
+| `./chart-component.js` or `../charts/chart.js` | Allowed | Allowed |
+| `/js/chart-component.js` | Allowed | Allowed |
+| `https://app.example/js/chart.js` when same-origin, or any explicit `https://cdn.example/chart.js` | Allowed | Allowed |
+| `ChartComponent` resolved by an import map | Allowed | Allowed |
+| `data:text/javascript,...` | Blocked | Blocked |
+| `javascript:`, `blob:`, or `file:` | Blocked | Blocked |
+| `//cdn.example/chart.js` | Blocked; use explicit `https://cdn.example/chart.js` | Blocked; use explicit `https://cdn.example/chart.js` |
+| Empty or non-string values | Blocked | Blocked |
+
+If an older prototype or test used inline module bytes, move the code into a served module file:
+
+```js
+// Before: inline module bytes are blocked.
+window.RazorWireIslandModules = {
+  ChartComponent: "data:text/javascript,export function mount(root, props) { root.textContent = props.title; }"
+};
+
+// After: host the module as a normal static asset.
+window.RazorWireIslandModules = {
+  ChartComponent: "/js/chart-component.js"
+};
+```
+
+```js
+// /wwwroot/js/chart-component.js
+export function mount(root, props) {
+  root.textContent = props.title;
+}
+```
 
 RazorWire serves `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`,
 `razorwire.islands.js`, and the package demo assets as normal Razor Class Library

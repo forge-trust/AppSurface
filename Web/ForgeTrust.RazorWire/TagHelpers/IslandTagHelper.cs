@@ -45,7 +45,9 @@ public class IslandTagHelper : TagHelper
     public string? Export { get; set; }
 
     /// <summary>
-    /// The path to the client-side module to mount on this island.
+    /// The client-side module specifier to mount on this island. Use a relative path, root-relative path,
+    /// same-origin URL, explicit HTTPS URL, or bare import-map specifier; inline module content such as
+    /// data URLs is rejected by the browser runtime.
     /// </summary>
     [HtmlAttributeName("client-module")]
     public string? ClientModule { get; set; }

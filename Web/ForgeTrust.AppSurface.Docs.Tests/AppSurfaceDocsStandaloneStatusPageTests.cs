@@ -199,6 +199,7 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
     public async Task MissingDocsRoute_ShouldNotTakeOverNonBrowserRequests()
     {
         await using var runningHost = await StartStandaloneHostAsync();
+        await WaitForDocsHarvestAsync(runningHost.Client);
 
         using var jsonRequest = new HttpRequestMessage(HttpMethod.Get, "/docs/missing-page");
         jsonRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -233,13 +234,12 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
     {
         await using var runningHost = await StartStandaloneHostAsync();
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/docs/missing.json");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        var (statusCode, body) = await GetResponseAfterHarvestAsync(
+            runningHost.Client,
+            "/docs/missing.json",
+            "application/json");
 
-        using var response = await runningHost.Client.SendAsync(request);
-        var body = await response.Content.ReadAsStringAsync();
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, statusCode);
         Assert.DoesNotContain("Documentation page not found", body);
         Assert.DoesNotContain("Search documentation", body);
     }
@@ -337,6 +337,19 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         HttpClient client,
         string path)
     {
+        return await GetResponseAfterHarvestAsync(client, path, "text/html");
+    }
+
+    private static async Task WaitForDocsHarvestAsync(HttpClient client)
+    {
+        _ = await GetBrowserHtmlAfterHarvestAsync(client, "/docs/missing-page");
+    }
+
+    private static async Task<(HttpStatusCode StatusCode, string Body)> GetResponseAfterHarvestAsync(
+        HttpClient client,
+        string path,
+        string acceptMediaType)
+    {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
         HttpStatusCode? lastStatusCode = null;
         string? lastHtml = null;
@@ -344,17 +357,17 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         while (DateTimeOffset.UtcNow < deadline)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, path);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(acceptMediaType));
 
             using var response = await client.SendAsync(request);
-            var html = await response.Content.ReadAsStringAsync();
-            if (!IsHarvestingPlaceholder(response.StatusCode, html))
+            var body = await response.Content.ReadAsStringAsync();
+            if (!IsHarvestingPlaceholder(response.StatusCode, body))
             {
-                return (response.StatusCode, html);
+                return (response.StatusCode, body);
             }
 
             lastStatusCode = response.StatusCode;
-            lastHtml = html;
+            lastHtml = body;
             await Task.Delay(TimeSpan.FromMilliseconds(50));
         }
 

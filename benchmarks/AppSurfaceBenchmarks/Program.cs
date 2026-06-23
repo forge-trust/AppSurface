@@ -27,12 +27,14 @@ public class Program
             .AddJob(CreateJob("Native", "NATIVE_WEB"))
             .AddJob(CreateJob("Carter", "CARTER_WEB"))
             .AddJob(CreateJob("ABP", "ABP_WEB"))
+            .AddJob(CreateFlowJob())
             .AddFilter(new JobCategoryMatrixFilter(new Dictionary<string, IEnumerable<string>>
             {
+                ["AppSurface.Web"] = ["Minimal API", "Controllers", "Dependency Injection"],
+                ["Native"] = ["Minimal API", "Controllers", "Dependency Injection"],
                 ["Carter"] = ["Minimal API"],
-                // ["ABP"] = ["Minimal API", "Controllers", "Dependency Injection"],
-                // ["Native"] = ["Controllers", "Minimal API", "Dependency Injection"],
-                // ["AppSurface.Web"] = ["Controllers", "Minimal API", "Dependency Injection"]
+                ["ABP"] = ["Minimal API", "Controllers", "Dependency Injection"],
+                ["Flow"] = ["Flow"],
             }));
 
         BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, config);
@@ -66,5 +68,16 @@ public class Program
             .WithId(id)
             .WithBaseline(id == "Native")
             .WithArguments([new MsBuildArgument($"/p:DefineConstants={define}")]);
+    }
+
+    private static Job CreateFlowJob()
+    {
+        return Job.Default
+            .WithStrategy(RunStrategy.Throughput)
+            .WithLaunchCount(1)
+            .WithWarmupCount(3)
+            .WithIterationCount(8)
+            .WithId("Flow")
+            .WithArguments([new MsBuildArgument("/p:DefineConstants=FLOW")]);
     }
 }

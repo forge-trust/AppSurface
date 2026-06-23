@@ -14,9 +14,11 @@ appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 
 The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency in the same command. `appsurface coverage merge` fans in existing Cobertura shards from matrix or custom test workflows without reading a consumer tool manifest. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service.
 
+`appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, delete keys, and run doctor diagnostics for platform availability.
+
 ## Release Guidance
 
-AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 3 release note](../../releases/v0.1.0-rc.3.md) for current release risk, migration guidance, and package readiness.
+AppSurface publishes coordinated `v0.1.0` release candidates. Before installing this package from a prerelease feed, read the [v0.1.0 RC 4 release note](../../releases/v0.1.0-rc.4.md) for current release risk, migration guidance, and package readiness.
 
 ## Install
 
@@ -60,6 +62,63 @@ dotnet tool run appsurface --version
 ```
 
 ## Commands
+
+### `appsurface secrets`
+
+Manage AppSurface local development secrets before a remote vault exists.
+
+```bash
+appsurface secrets init --app MyApp --environment Development
+printf '%s' "<secret>" | appsurface secrets set Stripe:ApiKey --app MyApp --environment Development --stdin
+appsurface secrets doctor --app MyApp --environment Development
+appsurface secrets list --names-only --app MyApp --environment Development
+appsurface secrets get Stripe:ApiKey --app MyApp --environment Development
+```
+
+`get` verifies presence and source without printing the secret value. `list` prints currently retrievable names only:
+platform-backed stores validate indexed names against live values and silently remove stale names when validation and
+repair succeed. If the platform store is locked, unavailable, or the index is corrupt, `list` fails with a paste-safe
+diagnostic instead of hiding names it could not verify. `delete KEY` also repairs stale indexed names when the value is
+already gone, while keys that never existed still report `local-secret-missing`.
+
+`doctor` reports `Problem`, `Cause`, `Fix`, `Docs`, and `Retryable` so unsupported platforms, locked stores, and
+headless sessions fail closed instead of falling through to file secrets. Use `--store-file <path>` only for
+deterministic examples and tests; normal local development should use the OS-backed store when the platform adapter is
+available. Use environment variables, key-per-file, or a remote vault for CI, containers, team environments, and
+production.
+
+For explicit file fallback, `doctor` can render these value-safe posture codes:
+
+```text
+local-secret-store-ready
+local-secret-file-posture-repaired
+local-secret-file-posture-degraded
+local-secret-file-posture-unsupported
+```
+
+`ready`, `repaired`, and `degraded` are doctor-style readiness results and exit successfully so setup scripts can keep
+moving. `degraded` still means the file fallback is weaker than the OS-backed store; on Windows it is expected because
+v1 does not claim Windows ACL hardening, and on Unix it is reserved for paths AppSurface can open but cannot fully
+prove. `unsupported` fails the command and points to a normal per-user file path or OS-backed storage. On Unix, unsafe
+path shapes, loose existing directories, loose file mode bits, and writable non-sticky ancestors use `unsupported`
+rather than `degraded`. The file fallback creates missing directories with `0700` mode bits and tightens JSON file mode
+bits to `0600`; existing loose parent directories are rejected rather than modified in place. v1 does not claim
+universal POSIX ACL proof.
+
+On Linux, the OS-backed store runs Secret Service through `secret-tool`, but AppSurface does not execute `secret-tool`
+from `PATH`. It uses `/usr/bin/secret-tool`, then `/bin/secret-tool`, unless you pass an explicit trusted absolute path:
+
+```bash
+SECRET_TOOL=/absolute/path/to/secret-tool
+test -x "$SECRET_TOOL"
+appsurface secrets doctor --app MyApp --environment Development --secret-tool-path "$SECRET_TOOL"
+printf '%s' "<secret>" | appsurface secrets set Stripe:ApiKey --app MyApp --environment Development --secret-tool-path "$SECRET_TOOL" --stdin
+```
+
+Use `--secret-tool-path` for Nix, Linuxbrew, Guix, or custom prefixes after verifying the binary. The flag applies only
+to the current CLI invocation; configure `AppSurfaceLocalSecretsOptions.LinuxSecretToolPath` in the app for runtime use.
+`--secret-tool-path` and `--store-file` are mutually exclusive so `doctor` cannot report file-store readiness when you
+meant to verify the Linux platform store.
 
 ### `appsurface coverage run`
 

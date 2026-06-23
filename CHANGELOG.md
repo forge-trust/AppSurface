@@ -14,16 +14,24 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
-- `appsurface coverage gate` patch coverage now supports local Git refs, CI-produced unified diff files, and piped unified diff text, with fail-closed validation and report provenance for external diff artifacts.
-- The package chooser Intelligence entry now resolves in hosted AppSurface Docs instead of pointing readers at a harvested-out README route.
-- AppSurface CI coverage now dogfoods the `appsurface coverage run` command, running from source via `dotnet run --project`, for the default full-solution coverage lane while preserving Cobertura, JUnit, slow-test diagnostics, Codecov, and `coverage gate` evidence.
-- `appsurface coverage run` now supports AppSurface-managed `--test-results junit`; `--slow-test-diagnostics` implies managed JUnit results and records parser status, warnings, metadata completeness, and diagnostic overhead in `timings.json`.
-- Package artifact validation now installs the packed `ForgeTrust.AppSurface.Cli` tool into a clean consumer fixture before publication and proves `coverage run`, `coverage merge`, a passing `coverage gate`, and a deliberately failing `coverage gate` all behave from the packaged tool.
-- AppSurface Docs search now keeps MiniSearch candidate matching while applying deterministic reader-intent ranking for exact lookups, aliases, entry points, broad task queries, explicit API/internal filters, and contributor/internal demotion.
-- Evaluators can run `examples/product-readiness-lab` as a report-first product proof, then use the paired Aspire AppHost verifier to exercise Postgres-backed product state while keeping Durable Task worker/client hosting and storage provider setup explicitly host-owned.
-- AppSurface Docs search now preserves multi-word spacing while readers type in the full-page and sidebar search boxes.
-- RazorWire now includes a Cloud Run hybrid-hosting guide for split-origin deployments that serve exported static pages from one origin while a live RazorWire app serves streams, islands, and lazy anti-forgery forms from another origin.
-- Package validation now gates redistributed package payload provenance through `packages/third-party-payloads.yml`, package-root notices, generated-first-party evidence, and audited exceptions before prerelease artifacts can pass `verify-packages`.
+- `ForgeTrust.AppSurface.Auth` now defines durable external-subject to app-user-id mapping contracts, with Auth core staying free of user-store, ASP.NET Core, OIDC, persistence, and tenant-authority ownership.
+- `ForgeTrust.AppSurface.Auth.AspNetCore` can now protect Minimal API endpoints with host-owned ASP.NET Core policies while returning AppSurface-shaped ProblemDetails JSON for API callers.
+- `ForgeTrust.AppSurface.Observability` now lets AppSurface apps register OpenTelemetry logging, tracing, and metrics for Aspire or another OTLP collector without depending on the Aspire AppHost package.
+- `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` now provides a thin ASP.NET Core cookie plus OpenID Connect convenience package with named schemes, safe defaults, passive prompts, event composition, and redacted diagnostics.
+- AppSurface Config can now compare sanitized audit reports, render deterministic same-host or captured-snapshot evidence, and expose command-framework-agnostic diff workflows with display-safe failures.
+- RazorWire export now fails artifact-producing redirects with `RWEXPORT008` when the final response leaves the configured export origin or base path before content is read or written.
+- AppSurface LocalSecrets file fallback now creates missing Unix fallback directories with `0700`, writes or repairs JSON files with `0600`, fails closed on loose parent directories and unsafe path shapes, and lets `appsurface secrets doctor --store-file` report ready, repaired, degraded, or unsupported posture without printing secret values.
+- AppSurface LocalSecrets platform-backed stores now validate indexed names against live stored values during `appsurface secrets list`, prune stale names after successful repair, and let `appsurface secrets delete KEY` clean stale indexed names whose values are already gone.
+- AppSurface LocalSecrets now hardens Linux `secret-tool` resolution by using trusted system candidates or an explicit absolute override instead of executing the first PATH-discovered command.
+- AppSurface Flow now uses value-type execution contexts and deeper benchmark coverage to reduce and track synchronous in-memory runner allocation overhead.
+- `ForgeTrust.AppSurface.Web` now fails startup for AppSurface-managed production CORS when `CorsOptions.AllowedOrigins` contains the literal origin wildcard `*`; replace it with explicit origins such as `https://app.example.com`, keep permissive all-origin behavior to Development through `EnableAllOriginsInDevelopment`, or register host-owned ASP.NET Core CORS for intentionally public wildcard APIs.
+- RazorWire hybrid islands now block inline `data:` module specifiers and protocol-relative `//...` module URLs; serve client modules from relative, root-relative, same-origin, explicit HTTPS, or import-map specifiers instead.
+
+## 0.1.0-rc.4 - 2026-06-16
+
+- Narrative release note: [v0.1.0-rc.4](./releases/v0.1.0-rc.4.md)
+- Release manifest: `releases/v0.1.0-rc.4.release.json`
+- Release evidence bundle: `releases/v0.1.0-rc.4.evidence.json`
 
 ## 0.1.0-rc.3 - 2026-06-08
 

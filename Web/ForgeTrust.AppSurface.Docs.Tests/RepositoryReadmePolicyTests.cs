@@ -37,6 +37,26 @@ public sealed partial class RepositoryReadmePolicyTests
                 "Intelligence/ForgeTrust.AppSurface.Intelligence/README.md",
                 AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(
+            policy.ShouldIncludeFilePath(
+                "Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/local-secrets-without-a-remote-vault.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(
+            policy.ShouldIncludeFilePath(
+                "Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/migrate-from-dotenv.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(
+            policy.ShouldIncludeFilePath(
+                "Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/migrate-from-user-secrets.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(
+            policy.ShouldIncludeFilePath(
+                "Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/move-to-future-remote-vault.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(
+            policy.ShouldIncludeFilePath(
+                "Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/use-env-or-key-per-file-in-ci-and-containers.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/generated/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/TestResults/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.False(policy.ShouldIncludeFilePath("unpublished/scratch/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
@@ -93,7 +113,7 @@ public sealed partial class RepositoryReadmePolicyTests
             .Select(entry => entry.StartHerePath!)
             .ToArray();
 
-        Assert.Equal(17, requiredReadmes.Length);
+        Assert.Equal(20, requiredReadmes.Length);
         Assert.Contains("Web/ForgeTrust.AppSurface.Docs/README.md", nonRequiredReadmes);
         Assert.Contains("Web/ForgeTrust.RazorWire.Cli/README.md", nonRequiredReadmes);
 
@@ -104,7 +124,7 @@ public sealed partial class RepositoryReadmePolicyTests
 
             Assert.Contains("## Release Guidance", content, StringComparison.Ordinal);
 
-            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1.0-rc.3.md"), repoRoot);
+            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1.0-rc.4.md"), repoRoot);
             var linksToReleaseNote = MarkdownLinkRegex()
                 .Matches(content)
                 .Select(match => ResolveRelativeLinkTarget(
@@ -113,7 +133,7 @@ public sealed partial class RepositoryReadmePolicyTests
                     readmePath))
                 .Any(target => string.Equals(target, expectedTarget, StringComparison.Ordinal));
 
-            Assert.True(linksToReleaseNote, $"{readmePath} must link to the v0.1.0 RC 3 release note.");
+            Assert.True(linksToReleaseNote, $"{readmePath} must link to the v0.1.0 RC 4 release note.");
         }
     }
 

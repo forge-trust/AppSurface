@@ -45,7 +45,7 @@ interface Window {
             if (initializedElements.has(island) || scheduledElements.has(island)) continue;
 
             const modulePath = island.getAttribute('data-rw-module');
-            if (!modulePath) continue; // Safety guard
+            if (modulePath === null) continue; // Safety guard
 
             const resolvedModulePath = resolveIslandModulePath(modulePath);
             if (!resolvedModulePath) continue;
@@ -87,13 +87,14 @@ interface Window {
     /**
      * Resolve a data-rw-module value to a module specifier that is safe to pass to dynamic import().
      *
-     * App-owned pages may provide `window.RazorWireIslandModules` to map logical module names to approved
-     * URLs. Existing relative, root-relative, https, same-origin http(s), and bare import-map specifiers
-     * remain valid for compatibility. Dangerous direct schemes are rejected before import().
+     * App-owned pages may provide `window.RazorWireIslandModules` to map logical module names to host-provided
+     * module specifiers. Existing relative, root-relative, https, same-origin http(s), and bare import-map
+     * specifiers remain valid for compatibility. Inline module content and unsafe URL forms are rejected before
+     * import().
      */
     function resolveIslandModulePath(moduleName) {
         const rawModuleName = moduleName.trim();
-        if (!rawModuleName) return null;
+        if (!rawModuleName) return validateIslandModuleSpecifier(rawModuleName, rawModuleName, false);
 
         const manifest = window.RazorWireIslandModules || {};
         if (Object.prototype.hasOwnProperty.call(manifest, rawModuleName)) {
@@ -106,21 +107,18 @@ interface Window {
     function validateIslandModuleSpecifier(specifier, moduleName, fromManifest) {
         const value = typeof specifier === 'string' ? specifier.trim() : '';
         if (!value) {
-            console.warn(`RazorWire island module "${moduleName}" resolved to an empty module specifier.`);
+            warnBlockedIslandModuleSpecifier(moduleName, specifier, fromManifest, 'an empty or non-string module specifier');
             return null;
         }
 
-        if (/^(?:javascript|blob|file):/i.test(value)) {
-            console.warn(`RazorWire island module "${moduleName}" uses a blocked module scheme.`, value);
+        if (/^\/\//.test(value)) {
+            warnBlockedIslandModuleSpecifier(moduleName, value, fromManifest, 'a protocol-relative module URL');
             return null;
         }
 
-        if (/^data:/i.test(value)) {
-            if (fromManifest && /^data:text\/javascript[,;]/i.test(value)) {
-                return value;
-            }
-
-            console.warn(`RazorWire island module "${moduleName}" uses a blocked module scheme.`, value);
+        const blockedScheme = /^(javascript|data|blob|file):/i.exec(value);
+        if (blockedScheme) {
+            warnBlockedIslandModuleSpecifier(moduleName, value, fromManifest, `the blocked "${blockedScheme[1].toLowerCase()}:" module scheme`);
             return null;
         }
 
@@ -134,11 +132,19 @@ interface Window {
                 // Fall through to the shared warning below.
             }
 
-            console.warn(`RazorWire island module "${moduleName}" is not an allowed module URL.`, value);
+            warnBlockedIslandModuleSpecifier(moduleName, value, fromManifest, 'a module URL outside the allowed same-origin or explicit HTTPS forms');
             return null;
         }
 
         return value;
+    }
+
+    function warnBlockedIslandModuleSpecifier(moduleName, diagnosticValue, fromManifest, reason) {
+        const source = fromManifest ? 'window.RazorWireIslandModules' : 'data-rw-module';
+        console.warn(
+            `RazorWire island module "${moduleName}" from ${source} uses ${reason}. Use a relative, root-relative, same-origin, explicit HTTPS, or bare import-map module specifier.`,
+            diagnosticValue
+        );
     }
 
     function hasUrlScheme(value) {
