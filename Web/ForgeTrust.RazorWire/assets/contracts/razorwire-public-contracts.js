@@ -421,6 +421,241 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
+ * Form interactions manager for conditional form targets and one-dimensional model-bound collection mechanics.
+ * @public
+ * @namespace RazorWire
+ * @config window.RazorWire.formInteractionsManager
+ * @type {object}
+ * @source <rw:scripts /> with rendered `[data-rw-form-toggle]` or `[data-rw-form-collection]` markup
+ * @property {Function} scan - Re-scans the document for forms containing form-interaction markers after custom DOM updates.
+ * @property {Function} prune - Removes controllers for disconnected forms.
+ * @property {Function} getDiagnostics - Returns stable form-interaction diagnostic objects recorded since startup.
+ * @property {string} getDiagnostics[].message - Required problem statement for invalid form-interaction markup.
+ * @property {string} getDiagnostics[].impact - Required explanation of skipped behavior or submit-semantics risk.
+ * @property {string} getDiagnostics[].fix - Required remediation guidance.
+ * @property {string} getDiagnostics[].docs - Required repository documentation path for troubleshooting.
+ * @property {Function} clearDiagnostics - Clears recorded diagnostics.
+ */
+
+/**
+ * A conditional form toggle is about to reveal or hide its targets.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form-toggle:before-change
+ * @target [data-rw-form-toggle]
+ * @firesWhen A form toggle value changes and RazorWire has resolved the same-form targets that may be shown or hidden.
+ * @property {HTMLFormElement} detail.form - Owning form.
+ * @property {HTMLElement} detail.control - Toggle control.
+ * @property {HTMLElement} detail.target - First matched target.
+ * @property {boolean} detail.visible - Whether targets will be shown.
+ * @bubbles true
+ * @cancelable true
+ */
+
+/**
+ * A conditional form toggle finished revealing or hiding its targets.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form-toggle:change
+ * @target [data-rw-form-toggle]
+ * @firesWhen RazorWire finishes applying visibility, state hooks, and optional disabled state for a conditional form target.
+ * @property {HTMLFormElement} detail.form - Owning form.
+ * @property {HTMLElement} detail.control - Toggle control.
+ * @property {HTMLElement} detail.target - First matched target.
+ * @property {boolean} detail.visible - Whether targets are shown.
+ * @bubbles true
+ * @cancelable false
+ */
+
+/**
+ * A model-bound collection command is about to add a row.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form-collection:before-add
+ * @target [data-rw-form-collection-add]
+ * @firesWhen An add command has cloned the app-authored template and allocated a sparse collection index, before insertion.
+ * @property {HTMLFormElement} detail.form - Owning form.
+ * @property {HTMLElement} detail.root - Collection root.
+ * @property {HTMLElement} detail.control - Command button.
+ * @property {HTMLElement} detail.row - Row that will be inserted.
+ * @property {string} detail.index - New sparse model-binding index.
+ * @property {"add"} detail.action - Collection action.
+ * @bubbles true
+ * @cancelable true
+ */
+
+/**
+ * A model-bound collection command added a row.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form-collection:add
+ * @target [data-rw-form-collection-add]
+ * @firesWhen RazorWire inserts a new collection row and enables its hidden `.index` marker.
+ * @property {HTMLFormElement} detail.form - Owning form.
+ * @property {HTMLElement} detail.root - Collection root.
+ * @property {HTMLElement} detail.control - Command button.
+ * @property {HTMLElement} detail.row - Inserted row.
+ * @property {string} detail.index - New sparse model-binding index.
+ * @property {"add"} detail.action - Collection action.
+ * @bubbles true
+ * @cancelable false
+ */
+
+/**
+ * A model-bound collection command is about to duplicate a row.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form-collection:before-duplicate
+ * @target [data-rw-form-collection-duplicate]
+ * @firesWhen A duplicate command has cloned the source row, rewritten index tokens, and prepared copyable user values before insertion.
+ * @property {HTMLFormElement} detail.form - Owning form.
+ * @property {HTMLElement} detail.root - Collection root.
+ * @property {HTMLElement} detail.control - Command button.
+ * @property {HTMLElement} detail.row - Cloned row that will be inserted.
+ * @property {string|null} detail.previousIndex - Source row index.
+ * @property {string} detail.index - New sparse model-binding index.
+ * @property {"duplicate"} detail.action - Collection action.
+ * @bubbles true
+ * @cancelable true
+ */
+
+/**
+ * A model-bound collection command duplicated a row.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form-collection:duplicate
+ * @target [data-rw-form-collection-duplicate]
+ * @firesWhen RazorWire inserts a duplicated collection row with a new sparse model-binding index.
+ * @property {HTMLFormElement} detail.form - Owning form.
+ * @property {HTMLElement} detail.root - Collection root.
+ * @property {HTMLElement} detail.control - Command button.
+ * @property {HTMLElement} detail.row - Inserted clone.
+ * @property {string|null} detail.previousIndex - Source row index.
+ * @property {string} detail.index - New sparse model-binding index.
+ * @property {"duplicate"} detail.action - Collection action.
+ * @bubbles true
+ * @cancelable false
+ */
+
+/**
+ * A model-bound collection command is about to remove or mark a row.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form-collection:before-remove
+ * @target [data-rw-form-collection-remove]
+ * @firesWhen A remove command resolves its physical-remove or mark-remove mode, before RazorWire mutates the row.
+ * @property {HTMLFormElement} detail.form - Owning form.
+ * @property {HTMLElement} detail.root - Collection root.
+ * @property {HTMLElement} detail.control - Command button.
+ * @property {HTMLElement} detail.row - Row that will be removed or marked.
+ * @property {"physical-remove"|"mark-remove"} detail.action - Remove action.
+ * @property {"physical"|"mark"} detail.removeMode - Remove mode.
+ * @property {string} detail.index - Existing model-binding index.
+ * @bubbles true
+ * @cancelable true
+ */
+
+/**
+ * A model-bound collection command removed or marked a row.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form-collection:remove
+ * @target [data-rw-form-collection-remove]
+ * @firesWhen RazorWire finishes physically removing a row or marking it for app-owned deletion.
+ * @property {HTMLFormElement} detail.form - Owning form.
+ * @property {HTMLElement} detail.root - Collection root.
+ * @property {HTMLElement} detail.control - Command button.
+ * @property {HTMLElement} detail.row - Row that was removed or marked.
+ * @property {"physical-remove"|"mark-remove"} detail.action - Remove action.
+ * @property {"physical"|"mark"} detail.removeMode - Remove mode.
+ * @property {string} detail.index - Existing model-binding index.
+ * @bubbles true
+ * @cancelable false
+ */
+
+/**
+ * Marks a control that reveals or hides conditional form targets inside the same form.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-form-toggle
+ * @target input, select, textarea, button
+ * @type {string}
+ */
+
+/**
+ * Marks an app-authored target revealed or hidden by a matching form toggle.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-form-toggle-target
+ * @target fieldset, section, div
+ * @type {string}
+ */
+
+/**
+ * Marks a one-dimensional ASP.NET Core model-bound collection root.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-form-collection
+ * @target div, section, fieldset
+ * @type {string}
+ */
+
+/**
+ * Marks an app-authored collection row.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-form-collection-row
+ * @target fieldset, div, tr
+ * @type {"true"}
+ */
+
+/**
+ * Marks the app-authored row template that contains the `__index__` token.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-form-collection-template
+ * @target template
+ * @type {"true"}
+ */
+
+/**
+ * Marks a button that adds a row from the collection template.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-form-collection-add
+ * @target button
+ * @type {"true"}
+ */
+
+/**
+ * Marks a button that duplicates the nearest collection row.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-form-collection-duplicate
+ * @target button
+ * @type {"true"}
+ */
+
+/**
+ * Marks a button that physically removes or marks the nearest collection row.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-form-collection-remove
+ * @target button
+ * @type {"physical"|"mark"|"true"}
+ */
+
+/**
+ * Stable selector for forms enhanced by the form-interactions runtime.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-form-interactions-enhanced="true"]
+ * @hookKind data-attribute
+ * @target form
+ * @stability stable
+ */
+
+/**
  * Selects when an island module hydrates.
  * @public
  * @namespace RazorWire

@@ -72,6 +72,18 @@ public class RazorWireScriptsTagHelper : TagHelper
     public bool SectionCopy { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the form-interactions runtime should be eagerly rendered after the core runtime.
+    /// </summary>
+    /// <remarks>
+    /// Form interactions are split out of the core runtime so plain RazorWire pages do not pay for local form mechanics they
+    /// do not use. Plain <c>&lt;rw:scripts /&gt;</c> emits a small usage detector that loads the runtime only when the
+    /// rendered page contains <c>data-rw-form-toggle</c> or <c>data-rw-form-collection</c> markup. Set this attribute to
+    /// <c>true</c> when a host wants to eagerly fetch the form-interactions asset before the detector runs.
+    /// </remarks>
+    [HtmlAttributeName("form-interactions")]
+    public bool FormInteractions { get; set; }
+
+    /// <summary>
     /// Renders the client-side script tags required by RazorWire and removes the wrapper element so no enclosing tag is emitted.
     /// </summary>
     /// <param name="context">The current tag helper context.</param>
@@ -108,6 +120,9 @@ public class RazorWireScriptsTagHelper : TagHelper
         var sectionCopyJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js");
+        var formInteractionsJs = _fileVersionProvider.AddFileVersionToPath(
+            pathBase,
+            "/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js");
 
         var diagnosticsEnabled = _options.Forms.EnableFailureUx
                                  && _options.Forms.EnableDevelopmentDiagnostics
@@ -165,6 +180,20 @@ public class RazorWireScriptsTagHelper : TagHelper
                 "data-rw-section-copy-runtime",
                 "RazorWireSectionCopyInitialized",
                 ["[data-rw-section-copy]", "[data-rw-section-copy-target]"]);
+        }
+
+        if (FormInteractions)
+        {
+            scripts += $@"<script src=""{formInteractionsJs}"" data-rw-form-interactions-runtime=""eager""></script>
+";
+        }
+        else
+        {
+            scripts += BuildAutoloadScript(
+                formInteractionsJs,
+                "data-rw-form-interactions-runtime",
+                "RazorWireFormInteractionsInitialized",
+                ["[data-rw-form-toggle]", "[data-rw-form-collection]"]);
         }
 
         output.Content.SetHtmlContent(scripts);

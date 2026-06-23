@@ -9,6 +9,7 @@ const runtimeSourcePath = new URL('../assets/src/razorwire.ts', import.meta.url)
 const islandsPath = new URL('../wwwroot/razorwire/razorwire.islands.js', import.meta.url);
 const pageNavigationPath = new URL('../wwwroot/razorwire/page-navigation.js', import.meta.url);
 const sectionCopyPath = new URL('../wwwroot/razorwire/section-copy.js', import.meta.url);
+const formInteractionsPath = new URL('../wwwroot/razorwire/form-interactions.js', import.meta.url);
 const packageRoot = new URL('../', import.meta.url);
 const packageRootPath = fileURLToPath(packageRoot);
 
@@ -17,15 +18,18 @@ test('generated runtime outputs keep provenance banners and public package paths
   const islands = readFileSync(islandsPath, 'utf8');
   const pageNavigation = readFileSync(pageNavigationPath, 'utf8');
   const sectionCopy = readFileSync(sectionCopyPath, 'utf8');
+  const formInteractions = readFileSync(formInteractionsPath, 'utf8');
 
   assert.match(runtime, /^\/\/ Generated from assets\/src\/razorwire\.ts\./);
   assert.match(islands, /^\/\/ Generated from assets\/src\/razorwire\.islands\.ts\./);
   assert.match(pageNavigation, /^\/\/ Generated from assets\/src\/page-navigation\.ts\./);
   assert.match(sectionCopy, /^\/\/ Generated from assets\/src\/section-copy\.ts\./);
+  assert.match(formInteractions, /^\/\/ Generated from assets\/src\/form-interactions\.ts\./);
   assert.equal(runtime.includes('sourceMappingURL'), false);
   assert.equal(islands.includes('sourceMappingURL'), false);
   assert.equal(pageNavigation.includes('sourceMappingURL'), false);
   assert.equal(sectionCopy.includes('sourceMappingURL'), false);
+  assert.equal(formInteractions.includes('sourceMappingURL'), false);
   assert.match(runtime, /RazorWireInitialized/);
   assert.match(runtime, /formFailureManager/);
   assert.match(islands, /RazorWireIslandsInitialized/);
@@ -34,6 +38,8 @@ test('generated runtime outputs keep provenance banners and public package paths
   assert.match(pageNavigation, /data-rw-page-nav/);
   assert.match(sectionCopy, /sectionCopyManager/);
   assert.match(sectionCopy, /data-rw-section-copy/);
+  assert.match(formInteractions, /formInteractionsManager/);
+  assert.match(formInteractions, /data-rw-form-collection/);
 });
 
 test('authored form failure product event keeps failure mode separate from response kind', () => {
@@ -43,11 +49,12 @@ test('authored form failure product event keeps failure mode separate from respo
   assert.match(source, /response_kind:\s*detail\.responseKind \|\| 'unknown'/);
 });
 
-test('public contract manifest includes page navigation and section copy hooks', () => {
+test('public contract manifest includes page navigation, section copy, and form interaction hooks', () => {
   const contracts = readFileSync(new URL('assets/contracts/razorwire-public-contracts.js', packageRoot), 'utf8');
 
   assert.match(contracts, /window\.RazorWire\.pageNavigationManager/);
   assert.match(contracts, /window\.RazorWire\.sectionCopyManager/);
+  assert.match(contracts, /window\.RazorWire\.formInteractionsManager/);
   assert.doesNotMatch(contracts, /@manager/);
   assert.match(contracts, /razorwire:page-nav:active-change/);
   assert.match(contracts, /data-rw-page-nav/);
@@ -58,6 +65,10 @@ test('public contract manifest includes page navigation and section copy hooks',
   assert.match(contracts, /data-rw-section-copy-target/);
   assert.match(contracts, /data-rw-section-copy-state/);
   assert.match(contracts, /data-rw-section-copy-fallback/);
+  assert.match(contracts, /razorwire:form-collection:before-add/);
+  assert.match(contracts, /data-rw-form-toggle/);
+  assert.match(contracts, /data-rw-form-collection/);
+  assert.match(contracts, /data-rw-form-collection-row/);
 });
 
 test('generated verifier emits actionable stale-output diagnostics', () => {
@@ -66,6 +77,7 @@ test('generated verifier emits actionable stale-output diagnostics', () => {
   assert.match(verifier, /RWASSET003 RazorWire generated assets are stale/);
   assert.match(verifier, /page-navigation\.js/);
   assert.match(verifier, /section-copy\.js/);
+  assert.match(verifier, /form-interactions\.js/);
   assert.match(verifier, /Problem:/);
   assert.match(verifier, /Cause:/);
   assert.match(verifier, /Fix: run `pnpm --dir Web run assets:razorwire:build`/);
