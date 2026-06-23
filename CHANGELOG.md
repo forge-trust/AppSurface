@@ -26,6 +26,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Flow now uses value-type execution contexts and deeper benchmark coverage to reduce and track synchronous in-memory runner allocation overhead.
 - `ForgeTrust.AppSurface.Web` now fails startup for AppSurface-managed production CORS when `CorsOptions.AllowedOrigins` contains the literal origin wildcard `*`; replace it with explicit origins such as `https://app.example.com`, keep permissive all-origin behavior to Development through `EnableAllOriginsInDevelopment`, or register host-owned ASP.NET Core CORS for intentionally public wildcard APIs.
 - RazorWire hybrid islands now block inline `data:` module specifiers and protocol-relative `//...` module URLs; serve client modules from relative, root-relative, same-origin, explicit HTTPS, or import-map specifiers instead.
+- RazorWire stream authorization can now return `AppSurfaceAuthResult` outcomes before SSE starts, while existing bool authorizers keep working through a compatibility adapter.
 
 ## 0.1.0-rc.4 - 2026-06-16
 
