@@ -29,6 +29,7 @@ public sealed class DocsControllerHarvestReturnUrlTests
     [Theory]
     [InlineData("/docs", null, "/docs")]
     [InlineData("/docs/search?q=api", null, "/docs")]
+    [InlineData("/docs/packages/guide%20one.html", null, "/docs")]
     [InlineData("/base/docs/packages/README.md.html", "/base", "/docs")]
     [InlineData("/base/docs/search", "base/", "docs/")]
     [InlineData("/base", "base", "/")]
@@ -44,10 +45,20 @@ public sealed class DocsControllerHarvestReturnUrlTests
     [Theory]
     [InlineData("/admin", null, "/docs")]
     [InlineData("/base/admin", "/base", "/docs")]
+    [InlineData("/docs/../admin", null, "/docs")]
+    [InlineData("/docs/%2e%2e/admin", null, "/docs")]
+    [InlineData("/docs/%2E%2E/_harvest", null, "/docs")]
+    [InlineData("/docs/%252e%252e/admin", null, "/docs")]
+    [InlineData("/docs/%", null, "/docs")]
+    [InlineData("/docs/%0a", null, "/docs")]
     [InlineData("/docs/_harvest", null, "/docs")]
+    [InlineData("/docs/%5Fharvest", null, "/docs")]
     [InlineData("/docs/_harvest/rebuild", null, "/docs")]
+    [InlineData("/docs/%5Fharvest/rebuild", null, "/docs")]
     [InlineData("/docs/_harvest/extra", null, "/docs")]
+    [InlineData("/docs/%5Fharvest/extra", null, "/docs")]
     [InlineData("/_harvest", null, "/")]
+    [InlineData("/%5Fharvest", null, "/")]
     public void IsSafeDocsHarvestReturnUrl_WhenUrlLeavesDocsOrLoopsToHarvest_ReturnsFalse(
         string url,
         string? pathBase,

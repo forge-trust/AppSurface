@@ -1229,8 +1229,12 @@ public class DocsController : Controller
 
         var pathEnd = url!.IndexOfAny(['?', '#']);
         var path = pathEnd >= 0 ? url[..pathEnd] : url;
+        if (!TryNormalizeReturnUrlPathForValidation(path, out var candidate))
+        {
+            return false;
+        }
+
         var normalizedPathBase = NormalizeReturnUrlPath(pathBase);
-        var candidate = NormalizeReturnUrlPath(path);
         if (!string.IsNullOrWhiteSpace(normalizedPathBase)
             && (string.Equals(candidate, normalizedPathBase, StringComparison.OrdinalIgnoreCase)
                 || candidate.StartsWith(normalizedPathBase + "/", StringComparison.OrdinalIgnoreCase)))
@@ -1253,6 +1257,81 @@ public class DocsController : Controller
         return !relativePath.Equals("_harvest", StringComparison.OrdinalIgnoreCase)
                && !relativePath.Equals("_harvest/rebuild", StringComparison.OrdinalIgnoreCase)
                && !relativePath.StartsWith("_harvest/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Normalizes a harvest return URL path for containment checks after rejecting encoded traversal tricks.
+    /// </summary>
+    /// <param name="path">The path portion of the candidate return URL.</param>
+    /// <param name="normalizedPath">The normalized decoded path when validation succeeds.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="path"/> can be decoded without revealing control characters,
+    /// backslashes, raw dot segments, or encoded dot-segment traversal; otherwise <see langword="false"/>.
+    /// </returns>
+    private static bool TryNormalizeReturnUrlPathForValidation(string path, out string normalizedPath)
+    {
+        normalizedPath = string.Empty;
+        if (!TryValidateReturnUrlPercentEscapes(path))
+        {
+            return false;
+        }
+
+        var decodedPath = Uri.UnescapeDataString(path);
+        if (decodedPath.Any(char.IsControl)
+            || decodedPath.Contains('\\', StringComparison.Ordinal)
+            || ContainsDotSegment(path)
+            || ContainsDotSegment(decodedPath))
+        {
+            return false;
+        }
+
+        normalizedPath = NormalizeReturnUrlPath(decodedPath);
+        return true;
+    }
+
+    /// <summary>
+    /// Rejects malformed percent escapes and double-encoded sensitive path tokens in a harvest return URL path.
+    /// </summary>
+    /// <param name="path">The path portion of the candidate return URL.</param>
+    /// <returns>
+    /// <see langword="true"/> when every percent escape is syntactically valid and does not hide a second encoded
+    /// control character, slash, backslash, or dot; otherwise <see langword="false"/>.
+    /// </returns>
+    private static bool TryValidateReturnUrlPercentEscapes(string path)
+    {
+        for (var i = 0; i < path.Length; i++)
+        {
+            if (path[i] != '%')
+            {
+                continue;
+            }
+
+            if (i + 2 >= path.Length || !IsHex(path[i + 1]) || !IsHex(path[i + 2]))
+            {
+                return false;
+            }
+
+            var decoded = HexToByte(path[i + 1], path[i + 2]);
+            if (decoded < 0x20 || decoded == 0x7f)
+            {
+                return false;
+            }
+
+            if (decoded == '%' && i + 4 < path.Length && IsHex(path[i + 3]) && IsHex(path[i + 4]))
+            {
+                var doubleDecoded = HexToByte(path[i + 3], path[i + 4]);
+                if (doubleDecoded < 0x20
+                    || doubleDecoded == 0x7f
+                    || doubleDecoded == '/'
+                    || doubleDecoded == '\\'
+                    || doubleDecoded == '.')
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -1308,6 +1387,33 @@ public class DocsController : Controller
         }
 
         return trimmed;
+    }
+
+    private static bool ContainsDotSegment(string path)
+    {
+        return path.Split('/', StringSplitOptions.None).Any(segment => segment is "." or "..");
+    }
+
+    private static bool IsHex(char value)
+    {
+        return value is >= '0' and <= '9'
+               || value is >= 'a' and <= 'f'
+               || value is >= 'A' and <= 'F';
+    }
+
+    private static int HexToByte(char high, char low)
+    {
+        return (HexValue(high) << 4) + HexValue(low);
+    }
+
+    private static int HexValue(char value)
+    {
+        return value switch
+        {
+            >= '0' and <= '9' => value - '0',
+            >= 'a' and <= 'f' => value - 'a' + 10,
+            _ => value - 'A' + 10
+        };
     }
 
     private static bool IsUnderPath(string candidatePath, string rootPath)
