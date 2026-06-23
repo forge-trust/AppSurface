@@ -32,6 +32,7 @@ internal static class RazorWireProofRuntimeAssets
         MapEmbeddedAsset(endpoints, "razorwire/razorwire.islands.js");
         MapEmbeddedAsset(endpoints, "razorwire/page-navigation.js");
         MapEmbeddedAsset(endpoints, "razorwire/section-copy.js");
+        MapEmbeddedAsset(endpoints, "razorwire/form-interactions.js");
     }
 
     /// <summary>

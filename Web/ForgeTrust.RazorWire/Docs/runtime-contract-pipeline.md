@@ -34,7 +34,8 @@ The root `assets:typecheck`, `assets:test`, `assets:build`, and `assets:verify` 
 - `assets/src/razorwire.islands.ts` is the authored source for the island loader exposed at `/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js`.
 - `assets/src/page-navigation.ts` is the authored source for the lazy page-navigation runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js`.
 - `assets/src/section-copy.ts` is the authored source for the lazy section-copy runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`.
-- `wwwroot/razorwire/razorwire.js`, `wwwroot/razorwire/razorwire.islands.js`, `wwwroot/razorwire/page-navigation.js`, and `wwwroot/razorwire/section-copy.js` are generated, minified, committed package outputs. Do not edit them by hand.
+- `assets/src/form-interactions.ts` is the authored source for the lazy form-interactions runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js`.
+- `wwwroot/razorwire/razorwire.js`, `wwwroot/razorwire/razorwire.islands.js`, `wwwroot/razorwire/page-navigation.js`, `wwwroot/razorwire/section-copy.js`, and `wwwroot/razorwire/form-interactions.js` are generated, minified, committed package outputs. Do not edit them by hand.
 - `assets/contracts/razorwire-public-contracts.js` is a docs-only manifest for AppSurface Docs JavaScript API harvesting. It documents browser contracts without forcing the harvester to parse generated runtime bundles.
 - `wwwroot/razorwire/exampleJsInterop.js` remains hand-authored, demo-only JavaScript. It is not part of the generated runtime pipeline.
 
@@ -44,7 +45,12 @@ Generated outputs stay committed because Razor Class Library static web assets, 
 
 The TypeScript migration preserves the public browser surface:
 
-- Script paths: `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`, `/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js`, `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js`, and `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`.
+- Script paths:
+  - `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`
+  - `/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js`
+  - `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js`
+  - `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`
+  - `/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js`
 - Tag helper output: `<rw:scripts />`, Turbo attributes, optional Turbo CDN URL, SRI, `crossorigin`, and lazy/eager split-runtime detectors.
 - Global state: `window.RazorWire`, `window.RazorWire.config`, `connectionManager`, `localTimeFormatter`, `formFailureManager`, `pageNavigationManager`, and `sectionCopyManager`.
 - Form events: `razorwire:form:submit-start`, `razorwire:form:failure`, `razorwire:form:diagnostic`, and `razorwire:form:submit-end`.
