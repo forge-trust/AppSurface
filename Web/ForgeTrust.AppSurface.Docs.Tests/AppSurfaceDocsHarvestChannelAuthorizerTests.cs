@@ -3,6 +3,7 @@ using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 
@@ -66,6 +67,28 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         Assert.False(await always.CanSubscribeAsync(
             new DefaultHttpContext(),
             AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+    }
+
+    [Fact]
+    public async Task CanSubscribeAsync_WhenRazorWireOptionsAreRegistered_PassesConfiguredAuthorizationMode()
+    {
+        var streamAuthorizer = new RecordingStreamAuthorizer(AppSurfaceAuthResult.Allowed());
+        var authorizer = new AppSurfaceDocsHarvestChannelAuthorizer(streamAuthorizer);
+        await using var services = new ServiceCollection()
+            .AddSingleton(
+                new RazorWireOptions
+                {
+                    Streams =
+                    {
+                        AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll
+                    }
+                })
+            .BuildServiceProvider();
+
+        var context = new DefaultHttpContext { RequestServices = services };
+
+        Assert.True(await authorizer.CanSubscribeAsync(context, "app-notifications"));
+        Assert.Equal(RazorWireStreamAuthorizationMode.AllowAll, streamAuthorizer.LastAuthorizationMode);
     }
 
     [Fact]
@@ -168,6 +191,44 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
     }
 
     [Theory]
+    [InlineData(true, AppSurfaceAuthOutcome.Allowed)]
+    [InlineData(false, AppSurfaceAuthOutcome.Forbid)]
+    public async Task StreamAuthorizeAsync_WhenReplacementChannelAuthorizerIsRegistered_UsesReplacementBeforeDocsPolicy(
+        bool allow,
+        AppSurfaceAuthOutcome expectedOutcome)
+    {
+        await using var services = new ServiceCollection()
+            .AddSingleton<IRazorWireChannelAuthorizer>(new TestChannelAuthorizer(allow))
+            .BuildServiceProvider();
+        var authorizer = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Never),
+            new TestHostEnvironment { EnvironmentName = Environments.Production });
+        var context = Context(AppSurfaceDocsStreamAuthorization.HarvestProgressChannel, services);
+
+        var result = await authorizer.AuthorizeAsync(context);
+
+        Assert.Equal(expectedOutcome, result.Outcome);
+    }
+
+    [Fact]
+    public async Task StreamAuthorizeAsync_WhenDocsChannelFacadeIsRegistered_DoesNotTreatFacadeAsReplacement()
+    {
+        var facade = new AppSurfaceDocsHarvestChannelAuthorizer(
+            new TestStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+        await using var services = new ServiceCollection()
+            .AddSingleton<IRazorWireChannelAuthorizer>(facade)
+            .BuildServiceProvider();
+        var authorizer = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Never),
+            new TestHostEnvironment { EnvironmentName = Environments.Production });
+        var context = Context(AppSurfaceDocsStreamAuthorization.HarvestProgressChannel, services);
+
+        var result = await authorizer.AuthorizeAsync(context);
+
+        Assert.Equal(AppSurfaceAuthOutcome.Forbid, result.Outcome);
+    }
+
+    [Theory]
     [InlineData(null, false)]
     [InlineData("", false)]
     [InlineData("appsurfacedocs-harvest", true)]
@@ -211,10 +272,18 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         }
     }
 
-    private static RazorWireStreamAuthorizationContext Context(string channel)
+    private static RazorWireStreamAuthorizationContext Context(
+        string channel,
+        IServiceProvider? requestServices = null)
     {
+        var httpContext = new DefaultHttpContext();
+        if (requestServices is not null)
+        {
+            httpContext.RequestServices = requestServices;
+        }
+
         return new RazorWireStreamAuthorizationContext(
-            new DefaultHttpContext(),
+            httpContext,
             channel,
             RazorWireStreamAuthorizationMode.DenyAll);
     }
@@ -223,6 +292,17 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
     {
         public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
         {
+            return new ValueTask<AppSurfaceAuthResult>(result);
+        }
+    }
+
+    private sealed class RecordingStreamAuthorizer(AppSurfaceAuthResult result) : IRazorWireStreamAuthorizer
+    {
+        public RazorWireStreamAuthorizationMode? LastAuthorizationMode { get; private set; }
+
+        public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            LastAuthorizationMode = context.ConfiguredAuthorizationMode;
             return new ValueTask<AppSurfaceAuthResult>(result);
         }
     }
