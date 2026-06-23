@@ -218,6 +218,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
         await using var app = BuildApp();
         var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
         var selectContext = CreateContext(app.Services);
+        selectContext.Request.Method = HttpMethods.Post;
         selectContext.Request.RouteValues["personaId"] = "admin";
         selectContext.Request.QueryString = new QueryString("?returnUrl=%2Fdashboard%3Ftab%3Dauth");
 
@@ -226,6 +227,44 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Equal(StatusCodes.Status302Found, selectContext.Response.StatusCode);
         Assert.Equal("/dashboard?tab=auth", selectContext.Response.Headers.Location);
         Assert.Contains(AppSurfaceDevAuthDefaults.CookieName, selectContext.Response.Headers.SetCookie.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SelectPersona_WithCrossOriginBrowserPost_RejectsWithoutCookie()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var context = CreateContext(app.Services);
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Scheme = "http";
+        context.Request.Host = new HostString("127.0.0.1", 5058);
+        context.Request.Headers["Origin"] = "https://evil.example";
+        context.Request.RouteValues["personaId"] = "admin";
+
+        await endpoint.RequestDelegate!(context);
+
+        var body = await ReadBodyAsync(context);
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+        Assert.Contains("AppSurface DevAuth same-origin request required", body, StringComparison.Ordinal);
+        Assert.True(context.Response.Headers.SetCookie.Count == 0, "Cross-origin persona selection must not set a cookie.");
+    }
+
+    [Fact]
+    public async Task SelectPersona_WithSameOriginBrowserPost_AllowsCookie()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var context = CreateContext(app.Services);
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Scheme = "http";
+        context.Request.Host = new HostString("127.0.0.1", 5058);
+        context.Request.Headers["Origin"] = "http://127.0.0.1:5058";
+        context.Request.RouteValues["personaId"] = "admin";
+
+        await endpoint.RequestDelegate!(context);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Contains(AppSurfaceDevAuthDefaults.CookieName, context.Response.Headers.SetCookie.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -437,6 +476,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
         await using var app = BuildApp();
         var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/clear", HttpMethods.Post);
         var context = CreateContext(app.Services);
+        context.Request.Method = HttpMethods.Post;
         context.Request.QueryString = new QueryString("?returnUrl=%2F");
 
         await endpoint.RequestDelegate!(context);
@@ -444,6 +484,23 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Equal(StatusCodes.Status302Found, context.Response.StatusCode);
         Assert.Equal("/", context.Response.Headers.Location);
         Assert.Contains(AppSurfaceDevAuthDefaults.CookieName, context.Response.Headers.SetCookie.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ClearPersona_WithCrossSiteFetchMetadata_RejectsWithoutCookieMutation()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/clear", HttpMethods.Post);
+        var context = CreateContext(app.Services);
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Headers["Sec-Fetch-Site"] = "cross-site";
+
+        await endpoint.RequestDelegate!(context);
+
+        var body = await ReadBodyAsync(context);
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+        Assert.Contains("AppSurface DevAuth same-origin request required", body, StringComparison.Ordinal);
+        Assert.True(context.Response.Headers.SetCookie.Count == 0, "Cross-site clear must not mutate the persona cookie.");
     }
 
     [Fact]

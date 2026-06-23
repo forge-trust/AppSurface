@@ -21,6 +21,9 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
 {
     private const string ProtectorPurpose = "ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Persona.v1";
     private const string RedactedValue = "(hidden)";
+    private const string OriginHeaderName = "Origin";
+    private const string RefererHeaderName = "Referer";
+    private const string SecFetchSiteHeaderName = "Sec-Fetch-Site";
 
     /// <summary>
     /// Maps the AppSurface DevAuth control page, status JSON, select persona, and clear persona endpoints.
@@ -110,6 +113,14 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
 
         if (!options.RequireLoopbackControlRequests || IsLoopback(context.HttpContext.Connection.RemoteIpAddress))
         {
+            if (IsCrossSiteMutationRequest(context.HttpContext.Request))
+            {
+                return Results.Problem(
+                    title: "AppSurface DevAuth same-origin request required",
+                    detail: "Problem: AppSurface DevAuth mutation endpoints only accept same-origin browser requests. Cause: a browser page from another origin attempted to change the selected fake persona. Fix: use the local DevAuth marker/control page or remove DevAuth from this host. Docs: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#diagnostics.",
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
             return await next(context);
         }
 
@@ -378,6 +389,51 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
     private static bool IsLoopback(IPAddress? remoteAddress)
     {
         return remoteAddress is not null && IPAddress.IsLoopback(remoteAddress);
+    }
+
+    private static bool IsCrossSiteMutationRequest(HttpRequest request)
+    {
+        if (!HttpMethods.IsPost(request.Method))
+        {
+            return false;
+        }
+
+        var secFetchSite = request.Headers[SecFetchSiteHeaderName].ToString();
+        if (string.Equals(secFetchSite, "cross-site", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (request.Headers.TryGetValue(OriginHeaderName, out var origins))
+        {
+            foreach (var origin in origins)
+            {
+                if (!IsSameOrigin(origin, request))
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (request.Headers.TryGetValue(RefererHeaderName, out var referers))
+        {
+            foreach (var referer in referers)
+            {
+                if (!IsSameOrigin(referer, request))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsSameOrigin(string? value, HttpRequest request)
+    {
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+            string.Equals(uri.Scheme, request.Scheme, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(uri.Authority, request.Host.Value, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsDisplaySafeClaim(string type, string value, AppSurfaceDevAuthOptions options)

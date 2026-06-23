@@ -123,6 +123,8 @@ The authentication handler issues every seeded persona claim, but the control pa
 
 The marker renderer uses the same safe display rules as the control page and status JSON. It does not render arbitrary claims. Marker select and clear buttons call the same POST-only mutation endpoints as the control page and use only safe local return URLs, so external `returnUrl` values do not redirect.
 
+Persona mutation endpoints are loopback-only by default and reject cross-site browser POSTs when `Origin`, `Referer`, or Fetch Metadata identifies another origin. This keeps arbitrary websites from silently changing the fake persona in a developer's local browser. Command-line local tooling without browser origin headers can still post to the endpoints from loopback.
+
 ## DevAuth Versus Other Auth Packages
 
 Use `ForgeTrust.AppSurface.Auth` when reusable modules need surface-neutral auth vocabulary, auth results, prompts, audit event descriptions, or durable external-subject to app-user-id mapping contracts.
@@ -170,6 +172,7 @@ Diagnostics, HTML, and status JSON do not include raw tokens, secrets, passwords
 - Keep the DevAuth marker visible in local sample pages so fake auth is impossible to miss.
 - Prefer `AppSurfaceDevAuthMarker.Render(...)` over copying the generated control-page HTML. Use `IncludeDefaultStyles = false`, `CssClassPrefix`, and `AdditionalCssClass` when the marker needs to match a consumer app.
 - DevAuth does not automatically inject an overlay into arbitrary responses. Add the marker explicitly to the pages or local layout where the fake-auth state should be visible.
+- If persona selection returns a same-origin 403, make sure custom local UI posts from the same scheme, host, and port as the mapped DevAuth endpoints.
 
 ## Upgrade And Removal
 
