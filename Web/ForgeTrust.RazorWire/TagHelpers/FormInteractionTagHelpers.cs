@@ -9,7 +9,9 @@ namespace ForgeTrust.RazorWire.TagHelpers;
 /// Use this helper when Razor markup should normalize to the canonical
 /// <c>data-rw-form-toggle</c> attribute. RazorWire interprets null, blank,
 /// <c>true</c>, and the sentinel <c>rw-form-toggle</c> value as the default
-/// logical name <c>true</c>. The helper does not move focus, validate business
+/// logical name <c>true</c>. When applied to a <c>button</c>, the helper sets
+/// <c>type="button"</c> when the app has not supplied a type so toggles do not
+/// submit forms by default. The helper does not move focus, validate business
 /// rules, or generate target markup; the app owns the control and target.
 /// </remarks>
 [HtmlTargetElement(Attributes = "rw-form-toggle")]
@@ -49,6 +51,8 @@ public sealed class FormToggleTagHelper : TagHelper
         {
             output.Attributes.SetAttribute("data-rw-form-toggle-invert", "true");
         }
+
+        EnsureButtonType(output);
     }
 
     private static string NormalizeName(string? value, string sentinel)
@@ -59,6 +63,15 @@ public sealed class FormToggleTagHelper : TagHelper
                || string.Equals(normalized, sentinel, StringComparison.OrdinalIgnoreCase)
             ? "true"
             : normalized;
+    }
+
+    private static void EnsureButtonType(TagHelperOutput output)
+    {
+        if (string.Equals(output.TagName, "button", StringComparison.OrdinalIgnoreCase)
+            && !output.Attributes.ContainsName("type"))
+        {
+            output.Attributes.SetAttribute("type", "button");
+        }
     }
 }
 

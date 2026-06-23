@@ -34,6 +34,28 @@ public sealed class FormInteractionTagHelperTests
     }
 
     [Fact]
+    public void Toggle_Process_SetsTypeButtonWhenAppliedToButtonWithoutType()
+    {
+        var output = CreateOutput("button", "rw-form-toggle", "details");
+
+        new FormToggleTagHelper { TargetName = "details" }.Process(CreateContext("button"), output);
+
+        Assert.Equal("button", output.Attributes["type"].Value);
+        Assert.Equal("details", output.Attributes["data-rw-form-toggle"].Value);
+    }
+
+    [Fact]
+    public void Toggle_Process_PreservesExistingButtonType()
+    {
+        var output = CreateOutput("button", "type", "submit", "rw-form-toggle", "details");
+
+        new FormToggleTagHelper { TargetName = "details" }.Process(CreateContext("button"), output);
+
+        Assert.Equal("submit", output.Attributes["type"].Value);
+        Assert.Equal("details", output.Attributes["data-rw-form-toggle"].Value);
+    }
+
+    [Fact]
     public void ToggleTarget_Process_EmitsDisableWhenHiddenWhenRequested()
     {
         var output = CreateOutput("fieldset", "rw-form-toggle-target", "no-action");
