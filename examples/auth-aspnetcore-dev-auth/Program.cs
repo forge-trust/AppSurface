@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using ForgeTrust.AppSurface.Auth.AspNetCore;
 using ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,18 +40,45 @@ var app = builder.Build();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGet("/", () => Results.Content(
-    """
+app.MapGet("/", (
+    HttpContext httpContext,
+    IHostEnvironment environment,
+    IOptions<AppSurfaceDevAuthOptions> devAuthOptions,
+    IDataProtectionProvider dataProtectionProvider) =>
+{
+    var marker = AppSurfaceDevAuthMarker.Render(
+        httpContext,
+        environment,
+        devAuthOptions,
+        dataProtectionProvider,
+        options => options.AdditionalCssClass = "demo-dev-auth");
+
+    return Results.Content(
+        $$"""
     <!doctype html>
     <html lang="en">
-    <head><meta charset="utf-8"><title>AppSurface DevAuth Example</title></head>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>AppSurface DevAuth Example</title>
+      <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; color: #111827; background: #f8fafc; }
+        main { max-width: 760px; padding: 32px; }
+        .proof { display: inline-block; margin-top: 12px; color: #1d4ed8; }
+      </style>
+    </head>
     <body>
-      <p>AppSurface DevAuth proof is running.</p>
-      <p><a href="/_appsurface/dev-auth">DEV AUTH: open local persona lab</a></p>
+      <main>
+        <h1>AppSurface DevAuth proof is running.</h1>
+        <p>This page keeps the current local persona visible while you work through the app.</p>
+        <a class="proof" href="/api/auth-proof">Open protected auth proof</a>
+      </main>
+      {{marker}}
     </body>
     </html>
     """,
-    "text/html"));
+        "text/html");
+});
 
 app.MapGet(
         "/api/auth-proof",

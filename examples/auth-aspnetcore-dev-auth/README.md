@@ -4,6 +4,8 @@ This example proves `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` can give a l
 
 DevAuth is local tooling. It is not production authentication, OIDC, ASP.NET Identity, a user store, a durable app-user mapping layer, or the future test harness.
 
+The root page renders `AppSurfaceDevAuthMarker` as a persistent in-app overlay. Selecting `Local Admin`, `Local Viewer`, or `Clear` from the overlay posts to the DevAuth control endpoints and returns to the same page, so the fake auth state remains visible while you use the app. Consumers can skin that marker by passing `AppSurfaceDevAuthMarkerOptions`, including `CssClassPrefix`, `AdditionalCssClass`, and `IncludeDefaultStyles = false`.
+
 Run it:
 
 ```bash
@@ -19,6 +21,12 @@ open http://127.0.0.1:5058/_appsurface/dev-auth
 xdg-open http://127.0.0.1:5058/_appsurface/dev-auth
 # Windows (PowerShell)
 Start-Process http://127.0.0.1:5058/_appsurface/dev-auth
+```
+
+Or start from the app page and use the overlay:
+
+```text
+http://127.0.0.1:5058/
 ```
 
 Or prove the flow with curl:

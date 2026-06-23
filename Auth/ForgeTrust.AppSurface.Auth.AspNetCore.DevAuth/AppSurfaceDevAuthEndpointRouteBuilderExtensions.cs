@@ -172,6 +172,11 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             protector.Protect(normalized),
             CreatePersonaCookieOptions(httpContext.Request));
 
+        if (TryGetSafeReturnUrl(httpContext, out var returnUrl))
+        {
+            return Results.LocalRedirect(returnUrl);
+        }
+
         var status = new AppSurfaceDevAuthStatus(
             Enabled: environment.IsDevelopment(),
             Environment: environment.EnvironmentName,
@@ -211,6 +216,11 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
                 Secure = httpContext.Request.IsHttps,
             });
 
+        if (TryGetSafeReturnUrl(httpContext, out var returnUrl))
+        {
+            return Results.LocalRedirect(returnUrl);
+        }
+
         var status = new AppSurfaceDevAuthStatus(
             Enabled: environment.IsDevelopment(),
             Environment: environment.EnvironmentName,
@@ -237,7 +247,10 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         };
     }
 
-    private static AppSurfaceDevAuthStatus BuildStatus(
+    /// <summary>
+    /// Builds safe DevAuth status from the selected persona cookie for endpoint and marker rendering.
+    /// </summary>
+    internal static AppSurfaceDevAuthStatus BuildStatus(
         HttpContext httpContext,
         IHostEnvironment environment,
         AppSurfaceDevAuthOptions options,
@@ -379,17 +392,26 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         return !ContainsSensitiveToken(type) && !ContainsSensitiveToken(value);
     }
 
-    private static string DisplayPersonaName(AppSurfaceDevAuthPersona persona)
+    /// <summary>
+    /// Returns a safe display name for a configured persona.
+    /// </summary>
+    internal static string DisplayPersonaName(AppSurfaceDevAuthPersona persona)
     {
         return SafeStatusValue(persona.DisplayName) ?? RedactedValue;
     }
 
-    private static string DisplayStatusPersonaName(AppSurfaceDevAuthStatus status)
+    /// <summary>
+    /// Returns a safe display name for the current status.
+    /// </summary>
+    internal static string DisplayStatusPersonaName(AppSurfaceDevAuthStatus status)
     {
         return status.DisplayName ?? (status.PersonaId is null ? "Anonymous" : RedactedValue);
     }
 
-    private static string DisplayStatusSubject(AppSurfaceDevAuthStatus status)
+    /// <summary>
+    /// Returns a safe subject value for the current status.
+    /// </summary>
+    internal static string DisplayStatusSubject(AppSurfaceDevAuthStatus status)
     {
         return status.Subject ?? (status.PersonaId is null ? "(none)" : RedactedValue);
     }
@@ -417,6 +439,31 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         httpContext.Response.Headers.Pragma = "no-cache";
         httpContext.Response.Headers.Expires = "0";
         httpContext.Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
+    }
+
+    private static bool TryGetSafeReturnUrl(HttpContext httpContext, out string returnUrl)
+    {
+        returnUrl = NormalizeLocalReturnUrl(httpContext.Request.Query["returnUrl"].ToString());
+        return !string.Equals(returnUrl, "/", StringComparison.Ordinal) ||
+            string.Equals(httpContext.Request.Query["returnUrl"].ToString(), "/", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Normalizes a local marker return URL and falls back to the site root for unsafe values.
+    /// </summary>
+    internal static string NormalizeLocalReturnUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            !value.StartsWith("/", StringComparison.Ordinal) ||
+            value.StartsWith("//", StringComparison.Ordinal) ||
+            value.StartsWith("/\\", StringComparison.Ordinal) ||
+            value.Contains('\\', StringComparison.Ordinal) ||
+            value.Any(char.IsControl))
+        {
+            return "/";
+        }
+
+        return value;
     }
 
     [GeneratedRegex(@"\{[^}/]+\}", RegexOptions.CultureInvariant)]

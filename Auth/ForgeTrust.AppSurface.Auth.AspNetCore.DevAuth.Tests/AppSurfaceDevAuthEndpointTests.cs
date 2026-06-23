@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests;
 
@@ -66,6 +67,71 @@ public sealed class AppSurfaceDevAuthEndpointTests
     }
 
     [Fact]
+    public void Marker_RendersPersistentOverlayControlsWithCurrentReturnUrl()
+    {
+        using var app = BuildApp();
+        var context = CreateContext(app.Services);
+        context.Request.Path = "/dashboard";
+        context.Request.QueryString = new QueryString("?tab=auth");
+
+        var html = AppSurfaceDevAuthMarker.Render(
+            context,
+            app.Services.GetRequiredService<IHostEnvironment>(),
+            app.Services.GetRequiredService<IOptions<AppSurfaceDevAuthOptions>>(),
+            app.Services.GetRequiredService<IDataProtectionProvider>());
+
+        Assert.Contains("appsurface-dev-auth-marker", html, StringComparison.Ordinal);
+        Assert.Contains("DEV AUTH", html, StringComparison.Ordinal);
+        Assert.Contains("Anonymous", html, StringComparison.Ordinal);
+        Assert.Contains("/_appsurface/dev-auth/select/admin?returnUrl=%2Fdashboard%3Ftab%3Dauth", html, StringComparison.Ordinal);
+        Assert.Contains("Open persona lab", html, StringComparison.Ordinal);
+        Assert.Contains("Status JSON", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Marker_RendersSelectedPersonaWithoutSensitiveClaims()
+    {
+        using var app = BuildApp();
+        var context = CreateContext(app.Services);
+        context.Request.Headers.Cookie = $"{AppSurfaceDevAuthDefaults.CookieName}={ProtectPersonaId(app.Services, "admin")}";
+
+        var html = AppSurfaceDevAuthMarker.Render(
+            context,
+            app.Services.GetRequiredService<IHostEnvironment>(),
+            app.Services.GetRequiredService<IOptions<AppSurfaceDevAuthOptions>>(),
+            app.Services.GetRequiredService<IDataProtectionProvider>());
+
+        Assert.Contains("Local Admin", html, StringComparison.Ordinal);
+        Assert.Contains("admin-1", html, StringComparison.Ordinal);
+        Assert.Contains("aria-current=\"true\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("admin@example.com", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Marker_AllowsConsumerSkinningWithoutInlineStyles()
+    {
+        using var app = BuildApp();
+        var context = CreateContext(app.Services);
+
+        var html = AppSurfaceDevAuthMarker.Render(
+            context,
+            app.Services.GetRequiredService<IHostEnvironment>(),
+            app.Services.GetRequiredService<IOptions<AppSurfaceDevAuthOptions>>(),
+            app.Services.GetRequiredService<IDataProtectionProvider>(),
+            options =>
+            {
+                options.CssClassPrefix = "demo-dev-auth";
+                options.AdditionalCssClass = "theme-local";
+                options.IncludeDefaultStyles = false;
+            });
+
+        Assert.Contains("class=\"demo-dev-auth theme-local\"", html, StringComparison.Ordinal);
+        Assert.Contains("demo-dev-auth__button", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("<style>", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SelectPersona_UsesPostOnlyEndpointAndProtectedCookieAuthenticatesNamedScheme()
     {
         await using var app = BuildApp();
@@ -98,6 +164,39 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.True(result.Succeeded);
         Assert.Equal("admin-1", result.Principal?.FindFirst("sub")?.Value);
         Assert.Equal("operator", result.Principal?.FindFirst("role")?.Value);
+    }
+
+    [Fact]
+    public async Task SelectPersona_WithSafeReturnUrl_RedirectsBackToHostPage()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var selectContext = CreateContext(app.Services);
+        selectContext.Request.RouteValues["personaId"] = "admin";
+        selectContext.Request.QueryString = new QueryString("?returnUrl=%2Fdashboard%3Ftab%3Dauth");
+
+        await endpoint.RequestDelegate!(selectContext);
+
+        Assert.Equal(StatusCodes.Status302Found, selectContext.Response.StatusCode);
+        Assert.Equal("/dashboard?tab=auth", selectContext.Response.Headers.Location);
+        Assert.Contains(AppSurfaceDevAuthDefaults.CookieName, selectContext.Response.Headers.SetCookie.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SelectPersona_WithExternalReturnUrl_RendersControlPageInsteadOfRedirecting()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var selectContext = CreateContext(app.Services);
+        selectContext.Request.RouteValues["personaId"] = "admin";
+        selectContext.Request.QueryString = new QueryString("?returnUrl=https%3A%2F%2Fexample.com%2F");
+
+        await endpoint.RequestDelegate!(selectContext);
+
+        var html = await ReadBodyAsync(selectContext);
+        Assert.Equal(StatusCodes.Status200OK, selectContext.Response.StatusCode);
+        Assert.True(selectContext.Response.Headers.Location.Count == 0, "External return URLs must not redirect.");
+        Assert.Contains("Local Admin", html, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -284,6 +383,21 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains("samesite=strict", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("secure", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DEV AUTH: Anonymous (AppSurface.DevAuth)", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ClearPersona_WithSafeReturnUrl_RedirectsBackToHostPage()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/clear", HttpMethods.Post);
+        var context = CreateContext(app.Services);
+        context.Request.QueryString = new QueryString("?returnUrl=%2F");
+
+        await endpoint.RequestDelegate!(context);
+
+        Assert.Equal(StatusCodes.Status302Found, context.Response.StatusCode);
+        Assert.Equal("/", context.Response.Headers.Location);
+        Assert.Contains(AppSurfaceDevAuthDefaults.CookieName, context.Response.Headers.SetCookie.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
