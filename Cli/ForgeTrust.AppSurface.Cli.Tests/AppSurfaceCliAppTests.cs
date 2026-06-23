@@ -29,6 +29,7 @@ public sealed class AppSurfaceCliAppTests
         using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("ExportEngine");
         using var response = await client.GetAsync($"http://127.0.0.1:{redirectPort}/redirect");
 
+        Assert.Equal(TimeSpan.FromSeconds(60), client.Timeout);
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         Assert.Equal(targetUrl, response.Headers.Location?.OriginalString);
         Assert.False(await targetRequestTask);
