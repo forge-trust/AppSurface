@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.RegularExpressions;
 using CliWrap;
 using ForgeTrust.AppSurface.Core;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Playwright;
 using CliCommandResult = CliWrap.CommandResult;
 
@@ -47,6 +48,110 @@ public sealed class RazorWireMvcPlaywrightTests
         Assert.Equal("auto", contract.FailureMode);
         Assert.Contains("/_content/ForgeTrust.RazorWire/razorwire/razorwire.js", contract.RuntimeScriptPath, StringComparison.Ordinal);
         Assert.Contains("/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js", contract.IslandsScriptPath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FormInteractionsSample_ReplacesPageLocalJavaScriptForConditionalAndCollectionRows()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        var browserMessages = CaptureBrowserMessages(page);
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Reactivity/FormInteractions");
+        await WaitForFormInteractionsReadyAsync(page, browserMessages);
+
+        Assert.True(await page.Locator("script[src*='/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js']").CountAsync() > 0);
+        Assert.Equal(0, await page.Locator("[data-form-interactions-proof] script").CountAsync());
+
+        await page.ClickAsync("[data-rw-form-collection-duplicate]");
+        await page.WaitForSelectorAsync("input[name='Actions[1].Title']");
+        Assert.Equal("Call parent", await page.InputValueAsync("input[name='Actions[1].Title']"));
+        Assert.Equal(string.Empty, await page.InputValueAsync("input[name='Actions[1].Id']"));
+
+        await page.ClickAsync("[data-rw-form-collection-add]");
+        await page.WaitForSelectorAsync("input[name='Actions[2].Title']");
+        await page.FillAsync("input[name='Actions[2].Title']", "Email teacher");
+
+        await page.ClickAsync("button[data-rw-form-collection-remove='mark']");
+        var markData = await page.EvaluateAsync<FormDataProbe>(
+            """
+            () => {
+              const form = document.querySelector('[data-form-interactions-proof]');
+              const data = new FormData(form);
+              return {
+                DeleteValue: data.get('Actions[0].Delete'),
+                TitleValue: data.get('Actions[0].Title'),
+                IndexValues: data.getAll('Actions.index')
+              };
+            }
+            """);
+
+        Assert.Equal("true", markData.DeleteValue);
+        Assert.Null(markData.TitleValue);
+        Assert.Contains("0", markData.IndexValues);
+
+        await page.CheckAsync("input[name='ExpectedNoAction']");
+        await page.WaitForFunctionAsync(
+            """
+            () => document.getElementById('draft-action')?.hidden === true
+              && [...document.querySelectorAll('#draft-action input[name$=".Title"]')].every(input => input.disabled)
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var hiddenData = await page.EvaluateAsync<FormDataProbe>(
+            """
+            () => {
+              const data = new FormData(document.querySelector('[data-form-interactions-proof]'));
+              return {
+                DeleteValue: data.get('Actions[0].Delete'),
+                TitleValue: data.get('Actions[2].Title'),
+                IndexValues: data.getAll('Actions.index')
+              };
+            }
+            """);
+
+        Assert.Equal("true", hiddenData.DeleteValue);
+        Assert.Null(hiddenData.TitleValue);
+        Assert.Contains("0", hiddenData.IndexValues);
+        Assert.DoesNotContain("2", hiddenData.IndexValues);
+
+        var submitResponse = await page.RunAndWaitForResponseAsync(
+            () => page.ClickAsync("button[type='submit']"),
+            response => response.Url.Contains("/Reactivity/SubmitFormInteractions", StringComparison.Ordinal));
+        var statusCode = (HttpStatusCode)submitResponse.Status;
+        Assert.True(
+            statusCode is HttpStatusCode.OK or HttpStatusCode.Found,
+            $"Expected accepted POST or redirect response from {submitResponse.Url}, got {statusCode}.");
+    }
+
+    [Fact]
+    public async Task FormInteractionsSample_RedisplaysValidationErrorsForInvalidPostedState()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        var browserMessages = CaptureBrowserMessages(page);
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Reactivity/FormInteractions");
+        await WaitForFormInteractionsReadyAsync(page, browserMessages);
+
+        await page.EvaluateAsync(
+            """
+            () => {
+              document.querySelector('input[name="ExpectedNoAction"]').checked = true;
+              document.querySelector('input[name="Actions[0].Title"]').disabled = false;
+            }
+            """);
+
+        var response = await page.RunAndWaitForResponseAsync(
+            () => page.ClickAsync("button[type='submit']"),
+            response => response.Url.Contains("/Reactivity/SubmitFormInteractions", StringComparison.Ordinal)
+                        && response.Status == StatusCodes.Status422UnprocessableEntity);
+
+        Assert.Equal(StatusCodes.Status422UnprocessableEntity, response.Status);
+        await page.WaitForSelectorAsync("text=Clear draft action rows before marking that no action is expected.");
+        Assert.True(await page.Locator("input[name='Actions[0].Title']").CountAsync() > 0);
+        Assert.Equal("Call parent", await page.InputValueAsync("input[name='Actions[0].Title']"));
     }
 
     [Fact]
@@ -766,6 +871,77 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     /// <summary>
+    /// Describes the browser-sampled form payload used by the form-interactions integration proof.
+    /// </summary>
+    /// <remarks>
+    /// Values come from <c>new FormData(form)</c> so the payload reflects disabled-control
+    /// filtering and sparse ASP.NET Core <c>.index</c> submission semantics.
+    /// </remarks>
+    private sealed class FormDataProbe
+    {
+        /// <summary>
+        /// Gets or sets the posted value for the app-owned delete marker being inspected.
+        /// </summary>
+        public string? DeleteValue { get; set; }
+
+        /// <summary>
+        /// Gets or sets the posted value for the inspected title field, or <see langword="null" /> when the field is disabled.
+        /// </summary>
+        public string? TitleValue { get; set; }
+
+        /// <summary>
+        /// Gets or sets all posted sparse <c>Actions.index</c> marker values in submission order.
+        /// </summary>
+        public string[] IndexValues { get; set; } = [];
+    }
+
+    /// <summary>
+    /// Describes the browser-sampled readiness state used when form-interactions enhancement times out.
+    /// </summary>
+    /// <remarks>
+    /// The timeout path combines static marker presence, loaded runtime state, enhancement state,
+    /// and public manager diagnostics so failures explain whether markup, script loading, or runtime
+    /// initialization broke.
+    /// </remarks>
+    private sealed class FormInteractionsReadinessProbe
+    {
+        /// <summary>
+        /// Gets or sets a value indicating whether a form-toggle marker exists on the page.
+        /// </summary>
+        public bool HasToggleMarker { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether a form-collection marker exists on the page.
+        /// </summary>
+        public bool HasCollectionMarker { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the split form-interactions runtime script is present.
+        /// </summary>
+        public bool HasRuntimeScript { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the runtime bootstrap flag was set.
+        /// </summary>
+        public bool Initialized { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether <c>window.RazorWire.formInteractionsManager</c> is available.
+        /// </summary>
+        public bool HasManager { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether a form was marked enhanced by the runtime.
+        /// </summary>
+        public bool Enhanced { get; set; }
+
+        /// <summary>
+        /// Gets or sets the current public diagnostic messages exposed by the form-interactions manager.
+        /// </summary>
+        public string[] Diagnostics { get; set; } = [];
+    }
+
+    /// <summary>
     /// Describes the Playwright-to-C# deserialization contract for the page-navigation active-link reveal probe.
     /// </summary>
     /// <remarks>
@@ -1127,6 +1303,71 @@ public sealed class RazorWireMvcPlaywrightTests
             "path => window.location.pathname === path",
             expectedPath,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
+    }
+
+    private static ConcurrentQueue<string> CaptureBrowserMessages(IPage page)
+    {
+        var messages = new ConcurrentQueue<string>();
+        page.Console += (_, message) =>
+        {
+            messages.Enqueue($"{message.Type}: {message.Text}");
+        };
+        page.PageError += (_, exception) =>
+        {
+            messages.Enqueue($"pageerror: {exception}");
+        };
+        page.RequestFailed += (_, request) =>
+        {
+            messages.Enqueue($"requestfailed: {request.Url} {request.Failure}");
+        };
+
+        return messages;
+    }
+
+    /// <summary>
+    /// Waits until the RazorWire form-interactions runtime has loaded, exposed its manager, and enhanced the sample form.
+    /// </summary>
+    /// <param name="page">The Playwright page hosting the sample.</param>
+    /// <param name="browserMessages">Thread-safe browser console, page error, and request failure messages captured during navigation.</param>
+    /// <returns>A task that completes when the sample is enhanced.</returns>
+    /// <remarks>
+    /// On timeout, the helper samples browser readiness markers and public RazorWire diagnostics before
+    /// throwing so test failures identify whether markup, asset loading, or runtime initialization is missing.
+    /// </remarks>
+    private static async Task WaitForFormInteractionsReadyAsync(IPage page, ConcurrentQueue<string> browserMessages)
+    {
+        try
+        {
+            await page.WaitForFunctionAsync(
+                """
+                () => window.RazorWire?.formInteractionsManager
+                  && document.querySelector('[data-rw-form-interactions-enhanced="true"]')
+                """,
+                null,
+                new PageWaitForFunctionOptions { Timeout = 15_000 });
+        }
+        catch (TimeoutException exception)
+        {
+            var probe = await page.EvaluateAsync<FormInteractionsReadinessProbe>(
+                """
+                () => ({
+                    HasToggleMarker: Boolean(document.querySelector('[data-rw-form-toggle]')),
+                    HasCollectionMarker: Boolean(document.querySelector('[data-rw-form-collection]')),
+                    HasRuntimeScript: Boolean(document.querySelector('script[src*="/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js"]')),
+                    Initialized: window.RazorWireFormInteractionsInitialized === true,
+                    HasManager: Boolean(window.RazorWire?.formInteractionsManager),
+                    Enhanced: Boolean(document.querySelector('[data-rw-form-interactions-enhanced="true"]')),
+                    Diagnostics: window.RazorWire?.formInteractionsManager?.getDiagnostics?.().map(diagnostic => diagnostic.message) ?? []
+                })
+                """);
+            var message = $"""
+                Timed out waiting for RazorWire form interactions to enhance the sample form.
+                Probe: markers toggle={probe.HasToggleMarker}, collection={probe.HasCollectionMarker}; script={probe.HasRuntimeScript}; initialized={probe.Initialized}; manager={probe.HasManager}; enhanced={probe.Enhanced}; diagnostics=[{string.Join("; ", probe.Diagnostics)}].
+                Browser messages: {string.Join(" | ", browserMessages.ToArray())}
+                """;
+
+            throw new TimeoutException(message, exception);
+        }
     }
 
     private static async Task PlantNoRefreshMarkerAsync(IPage page)

@@ -1177,6 +1177,37 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_Should_Export_FormInteractions_Runtime_When_Lazy_Markup_Is_Present()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new FormInteractionsRuntimeHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var scriptPath = Path.Join(
+                tempDir,
+                "_content",
+                "ForgeTrust.RazorWire",
+                "razorwire",
+                "form-interactions.js");
+            Assert.True(File.Exists(scriptPath), "RazorWire form-interactions runtime should be exported for lazy form-interaction markup.");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Export_Redirected_Stylesheet_To_Original_Route_Path()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
@@ -3752,6 +3783,52 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractReferences_Should_Add_FormInteractions_Runtime_For_Lazy_Markup()
+    {
+        var html = """
+            <script>
+            (() => {
+              const source = "/app/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js?v=abc";
+              const marker = "data-rw-form-interactions-runtime";
+              const selectors = ["[data-rw-form-toggle]", "[data-rw-form-collection]"];
+            })();
+            </script>
+            <form>
+              <input data-rw-form-toggle="draft">
+              <div data-rw-form-toggle-target="draft"></div>
+            </form>
+            """;
+
+        var reference = Assert.Single(
+            _sut.ExtractReferences(html, "/docs/start", htmlScope: true),
+            reference => reference.Path == "/app/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js");
+
+        Assert.Equal(ExportReferenceKind.ScriptSrc, reference.Kind);
+        Assert.Equal(ExportReferenceRole.StaticAsset, reference.Role);
+        Assert.Equal("?v=abc", reference.Query);
+        Assert.Equal("<script>", reference.Provenance?.DisplaySource);
+        Assert.Equal("RazorWire form-interactions autoload source", reference.Provenance?.TokenType);
+    }
+
+    [Fact]
+    public void ExtractReferences_Should_Add_FormInteractions_Runtime_For_Marker_Only_Lazy_Markup()
+    {
+        var html = """
+            <form>
+              <div data-rw-form-collection="Actions"></div>
+            </form>
+            """;
+
+        var reference = Assert.Single(
+            _sut.ExtractReferences(html, "/docs/start", htmlScope: true),
+            reference => reference.Path == "/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js");
+
+        Assert.Equal(ExportReferenceKind.ScriptSrc, reference.Kind);
+        Assert.Equal(ExportReferenceRole.StaticAsset, reference.Role);
+        Assert.Equal("<div data-rw-form-collection>", reference.Provenance?.DisplaySource);
+    }
+
+    [Fact]
     public void ExtractReferences_Should_Ignore_Hash_Only_Css_References()
     {
         var css = """
@@ -5128,6 +5205,33 @@ public class ExportEngineTests
             }
 
             if (path == "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class FormInteractionsRuntimeHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Text("""
+                    <html>
+                      <body>
+                        <form>
+                          <div data-rw-form-collection="Actions"></div>
+                        </form>
+                      </body>
+                    </html>
+                    """, "text/html");
+            }
+
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js")
             {
                 return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
             }

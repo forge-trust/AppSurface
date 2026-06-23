@@ -1,0 +1,125 @@
+@model RazorWireWebExample.Models.FormInteractionsSampleModel
+
+@{
+    ViewData["Title"] = "Form Interactions";
+}
+
+<div class="mb-10 text-center sm:text-left">
+    <h1 class="text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">Form Interactions</h1>
+    <p class="mt-4 max-w-3xl text-lg text-slate-600">Conditional fields and one-dimensional model-bound collections, with no page-local JavaScript.</p>
+</div>
+
+<form asp-controller="Reactivity"
+      asp-action="SubmitFormInteractions"
+      method="post"
+      rw-active="true"
+      class="card-premium p-6 space-y-6"
+      data-form-interactions-proof="no-page-local-js">
+    <div asp-validation-summary="All" class="text-sm font-medium text-rose-700"></div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.Result))
+    {
+        <p class="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">@Model.Result</p>
+    }
+
+    <label class="flex items-start gap-3 rounded-md border border-slate-200 p-4">
+        <input asp-for="ExpectedNoAction"
+               class="mt-1"
+               data-rw-form-toggle="draft-action"
+               data-rw-form-toggle-invert="true" />
+        <span>
+            <span class="block text-sm font-semibold text-slate-900">No follow-up action expected</span>
+            <span class="block text-sm text-slate-600">When checked, the draft action editor is hidden and its editable fields do not submit stale values.</span>
+        </span>
+    </label>
+
+    <section id="draft-action"
+             data-rw-form-toggle-target="draft-action"
+             data-rw-form-toggle-disable-when-hidden="true"
+             class="space-y-4">
+        <div class="flex items-center justify-between gap-4">
+            <h2 class="text-lg font-semibold text-slate-900">Draft actions</h2>
+            <span class="text-sm text-slate-500">Sparse .index model binding</span>
+        </div>
+
+        <div data-rw-form-collection="Actions"
+             data-rw-form-collection-label="action"
+             class="space-y-4">
+            @for (var i = 0; i < Model.Actions.Count; i++)
+            {
+                var action = Model.Actions[i];
+                var index = string.IsNullOrWhiteSpace(action.ClientIndex) ? i.ToString(System.Globalization.CultureInfo.InvariantCulture) : action.ClientIndex;
+                var titleId = $"Actions_{index}__Title";
+
+                <fieldset data-rw-form-collection-row
+                          data-rw-form-index="@index"
+                          class="rounded-md border border-slate-200 p-4 space-y-3">
+                    <input type="hidden" name="Actions.index" value="@index" />
+                    <input type="hidden" name="Actions[@index].ClientIndex" value="@index" />
+                    <input type="hidden" name="Actions[@index].Id" value="@action.Id" data-rw-form-collection-preserve />
+                    <input type="hidden" name="Actions[@index].Delete" value="@action.Delete.ToString().ToLowerInvariant()" data-rw-form-collection-delete-field />
+
+                    <div class="space-y-1">
+                        <label for="@titleId" class="block text-sm font-medium text-slate-800">Action title</label>
+                        <input id="@titleId"
+                               name="Actions[@index].Title"
+                               value="@action.Title"
+                               class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                        <span data-valmsg-for="Actions[@index].Title" class="text-sm text-rose-700"></span>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button"
+                                data-rw-form-collection-duplicate
+                                class="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">
+                            Duplicate
+                        </button>
+                        <button type="button"
+                                data-rw-form-collection-remove
+                                class="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">
+                            Remove draft
+                        </button>
+                        <button type="button"
+                                data-rw-form-collection-remove="mark"
+                                class="rounded-md border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700">
+                            Mark saved row for deletion
+                        </button>
+                    </div>
+                </fieldset>
+            }
+
+            <template data-rw-form-collection-template>
+                <fieldset data-rw-form-collection-row class="rounded-md border border-slate-200 p-4 space-y-3">
+                    <input type="hidden" name="Actions.index" value="__index__" />
+                    <input type="hidden" name="Actions[__index__].ClientIndex" value="__index__" />
+                    <input type="hidden" name="Actions[__index__].Id" value="" data-rw-form-collection-preserve />
+                    <input type="hidden" name="Actions[__index__].Delete" value="false" data-rw-form-collection-delete-field />
+
+                    <div class="space-y-1">
+                        <label for="Actions___index____Title" class="block text-sm font-medium text-slate-800">Action title</label>
+                        <input id="Actions___index____Title"
+                               name="Actions[__index__].Title"
+                               class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                        <span data-valmsg-for="Actions[__index__].Title" class="text-sm text-rose-700"></span>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" data-rw-form-collection-duplicate class="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">Duplicate</button>
+                        <button type="button" data-rw-form-collection-remove class="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">Remove draft</button>
+                    </div>
+                </fieldset>
+            </template>
+
+            <div class="flex items-center gap-3">
+                <button type="button"
+                        data-rw-form-collection-add
+                        class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">
+                    Add action
+                </button>
+                <span data-rw-form-collection-status aria-live="polite" class="text-sm text-slate-600"></span>
+            </div>
+        </div>
+    </section>
+
+    <button type="submit" class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Submit review</button>
+</form>

@@ -279,11 +279,11 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.4.md
     order: 100
-    use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, or islands without moving to a separate frontend app.
-    includes: RazorWire modules, TagHelpers, stream helpers, Razor fragment updates, and hybrid island support.
+    use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, islands, or local declarative form interactions without moving to a separate frontend app.
+    includes: RazorWire modules, TagHelpers, stream helpers, Razor fragment updates, hybrid island support, failed-form UX, page navigation, section copy, and stable form interactions for conditional targets and one-dimensional model-bound collections.
     does_not_include: OpenAPI generation, API reference UI, or Tailwind asset compilation.
     start_here_path: Web/ForgeTrust.RazorWire/README.md
-    recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, and server-rendered islands.
+    recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, server-rendered islands, and local declarative form interactions.
     depends_on:
       - ForgeTrust.AppSurface.Intelligence
       - ForgeTrust.AppSurface.Web
