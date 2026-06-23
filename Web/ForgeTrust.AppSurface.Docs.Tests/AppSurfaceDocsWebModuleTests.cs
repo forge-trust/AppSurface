@@ -619,6 +619,70 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
+    public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerInstanceIsRegisteredBeforeDocs_AllowsVisibleHarvestChannel()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireStreamAuthorizer>(new AllowAllStreamAuthorizer());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.True((await streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed);
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerFactoryIsRegisteredBeforeDocs_DelegatesToFactoryResult()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireStreamAuthorizer>(_ => new ForbiddenStreamAuthorizer());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        var result = await streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll));
+
+        Assert.Equal(AppSurfaceAuthOutcome.Forbid, result.Outcome);
+    }
+
+    [Fact]
     public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerIsRegisteredBeforeDocs_DoesNotResolveLegacyBoolAuthorizer()
     {
         var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
@@ -2261,6 +2325,14 @@ public class AppSurfaceDocsWebModuleTests
         public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
         {
             return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Allowed());
+        }
+    }
+
+    private sealed class ForbiddenStreamAuthorizer : IRazorWireStreamAuthorizer
+    {
+        public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Forbidden());
         }
     }
 

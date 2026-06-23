@@ -8,7 +8,7 @@ public sealed class RazorWireDependencyBoundaryTests
     public void RazorWireProjectReferencesNeutralAuthButNotAspNetCoreAuth()
     {
         var projectPath = Path.GetFullPath(
-            Path.Combine(
+            Path.Join(
                 AppContext.BaseDirectory,
                 "../../../../ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj"));
         var document = XDocument.Load(projectPath);
