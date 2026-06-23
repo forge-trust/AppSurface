@@ -107,31 +107,50 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
     /// Suppresses the terminal browser visit for the active run, or for the next run if the coordinator has scheduled
     /// work before the run has published its identifier.
     /// </summary>
-    internal void SuppressCompletionVisitForCurrentOrNextRun()
+    /// <returns>
+    /// The run identifier that was suppressed, or <see langword="null"/> when suppression was deferred to the next run.
+    /// </returns>
+    /// <remarks>
+    /// A run can be terminal in the snapshot while its asynchronous completion publish is still in progress. Completed
+    /// snapshots are therefore still eligible for suppression so a queued rebuild cannot race with a stale terminal visit.
+    /// </remarks>
+    internal string? SuppressCompletionVisitForCurrentOrNextRun()
     {
         lock (_gate)
         {
-            if (_snapshot.State == AppSurfaceDocsHarvestRunState.Running
+            if ((_snapshot.State == AppSurfaceDocsHarvestRunState.Running
+                    || _snapshot.State == AppSurfaceDocsHarvestRunState.Completed)
                 && !string.IsNullOrWhiteSpace(_snapshot.RunId))
             {
                 _completionVisitSuppressedRunIds.Add(_snapshot.RunId);
-                return;
+                return _snapshot.RunId;
             }
 
             _suppressNextCompletionVisit = true;
+            return null;
         }
     }
 
     /// <summary>
     /// Records that a trusted rebuild is queued behind the active run.
     /// </summary>
+    /// <param name="supersededRunId">
+    /// The active run identifier returned by <see cref="SuppressCompletionVisitForCurrentOrNextRun"/>, or
+    /// <see langword="null"/> when the suppression applies to the next unpublished run.
+    /// </param>
     /// <returns>A task that completes after any snapshot publication attempt.</returns>
-    internal async ValueTask RebuildQueuedAsync()
+    /// <remarks>
+    /// When a run identifier is supplied, the queued-state update is ignored if a newer run has already replaced the
+    /// superseded snapshot. This keeps delayed queued notifications from decorating a fresh rebuild run.
+    /// </remarks>
+    internal async ValueTask RebuildQueuedAsync(string? supersededRunId)
     {
         AppSurfaceDocsHarvestProgressSnapshot snapshot;
         lock (_gate)
         {
-            if (_snapshot.State != AppSurfaceDocsHarvestRunState.Running)
+            if (_snapshot.State != AppSurfaceDocsHarvestRunState.Running
+                || (!string.IsNullOrWhiteSpace(supersededRunId)
+                    && !string.Equals(_snapshot.RunId, supersededRunId, StringComparison.Ordinal)))
             {
                 return;
             }
@@ -267,10 +286,8 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                 Activity = AddActivity(_snapshot.Activity, $"Harvest completed with {health.TotalDocs.ToString(CultureInfo.InvariantCulture)} docs.")
             };
             _snapshot = snapshot;
-            var suppressCompletionVisit = _completionVisitSuppressedRunIds.Remove(runId);
             publishCompletionVisit = previousState != AppSurfaceDocsHarvestRunState.Completed
-                                     && snapshot.State == AppSurfaceDocsHarvestRunState.Completed
-                                     && !suppressCompletionVisit;
+                                     && snapshot.State == AppSurfaceDocsHarvestRunState.Completed;
         }
 
         await PublishAsync(snapshot, publishCompletionVisit);
@@ -331,7 +348,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                 message,
                 new RazorWireStreamPublishOptions { Replay = true });
 
-            if (publishCompletionVisit)
+            if (publishCompletionVisit && ShouldPublishCompletionVisit(snapshot.RunId))
             {
                 var visitMessage = new RazorWireStreamBuilder()
                     .Visit(CurrentPageVisitUrl, RazorWireVisitAction.Replace)
@@ -345,6 +362,21 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         catch (Exception ex) when (!IsFatalException(ex))
         {
             _logger.LogWarning(ex, "AppSurface Docs harvest progress publish failed.");
+        }
+    }
+
+    private bool ShouldPublishCompletionVisit(string? runId)
+    {
+        if (string.IsNullOrWhiteSpace(runId))
+        {
+            return false;
+        }
+
+        lock (_gate)
+        {
+            return string.Equals(_snapshot.RunId, runId, StringComparison.Ordinal)
+                   && _snapshot.State == AppSurfaceDocsHarvestRunState.Completed
+                   && !_completionVisitSuppressedRunIds.Remove(runId);
         }
     }
 

@@ -163,6 +163,69 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     }
 
     [Fact]
+    public async Task ProgressReporter_ShouldSuppressCompletionVisit_WhenQueuedDuringTerminalPublish()
+    {
+        var hub = new BlockingCompletionRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        var complete = reporter.CompleteRunAsync(runId, CreateHealth()).AsTask();
+        await hub.CompletionPublishStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        reporter.SuppressCompletionVisitForCurrentOrNextRun();
+        hub.ReleaseCompletionPublish.TrySetResult();
+        await complete.WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Contains(
+            hub.Published,
+            item => item.Message.Contains("data-appsurface-docs-harvest-complete=\"true\"", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            hub.Published,
+            item => item.Message.Contains("action=\"rw-visit\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldIgnoreQueuedStatus_WhenSupersededRunIsStale()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var supersededRunId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        var currentRunId = await reporter.BeginRunAsync([nameof(CSharpDocHarvester)]);
+        await reporter.RebuildQueuedAsync(supersededRunId);
+
+        Assert.Equal(currentRunId, reporter.CurrentSnapshot.RunId);
+        Assert.Equal("Harvesting", reporter.CurrentSnapshot.Status);
+        Assert.DoesNotContain(
+            reporter.CurrentSnapshot.Activity,
+            item => item.Message.Contains("rebuild is queued", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldRecordQueuedStatus_WhenSupersededRunIsCurrent()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.RebuildQueuedAsync(runId);
+
+        Assert.Equal("Harvesting (rebuild queued)", reporter.CurrentSnapshot.Status);
+        Assert.Contains(
+            reporter.CurrentSnapshot.Activity,
+            item => item.Message.Contains("rebuild is queued", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ProgressReporter_ShouldReplayFailedTerminalStateWithoutVisit()
     {
         var hub = new InMemoryRazorWireStreamHub();
@@ -225,6 +288,41 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         public ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
         {
             Published.Add(new PublishedMessage(channel, message, options));
+            return ValueTask.CompletedTask;
+        }
+
+        public ChannelReader<string> Subscribe(string channel)
+        {
+            return Channel.CreateUnbounded<string>().Reader;
+        }
+
+        public void Unsubscribe(string channel, ChannelReader<string> reader)
+        {
+        }
+    }
+
+    private sealed class BlockingCompletionRazorWireStreamHub : IRazorWireStreamHub
+    {
+        public List<PublishedMessage> Published { get; } = [];
+
+        public TaskCompletionSource CompletionPublishStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ReleaseCompletionPublish { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask PublishAsync(string channel, string message)
+        {
+            return PublishAsync(channel, message, options: null);
+        }
+
+        public ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
+        {
+            Published.Add(new PublishedMessage(channel, message, options));
+            if (message.Contains("data-appsurface-docs-harvest-complete=\"true\"", StringComparison.Ordinal))
+            {
+                CompletionPublishStarted.TrySetResult();
+                return new ValueTask(ReleaseCompletionPublish.Task);
+            }
+
             return ValueTask.CompletedTask;
         }
 

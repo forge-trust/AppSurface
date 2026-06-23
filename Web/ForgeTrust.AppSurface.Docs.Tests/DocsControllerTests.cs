@@ -5004,6 +5004,35 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenOperatorWritePolicyFailsEvenIfLegacyPolicyAllows()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorWritePolicy = "DocsWrite",
+                SearchIndexRefreshPolicy = "LegacyRefresh"
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+        using var requestServices = CreateOperatorAndLegacyAuthorizationServices();
+        controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+        {
+            RequestServices = requestServices,
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+                authenticationType: "test-auth"))
+        });
+
+        var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
+
+        Assert.False(result.IsAllowed);
+        Assert.Equal(SearchIndexRefreshAuthorizationFailure.AuthorizationFailed, result.Reason);
+    }
+
+    [Fact]
     public async Task RefreshSearchIndex_ShouldReturnForbidden_WhenAuthorizationFails()
     {
         var options = new AppSurfaceDocsOptions();
@@ -5806,6 +5835,21 @@ public class DocsControllerTests : IDisposable
         return services.BuildServiceProvider();
     }
 
+    private static ServiceProvider CreateOperatorAndLegacyAuthorizationServices()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddControllersWithViews();
+        services.AddAuthorization(
+            options =>
+            {
+                options.AddPolicy("DocsWrite", policy => policy.RequireClaim("scope", "docs.write"));
+                options.AddPolicy("LegacyRefresh", policy => policy.RequireAuthenticatedUser());
+            });
+
+        return services.BuildServiceProvider();
+    }
+
     private (DocsController Controller, IMemoryCache Cache, Memo Memo) CreateController(
         AppSurfaceDocsOptions options,
         IDocHarvester harvester)
@@ -6001,7 +6045,7 @@ public class DocsControllerTests : IDisposable
         controller.ControllerContext.HttpContext.Request.Path = requestPath;
         controller.Url = new UrlHelper(controller.ControllerContext);
 
-        return new PendingHarvestController(controller, release, initialHarvest, cache, memo, requestServices);
+        return new PendingHarvestController(controller, release, initialHarvest, coordinator, cache, memo, requestServices);
     }
 
     private static void AssertHarvestingView(
@@ -6110,6 +6154,7 @@ public class DocsControllerTests : IDisposable
     {
         private readonly TaskCompletionSource<IReadOnlyList<DocNode>> _release;
         private readonly Task<DocHarvestHealthSnapshot> _initialHarvest;
+        private readonly AppSurfaceDocsHarvestCoordinator _coordinator;
         private readonly IMemoryCache _cache;
         private readonly Memo _memo;
         private readonly ServiceProvider _requestServices;
@@ -6118,6 +6163,7 @@ public class DocsControllerTests : IDisposable
             DocsController controller,
             TaskCompletionSource<IReadOnlyList<DocNode>> release,
             Task<DocHarvestHealthSnapshot> initialHarvest,
+            AppSurfaceDocsHarvestCoordinator coordinator,
             IMemoryCache cache,
             Memo memo,
             ServiceProvider requestServices)
@@ -6125,6 +6171,7 @@ public class DocsControllerTests : IDisposable
             Controller = controller;
             _release = release;
             _initialHarvest = initialHarvest;
+            _coordinator = coordinator;
             _cache = cache;
             _memo = memo;
             _requestServices = requestServices;
@@ -6136,6 +6183,11 @@ public class DocsControllerTests : IDisposable
         {
             _release.TrySetResult([]);
             await _initialHarvest.WaitAsync(TimeSpan.FromSeconds(3));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            while (_coordinator.HasActiveOrQueuedHarvest)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(10), timeout.Token);
+            }
         }
 
         public async ValueTask DisposeAsync()

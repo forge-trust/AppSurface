@@ -1126,6 +1126,19 @@ public class DocsController : Controller
         return PathBaseAware(_docsUrlBuilder.BuildHomeUrl());
     }
 
+    /// <summary>
+    /// Builds a path-base-aware harvest observatory URL that carries the verified docs return URL and rebuild result.
+    /// </summary>
+    /// <param name="returnUrl">The app-relative docs URL to revisit after the active or queued harvest completes.</param>
+    /// <param name="rebuild">The trusted rebuild request result to expose in the observatory status copy.</param>
+    /// <returns>
+    /// A local harvest URL containing URL-encoded <c>returnUrl</c> and <c>rebuild</c> query-string values.
+    /// </returns>
+    /// <remarks>
+    /// Callers should pass only return URLs produced by <see cref="ResolveHarvestReturnUrl(string?)"/> or the current
+    /// docs request. This helper only encodes the value for transport; it does not re-run the docs-root containment
+    /// policy. Unknown rebuild enum values serialize as an empty marker and are ignored by the observatory parser.
+    /// </remarks>
     private string BuildHarvestUrlWithReturnUrl(
         string returnUrl,
         AppSurfaceDocsHarvestRebuildRequestResult rebuild)
@@ -1139,6 +1152,19 @@ public class DocsController : Controller
             GetHarvestRebuildRequestResultQueryValue(rebuild));
     }
 
+    /// <summary>
+    /// Resolves request-provided harvest navigation back to a safe docs URL.
+    /// </summary>
+    /// <param name="returnUrl">The candidate app-relative return URL from the query string or rebuild form.</param>
+    /// <returns>
+    /// <paramref name="returnUrl"/> when it stays under the current docs root and avoids harvest routes; otherwise the
+    /// path-base-aware docs home URL.
+    /// </returns>
+    /// <remarks>
+    /// This is the docs-specific return URL policy for the harvest loop. It intentionally rejects same-origin paths
+    /// outside the docs surface, raw or encoded traversal, and <c>_harvest</c> loops so a terminal progress update cannot
+    /// navigate an operator away from the docs context being verified.
+    /// </remarks>
     private string ResolveHarvestReturnUrl(string? returnUrl)
     {
         if (IsSafeDocsHarvestReturnUrl(
@@ -1152,6 +1178,19 @@ public class DocsController : Controller
         return PathBaseAware(_docsUrlBuilder.BuildHomeUrl());
     }
 
+    /// <summary>
+    /// Resolves the authorization policy used for trusted docs write operations.
+    /// </summary>
+    /// <returns>
+    /// The configured docs operator-write policy when present, otherwise the legacy search-index refresh policy, or
+    /// <see langword="null"/> when neither policy is configured.
+    /// </returns>
+    /// <remarks>
+    /// <see cref="AppSurfaceDocsDiagnosticsOptions.OperatorWritePolicy"/> is preferred so hosts can give rebuild actions
+    /// a neutral docs-operator policy name. The fallback to
+    /// <see cref="AppSurfaceDocsDiagnosticsOptions.SearchIndexRefreshPolicy"/> preserves compatibility for applications
+    /// that already opted into the older refresh endpoint.
+    /// </remarks>
     private string? ResolveDocsOperatorWritePolicyName()
     {
         return string.IsNullOrWhiteSpace(_options.Diagnostics?.OperatorWritePolicy)
@@ -1159,6 +1198,15 @@ public class DocsController : Controller
             : _options.Diagnostics.OperatorWritePolicy;
     }
 
+    /// <summary>
+    /// Converts an authorization failure reason into the compact health-page rebuild status.
+    /// </summary>
+    /// <param name="failure">The failure reason returned by the shared operator authorization helper.</param>
+    /// <returns><c>Unauthorized</c> for user/auth policy denials; otherwise <c>Unavailable</c>.</returns>
+    /// <remarks>
+    /// Missing policies and missing services are shown as unavailable rather than unauthorized so operators can
+    /// distinguish host configuration problems from account permission problems.
+    /// </remarks>
     private static string GetRebuildAuthorizationStatus(SearchIndexRefreshAuthorizationFailure? failure)
     {
         return failure is SearchIndexRefreshAuthorizationFailure.Unauthenticated
@@ -1167,6 +1215,15 @@ public class DocsController : Controller
             : "Unavailable";
     }
 
+    /// <summary>
+    /// Builds the visible health-page explanation for a disabled rebuild action.
+    /// </summary>
+    /// <param name="failure">The failure reason returned by the shared operator authorization helper.</param>
+    /// <returns>A short operator-facing explanation for why the rebuild form is disabled.</returns>
+    /// <remarks>
+    /// The text avoids exposing policy internals while still separating sign-in, authorization, missing-policy, and
+    /// unavailable-service cases for production troubleshooting.
+    /// </remarks>
     private static string GetRebuildAuthorizationDescription(SearchIndexRefreshAuthorizationFailure? failure)
     {
         return failure switch
@@ -1198,6 +1255,17 @@ public class DocsController : Controller
         };
     }
 
+    /// <summary>
+    /// Parses the stable query-string marker used by the harvest observatory rebuild status.
+    /// </summary>
+    /// <param name="value">The raw <c>rebuild</c> query-string value.</param>
+    /// <returns>
+    /// The matching rebuild request result, or <see langword="null"/> for missing, blank, or unknown markers.
+    /// </returns>
+    /// <remarks>
+    /// Unknown values are ignored instead of displayed so stale links and hand-written URLs do not create misleading
+    /// operator status copy.
+    /// </remarks>
     private static AppSurfaceDocsHarvestRebuildRequestResult? ParseHarvestRebuildRequestResult(string? value)
     {
         return value switch
@@ -1368,6 +1436,17 @@ public class DocsController : Controller
         return true;
     }
 
+    /// <summary>
+    /// Normalizes a local return URL path into the shape used by docs containment checks.
+    /// </summary>
+    /// <param name="path">A candidate path, path base, or docs root value.</param>
+    /// <returns>
+    /// A leading-slash path with trailing slashes removed, or an empty string for blank input.
+    /// </returns>
+    /// <remarks>
+    /// The helper only trims and applies slash shape. It does not decode, collapse dot segments, or decide whether a path
+    /// is safe; callers must validate encoded input and traversal before using the normalized value for redirects.
+    /// </remarks>
     private static string NormalizeReturnUrlPath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -1416,6 +1495,19 @@ public class DocsController : Controller
         };
     }
 
+    /// <summary>
+    /// Determines whether a normalized candidate path is at or below a normalized root path.
+    /// </summary>
+    /// <param name="candidatePath">The normalized candidate path to evaluate.</param>
+    /// <param name="rootPath">The normalized root path that bounds the allowed surface.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="candidatePath"/> equals <paramref name="rootPath"/> or is a child path;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// The root path <c>/</c> accepts any absolute app path. Non-root comparisons are ordinal-ignore-case to match the
+    /// existing docs route policy. Callers must pass already-normalized, decoded, traversal-free paths.
+    /// </remarks>
     private static bool IsUnderPath(string candidatePath, string rootPath)
     {
         if (string.Equals(rootPath, "/", StringComparison.Ordinal))

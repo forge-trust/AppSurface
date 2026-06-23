@@ -96,6 +96,7 @@ public sealed class AppSurfaceDocsHarvestCoordinator
         cancellationToken.ThrowIfCancellationRequested();
 
         AppSurfaceDocsHarvestRebuildRequestResult result;
+        string? supersededRunId = null;
         lock (_gate)
         {
             if (_activeHarvest is null || _activeHarvest.IsCompleted)
@@ -113,7 +114,7 @@ public sealed class AppSurfaceDocsHarvestCoordinator
             else
             {
                 _pendingRebuild = true;
-                _progress.SuppressCompletionVisitForCurrentOrNextRun();
+                supersededRunId = _progress.SuppressCompletionVisitForCurrentOrNextRun();
                 _ = RunQueuedRebuildAfterAsync(_activeHarvest);
                 result = AppSurfaceDocsHarvestRebuildRequestResult.Queued;
             }
@@ -121,7 +122,7 @@ public sealed class AppSurfaceDocsHarvestCoordinator
 
         if (result == AppSurfaceDocsHarvestRebuildRequestResult.Queued)
         {
-            await _progress.RebuildQueuedAsync();
+            await _progress.RebuildQueuedAsync(supersededRunId);
         }
 
         return result;
@@ -209,6 +210,11 @@ public sealed class AppSurfaceDocsHarvestCoordinator
 /// <summary>
 /// Result of a trusted operator request to rebuild the live AppSurface Docs harvest.
 /// </summary>
+/// <remarks>
+/// The default enum value, <c>0</c>, is not a valid rebuild request result. Callers that bind, deserialize, or display
+/// unknown values should treat them as "no request result." While a harvest is active, rebuild requests are coalesced so
+/// at most one superseding rebuild is queued behind the active run.
+/// </remarks>
 public enum AppSurfaceDocsHarvestRebuildRequestResult
 {
     /// <summary>
@@ -219,10 +225,12 @@ public enum AppSurfaceDocsHarvestRebuildRequestResult
     /// <summary>
     /// A rebuild was queued to start after the current harvest finishes.
     /// </summary>
+    /// <remarks>Additional operator requests made while this rebuild is pending coalesce into the same queued run.</remarks>
     Queued = 2,
 
     /// <summary>
     /// A rebuild was already queued, so no additional work was scheduled.
     /// </summary>
+    /// <remarks>The pending queued rebuild already represents all superseding operator requests.</remarks>
     AlreadyQueued = 3
 }
