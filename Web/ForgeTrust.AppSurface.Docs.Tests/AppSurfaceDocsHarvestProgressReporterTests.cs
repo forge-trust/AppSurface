@@ -157,6 +157,9 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
         await reporter.CompleteRunAsync(runId, CreateHealth());
 
+        Assert.Contains(
+            hub.Published,
+            item => item.Message.Contains("data-appsurface-docs-harvest-complete=\"true\"", StringComparison.Ordinal));
         Assert.DoesNotContain(
             hub.Published,
             item => item.Message.Contains("action=\"rw-visit\"", StringComparison.Ordinal));

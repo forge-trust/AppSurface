@@ -1760,7 +1760,8 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("Live progress is disabled", html);
         Assert.Contains("<noscript>", html);
         Assert.Contains("href=\"/docs/search?q=api\"", html);
-        Assert.DoesNotContain("<rw:stream-source", html);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        Assert.Null(document.QuerySelector("rw-stream-source"));
     }
 
     [Theory]

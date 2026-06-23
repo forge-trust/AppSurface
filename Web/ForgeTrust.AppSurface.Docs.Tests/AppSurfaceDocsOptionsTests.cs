@@ -56,6 +56,9 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(1, (int)DocHarvestDiagnosticSeverity.Warning);
         Assert.Equal(2, (int)DocHarvestDiagnosticSeverity.Error);
         Assert.Equal(3, (int)DocHarvestDiagnosticSeverity.Critical);
+        Assert.Equal(1, (int)AppSurfaceDocsHarvestRebuildRequestResult.Started);
+        Assert.Equal(2, (int)AppSurfaceDocsHarvestRebuildRequestResult.Queued);
+        Assert.Equal(3, (int)AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued);
     }
 
     [Fact]

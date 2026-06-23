@@ -1162,8 +1162,9 @@ public class DocsController : Controller
     /// </returns>
     /// <remarks>
     /// This is the docs-specific return URL policy for the harvest loop. It intentionally rejects same-origin paths
-    /// outside the docs surface, raw or encoded traversal, and <c>_harvest</c> loops so a terminal progress update cannot
-    /// navigate an operator away from the docs context being verified.
+    /// outside the active <see cref="HttpRequest.PathBase"/> and docs surface, raw or encoded traversal, and
+    /// <c>_harvest</c> loops so a terminal progress update cannot navigate an operator away from the docs context being
+    /// verified.
     /// </remarks>
     private string ResolveHarvestReturnUrl(string? returnUrl)
     {
@@ -1303,10 +1304,14 @@ public class DocsController : Controller
         }
 
         var normalizedPathBase = NormalizeReturnUrlPath(pathBase);
-        if (!string.IsNullOrWhiteSpace(normalizedPathBase)
-            && (string.Equals(candidate, normalizedPathBase, StringComparison.OrdinalIgnoreCase)
-                || candidate.StartsWith(normalizedPathBase + "/", StringComparison.OrdinalIgnoreCase)))
+        if (!string.IsNullOrWhiteSpace(normalizedPathBase))
         {
+            if (!string.Equals(candidate, normalizedPathBase, StringComparison.OrdinalIgnoreCase)
+                && !candidate.StartsWith(normalizedPathBase + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
             candidate = candidate.Length == normalizedPathBase.Length
                 ? "/"
                 : candidate[normalizedPathBase.Length..];

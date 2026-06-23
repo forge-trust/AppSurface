@@ -343,9 +343,16 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
         Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
         await WaitUntilAsync(() => harvester.CallCount == 1);
 
+        using var gate = new ManualResetEventSlim(false);
         var requests = Enumerable.Range(0, 20)
-            .Select(_ => coordinator.RequestRebuildAsync(CancellationToken.None).AsTask())
+            .Select(_ => Task.Run(
+                async () =>
+                {
+                    gate.Wait();
+                    return await coordinator.RequestRebuildAsync(CancellationToken.None);
+                }))
             .ToArray();
+        gate.Set();
         var results = await Task.WhenAll(requests);
 
         Assert.Equal(1, results.Count(result => result == AppSurfaceDocsHarvestRebuildRequestResult.Queued));

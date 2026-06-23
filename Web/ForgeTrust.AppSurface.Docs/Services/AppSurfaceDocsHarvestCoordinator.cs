@@ -213,7 +213,8 @@ public sealed class AppSurfaceDocsHarvestCoordinator
 /// <remarks>
 /// The default enum value, <c>0</c>, is not a valid rebuild request result. Callers that bind, deserialize, or display
 /// unknown values should treat them as "no request result." While a harvest is active, rebuild requests are coalesced so
-/// at most one superseding rebuild is queued behind the active run.
+/// at most one superseding rebuild is queued behind the active run. The numeric member values are part of the public
+/// compatibility contract and must not be reordered or renumbered.
 /// </remarks>
 public enum AppSurfaceDocsHarvestRebuildRequestResult
 {

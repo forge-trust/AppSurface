@@ -45,6 +45,7 @@ public sealed class DocsControllerHarvestReturnUrlTests
     [Theory]
     [InlineData("/admin", null, "/docs")]
     [InlineData("/base/admin", "/base", "/docs")]
+    [InlineData("/docs/search", "/base", "/docs")]
     [InlineData("/docs/../admin", null, "/docs")]
     [InlineData("/docs/section/../../admin", null, "/docs")]
     [InlineData("/docs/%2e%2e/admin", null, "/docs")]
