@@ -523,6 +523,76 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostChannelAuthorizerIsKeyed_DoesNotUseItAsUnkeyedInnerAuthorizer()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddKeyedSingleton<IRazorWireChannelAuthorizer>("host", new AllowAllChannelAuthorizer());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.False(await authorizer.CanSubscribeAsync(context, AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+        Assert.False(await authorizer.CanSubscribeAsync(context, "host-channel"));
+        Assert.IsType<AllowAllChannelAuthorizer>(
+            serviceProvider.GetRequiredKeyedService<IRazorWireChannelAuthorizer>("host"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostStreamAuthorizerIsKeyed_DoesNotUseItAsUnkeyedInnerAuthorizer()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddKeyedSingleton<IRazorWireStreamAuthorizer>("host", new AllowAllStreamAuthorizer());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.Equal(
+            AppSurfaceAuthOutcome.Forbid,
+            (await authorizer.AuthorizeAsync(new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll))).Outcome);
+        Assert.Equal(
+            AppSurfaceAuthOutcome.Forbid,
+            (await authorizer.AuthorizeAsync(new RazorWireStreamAuthorizationContext(
+                context,
+                "host-channel",
+                RazorWireStreamAuthorizationMode.DenyAll))).Outcome);
+        Assert.IsType<AllowAllStreamAuthorizer>(
+            serviceProvider.GetRequiredKeyedService<IRazorWireStreamAuthorizer>("host"));
+    }
+
+    [Fact]
     public async Task AddAppSurfaceDocs_WhenCustomAuthorizerIsRegisteredBeforeDocs_AllowsVisibleHarvestChannel()
     {
         var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };

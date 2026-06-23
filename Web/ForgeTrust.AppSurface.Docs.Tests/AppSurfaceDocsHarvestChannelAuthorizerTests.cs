@@ -12,6 +12,37 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
 {
     [Fact]
+    public void Constructor_WhenOptionsIsNull_Throws()
+    {
+        var exception = Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceDocsHarvestStreamAuthorizer(
+                null!,
+                new TestHostEnvironment()));
+
+        Assert.Equal("options", exception.ParamName);
+    }
+
+    [Fact]
+    public void Constructor_WhenEnvironmentIsNull_Throws()
+    {
+        var exception = Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceDocsHarvestStreamAuthorizer(
+                Options(AppSurfaceDocsHarvestHealthExposure.Always),
+                null!));
+
+        Assert.Equal("environment", exception.ParamName);
+    }
+
+    [Fact]
+    public void Constructor_WhenStreamAuthorizerIsNull_Throws()
+    {
+        var exception = Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceDocsHarvestChannelAuthorizer(null!));
+
+        Assert.Equal("streamAuthorizer", exception.ParamName);
+    }
+
+    [Fact]
     public async Task CanSubscribeAsync_WhenChannelIsNotHarvestProgress_DelegatesToInnerAuthorizer()
     {
         var allowedAuthorizer = new AppSurfaceDocsHarvestChannelAuthorizer(
