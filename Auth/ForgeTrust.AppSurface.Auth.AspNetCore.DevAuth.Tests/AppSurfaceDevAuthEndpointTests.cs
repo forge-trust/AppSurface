@@ -132,6 +132,52 @@ public sealed class AppSurfaceDevAuthEndpointTests
     }
 
     [Fact]
+    public void Marker_WithCustomReturnUrlAndHiddenControls_RendersStateOnly()
+    {
+        using var app = BuildApp();
+        var context = CreateContext(app.Services);
+
+        var html = AppSurfaceDevAuthMarker.Render(
+            context,
+            app.Services.GetRequiredService<IHostEnvironment>(),
+            app.Services.GetRequiredService<IOptions<AppSurfaceDevAuthOptions>>(),
+            app.Services.GetRequiredService<IDataProtectionProvider>(),
+            options =>
+            {
+                options.ReturnUrl = "/custom-proof?tab=auth";
+                options.ShowPersonaControls = false;
+            });
+
+        Assert.Contains("DEV AUTH", html, StringComparison.Ordinal);
+        Assert.Contains("Open persona lab", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("returnUrl=", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("Select DevAuth persona", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Marker_WithUnsafeCssClassOptions_FallsBackAndSanitizesAdditionalClasses()
+    {
+        using var app = BuildApp();
+        var context = CreateContext(app.Services);
+
+        var html = AppSurfaceDevAuthMarker.Render(
+            context,
+            app.Services.GetRequiredService<IHostEnvironment>(),
+            app.Services.GetRequiredService<IOptions<AppSurfaceDevAuthOptions>>(),
+            app.Services.GetRequiredService<IDataProtectionProvider>(),
+            options =>
+            {
+                options.CssClassPrefix = "<>";
+                options.AdditionalCssClass = "safe <bad> _ok";
+                options.IncludeDefaultStyles = false;
+            });
+
+        Assert.Contains("class=\"appsurface-dev-auth-marker safe bad _ok\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("<bad>", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("<style>", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SelectPersona_UsesPostOnlyEndpointAndProtectedCookieAuthenticatesNamedScheme()
     {
         await using var app = BuildApp();
@@ -430,6 +476,25 @@ public sealed class AppSurfaceDevAuthEndpointTests
     }
 
     [Fact]
+    public async Task ControlEndpoints_WhenLoopbackRequirementDisabled_AllowsNonLoopbackRequests()
+    {
+        await using var app = BuildApp(options =>
+        {
+            options.RequireLoopbackControlRequests = false;
+            AddDefaultPersonas(options);
+        });
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/status", HttpMethods.Get);
+        var context = CreateContext(app.Services);
+        context.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.10");
+
+        await endpoint.RequestDelegate!(context);
+
+        var body = await ReadBodyAsync(context);
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Contains("\"enabled\":true", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ControlAndStatus_RedactSensitiveDisplayNameAndSubject()
     {
         await using var app = BuildApp(options =>
@@ -484,6 +549,56 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.DoesNotContain("admin@example.com", statusJson, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-token", statusJson, StringComparison.Ordinal);
         Assert.Contains("\"personaId\":\"sensitive\"", statusJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ControlPage_WithOnlyHiddenClaims_RendersHiddenCountWithoutClaimList()
+    {
+        await using var app = BuildApp(options =>
+        {
+            options.Users.Add(
+                "hidden",
+                user => user
+                    .DisplayName("Hidden Local")
+                    .Subject("secret-token")
+                    .Claim("email", "hidden@example.com"));
+        });
+        var selectEndpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var selectContext = CreateContext(app.Services);
+        selectContext.Request.RouteValues["personaId"] = "hidden";
+
+        await selectEndpoint.RequestDelegate!(selectContext);
+
+        var html = await ReadBodyAsync(selectContext);
+        Assert.Contains("claim(s) hidden from preview", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("<dl>", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("hidden@example.com", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ControlPage_WithOnlyDisplaySafeClaims_DoesNotRenderHiddenCount()
+    {
+        await using var app = BuildApp(options =>
+        {
+            options.Users.Add(
+                "safe",
+                user => user
+                    .DisplayName("Safe Local")
+                    .Subject("safe-1")
+                    .Claim("role", "operator"));
+        });
+        var selectEndpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var selectContext = CreateContext(app.Services);
+        selectContext.Request.RouteValues["personaId"] = "safe";
+
+        await selectEndpoint.RequestDelegate!(selectContext);
+
+        var html = await ReadBodyAsync(selectContext);
+        Assert.Contains("<dl>", html, StringComparison.Ordinal);
+        Assert.Contains("safe-1", html, StringComparison.Ordinal);
+        Assert.Contains("operator", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("claim(s) hidden from preview", html, StringComparison.Ordinal);
     }
 
     [Fact]
