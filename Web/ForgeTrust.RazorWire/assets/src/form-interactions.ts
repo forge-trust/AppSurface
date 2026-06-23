@@ -168,7 +168,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             const toggleButton = target.closest('button[data-rw-form-toggle]');
             if (toggleButton && this.form.contains(toggleButton)) {
                 event.preventDefault();
-                this.syncToggle(toggleButton as HTMLElement);
+                this.syncButtonToggle(toggleButton as HTMLElement);
                 return;
             }
 
@@ -203,7 +203,28 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             }
         }
 
-        private syncToggle(toggle: HTMLElement) {
+        private syncButtonToggle(toggle: HTMLElement) {
+            const key = (toggle.getAttribute('data-rw-form-toggle') ?? '').trim();
+            if (!key) {
+                this.syncToggle(toggle);
+                return;
+            }
+
+            const targets = this.findToggleTargets(key);
+            if (targets.length === 0) {
+                this.syncToggle(toggle);
+                return;
+            }
+
+            const currentExpanded = toggle.getAttribute('aria-expanded');
+            const visible = currentExpanded === null
+                ? targets.every(target => (target as HTMLElement).hidden)
+                : currentExpanded !== 'true';
+
+            this.syncToggle(toggle, visible);
+        }
+
+        private syncToggle(toggle: HTMLElement, visibleOverride: boolean | null = null) {
             const key = (toggle.getAttribute('data-rw-form-toggle') ?? '').trim();
             if (!key) {
                 this.manager.recordDiagnostic(
@@ -230,7 +251,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 return;
             }
 
-            const visible = this.resolveToggleVisible(toggle);
+            const visible = visibleOverride ?? this.resolveToggleVisible(toggle);
             const firstTarget = targets[0] as HTMLElement;
             const before = this.dispatchToggleEvent(toggle, firstTarget, 'razorwire:form-toggle:before-change', visible, true);
             if (before.defaultPrevented) return;
@@ -287,12 +308,12 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
         private resolveToggleVisible(toggle: HTMLElement) {
             const input = toggle as HTMLInputElement;
             let active: boolean;
-            if (input.type === 'checkbox' || input.type === 'radio') {
+            if (toggle.localName === 'input' && (input.type === 'checkbox' || input.type === 'radio')) {
                 active = input.checked;
-            } else if (toggle instanceof HTMLSelectElement || toggle instanceof HTMLTextAreaElement || toggle instanceof HTMLInputElement) {
-                active = (toggle.value ?? '').length > 0;
+            } else if (toggle.localName === 'select' || toggle.localName === 'textarea' || toggle.localName === 'input') {
+                active = ((toggle as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).value ?? '').length > 0;
             } else {
-                active = toggle.getAttribute('aria-expanded') !== 'true';
+                active = toggle.getAttribute('aria-expanded') !== 'false';
             }
 
             return toggle.getAttribute('data-rw-form-toggle-invert') === 'true' ? !active : active;
@@ -720,9 +741,9 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
         private markRowForRemoval(root: HTMLElement, row: HTMLElement) {
             const selector = root.getAttribute('data-rw-form-collection-delete-field') || '[data-rw-form-collection-delete-field]';
-            let field: HTMLInputElement | null = null;
+            let field: Element | null = null;
             try {
-                field = row.querySelector(selector) as HTMLInputElement | null;
+                field = row.querySelector(selector);
             } catch {
                 this.manager.recordDiagnostic(
                     `Collection "${this.collectionName(root)}" uses an invalid delete-field selector "${selector}".`,
@@ -731,7 +752,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 return false;
             }
 
-            if (!field) {
+            if (!(field instanceof HTMLInputElement) || field.localName !== 'input') {
                 this.manager.recordDiagnostic(
                     `Collection "${this.collectionName(root)}" mark-remove has no app-owned delete field.`,
                     'RazorWire cannot express persisted row deletion without guessing app persistence semantics.',
@@ -739,14 +760,15 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 return false;
             }
 
-            field.setAttribute('data-rw-form-collection-delete-field', 'true');
+            const deleteField = field as HTMLInputElement;
+            deleteField.setAttribute('data-rw-form-collection-delete-field', 'true');
             row.hidden = true;
             row.setAttribute('data-rw-form-collection-row-state', 'removed');
-            field.disabled = false;
-            field.value = field.getAttribute('data-rw-form-collection-delete-value') || 'true';
+            deleteField.disabled = false;
+            deleteField.value = deleteField.getAttribute('data-rw-form-collection-delete-value') || 'true';
 
             for (const control of this.getControls(row)) {
-                if (control === field || control.name.endsWith('.index') || control.hasAttribute('data-rw-form-collection-preserve')) {
+                if (control === deleteField || control.name.endsWith('.index') || control.hasAttribute('data-rw-form-collection-preserve')) {
                     control.disabled = false;
                 } else if (!control.disabled) {
                     control.disabled = true;

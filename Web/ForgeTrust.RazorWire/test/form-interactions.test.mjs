@@ -69,8 +69,6 @@ test('button form toggles sync on click without relying on change events', () =>
   assert.equal(title.disabled, true);
   assert.equal(toggle.getAttribute('aria-expanded'), 'false');
 
-  toggle.setAttribute('aria-expanded', 'true');
-  toggle.value = '';
   const event = createEvent('click');
   toggle.dispatchEvent(event);
 
@@ -235,6 +233,27 @@ test('mark-for-removal handles selector fields and invalid selectors safely', ()
     context.window.RazorWire.formInteractionsManager
       .getDiagnostics()
       .some(diagnostic => /invalid delete-field selector/.test(diagnostic.message)),
+    true);
+
+  const third = buildCollection(document);
+  third.root.setAttribute('data-rw-form-collection-remove-mode', 'mark');
+  third.root.setAttribute('data-rw-form-collection-delete-field', '[data-delete-wrapper]');
+  const wrapper = document.createElement('span');
+  wrapper.setAttribute('data-delete-wrapper', 'true');
+  third.row.appendChild(wrapper);
+  const form3 = document.createElement('form');
+  form3.appendChild(third.root);
+  document.body.appendChild(form3);
+
+  context.window.RazorWire.formInteractionsManager.scan();
+  context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+  third.remove.dispatchEvent(createEvent('click'));
+
+  assert.equal(third.row.hidden, false);
+  assert.equal(
+    context.window.RazorWire.formInteractionsManager
+      .getDiagnostics()
+      .some(diagnostic => /mark-remove has no app-owned delete field/.test(diagnostic.message)),
     true);
 });
 
