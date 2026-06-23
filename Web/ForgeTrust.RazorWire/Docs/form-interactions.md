@@ -133,7 +133,7 @@ Event detail includes the owning `form`, relevant `root`, command `control`, aff
 
 ## Diagnostics
 
-RazorWire exposes `window.RazorWire.formInteractionsManager.getDiagnostics()` and `clearDiagnostics()`. Diagnostics use `message`, `impact`, `fix`, and `docs`.
+RazorWire exposes `window.RazorWire.formInteractionsManager.scan()`, `prune()`, `getDiagnostics()`, and `clearDiagnostics()`. Call `scan()` after app-owned DOM updates add form-interaction markers, and call `prune()` after removing forms when you need to release disconnected controllers before the next automatic lifecycle scan. Diagnostics use `message`, `impact`, `fix`, and `docs`.
 
 Diagnostics report missing or cross-form toggle targets, missing or malformed collection templates, missing, invalid, duplicate, or mismatched `.index` markers, nested collections, non-button commands, missing mark-remove delete fields, and file inputs that cannot be cloned by browser APIs.
 

@@ -364,9 +364,9 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             const row = sourceRow.cloneNode(true) as HTMLElement;
             this.rewriteAttributes(row, sourceIndex, index);
             row.setAttribute('data-rw-form-index', index);
-            this.ensureIndexMarker(row, collection, index);
             this.copyRowValues(sourceRow, row);
             this.rewriteHiddenIndexValues(row, sourceIndex, index);
+            this.ensureIndexMarker(row, collection, index);
             this.clearValidationState(row);
 
             if (!this.dispatchCollectionEvent(root, command, row, 'razorwire:form-collection:before-duplicate', 'duplicate', index, true, sourceIndex)) {
@@ -617,6 +617,8 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 marker = document.createElement('input');
                 marker.type = 'hidden';
                 marker.name = markerName;
+                marker.setAttribute('type', 'hidden');
+                marker.setAttribute('name', markerName);
                 row.insertAdjacentElement('afterbegin', marker);
             }
 

@@ -153,6 +153,26 @@ test('collection duplicate aborts when the source sparse index cannot be resolve
     true);
 });
 
+test('collection duplicate copies controls before inserting a missing index marker', () => {
+  const { context, document } = loadRuntime();
+  const { root, duplicate } = buildCollection(document);
+  const sourceRow = root.querySelector('[data-rw-form-collection-row]');
+  sourceRow.querySelector('input[name="Actions.index"]').remove();
+  sourceRow.querySelector('input[name="Actions[0].ClientIndex"]').value = '0';
+  sourceRow.querySelector('input[name="Actions[0].Title"]').value = 'Call parent';
+  const form = document.createElement('form');
+  form.appendChild(root);
+  document.body.appendChild(form);
+
+  context.window.RazorWire.formInteractionsManager.scan();
+  duplicate.dispatchEvent(createEvent('click'));
+
+  const clone = root.querySelectorAll('[data-rw-form-collection-row]')[1];
+  assert.equal(clone.querySelector('input[name="Actions.index"]').value, '1');
+  assert.equal(clone.querySelector('input[name="Actions[1].ClientIndex"]').value, '1');
+  assert.equal(clone.querySelector('input[name="Actions[1].Title"]').value, 'Call parent');
+});
+
 test('collection remove supports physical and mark-for-removal lanes', () => {
   const { context, document } = loadRuntime();
   const { root, remove } = buildCollection(document);
