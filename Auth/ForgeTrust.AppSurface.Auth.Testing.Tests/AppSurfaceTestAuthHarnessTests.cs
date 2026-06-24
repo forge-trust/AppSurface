@@ -390,6 +390,17 @@ public sealed class AppSurfaceTestAuthHarnessTests
     }
 
     [Fact]
+    public void BlankPersonaName_FailsWithDiagnosticCode()
+    {
+        var options = new AppSurfaceTestAuthOptions();
+
+        var error = Assert.Throws<InvalidOperationException>(() => options.AddPersona(" ", "operator-1"));
+
+        Assert.Contains("persona name is blank", error.Message, StringComparison.Ordinal);
+        Assert.Contains(AppSurfaceTestAuthDiagnosticCodes.BlankPersonaName, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BlankSubjectClaimType_FailsDuringRegistration()
     {
         var services = new ServiceCollection();
@@ -579,6 +590,34 @@ public sealed class AppSurfaceTestAuthHarnessTests
 
         using var realFactory = new WebApplicationFactory<object>();
         Assert.ThrowsAny<ArgumentException>(() => realFactory.CreateAppSurfaceClient(" "));
+    }
+
+    [Fact]
+    public void PersonaRegistry_RequireReturnsRegisteredPersona()
+    {
+        var options = new AppSurfaceTestAuthOptions();
+        options.AddPersona("operator", "operator-1");
+        var registry = AppSurfaceTestPersonaRegistry.Create(options);
+
+        var persona = registry.Require("operator");
+
+        Assert.Equal("operator-1", persona.SubjectId);
+    }
+
+    [Fact]
+    public void PersonaRegistry_RequireUnknownPersonaThrowsDiagnostic()
+    {
+        var registry = AppSurfaceTestPersonaRegistry.Create(new AppSurfaceTestAuthOptions());
+
+        var error = Assert.Throws<InvalidOperationException>(() => registry.Require("missing"));
+
+        Assert.Contains(AppSurfaceTestAuthDiagnosticCodes.UnknownPersona, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InnerPolicyEvaluator_WithNullPolicyEvaluator_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceTestInnerPolicyEvaluator(null!));
     }
 
     [Fact]

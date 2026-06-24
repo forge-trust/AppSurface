@@ -14,12 +14,6 @@ internal sealed class AppSurfaceTestPersonaRegistry
         var personas = new Dictionary<string, AppSurfaceTestPersona>(StringComparer.Ordinal);
         foreach (var persona in options.Personas)
         {
-            if (string.IsNullOrWhiteSpace(persona.Name))
-            {
-                throw new InvalidOperationException(
-                    $"Problem: AppSurface test auth persona name is blank. Cause: A persona was registered without a stable name. Fix: give every persona a non-blank ordinal name. Docs: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md. Code: {AppSurfaceTestAuthDiagnosticCodes.BlankPersonaName}.");
-            }
-
             if (!personas.TryAdd(persona.Name, persona))
             {
                 throw new InvalidOperationException(

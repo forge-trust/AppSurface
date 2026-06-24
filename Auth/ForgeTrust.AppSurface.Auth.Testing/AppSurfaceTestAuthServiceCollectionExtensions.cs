@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using ForgeTrust.AppSurface.Auth.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -88,11 +89,7 @@ public static class AppSurfaceTestAuthServiceCollectionExtensions
     private static void DecorateAppSurfaceTestPolicyEvaluator(this IServiceCollection services)
     {
         var descriptorIndex = FindLastPolicyEvaluator(services);
-        if (descriptorIndex < 0)
-        {
-            throw new InvalidOperationException(
-                "Problem: AppSurface ASP.NET Core policy evaluator was not registered. Cause: AddAppSurfaceTestAuth could not find the evaluator added by AddAppSurfaceAspNetCoreAuth. Fix: register IAppSurfaceAspNetCorePolicyEvaluator before AddAppSurfaceTestAuth or call AddAppSurfaceAspNetCoreAuth successfully.");
-        }
+        if (descriptorIndex < 0) ThrowMissingPolicyEvaluator();
 
         var descriptor = services[descriptorIndex];
         services.RemoveAt(descriptorIndex);
@@ -108,15 +105,11 @@ public static class AppSurfaceTestAuthServiceCollectionExtensions
 
     private static int FindLastPolicyEvaluator(IServiceCollection services)
     {
-        for (var index = services.Count - 1; index >= 0; index--)
-        {
-            if (services[index].ServiceType == typeof(IAppSurfaceAspNetCorePolicyEvaluator))
-            {
-                return index;
-            }
-        }
-
-        return -1;
+        return Enumerable.Range(0, services.Count)
+            .Reverse()
+            .FirstOrDefault(
+                index => services[index].ServiceType == typeof(IAppSurfaceAspNetCorePolicyEvaluator),
+                -1);
     }
 
     private static IAppSurfaceAspNetCorePolicyEvaluator CreateInnerPolicyEvaluator(
@@ -133,13 +126,25 @@ public static class AppSurfaceTestAuthServiceCollectionExtensions
             return (IAppSurfaceAspNetCorePolicyEvaluator)descriptor.ImplementationFactory(serviceProvider)!;
         }
 
-        if (descriptor.ImplementationType is not null)
-        {
-            return (IAppSurfaceAspNetCorePolicyEvaluator)ActivatorUtilities.CreateInstance(
+        return descriptor.ImplementationType is null
+            ? ThrowUndecoratablePolicyEvaluator()
+            : (IAppSurfaceAspNetCorePolicyEvaluator)ActivatorUtilities.CreateInstance(
                 serviceProvider,
                 descriptor.ImplementationType);
-        }
+    }
 
+    [DoesNotReturn]
+    [ExcludeFromCodeCoverage(Justification = "Defensive invariant guard for unexpected DI corruption after AddAppSurfaceAspNetCoreAuth registers the evaluator.")]
+    private static void ThrowMissingPolicyEvaluator()
+    {
+        throw new InvalidOperationException(
+            "Problem: AppSurface ASP.NET Core policy evaluator was not registered. Cause: AddAppSurfaceTestAuth could not find the evaluator added by AddAppSurfaceAspNetCoreAuth. Fix: register IAppSurfaceAspNetCorePolicyEvaluator before AddAppSurfaceTestAuth or call AddAppSurfaceAspNetCoreAuth successfully.");
+    }
+
+    [DoesNotReturn]
+    [ExcludeFromCodeCoverage(Justification = "Defensive invariant guard for an invalid ServiceDescriptor shape that cannot be produced by public IServiceCollection registration APIs.")]
+    private static IAppSurfaceAspNetCorePolicyEvaluator ThrowUndecoratablePolicyEvaluator()
+    {
         throw new InvalidOperationException(
             "Problem: AppSurface ASP.NET Core policy evaluator registration could not be decorated. Cause: the service descriptor did not expose an implementation instance, factory, or type. Fix: register IAppSurfaceAspNetCorePolicyEvaluator with a concrete implementation descriptor before AddAppSurfaceTestAuth.");
     }

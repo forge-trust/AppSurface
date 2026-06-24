@@ -58,6 +58,12 @@ public sealed class AppSurfaceTestAuthOptions
     /// <returns>The current options instance for chaining.</returns>
     public AppSurfaceTestAuthOptions AddPersona(string name, string subjectId, IEnumerable<Claim>? claims = null)
     {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new InvalidOperationException(
+                $"Problem: AppSurface test auth persona name is blank. Cause: A persona was registered without a stable name. Fix: give every persona a non-blank ordinal name. Docs: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md. Code: {AppSurfaceTestAuthDiagnosticCodes.BlankPersonaName}.");
+        }
+
         return AddPersona(new AppSurfaceTestPersona(name, subjectId, claims));
     }
 

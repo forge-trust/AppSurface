@@ -43,6 +43,21 @@ public sealed class AuthWebRazorWireProofExampleTests
     }
 
     [Fact]
+    public async Task WebApplicationFactoryProof_PersonaClientUsesSuppliedClientOptions()
+    {
+        await WithAuthTestingFactoryAsync(async factory =>
+        {
+            using var client = factory.CreateAppSurfaceClient(
+                "operator",
+                new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+            using var response = await client.GetAsync("/api/auth-proof");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        });
+    }
+
+    [Fact]
     public async Task WebApplicationFactoryProof_NoPersonaSelectionRemainsAnonymous()
     {
         await WithAuthTestingFactoryAsync(async factory =>
@@ -58,6 +73,33 @@ public sealed class AuthWebRazorWireProofExampleTests
             Assert.Equal(AppSurfaceAuthReason.Unauthenticated.ToString(), ReadString(json, "reason"));
             Assert.Null(ReadNullableString(json, "subject"));
         });
+    }
+
+    [Fact]
+    public async Task WebApplicationFactoryProof_DefaultTestAuthConfigurationAllowsAnonymousProof()
+    {
+        await using var baseFactory = new WebApplicationFactory<Program>();
+        await using var factory = baseFactory.WithAppSurfaceTestAuth();
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync("/api/auth-proof");
+        var body = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(body);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(AppSurfaceAuthOutcome.Challenge.ToString(), ReadString(json, "outcome"));
+        Assert.Equal(AppSurfaceAuthReason.Unauthenticated.ToString(), ReadString(json, "reason"));
+        Assert.Null(ReadNullableString(json, "subject"));
+    }
+
+    [Fact]
+    public async Task WebApplicationFactoryProof_PersonaClientRequiresAuthTestingRegistration()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+
+        var error = Assert.Throws<InvalidOperationException>(() => factory.CreateAppSurfaceClient("operator"));
+
+        Assert.Contains("WithAppSurfaceTestAuth", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
