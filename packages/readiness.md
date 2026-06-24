@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 31
-- Evidence status: manifest evidence complete: 21; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
-- Product families: AppSurface: 20; Forge Trust: 2; Internal support: 7; RazorWire: 2
+- Packages: 32
+- Evidence status: manifest evidence complete: 22; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
+- Product families: AppSurface: 21; Forge Trust: 2; Internal support: 7; RazorWire: 2
 
 ## Package evidence matrix
 
