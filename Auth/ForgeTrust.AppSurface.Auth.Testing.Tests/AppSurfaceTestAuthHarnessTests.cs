@@ -7,6 +7,7 @@ using ForgeTrust.AppSurface.Auth.Testing;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -116,6 +117,27 @@ public sealed class AppSurfaceTestAuthHarnessTests
     }
 
     [Fact]
+    public async Task AddAppSurfaceTestAuth_DecoratesExistingPolicyEvaluatorInstance()
+    {
+        var evaluator = new CapturingPolicyEvaluator(() =>
+            AppSurfaceAuthResult.Forbid(new AppSurfaceAuthContext(new AppSurfaceUser("instance-user"))));
+        using var host = await CreateHostAsync(
+            options => options.AddPersona("operator", "operator-1", [new Claim("role", "operator")]),
+            configureServicesBeforeTestAuth: services =>
+                services.AddSingleton<IAppSurfaceAspNetCorePolicyEvaluator>(evaluator));
+        using var client = host.GetTestClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/result")
+            .WithAppSurfaceTestPersona("operator");
+
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(body);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal("instance-user", ReadNullableString(json.RootElement, "subject"));
+    }
+
+    [Fact]
     public async Task AddAppSurfaceTestAuth_WithCustomEvaluatorStillRejectsUnknownRequestPersona()
     {
         using var host = await CreateHostAsync(
@@ -170,6 +192,42 @@ public sealed class AppSurfaceTestAuthHarnessTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(() =>
             evaluator.AuthorizeAsync(PolicyName, cancellationToken: cancellation.Token));
+    }
+
+    [Fact]
+    public async Task AppSurfaceTestPolicyEvaluator_WithNoHttpContext_ReturnsInnerResult()
+    {
+        var evaluator = new AppSurfaceTestAspNetCorePolicyEvaluator(
+            new AppSurfaceTestInnerPolicyEvaluator(new CapturingPolicyEvaluator(() => AppSurfaceAuthResult.Allowed())),
+            new HttpContextAccessor(),
+            AppSurfaceTestPersonaRegistry.Create(new AppSurfaceTestAuthOptions()));
+
+        var result = await evaluator.AuthorizeAsync(PolicyName);
+
+        Assert.Equal(AppSurfaceAuthOutcome.Allowed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task AppSurfaceTestPolicyEvaluator_WithUnknownPersonaItemAfterInnerEvaluation_ReturnsSetupFailure()
+    {
+        var context = new DefaultHttpContext();
+        var accessor = new HttpContextAccessor { HttpContext = context };
+        var evaluator = new AppSurfaceTestAspNetCorePolicyEvaluator(
+            new AppSurfaceTestInnerPolicyEvaluator(new CapturingPolicyEvaluator(() =>
+            {
+                context.Items[AppSurfaceTestAuthTransport.UnknownPersonaItemKey] = "late-missing";
+                return AppSurfaceAuthResult.Allowed();
+            })),
+            accessor,
+            AppSurfaceTestPersonaRegistry.Create(new AppSurfaceTestAuthOptions()));
+
+        var result = await evaluator.AuthorizeAsync(PolicyName);
+
+        Assert.Equal(AppSurfaceAuthOutcome.SetupFailure, result.Outcome);
+        Assert.Equal(AppSurfaceAuthReason.MissingSubject, result.Reason);
+        Assert.Equal(
+            AppSurfaceTestAuthDiagnosticCodes.UnknownPersona,
+            result.Metadata[AppSurfaceAspNetCoreAuthMetadataKeys.DiagnosticCode]);
     }
 
     [Fact]
@@ -356,6 +414,23 @@ public sealed class AppSurfaceTestAuthHarnessTests
         Assert.Contains(AppSurfaceTestAuthDiagnosticCodes.ProductionEnvironmentBlocked, error.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Test")]
+    public async Task NonProductionEnvironments_AreAllowedByDefault(string environmentName)
+    {
+        using var host = await CreateHostAsync(
+            options => options.AddPersona("operator", "operator-1", [new Claim("role", "operator")]),
+            environmentName: environmentName);
+        using var client = host.GetTestClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/result")
+            .WithAppSurfaceTestPersona("operator");
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
     [Fact]
     public async Task ProductionEnvironment_CanBeExplicitlyAllowedForIsolatedHosts()
     {
@@ -383,6 +458,19 @@ public sealed class AppSurfaceTestAuthHarnessTests
                 AppSurfaceAuthResult.Challenge(),
                 AppSurfaceAuthOutcome.Allowed));
 
+        Assert.Contains(AppSurfaceTestAuthDiagnosticCodes.AssertionFailed, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AssertionHelpers_ReportReasonMismatchWithoutTestFrameworkDependency()
+    {
+        var error = Assert.Throws<AppSurfaceTestAuthAssertionException>(() =>
+            AppSurfaceAuthTestAssert.HasOutcome(
+                AppSurfaceAuthResult.Challenge(),
+                AppSurfaceAuthOutcome.Challenge,
+                AppSurfaceAuthReason.Forbidden));
+
+        Assert.Contains("Expected AppSurface auth reason", error.Message, StringComparison.Ordinal);
         Assert.Contains(AppSurfaceTestAuthDiagnosticCodes.AssertionFailed, error.Message, StringComparison.Ordinal);
     }
 
@@ -432,12 +520,78 @@ public sealed class AppSurfaceTestAuthHarnessTests
         Assert.Contains(AppSurfaceTestAuthDiagnosticCodes.AssertionFailed, error.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(
+        """
+        { "status": 403, "appsurfaceAuthOutcome": "Challenge", "appsurfaceAuthReason": "Forbidden" }
+        """,
+        "Expected ProblemDetails AppSurface outcome")]
+    [InlineData(
+        """
+        { "status": 403, "appsurfaceAuthOutcome": "Forbid", "appsurfaceAuthReason": "Unauthenticated" }
+        """,
+        "Expected ProblemDetails AppSurface reason")]
+    [InlineData(
+        """
+        { "status": 403, "appsurfaceAuthOutcome": "Forbid", "appsurfaceAuthReason": "Forbidden", "appsurfacePolicyName": "OtherPolicy" }
+        """,
+        "Expected ProblemDetails AppSurface policy")]
+    [InlineData(
+        """
+        { "status": 403, "appsurfaceAuthReason": "Forbidden" }
+        """,
+        "Expected ProblemDetails property 'appsurfaceAuthOutcome' to be a string")]
+    [InlineData(
+        """
+        { "status": "403", "appsurfaceAuthOutcome": "Forbid", "appsurfaceAuthReason": "Forbidden" }
+        """,
+        "Expected ProblemDetails property 'status' to be a number")]
+    public void AssertionHelpers_ReportSpecificProblemDetailsMismatches(string problemJson, string expectedMessage)
+    {
+        using var json = JsonDocument.Parse(problemJson);
+
+        var error = Assert.Throws<AppSurfaceTestAuthAssertionException>(() =>
+            AppSurfaceAuthTestAssert.HasProblemDetails(
+                json.RootElement,
+                AppSurfaceAuthOutcome.Forbid,
+                AppSurfaceAuthReason.Forbidden,
+                StatusCodes.Status403Forbidden,
+                PolicyName));
+
+        Assert.Contains(expectedMessage, error.Message, StringComparison.Ordinal);
+        Assert.Contains(AppSurfaceTestAuthDiagnosticCodes.AssertionFailed, error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RequestPersonaHelper_WithBlankPersona_ThrowsArgumentException()
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, "/");
 
         Assert.ThrowsAny<ArgumentException>(() => request.WithAppSurfaceTestPersona(" "));
+    }
+
+    [Fact]
+    public void WebApplicationFactoryHelpers_ValidateArguments()
+    {
+        WebApplicationFactory<object>? factory = null;
+
+        Assert.Throws<ArgumentNullException>(() => factory!.WithAppSurfaceTestAuth());
+
+        using var realFactory = new WebApplicationFactory<object>();
+        Assert.ThrowsAny<ArgumentException>(() => realFactory.CreateAppSurfaceClient(" "));
+    }
+
+    [Fact]
+    public void Persona_ExposesImmutableAdditionalClaimsSnapshot()
+    {
+        Claim[] claims = [new Claim("role", "operator")];
+        var persona = new AppSurfaceTestPersona(" operator ", " operator-1 ", claims);
+        claims[0] = new Claim("role", "viewer");
+
+        Assert.Equal("operator", persona.Name);
+        Assert.Equal("operator-1", persona.SubjectId);
+        var claim = Assert.Single(persona.Claims);
+        Assert.Equal("operator", claim.Value);
     }
 
     [Fact]
