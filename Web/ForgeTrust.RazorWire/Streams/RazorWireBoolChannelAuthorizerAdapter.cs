@@ -22,11 +22,12 @@ internal sealed class RazorWireBoolChannelAuthorizerAdapter : IRazorWireStreamAu
     }
 
     internal async ValueTask<(AppSurfaceAuthResult Result, string AuthorizerType)> AuthorizeWithResolvedAuthorizerAsync(
-        RazorWireStreamAuthorizationContext context)
+        RazorWireStreamAuthorizationContext context,
+        IRazorWireChannelAuthorizer? channelAuthorizer = null)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var channelAuthorizer = context.HttpContext.RequestServices.GetRequiredService<IRazorWireChannelAuthorizer>();
+        channelAuthorizer ??= ResolveChannelAuthorizer(context);
         var allowed = await channelAuthorizer.CanSubscribeAsync(context.HttpContext, context.Channel);
         var isAuthenticated = context.HttpContext.User?.Identity?.IsAuthenticated == true;
 
@@ -35,8 +36,20 @@ internal sealed class RazorWireBoolChannelAuthorizerAdapter : IRazorWireStreamAu
             : isAuthenticated
                 ? AppSurfaceAuthResult.Forbidden()
                 : AppSurfaceAuthResult.Challenge();
-        var authorizerType = channelAuthorizer.GetType().FullName ?? channelAuthorizer.GetType().Name;
+        var authorizerType = GetAuthorizerType(channelAuthorizer);
 
         return (result, authorizerType);
+    }
+
+    internal IRazorWireChannelAuthorizer ResolveChannelAuthorizer(RazorWireStreamAuthorizationContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        return context.HttpContext.RequestServices.GetRequiredService<IRazorWireChannelAuthorizer>();
+    }
+
+    internal static string GetAuthorizerType(IRazorWireChannelAuthorizer channelAuthorizer)
+    {
+        return channelAuthorizer.GetType().FullName ?? channelAuthorizer.GetType().Name;
     }
 }

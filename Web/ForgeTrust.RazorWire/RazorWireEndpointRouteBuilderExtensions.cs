@@ -227,7 +227,11 @@ public static class RazorWireEndpointRouteBuilderExtensions
         {
             if (authorizer is RazorWireBoolChannelAuthorizerAdapter boolAdapter)
             {
-                var boolDecision = await boolAdapter.AuthorizeWithResolvedAuthorizerAsync(authorizationContext);
+                var channelAuthorizer = boolAdapter.ResolveChannelAuthorizer(authorizationContext);
+                authorizerType = RazorWireBoolChannelAuthorizerAdapter.GetAuthorizerType(channelAuthorizer);
+                var boolDecision = await boolAdapter.AuthorizeWithResolvedAuthorizerAsync(
+                    authorizationContext,
+                    channelAuthorizer);
 
                 return new RazorWireStreamAuthorizationDecision(boolDecision.Result, boolDecision.AuthorizerType);
             }

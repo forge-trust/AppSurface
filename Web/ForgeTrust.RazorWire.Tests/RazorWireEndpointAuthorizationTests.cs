@@ -256,6 +256,38 @@ public class RazorWireEndpointAuthorizationTests
     }
 
     [Fact]
+    public async Task StreamEndpoint_LegacyAuthorizerMethodException_LogsLegacyAuthorizerType()
+    {
+        var hub = new TrackingStreamHub();
+        var loggerProvider = new CapturingLoggerProvider();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            configureServices: services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireChannelAuthorizer, ThrowingLegacyChannelAuthorizer>();
+            },
+            configureLogging: logging =>
+            {
+                logging.ClearProviders();
+                logging.AddProvider(loggerProvider);
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/public");
+        var body = await response.Content.ReadAsStringAsync();
+        var entry = Assert.Single(loggerProvider.Entries, log => log.EventId.Id == 13700);
+        var renderedState = string.Join(" ", entry.State.Select(pair => $"{pair.Key}={pair.Value}"));
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.NotEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains(nameof(ThrowingLegacyChannelAuthorizer), renderedState, StringComparison.Ordinal);
+        Assert.Contains(nameof(InvalidOperationException), renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain(nameof(RazorWireBoolChannelAuthorizerAdapter), renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain("legacy method secret", entry.Message + renderedState + body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AntiforgeryTokenEndpoint_ReturnsTokenPayloadWithNoStoreHeaders()
     {
         await using var fixture = await RazorWireEndpointFixture.StartAsync(Environments.Production);
@@ -955,6 +987,14 @@ public class RazorWireEndpointAuthorizationTests
         {
             Interlocked.Increment(ref _callCount);
             return ValueTask.FromResult(true);
+        }
+    }
+
+    private sealed class ThrowingLegacyChannelAuthorizer : IRazorWireChannelAuthorizer
+    {
+        public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            throw new InvalidOperationException("legacy method secret");
         }
     }
 
