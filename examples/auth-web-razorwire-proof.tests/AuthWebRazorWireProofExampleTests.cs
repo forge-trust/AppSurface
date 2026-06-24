@@ -289,13 +289,13 @@ public sealed class AuthWebRazorWireProofExampleTests
 
     private static async Task WithAuthTestingFactoryAsync(Func<WebApplicationFactory<Program>, Task> action)
     {
-        await using var factory = new WebApplicationFactory<Program>()
-            .WithAppSurfaceTestAuth(options =>
-            {
-                options.SubjectClaimType = "sub";
-                options.AddPersona("operator", "operator-1", [new Claim("role", "operator")]);
-                options.AddPersona("viewer", "viewer-1", [new Claim("role", "viewer")]);
-            });
+        await using var baseFactory = new WebApplicationFactory<Program>();
+        await using var factory = baseFactory.WithAppSurfaceTestAuth(options =>
+        {
+            options.SubjectClaimType = "sub";
+            options.AddPersona("operator", "operator-1", [new Claim("role", "operator")]);
+            options.AddPersona("viewer", "viewer-1", [new Claim("role", "viewer")]);
+        });
 
         await action(factory);
     }
