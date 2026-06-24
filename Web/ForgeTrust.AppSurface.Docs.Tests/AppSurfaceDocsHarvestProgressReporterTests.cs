@@ -261,6 +261,44 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     }
 
     [Fact]
+    public async Task ProgressReporter_ShouldNotPublishDuplicateQueuedStatus_WhenDeferredRunWasMarkedOnBegin()
+    {
+        var hub = new RecordingRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        reporter.SuppressCompletionVisitForCurrentOrNextRun();
+        await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        var publishCount = hub.Published.Count;
+
+        await reporter.RebuildQueuedAsync(null);
+
+        Assert.Equal(publishCount, hub.Published.Count);
+        Assert.Equal("Harvesting (rebuild queued)", reporter.CurrentSnapshot.Status);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldIgnoreQueuedStatus_WhenNoDeferredRunWasMarked()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.RebuildQueuedAsync(null);
+
+        Assert.Equal("Harvesting", reporter.CurrentSnapshot.Status);
+        Assert.DoesNotContain(
+            reporter.CurrentSnapshot.Activity,
+            item => item.Message.Contains("rebuild is queued", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ProgressReporter_ShouldIgnoreDeferredQueuedStatus_WhenLaterRunReplacesSuppressedRun()
     {
         using var provider = new ServiceCollection().BuildServiceProvider();
