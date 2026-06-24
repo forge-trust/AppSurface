@@ -184,14 +184,14 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepository
     /// <returns>A value task that completes when export finishes.</returns>
     internal async ValueTask ExecuteAsync(CancellationToken cancellationToken)
     {
-        var exportArgs = BuildExportArgs();
-        _logger.LogInformation(
-            "Exporting AppSurface Docs for {RepositoryRoot} to {OutputPath}.",
-            exportArgs.HostArgs.RepositoryRoot,
-            exportArgs.OutputPath);
-
         try
         {
+            var exportArgs = BuildExportArgs();
+            _logger.LogInformation(
+                "Exporting AppSurface Docs for {RepositoryRoot} to {OutputPath}.",
+                exportArgs.HostArgs.RepositoryRoot,
+                exportArgs.OutputPath);
+
             await _exportRunner.ExportAsync(exportArgs, cancellationToken);
         }
         catch (ExportValidationException ex)

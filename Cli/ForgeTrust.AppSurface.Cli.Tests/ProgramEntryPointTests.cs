@@ -1574,7 +1574,7 @@ public sealed class ProgramEntryPointTests
         {
             if (!TryCreateDirectorySymlink(linkedOutput, outside.Path))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             var runner = new CapturingAppSurfaceDocsExportRunner();
@@ -1930,7 +1930,7 @@ public sealed class ProgramEntryPointTests
         var manifestPath = Path.Join(output.Path, ".appsurface-docs-route-manifest.json");
         if (!TryCreateFileSymlink(manifestPath, outsideManifest))
         {
-            return;
+            throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
         }
 
         using var host = new TrackingHost(

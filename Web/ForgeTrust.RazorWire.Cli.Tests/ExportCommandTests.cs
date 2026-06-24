@@ -147,7 +147,7 @@ public class ExportCommandTests
             var linkPath = Path.Join(tempDir, "linked-assets");
             if (!TryCreateDirectorySymlink(linkPath, outsideRoot))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             var exception = await Assert.ThrowsAsync<ExportValidationException>(
@@ -186,7 +186,7 @@ public class ExportCommandTests
             var manifestPath = TestPathUtils.PathUnder(tempDir, ".appsurface-docs-release-manifest.json");
             if (!TryCreateFileSymlink(manifestPath, outsideManifest))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             var exception = await Assert.ThrowsAsync<ExportValidationException>(
@@ -221,7 +221,7 @@ public class ExportCommandTests
             var linkPath = Path.Join(tempDir, "dangling.txt");
             if (!TryCreateFileSymlink(linkPath, Path.Join(tempDir, "missing-target.txt")))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             var exception = await Assert.ThrowsAsync<ExportValidationException>(

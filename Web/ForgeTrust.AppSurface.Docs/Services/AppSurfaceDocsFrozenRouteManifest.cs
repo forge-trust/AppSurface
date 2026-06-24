@@ -58,10 +58,21 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
     }
 
     /// <summary>
-    /// Serializes and validates a frozen route manifest document without materializing it to disk.
+    /// Serializes a frozen route manifest document only after strict validation succeeds.
     /// </summary>
+    /// <remarks>
+    /// This writer-facing API validates with the same strict rules used for exact archive pins. It throws instead of
+    /// dropping unsafe entries when a canonical route is missing or unsafe, when aliases are unsafe, self-referential, or
+    /// collide with canonical routes, or when duplicate aliases point at different canonical routes. Use it when creating
+    /// a new frozen manifest from trusted source-backed route metadata. Use the tolerant loading paths when reading an
+    /// existing archive where an invalid manifest should degrade to an empty alias map instead of failing the caller.
+    /// </remarks>
     /// <param name="routeManifest">Live route manifest captured from the source-backed docs snapshot.</param>
     /// <returns>The exact JSON payload used for the frozen route manifest artifact.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="routeManifest" /> is <c>null</c>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The route manifest contains unsafe, duplicate, colliding, or ambiguous canonical routes or aliases.
+    /// </exception>
     internal static string Serialize(AppSurfaceDocsRouteManifest routeManifest)
     {
         ArgumentNullException.ThrowIfNull(routeManifest);

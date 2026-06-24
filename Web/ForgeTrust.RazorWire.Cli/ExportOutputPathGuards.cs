@@ -296,7 +296,7 @@ internal static class ExportOutputPathGuards
             cursor = root;
         }
 
-        var relative = Path.GetRelativePath(cursor, outputRoot);
+        var relative = Path.GetRelativePath(root, outputRoot);
         if (string.IsNullOrWhiteSpace(relative) || relative == ".")
         {
             ValidateOutputRootSegment(cursor, artifactKind, route, relativePath, operation);

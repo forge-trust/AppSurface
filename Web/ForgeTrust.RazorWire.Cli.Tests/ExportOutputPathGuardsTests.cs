@@ -38,7 +38,7 @@ public sealed class ExportOutputPathGuardsTests
         {
             if (!TryCreateDirectorySymlink(linkRoot, realRoot))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             var exception = Assert.Throws<ExportValidationException>(
@@ -68,7 +68,7 @@ public sealed class ExportOutputPathGuardsTests
             var linkedParent = Path.Join(tempDir, "linked");
             if (!TryCreateDirectorySymlink(linkedParent, outsideRoot))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             var outputRoot = Path.Join(linkedParent, "future-output-root");
@@ -104,7 +104,7 @@ public sealed class ExportOutputPathGuardsTests
             var linkPath = Path.Join(tempDir, "linked");
             if (!TryCreateDirectorySymlink(linkPath, outsideRoot))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             var artifactPath = Path.Join(linkPath, "nested", "index.html");
@@ -141,7 +141,7 @@ public sealed class ExportOutputPathGuardsTests
             var linkPath = Path.Join(tempDir, "index.html");
             if (!TryCreateFileSymlink(linkPath, outsideFile))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             var exception = await Assert.ThrowsAsync<ExportValidationException>(
@@ -174,7 +174,7 @@ public sealed class ExportOutputPathGuardsTests
             var linkPath = Path.Join(tempDir, "asset");
             if (!TryCreateDirectorySymlink(linkPath, outsideRoot))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             var exception = Assert.Throws<ExportValidationException>(

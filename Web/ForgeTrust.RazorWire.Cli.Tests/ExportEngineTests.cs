@@ -893,7 +893,7 @@ public class ExportEngineTests
             var linkedParent = Path.Join(tempDir, "linked");
             if (!TryCreateDirectorySymlink(linkedParent, outsideRoot))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             using var handler = new SingleRouteHandler(route, mediaType, body);
@@ -935,7 +935,7 @@ public class ExportEngineTests
             var notFoundFile = Path.Join(tempDir, "404.html");
             if (!TryCreateFileSymlink(notFoundFile, outsideFile))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             var handler = new ConventionalNotFoundPageHandler();
@@ -978,7 +978,7 @@ public class ExportEngineTests
             var partialPath = Path.Join(tempDir, "docs", "start.partial.html");
             if (!TryCreateFileSymlink(partialPath, outsideFile))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             using var handler = new SingleRouteHandler(
@@ -1024,7 +1024,7 @@ public class ExportEngineTests
             var linkedAliasParent = Path.Join(tempDir, "docs", "example");
             if (!TryCreateDirectorySymlink(linkedAliasParent, outsideRoot))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
@@ -1067,7 +1067,7 @@ public class ExportEngineTests
             var redirectsPath = Path.Join(tempDir, "_redirects");
             if (!TryCreateFileSymlink(redirectsPath, outsideFile))
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
             }
 
             using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
