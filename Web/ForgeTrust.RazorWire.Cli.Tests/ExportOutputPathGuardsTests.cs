@@ -228,6 +228,19 @@ public sealed class ExportOutputPathGuardsTests
         Assert.Equal(expected, ExportOutputPathGuards.GetPathComparison());
     }
 
+    [Fact]
+    public void IsPathUnderRoot_Should_Treat_FileSystem_Root_As_Containing_Descendants()
+    {
+        var tempPath = Path.GetFullPath(Path.GetTempPath());
+        var root = Path.GetPathRoot(tempPath);
+
+        Assert.False(string.IsNullOrWhiteSpace(root));
+        Assert.True(ExportOutputPathGuards.IsPathUnderRoot(
+            tempPath,
+            root,
+            ExportOutputPathGuards.GetPathComparison()));
+    }
+
     private static void AssertRwExport009(ExportValidationException exception, string reason)
     {
         var diagnostic = Assert.Single(exception.Diagnostics);

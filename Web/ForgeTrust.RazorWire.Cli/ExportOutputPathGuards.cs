@@ -253,9 +253,21 @@ internal static class ExportOutputPathGuards
     {
         var normalizedPath = NormalizePath(path);
         var normalizedRoot = NormalizePath(root);
-        return string.Equals(normalizedPath, normalizedRoot, comparison)
-               || normalizedPath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, comparison)
-               || normalizedPath.StartsWith(normalizedRoot + Path.AltDirectorySeparatorChar, comparison);
+        if (string.Equals(normalizedPath, normalizedRoot, comparison))
+        {
+            return true;
+        }
+
+        var rootPrefix = EnsureTrailingDirectorySeparator(normalizedRoot, Path.DirectorySeparatorChar);
+        if (normalizedPath.StartsWith(rootPrefix, comparison))
+        {
+            return true;
+        }
+
+        return Path.DirectorySeparatorChar != Path.AltDirectorySeparatorChar
+               && normalizedPath.StartsWith(
+                   EnsureTrailingDirectorySeparator(normalizedRoot, Path.AltDirectorySeparatorChar),
+                   comparison);
     }
 
     internal static StringComparison GetPathComparison()
@@ -510,5 +522,12 @@ internal static class ExportOutputPathGuards
     private static string NormalizePath(string path)
     {
         return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+    }
+
+    private static string EnsureTrailingDirectorySeparator(string path, char separator)
+    {
+        return Path.EndsInDirectorySeparator(path)
+            ? path
+            : path + separator;
     }
 }
