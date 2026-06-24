@@ -2,6 +2,8 @@
 
 This example proves `ForgeTrust.AppSurface.Auth.AspNetCore` can consume a normal ASP.NET Core authentication and authorization setup without owning it.
 
+For new local package-consumer fake auth, prefer [the DevAuth example](../auth-aspnetcore-dev-auth/README.md). This bridge example keeps the header-driven `X-Proof-User` handler only as a low-level adapter proof for hosts that already own their authentication scheme.
+
 The host still configures:
 
 - `AddAuthentication(...)`
@@ -44,4 +46,4 @@ Expected outcomes:
 | `/missing-subject` with `X-Proof-User: nosub` | `SetupFailure` | `MissingSubject` |
 | `/missing-services` | `SetupFailure` | `MissingServices` |
 
-The fake `X-Proof-User` authentication scheme is only for local proof. Real applications should keep using their existing ASP.NET Core authentication handlers and policies.
+The fake `X-Proof-User` authentication scheme is only for this local adapter proof. Do not copy it into product apps. Use `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` for selectable local personas, and use real ASP.NET Core authentication handlers and policies for deployed hosts.
