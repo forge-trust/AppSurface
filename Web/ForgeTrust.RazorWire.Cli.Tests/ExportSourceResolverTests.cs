@@ -151,25 +151,26 @@ public class ExportSourceResolverTests
         var requestPaths = new List<string>();
         var fakeProcess = new FakeTargetAppProcess();
         var factory = new FakeTargetAppProcessFactory(_ => fakeProcess);
+        var httpFactory = new TestHttpHelpers.Factory(request =>
+        {
+            requestPaths.Add(request.RequestUri?.AbsolutePath ?? "/");
+
+            if (request.RequestUri?.AbsolutePath == "/")
+            {
+                return new HttpResponseMessage(System.Net.HttpStatusCode.Found)
+                {
+                    Headers =
+                    {
+                        Location = new Uri("/target", UriKind.Relative)
+                    }
+                };
+            }
+
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        });
         var resolver = CreateResolver(
             factory,
-            new TestHttpHelpers.Factory(request =>
-            {
-                requestPaths.Add(request.RequestUri?.AbsolutePath ?? "/");
-
-                if (request.RequestUri?.AbsolutePath == "/")
-                {
-                    return new HttpResponseMessage(System.Net.HttpStatusCode.Found)
-                    {
-                        Headers =
-                        {
-                            Location = new Uri("/target", UriKind.Relative)
-                        }
-                    };
-                }
-
-                return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
-            }));
+            httpFactory);
         var request = new ExportSourceRequest(
             ExportSourceKind.Url,
             "http://localhost:5233",
@@ -181,6 +182,7 @@ public class ExportSourceResolverTests
 
         Assert.Equal("http://localhost:5233", result.BaseUrl);
         Assert.Equal(["/"], requestPaths);
+        Assert.Equal(["ExportEngine"], httpFactory.RequestedClientNames);
         Assert.False(fakeProcess.Started);
     }
 
@@ -402,6 +404,42 @@ public class ExportSourceResolverTests
 
         await using var result = await resolver.ResolveAsync(request);
         Assert.Equal("http://127.0.0.1:5050", result.BaseUrl);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_Should_Treat_Launched_App_Redirect_As_Readiness_Without_Following()
+    {
+        var requestPaths = new List<string>();
+        var fakeProcess = new FakeTargetAppProcess();
+        var factory = new FakeTargetAppProcessFactory(_ => fakeProcess);
+        var httpFactory = new TestHttpHelpers.Factory(request =>
+        {
+            requestPaths.Add(request.RequestUri?.AbsolutePath ?? "/");
+
+            if (request.RequestUri?.AbsolutePath == "/")
+            {
+                return new HttpResponseMessage(System.Net.HttpStatusCode.Found)
+                {
+                    Headers =
+                    {
+                        Location = new Uri("/target", UriKind.Relative)
+                    }
+                };
+            }
+
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        });
+        var resolver = CreateResolver(factory, httpFactory);
+
+        var request = new ExportSourceRequest(ExportSourceKind.Dll, "/tmp/site.dll", null, [], false);
+        fakeProcess.OnStart = () => fakeProcess.EmitOutput("Now listening on: http://127.0.0.1:5050");
+
+        await using var result = await resolver.ResolveAsync(request);
+
+        Assert.Equal("http://127.0.0.1:5050", result.BaseUrl);
+        Assert.Equal(["/"], requestPaths);
+        Assert.Equal(["ExportEngine"], httpFactory.RequestedClientNames);
+        Assert.True(fakeProcess.Started);
     }
 
     [Fact]
