@@ -68,9 +68,11 @@ public sealed class AppSurfaceCliAppTests
                                              or SocketError.Interrupted
                                              or SocketError.ConnectionReset)
         {
+            System.Diagnostics.Trace.WriteLine($"Ignored expected test listener shutdown socket exception: {ex.SocketErrorCode}.");
         }
-        catch (ObjectDisposedException)
+        catch (ObjectDisposedException ex)
         {
+            System.Diagnostics.Trace.WriteLine($"Ignored expected test listener disposal: {ex.Message}");
         }
     }
 
