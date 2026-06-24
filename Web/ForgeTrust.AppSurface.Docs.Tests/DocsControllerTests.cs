@@ -1097,7 +1097,7 @@ public class DocsControllerTests : IDisposable
         };
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
-        var (controller, cache, memo) = CreateController(options, harvester);
+        var (controller, cache, memo) = CreateController(options, harvester, registerHarvestCoordinator: true);
         using (memo)
         using (cache)
         {
@@ -3881,7 +3881,7 @@ public class DocsControllerTests : IDisposable
                 OperatorWritePolicy = "DocsWrite"
             }
         };
-        var (controller, cache, memo) = CreateController(options, harvester);
+        var (controller, cache, memo) = CreateController(options, harvester, registerHarvestCoordinator: true);
         using (memo)
         using (cache)
         {
@@ -3901,6 +3901,43 @@ public class DocsControllerTests : IDisposable
             Assert.NotNull(model.RebuildForm);
             Assert.True(model.RebuildForm.IsAuthorized);
             Assert.Equal("Ready", model.RebuildForm.Status);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestHealth_ShouldRenderUnavailableRebuildState_WhenCoordinatorIsMissing()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorWritePolicy = "DocsWrite"
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester);
+        using (memo)
+        using (cache)
+        {
+            controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+            {
+                RequestServices = CreateAuthorizationServices(
+                    policyName: "DocsWrite",
+                    policy => policy.RequireAuthenticatedUser()),
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+                    authenticationType: "test-auth"))
+            });
+
+            var result = Assert.IsType<ViewResult>(await controller.HarvestHealth());
+            var model = Assert.IsType<AppSurfaceDocsHarvestHealthResponse>(result.Model);
+
+            Assert.NotNull(model.RebuildForm);
+            Assert.False(model.RebuildForm.IsAuthorized);
+            Assert.Equal("Unavailable", model.RebuildForm.Status);
+            Assert.Contains("coordinator is not registered", model.RebuildForm.Description, StringComparison.OrdinalIgnoreCase);
         }
     }
 
@@ -5852,9 +5889,10 @@ public class DocsControllerTests : IDisposable
 
     private (DocsController Controller, IMemoryCache Cache, Memo Memo) CreateController(
         AppSurfaceDocsOptions options,
-        IDocHarvester harvester)
+        IDocHarvester harvester,
+        bool registerHarvestCoordinator = false)
     {
-        return CreateController(options, [harvester]);
+        return CreateController(options, [harvester], registerHarvestCoordinator: registerHarvestCoordinator);
     }
 
     private (DocsController Controller, IMemoryCache Cache, Memo Memo) CreateController(
@@ -5879,7 +5917,8 @@ public class DocsControllerTests : IDisposable
         IReadOnlyList<IDocHarvester> harvesters,
         string? environmentName = null,
         AppSurfaceDocsSearchQualityReadModel? searchQualityReadModel = null,
-        IAppSurfaceProductIntelligence? productIntelligence = null)
+        IAppSurfaceProductIntelligence? productIntelligence = null,
+        bool registerHarvestCoordinator = false)
     {
         var cache = new MemoryCache(new MemoryCacheOptions());
         var memo = new Memo(cache);
@@ -5901,6 +5940,13 @@ public class DocsControllerTests : IDisposable
             aggregatorLogger);
         var docsUrlBuilder = new DocsUrlBuilder(options);
         var versionCatalogService = CreateDefaultVersionCatalogService(options);
+        var harvestCoordinator = registerHarvestCoordinator
+            ? new AppSurfaceDocsHarvestCoordinator(
+                aggregator,
+                new AppSurfaceDocsHarvestProgressReporter(
+                    A.Fake<IServiceProvider>(),
+                    A.Fake<ILogger<AppSurfaceDocsHarvestProgressReporter>>()))
+            : null;
 
         var controller = new DocsController(
             aggregator,
@@ -5910,6 +5956,7 @@ public class DocsControllerTests : IDisposable
             options,
             environment,
             controllerLogger,
+            harvestCoordinator,
             searchQualityReadModel: searchQualityReadModel,
             productIntelligence: productIntelligence)
         {

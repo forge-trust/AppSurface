@@ -897,6 +897,7 @@ public class DocsController : Controller
         if (!string.IsNullOrWhiteSpace(policyName))
         {
             var authorization = await AuthorizeSearchIndexRefreshAsync(HttpContext.RequestAborted);
+            var canSubmitRebuild = authorization.IsAllowed && _harvestCoordinator is not null;
             response = response with
             {
                 RebuildForm = new AppSurfaceDocsHarvestRebuildForm
@@ -904,10 +905,14 @@ public class DocsController : Controller
                     Action = PathBaseAware(_docsUrlBuilder.BuildHarvestRebuildUrl()),
                     Method = DocsUrlBuilder.HarvestRebuildMethod,
                     ReturnUrl = ResolveHarvestReturnUrl(Request.Query["returnUrl"].FirstOrDefault()),
-                    IsAuthorized = authorization.IsAllowed,
-                    Status = authorization.IsAllowed ? "Ready" : GetRebuildAuthorizationStatus(authorization.Reason),
-                    Description = authorization.IsAllowed
+                    IsAuthorized = canSubmitRebuild,
+                    Status = canSubmitRebuild
+                        ? "Ready"
+                        : authorization.IsAllowed ? "Unavailable" : GetRebuildAuthorizationStatus(authorization.Reason),
+                    Description = canSubmitRebuild
                         ? "Rebuild the live docs snapshot from source and watch progress before returning to this docs context."
+                        : authorization.IsAllowed
+                            ? "The docs harvest coordinator is not registered for this host, so rebuild requests are disabled."
                         : GetRebuildAuthorizationDescription(authorization.Reason)
                 }
             };
@@ -1350,7 +1355,8 @@ public class DocsController : Controller
         }
 
         var decodedPath = Uri.UnescapeDataString(path);
-        if (decodedPath.Any(char.IsControl)
+        if (ContainsSensitivePercentEscape(decodedPath)
+            || decodedPath.Any(char.IsControl)
             || decodedPath.Contains('\\', StringComparison.Ordinal)
             || ContainsDotSegment(path)
             || ContainsDotSegment(decodedPath))
@@ -1473,11 +1479,69 @@ public class DocsController : Controller
         return trimmed;
     }
 
+    /// <summary>
+    /// Detects dot-segment traversal after splitting a return URL path on literal path separators.
+    /// </summary>
+    /// <param name="path">The raw or once-decoded path being evaluated for harvest return navigation.</param>
+    /// <returns>
+    /// <see langword="true"/> when any path segment is exactly <c>.</c> or <c>..</c>; otherwise
+    /// <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// This helper is deliberately segment-based instead of substring-based so ordinary filenames containing dots remain
+    /// valid. Callers must invoke it for both the raw path and the once-decoded path because percent-encoded traversal can
+    /// be hidden until after decoding.
+    /// </remarks>
     private static bool ContainsDotSegment(string path)
     {
         return path.Split('/', StringSplitOptions.None).Any(segment => segment is "." or "..");
     }
 
+    /// <summary>
+    /// Detects percent escapes that still hide sensitive path bytes after the first decode pass.
+    /// </summary>
+    /// <param name="path">The once-decoded path being checked for nested percent escapes.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="path"/> contains an encoded control character, slash, backslash, or dot;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// Harvest return URLs are decoded once before redirect decisions. A second decoder later in the stack could otherwise
+    /// turn split encodings such as <c>%25%32%65</c> into <c>%2e</c> and then into <c>.</c>. Rejecting sensitive nested
+    /// escapes keeps the docs-only containment decision stable across downstream URL normalization.
+    /// </remarks>
+    private static bool ContainsSensitivePercentEscape(string path)
+    {
+        for (var i = 0; i + 2 < path.Length; i++)
+        {
+            if (path[i] != '%' || !IsHex(path[i + 1]) || !IsHex(path[i + 2]))
+            {
+                continue;
+            }
+
+            var decoded = HexToByte(path[i + 1], path[i + 2]);
+            if (decoded < 0x20
+                || decoded == 0x7f
+                || decoded == '/'
+                || decoded == '\\'
+                || decoded == '.')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Determines whether a character can participate in a percent-encoded byte.
+    /// </summary>
+    /// <param name="value">The candidate hexadecimal digit.</param>
+    /// <returns><see langword="true"/> for ASCII hexadecimal digits; otherwise <see langword="false"/>.</returns>
+    /// <remarks>
+    /// URL percent escapes are byte-oriented and ASCII-only. This intentionally does not accept Unicode lookalikes or
+    /// culture-sensitive digits, and callers should only pass characters adjacent to a literal <c>%</c>.
+    /// </remarks>
     private static bool IsHex(char value)
     {
         return value is >= '0' and <= '9'
@@ -1485,11 +1549,31 @@ public class DocsController : Controller
                || value is >= 'A' and <= 'F';
     }
 
+    /// <summary>
+    /// Converts two validated hexadecimal digits into the byte value represented by a percent escape.
+    /// </summary>
+    /// <param name="high">The high-order hexadecimal digit.</param>
+    /// <param name="low">The low-order hexadecimal digit.</param>
+    /// <returns>The decoded byte value from <c>0</c> through <c>255</c>.</returns>
+    /// <remarks>
+    /// Callers must guard both inputs with <see cref="IsHex(char)"/> before calling this helper. The method is intentionally
+    /// allocation-free because it runs in the return-URL validation hot path.
+    /// </remarks>
     private static int HexToByte(char high, char low)
     {
         return (HexValue(high) << 4) + HexValue(low);
     }
 
+    /// <summary>
+    /// Maps a single validated hexadecimal digit to its numeric value.
+    /// </summary>
+    /// <param name="value">The ASCII hexadecimal digit to convert.</param>
+    /// <returns>An integer from <c>0</c> through <c>15</c>.</returns>
+    /// <remarks>
+    /// This helper assumes <paramref name="value"/> has already passed <see cref="IsHex(char)"/>. Passing any other
+    /// character falls into the uppercase branch and produces a meaningless value, so validation order is part of the
+    /// contract.
+    /// </remarks>
     private static int HexValue(char value)
     {
         return value switch

@@ -14,6 +14,8 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
     internal const string ChannelName = AppSurfaceDocsStreamAuthorization.HarvestProgressChannel;
     private const int MaxActivityCount = 8;
     private const int CompletionDelayMilliseconds = 900;
+    private const string QueuedRebuildStatus = "Harvesting (rebuild queued)";
+    private const string QueuedRebuildActivity = "A rebuild is queued and will start after this run finishes.";
     // Resolve per subscriber so a shared harvest channel revisits each user's requested docs URL.
     private const string CurrentPageVisitUrl = "#";
 
@@ -23,6 +25,8 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
     private readonly HashSet<string> _completionVisitSuppressedRunIds = new(StringComparer.Ordinal);
     private AppSurfaceDocsHarvestProgressSnapshot _snapshot = AppSurfaceDocsHarvestProgressSnapshot.Idle;
     private bool _suppressNextCompletionVisit;
+    private bool _recordQueuedRebuildForNextRun;
+    private string? _queuedRebuildRunId;
 
     /// <summary>
     /// Initializes a new instance of the harvest progress reporter.
@@ -86,15 +90,26 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                 _suppressNextCompletionVisit = false;
             }
 
+            var status = "Harvesting";
+            IReadOnlyList<AppSurfaceDocsHarvestActivity> activity =
+                [new AppSurfaceDocsHarvestActivity(DateTimeOffset.UtcNow, "Harvest started.")];
+            if (_recordQueuedRebuildForNextRun)
+            {
+                status = QueuedRebuildStatus;
+                activity = AddActivity(activity, QueuedRebuildActivity);
+                _queuedRebuildRunId = runId;
+                _recordQueuedRebuildForNextRun = false;
+            }
+
             snapshot = new AppSurfaceDocsHarvestProgressSnapshot
             {
                 RunId = runId,
                 State = AppSurfaceDocsHarvestRunState.Running,
                 StartedUtc = DateTimeOffset.UtcNow,
                 TotalHarvesters = harvesters.Length,
-                Status = "Harvesting",
+                Status = status,
                 Harvesters = harvesters,
-                Activity = [new AppSurfaceDocsHarvestActivity(DateTimeOffset.UtcNow, "Harvest started.")]
+                Activity = activity
             };
             _snapshot = snapshot;
         }
@@ -118,15 +133,18 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
     {
         lock (_gate)
         {
-            if ((_snapshot.State == AppSurfaceDocsHarvestRunState.Running
-                    || _snapshot.State == AppSurfaceDocsHarvestRunState.Completed)
-                && !string.IsNullOrWhiteSpace(_snapshot.RunId))
+            if (!string.IsNullOrWhiteSpace(_snapshot.RunId))
             {
-                _completionVisitSuppressedRunIds.Add(_snapshot.RunId);
+                if (_snapshot.State is AppSurfaceDocsHarvestRunState.Running or AppSurfaceDocsHarvestRunState.Completed)
+                {
+                    _completionVisitSuppressedRunIds.Add(_snapshot.RunId);
+                }
+
                 return _snapshot.RunId;
             }
 
             _suppressNextCompletionVisit = true;
+            _recordQueuedRebuildForNextRun = true;
             return null;
         }
     }
@@ -149,18 +167,24 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         lock (_gate)
         {
             if (_snapshot.State != AppSurfaceDocsHarvestRunState.Running
-                || (!string.IsNullOrWhiteSpace(supersededRunId)
-                    && !string.Equals(_snapshot.RunId, supersededRunId, StringComparison.Ordinal)))
+                || !IsQueuedRebuildRun(supersededRunId))
             {
+                return;
+            }
+
+            if (string.Equals(_snapshot.Status, QueuedRebuildStatus, StringComparison.Ordinal))
+            {
+                _queuedRebuildRunId = null;
                 return;
             }
 
             snapshot = _snapshot with
             {
-                Status = "Harvesting (rebuild queued)",
-                Activity = AddActivity(_snapshot.Activity, "A rebuild is queued and will start after this run finishes.")
+                Status = QueuedRebuildStatus,
+                Activity = AddActivity(_snapshot.Activity, QueuedRebuildActivity)
             };
             _snapshot = snapshot;
+            _queuedRebuildRunId = null;
         }
 
         await PublishAsync(snapshot);
@@ -378,6 +402,30 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                    && _snapshot.State == AppSurfaceDocsHarvestRunState.Completed
                    && !_completionVisitSuppressedRunIds.Remove(runId);
         }
+    }
+
+    /// <summary>
+    /// Determines whether a queued-rebuild status update still belongs to the currently retained running snapshot.
+    /// </summary>
+    /// <param name="supersededRunId">
+    /// The run identifier captured when the rebuild was queued, or <see langword="null"/> when the queue marker was
+    /// deferred until the next run published its identifier.
+    /// </param>
+    /// <returns><see langword="true"/> when the current snapshot is the run that should carry queued state.</returns>
+    /// <remarks>
+    /// This guard prevents delayed queued-state publishes from decorating a fresh rebuild after the original run has
+    /// already completed. Callers must hold <c>_gate</c> while invoking this helper so the snapshot and deferred marker are
+    /// compared atomically.
+    /// </remarks>
+    private bool IsQueuedRebuildRun(string? supersededRunId)
+    {
+        if (!string.IsNullOrWhiteSpace(supersededRunId))
+        {
+            return string.Equals(_snapshot.RunId, supersededRunId, StringComparison.Ordinal);
+        }
+
+        return !string.IsNullOrWhiteSpace(_queuedRebuildRunId)
+               && string.Equals(_snapshot.RunId, _queuedRebuildRunId, StringComparison.Ordinal);
     }
 
     private static IReadOnlyList<AppSurfaceDocsHarvestActivity> AddActivity(
