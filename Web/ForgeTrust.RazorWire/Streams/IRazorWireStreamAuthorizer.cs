@@ -19,8 +19,8 @@ public interface IRazorWireStreamAuthorizer
     /// </summary>
     /// <param name="context">The stream authorization context for this subscription request.</param>
     /// <returns>
-    /// An <see cref="AppSurfaceAuthResult"/> describing whether the subscription may proceed. Returning
-    /// <see langword="null"/> fails closed as a setup failure.
+    /// A non-null <see cref="AppSurfaceAuthResult"/> describing whether the subscription may proceed. RazorWire
+    /// defensively treats a <see langword="null"/> result from a misbehaving implementation as a setup failure.
     /// </returns>
     ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context);
 }

@@ -25,13 +25,13 @@ namespace ForgeTrust.RazorWire.Tests;
 public class RazorWireEndpointAuthorizationTests
 {
     [Fact]
-    public async Task StreamEndpoint_DefaultConfiguration_ReturnsForbidden()
+    public async Task StreamEndpoint_DefaultConfiguration_ReturnsUnauthorizedForAnonymousCaller()
     {
         await using var fixture = await RazorWireEndpointFixture.StartAsync(Environments.Production);
 
         using var response = await fixture.Client.GetAsync("/_rw/streams/public");
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
@@ -44,7 +44,7 @@ public class RazorWireEndpointAuthorizationTests
 
         using var response = await fixture.Client.GetAsync("/_rw/streams/sensitive-channel");
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.NotEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
         Assert.Equal(0, hub.SubscribeCount);
     }
@@ -57,11 +57,11 @@ public class RazorWireEndpointAuthorizationTests
         using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
         var body = await response.Content.ReadAsStringAsync();
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Equal("text/plain", response.Content.Headers.ContentType?.MediaType);
-        Assert.Contains("Streams deny subscriptions by default", body, StringComparison.Ordinal);
-        Assert.Contains(nameof(RazorWireStreamAuthorizationMode.AllowAll), body, StringComparison.Ordinal);
-        Assert.Contains(nameof(IRazorWireChannelAuthorizer), body, StringComparison.Ordinal);
+        Assert.Contains("The caller must authenticate before this stream can open", body, StringComparison.Ordinal);
+        Assert.Contains("Authenticate the request in host middleware", body, StringComparison.Ordinal);
+        Assert.Contains(nameof(AppSurfaceAuthOutcome.Challenge), body, StringComparison.Ordinal);
         Assert.DoesNotContain("tenant-secret-42", body, StringComparison.Ordinal);
     }
 
@@ -73,7 +73,7 @@ public class RazorWireEndpointAuthorizationTests
         using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
         var body = await response.Content.ReadAsStringAsync();
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Equal(string.Empty, body);
     }
 

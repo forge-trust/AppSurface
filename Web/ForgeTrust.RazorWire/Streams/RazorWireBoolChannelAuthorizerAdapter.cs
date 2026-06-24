@@ -28,10 +28,13 @@ internal sealed class RazorWireBoolChannelAuthorizerAdapter : IRazorWireStreamAu
 
         var channelAuthorizer = context.HttpContext.RequestServices.GetRequiredService<IRazorWireChannelAuthorizer>();
         var allowed = await channelAuthorizer.CanSubscribeAsync(context.HttpContext, context.Channel);
+        var isAuthenticated = context.HttpContext.User?.Identity?.IsAuthenticated == true;
 
         var result = allowed
             ? AppSurfaceAuthResult.Allowed()
-            : AppSurfaceAuthResult.Forbidden();
+            : isAuthenticated
+                ? AppSurfaceAuthResult.Forbidden()
+                : AppSurfaceAuthResult.Challenge();
         var authorizerType = channelAuthorizer.GetType().FullName ?? channelAuthorizer.GetType().Name;
 
         return (result, authorizerType);

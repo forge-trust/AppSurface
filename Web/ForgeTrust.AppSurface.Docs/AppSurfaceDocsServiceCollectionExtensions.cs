@@ -25,6 +25,9 @@ namespace ForgeTrust.AppSurface.Docs;
 /// </remarks>
 public static class AppSurfaceDocsServiceCollectionExtensions
 {
+    private const string RazorWireBoolChannelAuthorizerAdapterTypeName =
+        "ForgeTrust.RazorWire.Streams.RazorWireBoolChannelAuthorizerAdapter";
+
     /// <summary>
     /// Adds the AppSurface Docs package services, normalized options, and routing helpers to the service collection.
     /// </summary>
@@ -296,7 +299,9 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     {
         if (streamDescriptor is not null && !IsRazorWireBoolChannelAuthorizerAdapter(streamDescriptor))
         {
-            return streamDescriptor.Lifetime;
+            return channelDescriptor is null
+                ? streamDescriptor.Lifetime
+                : ShorterLifetime(streamDescriptor.Lifetime, channelDescriptor.Lifetime);
         }
 
         return channelDescriptor?.Lifetime ?? ServiceLifetime.Singleton;
@@ -356,7 +361,8 @@ public static class AppSurfaceDocsServiceCollectionExtensions
 
         if (descriptor.ImplementationFactory is not null)
         {
-            return descriptor.ImplementationFactory(provider) as IRazorWireStreamAuthorizer;
+            return FilterBoolChannelAuthorizerAdapter(
+                descriptor.ImplementationFactory(provider) as IRazorWireStreamAuthorizer);
         }
 
         return descriptor.ImplementationType is not null
@@ -372,10 +378,35 @@ public static class AppSurfaceDocsServiceCollectionExtensions
 
     private static bool IsRazorWireBoolChannelAuthorizerAdapter(ServiceDescriptor descriptor)
     {
-        const string adapterTypeName = "ForgeTrust.RazorWire.Streams.RazorWireBoolChannelAuthorizerAdapter";
+        return descriptor.ImplementationType?.FullName == RazorWireBoolChannelAuthorizerAdapterTypeName
+               || IsRazorWireBoolChannelAuthorizerAdapter(descriptor.ImplementationInstance);
+    }
 
-        return descriptor.ImplementationType?.FullName == adapterTypeName
-               || descriptor.ImplementationInstance?.GetType().FullName == adapterTypeName;
+    private static IRazorWireStreamAuthorizer? FilterBoolChannelAuthorizerAdapter(
+        IRazorWireStreamAuthorizer? authorizer)
+    {
+        return IsRazorWireBoolChannelAuthorizerAdapter(authorizer) ? null : authorizer;
+    }
+
+    private static bool IsRazorWireBoolChannelAuthorizerAdapter(object? instance)
+    {
+        return instance?.GetType().FullName == RazorWireBoolChannelAuthorizerAdapterTypeName;
+    }
+
+    private static ServiceLifetime ShorterLifetime(ServiceLifetime first, ServiceLifetime second)
+    {
+        return LifetimeRank(first) <= LifetimeRank(second) ? first : second;
+    }
+
+    private static int LifetimeRank(ServiceLifetime lifetime)
+    {
+        return lifetime switch
+        {
+            ServiceLifetime.Transient => 0,
+            ServiceLifetime.Scoped => 1,
+            ServiceLifetime.Singleton => 2,
+            _ => 0
+        };
     }
 
     private static void TryAddMarkdownHarvester(IServiceCollection services)

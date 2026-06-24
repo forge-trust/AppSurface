@@ -121,7 +121,7 @@ public class RazorWireChannelAuthorizerTests
     }
 
     [Fact]
-    public async Task AddRazorWire_DefaultConfiguration_ResolvesResultAdapterOverDenyAll()
+    public async Task AddRazorWire_DefaultConfiguration_ChallengesAnonymousResultAdapterDenials()
     {
         var services = new ServiceCollection();
 
@@ -129,6 +129,31 @@ public class RazorWireChannelAuthorizerTests
 
         using var provider = services.BuildServiceProvider();
         var context = new DefaultHttpContext { RequestServices = provider };
+        var authorizer = provider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var result = await authorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                "public",
+                RazorWireStreamAuthorizationMode.DenyAll));
+
+        Assert.Equal(AppSurfaceAuthOutcome.Challenge, result.Outcome);
+        Assert.Equal(AppSurfaceAuthReason.Unauthenticated, result.Reason);
+    }
+
+    [Fact]
+    public async Task AddRazorWire_DefaultConfiguration_ForbidsAuthenticatedResultAdapterDenials()
+    {
+        var services = new ServiceCollection();
+
+        services.AddRazorWire();
+
+        using var provider = services.BuildServiceProvider();
+        var context = new DefaultHttpContext
+        {
+            RequestServices = provider,
+            User = new System.Security.Claims.ClaimsPrincipal(
+                new System.Security.Claims.ClaimsIdentity(authenticationType: "Test"))
+        };
         var authorizer = provider.GetRequiredService<IRazorWireStreamAuthorizer>();
         var result = await authorizer.AuthorizeAsync(
             new RazorWireStreamAuthorizationContext(

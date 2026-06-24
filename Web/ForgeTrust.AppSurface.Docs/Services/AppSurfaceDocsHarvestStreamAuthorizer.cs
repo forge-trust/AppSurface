@@ -10,6 +10,13 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// <summary>
 /// Authorizes the AppSurface Docs harvest progress stream with result-bearing RazorWire authorization semantics.
 /// </summary>
+/// <remarks>
+/// Use this wrapper when AppSurface Docs owns the harvest-progress channel but must preserve host RazorWire
+/// authorization for other channels. The decision order is: after-registration legacy replacement authorizer,
+/// non-harvest host-channel delegation, harvest route visibility, Development fallback, custom result authorizer,
+/// custom legacy bool authorizer, then deny. Built-in RazorWire allow-all and deny-all authorizers are compatibility
+/// defaults and do not authorize the Docs harvest stream in non-Development hosts.
+/// </remarks>
 internal sealed class AppSurfaceDocsHarvestStreamAuthorizer : IRazorWireStreamAuthorizer
 {
     private readonly AppSurfaceDocsOptions _options;

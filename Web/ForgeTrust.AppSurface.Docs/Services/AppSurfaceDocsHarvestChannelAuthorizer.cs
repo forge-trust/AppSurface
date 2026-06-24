@@ -22,9 +22,12 @@ internal sealed class AppSurfaceDocsHarvestChannelAuthorizer : IRazorWireChannel
     /// <remarks>
     /// The harvest channel is denied when harvest routes are hidden. Development hosts may use the default live
     /// observatory without a custom authorizer. Non-development hosts must provide a custom, non-built-in
-    /// <see cref="IRazorWireChannelAuthorizer"/> that allows the AppSurface Docs harvest progress channel. Non-harvest
-    /// channels delegate to <paramref name="inner"/> when supplied and otherwise remain denied so registering
-    /// AppSurface Docs does not make unrelated RazorWire streams public.
+    /// <see cref="IRazorWireStreamAuthorizer"/> or legacy <see cref="IRazorWireChannelAuthorizer"/> that allows the
+    /// AppSurface Docs harvest progress channel. This legacy constructor builds an
+    /// <see cref="AppSurfaceDocsHarvestStreamAuthorizer"/> and supplies <paramref name="inner"/> as the bool-facade
+    /// fallback. Non-harvest channels delegate through the effective result authorizer, including the legacy
+    /// <paramref name="inner"/> fallback when supplied, and otherwise remain denied so registering AppSurface Docs does
+    /// not make unrelated RazorWire streams public.
     /// </remarks>
     public AppSurfaceDocsHarvestChannelAuthorizer(
         AppSurfaceDocsOptions options,
