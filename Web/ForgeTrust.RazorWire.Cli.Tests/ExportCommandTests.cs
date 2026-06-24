@@ -136,6 +136,113 @@ public class ExportCommandTests
     }
 
     [Fact]
+    public async Task ReleaseArchiveManifestWriter_ShouldFail_BeforeEnumerating_LinkedArchiveEntry()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-release-manifest-").FullName;
+        var outsideRoot = Directory.CreateTempSubdirectory("razorwire-release-outside-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(tempDir, "index.html"), "<!DOCTYPE html><html></html>");
+            await File.WriteAllTextAsync(Path.Join(outsideRoot, "secret.txt"), "outside");
+            var linkPath = Path.Join(tempDir, "linked-assets");
+            if (!TryCreateDirectorySymlink(linkPath, outsideRoot))
+            {
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
+            }
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(
+                () => ReleaseArchiveManifestWriter.WriteAsync(tempDir, CancellationToken.None));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT009", diagnostic.Code);
+            Assert.Contains("[archive-entry-reparse]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains("Operation: archive-enumerate.", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(TestPathUtils.PathUnder(tempDir, ".appsurface-docs-release-manifest.json")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(outsideRoot))
+            {
+                Directory.Delete(outsideRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ReleaseArchiveManifestWriter_ShouldFail_BeforeHashing_LinkedExistingManifestTarget()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-release-manifest-").FullName;
+        var outsideRoot = Directory.CreateTempSubdirectory("razorwire-release-outside-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(tempDir, "index.html"), "<!DOCTYPE html><html></html>");
+            var outsideManifest = Path.Join(outsideRoot, ".appsurface-docs-release-manifest.json");
+            await File.WriteAllTextAsync(outsideManifest, "outside");
+            var manifestPath = TestPathUtils.PathUnder(tempDir, ".appsurface-docs-release-manifest.json");
+            if (!TryCreateFileSymlink(manifestPath, outsideManifest))
+            {
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
+            }
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(
+                () => ReleaseArchiveManifestWriter.WriteAsync(tempDir, CancellationToken.None));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT009", diagnostic.Code);
+            Assert.Contains("[archive-entry-reparse]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Equal("outside", await File.ReadAllTextAsync(outsideManifest));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(outsideRoot))
+            {
+                Directory.Delete(outsideRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ReleaseArchiveManifestWriter_ShouldFail_BeforeInspecting_DanglingLinkedArchiveEntry()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-release-manifest-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(tempDir, "index.html"), "<!DOCTYPE html><html></html>");
+            var linkPath = Path.Join(tempDir, "dangling.txt");
+            if (!TryCreateFileSymlink(linkPath, Path.Join(tempDir, "missing-target.txt")))
+            {
+                throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
+            }
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(
+                () => ReleaseArchiveManifestWriter.WriteAsync(tempDir, CancellationToken.None));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT009", diagnostic.Code);
+            Assert.Contains("[archive-entry-reparse]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains("Operation: archive-enumerate.", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(TestPathUtils.PathUnder(tempDir, ".appsurface-docs-release-manifest.json")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_Should_Throw_When_No_Source_Is_Provided()
     {
         var command = CreateCommand(null, null, null);
@@ -319,6 +426,48 @@ public class ExportCommandTests
         {
             CreateCount++;
             throw new InvalidOperationException("The source resolver should not run before --live-origin validation.");
+        }
+    }
+
+    private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryCreateFileSymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
         }
     }
 }

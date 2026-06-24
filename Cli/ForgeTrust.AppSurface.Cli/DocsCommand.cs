@@ -184,14 +184,14 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepository
     /// <returns>A value task that completes when export finishes.</returns>
     internal async ValueTask ExecuteAsync(CancellationToken cancellationToken)
     {
-        var exportArgs = BuildExportArgs();
-        _logger.LogInformation(
-            "Exporting AppSurface Docs for {RepositoryRoot} to {OutputPath}.",
-            exportArgs.HostArgs.RepositoryRoot,
-            exportArgs.OutputPath);
-
         try
         {
+            var exportArgs = BuildExportArgs();
+            _logger.LogInformation(
+                "Exporting AppSurface Docs for {RepositoryRoot} to {OutputPath}.",
+                exportArgs.HostArgs.RepositoryRoot,
+                exportArgs.OutputPath);
+
             await _exportRunner.ExportAsync(exportArgs, cancellationToken);
         }
         catch (ExportValidationException ex)
@@ -230,6 +230,11 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepository
         }
 
         var outputPath = Path.GetFullPath(OutputPath);
+        ExportOutputPathGuards.ValidateOutputRootPath(
+            outputPath,
+            "AppSurface Docs export output root",
+            route: null,
+            "create-directory");
         if (File.Exists(outputPath))
         {
             throw new CommandException($"The --output value must point to an export directory, but an existing file was found: {outputPath}");
@@ -2542,9 +2547,16 @@ internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsE
             }
         }
 
-        await AppSurfaceDocsFrozenRouteManifest.WriteAsync(
+        var manifestPath = AppSurfaceDocsFrozenRouteManifest.BuildManifestPath(
             context.OutputPath,
-            routeManifest,
+            AppSurfaceDocsFrozenRouteManifest.FileName);
+        await ExportOutputPathGuards.WriteTextArtifactAsync(
+            context.OutputPath,
+            manifestPath,
+            "AppSurface Docs frozen route manifest",
+            "/" + AppSurfaceDocsFrozenRouteManifest.FileName,
+            AppSurfaceDocsFrozenRouteManifest.Serialize(routeManifest),
+            encoding: null,
             cancellationToken);
     }
 }
