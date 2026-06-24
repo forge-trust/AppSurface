@@ -16,6 +16,8 @@ The CLI also includes public coverage commands for private-by-default CI coverag
 
 `appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, delete keys, and run doctor diagnostics for platform availability.
 
+`appsurface pwa verify` checks the install metadata served by `ForgeTrust.AppSurface.Web`: secure origin posture, manifest discovery and content, icon reachability, same-origin start URL and scope, head link presence, diagnostics exposure, and opt-in offline service worker posture.
+
 ## Release Guidance
 
 AppSurface publishes coordinated `v0.1.0` release candidates. Before installing this package from a prerelease feed, read the [v0.1.0 RC 4 release note](../../releases/v0.1.0-rc.4.md) for current release risk, migration guidance, and package readiness.
@@ -62,6 +64,17 @@ dotnet tool run appsurface --version
 ```
 
 ## Commands
+
+### `appsurface pwa verify`
+
+Verify PWA install metadata for a running AppSurface Web app:
+
+```bash
+appsurface pwa verify --url https://app.example.com
+appsurface pwa verify --url http://localhost:5055 --json
+```
+
+The verifier accepts HTTPS origins and localhost development origins. It reports stable `ASPWA2xx` diagnostics for manifest reachability, required manifest fields, required `192x192` and `512x512` icons, icon content types, root-page manifest links, development diagnostics, and offline service worker posture when the app enables an offline strategy. JSON output is intended for CI or smoke tests; text output is optimized for local copy-paste debugging.
 
 ### `appsurface secrets`
 

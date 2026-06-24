@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="AppSurface PWA proof icon">
+  <rect width="512" height="512" rx="88" fill="#2563eb"/>
+  <path d="M128 320h256v48H128zM128 224h256v48H128zM128 128h256v48H128z" fill="#ffffff"/>
+  <circle cx="376" cy="376" r="60" fill="#22c55e"/>
+</svg>

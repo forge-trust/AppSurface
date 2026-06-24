@@ -60,6 +60,7 @@
     <Project Path="examples/product-readiness-lab-verifier/ProductReadinessLabVerifier.csproj" />
     <Project Path="examples/web-app/WebAppExample.csproj" />
     <Project Path="examples/web-error-pages/WebErrorPagesExample.csproj" />
+    <Project Path="examples/web-pwa-install/WebPwaInstallExample.csproj" />
   </Folder>
   <Folder Name="/Flow/">
     <Project Path="Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj" />

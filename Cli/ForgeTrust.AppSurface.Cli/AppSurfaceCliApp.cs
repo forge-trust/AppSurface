@@ -74,6 +74,9 @@ internal static class AppSurfaceCliApp
         services.AddSingleton<ICoverageRunProcessRunner, CliWrapCoverageRunProcessRunner>();
         services.AddSingleton<IReportGeneratorPackageLocator, ReportGeneratorPackageLocator>();
         services.AddSingleton<ICoverageRunReportGenerator, CoverageRunReportGenerator>();
+        services.AddHttpClient<IPwaVerificationHttpClient, PwaVerificationHttpClient>(
+            client => { client.Timeout = TimeSpan.FromSeconds(30); });
+        services.AddTransient<PwaVerifier>();
         services.AddSingleton(TimeProvider.System);
         services.AddTransient<CoverageRunWorkflow>();
         services.AddTransient<CoverageMergeWorkflow>();
@@ -88,6 +91,7 @@ internal static class AppSurfaceCliApp
         {
             builder.AddConsole();
             builder.SetMinimumLevel(LogLevel.Information);
+            builder.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
         });
 
         foreach (var commandType in commandTypes)
