@@ -40,6 +40,26 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
     }
 
     [Fact]
+    public async Task WriteAsync_ShouldValidateBeforeCreatingOutputDirectory()
+    {
+        var outputPath = Path.Join(_tempDirectory, "future-output");
+        var manifest = new AppSurfaceDocsRouteManifest(
+            [
+                Entry(
+                    sourcePath: "guide.md",
+                    canonicalRoutePath: "../admin",
+                    aliases: ["guide.md"])
+            ],
+            []);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => AppSurfaceDocsFrozenRouteManifest.WriteAsync(outputPath, manifest, CancellationToken.None));
+
+        Assert.Contains("unsafe canonical route", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(outputPath));
+    }
+
+    [Fact]
     public async Task WriteAsync_ShouldRejectAliasesThatCollideWithFragmentedCanonicalRoutes()
     {
         var manifest = new AppSurfaceDocsRouteManifest(
