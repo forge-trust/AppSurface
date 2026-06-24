@@ -1332,9 +1332,7 @@ public class DocsController : Controller
             ? string.Empty
             : candidate[(normalizedDocsRoot == "/" ? 1 : normalizedDocsRoot.Length + 1)..];
 
-        return !relativePath.Equals("_harvest", StringComparison.OrdinalIgnoreCase)
-               && !relativePath.Equals("_harvest/rebuild", StringComparison.OrdinalIgnoreCase)
-               && !relativePath.StartsWith("_harvest/", StringComparison.OrdinalIgnoreCase);
+        return !StartsWithHarvestRouteSegment(relativePath);
     }
 
     /// <summary>
@@ -1531,6 +1529,26 @@ public class DocsController : Controller
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Determines whether a docs-root-relative path begins with the reserved harvest route segment.
+    /// </summary>
+    /// <param name="relativePath">The decoded path relative to the current docs root.</param>
+    /// <returns>
+    /// <see langword="true"/> when the first non-empty path segment is <c>_harvest</c>; otherwise
+    /// <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// Duplicate separators can appear after decoding an otherwise local URL. The harvest loop guard therefore evaluates
+    /// the first meaningful segment instead of comparing the unnormalized relative path string.
+    /// </remarks>
+    private static bool StartsWithHarvestRouteSegment(string relativePath)
+    {
+        var firstSegment = relativePath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        return string.Equals(firstSegment, "_harvest", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

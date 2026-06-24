@@ -65,6 +65,24 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
     internal int CompletionDelay => CompletionDelayMilliseconds;
 
     /// <summary>
+    /// Gets the number of run identifiers whose terminal completion visit is currently suppressed.
+    /// </summary>
+    /// <remarks>
+    /// This test seam keeps suppression cleanup verifiable without exposing the mutable set or using reflection. Production
+    /// callers should use <see cref="SuppressCompletionVisitForCurrentOrNextRun"/> instead of observing this count.
+    /// </remarks>
+    internal int SuppressedCompletionVisitCount
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _completionVisitSuppressedRunIds.Count;
+            }
+        }
+    }
+
+    /// <summary>
     /// Begins a new harvest run and publishes the initial waiting snapshot.
     /// </summary>
     /// <param name="harvesterTypes">The redacted harvester type names expected in the run.</param>
@@ -310,6 +328,11 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                 Activity = AddActivity(_snapshot.Activity, $"Harvest completed with {health.TotalDocs.ToString(CultureInfo.InvariantCulture)} docs.")
             };
             _snapshot = snapshot;
+            if (snapshot.State == AppSurfaceDocsHarvestRunState.Failed)
+            {
+                _completionVisitSuppressedRunIds.Remove(runId);
+            }
+
             publishCompletionVisit = previousState != AppSurfaceDocsHarvestRunState.Completed
                                      && snapshot.State == AppSurfaceDocsHarvestRunState.Completed;
         }

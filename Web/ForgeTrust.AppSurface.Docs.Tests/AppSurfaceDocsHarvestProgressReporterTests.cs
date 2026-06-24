@@ -343,6 +343,29 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     }
 
     [Fact]
+    public async Task ProgressReporter_ShouldClearSuppressedRunId_WhenSuppressedRunFails()
+    {
+        var hub = new RecordingRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        Assert.Equal(runId, reporter.SuppressCompletionVisitForCurrentOrNextRun());
+        Assert.Equal(1, reporter.SuppressedCompletionVisitCount);
+
+        await reporter.CompleteRunAsync(runId, CreateHealth(DocHarvestHealthStatus.Failed));
+
+        Assert.Equal(0, reporter.SuppressedCompletionVisitCount);
+        Assert.DoesNotContain(
+            hub.Published,
+            item => item.Message.Contains("action=\"rw-visit\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ProgressReporter_ShouldReplayFailedTerminalStateWithoutVisit()
     {
         var hub = new InMemoryRazorWireStreamHub();
