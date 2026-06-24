@@ -1,5 +1,9 @@
 using System.Net;
+using System.Security.Claims;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Auth;
+using ForgeTrust.AppSurface.Auth.Testing;
+using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace AuthWebRazorWireProofExample.Tests;
 
@@ -11,6 +15,55 @@ public sealed class AuthWebRazorWireProofExampleTests
     public AuthWebRazorWireProofExampleTests(AuthWebRazorWireProofFixture fixture)
     {
         _fixture = fixture;
+    }
+
+    [Theory]
+    [InlineData("viewer", HttpStatusCode.Forbidden, AppSurfaceAuthOutcome.Forbid, AppSurfaceAuthReason.Forbidden, "viewer-1")]
+    [InlineData("operator", HttpStatusCode.OK, AppSurfaceAuthOutcome.Allowed, AppSurfaceAuthReason.None, "operator-1")]
+    public async Task WebApplicationFactoryProof_UsesAppSurfaceAuthTestingPersonas(
+        string persona,
+        HttpStatusCode expectedStatusCode,
+        AppSurfaceAuthOutcome expectedOutcome,
+        AppSurfaceAuthReason expectedReason,
+        string expectedSubject)
+    {
+        await using var factory = CreateAuthTestingFactory();
+        using var client = factory.CreateAppSurfaceClient(persona);
+
+        using var response = await client.GetAsync("/api/auth-proof");
+        var body = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(body);
+
+        Assert.Equal(expectedStatusCode, response.StatusCode);
+        Assert.Equal(expectedOutcome.ToString(), ReadString(json, "outcome"));
+        Assert.Equal(expectedReason.ToString(), ReadString(json, "reason"));
+        Assert.Equal(expectedSubject, ReadNullableString(json, "subject"));
+    }
+
+    [Fact]
+    public async Task WebApplicationFactoryProof_NoPersonaSelectionRemainsAnonymous()
+    {
+        await using var factory = CreateAuthTestingFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync("/api/auth-proof");
+        var body = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(body);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(AppSurfaceAuthOutcome.Challenge.ToString(), ReadString(json, "outcome"));
+        Assert.Equal(AppSurfaceAuthReason.Unauthenticated.ToString(), ReadString(json, "reason"));
+        Assert.Null(ReadNullableString(json, "subject"));
+    }
+
+    [Fact]
+    public async Task WebApplicationFactoryProof_UnknownPersonaFailsBeforeSendingRequest()
+    {
+        await using var factory = CreateAuthTestingFactory();
+
+        var error = Assert.Throws<InvalidOperationException>(() => factory.CreateAppSurfaceClient("missing"));
+
+        Assert.Contains(AppSurfaceTestAuthDiagnosticCodes.UnknownPersona, error.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -224,5 +277,16 @@ public sealed class AuthWebRazorWireProofExampleTests
     private static int ReadInt32(JsonDocument json, string propertyName)
     {
         return json.RootElement.GetProperty(propertyName).GetInt32();
+    }
+
+    private static WebApplicationFactory<Program> CreateAuthTestingFactory()
+    {
+        return new WebApplicationFactory<Program>()
+            .WithAppSurfaceTestAuth(options =>
+            {
+                options.SubjectClaimType = "sub";
+                options.AddPersona("operator", "operator-1", [new Claim("role", "operator")]);
+                options.AddPersona("viewer", "viewer-1", [new Claim("role", "viewer")]);
+            });
     }
 }
