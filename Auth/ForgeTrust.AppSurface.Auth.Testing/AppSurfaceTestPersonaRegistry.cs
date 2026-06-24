@@ -11,15 +11,21 @@ internal sealed class AppSurfaceTestPersonaRegistry
 
     public static AppSurfaceTestPersonaRegistry Create(AppSurfaceTestAuthOptions options)
     {
-        var personas = new Dictionary<string, AppSurfaceTestPersona>(StringComparer.Ordinal);
-        foreach (var persona in options.Personas)
+        var duplicatePersona = options.Personas
+            .GroupBy(persona => persona.Name, StringComparer.Ordinal)
+            .Where(group => group.Skip(1).Any())
+            .Select(group => group.First())
+            .FirstOrDefault();
+
+        if (duplicatePersona is not null)
         {
-            if (!personas.TryAdd(persona.Name, persona))
-            {
-                throw new InvalidOperationException(
-                    $"Problem: AppSurface test auth persona '{persona.Name}' is registered more than once. Cause: persona names are matched with ordinal comparison and must be unique. Fix: remove the duplicate or rename one persona. Docs: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md. Code: {AppSurfaceTestAuthDiagnosticCodes.DuplicatePersona}.");
-            }
+            throw new InvalidOperationException(
+                $"Problem: AppSurface test auth persona '{duplicatePersona.Name}' is registered more than once. Cause: persona names are matched with ordinal comparison and must be unique. Fix: remove the duplicate or rename one persona. Docs: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md. Code: {AppSurfaceTestAuthDiagnosticCodes.DuplicatePersona}.");
         }
+
+        var personas = options.Personas.ToDictionary(
+            persona => persona.Name,
+            StringComparer.Ordinal);
 
         return new AppSurfaceTestPersonaRegistry(personas);
     }
