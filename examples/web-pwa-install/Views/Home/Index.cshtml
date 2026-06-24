@@ -1,5 +1,6 @@
 @{
     ViewData["Title"] = "Install";
+    var verifierOrigin = $"{Context.Request.Scheme}://{Context.Request.Host}";
 }
 
 <main>
@@ -10,6 +11,6 @@
     </p>
     <p>
         Open <a href="/_appsurface/pwa">/_appsurface/pwa</a> for local diagnostics, or run
-        <code>appsurface pwa verify --url http://localhost:5055</code>.
+        <code>appsurface pwa verify --url @verifierOrigin</code>.
     </p>
 </main>
