@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.csproj" />
+    <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj" />
+  </ItemGroup>
+
+</Project>

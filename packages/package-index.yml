@@ -34,10 +34,10 @@ packages:
     release_notes_path: releases/v0.1.0-rc.4.md
     order: 25
     use_when: Add this after Config when a solo or hobbyist AppSurface app needs local development secrets before adopting a remote vault.
-    includes: AppSurfaceLocalSecretsModule, OS-backed local secret store adapters, fail-closed posture modes, local secret identity normalization, structured source diagnostics, test seams, and the `appsurface secrets` workflow.
-    does_not_include: Team secret sharing, CI/container secret injection, production rotation, remote vault storage, cloud secret managers, or generic vault abstractions.
+    includes: AppSurfaceLocalSecretsModule, OS-backed local secret store adapters, trusted Linux `secret-tool` resolution, fail-closed posture modes, Unix mode-bit-hardened file fallback for deterministic examples/tests, local secret identity normalization, structured source diagnostics, test seams, and the `appsurface secrets` workflow.
+    does_not_include: Team secret sharing, CI/container secret injection, production rotation, remote vault storage, cloud secret managers, generic vault abstractions, PATH-based executable discovery, or file-fallback parity with OS credential stores.
     start_here_path: Config/ForgeTrust.AppSurface.Config.LocalSecrets/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Config.LocalSecrets` after Config when local development secrets need source-aware diagnostics before a remote vault exists.
+    recipe_summary: Add `ForgeTrust.AppSurface.Config.LocalSecrets` after Config when local development secrets need source-aware diagnostics before a remote vault exists, including trusted Linux `secret-tool` resolution for nonstandard installs.
     depends_on:
       - ForgeTrust.AppSurface.Config
     expected_dependency_package_ids:
@@ -87,7 +87,7 @@ packages:
     recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results or Minimal API ProblemDetails responses; run the [Auth Web/RazorWire proof](../examples/auth-web-razorwire-proof/README.md) for the browser-first Web/RazorWire proof.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth
-  - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj
+  - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.csproj
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -95,6 +95,21 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/unreleased.md
     order: 37
+    use_when: Add this in Development-only ASP.NET Core hosts when package consumers need selectable fake personas, a visible local control page, and AppSurface policy proof without configuring an external identity provider.
+    includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, MapAppSurfaceDevAuth control endpoints, AppSurfaceDevAuthMarker embeddable state overlay, seeded personas, protected persona cookie, loopback-only status JSON, startup safety diagnostics, and ASDEV diagnostic codes.
+    does_not_include: Production authentication, OIDC, JWT validation, ASP.NET Identity, password handling, durable app-user mapping, user stores, tenant authority, audit sinks, deployment auth, automatic host HTML injection, RazorWire auth UI components, or the future automated test harness.
+    start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts that need fake local personas to prove AppSurface policy results.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Auth.AspNetCore
+  - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 38
     use_when: Add this in an ASP.NET Core web host that already chose an OpenID Connect provider and wants AppSurface-named cookie/OIDC schemes with safe defaults and diagnostics.
     includes: AddAppSurfaceOidcAuth registration, AppSurfaceOidcAuthOptions, named cookie and OpenID Connect schemes, authorization-code defaults, SaveTokens false by default, local-only passive login/logout prompt helpers, OIDC subject mapping handoff, event chaining, and stable safe diagnostic codes.
     does_not_include: User stores, ASP.NET Identity replacement, identity-provider hosting, OAuth/OIDC server behavior, provider SDKs, EF Core, persistence, middleware insertion, active redirects, challenge execution, sign-in or sign-out execution, silent default-scheme takeover, token storage by default, Aspire Keycloak, Dev Auth, or app-user provisioning.
@@ -295,11 +310,11 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.4.md
     order: 100
-    use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, or islands without moving to a separate frontend app.
-    includes: RazorWire modules, TagHelpers, stream helpers, Razor fragment updates, and hybrid island support.
+    use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, islands, or local declarative form interactions without moving to a separate frontend app.
+    includes: RazorWire modules, TagHelpers, stream helpers, Razor fragment updates, hybrid island support, failed-form UX, page navigation, section copy, and stable form interactions for conditional targets and one-dimensional model-bound collections.
     does_not_include: OpenAPI generation, API reference UI, or Tailwind asset compilation.
     start_here_path: Web/ForgeTrust.RazorWire/README.md
-    recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, and server-rendered islands.
+    recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, server-rendered islands, and local declarative form interactions.
     depends_on:
       - ForgeTrust.AppSurface.Intelligence
       - ForgeTrust.AppSurface.Web

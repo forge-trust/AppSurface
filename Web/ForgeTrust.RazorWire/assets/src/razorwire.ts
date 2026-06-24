@@ -11,6 +11,7 @@ interface Window {
         formFailureManager?: unknown;
         pageNavigationManager?: unknown;
         sectionCopyManager?: unknown;
+        formInteractionsManager?: unknown;
     };
     Turbo?: TurboRuntime;
 }

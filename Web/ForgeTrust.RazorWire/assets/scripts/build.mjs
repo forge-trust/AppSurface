@@ -43,6 +43,14 @@ const generatedOutputs = [
     banner: 'Generated from assets/src/section-copy.ts. Do not edit wwwroot/razorwire/section-copy.js by hand.',
     rawBytes: 12_000,
     gzipBytes: 4_000
+  },
+  {
+    entry: path.join(assetRoot, 'src', 'form-interactions.ts'),
+    output: path.join(outputRoot, 'form-interactions.js'),
+    label: 'form-interactions.js',
+    banner: 'Generated from assets/src/form-interactions.ts. Do not edit wwwroot/razorwire/form-interactions.js by hand.',
+    rawBytes: 24_000,
+    gzipBytes: 7_000
   }
 ];
 

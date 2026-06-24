@@ -68,6 +68,10 @@ public class RazorWireScriptsTagHelperTests
                 "/my-app",
                 "/_content/ForgeTrust.RazorWire/razorwire/section-copy.js"))
             .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc");
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js?v=form");
 
         // Act
         _helper.Process(_context, _output);
@@ -91,12 +95,16 @@ public class RazorWireScriptsTagHelperTests
             content);
         Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789\"", content);
         Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc\"", content);
+        Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js?v=form\"", content);
         Assert.Contains("const selectors = [\"rw-page-nav\", \"[data-rw-page-nav]\"];", content);
         Assert.Contains("data-rw-page-navigation-runtime", content);
         Assert.Contains("RazorWirePageNavigationInitialized", content);
         Assert.Contains("data-rw-section-copy-runtime", content);
         Assert.Contains("RazorWireSectionCopyInitialized", content);
         Assert.Contains("\"[data-rw-section-copy]\", \"[data-rw-section-copy-target]\"", content);
+        Assert.Contains("data-rw-form-interactions-runtime", content);
+        Assert.Contains("RazorWireFormInteractionsInitialized", content);
+        Assert.Contains("\"[data-rw-form-toggle]\", \"[data-rw-form-collection]\"", content);
         Assert.Contains("turbo:frame-load", content);
     }
 
@@ -128,6 +136,7 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("data-rw-page-navigation-runtime=\"eager\"", content);
         Assert.DoesNotContain("const selectors = [\"rw-page-nav\", \"[data-rw-page-nav]\"];", content);
         Assert.Contains("data-rw-section-copy-runtime", content);
+        Assert.Contains("data-rw-form-interactions-runtime", content);
     }
 
     [Fact]
@@ -158,6 +167,38 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("data-rw-section-copy-runtime=\"eager\"", content);
         Assert.DoesNotContain("\"[data-rw-section-copy]\", \"[data-rw-section-copy-target]\"", content);
         Assert.Contains("data-rw-page-navigation-runtime", content);
+        Assert.Contains("data-rw-form-interactions-runtime", content);
+    }
+
+    [Fact]
+    public void Process_WhenFormInteractionsEnabled_RendersEagerScript()
+    {
+        // Arrange
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider)
+        {
+            ViewContext = _viewContext,
+            FormInteractions = true
+        };
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js?v=form");
+
+        // Act
+        helper.Process(_context, _output);
+
+        // Assert
+        var content = _output.Content.GetContent();
+        Assert.Contains(
+            "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js?v=form\"",
+            content);
+        Assert.Contains("data-rw-form-interactions-runtime=\"eager\"", content);
+        Assert.DoesNotContain("\"[data-rw-form-toggle]\", \"[data-rw-form-collection]\"", content);
+        Assert.Contains("data-rw-page-navigation-runtime", content);
+        Assert.Contains("data-rw-section-copy-runtime", content);
     }
 
     [Fact]
@@ -176,6 +217,7 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("assets:razorwire:verify", project, StringComparison.Ordinal);
         Assert.Contains("RWPACK001", project, StringComparison.Ordinal);
         Assert.Contains("razorwire\\section-copy.js", project, StringComparison.Ordinal);
+        Assert.Contains("razorwire\\form-interactions.js", project, StringComparison.Ordinal);
         Assert.Contains("""<Content Remove="assets\**\*" />""", project, StringComparison.Ordinal);
         Assert.Contains("""<None Remove="assets\**\*" />""", project, StringComparison.Ordinal);
     }

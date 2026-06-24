@@ -16,14 +16,19 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - `ForgeTrust.AppSurface.Auth` now defines durable external-subject to app-user-id mapping contracts, with Auth core staying free of user-store, ASP.NET Core, OIDC, persistence, and tenant-authority ownership.
 - `ForgeTrust.AppSurface.Auth.AspNetCore` can now protect Minimal API endpoints with host-owned ASP.NET Core policies while returning AppSurface-shaped ProblemDetails JSON for API callers.
+- `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` adds Development-only selectable personas, a same-origin local control page, and a visible marker for package consumers proving AppSurface auth flows without an external identity provider.
 - `ForgeTrust.AppSurface.Observability` now lets AppSurface apps register OpenTelemetry logging, tracing, and metrics for Aspire or another OTLP collector without depending on the Aspire AppHost package.
 - `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` now provides a thin ASP.NET Core cookie plus OpenID Connect convenience package with named schemes, safe defaults, passive prompts, event composition, and redacted diagnostics.
 - AppSurface Config can now compare sanitized audit reports, render deterministic same-host or captured-snapshot evidence, and expose command-framework-agnostic diff workflows with display-safe failures.
 - RazorWire export now fails artifact-producing redirects with `RWEXPORT008` when the final response leaves the configured export origin or base path before content is read or written.
+- AppSurface CLI export and docs export now preserve RazorWire `RWEXPORT008` redirect-boundary checks by disabling automatic redirects on the shared `ExportEngine` HTTP client.
+- AppSurface LocalSecrets file fallback now creates missing Unix fallback directories with `0700`, writes or repairs JSON files with `0600`, fails closed on loose parent directories and unsafe path shapes, and lets `appsurface secrets doctor --store-file` report ready, repaired, degraded, or unsupported posture without printing secret values.
 - AppSurface LocalSecrets platform-backed stores now validate indexed names against live stored values during `appsurface secrets list`, prune stale names after successful repair, and let `appsurface secrets delete KEY` clean stale indexed names whose values are already gone.
+- AppSurface LocalSecrets now hardens Linux `secret-tool` resolution by using trusted system candidates or an explicit absolute override instead of executing the first PATH-discovered command.
 - AppSurface Flow now uses value-type execution contexts and deeper benchmark coverage to reduce and track synchronous in-memory runner allocation overhead.
 - `ForgeTrust.AppSurface.Web` now fails startup for AppSurface-managed production CORS when `CorsOptions.AllowedOrigins` contains the literal origin wildcard `*`; replace it with explicit origins such as `https://app.example.com`, keep permissive all-origin behavior to Development through `EnableAllOriginsInDevelopment`, or register host-owned ASP.NET Core CORS for intentionally public wildcard APIs.
 - RazorWire hybrid islands now block inline `data:` module specifiers and protocol-relative `//...` module URLs; serve client modules from relative, root-relative, same-origin, explicit HTTPS, or import-map specifiers instead.
+- RazorWire now provides stable local form interactions for conditional targets and one-dimensional ASP.NET Core model-bound collections without page-local JavaScript.
 
 ## 0.1.0-rc.4 - 2026-06-16
 

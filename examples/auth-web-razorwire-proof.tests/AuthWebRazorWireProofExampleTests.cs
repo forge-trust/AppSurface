@@ -182,6 +182,7 @@ public sealed class AuthWebRazorWireProofExampleTests
     [Theory]
     [InlineData("/_content/ForgeTrust.RazorWire/razorwire/razorwire.js")]
     [InlineData("/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js")]
+    [InlineData("/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js")]
     public async Task BrowserProof_ServesRazorWireRuntimeAssets(string assetPath)
     {
         using var client = _fixture.CreateClient();

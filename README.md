@@ -63,6 +63,7 @@ This approach aims to:
 
 - [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, durable external-subject to app-user-id mapping contracts, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) – ASP.NET Core adapter that maps existing host request auth context and named policies into AppSurface auth results without owning schemes, middleware, challenges, forbids, redirects, or identity-provider setup. Run the [Auth Web/RazorWire proof](./examples/auth-web-razorwire-proof/README.md) to see one host policy drive both API and rendered UI state.
+- [**ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) – Development-only selectable persona auth for local AppSurface policy proofs, with a visible control page, embeddable state overlay, named fake scheme, startup guard, and no production identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore.Oidc**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) – ASP.NET Core cookie + OIDC convenience registration with explicit AppSurface scheme names, conservative token defaults, passive prompt helpers, and safe diagnostics without silent default-scheme takeover or identity-provider ownership.
 - [**ForgeTrust.AppSurface.Auth.Testing**](./Auth/ForgeTrust.AppSurface.Auth.Testing/README.md) – Test-only ASP.NET Core harness for deterministic AppSurface auth personas, WebApplicationFactory integration tests, canonical auth result assertions, and ProblemDetails checks without becoming production authentication or Dev Auth.
 
@@ -94,7 +95,7 @@ This approach aims to:
 
 ### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
 
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including `appsurface docs` preview/export workflows, `appsurface coverage run` private test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` local threshold enforcement.
+- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` private test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` local threshold enforcement.
 
 ### [Dependency](./Dependency/README.md)
 

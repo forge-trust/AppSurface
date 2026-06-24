@@ -12,6 +12,12 @@
 
         @await Component.InvokeAsync("Counter")
 
+        <div class="space-y-2 rounded-xl border border-slate-100 bg-white p-4">
+            <h4 class="text-xs font-bold uppercase tracking-widest text-slate-400">Proof pages</h4>
+            <a asp-controller="Reactivity" asp-action="FormInteractions" class="block text-sm font-semibold text-indigo-700 hover:text-indigo-900">Form interactions</a>
+            <a asp-controller="Reactivity" asp-action="FormFailures" class="block text-sm font-semibold text-indigo-700 hover:text-indigo-900">Failed form UX</a>
+        </div>
+
         <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest px-1 pt-2">
             <span class="text-slate-400">Sync Status</span>
             <time datetime="@DateTimeOffset.UtcNow" rw-type="local" class="text-indigo-600 font-mono"></time>
