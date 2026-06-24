@@ -52,9 +52,10 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
         ArgumentNullException.ThrowIfNull(routeManifest);
 
-        Directory.CreateDirectory(outputPath);
+        var contents = Serialize(routeManifest);
         var manifestPath = BuildManifestPath(outputPath, FileName);
-        await File.WriteAllTextAsync(manifestPath, Serialize(routeManifest), cancellationToken);
+        Directory.CreateDirectory(outputPath);
+        await File.WriteAllTextAsync(manifestPath, contents, cancellationToken);
     }
 
     /// <summary>

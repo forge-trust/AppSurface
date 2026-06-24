@@ -290,11 +290,7 @@ internal static class ExportOutputPathGuards
             return;
         }
 
-        var cursor = Path.TrimEndingDirectorySeparator(root);
-        if (string.IsNullOrWhiteSpace(cursor))
-        {
-            cursor = root;
-        }
+        var cursor = root;
 
         var relative = Path.GetRelativePath(root, outputRoot);
         if (string.IsNullOrWhiteSpace(relative) || relative == ".")
