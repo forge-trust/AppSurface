@@ -44,6 +44,22 @@ public sealed class RazorWireCliReadmeContractTests
     }
 
     [Fact]
+    public void Readme_Should_Document_GeneratedArtifactPhysicalBoundary()
+    {
+        var readme = File.ReadAllText(GetRazorWireCliReadmePath());
+
+        Assert.Contains("#### Generated export artifact boundary", readme, StringComparison.Ordinal);
+        Assert.Contains("Generated artifacts are written only inside the physical output tree.", readme, StringComparison.Ordinal);
+        Assert.Contains("HTML, CSS, binary assets, root `404.html`, AppSurface Docs `.partial.html` files", readme, StringComparison.Ordinal);
+        Assert.Contains("`.appsurface-docs-route-manifest.json`, and `.appsurface-docs-release-manifest.json`", readme, StringComparison.Ordinal);
+        Assert.Contains("`RWEXPORT009` with stable reason labels", readme, StringComparison.Ordinal);
+        Assert.Contains("`output-root-reparse`, `artifact-parent-reparse`, `artifact-target-reparse`, `archive-entry-reparse`, and `artifact-outside-root`", readme, StringComparison.Ordinal);
+        Assert.Contains("This is distinct from `RWEXPORT008`", readme, StringComparison.Ordinal);
+        Assert.Contains("Hostile concurrent mutation after validation is outside the exporter contract", readme, StringComparison.Ordinal);
+        Assert.Contains("`RWEXPORT009`: a generated artifact path or release archive entry would cross the physical output-root boundary", readme, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Readme_Should_CrossReference_HybridHostingGuide()
     {
         var readme = File.ReadAllText(GetRazorWireCliReadmePath());

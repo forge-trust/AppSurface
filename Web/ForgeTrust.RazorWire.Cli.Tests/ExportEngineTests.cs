@@ -871,6 +871,238 @@ public class ExportEngineTests
         }
     }
 
+    public static IEnumerable<object[]> GeneratedArtifactParentReparseCases()
+    {
+        yield return ["/linked/index", "index.html", "text/html", "<!DOCTYPE html><html><body>Linked</body></html>"];
+        yield return ["/linked/site.css", "site.css", "text/css", "body { color: red; }"];
+        yield return ["/linked/logo.png", "logo.png", "image/png", "asset"];
+    }
+
+    [Theory]
+    [MemberData(nameof(GeneratedArtifactParentReparseCases))]
+    public async Task RunAsync_Should_Reject_GeneratedArtifact_ParentReparse_Before_Write(
+        string route,
+        string outsideRelativePath,
+        string mediaType,
+        string body)
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var outsideRoot = Directory.CreateTempSubdirectory("razorwire-export-outside-").FullName;
+        try
+        {
+            var linkedParent = Path.Join(tempDir, "linked");
+            if (!TryCreateDirectorySymlink(linkedParent, outsideRoot))
+            {
+                return;
+            }
+
+            using var handler = new SingleRouteHandler(route, mediaType, body);
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(tempDir, null, [route], "http://localhost:5000");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT009", diagnostic.Code);
+            Assert.Contains("[artifact-parent-reparse]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains("Output-relative path: linked/", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(TestPathUtils.PathUnder(outsideRoot, outsideRelativePath)));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(outsideRoot))
+            {
+                Directory.Delete(outsideRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Reject_404Html_TargetReparse_Before_Write()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var outsideRoot = Directory.CreateTempSubdirectory("razorwire-export-outside-").FullName;
+        try
+        {
+            var outsideFile = Path.Join(outsideRoot, "404.html");
+            await File.WriteAllTextAsync(outsideFile, "outside");
+            var notFoundFile = Path.Join(tempDir, "404.html");
+            if (!TryCreateFileSymlink(notFoundFile, outsideFile))
+            {
+                return;
+            }
+
+            var handler = new ConventionalNotFoundPageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT009", diagnostic.Code);
+            Assert.Contains("[artifact-target-reparse]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains("Output-relative path: 404.html.", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Equal("outside", await File.ReadAllTextAsync(outsideFile));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(outsideRoot))
+            {
+                Directory.Delete(outsideRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Reject_DocsPartial_TargetReparse_Before_Write()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var outsideRoot = Directory.CreateTempSubdirectory("razorwire-export-outside-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Join(tempDir, "docs"));
+            var outsideFile = Path.Join(outsideRoot, "start.partial.html");
+            await File.WriteAllTextAsync(outsideFile, "outside");
+            var partialPath = Path.Join(tempDir, "docs", "start.partial.html");
+            if (!TryCreateFileSymlink(partialPath, outsideFile))
+            {
+                return;
+            }
+
+            using var handler = new SingleRouteHandler(
+                "/docs/start",
+                "text/html",
+                """
+                <html><body><turbo-frame id="doc-content"><article>Start</article></turbo-frame></body></html>
+                """);
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(tempDir, null, ["/docs/start"], "http://localhost:5000");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT009", diagnostic.Code);
+            Assert.Contains("[artifact-target-reparse]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains("AppSurface Docs partial artifact", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Equal("outside", await File.ReadAllTextAsync(outsideFile));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(outsideRoot))
+            {
+                Directory.Delete(outsideRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Reject_RedirectAlias_ParentReparse_Before_Write()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var outsideRoot = Directory.CreateTempSubdirectory("razorwire-export-outside-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Join(tempDir, "docs"));
+            var linkedAliasParent = Path.Join(tempDir, "docs", "example");
+            if (!TryCreateDirectorySymlink(linkedAliasParent, outsideRoot))
+            {
+                return;
+            }
+
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, ["/"], "http://localhost:5000");
+            context.AddRedirectArtifact("/docs/example/README.md", "/docs/example");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT009", diagnostic.Code);
+            Assert.Contains("[artifact-parent-reparse]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains("redirect alias HTML artifact", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(outsideRoot, "README.md.html")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(outsideRoot))
+            {
+                Directory.Delete(outsideRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Reject_NetlifyRedirects_TargetReparse_Before_Write()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var outsideRoot = Directory.CreateTempSubdirectory("razorwire-export-outside-").FullName;
+        try
+        {
+            var outsideFile = Path.Join(outsideRoot, "_redirects");
+            await File.WriteAllTextAsync(outsideFile, "outside");
+            var redirectsPath = Path.Join(tempDir, "_redirects");
+            if (!TryCreateFileSymlink(redirectsPath, outsideFile))
+            {
+                return;
+            }
+
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                redirectStrategy: ExportRedirectStrategy.Netlify);
+            context.AddRedirectAlias("/docs/example/README.md", "/docs/example");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("RWEXPORT009", diagnostic.Code);
+            Assert.Contains("[artifact-target-reparse]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains("Netlify redirects artifact", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Equal("outside", await File.ReadAllTextAsync(outsideFile));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+
+            if (Directory.Exists(outsideRoot))
+            {
+                Directory.Delete(outsideRoot, true);
+            }
+        }
+    }
+
     [Fact]
     public async Task RunAsync_Should_Write_404Html_When_ReservedRoute_ReturnsHtml()
     {
@@ -5101,6 +5333,22 @@ public class ExportEngineTests
         }
     }
 
+    private sealed class SingleRouteHandler(string route, string mediaType, string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (!string.Equals(path, route, StringComparison.Ordinal))
+            {
+                return NotFound();
+            }
+
+            return string.Equals(mediaType, "image/png", StringComparison.Ordinal)
+                ? Bytes(mediaType)
+                : Text(body, mediaType);
+        }
+    }
+
     private sealed class FrameAwareHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -5779,6 +6027,27 @@ public class ExportEngineTests
         try
         {
             Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryCreateFileSymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
             return true;
         }
         catch (IOException)

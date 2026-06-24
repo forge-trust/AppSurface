@@ -52,15 +52,23 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
         ArgumentNullException.ThrowIfNull(routeManifest);
 
-        var document = CreateDocument(routeManifest);
-        ValidateDocument(document, strict: true, out _);
-
         Directory.CreateDirectory(outputPath);
         var manifestPath = BuildManifestPath(outputPath, FileName);
-        await File.WriteAllTextAsync(
-            manifestPath,
-            JsonSerializer.Serialize(document, SerializerOptions) + Environment.NewLine,
-            cancellationToken);
+        await File.WriteAllTextAsync(manifestPath, Serialize(routeManifest), cancellationToken);
+    }
+
+    /// <summary>
+    /// Serializes and validates a frozen route manifest document without materializing it to disk.
+    /// </summary>
+    /// <param name="routeManifest">Live route manifest captured from the source-backed docs snapshot.</param>
+    /// <returns>The exact JSON payload used for the frozen route manifest artifact.</returns>
+    internal static string Serialize(AppSurfaceDocsRouteManifest routeManifest)
+    {
+        ArgumentNullException.ThrowIfNull(routeManifest);
+
+        var document = CreateDocument(routeManifest);
+        ValidateDocument(document, strict: true, out _);
+        return JsonSerializer.Serialize(document, SerializerOptions) + Environment.NewLine;
     }
 
     /// <summary>

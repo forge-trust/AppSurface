@@ -1564,6 +1564,38 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsExportCommand_Should_Reject_Linked_OutputRoot_Before_EmptyDirectory_Preflight()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var outside = TempDirectory.Create("appsurface-docs-output-outside-");
+        await File.WriteAllTextAsync(Path.Join(outside.Path, "README.md.html"), "<html>outside</html>");
+        var linkedOutput = Path.Join(Path.GetTempPath(), $"appsurface-docs-output-link-{Guid.NewGuid():N}");
+        try
+        {
+            if (!TryCreateDirectorySymlink(linkedOutput, outside.Path))
+            {
+                return;
+            }
+
+            var runner = new CapturingAppSurfaceDocsExportRunner();
+
+            var result = await InvokeProgramEntryPointAsync(
+                ["docs", "export", "--repo", repository.Path, "--output", linkedOutput],
+                options => RegisterRunner(options, runner));
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("RWEXPORT009", result.AllText, StringComparison.Ordinal);
+            Assert.Contains("[output-root-reparse]", result.AllText, StringComparison.Ordinal);
+            Assert.DoesNotContain("must be empty before export starts", result.AllText, StringComparison.Ordinal);
+            Assert.Null(runner.Args);
+        }
+        finally
+        {
+            DeleteDirectoryLinkIfExists(linkedOutput);
+        }
+    }
+
+    [Fact]
     public async Task DocsExportCommand_Should_Derive_Default_Seed_From_Custom_DocsRoot()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
@@ -1885,6 +1917,37 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("\"packages/README.md.html\"", frozenManifest);
         Assert.Contains("\"declaredAliases\": [", frozenManifest);
         Assert.Contains("\"legacy/intro\"", frozenManifest);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsExportContextConfigurator_Should_Reject_FrozenRouteManifest_TargetReparse()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-export-output-");
+        using var outside = TempDirectory.Create("appsurface-docs-export-outside-");
+        var outsideManifest = Path.Join(outside.Path, ".appsurface-docs-route-manifest.json");
+        await File.WriteAllTextAsync(outsideManifest, "outside");
+        var manifestPath = Path.Join(output.Path, ".appsurface-docs-route-manifest.json");
+        if (!TryCreateFileSymlink(manifestPath, outsideManifest))
+        {
+            return;
+        }
+
+        using var host = new TrackingHost(
+            configureServices: services => AddDocsAggregatorServices(
+                services,
+                repository.Path,
+                [new DocNode("Package", "packages/README.md", "<p>Package</p>")]));
+        var context = new ExportContext(output.Path, seedRoutesPath: null, baseUrl: "http://127.0.0.1:51234");
+
+        var exception = await Assert.ThrowsAsync<ExportValidationException>(
+            () => new AppSurfaceDocsExportContextConfigurator().ConfigureAsync(host, context, CancellationToken.None));
+
+        var diagnostic = Assert.Single(exception.Diagnostics);
+        Assert.Equal("RWEXPORT009", diagnostic.Code);
+        Assert.Contains("[artifact-target-reparse]", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("AppSurface Docs frozen route manifest", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Equal("outside", await File.ReadAllTextAsync(outsideManifest));
     }
 
     [Fact]
@@ -3911,6 +3974,56 @@ public sealed class ProgramEntryPointTests
         public SecretsCommandContext BuildContextForTests() => BuildContext();
 
         public override ValueTask ExecuteAsync(IConsole console) => ValueTask.CompletedTask;
+    }
+
+    private static bool TryCreateFileSymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static void DeleteDirectoryLinkIfExists(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path);
+        }
     }
 
     private sealed class TempDirectory : IDisposable
