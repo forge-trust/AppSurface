@@ -22,6 +22,17 @@ public sealed class AppSurfaceCliReadmeContractTests
     }
 
     [Fact]
+    public void Readme_Should_Document_Export_Redirect_Boundary()
+    {
+        var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
+
+        Assert.Contains("Exporter-managed artifact fetches handle redirects inside the shared engine before response content is read or written", readme, StringComparison.Ordinal);
+        Assert.Contains("cross-origin or cross-path artifact redirects fail with RazorWire `RWEXPORT008`", readme, StringComparison.Ordinal);
+        Assert.Contains("for `RWEXPORT008`, keep exporter-managed artifact redirects on the same scheme, host, port, and app path", readme, StringComparison.Ordinal);
+        Assert.Contains("model the destination as an external reference instead of a static artifact", readme, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Readme_Should_CrossReference_HybridHostingGuide()
     {
         var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());

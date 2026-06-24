@@ -247,15 +247,12 @@ public class ExportEngine
             }
             else
             {
-                EnsureDirectoryExists(filePath);
                 await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                await using var fileStream = new FileStream(
+                await using var fileStream = ExportOutputPathGuards.OpenWritableArtifactStream(
+                    context.OutputPath,
                     filePath,
-                    FileMode.Create,
-                    FileAccess.Write,
-                    FileShare.None,
-                    bufferSize: 4096,
-                    useAsync: true);
+                    "non-HTML route asset",
+                    route);
                 await contentStream.CopyToAsync(fileStream, cancellationToken);
                 context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl);
             }
@@ -372,7 +369,6 @@ public class ExportEngine
                 continue;
             }
 
-            EnsureDirectoryExists(outcome.ArtifactPath);
             var body = outcome.TextBody!;
             if (outcome.IsHtml)
             {
@@ -1028,10 +1024,13 @@ public class ExportEngine
             var artifactUrl = MapFilePathToArtifactUrl(artifactPath, context.OutputPath, artifact.AliasRoute);
             if (writtenArtifactPaths.Add(artifactPath))
             {
-                EnsureDirectoryExists(artifactPath);
-                await File.WriteAllTextAsync(
+                await ExportOutputPathGuards.WriteTextArtifactAsync(
+                    context.OutputPath,
                     artifactPath,
+                    "redirect alias HTML artifact",
+                    artifact.AliasRoute,
                     BuildRedirectArtifactBody(canonicalArtifactUrl),
+                    encoding: null,
                     cancellationToken);
             }
 
@@ -1065,11 +1064,17 @@ public class ExportEngine
         }
 
         var redirectsPath = Path.Join(context.OutputPath, "_redirects");
-        EnsureDirectoryExists(redirectsPath);
         var body = string.Join(
             Environment.NewLine,
             rules.Select(rule => $"{rule.From} {rule.To} 301!"));
-        await File.WriteAllTextAsync(redirectsPath, body + Environment.NewLine, cancellationToken);
+        await ExportOutputPathGuards.WriteTextArtifactAsync(
+            context.OutputPath,
+            redirectsPath,
+            "Netlify redirects artifact",
+            "/_redirects",
+            body + Environment.NewLine,
+            encoding: null,
+            cancellationToken);
     }
 
     private bool TryGetNormalizedSeedRoute(string seed, ExportContext context, out string normalized)
@@ -1321,9 +1326,17 @@ public class ExportEngine
         htmlForWrite = rewriteManagedReferences
             ? RewriteManagedReferences(htmlForWrite, route, htmlScope: true, context)
             : htmlForWrite;
-        EnsureDirectoryExists(filePath);
-        await File.WriteAllTextAsync(filePath, htmlForWrite, cancellationToken);
+        await ExportOutputPathGuards.WriteTextArtifactAsync(
+            context.OutputPath,
+            filePath,
+            isDocsPage ? "AppSurface Docs HTML artifact" : "HTML route artifact",
+            route,
+            htmlForWrite,
+            encoding: null,
+            cancellationToken);
         await TryWriteDocsPartialAsync(
+            context,
+            route,
             filePath,
             ExtractDocContentFrame(htmlForWrite),
             cancellationToken);
@@ -1374,8 +1387,14 @@ public class ExportEngine
         var cssForWrite = rewriteManagedReferences
             ? RewriteManagedReferences(body, route, htmlScope: false, context)
             : body;
-        EnsureDirectoryExists(filePath);
-        await File.WriteAllTextAsync(filePath, cssForWrite, cancellationToken);
+        await ExportOutputPathGuards.WriteTextArtifactAsync(
+            context.OutputPath,
+            filePath,
+            "CSS route artifact",
+            route,
+            cssForWrite,
+            encoding: null,
+            cancellationToken);
     }
 
     private void ValidateExport(ExportContext context)
@@ -2038,6 +2057,8 @@ public class ExportEngine
     }
 
     private async Task TryWriteDocsPartialAsync(
+        ExportContext context,
+        string route,
         string htmlFilePath,
         string? docContentFrame,
         CancellationToken cancellationToken)
@@ -2048,7 +2069,14 @@ public class ExportEngine
         }
 
         var partialPath = MapHtmlFilePathToPartialPath(htmlFilePath);
-        await File.WriteAllTextAsync(partialPath, docContentFrame, cancellationToken);
+        await ExportOutputPathGuards.WriteTextArtifactAsync(
+            context.OutputPath,
+            partialPath,
+            "AppSurface Docs partial artifact",
+            route,
+            docContentFrame,
+            encoding: null,
+            cancellationToken);
     }
 
     /// <summary>
@@ -2158,15 +2186,6 @@ public class ExportEngine
         return artifactUrl.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
             ? artifactUrl[..^5] + ".partial.html"
             : artifactUrl + ".partial.html";
-    }
-
-    private static void EnsureDirectoryExists(string filePath)
-    {
-        var dirPath = Path.GetDirectoryName(filePath);
-        if (dirPath != null && !Directory.Exists(dirPath))
-        {
-            Directory.CreateDirectory(dirPath);
-        }
     }
 
     /// <summary>
