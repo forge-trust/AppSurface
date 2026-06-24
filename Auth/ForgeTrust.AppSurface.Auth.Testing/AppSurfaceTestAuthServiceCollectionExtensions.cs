@@ -79,7 +79,7 @@ public static class AppSurfaceTestAuthServiceCollectionExtensions
         if (options.SubjectClaimType is not null && string.IsNullOrWhiteSpace(options.SubjectClaimType))
         {
             throw new InvalidOperationException(
-                $"Problem: AppSurface test auth subject claim type is blank. Cause: AppSurfaceTestAuthOptions.SubjectClaimType was empty. Fix: set a non-blank subject claim type or leave it null to preserve host mapping. Docs: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md. Code: {AppSurfaceTestAuthDiagnosticCodes.BlankPersonaName}.");
+                $"Problem: AppSurface test auth subject claim type is blank. Cause: AppSurfaceTestAuthOptions.SubjectClaimType was empty. Fix: set a non-blank subject claim type or leave it null to preserve host mapping. Docs: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md. Code: {AppSurfaceTestAuthDiagnosticCodes.BlankSubjectClaimType}.");
         }
 
         _ = AppSurfaceTestPersonaRegistry.Create(options);

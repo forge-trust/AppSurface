@@ -342,6 +342,7 @@ public sealed class AppSurfaceTestAuthHarnessTests
         }));
 
         Assert.Contains("subject claim type is blank", error.Message, StringComparison.Ordinal);
+        Assert.Contains(AppSurfaceTestAuthDiagnosticCodes.BlankSubjectClaimType, error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

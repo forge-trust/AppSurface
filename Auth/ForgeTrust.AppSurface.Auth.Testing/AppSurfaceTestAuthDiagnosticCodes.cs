@@ -38,4 +38,9 @@ public static class AppSurfaceTestAuthDiagnosticCodes
     /// An assertion helper observed an unexpected AppSurface auth outcome, reason, status, or extension value.
     /// </summary>
     public const string AssertionFailed = "ASTAUTH006";
+
+    /// <summary>
+    /// A subject claim type was empty or whitespace.
+    /// </summary>
+    public const string BlankSubjectClaimType = "ASTAUTH007";
 }

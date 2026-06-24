@@ -128,6 +128,7 @@ Assertion failures throw `AppSurfaceTestAuthAssertionException` with diagnostic 
 | Production environment blocked | Test auth started outside `Development`, `Test`, or `Testing`. | Run the test host in a test environment, or set `AllowProductionEnvironmentForTestHost = true` only for isolated production-like integration tests. | `ASTAUTH004` |
 | Blank scheme name | `SchemeName` was set to an empty value. | Leave the default `AppSurface.Test` or set a non-empty name. | `ASTAUTH005` |
 | Assertion failed | Expected auth contract does not match the actual AppSurface result or ProblemDetails payload. | Fix the host auth setup or update the expected contract. | `ASTAUTH006` |
+| Blank subject claim type | `SubjectClaimType` was set to an empty value. | Set a non-empty claim type or leave it null to preserve host mapping. | `ASTAUTH007` |
 
 ## What The Package Includes
 
