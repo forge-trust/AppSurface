@@ -9,9 +9,10 @@
 ./eng/release prepare --version 0.1.0-preview.1 --dry-run
 ./eng/release prepare --version 0.1.0-preview.1 --date 2026-05-25
 ./eng/release publish --version 0.1.0-preview.1 --tag v0.1.0-preview.1 --dry-run
+./eng/release publish --version 0.1.0 --tag v0.1.0 --base-ref release/0.1.0 --dry-run
 ```
 
-Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`, where the tag must already exist and must be annotated.
+Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`, where the tag must already exist and must be annotated. `publish` defaults `--base-ref` to `main`; pass the release branch, such as `--base-ref release/0.1.0`, when publishing from a maintained release branch.
 
 ## Check
 
@@ -47,7 +48,7 @@ explicit post-review instruction to continue.
 
 ## Publish
 
-`publish` is create-only. It validates that the supplied tag is annotated, resolves to a commit reachable from `origin/main`, has a successful prerelease NuGet publish run for prerelease tags, has no existing GitHub Release, and contains the versioned release note, sidecar, release manifest, and matching release evidence bundle at the tag commit before GitHub Release creation. The command writes `version`, `tag`, `tag_commit`, `note_path`, `notes_file`, `release_classification`, `evidence_path`, `evidence_subject_sha256`, `evidence_tag_commit`, `docs_release_manifest_sha256`, and `prerelease` outputs when `--github-output` is supplied. `--github-output` must be a file path, not a root directory; in GitHub Actions, pass the `GITHUB_OUTPUT` file supplied by the runner.
+`publish` is create-only. It validates that the supplied tag is annotated, resolves to a commit reachable from `origin/<base-ref>`, has a successful protected NuGet publish run for the tag's release classification, has no existing GitHub Release, and contains the versioned release note, sidecar, release manifest, and matching release evidence bundle at the tag commit before GitHub Release creation. Prerelease tags require `nuget-prerelease-publish.yml` proof. Stable tags require `nuget-stable-publish.yml` proof before GitHub Release creation, so `v0.1.0` cannot become a GitHub-only release. The command writes `version`, `tag`, `tag_commit`, `note_path`, `notes_file`, `release_classification`, `evidence_path`, `evidence_subject_sha256`, `evidence_tag_commit`, `docs_release_manifest_sha256`, and `prerelease` outputs when `--github-output` is supplied. `--github-output` must be a file path, not a root directory; in GitHub Actions, pass the `GITHUB_OUTPUT` file supplied by the runner.
 
 ## Release Evidence Bundle
 
@@ -59,7 +60,7 @@ The AppSurface Docs `.appsurface-docs-release-manifest.json` remains the exact-t
 
 ## Stable Release Policy
 
-Stable GitHub Releases are blocked until this repository has a protected stable NuGet publish workflow and the release cockpit can verify that workflow before GitHub Release creation. This prevents `v0.1.0` from becoming a GitHub-only release while public packages remain unpublished. Prerelease publishing uses the existing protected `nuget-prerelease` path and `publish` requires a successful `nuget-prerelease-publish.yml` run for the requested tag commit. To enable stable releases, add and protect a stable package publish path, wire it to stable package validation and publishing, teach this tool how to verify it, and keep environment review enabled.
+Stable GitHub Releases require the protected `nuget-stable-publish.yml` path. The workflow validates annotated `vX.Y.Z` tags, checks the configured release base branch, publishes through the `nuget-stable` environment, waits through `nuget-stable-smoke`, and uploads publish and smoke evidence. The release cockpit verifies a successful stable workflow run for the exact tag commit before creating the GitHub Release. Prerelease publishing remains on `nuget-prerelease-publish.yml` and the `nuget-prerelease` environments.
 
 ## Diagnostics
 
@@ -72,4 +73,4 @@ Every failure uses the same envelope:
 - `Fix`
 - `Docs`
 
-Common codes include `release-version-leading-v`, `release-version-invalid`, `release-target-exists`, `release-sidecar-invalid`, `release-stable-package-policy-missing`, `release-prerelease-label-unprotected`, `release-tag-lightweight`, `release-tag-unreachable-from-main`, `release-github-output-path-invalid`, `release-github-release-exists`, `release-evidence-missing`, `release-evidence-duplicate`, `release-evidence-schema-invalid`, `release-evidence-version-mismatch`, `release-evidence-artifact-digest-mismatch`, `release-evidence-content-source-commit-mismatch`, `release-evidence-release-manifest-schema-invalid`, `release-evidence-subject-digest-mismatch`, `release-evidence-docs-manifest-digest-mismatch`, `release-evidence-catalog-entry-mismatch`, and `release-evidence-tag-commit-mismatch`.
+Common codes include `release-version-leading-v`, `release-version-invalid`, `release-target-exists`, `release-sidecar-invalid`, `release-stable-package-policy-missing`, `release-stable-packages-not-published`, `release-prerelease-label-unprotected`, `release-prerelease-packages-not-published`, `release-tag-lightweight`, `release-tag-unreachable-from-main`, `release-github-output-path-invalid`, `release-github-release-exists`, `release-evidence-missing`, `release-evidence-duplicate`, `release-evidence-schema-invalid`, `release-evidence-version-mismatch`, `release-evidence-artifact-digest-mismatch`, `release-evidence-content-source-commit-mismatch`, `release-evidence-release-manifest-schema-invalid`, `release-evidence-subject-digest-mismatch`, `release-evidence-docs-manifest-digest-mismatch`, `release-evidence-catalog-entry-mismatch`, and `release-evidence-tag-commit-mismatch`.

@@ -90,7 +90,7 @@ internal sealed class ReleaseChecker
                 "tools/ForgeTrust.AppSurface.Release/README.md#stable-release-policy"));
         }
 
-        if (options.Version.IsStable)
+        if (options.Version.IsStable && !File.Exists(_workspace.PathFor(".github/workflows/nuget-stable-publish.yml")))
         {
             warnings.Add(ReleaseDiagnostic.Warning(
                 "release-stable-package-policy-missing",

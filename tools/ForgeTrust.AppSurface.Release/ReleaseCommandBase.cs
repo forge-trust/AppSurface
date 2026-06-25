@@ -156,7 +156,8 @@ internal abstract class ReleaseCommandBase
             ResolveOptionalPath(repoRoot, ReportPath),
             ResolveGitHubOutputPath(repoRoot),
             FailOnWarnings,
-            AllowExistingTargets);
+            AllowExistingTargets,
+            ResolveBaseRef());
     }
 
     /// <summary>
@@ -177,6 +178,12 @@ internal abstract class ReleaseCommandBase
     /// <param name="repoRoot">Resolved repository root.</param>
     /// <returns>The output path, or <see langword="null"/> for commands that do not write workflow outputs.</returns>
     protected virtual string? ResolveGitHubOutputPath(string repoRoot) => null;
+
+    /// <summary>
+    /// Resolves the base ref used for publish-time reachability and source workflow checks.
+    /// </summary>
+    /// <returns>The base ref for release validation.</returns>
+    protected virtual string ResolveBaseRef() => "main";
 
     /// <summary>
     /// Gets whether this command should turn warning diagnostics into a failing exit code.

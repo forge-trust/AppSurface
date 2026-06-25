@@ -21,12 +21,15 @@ public sealed class ReleaseWorkflowPolicyTests
     {
         var prep = await ReadRepositoryFileAsync(".github/workflows/release-prep.yml");
         var publish = await ReadRepositoryFileAsync(".github/workflows/release-publish.yml");
+        var stablePublish = await ReadRepositoryFileAsync(".github/workflows/nuget-stable-publish.yml");
 
         Assert.Contains("concurrency:", prep, StringComparison.Ordinal);
         Assert.Contains("concurrency:", publish, StringComparison.Ordinal);
+        Assert.Contains("concurrency:", stablePublish, StringComparison.Ordinal);
         Assert.Contains("RELEASE_BOT_TOKEN", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("eval ", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("eval ", publish, StringComparison.Ordinal);
+        Assert.DoesNotContain("eval ", stablePublish, StringComparison.Ordinal);
         Assert.Contains("actions: read", publish, StringComparison.Ordinal);
         Assert.Contains("BASE_REF: ${{ inputs.base-ref }}", prep, StringComparison.Ordinal);
         Assert.Contains("expected_base=\"$(git rev-parse \"origin/${BASE_REF}\")\"", prep, StringComparison.Ordinal);
@@ -45,9 +48,41 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.DoesNotContain("find releases -maxdepth 1 -name 'v*.release.json'", prep, StringComparison.Ordinal);
         Assert.Contains("--github-output", publish, StringComparison.Ordinal);
         Assert.Contains("Validate tag-bound release evidence", publish, StringComparison.Ordinal);
+        Assert.Contains("base-ref:", publish, StringComparison.Ordinal);
+        Assert.Contains("BASE_REF: ${{ inputs.base-ref }}", publish, StringComparison.Ordinal);
+        Assert.Contains("--base-ref \"${BASE_REF}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("git fetch origin \"${BASE_REF}:refs/remotes/origin/${BASE_REF}\"", publish, StringComparison.Ordinal);
         Assert.Contains("evidence_path", await ReadRepositoryFileAsync("tools/ForgeTrust.AppSurface.Release/ReleasePublishing.cs"), StringComparison.Ordinal);
         Assert.DoesNotContain("id-token: write", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("attestations: write", publish, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StableNuGetPublishWorkflowUsesStablePolicy()
+    {
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/nuget-stable-publish.yml");
+
+        Assert.Contains("push:", workflow, StringComparison.Ordinal);
+        Assert.Contains("tags:", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("pull_request", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("workflow_dispatch", workflow, StringComparison.Ordinal);
+        Assert.Contains("tag_pattern='^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$'", workflow, StringComparison.Ordinal);
+        Assert.Contains("STABLE_BASE_REF: release/0.1.0", workflow, StringComparison.Ordinal);
+        Assert.Contains("origin/${STABLE_BASE_REF}", workflow, StringComparison.Ordinal);
+        Assert.Contains("--branch \"${STABLE_BASE_REF}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("nuget-stable", workflow, StringComparison.Ordinal);
+        Assert.Contains("nuget-stable-smoke", workflow, StringComparison.Ordinal);
+        Assert.Contains("prevent_self_review == true", workflow, StringComparison.Ordinal);
+        Assert.Contains("wait_timer == 25", workflow, StringComparison.Ordinal);
+        Assert.Contains("id-token: write", workflow, StringComparison.Ordinal);
+        Assert.Contains("NuGet/login", workflow, StringComparison.Ordinal);
+        Assert.Contains("publish-stable", workflow, StringComparison.Ordinal);
+        Assert.Contains("appsurface-stable-packages", workflow, StringComparison.Ordinal);
+        Assert.Contains("appsurface-stable-publish-log", workflow, StringComparison.Ordinal);
+        Assert.Contains("appsurface-stable-smoke", workflow, StringComparison.Ordinal);
+        Assert.Contains("package-manager-cache: false", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("cache: true", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("nuget-prerelease", workflow, StringComparison.Ordinal);
     }
 
     [Fact]

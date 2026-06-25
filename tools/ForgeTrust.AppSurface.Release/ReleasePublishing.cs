@@ -22,11 +22,11 @@ internal sealed class ReleasePublishing
     /// <summary>
     /// Validates an existing annotated tag and extracts release notes from the tag commit.
     /// </summary>
-    /// <param name="options">Publish command options. The version and tag must match, and stable versions are blocked until stable package publishing is protected.</param>
+    /// <param name="options">Publish command options. The version and tag must match, and stable versions require protected stable package publishing proof.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Structured workflow outputs for GitHub Release creation.</returns>
     /// <remarks>
-    /// <see cref="PublishAsync"/> is create-only: it verifies annotated tag shape, reachability from <c>origin/main</c>, prerelease package
+    /// <see cref="PublishAsync"/> is create-only: it verifies annotated tag shape, reachability from the configured base ref, package
     /// publication, absence of an existing GitHub Release, and presence of <c>releases/v{version}.md</c> in the tag commit. The tag commit
     /// must also contain the release sidecar, release manifest, and release evidence bundle; missing or invalid tag-bound artifacts fail fast
     /// before a GitHub Release is created. The method writes the tag's release note to a temporary file so workflows can pass a stable notes
@@ -34,20 +34,10 @@ internal sealed class ReleasePublishing
     /// </remarks>
     internal async Task<PublishOutputs> PublishAsync(ReleaseOptions options, CancellationToken cancellationToken)
     {
-        if (options.Version.IsStable)
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-stable-package-policy-missing",
-                "Stable GitHub Release publishing is blocked.",
-                "The release cockpit has no verifiable protected stable NuGet publish gate yet.",
-                "Ship a prerelease, or add and protect a stable package publish path plus release-cockpit validation before publishing a stable tag.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#stable-release-policy"));
-        }
-
         var tag = options.Tag ?? options.Version.TagName;
         await ValidateAnnotatedTagAsync(tag, cancellationToken);
         var tagCommit = await RequireCommandOutputAsync("git", ["rev-parse", $"refs/tags/{tag}^{{commit}}"], "release-tag-commit-missing", cancellationToken);
-        await ValidateReachableFromMainAsync(tag, tagCommit, cancellationToken);
+        await ValidateReachableFromBaseAsync(tag, tagCommit, options.BaseRef, cancellationToken);
         await ValidatePackagePublishingSucceededAsync(options.Version, tag, tagCommit, cancellationToken);
         await ValidateGitHubReleaseDoesNotExistAsync(tag, cancellationToken);
 
@@ -172,18 +162,19 @@ internal sealed class ReleasePublishing
         }
     }
 
-    private async Task ValidateReachableFromMainAsync(string tag, string tagCommit, CancellationToken cancellationToken)
+    private async Task ValidateReachableFromBaseAsync(string tag, string tagCommit, string baseRef, CancellationToken cancellationToken)
     {
+        var remoteBaseRef = $"origin/{baseRef}";
         var result = await _commandRunner.RunAsync(
-            new CommandInvocation("git", ["merge-base", "--is-ancestor", tagCommit.Trim(), "origin/main"], _workspace.RepositoryRoot),
+            new CommandInvocation("git", ["merge-base", "--is-ancestor", tagCommit.Trim(), remoteBaseRef], _workspace.RepositoryRoot),
             cancellationToken);
         if (result.ExitCode != 0)
         {
             throw new ReleaseToolException(ReleaseDiagnostic.Error(
                 "release-tag-unreachable-from-main",
-                $"Tag '{tag}' does not point at a commit reachable from origin/main.",
-                result.StandardError.Length == 0 ? $"Commit {tagCommit.Trim()} is not an ancestor of origin/main." : result.StandardError.Trim(),
-                "Fetch `origin/main`, move the tag only through the normal protected process, and retry.",
+                $"Tag '{tag}' does not point at a commit reachable from {remoteBaseRef}.",
+                result.StandardError.Length == 0 ? $"Commit {tagCommit.Trim()} is not an ancestor of {remoteBaseRef}." : result.StandardError.Trim(),
+                $"Fetch `{remoteBaseRef}`, move the tag only through the normal protected process, and retry.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
         }
     }
@@ -206,11 +197,9 @@ internal sealed class ReleasePublishing
 
     private async Task ValidatePackagePublishingSucceededAsync(SemVer version, string tag, string tagCommit, CancellationToken cancellationToken)
     {
-        if (version.IsStable)
-        {
-            throw new InvalidOperationException("Stable releases must be rejected before prerelease package validation.");
-        }
-
+        var workflow = version.IsStable ? "nuget-stable-publish.yml" : "nuget-prerelease-publish.yml";
+        var classification = version.IsStable ? "Stable" : "Prerelease";
+        var code = version.IsStable ? "release-stable-packages-not-published" : "release-prerelease-packages-not-published";
         var result = await _commandRunner.RunAsync(
             new CommandInvocation(
                 "gh",
@@ -218,7 +207,7 @@ internal sealed class ReleasePublishing
                     "run",
                     "list",
                     "--workflow",
-                    "nuget-prerelease-publish.yml",
+                    workflow,
                     "--commit",
                     tagCommit.Trim(),
                     "--json",
@@ -232,12 +221,12 @@ internal sealed class ReleasePublishing
         if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput))
         {
             throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-prerelease-packages-not-published",
-                $"Prerelease packages have not been published for tag '{tag}'.",
+                code,
+                $"{classification} packages have not been published for tag '{tag}'.",
                 result.ExitCode == 0
-                    ? $"No successful `nuget-prerelease-publish.yml` run was found for {tag} at {tagCommit.Trim()}."
+                    ? $"No successful `{workflow}` run was found for {tag} at {tagCommit.Trim()}."
                     : (string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput.Trim() : result.StandardError.Trim()),
-                "Wait for the protected NuGet prerelease publish workflow for this tag to complete successfully, then retry GitHub Release publishing.",
+                $"Wait for the protected NuGet {classification.ToLowerInvariant()} publish workflow for this tag to complete successfully, then retry GitHub Release publishing.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#stable-release-policy"));
         }
     }
@@ -255,7 +244,7 @@ internal sealed class ReleasePublishing
                 code,
                 $"Command `{executable} {string.Join(' ', arguments)}` failed.",
                 string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput.Trim() : result.StandardError.Trim(),
-                "Fetch tags and main, verify the release artifact exists at the tag commit, then retry.",
+                "Fetch tags and the configured base ref, verify the release artifact exists at the tag commit, then retry.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
         }
 
@@ -275,7 +264,7 @@ internal sealed class ReleasePublishing
                 code,
                 $"Command `git show {tag}:{pathInTag}` failed.",
                 string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput.Trim() : result.StandardError.Trim(),
-                "Fetch tags and main, verify the release artifact exists at the tag commit, then retry.",
+                "Fetch tags and the configured base ref, verify the release artifact exists at the tag commit, then retry.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
         }
 

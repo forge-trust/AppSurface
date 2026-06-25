@@ -1892,6 +1892,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     [InlineData("verify", "--help")]
     [InlineData("verify-packages", "--help")]
     [InlineData("publish-prerelease", "--help")]
+    [InlineData("publish-stable", "--help")]
     [InlineData("smoke-install", "--help")]
     [InlineData("gate", "--help")]
     public async Task RunAsync_WritesCommandHelpToStandardOut(string command, string helpOption)
@@ -2490,7 +2491,54 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.Combine(_repositoryRoot, "reports", "publish.md"), capturedRequest.PublishLogPath);
         Assert.Equal("https://example.test/v3/index.json", capturedRequest.Source);
         Assert.Equal("TEST_KEY", capturedRequest.ApiKeyEnvironmentVariable);
-        Assert.Contains("Published 0 package artifacts for 0.0.0-ci.99. Log: reports/publish.md.", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Published 0 prerelease package artifacts for 0.0.0-ci.99. Log: reports/publish.md.", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    [Fact]
+    public async Task RunAsync_PublishStable_UsesWorkflowAndReturnsFailureWhenLedgerFails()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        PackagePrereleasePublishRequest? capturedRequest = null;
+
+        var exitCode = await Program.RunAsync(
+            [
+                "publish-stable",
+                "--artifacts-input", "packages-in",
+                "--artifact-manifest", "packages-in/artifacts.json",
+                "--publish-log", "reports/publish.md",
+                "--source", "https://example.test/v3/index.json",
+                "--api-key-env", "TEST_KEY"
+            ],
+            stdout,
+            stderr,
+            _repositoryRoot,
+            publishStableAsync: (request, _) =>
+            {
+                capturedRequest = request;
+                return Task.FromResult(new PackagePublishLedger(
+                    "0.1.0",
+                    request.Source,
+                    [
+                        new PackagePublishLedgerEntry(
+                            "ForgeTrust.AppSurface.Web",
+                            "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                            "ForgeTrust.AppSurface.Web.0.1.0.nupkg",
+                            PackagePublishStatus.Failed,
+                            1,
+                            "failed")
+                    ]));
+            });
+
+        Assert.Equal(1, exitCode);
+        Assert.NotNull(capturedRequest);
+        Assert.Equal(Path.Combine(_repositoryRoot, "packages-in"), capturedRequest.ArtifactsInputPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "packages-in", "artifacts.json"), capturedRequest.ArtifactManifestPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "publish.md"), capturedRequest.PublishLogPath);
+        Assert.Equal("https://example.test/v3/index.json", capturedRequest.Source);
+        Assert.Equal("TEST_KEY", capturedRequest.ApiKeyEnvironmentVariable);
+        Assert.Contains("Published 0 stable package artifacts for 0.1.0. Log: reports/publish.md.", stdout.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr.ToString());
     }
 
@@ -2536,7 +2584,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.Combine(_repositoryRoot, "smoke"), capturedRequest.WorkDirectory);
         Assert.Equal(Path.Combine(_repositoryRoot, "reports", "smoke.md"), capturedRequest.ReportPath);
         Assert.Equal("https://example.test/v3/index.json", capturedRequest.Source);
-        Assert.Contains("Smoke installed 1 published prerelease packages for 0.0.0-ci.99. Report: reports/smoke.md.", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Smoke installed 1 published packages for 0.0.0-ci.99. Report: reports/smoke.md.", stdout.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr.ToString());
     }
 

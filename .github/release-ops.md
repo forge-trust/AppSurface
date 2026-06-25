@@ -19,11 +19,11 @@ The current workflow establishes the contracts that future release automation wi
 - Conventional Commits PR titles
 - one public unreleased proof artifact
 - tagged release notes plus a compact changelog
-- verified prerelease `.nupkg` artifacts from the manifest-backed package artifact workflow
+- verified `.nupkg` artifacts from the manifest-backed package artifact workflow
 - publishable .NET tool artifacts such as `ForgeTrust.AppSurface.Cli`
 
 CLI docs that show `dnx`, `dotnet tool execute`, or `dotnet tool install` assume
-either a NuGet-published prerelease package or an explicit local package source.
+either a NuGet-published package or an explicit local package source.
 `ForgeTrust.AppSurface.Cli` is the public `appsurface` tool; RazorWire-specific
 export workflows remain deferred to the separate `razorwire` tool.
 
@@ -54,7 +54,7 @@ review when deciding whether package-index evidence is complete enough for the
 package artifact workflow. That dashboard is generated maintainer evidence from
 the package index, not live NuGet publish, artifact, or smoke-install status.
 
-Run the package artifact verifier with an exact prerelease version:
+Run the package artifact verifier with an exact stable or prerelease version:
 
 ```bash
 dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
@@ -69,9 +69,9 @@ The verifier restores and builds the solution once, packs manifest-selected pack
 with `--no-restore --no-build`, inspects each `.nupkg`, and writes a markdown report.
 It checks package metadata, expected same-version dependencies, first-party DLL
 informational versions, .NET tool command settings, and Tailwind runtime binary
-payloads. It intentionally rejects stable versions and SemVer build metadata
-because this path is for prerelease package identity that NuGet will preserve
-exactly.
+payloads. It accepts stable and prerelease SemVer identities, and intentionally
+rejects SemVer build metadata because NuGet strips build metadata from package
+identity.
 
 `verify-packages` is the primary package-proof path for Tailwind runtime packages.
 It forces `TailwindRuntimeBinaryResolutionEnabled=true` during restore, build, and
@@ -80,7 +80,80 @@ binary payload. Do not set `TailwindRuntimeBinaryResolutionEnabled=false` for
 release package validation; that switch is only for non-package CI restore,
 build, and test jobs that do not compile Tailwind-consuming projects.
 
-Tracked follow-up for actual publishing: #253, "Add protected NuGet prerelease publish workflow after rename pass".
+Stable publishing is intentionally separate from prerelease publishing so the
+environment protections, trusted-publishing policy, and smoke-install proof stay
+auditable for the public stable line.
+
+## Protected NuGet stable publish
+
+The stable publish slice lives in `.github/workflows/nuget-stable-publish.yml`.
+It has no `pull_request`, `pull_request_target`, or `workflow_dispatch` entry
+point. It runs only when the main repository receives an annotated stable tag
+that matches:
+
+```text
+v<major>.<minor>.<patch>
+```
+
+For `v0.1.0`, the stable workflow treats `release/0.1.0` as the source base.
+It force-fetches the exact remote tag ref, resolves annotated tags to the
+tagged commit with `refs/tags/<tag>^{commit}`, verifies that commit is reachable
+from `origin/release/0.1.0`, and then checks that `build.yml` and
+`package-gate.yml` have successful completed runs for that exact commit on
+`release/0.1.0` before any protected publish job can start.
+
+Before creating the stable tag, create the GitHub environments used by the
+workflow. Create `nuget-stable` with required reviewers and prevent self-review
+enabled. Create `nuget-stable-smoke` with a 25-minute wait timer and no required
+reviewers so NuGet validation and indexing can settle before the smoke-install
+runner starts. Add `NUGET_USER` as an environment or repository variable
+containing the nuget.org profile name, not an email address. On nuget.org, add a
+Trusted Publishing policy for the package owner with these GitHub Actions
+details:
+
+- Repository Owner: `forge-trust`
+- Repository: `AppSurface`
+- Workflow File: `nuget-stable-publish.yml`
+- Environment: `nuget-stable`
+
+NuGet's policy UI expects only the workflow file name, not the
+`.github/workflows/` path. Keep the policy environment-scoped so a token
+exchange is valid only after the GitHub environment approval gate has passed.
+The workflow fails closed if `nuget-stable` is missing, has no required-reviewer
+protection, or does not prevent self-review. It also fails closed if
+`nuget-stable-smoke` is missing, lacks the 25-minute wait timer, or has required
+reviewers configured.
+
+Stable package proof uses the same artifact validation and smoke-install
+contract as prerelease publishing, but with stable package identity:
+
+```bash
+dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+  verify-packages \
+  --package-version 0.1.0 \
+  --artifacts-output artifacts/packages \
+  --artifact-manifest artifacts/packages/package-artifact-manifest.json \
+  --report artifacts/packages/package-validation-report.md
+```
+
+The protected publish job downloads that exact artifact bundle and runs:
+
+```bash
+dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+  publish-stable \
+  --artifacts-input artifacts/packages \
+  --artifact-manifest artifacts/packages/package-artifact-manifest.json \
+  --publish-log artifacts/packages/package-publish-log.md
+```
+
+Stable package versions are immutable once any package has been accepted by
+NuGet. For transient NuGet or environment failures, re-run the failed workflow
+with the same tag and package version; already published packages should become
+`duplicate-reported`. For content or metadata defects after any stable package
+is accepted, do not retag `v0.1.0`; fix forward with a new stable patch version.
+Only dispatch `release-publish.yml` after `nuget-stable-publish.yml` has
+published and smoke-installed successfully. For the stable `v0.1.0` release,
+dispatch GitHub Release creation with `base-ref=release/0.1.0`.
 
 ## Protected NuGet prerelease publish
 
@@ -151,7 +224,7 @@ dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurf
 ```
 
 `verify-packages` writes both the markdown validation report and
-`package-artifact-manifest.json`. The JSON manifest records the prerelease version,
+`package-artifact-manifest.json`. The JSON manifest records the package version,
 manifest order, package id, project path, publish decision, artifact file name, tool
 flag, declared tool command name for .NET tools, and SHA-512 hash for every
 `publish` and `support_publish` package selected from `packages/package-index.yml`.

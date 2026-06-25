@@ -115,6 +115,12 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
     [CommandOption("github-output", Description = "Optional GITHUB_OUTPUT file for publish workflow outputs.")]
     public string? GitHubOutputPath { get; set; }
 
+    /// <summary>
+    /// Gets the remote branch or ref that must contain the annotated tag commit.
+    /// </summary>
+    [CommandOption("base-ref", Description = "Remote branch or ref that must contain the annotated tag commit. Defaults to main.")]
+    public string? BaseRef { get; set; }
+
     /// <inheritdoc />
     protected override string CommandName => "publish";
 
@@ -150,6 +156,12 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
         return string.IsNullOrWhiteSpace(GitHubOutputPath)
             ? null
             : Path.GetFullPath(GitHubOutputPath, repoRoot);
+    }
+
+    /// <inheritdoc />
+    protected override string ResolveBaseRef()
+    {
+        return string.IsNullOrWhiteSpace(BaseRef) ? "main" : BaseRef.Trim();
     }
 
     /// <inheritdoc />

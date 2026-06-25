@@ -153,6 +153,17 @@ internal sealed class PackageArtifactManifestWriter
 /// </summary>
 internal sealed class PackageArtifactManifestReader
 {
+    private readonly PackageVersionPolicy _versionPolicy;
+
+    /// <summary>
+    /// Creates a manifest reader for package artifact manifests.
+    /// </summary>
+    /// <param name="versionPolicy">Version policy required by the consuming workflow.</param>
+    internal PackageArtifactManifestReader(PackageVersionPolicy versionPolicy = PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata)
+    {
+        _versionPolicy = versionPolicy;
+    }
+
     /// <summary>
     /// Reads a package artifact manifest from disk.
     /// </summary>
@@ -177,18 +188,18 @@ internal sealed class PackageArtifactManifestReader
             throw new PackageIndexException($"Package artifact manifest '{manifestPath}' is empty.");
         }
 
-        Validate(manifest, manifestPath);
+        Validate(manifest, manifestPath, _versionPolicy);
         return manifest;
     }
 
-    private static void Validate(PackageArtifactManifest manifest, string manifestPath)
+    private static void Validate(PackageArtifactManifest manifest, string manifestPath, PackageVersionPolicy versionPolicy)
     {
         if (manifest.SchemaVersion != 1)
         {
             throw new PackageIndexException($"Package artifact manifest '{manifestPath}' uses unsupported schema version '{manifest.SchemaVersion}'.");
         }
 
-        PackageVersionValidator.RequirePrerelease(manifest.PackageVersion);
+        PackageVersionValidator.Require(manifest.PackageVersion, versionPolicy);
         if (manifest.Entries.Count == 0)
         {
             throw new PackageIndexException($"Package artifact manifest '{manifestPath}' does not contain any entries.");
@@ -246,7 +257,7 @@ internal sealed class PackageArtifactManifestReader
 }
 
 /// <summary>
-/// Publishes a validated prerelease package artifact set to NuGet in manifest order.
+/// Publishes a validated package artifact set to NuGet in manifest order.
 /// </summary>
 internal sealed class PackagePrereleasePublishWorkflow
 {
@@ -1033,7 +1044,7 @@ internal sealed class PackageSmokeInstallReportRenderer
 }
 
 /// <summary>
-/// Request for the protected NuGet prerelease publish workflow.
+/// Request for a protected NuGet package publish workflow.
 /// </summary>
 /// <param name="RepositoryRoot">Repository root used for plan resolution.</param>
 /// <param name="ManifestPath">Checked-in package manifest path.</param>
@@ -1072,7 +1083,7 @@ internal sealed record PackageSmokeInstallRequest(
 /// Machine-readable artifact manifest that binds validated package artifacts to immutable hashes.
 /// </summary>
 /// <param name="SchemaVersion">Manifest schema version.</param>
-/// <param name="PackageVersion">Exact prerelease package version.</param>
+/// <param name="PackageVersion">Exact stable or prerelease package version.</param>
 /// <param name="GeneratedAtUtc">UTC timestamp when the manifest was generated.</param>
 /// <param name="Entries">Manifest entries in package publish order.</param>
 internal sealed record PackageArtifactManifest(
@@ -1106,9 +1117,9 @@ internal sealed record PackageArtifactManifestEntry(
     [property: JsonPropertyName("tool_command_name")] string ToolCommandName = "");
 
 /// <summary>
-/// Publish result for a coordinated prerelease package version.
+/// Publish result for a coordinated package version.
 /// </summary>
-/// <param name="PackageVersion">Exact prerelease package version.</param>
+/// <param name="PackageVersion">Exact stable or prerelease package version.</param>
 /// <param name="Source">NuGet source URL.</param>
 /// <param name="Entries">Per-package publish outcomes.</param>
 internal sealed record PackagePublishLedger(
@@ -1145,9 +1156,9 @@ internal enum PackagePublishStatus
 }
 
 /// <summary>
-/// Smoke install result for packages restored and tools verified after prerelease publishing.
+/// Smoke install result for packages restored and tools verified after package publishing.
 /// </summary>
-/// <param name="PackageVersion">Exact prerelease package version.</param>
+/// <param name="PackageVersion">Exact stable or prerelease package version.</param>
 /// <param name="Source">NuGet source URL.</param>
 /// <param name="Entries">Per-package smoke install outcomes.</param>
 internal sealed record PackageSmokeInstallReport(

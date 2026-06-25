@@ -3031,14 +3031,22 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
-    public void PackageVersionValidator_RejectsStableVersionsAndBuildMetadata()
+    public void PackageVersionValidator_AppliesReleaseClassificationPolicy()
     {
-        var stable = Assert.Throws<PackageIndexException>(
-            () => PackageVersionValidator.RequirePrerelease("1.2.3"));
-        var buildMetadata = Assert.Throws<PackageIndexException>(
-            () => PackageVersionValidator.RequirePrerelease("1.2.3-ci.4+sha"));
+        PackageVersionValidator.Require("1.2.3", PackageVersionPolicy.StableOnly);
+        PackageVersionValidator.Require("1.2.3", PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata);
+        PackageVersionValidator.Require("1.2.3-ci.4", PackageVersionPolicy.PrereleaseOnly);
+        PackageVersionValidator.Require("1.2.3-ci.4", PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata);
 
-        Assert.Contains("prerelease", stable.Message, StringComparison.OrdinalIgnoreCase);
+        var stableOnPrereleaseLane = Assert.Throws<PackageIndexException>(
+            () => PackageVersionValidator.Require("1.2.3", PackageVersionPolicy.PrereleaseOnly));
+        var prereleaseOnStableLane = Assert.Throws<PackageIndexException>(
+            () => PackageVersionValidator.Require("1.2.3-ci.4", PackageVersionPolicy.StableOnly));
+        var buildMetadata = Assert.Throws<PackageIndexException>(
+            () => PackageVersionValidator.Require("1.2.3-ci.4+sha", PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata));
+
+        Assert.Contains("prerelease", stableOnPrereleaseLane.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("stable", prereleaseOnStableLane.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("build metadata", buildMetadata.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -3049,7 +3057,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     public void PackageVersionValidator_RejectsMissingOrMalformedSemVerCore(string packageVersion)
     {
         var error = Assert.Throws<PackageIndexException>(
-            () => PackageVersionValidator.RequirePrerelease(packageVersion));
+            () => PackageVersionValidator.Require(packageVersion, PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata));
 
         Assert.Contains("Package version", error.Message, StringComparison.Ordinal);
     }
@@ -3873,6 +3881,56 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task PackageArtifactManifestReader_AppliesVersionPolicy()
+    {
+        var stableManifestPath = CombineSafeChildPath(_repositoryRoot, "stable-manifest.json");
+        await WriteManifestAsync(stableManifestPath, "0.1.0");
+        var prereleaseManifestPath = CombineSafeChildPath(_repositoryRoot, "prerelease-manifest.json");
+        await WriteManifestAsync(prereleaseManifestPath, PackageVersion);
+        var buildMetadataManifestPath = CombineSafeChildPath(_repositoryRoot, "build-manifest.json");
+        await WriteManifestAsync(buildMetadataManifestPath, "0.1.0+sha");
+
+        var stableManifest = await new PackageArtifactManifestReader().ReadAsync(stableManifestPath, CancellationToken.None);
+        var prereleaseManifest = await new PackageArtifactManifestReader().ReadAsync(prereleaseManifestPath, CancellationToken.None);
+        var stablePolicyError = await Assert.ThrowsAsync<PackageIndexException>(
+            () => new PackageArtifactManifestReader(PackageVersionPolicy.StableOnly).ReadAsync(prereleaseManifestPath, CancellationToken.None));
+        var prereleasePolicyError = await Assert.ThrowsAsync<PackageIndexException>(
+            () => new PackageArtifactManifestReader(PackageVersionPolicy.PrereleaseOnly).ReadAsync(stableManifestPath, CancellationToken.None));
+        var buildMetadataError = await Assert.ThrowsAsync<PackageIndexException>(
+            () => new PackageArtifactManifestReader().ReadAsync(buildMetadataManifestPath, CancellationToken.None));
+
+        Assert.Equal("0.1.0", stableManifest.PackageVersion);
+        Assert.Equal(PackageVersion, prereleaseManifest.PackageVersion);
+        Assert.Contains("stable", stablePolicyError.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prerelease", prereleasePolicyError.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("build metadata", buildMetadataError.Message, StringComparison.OrdinalIgnoreCase);
+
+        static async Task WriteManifestAsync(string manifestPath, string packageVersion)
+        {
+            await File.WriteAllTextAsync(
+                manifestPath,
+                $$"""
+                {
+                  "schema_version": 1,
+                  "package_version": "{{packageVersion}}",
+                  "generated_at_utc": "2026-05-12T00:00:00Z",
+                  "entries": [
+                    {
+                      "package_id": "ForgeTrust.AppSurface.Web",
+                      "project_path": "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                      "decision": "publish",
+                      "artifact_file_name": "ForgeTrust.AppSurface.Web.{{packageVersion}}.nupkg",
+                      "sha512": "abc",
+                      "is_tool": false
+                    }
+                  ]
+                }
+                """,
+                Encoding.UTF8);
+        }
+    }
+
+    [Fact]
     public async Task PackageArtifactWorkflow_RunsRestoreBuildPackAndWritesReport()
     {
         await WriteFileAsync("packages/package-index.yml",
@@ -4043,6 +4101,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var packageGateWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/package-gate.yml"));
         var packageArtifactsWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/package-artifacts.yml"));
         var prereleasePublishWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/nuget-prerelease-publish.yml"));
+        var stablePublishWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/nuget-stable-publish.yml"));
         const string disabledRuntimeResolutionSetting =
             """(?im)(?:^\s*TailwindRuntimeBinaryResolutionEnabled:\s*(?:"false"|'false'|false)\s*$|(?:^|\s)(?:env\s+)?TailwindRuntimeBinaryResolutionEnabled=false\b|(?:/p:|-p:|/property:|-property:)(?:[^\s'"]*;)*TailwindRuntimeBinaryResolutionEnabled=false\b)""";
 
@@ -4061,16 +4120,26 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("coverage-cli-consumer-proof/logs/**", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.DoesNotContain("coverage-cli-consumer-proof/**", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.Contains("Upload package validation diagnostics", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("Upload package validation diagnostics", stablePublishWorkflow, StringComparison.Ordinal);
         Assert.Contains("appsurface-prerelease-validation-diagnostics", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("appsurface-stable-validation-diagnostics", stablePublishWorkflow, StringComparison.Ordinal);
         Assert.Contains("coverage-cli-consumer-proof/NuGet.tool.config", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof/NuGet.tool.config", stablePublishWorkflow, StringComparison.Ordinal);
         Assert.Contains("coverage-cli-consumer-proof/consumer/NuGet.config", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof/consumer/NuGet.config", stablePublishWorkflow, StringComparison.Ordinal);
         Assert.Contains("coverage-cli-consumer-proof/consumer/TestResults/**", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof/consumer/TestResults/**", stablePublishWorkflow, StringComparison.Ordinal);
         Assert.Contains("coverage-cli-consumer-proof/logs/**", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-cli-consumer-proof/logs/**", stablePublishWorkflow, StringComparison.Ordinal);
         Assert.DoesNotContain("coverage-cli-consumer-proof/**", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("coverage-cli-consumer-proof/**", stablePublishWorkflow, StringComparison.Ordinal);
         Assert.Contains("Upload package artifacts", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.Contains("Upload validated package artifacts", prereleasePublishWorkflow, StringComparison.Ordinal);
+        Assert.Contains("Upload validated package artifacts", stablePublishWorkflow, StringComparison.Ordinal);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageGateWorkflow);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageArtifactsWorkflow);
+        Assert.DoesNotMatch(disabledRuntimeResolutionSetting, stablePublishWorkflow);
+        Assert.DoesNotContain("cache: true", stablePublishWorkflow, StringComparison.Ordinal);
         Assert.Matches(disabledRuntimeResolutionSetting, "-p:TailwindRuntimeBinaryResolutionEnabled=false");
         Assert.Matches(disabledRuntimeResolutionSetting, "/property:TailwindRuntimeBinaryResolutionEnabled=false");
         Assert.Matches(disabledRuntimeResolutionSetting, "-property:TailwindRuntimeBinaryResolutionEnabled=false");

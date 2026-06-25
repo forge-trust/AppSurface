@@ -321,6 +321,20 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckDoesNotWarnForStableReleaseWhenStableWorkflowExists()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(".github/workflows/nuget-stable-publish.yml", "name: NuGet Stable Publish\n");
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0", "--fail-on-warnings"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.DoesNotContain("release-stable-package-policy-missing", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CheckWarnsWhenPrereleaseLabelCannotTriggerProtectedPublishing()
     {
         await SeedRepositoryAsync();
@@ -1314,32 +1328,45 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
-    public async Task PublishRejectsStableReleaseWithoutStablePackageWorkflow()
+    public async Task PublishRejectsStableReleaseWithoutStablePackageProof()
     {
         await SeedRepositoryAsync();
+        var runner = CreateSuccessfulStablePublishRunner();
+        runner.Add("gh run list --workflow nuget-stable-publish.yml --commit abc123 --json conclusion,headBranch,status,url --jq [.[] | select(.headBranch == \"v0.1.0\" and .status == \"completed\" and .conclusion == \"success\")][0].url // \"\"", new CommandResult(0, "", ""));
 
         var result = await RunAsync(
             ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--dry-run"],
-            new FakeCommandRunner());
+            runner);
 
         Assert.Equal(1, result.ExitCode);
-        Assert.Contains("Code: release-stable-package-policy-missing", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("Code: release-stable-packages-not-published", result.Stderr, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task PublishKeepsStableReleaseBlockedEvenWhenStableWorkflowFileExists()
+    public async Task PublishStableReleaseValidatesStablePackageWorkflow()
     {
         await SeedRepositoryAsync();
-        await WriteFileAsync(
-            ".github/workflows/nuget-release-publish.yml",
-            "name: Placeholder Stable Publish\n");
+        var runner = CreateSuccessfulStablePublishRunner();
 
         var result = await RunAsync(
             ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--dry-run"],
-            new FakeCommandRunner());
+            runner);
 
-        Assert.Equal(1, result.ExitCode);
-        Assert.Contains("Code: release-stable-package-policy-missing", result.Stderr, StringComparison.Ordinal);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("\"releaseClassification\": \"stable\"", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishUsesConfiguredBaseRefForReachability()
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulStablePublishRunner(baseRef: "release/0.1.0");
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--base-ref", "release/0.1.0", "--dry-run"],
+            runner);
+
+        Assert.Equal(0, result.ExitCode);
     }
 
     [Theory]
@@ -1889,43 +1916,61 @@ public sealed class ReleaseToolTests : IDisposable
         return runner;
     }
 
-    private static string CreateReleaseManifestJson(string? sourceCommit = "abc123")
+    private static FakeCommandRunner CreateSuccessfulStablePublishRunner(string baseRef = "main")
     {
-        var version = SemVer.Parse("0.1.0-preview.1");
+        var runner = new FakeCommandRunner();
+        var releaseManifest = CreateReleaseManifestJson(versionText: "0.1.0");
+        runner.Add("git cat-file -t refs/tags/v0.1.0", new CommandResult(0, "tag\n", ""));
+        runner.Add("git rev-parse refs/tags/v0.1.0^{commit}", new CommandResult(0, "abc123\n", ""));
+        runner.Add($"git merge-base --is-ancestor abc123 origin/{baseRef}", new CommandResult(0, "", ""));
+        runner.Add("gh run list --workflow nuget-stable-publish.yml --commit abc123 --json conclusion,headBranch,status,url --jq [.[] | select(.headBranch == \"v0.1.0\" and .status == \"completed\" and .conclusion == \"success\")][0].url // \"\"", new CommandResult(0, "https://github.com/example/actions/runs/2\n", ""));
+        runner.Add("gh release view v0.1.0 --json url", new CommandResult(1, "", "not found"));
+        runner.Add("git show v0.1.0:releases/v0.1.0.md", new CommandResult(0, TaggedReleaseNoteContent, ""));
+        runner.Add("git show v0.1.0:releases/v0.1.0.md.yml", new CommandResult(0, TaggedReleaseSidecarContent, ""));
+        runner.Add("git show v0.1.0:releases/v0.1.0.release.json", new CommandResult(0, releaseManifest, ""));
+        runner.Add("git show v0.1.0:releases/v0.1.0.evidence.json", new CommandResult(0, CreateReleaseEvidenceJson(releaseManifest, "0.1.0"), ""));
+        return runner;
+    }
+
+    private static string CreateReleaseManifestJson(string? sourceCommit = "abc123", string versionText = "0.1.0-preview.1")
+    {
+        var version = SemVer.Parse(versionText);
+        var releasePath = $"releases/v{version}.md";
         var manifest = new ReleaseManifest(
             "appsurface-release-manifest-v1",
             version.ToString(),
             version.TagName,
             "2026-05-25",
             sourceCommit,
-            "prerelease",
+            version.IsStable ? "stable" : "prerelease",
             [
-                "releases/v0.1.0-preview.1.md",
-                "releases/v0.1.0-preview.1.md.yml",
-                "releases/v0.1.0-preview.1.release.json",
-                "releases/v0.1.0-preview.1.evidence.json"
+                releasePath,
+                $"releases/v{version}.md.yml",
+                $"releases/v{version}.release.json",
+                $"releases/v{version}.evidence.json"
             ],
             ["Core/ForgeTrust.AppSurface.Core.csproj"],
-            [new PackagePathUpdate("Core/ForgeTrust.AppSurface.Core.csproj", "releases/unreleased.md", "releases/v0.1.0-preview.1.md")],
+            [new PackagePathUpdate("Core/ForgeTrust.AppSurface.Core.csproj", "releases/unreleased.md", releasePath)],
             [],
             []);
         return JsonSerializer.Serialize(manifest, ReleaseJson.Options) + Environment.NewLine;
     }
 
-    private static string CreateReleaseEvidenceJson(string releaseManifestJson)
+    private static string CreateReleaseEvidenceJson(string releaseManifestJson, string versionText = "0.1.0-preview.1")
     {
-        var version = SemVer.Parse("0.1.0-preview.1");
+        var version = SemVer.Parse(versionText);
+        var releasePath = $"releases/v{version}.md";
         var workspace = new ReleaseWorkspace(Path.Join(Path.GetTempPath(), "ReleaseToolEvidenceFixtures"));
         var evidence = ReleaseEvidence.BuildDraft(
             workspace,
             version,
-            "prerelease",
+            version.IsStable ? "stable" : "prerelease",
             new DateOnly(2026, 5, 25),
             "abc123",
             TaggedReleaseNoteContent,
             TaggedReleaseSidecarContent,
             releaseManifestJson,
-            [new PackagePathUpdate("Core/ForgeTrust.AppSurface.Core.csproj", "releases/unreleased.md", "releases/v0.1.0-preview.1.md")]);
+            [new PackagePathUpdate("Core/ForgeTrust.AppSurface.Core.csproj", "releases/unreleased.md", releasePath)]);
         return ReleaseEvidence.Serialize(evidence);
     }
 
