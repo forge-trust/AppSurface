@@ -299,9 +299,9 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     {
         if (streamDescriptor is not null && !IsRazorWireBoolChannelAuthorizerAdapter(streamDescriptor))
         {
-            return channelDescriptor is null
-                ? streamDescriptor.Lifetime
-                : ShorterLifetime(streamDescriptor.Lifetime, channelDescriptor.Lifetime);
+            return streamDescriptor.ImplementationFactory is not null && channelDescriptor is not null
+                ? ShorterLifetime(streamDescriptor.Lifetime, channelDescriptor.Lifetime)
+                : streamDescriptor.Lifetime;
         }
 
         return channelDescriptor?.Lifetime ?? ServiceLifetime.Singleton;

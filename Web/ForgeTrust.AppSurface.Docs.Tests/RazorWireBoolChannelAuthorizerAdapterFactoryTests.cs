@@ -49,6 +49,27 @@ namespace ForgeTrust.AppSurface.Docs.Tests
             Assert.True(result.IsAllowed);
         }
 
+        [Fact]
+        public void AddAppSurfaceDocs_WhenCustomStreamAuthorizerExists_PreservesStreamAuthorizerLifetime()
+        {
+            var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+            var services = new ServiceCollection();
+            services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+            services.AddSingleton<IWebHostEnvironment>(environment);
+            services.AddSingleton<IHostEnvironment>(environment);
+            services.AddSingleton<IRazorWireStreamAuthorizer, AllowAllStreamAuthorizer>();
+            services.AddScoped<IRazorWireChannelAuthorizer, AllowAllChannelAuthorizer>();
+            services.AddLogging();
+
+            services.AddAppSurfaceDocs();
+
+            var streamDescriptor = services.Last(service => service.ServiceType == typeof(IRazorWireStreamAuthorizer));
+            var channelDescriptor = services.Last(service => service.ServiceType == typeof(IRazorWireChannelAuthorizer));
+
+            Assert.Equal(ServiceLifetime.Singleton, streamDescriptor.Lifetime);
+            Assert.Equal(ServiceLifetime.Singleton, channelDescriptor.Lifetime);
+        }
+
         private sealed class TestWebHostEnvironment : IWebHostEnvironment
         {
             public string ApplicationName { get; set; } = "AppSurfaceDocsTests";
@@ -69,6 +90,14 @@ namespace ForgeTrust.AppSurface.Docs.Tests
             public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
             {
                 return new ValueTask<bool>(true);
+            }
+        }
+
+        private sealed class AllowAllStreamAuthorizer : IRazorWireStreamAuthorizer
+        {
+            public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+            {
+                return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Allowed());
             }
         }
     }
