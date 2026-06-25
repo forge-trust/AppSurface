@@ -23,6 +23,7 @@ internal static class PublishedSearchIndexDocumentPathPolicy
         "search-client.js",
         "outline-client.js",
         "minisearch.min.js",
+        "_harvest",
         "_health",
         "_health.json",
         "_routes",
@@ -364,7 +365,8 @@ internal static class PublishedSearchIndexDocumentPathPolicy
             return true;
         }
 
-        return trimmed.StartsWith("_search-index/", StringComparison.OrdinalIgnoreCase);
+        return trimmed.StartsWith("_harvest/", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith("_search-index/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsUnderRootOrdinal(string path, string root)

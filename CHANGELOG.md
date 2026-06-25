@@ -18,6 +18,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - `ForgeTrust.AppSurface.Auth.AspNetCore` can now protect Minimal API endpoints with host-owned ASP.NET Core policies while returning AppSurface-shaped ProblemDetails JSON for API callers.
 - `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` adds Development-only selectable personas, a same-origin local control page, and a visible marker for package consumers proving AppSurface auth flows without an external identity provider.
 - `ForgeTrust.AppSurface.Observability` now lets AppSurface apps register OpenTelemetry logging, tracing, and metrics for Aspire or another OTLP collector without depending on the Aspire AppHost package.
+- AppSurface Docs now exposes a trusted maintainer harvest rebuild loop with an operator-gated `Rebuild docs` action, queued source-backed rebuilds, and a live `_harvest` observatory that returns to validated docs/search context.
 - `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` now provides a thin ASP.NET Core cookie plus OpenID Connect convenience package with named schemes, safe defaults, passive prompts, event composition, and redacted diagnostics.
 - AppSurface Config can now compare sanitized audit reports, render deterministic same-host or captured-snapshot evidence, and expose command-framework-agnostic diff workflows with display-safe failures.
 - RazorWire export now fails artifact-producing redirects with `RWEXPORT008` when the final response leaves the configured export origin or base path before content is read or written.
