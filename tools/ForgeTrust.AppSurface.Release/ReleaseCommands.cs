@@ -207,13 +207,7 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
         if (string.IsNullOrWhiteSpace(normalizedBaseRef)
             || normalizedBaseRef.StartsWith("refs/", StringComparison.Ordinal)
             || IsFullObjectId(normalizedBaseRef)
-            || normalizedBaseRef.Contains("..", StringComparison.Ordinal)
-            || normalizedBaseRef.Contains(' ')
-            || normalizedBaseRef.Contains('\\')
-            || normalizedBaseRef.Contains('~')
-            || normalizedBaseRef.Contains('^')
-            || normalizedBaseRef.Contains(':')
-            || normalizedBaseRef.EndsWith("/", StringComparison.Ordinal))
+            || !IsValidBranchRef(normalizedBaseRef))
         {
             throw new ReleaseToolException(ReleaseDiagnostic.Error(
                 "release-base-ref-invalid",
@@ -233,17 +227,43 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
             return false;
         }
 
-        foreach (var character in value)
+        return value.All(IsHexObjectIdCharacter);
+    }
+
+    private static bool IsHexObjectIdCharacter(char character)
+    {
+        return (character >= '0' && character <= '9')
+            || (character >= 'a' && character <= 'f')
+            || (character >= 'A' && character <= 'F');
+    }
+
+    private static bool IsValidBranchRef(string value)
+    {
+        if (value is "@"
+            || value.StartsWith("/", StringComparison.Ordinal)
+            || value.StartsWith(".", StringComparison.Ordinal)
+            || value.StartsWith("-", StringComparison.Ordinal)
+            || value.EndsWith("/", StringComparison.Ordinal)
+            || value.EndsWith(".", StringComparison.Ordinal)
+            || value.Contains("//", StringComparison.Ordinal)
+            || value.Contains("..", StringComparison.Ordinal)
+            || value.Contains("@{", StringComparison.Ordinal)
+            || !value.All(IsValidBranchRefCharacter))
         {
-            if (!((character >= '0' && character <= '9')
-                || (character >= 'a' && character <= 'f')
-                || (character >= 'A' && character <= 'F')))
-            {
-                return false;
-            }
+            return false;
         }
 
-        return true;
+        return value
+            .Split('/')
+            .All(component => !component.StartsWith(".", StringComparison.Ordinal)
+                && !component.EndsWith(".lock", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsValidBranchRefCharacter(char character)
+    {
+        return character > ' '
+            && character != '\u007f'
+            && character is not ('~' or '^' or ':' or '?' or '*' or '[' or '\\');
     }
 
     /// <inheritdoc />
