@@ -1174,6 +1174,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     {
         var feedDirectory = Path.Join(_tempRoot, "feed");
         Directory.CreateDirectory(feedDirectory);
+        var nugetPackagesDirectory = CreateNuGetPackageCacheDirectory("packed-consumer-nuget-packages");
         var repoRoot = GetRepositoryRoot();
         var packageVersion = CreateSmokePackageVersion();
 
@@ -1213,6 +1214,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
                 <TargetFramework>net10.0</TargetFramework>
                 <Nullable>enable</Nullable>
                 <RestoreSources>{{EscapeForXml(feedDirectory)}};$(RestoreSources)</RestoreSources>
+                <RestoreFallbackFolders>{{EscapeForXml(GetNuGetFallbackPackagesPath())}}</RestoreFallbackFolders>
                 <RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources>
                 <StaticWebAssetBasePath>_content/PackedConsumer</StaticWebAssetBasePath>
                 <TailwindInputPath>wwwroot/css/app.css</TailwindInputPath>
@@ -1227,7 +1229,10 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             </Project>
             """);
 
-        var buildResult = await RunDotNetAsync(["build", projectPath, "-nologo", "-v:minimal"], projectDirectory);
+        var buildResult = await RunDotNetAsync(
+            ["build", projectPath, "-nologo", "-v:minimal"],
+            projectDirectory,
+            ("NUGET_PACKAGES", nugetPackagesDirectory));
         var buildOutput = buildResult.Stdout + Environment.NewLine + buildResult.Stderr;
         Assert.Equal(0, buildResult.ExitCode);
         Assert.True(File.Exists(markerPath), buildOutput);
@@ -1236,7 +1241,10 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         var manifestPath = GetStaticWebAssetsBuildManifestPath(projectDirectory, buildOutput);
         await AssertBuildManifestContainsGeneratedCssAsync(manifestPath);
 
-        var publishResult = await RunDotNetAsync(["publish", projectPath, "-nologo", "-v:minimal", "--no-restore"], projectDirectory);
+        var publishResult = await RunDotNetAsync(
+            ["publish", projectPath, "-nologo", "-v:minimal", "--no-restore"],
+            projectDirectory,
+            ("NUGET_PACKAGES", nugetPackagesDirectory));
         var publishOutput = publishResult.Stdout + Environment.NewLine + publishResult.Stderr;
         Assert.Equal(0, publishResult.ExitCode);
         Assert.True(
@@ -1250,6 +1258,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     {
         var feedDirectory = Path.Join(_tempRoot, "default-runtime-feed");
         Directory.CreateDirectory(feedDirectory);
+        var nugetPackagesDirectory = CreateNuGetPackageCacheDirectory("packed-default-runtime-consumer-nuget-packages");
         var repoRoot = GetRepositoryRoot();
         var packageVersion = CreateSmokePackageVersion();
 
@@ -1276,6 +1285,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
                 <TargetFramework>net10.0</TargetFramework>
                 <Nullable>enable</Nullable>
                 <RestoreSources>{{EscapeForXml(feedDirectory)}};$(RestoreSources)</RestoreSources>
+                <RestoreFallbackFolders>{{EscapeForXml(GetNuGetFallbackPackagesPath())}}</RestoreFallbackFolders>
                 <RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources>
                 <StaticWebAssetBasePath>_content/PackedDefaultRuntimeConsumer</StaticWebAssetBasePath>
                 <TailwindInputPath>wwwroot/css/app.css</TailwindInputPath>
@@ -1289,7 +1299,10 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             </Project>
             """);
 
-        var buildResult = await RunDotNetAsync(["build", projectPath, "-nologo", "-v:minimal"], projectDirectory);
+        var buildResult = await RunDotNetAsync(
+            ["build", projectPath, "-nologo", "-v:minimal"],
+            projectDirectory,
+            ("NUGET_PACKAGES", nugetPackagesDirectory));
         var buildOutput = buildResult.Stdout + Environment.NewLine + buildResult.Stderr;
 
         Assert.True(buildResult.ExitCode == 0, buildOutput);
@@ -1376,6 +1389,30 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     private static string CreateSmokePackageVersion()
     {
         return "0.1.0-smoke." + Guid.NewGuid().ToString("N");
+    }
+
+    private static string GetNuGetFallbackPackagesPath()
+    {
+        var configuredPath = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+        {
+            Directory.CreateDirectory(configuredPath);
+            return configuredPath;
+        }
+
+        var packagesPath = Path.Join(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".nuget",
+            "packages");
+        Directory.CreateDirectory(packagesPath);
+        return packagesPath;
+    }
+
+    private string CreateNuGetPackageCacheDirectory(string name)
+    {
+        var path = Path.Join(_tempRoot, name);
+        Directory.CreateDirectory(path);
+        return path;
     }
 
     private static async Task<string> CreatePackagedTargetsCopyAsync(string projectDirectory)

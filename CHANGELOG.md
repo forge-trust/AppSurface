@@ -34,6 +34,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - RazorWire hybrid islands now block inline `data:` module specifiers and protocol-relative `//...` module URLs; serve client modules from relative, root-relative, same-origin, explicit HTTPS, or import-map specifiers instead.
 - RazorWire stream authorization can now return `AppSurfaceAuthResult` outcomes before SSE starts, while existing bool authorizers keep working through a compatibility adapter.
 - RazorWire now provides stable local form interactions for conditional targets and one-dimensional ASP.NET Core model-bound collections without page-local JavaScript.
+- Package verification tests now keep Tailwind packed-consumer smoke restores out of the user-level NuGet package cache and remove generated RazorWire ToolVerifier package entries after the tool contract proof completes.
 
 ## 0.1.0-rc.4 - 2026-06-16
 

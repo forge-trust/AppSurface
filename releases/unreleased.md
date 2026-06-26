@@ -59,6 +59,8 @@ This is the living release note for the next coordinated AppSurface version afte
   an offline fallback strategy. MVC and Razor apps can add `<appsurface:pwa-head />`; custom layouts can copy equivalent
   tags from diagnostics; `appsurface pwa verify --url <origin>` checks the live metadata, icons, secure-origin posture,
   diagnostics, and opt-in service worker.
+- Package verification tests now keep Tailwind packed-consumer smoke restores out of the user-level NuGet package cache
+  and clean up generated RazorWire ToolVerifier package entries after the tool contract proof completes.
 
 ### AppSurface Flow
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
@@ -26,6 +27,7 @@ public sealed class ToolPackageContractTests
         var exportDirectory = workspace.CreateSubdirectory("export-output");
         var version = "0.0.0-toolverifier." + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
         var nugetPackagesDirectory = GetDefaultNuGetPackagesPath();
+        using var packageCacheCleanup = new GeneratedPackageCacheCleanup(nugetPackagesDirectory, PackageId, version);
         var repositoryRunner = new ToolProcessRunner(
             repositoryRoot,
             new Dictionary<string, string?>
@@ -274,6 +276,56 @@ public sealed class ToolPackageContractTests
         }
     }
 
+    private sealed class GeneratedPackageCacheCleanup(
+        string nugetPackagesDirectory,
+        string packageId,
+        string packageVersion) : IDisposable
+    {
+        public void Dispose()
+        {
+            var packageIdSegment = GetSafePackagePathSegment(packageId, nameof(packageId));
+            var packageVersionSegment = GetSafePackagePathSegment(packageVersion, nameof(packageVersion));
+            var packageVersionDirectory = TestPathUtils.PathUnder(
+                nugetPackagesDirectory,
+                packageIdSegment,
+                packageVersionSegment);
+
+            try
+            {
+                if (Directory.Exists(packageVersionDirectory))
+                {
+                    Directory.Delete(packageVersionDirectory, recursive: true);
+                }
+            }
+            catch (IOException ex)
+            {
+                Trace.TraceWarning(
+                    "Could not delete generated NuGet package cache directory '{0}': {1}",
+                    packageVersionDirectory,
+                    ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Trace.TraceWarning(
+                    "Could not delete generated NuGet package cache directory '{0}': {1}",
+                    packageVersionDirectory,
+                    ex);
+            }
+        }
+
+        private static string GetSafePackagePathSegment(string value, string parameterName)
+        {
+            if (System.IO.Path.IsPathRooted(value)
+                || value.IndexOf(System.IO.Path.DirectorySeparatorChar, StringComparison.Ordinal) >= 0
+                || value.IndexOf(System.IO.Path.AltDirectorySeparatorChar, StringComparison.Ordinal) >= 0)
+            {
+                throw new InvalidOperationException($"{parameterName} must be a NuGet package path segment.");
+            }
+
+            return value.ToLowerInvariant();
+        }
+    }
+
     private sealed class TempDirectory : IDisposable
     {
         private TempDirectory(string path)
@@ -303,11 +355,13 @@ public sealed class ToolPackageContractTests
             {
                 Directory.Delete(Path, recursive: true);
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                Trace.TraceWarning("Could not delete temporary directory '{0}': {1}", Path, ex);
             }
-            catch (UnauthorizedAccessException)
+            catch (UnauthorizedAccessException ex)
             {
+                Trace.TraceWarning("Could not delete temporary directory '{0}': {1}", Path, ex);
             }
         }
     }
