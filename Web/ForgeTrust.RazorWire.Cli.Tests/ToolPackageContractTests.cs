@@ -285,7 +285,7 @@ public sealed class ToolPackageContractTests
         {
             var packageIdSegment = GetSafePackagePathSegment(packageId, nameof(packageId));
             var packageVersionSegment = GetSafePackagePathSegment(packageVersion, nameof(packageVersion));
-            var packageVersionDirectory = System.IO.Path.Combine(
+            var packageVersionDirectory = TestPathUtils.PathUnder(
                 nugetPackagesDirectory,
                 packageIdSegment,
                 packageVersionSegment);
