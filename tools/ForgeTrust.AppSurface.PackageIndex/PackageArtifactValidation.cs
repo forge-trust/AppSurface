@@ -1195,14 +1195,24 @@ internal static class PackageVersionValidator
             throw new PackageIndexException("Package version must not include SemVer build metadata because NuGet strips build metadata from package identity.");
         }
 
-        var parts = packageVersion.Split('-', 2, StringSplitOptions.TrimEntries);
+        if (!string.Equals(packageVersion, packageVersion.Trim(), StringComparison.Ordinal))
+        {
+            throw new PackageIndexException($"Package version '{packageVersion}' must not include leading or trailing whitespace.");
+        }
+
+        var parts = packageVersion.Split('-', 2, StringSplitOptions.None);
         var versionParts = parts[0].Split('.');
-        if (versionParts.Length != 3 || versionParts.Any(part => !int.TryParse(part, out _)))
+        if (versionParts.Length != 3 || versionParts.Any(part => !IsValidNumericIdentifier(part)))
         {
             throw new PackageIndexException($"Package version '{packageVersion}' must use a major.minor.patch SemVer core.");
         }
 
-        var isPrerelease = parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]);
+        var isPrerelease = parts.Length == 2;
+        if (isPrerelease && !IsValidPrerelease(parts[1]))
+        {
+            throw new PackageIndexException($"Package version '{packageVersion}' must use a valid SemVer prerelease suffix.");
+        }
+
         if (policy == PackageVersionPolicy.PrereleaseOnly && !isPrerelease)
         {
             throw new PackageIndexException($"Package version '{packageVersion}' must be a prerelease version with a SemVer suffix.");
@@ -1212,6 +1222,39 @@ internal static class PackageVersionValidator
         {
             throw new PackageIndexException($"Package version '{packageVersion}' must be a stable version without a SemVer prerelease suffix.");
         }
+    }
+
+    private static bool IsValidNumericIdentifier(string value)
+    {
+        return value.Length > 0
+            && value.All(IsAsciiDigit)
+            && (value.Length == 1 || value[0] != '0');
+    }
+
+    private static bool IsValidPrerelease(string prerelease)
+    {
+        if (prerelease.Length == 0)
+        {
+            return false;
+        }
+
+        var identifiers = prerelease.Split('.');
+        foreach (var identifier in identifiers)
+        {
+            if (identifier.Length == 0
+                || !identifier.All(character => char.IsAsciiLetterOrDigit(character) || character == '-')
+                || (identifier.All(IsAsciiDigit) && !IsValidNumericIdentifier(identifier)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsAsciiDigit(char value)
+    {
+        return value is >= '0' and <= '9';
     }
 }
 

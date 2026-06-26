@@ -180,9 +180,14 @@ internal abstract class ReleaseCommandBase
     protected virtual string? ResolveGitHubOutputPath(string repoRoot) => null;
 
     /// <summary>
-    /// Resolves the base ref used for publish-time reachability and source workflow checks.
+    /// Resolves the branch name used for publish-time reachability and source workflow checks.
     /// </summary>
-    /// <returns>The base ref for release validation.</returns>
+    /// <returns>
+    /// The base branch name for release validation. Commands default to <c>main</c>; publish accepts branch-ish
+    /// inputs such as <c>release/0.1.0</c>, <c>origin/release/0.1.0</c>, <c>refs/heads/release/0.1.0</c>, or
+    /// <c>refs/remotes/origin/release/0.1.0</c> and normalizes them before validators query <c>origin/&lt;branch&gt;</c>.
+    /// Tags and commit SHAs are not valid base refs because publish validation must prove protected branch reachability.
+    /// </returns>
     protected virtual string ResolveBaseRef() => "main";
 
     /// <summary>

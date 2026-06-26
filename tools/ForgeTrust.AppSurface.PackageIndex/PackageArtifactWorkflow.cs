@@ -281,7 +281,7 @@ internal sealed class PackageArtifactWorkflow
 /// <param name="ManifestPath">Absolute package manifest path.</param>
 /// <param name="ArtifactsOutputPath">Directory that receives produced <c>.nupkg</c> artifacts.</param>
 /// <param name="ReportPath">Markdown validation report path.</param>
-/// <param name="PackageVersion">Exact stable or prerelease package version to pack and validate.</param>
+/// <param name="PackageVersion">Exact stable or prerelease package version to pack and validate. SemVer build metadata such as <c>1.2.3+sha</c> is rejected because NuGet strips it from package identity.</param>
 /// <param name="ArtifactManifestPath">Machine-readable validation manifest path for the publish workflow.</param>
 /// <param name="CoverageProofWorkDirectory">Isolated work directory for the packaged coverage CLI consumer proof.</param>
 /// <param name="CoverageProofReportPath">Standalone markdown report path for the packaged coverage CLI consumer proof.</param>

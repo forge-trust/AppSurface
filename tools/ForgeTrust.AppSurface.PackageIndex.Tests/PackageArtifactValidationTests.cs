@@ -3081,14 +3081,43 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
     [Theory]
     [InlineData("")]
+    [InlineData(" 1.2.3")]
+    [InlineData("1.2.3 ")]
+    [InlineData("01.2.3")]
+    [InlineData("1.02.3")]
+    [InlineData("1.2.03")]
     [InlineData("1.two.3-ci.4")]
     [InlineData("1.2-ci.4")]
+    [InlineData("1.2.3-")]
+    [InlineData("1.2.3-rc..1")]
+    [InlineData("1.2.3-01")]
+    [InlineData("1.2.3-rc.01")]
+    [InlineData("1.2.3-rc 1")]
     public void PackageVersionValidator_RejectsMissingOrMalformedSemVerCore(string packageVersion)
     {
         var error = Assert.Throws<PackageIndexException>(
             () => PackageVersionValidator.Require(packageVersion, PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata));
 
         Assert.Contains("Package version", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackagePublishLedgerRenderer_LabelsStablePublishLogs()
+    {
+        var markdown = new PackagePublishLedgerRenderer().RenderMarkdown(new PackagePublishLedger(
+            "1.2.3",
+            "https://api.nuget.org/v3/index.json",
+            [
+                new PackagePublishLedgerEntry(
+                    "ForgeTrust.AppSurface.Web",
+                    "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                    "ForgeTrust.AppSurface.Web.1.2.3.nupkg",
+                    PackagePublishStatus.Pushed,
+                    0,
+                    string.Empty)
+            ]));
+
+        Assert.Contains("# NuGet stable publish ledger", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -4402,7 +4431,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
-    public async Task PackagePrereleasePublishWorkflow_PushesArtifactsInManifestOrderAndWritesLedger()
+    public async Task PackagePublishWorkflow_PushesArtifactsInManifestOrderAndWritesLedger()
     {
         await WriteFileAsync("packages/package-index.yml",
             """
@@ -4459,7 +4488,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             new ExternalCommandResult(0, "pushed", string.Empty),
             new ExternalCommandResult(0, "Package already exists.", string.Empty)
         ]);
-        var workflow = new PackagePrereleasePublishWorkflow(
+        var workflow = new PackagePublishWorkflow(
             CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
             {
                 ["ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"] = CreateMetadata(
@@ -4479,7 +4508,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         try
         {
             var ledger = await workflow.RunAsync(
-                new PackagePrereleasePublishRequest(
+                new PackagePublishRequest(
                     _repositoryRoot,
                     ManifestPath,
                     artifactDirectory,
@@ -4493,7 +4522,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
             Assert.EndsWith($"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg", commandRunner.Requests[0].Arguments[2], StringComparison.Ordinal);
             Assert.EndsWith($"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg", commandRunner.Requests[1].Arguments[2], StringComparison.Ordinal);
             Assert.All(commandRunner.Requests, request => Assert.Contains("--skip-duplicate", request.Arguments));
-            Assert.Contains("duplicate-reported", await File.ReadAllTextAsync(publishLogPath), StringComparison.Ordinal);
+            var publishLog = await File.ReadAllTextAsync(publishLogPath);
+            Assert.Contains("# NuGet prerelease publish ledger", publishLog, StringComparison.Ordinal);
+            Assert.Contains("duplicate-reported", publishLog, StringComparison.Ordinal);
         }
         finally
         {
@@ -4502,7 +4533,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
-    public async Task PackagePrereleasePublishWorkflow_StopsAfterFirstPublishFailure()
+    public async Task PackagePublishWorkflow_StopsAfterFirstPublishFailure()
     {
         await WriteFileAsync("packages/package-index.yml",
             """
@@ -4550,7 +4581,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var commandRunner = new RecordingExternalCommandRunner([
             new ExternalCommandResult(1, string.Empty, "nuget outage")
         ]);
-        var workflow = new PackagePrereleasePublishWorkflow(
+        var workflow = new PackagePublishWorkflow(
             CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
             {
                 ["ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"] = CreateMetadata("ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", "ForgeTrust.AppSurface.Core"),
@@ -4564,7 +4595,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         try
         {
             var ledger = await workflow.RunAsync(
-                new PackagePrereleasePublishRequest(
+                new PackagePublishRequest(
                     _repositoryRoot,
                     ManifestPath,
                     artifactDirectory,
@@ -4584,7 +4615,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
-    public async Task PackagePrereleasePublishWorkflow_RedactsSecretsAndPersistsLedgerAfterEachAttempt()
+    public async Task PackagePublishWorkflow_RedactsSecretsAndPersistsLedgerAfterEachAttempt()
     {
         await WriteFileAsync("packages/package-index.yml",
             """
@@ -4634,7 +4665,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             new ExternalCommandResult(0, "api-key: super-secret-token", "pushed super-secret-token"),
             new InvalidOperationException("runner crashed")
         ]);
-        var workflow = new PackagePrereleasePublishWorkflow(
+        var workflow = new PackagePublishWorkflow(
             CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
             {
                 ["ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"] = CreateMetadata("ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", "ForgeTrust.AppSurface.Core"),
@@ -4648,7 +4679,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         try
         {
             var ledger = await workflow.RunAsync(
-                new PackagePrereleasePublishRequest(
+                new PackagePublishRequest(
                     _repositoryRoot,
                     ManifestPath,
                     artifactDirectory,

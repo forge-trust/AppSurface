@@ -332,6 +332,7 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Equal(0, result.ExitCode);
         Assert.DoesNotContain("release-stable-package-policy-missing", result.Stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("release-prerelease-label-unprotected", result.Stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1370,9 +1371,25 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Theory]
+    [InlineData("origin/release/0.1.0")]
+    [InlineData("refs/heads/release/0.1.0")]
+    [InlineData("refs/remotes/origin/release/0.1.0")]
+    public async Task PublishNormalizesBranchishBaseRefForReachability(string baseRef)
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulStablePublishRunner(baseRef: "release/0.1.0");
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--base-ref", baseRef, "--dry-run"],
+            runner);
+
+        Assert.Equal(0, result.ExitCode);
+    }
+
+    [Theory]
     [InlineData("git cat-file -t refs/tags/v0.1.0-preview.1", "commit", "release-tag-lightweight")]
     [InlineData("git rev-parse refs/tags/v0.1.0-preview.1^{commit}", "stdout failure", "release-tag-commit-missing")]
-    [InlineData("git merge-base --is-ancestor abc123 origin/main", "", "release-tag-unreachable-from-main")]
+    [InlineData("git merge-base --is-ancestor abc123 origin/main", "", "release-tag-unreachable-from-base-ref")]
     [InlineData("gh run list --workflow nuget-prerelease-publish.yml --commit abc123 --json conclusion,headBranch,status,url --jq [.[] | select(.headBranch == \"v0.1.0-preview.1\" and .status == \"completed\" and .conclusion == \"success\")][0].url // \"\"", "", "release-prerelease-packages-not-published")]
     [InlineData("gh release view v0.1.0-preview.1 --json url", "{\"url\":\"https://example.test\"}", "release-github-release-exists")]
     [InlineData("git show v0.1.0-preview.1:releases/v0.1.0-preview.1.md", "", "release-note-missing-from-tag")]

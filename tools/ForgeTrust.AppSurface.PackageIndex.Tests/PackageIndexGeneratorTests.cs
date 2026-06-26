@@ -2453,7 +2453,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-        PackagePrereleasePublishRequest? capturedRequest = null;
+        PackagePublishRequest? capturedRequest = null;
 
         var exitCode = await Program.RunAsync(
             [
@@ -2540,7 +2540,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-        PackagePrereleasePublishRequest? capturedRequest = null;
+        PackagePublishRequest? capturedRequest = null;
 
         var exitCode = await Program.RunAsync(
             [

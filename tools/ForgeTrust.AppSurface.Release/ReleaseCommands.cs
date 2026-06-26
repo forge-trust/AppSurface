@@ -116,9 +116,9 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
     public string? GitHubOutputPath { get; set; }
 
     /// <summary>
-    /// Gets the remote branch or ref that must contain the annotated tag commit.
+    /// Gets the remote branch or branch ref that must contain the annotated tag commit.
     /// </summary>
-    [CommandOption("base-ref", Description = "Remote branch or ref that must contain the annotated tag commit. Defaults to main.")]
+    [CommandOption("base-ref", Description = "Branch or branch ref that must contain the annotated tag commit. Defaults to main.")]
     public string? BaseRef { get; set; }
 
     /// <inheritdoc />
@@ -161,7 +161,37 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
     /// <inheritdoc />
     protected override string ResolveBaseRef()
     {
-        return string.IsNullOrWhiteSpace(BaseRef) ? "main" : BaseRef.Trim();
+        return NormalizeBaseRef(BaseRef);
+    }
+
+    private static string NormalizeBaseRef(string? baseRef)
+    {
+        if (string.IsNullOrWhiteSpace(baseRef))
+        {
+            return "main";
+        }
+
+        var normalized = baseRef.Trim();
+        const string remoteBranchPrefix = "refs/remotes/origin/";
+        const string branchPrefix = "refs/heads/";
+        const string originPrefix = "origin/";
+
+        if (normalized.StartsWith(remoteBranchPrefix, StringComparison.Ordinal))
+        {
+            return normalized[remoteBranchPrefix.Length..];
+        }
+
+        if (normalized.StartsWith(branchPrefix, StringComparison.Ordinal))
+        {
+            return normalized[branchPrefix.Length..];
+        }
+
+        if (normalized.StartsWith(originPrefix, StringComparison.Ordinal))
+        {
+            return normalized[originPrefix.Length..];
+        }
+
+        return normalized;
     }
 
     /// <inheritdoc />

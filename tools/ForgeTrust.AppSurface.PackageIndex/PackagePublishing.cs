@@ -158,7 +158,12 @@ internal sealed class PackageArtifactManifestReader
     /// <summary>
     /// Creates a manifest reader for package artifact manifests.
     /// </summary>
-    /// <param name="versionPolicy">Version policy required by the consuming workflow.</param>
+    /// <param name="versionPolicy">
+    /// Version policy required by the consuming workflow. The default accepts stable or prerelease versions without
+    /// SemVer build metadata for shared consumers such as smoke install; protected publish callers override it with
+    /// <see cref="PackageVersionPolicy.PrereleaseOnly" /> or <see cref="PackageVersionPolicy.StableOnly" /> so a stable
+    /// job cannot publish prerelease artifacts, and a prerelease job cannot publish stable artifacts.
+    /// </param>
     internal PackageArtifactManifestReader(PackageVersionPolicy versionPolicy = PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata)
     {
         _versionPolicy = versionPolicy;
@@ -259,7 +264,7 @@ internal sealed class PackageArtifactManifestReader
 /// <summary>
 /// Publishes a validated package artifact set to NuGet in manifest order.
 /// </summary>
-internal sealed class PackagePrereleasePublishWorkflow
+internal sealed class PackagePublishWorkflow
 {
     internal const int PushTimeoutMilliseconds = 180_000;
 
@@ -268,7 +273,7 @@ internal sealed class PackagePrereleasePublishWorkflow
     private readonly IExternalCommandRunner _commandRunner;
     private readonly PackagePublishLedgerRenderer _ledgerRenderer;
 
-    internal PackagePrereleasePublishWorkflow(
+    internal PackagePublishWorkflow(
         PackagePublishPlanResolver planResolver,
         PackageArtifactManifestReader manifestReader,
         IExternalCommandRunner commandRunner,
@@ -287,7 +292,7 @@ internal sealed class PackagePrereleasePublishWorkflow
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Publish ledger.</returns>
     internal async Task<PackagePublishLedger> RunAsync(
-        PackagePrereleasePublishRequest request,
+        PackagePublishRequest request,
         CancellationToken cancellationToken)
     {
         ValidatePublishRequest(request);
@@ -365,7 +370,7 @@ internal sealed class PackagePrereleasePublishWorkflow
     }
 
     private async Task<ExternalCommandResult> RunPushAsync(
-        PackagePrereleasePublishRequest request,
+        PackagePublishRequest request,
         PlannedPackageArtifact entry,
         string apiKey,
         CancellationToken cancellationToken)
@@ -404,7 +409,7 @@ internal sealed class PackagePrereleasePublishWorkflow
 
     private async Task PersistLedgerAsync(
         string packageVersion,
-        PackagePrereleasePublishRequest request,
+        PackagePublishRequest request,
         IReadOnlyList<PackagePublishLedgerEntry> ledgerEntries,
         CancellationToken cancellationToken)
     {
@@ -413,7 +418,7 @@ internal sealed class PackagePrereleasePublishWorkflow
         await File.WriteAllTextAsync(request.PublishLogPath, _ledgerRenderer.RenderMarkdown(ledger), cancellationToken);
     }
 
-    private static void ValidatePublishRequest(PackagePrereleasePublishRequest request)
+    private static void ValidatePublishRequest(PackagePublishRequest request)
     {
         if (!Directory.Exists(request.RepositoryRoot))
         {
@@ -957,7 +962,7 @@ internal sealed class PackagePublishLedgerRenderer
     internal string RenderMarkdown(PackagePublishLedger ledger)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("# NuGet prerelease publish ledger");
+        builder.AppendLine($"# NuGet {ResolveClassification(ledger.PackageVersion)} publish ledger");
         builder.AppendLine();
         builder.AppendLine($"Version: `{ledger.PackageVersion}`");
         builder.AppendLine($"Source: `{ledger.Source}`");
@@ -994,6 +999,11 @@ internal sealed class PackagePublishLedgerRenderer
             PackagePublishStatus.SkippedAfterFailure => "skipped-after-failure",
             _ => status.ToString()
         };
+    }
+
+    private static string ResolveClassification(string packageVersion)
+    {
+        return packageVersion.Contains('-', StringComparison.Ordinal) ? "prerelease" : "stable";
     }
 }
 
@@ -1053,7 +1063,7 @@ internal sealed class PackageSmokeInstallReportRenderer
 /// <param name="PublishLogPath">Markdown publish ledger path.</param>
 /// <param name="Source">NuGet source URL.</param>
 /// <param name="ApiKeyEnvironmentVariable">Environment variable that supplies the NuGet API key.</param>
-internal sealed record PackagePrereleasePublishRequest(
+internal sealed record PackagePublishRequest(
     string RepositoryRoot,
     string ManifestPath,
     string ArtifactsInputPath,

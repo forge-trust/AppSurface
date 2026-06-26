@@ -29,6 +29,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Validate stable tag
         id: tag
@@ -117,6 +118,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      # Required so gh run list can verify source CI for the tag commit.
       actions: read
       contents: read
 
@@ -157,6 +159,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ needs.validate-tag.outputs.tag-commit }}
+          persist-credentials: false
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5
@@ -225,6 +228,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      # Required for NuGet trusted publishing to request an OIDC token.
       id-token: write
     environment: nuget-stable
 
@@ -233,6 +237,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ needs.validate-tag.outputs.tag-commit }}
+          persist-credentials: false
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5
@@ -297,6 +302,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ needs.validate-tag.outputs.tag-commit }}
+          persist-credentials: false
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5

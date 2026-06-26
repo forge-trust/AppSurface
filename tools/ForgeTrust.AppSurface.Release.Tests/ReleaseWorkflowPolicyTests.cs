@@ -75,6 +75,9 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("prevent_self_review == true", workflow, StringComparison.Ordinal);
         Assert.Contains("wait_timer == 25", workflow, StringComparison.Ordinal);
         Assert.Contains("id-token: write", workflow, StringComparison.Ordinal);
+        Assert.Contains("Required so gh run list can verify source CI for the tag commit.", workflow, StringComparison.Ordinal);
+        Assert.Contains("Required for NuGet trusted publishing to request an OIDC token.", workflow, StringComparison.Ordinal);
+        Assert.Contains("persist-credentials: false", workflow, StringComparison.Ordinal);
         Assert.Contains("NuGet/login", workflow, StringComparison.Ordinal);
         Assert.Contains("publish-stable", workflow, StringComparison.Ordinal);
         Assert.Contains("appsurface-stable-packages", workflow, StringComparison.Ordinal);

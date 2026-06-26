@@ -171,7 +171,7 @@ internal sealed class ReleasePublishing
         if (result.ExitCode != 0)
         {
             throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-tag-unreachable-from-main",
+                "release-tag-unreachable-from-base-ref",
                 $"Tag '{tag}' does not point at a commit reachable from {remoteBaseRef}.",
                 result.StandardError.Length == 0 ? $"Commit {tagCommit.Trim()} is not an ancestor of {remoteBaseRef}." : result.StandardError.Trim(),
                 $"Fetch `{remoteBaseRef}`, move the tag only through the normal protected process, and retry.",
