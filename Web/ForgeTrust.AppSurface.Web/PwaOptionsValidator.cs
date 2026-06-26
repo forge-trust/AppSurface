@@ -95,14 +95,42 @@ internal static partial class PwaOptionsValidator
             && !value.Contains("://", StringComparison.Ordinal)
             && !value.Contains('?')
             && !value.Contains('#')
-            && !HasTraversalSegment(value)
-            && value.All(ch => !char.IsControl(ch));
+            && value.All(ch => !char.IsControl(ch) && !char.IsWhiteSpace(ch) && ch is not ('{' or '}'))
+            && !HasTraversalSegment(value);
     }
 
     private static bool HasTraversalSegment(string path)
     {
-        return path.Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Any(segment => string.Equals(Uri.UnescapeDataString(segment), "..", StringComparison.Ordinal));
+        try
+        {
+            return path.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Any(segment => ContainsMalformedEscape(segment)
+                    || string.Equals(Uri.UnescapeDataString(segment), "..", StringComparison.Ordinal));
+        }
+        catch (UriFormatException)
+        {
+            return true;
+        }
+    }
+
+    private static bool ContainsMalformedEscape(string segment)
+    {
+        for (var i = 0; i < segment.Length; i++)
+        {
+            if (segment[i] != '%')
+            {
+                continue;
+            }
+
+            if (i + 2 >= segment.Length || !Uri.IsHexDigit(segment[i + 1]) || !Uri.IsHexDigit(segment[i + 2]))
+            {
+                return true;
+            }
+
+            i += 2;
+        }
+
+        return false;
     }
 
     internal static string FormatDisplayMode(PwaDisplayMode displayMode)
@@ -162,7 +190,7 @@ internal static partial class PwaOptionsValidator
             || startUrl.Contains('\\')
             || startUrl.Contains("://", StringComparison.Ordinal)
             || startUrl.Contains('#')
-            || startUrl.Any(ch => char.IsControl(ch)))
+            || startUrl.Any(ch => char.IsControl(ch) || char.IsWhiteSpace(ch) || ch is '{' or '}'))
         {
             return false;
         }

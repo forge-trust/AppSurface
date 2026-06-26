@@ -52,8 +52,10 @@ public sealed class PwaOptionsTests
     [Theory]
     [InlineData("//cdn.example.com/manifest.webmanifest", "ASPWA005")]
     [InlineData("/manifest.webmanifest?version=1", "ASPWA005")]
+    [InlineData("/manifest {tenant}.webmanifest", "ASPWA005")]
     [InlineData("/../manifest.webmanifest", "ASPWA005")]
     [InlineData("/%2e%2e/manifest.webmanifest", "ASPWA005")]
+    [InlineData("/%zz/manifest.webmanifest", "ASPWA005")]
     [InlineData("manifest.webmanifest", "ASPWA005")]
     public void ThrowIfInvalid_RejectsUnsafeManifestPaths(string manifestPath, string expectedCode)
     {
@@ -99,8 +101,10 @@ public sealed class PwaOptionsTests
     [InlineData("//cdn.example.test/start")]
     [InlineData("https://example.test/start")]
     [InlineData("/start#launch")]
+    [InlineData("/start {tenant}?source=pwa")]
     [InlineData("/../start?source=pwa")]
     [InlineData("/%2e%2e/start?source=pwa")]
+    [InlineData("/%zz/start?source=pwa")]
     [InlineData("/start\\admin?source=pwa")]
     public void ThrowIfInvalid_RejectsUnsafeStartUrls(string startUrl)
     {

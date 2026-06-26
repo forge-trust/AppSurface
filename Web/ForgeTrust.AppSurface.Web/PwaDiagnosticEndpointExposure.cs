@@ -6,6 +6,8 @@ namespace ForgeTrust.AppSurface.Web;
 /// <remarks>
 /// Diagnostics can expose deploy and browser-install posture. Keep the default
 /// <see cref="DevelopmentOnly"/> unless a host intentionally wants the diagnostics available behind its own controls.
+/// The numeric values are explicit because this public enum may be persisted, serialized, or bound by
+/// applications. New values should be appended without changing the values documented here.
 /// </remarks>
 public enum PwaDiagnosticEndpointExposure
 {
