@@ -1387,6 +1387,26 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Theory]
+    [InlineData("origin/")]
+    [InlineData("refs/heads/")]
+    [InlineData("refs/remotes/origin/")]
+    [InlineData("refs/tags/v0.1.0")]
+    [InlineData("refs/remotes/upstream/release/0.1.0")]
+    [InlineData("0123456789abcdef0123456789abcdef01234567")]
+    public async Task PublishRejectsUnsupportedBaseRefShapes(string baseRef)
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulStablePublishRunner(baseRef: "release/0.1.0");
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--base-ref", baseRef, "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-base-ref-invalid", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("git cat-file -t refs/tags/v0.1.0-preview.1", "commit", "release-tag-lightweight")]
     [InlineData("git rev-parse refs/tags/v0.1.0-preview.1^{commit}", "stdout failure", "release-tag-commit-missing")]
     [InlineData("git merge-base --is-ancestor abc123 origin/main", "", "release-tag-unreachable-from-base-ref")]

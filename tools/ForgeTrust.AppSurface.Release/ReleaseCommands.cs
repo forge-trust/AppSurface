@@ -116,9 +116,17 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
     public string? GitHubOutputPath { get; set; }
 
     /// <summary>
-    /// Gets the remote branch or branch ref that must contain the annotated tag commit.
+    /// Gets the branch that must contain the annotated tag commit.
     /// </summary>
-    [CommandOption("base-ref", Description = "Branch or branch ref that must contain the annotated tag commit. Defaults to main.")]
+    /// <remarks>
+    /// Publish defaults to <c>main</c>. Use this option when a maintained release branch, such as
+    /// <c>release/0.1.0</c>, owns the tag provenance for a release. The command accepts branch names and branch refs
+    /// shaped as <c>origin/&lt;branch&gt;</c>, <c>refs/heads/&lt;branch&gt;</c>, or
+    /// <c>refs/remotes/origin/&lt;branch&gt;</c>, then normalizes them before validation fetches and checks
+    /// <c>origin/&lt;branch&gt;</c>. Tags, SHAs, empty branch names, and unsupported refs such as <c>refs/tags/v1.2.3</c>
+    /// are invalid because publish validation must prove protected branch reachability.
+    /// </remarks>
+    [CommandOption("base-ref", Description = "Branch name or supported branch ref (origin/<branch>, refs/heads/<branch>, refs/remotes/origin/<branch>) that must contain the annotated tag commit. Defaults to main; tags and SHAs are invalid.")]
     public string? BaseRef { get; set; }
 
     /// <inheritdoc />
@@ -178,20 +186,65 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
 
         if (normalized.StartsWith(remoteBranchPrefix, StringComparison.Ordinal))
         {
-            return normalized[remoteBranchPrefix.Length..];
+            return ValidateNormalizedBaseRef(normalized[remoteBranchPrefix.Length..], baseRef);
         }
 
         if (normalized.StartsWith(branchPrefix, StringComparison.Ordinal))
         {
-            return normalized[branchPrefix.Length..];
+            return ValidateNormalizedBaseRef(normalized[branchPrefix.Length..], baseRef);
         }
 
         if (normalized.StartsWith(originPrefix, StringComparison.Ordinal))
         {
-            return normalized[originPrefix.Length..];
+            return ValidateNormalizedBaseRef(normalized[originPrefix.Length..], baseRef);
         }
 
-        return normalized;
+        return ValidateNormalizedBaseRef(normalized, baseRef);
+    }
+
+    private static string ValidateNormalizedBaseRef(string normalizedBaseRef, string originalBaseRef)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedBaseRef)
+            || normalizedBaseRef.StartsWith("refs/", StringComparison.Ordinal)
+            || IsFullObjectId(normalizedBaseRef)
+            || normalizedBaseRef.StartsWith("-", StringComparison.Ordinal)
+            || normalizedBaseRef.Contains("..", StringComparison.Ordinal)
+            || normalizedBaseRef.Contains(' ')
+            || normalizedBaseRef.Contains('\\')
+            || normalizedBaseRef.Contains('~')
+            || normalizedBaseRef.Contains('^')
+            || normalizedBaseRef.Contains(':')
+            || normalizedBaseRef.EndsWith("/", StringComparison.Ordinal))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-base-ref-invalid",
+                "The requested base ref is not a supported branch ref.",
+                $"`--base-ref {originalBaseRef}` normalizes to `{normalizedBaseRef}`.",
+                "Pass a branch name, `origin/<branch>`, `refs/heads/<branch>`, or `refs/remotes/origin/<branch>`. Do not pass tags, full object IDs, empty refs, or unsupported refs.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+        }
+
+        return normalizedBaseRef;
+    }
+
+    private static bool IsFullObjectId(string value)
+    {
+        if (value.Length is not (40 or 64))
+        {
+            return false;
+        }
+
+        foreach (var character in value)
+        {
+            if (!((character >= '0' && character <= '9')
+                || (character >= 'a' && character <= 'f')
+                || (character >= 'A' && character <= 'F')))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <inheritdoc />

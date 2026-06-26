@@ -12,7 +12,7 @@
 ./eng/release publish --version 0.1.0 --tag v0.1.0 --base-ref release/0.1.0 --dry-run
 ```
 
-Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`, where the tag must already exist and must be annotated. `publish` defaults `--base-ref` to `main`; pass the release branch, such as `--base-ref release/0.1.0`, when publishing from a maintained release branch.
+Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`, where the tag must already exist and must be annotated. `publish` defaults `--base-ref` to `main`; pass the release branch, such as `--base-ref release/0.1.0`, when publishing from a maintained release branch. `--base-ref` accepts branch names plus `origin/<branch>`, `refs/heads/<branch>`, and `refs/remotes/origin/<branch>` refs, then normalizes them before checking reachability from `origin/<branch>`. Tags, full object IDs, empty branch names, and unsupported refs are rejected because the publish gate must prove protected branch reachability.
 
 ## Check
 
@@ -73,4 +73,4 @@ Every failure uses the same envelope:
 - `Fix`
 - `Docs`
 
-Common codes include `release-version-leading-v`, `release-version-invalid`, `release-target-exists`, `release-sidecar-invalid`, `release-stable-package-policy-missing`, `release-stable-packages-not-published`, `release-prerelease-label-unprotected`, `release-prerelease-packages-not-published`, `release-tag-lightweight`, `release-tag-unreachable-from-base-ref`, `release-github-output-path-invalid`, `release-github-release-exists`, `release-evidence-missing`, `release-evidence-duplicate`, `release-evidence-schema-invalid`, `release-evidence-version-mismatch`, `release-evidence-artifact-digest-mismatch`, `release-evidence-content-source-commit-mismatch`, `release-evidence-release-manifest-schema-invalid`, `release-evidence-subject-digest-mismatch`, `release-evidence-docs-manifest-digest-mismatch`, `release-evidence-catalog-entry-mismatch`, and `release-evidence-tag-commit-mismatch`.
+Common codes include `release-version-leading-v`, `release-version-invalid`, `release-target-exists`, `release-sidecar-invalid`, `release-stable-package-policy-missing`, `release-stable-packages-not-published`, `release-prerelease-label-unprotected`, `release-prerelease-packages-not-published`, `release-base-ref-invalid`, `release-tag-lightweight`, `release-tag-unreachable-from-base-ref`, `release-github-output-path-invalid`, `release-github-release-exists`, `release-evidence-missing`, `release-evidence-duplicate`, `release-evidence-schema-invalid`, `release-evidence-version-mismatch`, `release-evidence-artifact-digest-mismatch`, `release-evidence-content-source-commit-mismatch`, `release-evidence-release-manifest-schema-invalid`, `release-evidence-subject-digest-mismatch`, `release-evidence-docs-manifest-digest-mismatch`, `release-evidence-catalog-entry-mismatch`, and `release-evidence-tag-commit-mismatch`.
