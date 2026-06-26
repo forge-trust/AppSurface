@@ -235,9 +235,11 @@ internal sealed partial class PwaVerifier
     {
         RequireText(manifest.Name, "ASPWA205", "Manifest name is required.", diagnostics);
         RequireText(manifest.ShortName, "ASPWA206", "Manifest short_name is required.", diagnostics);
-        RequireText(manifest.Display, "ASPWA207", "Manifest display is required.", diagnostics);
+        RequireDisplayMode(manifest.Display, diagnostics);
         RequireSameOriginPath(target, manifestUri, manifest.StartUrl, "ASPWA208", "Manifest start_url must resolve to the app origin.", diagnostics);
         RequireSameOriginPath(target, manifestUri, manifest.Scope, "ASPWA209", "Manifest scope must resolve to the app origin.", diagnostics);
+        RequireHexColor(manifest.ThemeColor, "ASPWA232", "Manifest theme_color must be a CSS hex color such as #2563eb.", diagnostics);
+        RequireHexColor(manifest.BackgroundColor, "ASPWA233", "Manifest background_color must be a CSS hex color such as #ffffff.", diagnostics);
 
         var icons = manifest.Icons ?? [];
         if (!icons.Any(icon => string.Equals(icon.Sizes, "192x192", StringComparison.OrdinalIgnoreCase)))
@@ -251,9 +253,40 @@ internal sealed partial class PwaVerifier
         }
     }
 
+    private static void RequireDisplayMode(string? value, List<PwaVerificationDiagnostic> diagnostics)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            diagnostics.Add(Error("ASPWA207", "Manifest display is required."));
+            return;
+        }
+
+        if (!IsSupportedDisplayMode(value))
+        {
+            diagnostics.Add(Error("ASPWA234", "Manifest display must be browser, minimal-ui, standalone, or fullscreen."));
+        }
+    }
+
+    private static bool IsSupportedDisplayMode(string value)
+    {
+        return value is "browser" or "minimal-ui" or "standalone" or "fullscreen";
+    }
+
     private static void RequireText(string? value, string code, string message, List<PwaVerificationDiagnostic> diagnostics)
     {
         if (string.IsNullOrWhiteSpace(value))
+        {
+            diagnostics.Add(Error(code, message));
+        }
+    }
+
+    private static void RequireHexColor(
+        string? value,
+        string code,
+        string message,
+        List<PwaVerificationDiagnostic> diagnostics)
+    {
+        if (string.IsNullOrWhiteSpace(value) || !HexColorPattern().IsMatch(value))
         {
             diagnostics.Add(Error(code, message));
         }
@@ -358,6 +391,9 @@ internal sealed partial class PwaVerifier
 
     [GeneratedRegex("""\bhref\s*=\s*["'](?<value>[^"']+)["']""", RegexOptions.IgnoreCase)]
     private static partial Regex HrefAttributeRegex();
+
+    [GeneratedRegex("^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")]
+    private static partial Regex HexColorPattern();
 }
 
 internal interface IPwaVerificationHttpClient
@@ -409,6 +445,8 @@ internal sealed record PwaManifestProbe(
     [property: JsonPropertyName("start_url")] string? StartUrl,
     [property: JsonPropertyName("scope")] string? Scope,
     [property: JsonPropertyName("display")] string? Display,
+    [property: JsonPropertyName("theme_color")] string? ThemeColor,
+    [property: JsonPropertyName("background_color")] string? BackgroundColor,
     [property: JsonPropertyName("icons")] IReadOnlyList<PwaIconProbe>? Icons);
 
 internal sealed record PwaIconProbe(

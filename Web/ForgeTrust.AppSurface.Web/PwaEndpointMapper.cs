@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -131,6 +132,7 @@ internal static class PwaEndpointMapper
         var encodedName = HtmlEncoder.Default.Encode(options.Name);
         var encodedManifest = HtmlEncoder.Default.Encode(diagnostics.ManifestPath);
         var encodedStatusPath = HtmlEncoder.Default.Encode(statusPath);
+        var encodedHeadSnippet = HtmlEncoder.Default.Encode(BuildHeadMetadataSnippet(httpContext.Request.PathBase, options));
         var items = diagnostics.Diagnostics.Count == 0
             ? "<li><strong>ASPWA000</strong> info: PWA configuration is valid for AppSurface startup.</li>"
             : string.Concat(
@@ -154,12 +156,46 @@ internal static class PwaEndpointMapper
                 <p>Manifest: <a href="{{encodedManifest}}">{{encodedManifest}}</a></p>
                 <p>Status JSON: <a href="{{encodedStatusPath}}">{{encodedStatusPath}}</a></p>
                 <p>Offline strategy: {{(diagnostics.OfflineEnabled ? "enabled" : "disabled")}}</p>
+                <h2>Head metadata</h2>
+                <p>Copy these tags into custom layouts that cannot use &lt;appsurface:pwa-head /&gt;.</p>
+                <pre><code>{{encodedHeadSnippet}}</code></pre>
                 <ul>{{items}}</ul>
               </main>
             </body>
             </html>
             """,
             httpContext.RequestAborted);
+    }
+
+    private static string BuildHeadMetadataSnippet(PathString pathBase, PwaOptions options)
+    {
+        var manifestPath = EscapeAttribute(AddPathBase(pathBase, options.ManifestPath));
+        var builder = new StringBuilder();
+        builder.AppendLine($"""<link rel="manifest" href="{manifestPath}" />""");
+        builder.AppendLine($"""<meta name="theme-color" content="{EscapeAttribute(options.ThemeColor)}" />""");
+        builder.AppendLine($"""<meta name="application-name" content="{EscapeAttribute(options.Name)}" />""");
+        builder.AppendLine("""<meta name="apple-mobile-web-app-capable" content="yes" />""");
+        builder.AppendLine($"""<meta name="apple-mobile-web-app-title" content="{EscapeAttribute(options.ShortName)}" />""");
+
+        foreach (var icon in options.Icons)
+        {
+            var iconPath = EscapeAttribute(AddPathBase(pathBase, icon.Source));
+            builder.AppendLine(
+                $"""<link rel="icon" href="{iconPath}" sizes="{EscapeAttribute(icon.Sizes)}" type="{EscapeAttribute(icon.Type)}" />""");
+        }
+
+        if (options.Offline.Enabled)
+        {
+            var serviceWorkerPath = EscapeAttribute(AddPathBase(pathBase, options.Offline.ServiceWorkerPath));
+            builder.AppendLine($"""<meta name="appsurface:pwa-service-worker" content="{serviceWorkerPath}" />""");
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string EscapeAttribute(string value)
+    {
+        return HtmlEncoder.Default.Encode(value);
     }
 
     private static async Task WriteServiceWorkerAsync(HttpContext httpContext, PwaOptions options)

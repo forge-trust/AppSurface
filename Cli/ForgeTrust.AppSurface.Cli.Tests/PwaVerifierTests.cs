@@ -117,6 +117,68 @@ public sealed class PwaVerifierTests
     }
 
     [Fact]
+    public async Task VerifyAsync_FailsWhenManifestOmitsInstallColors()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", """<link rel="manifest" href="/manifest.webmanifest">""", "text/html");
+        http.Add(
+            "https://app.example.test/manifest.webmanifest",
+            ManifestWithoutInstallColors(),
+            "application/manifest+json");
+        http.Add("https://app.example.test/icons/app-192.png", "png", "image/png");
+        http.Add("https://app.example.test/icons/app-512.png", "png", "image/png");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA232");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA233");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_FailsWhenManifestInstallColorsAreInvalid()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", """<link rel="manifest" href="/manifest.webmanifest">""", "text/html");
+        http.Add(
+            "https://app.example.test/manifest.webmanifest",
+            ValidManifest(themeColor: "blue", backgroundColor: "ffffff"),
+            "application/manifest+json");
+        http.Add("https://app.example.test/icons/app-192.png", "png", "image/png");
+        http.Add("https://app.example.test/icons/app-512.png", "png", "image/png");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA232");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA233");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_FailsWhenManifestDisplayIsUnsupported()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", """<link rel="manifest" href="/manifest.webmanifest">""", "text/html");
+        http.Add(
+            "https://app.example.test/manifest.webmanifest",
+            ValidManifest(display: "wat"),
+            "application/manifest+json");
+        http.Add("https://app.example.test/icons/app-192.png", "png", "image/png");
+        http.Add("https://app.example.test/icons/app-512.png", "png", "image/png");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA234");
+    }
+
+    [Fact]
     public async Task VerifyAsync_FailsUnsafeHttpOriginAndOffOriginStartUrl()
     {
         var http = new FakePwaHttpClient();
@@ -182,7 +244,10 @@ public sealed class PwaVerifierTests
         string startUrl = "/",
         string scope = "/",
         string icon192 = "/icons/app-192.png",
-        string icon512 = "/icons/app-512.png")
+        string icon512 = "/icons/app-512.png",
+        string themeColor = "#2563eb",
+        string backgroundColor = "#ffffff",
+        string display = "standalone")
     {
         return $$"""
         {
@@ -190,12 +255,29 @@ public sealed class PwaVerifierTests
           "short_name": "Notes",
           "start_url": {{System.Text.Json.JsonSerializer.Serialize(startUrl)}},
           "scope": {{System.Text.Json.JsonSerializer.Serialize(scope)}},
-          "display": "standalone",
-          "theme_color": "#2563eb",
-          "background_color": "#ffffff",
+          "display": {{System.Text.Json.JsonSerializer.Serialize(display)}},
+          "theme_color": {{System.Text.Json.JsonSerializer.Serialize(themeColor)}},
+          "background_color": {{System.Text.Json.JsonSerializer.Serialize(backgroundColor)}},
           "icons": [
             { "src": {{System.Text.Json.JsonSerializer.Serialize(icon192)}}, "sizes": "192x192", "type": "image/png" },
             { "src": {{System.Text.Json.JsonSerializer.Serialize(icon512)}}, "sizes": "512x512", "type": "image/png" }
+          ]
+        }
+        """;
+    }
+
+    private static string ManifestWithoutInstallColors()
+    {
+        return """
+        {
+          "name": "Field Notes",
+          "short_name": "Notes",
+          "start_url": "/",
+          "scope": "/",
+          "display": "standalone",
+          "icons": [
+            { "src": "/icons/app-192.png", "sizes": "192x192", "type": "image/png" },
+            { "src": "/icons/app-512.png", "sizes": "512x512", "type": "image/png" }
           ]
         }
         """;

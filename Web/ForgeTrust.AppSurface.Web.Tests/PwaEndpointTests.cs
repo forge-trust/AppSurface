@@ -49,11 +49,15 @@ public sealed class PwaEndpointTests
 
         using var htmlResponse = await app.Client.GetAsync("/_appsurface/pwa");
         using var jsonResponse = await app.Client.GetAsync("/_appsurface/pwa/status.json");
+        var html = await htmlResponse.Content.ReadAsStringAsync();
         var json = await jsonResponse.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.OK, htmlResponse.StatusCode);
         Assert.Equal(HttpStatusCode.OK, jsonResponse.StatusCode);
-        Assert.Contains("AppSurface PWA diagnostics", await htmlResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Contains("AppSurface PWA diagnostics", html, StringComparison.Ordinal);
+        Assert.Contains("&lt;link rel=&quot;manifest&quot; href=&quot;/manifest.webmanifest&quot;", html, StringComparison.Ordinal);
+        Assert.Contains("&lt;meta name=&quot;theme-color&quot; content=&quot;#2563eb&quot;", html, StringComparison.Ordinal);
+        Assert.Contains("&lt;link rel=&quot;icon&quot; href=&quot;/icons/app-192.png&quot;", html, StringComparison.Ordinal);
         Assert.Contains("\"enabled\": true", json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("\"offlineEnabled\": false", json, StringComparison.Ordinal);
     }
@@ -126,6 +130,14 @@ public sealed class PwaEndpointTests
         Assert.Contains("\"manifestPath\": \"/tenant/manifest.webmanifest\"", diagnosticsJson, StringComparison.Ordinal);
         Assert.Contains("\"serviceWorkerPath\": \"/tenant/service-worker.js\"", diagnosticsJson, StringComparison.Ordinal);
         Assert.Contains("\"offlineFallbackPath\": \"/tenant/offline.html\"", diagnosticsJson, StringComparison.Ordinal);
+
+        using var diagnosticsHtmlResponse = await app.Client.GetAsync("/tenant/_appsurface/pwa");
+        var diagnosticsHtml = await diagnosticsHtmlResponse.Content.ReadAsStringAsync();
+        Assert.Contains("&lt;link rel=&quot;manifest&quot; href=&quot;/tenant/manifest.webmanifest&quot;", diagnosticsHtml, StringComparison.Ordinal);
+        Assert.Contains(
+            "&lt;meta name=&quot;appsurface:pwa-service-worker&quot; content=&quot;/tenant/service-worker.js&quot;",
+            diagnosticsHtml,
+            StringComparison.Ordinal);
 
         using var serviceWorkerResponse = await app.Client.GetAsync("/tenant/service-worker.js");
         var serviceWorker = await serviceWorkerResponse.Content.ReadAsStringAsync();
