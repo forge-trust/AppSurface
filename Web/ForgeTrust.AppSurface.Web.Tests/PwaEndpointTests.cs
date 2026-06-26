@@ -41,6 +41,39 @@ public sealed class PwaEndpointTests
     }
 
     [Fact]
+    public async Task HeadRequests_ReturnMetadataWithoutBodies()
+    {
+        await using var app = await StartHostAsync(
+            options =>
+            {
+                ConfigureValidPwa(options.Pwa);
+                options.Pwa.Offline.Enabled = true;
+                options.Pwa.Offline.OfflineFallbackPath = "/offline.html";
+                options.Pwa.Offline.StaticAssetPaths = ["/css/site.css"];
+            },
+            Environments.Development);
+
+        using var manifest = await app.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/manifest.webmanifest"));
+        using var diagnostics = await app.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/_appsurface/pwa"));
+        using var status = await app.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/_appsurface/pwa/status.json"));
+        using var serviceWorker = await app.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/service-worker.js"));
+
+        Assert.Equal(HttpStatusCode.OK, manifest.StatusCode);
+        Assert.Equal("application/manifest+json", manifest.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(string.Empty, await manifest.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, diagnostics.StatusCode);
+        Assert.Equal("text/html", diagnostics.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(string.Empty, await diagnostics.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, status.StatusCode);
+        Assert.Equal("application/json", status.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(string.Empty, await status.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, serviceWorker.StatusCode);
+        Assert.Equal("text/javascript", serviceWorker.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("no-cache", serviceWorker.Headers.CacheControl?.ToString());
+        Assert.Equal(string.Empty, await serviceWorker.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task DevelopmentDiagnostics_AreMappedWithJsonStatus()
     {
         await using var app = await StartHostAsync(
@@ -72,6 +105,48 @@ public sealed class PwaEndpointTests
         using var response = await app.Client.GetAsync("/_appsurface/pwa/status.json");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DiagnosticsExposure_CanBeForcedOrHidden()
+    {
+        await using var forced = await StartHostAsync(
+            options =>
+            {
+                ConfigureValidPwa(options.Pwa);
+                options.Pwa.DiagnosticsExposure = PwaDiagnosticEndpointExposure.Always;
+            },
+            Environments.Production);
+        using var forcedResponse = await forced.Client.GetAsync("/_appsurface/pwa/status.json");
+
+        await using var hidden = await StartHostAsync(
+            options =>
+            {
+                ConfigureValidPwa(options.Pwa);
+                options.Pwa.DiagnosticsExposure = PwaDiagnosticEndpointExposure.Never;
+            },
+            Environments.Development);
+        using var hiddenResponse = await hidden.Client.GetAsync("/_appsurface/pwa/status.json");
+
+        Assert.Equal(HttpStatusCode.OK, forcedResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, hiddenResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Diagnostics_WarnWhenRequestIsNotSecureInstallContext()
+    {
+        await using var app = await StartHostAsync(
+            options => ConfigureValidPwa(options.Pwa),
+            Environments.Development);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/_appsurface/pwa/status.json");
+        request.Headers.Host = "app.example.test";
+
+        using var response = await app.Client.SendAsync(request);
+        var json = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("\"code\": \"ASPWA018\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"severity\": \"warning\"", json, StringComparison.Ordinal);
     }
 
     [Fact]

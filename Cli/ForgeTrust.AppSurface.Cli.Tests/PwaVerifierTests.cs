@@ -1,9 +1,69 @@
 using System.Net;
+using CliFx;
+using CliFx.Infrastructure;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class PwaVerifierTests
 {
+    [Fact]
+    public async Task ExecuteAsync_WritesTextReport_WhenVerificationPasses()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var command = new PwaVerifyCommand(new PwaVerifier(http)) { Url = "https://app.example.test" };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console);
+
+        var output = console.ReadOutputString();
+        Assert.Contains("PWA verification passed.", output, StringComparison.Ordinal);
+        Assert.Contains("INFO ASPWA220:", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WritesJsonReportAndThrows_WhenVerificationFails()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", "<html></html>", "text/html");
+        http.Add("https://app.example.test/manifest.webmanifest", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var command = new PwaVerifyCommand(new PwaVerifier(http))
+        {
+            Url = "https://app.example.test",
+            Json = true
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Equal("PWA verification failed.", exception.Message);
+        var output = console.ReadOutputString();
+        Assert.Contains("\"passed\": false", output, StringComparison.Ordinal);
+        Assert.Contains("\"code\": \"ASPWA224\"", output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not-a-url")]
+    [InlineData("file:///tmp/app")]
+    public async Task ExecuteAsync_RejectsInvalidUrl(string? url)
+    {
+        var command = new PwaVerifyCommand(new PwaVerifier(new FakePwaHttpClient())) { Url = url };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Equal("--url must be an absolute http or https URL.", exception.Message);
+    }
+
+    [Fact]
+    public void Constructors_RejectNullDependencies()
+    {
+        Assert.Throws<ArgumentNullException>(() => new PwaVerifyCommand(null!));
+        Assert.Throws<ArgumentNullException>(() => new PwaVerifier(null!));
+    }
+
     [Fact]
     public async Task VerifyAsync_PassesForValidAppWithHiddenProductionDiagnostics()
     {

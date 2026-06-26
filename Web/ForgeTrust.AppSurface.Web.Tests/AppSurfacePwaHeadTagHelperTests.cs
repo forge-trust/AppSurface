@@ -47,6 +47,34 @@ public sealed class AppSurfacePwaHeadTagHelperTests
         Assert.Contains("<meta name=\"appsurface:pwa-service-worker\" content=\"/tenant/service-worker.js\"", html, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Process_WhenIconSourceIsUnsafe_EmitsEncodedFallbackWithoutVersioning()
+    {
+        var options = PwaOptionsTests.CreateValidOptions();
+        options.Icons.Clear();
+        options.Icons.Add(
+            new PwaIcon
+            {
+                Source = "https://cdn.example.test/icon 192.png?token=<unsafe>",
+                Sizes = "192x192",
+                Type = "image/png"
+            });
+        var helper = new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), options)
+        {
+            ViewContext = CreateViewContext("/tenant")
+        };
+        var output = CreateOutput();
+
+        helper.Process(CreateContext(), output);
+
+        var html = output.Content.GetContent();
+        Assert.Contains(
+            "href=\"https://cdn.example.test/icon 192.png?token=&lt;unsafe&gt;\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("?v=asset", html, StringComparison.Ordinal);
+    }
+
     private static TagHelperContext CreateContext()
     {
         return new TagHelperContext(

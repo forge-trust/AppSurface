@@ -21,6 +21,12 @@ public sealed class PwaOptionsTests
     }
 
     [Fact]
+    public void Validate_RejectsNullOptions()
+    {
+        Assert.Throws<ArgumentNullException>(() => PwaOptionsValidator.Validate(null!));
+    }
+
+    [Fact]
     public void ThrowIfInvalid_ReportsMissingRequiredFields()
     {
         var options = new PwaOptions { Enabled = true };
@@ -58,6 +64,27 @@ public sealed class PwaOptionsTests
         var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
 
         Assert.Contains("ASPWA016", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThrowIfInvalid_ReportsInvalidDisplayIconAndOfflineAssetPaths()
+    {
+        var options = CreateValidOptions();
+        options.Display = (PwaDisplayMode)999;
+        options.Icons.Add(new PwaIcon { Source = "https://cdn.example.test/icon.png", Sizes = "0x0", Type = string.Empty });
+        options.Offline.Enabled = true;
+        options.Offline.ServiceWorkerPath = "//cdn.example.test/service-worker.js";
+        options.Offline.OfflineFallbackPath = "/offline.html";
+        options.Offline.StaticAssetPaths = ["/css/site.css#hash", "/%2e%2e/secret.txt"];
+
+        var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Contains("ASPWA009", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ASPWA012", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ASPWA013", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ASPWA014", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ASPWA015", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ASPWA017", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
