@@ -561,7 +561,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 })
             .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
 
-        endpoints.MapControllerRoute(
+        var health = endpoints.MapControllerRoute(
             name: "appsurfacedocs_harvest_health",
             pattern: currentHealthPattern,
             defaults: new
@@ -570,7 +570,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 action = "HarvestHealth"
             });
 
-        endpoints.MapControllerRoute(
+        var healthJson = endpoints.MapControllerRoute(
             name: "appsurfacedocs_harvest_health_json",
             pattern: currentHealthJsonPattern,
             defaults: new
@@ -578,6 +578,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "HarvestHealthJson"
             });
+        ApplyHealthAuthorizationPolicy(health, healthJson, docsOptions, endpoints.ServiceProvider);
 
         endpoints.MapControllerRoute(
             name: "appsurfacedocs_route_inspector",
@@ -651,6 +652,28 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "Details"
             });
+    }
+
+    private static void ApplyHealthAuthorizationPolicy(
+        IEndpointConventionBuilder health,
+        IEndpointConventionBuilder healthJson,
+        AppSurfaceDocsOptions docsOptions,
+        IServiceProvider services)
+    {
+        var policyName = docsOptions.Harvest?.Health?.AuthorizationPolicy;
+        if (string.IsNullOrWhiteSpace(policyName))
+        {
+            return;
+        }
+
+        var environment = services.GetService(typeof(IWebHostEnvironment)) as IWebHostEnvironment;
+        if (environment is null || !AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(docsOptions, environment))
+        {
+            return;
+        }
+
+        health.RequireAuthorization(policyName);
+        healthJson.RequireAuthorization(policyName);
     }
 
     private static void MapLegacyAssetRedirect(IEndpointRouteBuilder endpoints, string route, string targetPath)

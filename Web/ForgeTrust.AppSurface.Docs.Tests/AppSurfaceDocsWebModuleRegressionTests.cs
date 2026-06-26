@@ -1,5 +1,7 @@
 using System.Net;
 using System.Reflection;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Core;
@@ -7,6 +9,8 @@ using ForgeTrust.AppSurface.Docs.Controllers;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Web;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -16,6 +20,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -203,6 +209,85 @@ public class AppSurfaceDocsWebModuleRegressionTests
         {
             await host.StopAsync();
         }
+    }
+
+    [Theory]
+    [InlineData("/docs/_health")]
+    [InlineData("/docs/_health.json")]
+    public async Task HarvestHealthAuthorizationPolicy_ShouldProtectDevelopmentDefaultHealthRoutes(string requestPath)
+    {
+        await using var host = await StartHealthAuthorizationHostAsync(Environments.Development);
+
+        using var anonymous = await host.Client.GetAsync(requestPath);
+        using var forbiddenRequest = CreateHealthRequest(requestPath, "alice", "docs.other");
+        using var forbidden = await host.Client.SendAsync(forbiddenRequest);
+        using var authorizedRequest = CreateHealthRequest(requestPath, "alice", "docs.health.read");
+        using var authorized = await host.Client.SendAsync(authorizedRequest);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, authorized.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("/docs/_health")]
+    [InlineData("/docs/_health.json")]
+    public async Task HarvestHealthAuthorizationPolicy_ShouldProtectProductionHealthRoutes_WhenExplicitlyExposed(string requestPath)
+    {
+        await using var host = await StartHealthAuthorizationHostAsync(
+            Environments.Production,
+            exposeHealthRoutes: true);
+
+        using var anonymous = await host.Client.GetAsync(requestPath);
+        using var authorizedRequest = CreateHealthRequest(requestPath, "alice", "docs.health.read");
+        using var authorized = await host.Client.SendAsync(authorizedRequest);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, authorized.StatusCode);
+    }
+
+    [Fact]
+    public async Task HarvestHealthAuthorizationPolicy_ShouldStillReturnNotFound_WhenProductionHealthRoutesAreHidden()
+    {
+        await using var host = await StartHealthAuthorizationHostAsync(
+            Environments.Production,
+            exposeHealthRoutes: false);
+
+        using var anonymous = await host.Client.GetAsync("/docs/_health");
+        using var forbiddenRequest = CreateHealthRequest("/docs/_health.json", "alice", "docs.other");
+        using var forbidden = await host.Client.SendAsync(forbiddenRequest);
+        using var authorizedRequest = CreateHealthRequest("/docs/_health.json", "alice", "docs.health.read");
+        using var authorized = await host.Client.SendAsync(authorizedRequest);
+
+        Assert.Equal(HttpStatusCode.NotFound, anonymous.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, forbidden.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, authorized.StatusCode);
+    }
+
+    [Fact]
+    public async Task HarvestHealthAuthorizationPolicy_ShouldFailClosed_WhenNamedPolicyIsNotRegistered()
+    {
+        await using var host = await StartHealthAuthorizationHostAsync(
+            Environments.Development,
+            registerPolicy: false);
+
+        using var authorizedRequest = CreateHealthRequest("/docs/_health.json", "alice", "docs.health.read");
+        using var response = await host.Client.SendAsync(authorizedRequest);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task HarvestHealthAuthorizationPolicy_ShouldFailClosed_WhenAuthorizationMiddlewareIsMissing()
+    {
+        await using var host = await StartHealthAuthorizationHostAsync(
+            Environments.Development,
+            registerAuthorizationMiddleware: false);
+
+        using var authorizedRequest = CreateHealthRequest("/docs/_health.json", "alice", "docs.health.read");
+        using var response = await host.Client.SendAsync(authorizedRequest);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
     }
 
     [Fact]
@@ -2087,6 +2172,73 @@ public class AppSurfaceDocsWebModuleRegressionTests
         return new StartupContext(Array.Empty<string>(), rootModule, "TestApp", environmentProvider);
     }
 
+    private static HttpRequestMessage CreateHealthRequest(string requestPath, string userName, string scope)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, requestPath);
+        request.Headers.Add(HeaderAuthenticationHandler.UserHeaderName, userName);
+        request.Headers.Add(HeaderAuthenticationHandler.ScopeHeaderName, scope);
+        return request;
+    }
+
+    private static async Task<StartedHealthAuthorizationHost> StartHealthAuthorizationHostAsync(
+        string environmentName,
+        bool exposeHealthRoutes = false,
+        bool registerPolicy = true,
+        bool registerAuthorizationMiddleware = true)
+    {
+        var root = new HealthAuthorizationRootModule
+        {
+            RegisterPolicy = registerPolicy,
+            RegisterAuthorizationMiddleware = registerAuthorizationMiddleware
+        };
+        var startup = new TestHealthAuthorizationStartup(root);
+        var context = new StartupContext(["--environment", environmentName], root, "TestApp")
+        {
+            OverrideEntryPointAssembly = typeof(AppSurfaceDocsWebModule).Assembly
+        };
+        var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+
+        builder.ConfigureAppConfiguration(
+            (_, configuration) =>
+            {
+                var values = new Dictionary<string, string?>
+                {
+                    ["AppSurfaceDocs:Harvest:Health:AuthorizationPolicy"] = "DocsHealthRead"
+                };
+                if (exposeHealthRoutes)
+                {
+                    values["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always";
+                }
+
+                configuration.AddInMemoryCollection(values);
+            });
+        builder.ConfigureServices(
+            services =>
+            {
+                services.RemoveAll<IDocHarvester>();
+                services.AddSingleton<IDocHarvester, HealthyHarvester>();
+            });
+        builder.ConfigureWebHost(
+            webHost =>
+            {
+                webHost.UseEnvironment(environmentName);
+                webHost.UseUrls("http://127.0.0.1:0");
+            });
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        var server = host.Services.GetRequiredService<IServer>();
+        var addresses = server.Features.Get<IServerAddressesFeature>();
+        var baseAddress = Assert.Single(addresses!.Addresses);
+        var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+        {
+            BaseAddress = new Uri(baseAddress)
+        };
+
+        return new StartedHealthAuthorizationHost(host, client);
+    }
+
     private static ServiceProvider CreateServiceProviderWithContentRoot(string contentRootPath)
     {
         var environment = A.Fake<IWebHostEnvironment>();
@@ -2240,6 +2392,145 @@ public class AppSurfaceDocsWebModuleRegressionTests
         }
 
         protected override AppSurfaceDocsWebModule CreateRootModule() => _module;
+    }
+
+    private sealed class TestHealthAuthorizationStartup : WebStartup<HealthAuthorizationRootModule>
+    {
+        private readonly HealthAuthorizationRootModule _module;
+
+        public TestHealthAuthorizationStartup(HealthAuthorizationRootModule module)
+        {
+            _module = module;
+        }
+
+        protected override HealthAuthorizationRootModule CreateRootModule() => _module;
+    }
+
+    private sealed class HealthAuthorizationRootModule : IAppSurfaceWebModule
+    {
+        public bool RegisterPolicy { get; init; } = true;
+
+        public bool RegisterAuthorizationMiddleware { get; init; } = true;
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+            services
+                .AddAuthentication(HeaderAuthenticationHandler.SchemeName)
+                .AddScheme<AuthenticationSchemeOptions, HeaderAuthenticationHandler>(
+                    HeaderAuthenticationHandler.SchemeName,
+                    _ => { });
+            services.AddAuthorization(
+                options =>
+                {
+                    if (RegisterPolicy)
+                    {
+                        options.AddPolicy(
+                            "DocsHealthRead",
+                            policy => policy.RequireAuthenticatedUser()
+                                .RequireClaim("scope", "docs.health.read"));
+                    }
+                });
+        }
+
+        public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+        {
+            if (!RegisterAuthorizationMiddleware)
+            {
+                return;
+            }
+
+            app.UseAuthentication();
+            app.UseAuthorization();
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+            builder.AddModule<AppSurfaceDocsWebModule>();
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+    }
+
+    private sealed class HeaderAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+    {
+        public const string SchemeName = "HeaderTest";
+        public const string UserHeaderName = "X-Test-User";
+        public const string ScopeHeaderName = "X-Test-Scope";
+
+        public HeaderAuthenticationHandler(
+            IOptionsMonitor<AuthenticationSchemeOptions> options,
+            ILoggerFactory logger,
+            UrlEncoder encoder)
+            : base(options, logger, encoder)
+        {
+        }
+
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        {
+            if (!Request.Headers.TryGetValue(UserHeaderName, out var userValues)
+                || string.IsNullOrWhiteSpace(userValues[0]))
+            {
+                return Task.FromResult(AuthenticateResult.NoResult());
+            }
+
+            var userName = userValues[0]!;
+            var claims = new List<Claim>
+            {
+                new(ClaimTypes.Name, userName),
+                new(ClaimTypes.NameIdentifier, userName)
+            };
+            if (Request.Headers.TryGetValue(ScopeHeaderName, out var scopeValues))
+            {
+                claims.AddRange(
+                    scopeValues
+                        .SelectMany(value => value?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [])
+                        .Select(scope => new Claim("scope", scope)));
+            }
+
+            var identity = new ClaimsIdentity(claims, SchemeName);
+            var principal = new ClaimsPrincipal(identity);
+            var ticket = new AuthenticationTicket(principal, SchemeName);
+
+            return Task.FromResult(AuthenticateResult.Success(ticket));
+        }
+    }
+
+    private sealed class HealthyHarvester : IDocHarvester
+    {
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
+        {
+            IReadOnlyList<DocNode> docs =
+            [
+                new("Health Test", "health-test.md", "# Health Test")
+            ];
+            return Task.FromResult(docs);
+        }
+    }
+
+    private sealed class StartedHealthAuthorizationHost : IAsyncDisposable
+    {
+        private readonly IHost _host;
+
+        public StartedHealthAuthorizationHost(IHost host, HttpClient client)
+        {
+            _host = host;
+            Client = client;
+        }
+
+        public HttpClient Client { get; }
+
+        public async ValueTask DisposeAsync()
+        {
+            Client.Dispose();
+            await _host.StopAsync();
+            _host.Dispose();
+        }
     }
 
     private sealed class FailingHarvester : IDocHarvester
