@@ -17,8 +17,8 @@ await WebApp<MyRootModule>.RunAsync(
         options.Pwa.ShortName = "Field Notes";
         options.Pwa.ThemeColor = "#2563eb";
         options.Pwa.BackgroundColor = "#ffffff";
-        options.Pwa.Icons.Add(new PwaIcon { Source = "/icons/app-192.png", Sizes = "192x192" });
-        options.Pwa.Icons.Add(new PwaIcon { Source = "/icons/app-512.png", Sizes = "512x512" });
+        options.Pwa.Icons.Add(new PwaIcon { Source = "/icons/app-192.png", Sizes = "192x192", Type = "image/png" });
+        options.Pwa.Icons.Add(new PwaIcon { Source = "/icons/app-512.png", Sizes = "512x512", Type = "image/png" });
     });
 ```
 

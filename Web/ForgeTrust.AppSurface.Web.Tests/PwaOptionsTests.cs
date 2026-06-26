@@ -71,7 +71,7 @@ public sealed class PwaOptionsTests
         var options = CreateValidOptions();
         options.ThemeColor = "blue";
         options.BackgroundColor = "#12";
-        options.StartUrl = "/start?from=test";
+        options.StartUrl = "https://example.test/start";
         options.Scope = "//cdn.example.test/";
         options.DiagnosticsPath = "/_appsurface/pwa#status";
 
@@ -82,6 +82,34 @@ public sealed class PwaOptionsTests
         Assert.Contains("ASPWA006", exception.Message, StringComparison.Ordinal);
         Assert.Contains("ASPWA007", exception.Message, StringComparison.Ordinal);
         Assert.Contains("ASPWA008", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThrowIfInvalid_AcceptsStartUrlWithQuery()
+    {
+        var options = CreateValidOptions();
+        options.StartUrl = "/?source=pwa";
+
+        var exception = Record.Exception(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Null(exception);
+    }
+
+    [Theory]
+    [InlineData("//cdn.example.test/start")]
+    [InlineData("https://example.test/start")]
+    [InlineData("/start#launch")]
+    [InlineData("/../start?source=pwa")]
+    [InlineData("/%2e%2e/start?source=pwa")]
+    [InlineData("/start\\admin?source=pwa")]
+    public void ThrowIfInvalid_RejectsUnsafeStartUrls(string startUrl)
+    {
+        var options = CreateValidOptions();
+        options.StartUrl = startUrl;
+
+        var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Contains("ASPWA006", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

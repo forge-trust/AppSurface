@@ -20,7 +20,7 @@ internal static partial class PwaOptionsValidator
         RequireHexColor(options.ThemeColor, "ASPWA003", "PwaOptions.ThemeColor must be a CSS hex color such as #2563eb.", diagnostics);
         RequireHexColor(options.BackgroundColor, "ASPWA004", "PwaOptions.BackgroundColor must be a CSS hex color such as #ffffff.", diagnostics);
         RequireLocalPath(options.ManifestPath, "ASPWA005", "PwaOptions.ManifestPath must be an app-root-relative path such as /manifest.webmanifest.", diagnostics);
-        RequireLocalPath(options.StartUrl, "ASPWA006", "PwaOptions.StartUrl must be an app-root-relative URL such as /.", diagnostics);
+        RequireLocalStartUrl(options.StartUrl, "ASPWA006", "PwaOptions.StartUrl must be an app-root-relative URL such as /.", diagnostics);
         RequireLocalPath(options.Scope, "ASPWA007", "PwaOptions.Scope must be an app-root-relative URL such as /.", diagnostics);
         RequireLocalPath(options.DiagnosticsPath, "ASPWA008", "PwaOptions.DiagnosticsPath must be an app-root-relative path such as /_appsurface/pwa.", diagnostics);
 
@@ -139,6 +139,37 @@ internal static partial class PwaOptionsValidator
         {
             diagnostics.Add(new PwaDiagnostic(code, PwaDiagnosticSeverity.Error, message));
         }
+    }
+
+    private static void RequireLocalStartUrl(string? value, string code, string message, List<PwaDiagnostic> diagnostics)
+    {
+        if (!IsSafeLocalStartUrl(value))
+        {
+            diagnostics.Add(new PwaDiagnostic(code, PwaDiagnosticSeverity.Error, message));
+        }
+    }
+
+    private static bool IsSafeLocalStartUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var startUrl = value.Trim();
+        if (!startUrl.StartsWith('/')
+            || startUrl.StartsWith("//", StringComparison.Ordinal)
+            || startUrl.Contains('\\')
+            || startUrl.Contains("://", StringComparison.Ordinal)
+            || startUrl.Contains('#')
+            || startUrl.Any(ch => char.IsControl(ch)))
+        {
+            return false;
+        }
+
+        var queryStart = startUrl.IndexOf('?');
+        var path = queryStart < 0 ? startUrl : startUrl[..queryStart];
+        return !HasTraversalSegment(path);
     }
 
     [GeneratedRegex("^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")]

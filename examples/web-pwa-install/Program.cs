@@ -31,22 +31,57 @@ await WebApp<WebPwaInstallModule>.RunAsync(
         };
     });
 
+/// <summary>
+/// Sample module that exposes the MVC assets required by the PWA install example.
+/// </summary>
+/// <remarks>
+/// Keep <see cref="IncludeAsApplicationPart"/> enabled so the sample controller and views are discoverable
+/// without additional application-part wiring in the host.
+/// </remarks>
 internal sealed class WebPwaInstallModule : IAppSurfaceWebModule
 {
+    /// <summary>
+    /// Gets a value indicating whether AppSurface should register this sample assembly as an MVC application part.
+    /// </summary>
     public bool IncludeAsApplicationPart => true;
 
+    /// <summary>
+    /// Registers services for the sample module.
+    /// </summary>
+    /// <remarks>
+    /// The example does not need module-owned services; PWA options and offline fallback endpoints are configured
+    /// from the host delegate above.
+    /// </remarks>
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
     }
 
+    /// <summary>
+    /// Registers AppSurface module dependencies required by this sample.
+    /// </summary>
+    /// <remarks>
+    /// No additional dependencies are required because the sample starts from <see cref="ForgeTrust.AppSurface.Web.WebApp{TModule}"/>.
+    /// </remarks>
     public void RegisterDependentModules(ModuleDependencyBuilder builder)
     {
     }
 
+    /// <summary>
+    /// Configures the host before AppSurface builds the service collection.
+    /// </summary>
+    /// <remarks>
+    /// This hook is intentionally empty; host-level PWA settings are configured in the startup options delegate.
+    /// </remarks>
     public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
     {
     }
 
+    /// <summary>
+    /// Configures the host after AppSurface builds the service collection.
+    /// </summary>
+    /// <remarks>
+    /// This hook is intentionally empty because the sample does not need post-service host customization.
+    /// </remarks>
     public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
     {
     }

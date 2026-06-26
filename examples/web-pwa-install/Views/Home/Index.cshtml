@@ -1,6 +1,7 @@
 @{
     ViewData["Title"] = "Install";
-    var verifierOrigin = $"{Context.Request.Scheme}://{Context.Request.Host}";
+    var diagnosticsPath = Url.Content("~/_appsurface/pwa");
+    var verifierUrl = $"{Context.Request.Scheme}://{Context.Request.Host}{Context.Request.PathBase}";
 }
 
 <main>
@@ -10,7 +11,7 @@
         development diagnostics, and an explicit offline fallback strategy.
     </p>
     <p>
-        Open <a href="/_appsurface/pwa">/_appsurface/pwa</a> for local diagnostics, or run
-        <code>appsurface pwa verify --url @verifierOrigin</code>.
+        Open <a href="@diagnosticsPath">@diagnosticsPath</a> for local diagnostics, or run
+        <code>appsurface pwa verify --url @verifierUrl</code>.
     </p>
 </main>
