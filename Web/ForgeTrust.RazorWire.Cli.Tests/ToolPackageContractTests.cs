@@ -26,6 +26,7 @@ public sealed class ToolPackageContractTests
         var exportDirectory = workspace.CreateSubdirectory("export-output");
         var version = "0.0.0-toolverifier." + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
         var nugetPackagesDirectory = GetDefaultNuGetPackagesPath();
+        using var packageCacheCleanup = new GeneratedPackageCacheCleanup(nugetPackagesDirectory, PackageId, version);
         var repositoryRunner = new ToolProcessRunner(
             repositoryRoot,
             new Dictionary<string, string?>
@@ -271,6 +272,34 @@ public sealed class ToolPackageContractTests
             Assert.True(
                 ExitCode == 0,
                 $"{message}{Environment.NewLine}Command: {CommandLine}{Environment.NewLine}Exit code: {ExitCode?.ToString(CultureInfo.InvariantCulture) ?? "<timeout>"}{Environment.NewLine}STDOUT:{Environment.NewLine}{Stdout}{Environment.NewLine}STDERR:{Environment.NewLine}{Stderr}");
+        }
+    }
+
+    private sealed class GeneratedPackageCacheCleanup(
+        string nugetPackagesDirectory,
+        string packageId,
+        string packageVersion) : IDisposable
+    {
+        public void Dispose()
+        {
+            var packageVersionDirectory = System.IO.Path.Combine(
+                nugetPackagesDirectory,
+                packageId.ToLowerInvariant(),
+                packageVersion.ToLowerInvariant());
+
+            try
+            {
+                if (Directory.Exists(packageVersionDirectory))
+                {
+                    Directory.Delete(packageVersionDirectory, recursive: true);
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
         }
     }
 
