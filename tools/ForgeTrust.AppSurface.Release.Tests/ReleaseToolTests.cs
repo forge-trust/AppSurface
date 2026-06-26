@@ -1386,6 +1386,20 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(0, result.ExitCode);
     }
 
+    [Fact]
+    public async Task PublishAllowsObjectIdLengthBranchNameWhenItIsNotAFullObjectId()
+    {
+        await SeedRepositoryAsync();
+        var baseRef = "0123456789abcdef0123456789abcdef0123456g";
+        var runner = CreateSuccessfulStablePublishRunner(baseRef: baseRef);
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--base-ref", baseRef, "--dry-run"],
+            runner);
+
+        Assert.Equal(0, result.ExitCode);
+    }
+
     [Theory]
     [InlineData("origin/")]
     [InlineData("refs/heads/")]
