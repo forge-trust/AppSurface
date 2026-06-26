@@ -631,6 +631,11 @@ public sealed class AppSurfaceTestAuthHarnessTests
         Assert.Equal("operator-1", persona.SubjectId);
         var claim = Assert.Single(persona.Claims);
         Assert.Equal("operator", claim.Value);
+        Assert.Throws<NotSupportedException>(() =>
+            ((IList<Claim>)persona.Claims)[0] = new Claim("role", "viewer"));
+        Assert.Equal(
+            "operator",
+            persona.CreateClaims(SubjectClaimType).Single(claim => claim.Type == "role").Value);
     }
 
     [Fact]
