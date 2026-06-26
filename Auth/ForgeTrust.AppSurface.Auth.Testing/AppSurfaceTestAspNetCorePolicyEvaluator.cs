@@ -9,8 +9,8 @@ namespace ForgeTrust.AppSurface.Auth.Testing;
 /// </summary>
 /// <remarks>
 /// The inner evaluator remains responsible for real ASP.NET Core policy evaluation and AppSurface result mapping. This
-/// decorator only converts the private test-auth unknown-persona transport marker into a setup failure after the inner
-/// evaluator has given authentication handlers a chance to run.
+/// decorator pre-validates request-level persona selection from the private test transport and also converts late
+/// unknown-persona markers set by authentication handlers into setup failures after the inner evaluator runs.
 /// </remarks>
 internal sealed class AppSurfaceTestAspNetCorePolicyEvaluator : IAppSurfaceAspNetCorePolicyEvaluator
 {

@@ -20,6 +20,17 @@ public sealed class AppSurfaceTestAuthHarnessTests
     private const string SubjectClaimType = "sub";
 
     [Theory]
+    [InlineData(AppSurfaceTestAuthSchemeMode.DefaultScheme, 0)]
+    [InlineData(AppSurfaceTestAuthSchemeMode.NamedScheme, 1)]
+    [InlineData(AppSurfaceTestAuthSchemeMode.NoDefault, 2)]
+    public void AppSurfaceTestAuthSchemeMode_NumericValues_AreStable(
+        AppSurfaceTestAuthSchemeMode value,
+        int expected)
+    {
+        Assert.Equal(expected, (int)value);
+    }
+
+    [Theory]
     [InlineData("operator", HttpStatusCode.OK, AppSurfaceAuthOutcome.Allowed, AppSurfaceAuthReason.None, "operator-1")]
     [InlineData("viewer", HttpStatusCode.Forbidden, AppSurfaceAuthOutcome.Forbid, AppSurfaceAuthReason.Forbidden, "viewer-1")]
     public async Task DefaultScheme_EvaluatesRealAspNetCorePolicyWithPersona(
@@ -557,6 +568,11 @@ public sealed class AppSurfaceTestAuthHarnessTests
         { "status": "403", "appsurfaceAuthOutcome": "Forbid", "appsurfaceAuthReason": "Forbidden" }
         """,
         "Expected ProblemDetails property 'status' to be a number")]
+    [InlineData(
+        """
+        { "status": 2147483648, "appsurfaceAuthOutcome": "Forbid", "appsurfaceAuthReason": "Forbidden" }
+        """,
+        "Expected ProblemDetails property 'status' to be a 32-bit integer")]
     public void AssertionHelpers_ReportSpecificProblemDetailsMismatches(string problemJson, string expectedMessage)
     {
         using var json = JsonDocument.Parse(problemJson);
@@ -639,6 +655,17 @@ public sealed class AppSurfaceTestAuthHarnessTests
     }
 
     [Fact]
+    public void Options_ExposeReadOnlyPersonaView()
+    {
+        var options = new AppSurfaceTestAuthOptions();
+        options.AddPersona("operator", "operator-1");
+
+        Assert.Throws<NotSupportedException>(() =>
+            ((IList<AppSurfaceTestPersona>)options.Personas).Add(new AppSurfaceTestPersona("viewer", "viewer-1")));
+        Assert.Equal("operator", Assert.Single(options.Personas).Name);
+    }
+
+    [Fact]
     public void StaleSession_ResultCanBeAssertedWithoutSimulatingSessionFreshness()
     {
         var result = AppSurfaceAuthResult.StaleOrUnknownSession();
@@ -712,11 +739,19 @@ public sealed class AppSurfaceTestAuthHarnessTests
             environmentName,
             configurePolicy,
             configureServicesBeforeTestAuth);
-        await host.StartAsync();
-        using var client = host.GetTestClient();
-        using var response = await client.GetAsync("/ready");
-        response.EnsureSuccessStatusCode();
-        return host;
+        try
+        {
+            await host.StartAsync();
+            using var client = host.GetTestClient();
+            using var response = await client.GetAsync("/ready");
+            response.EnsureSuccessStatusCode();
+            return host;
+        }
+        catch
+        {
+            host.Dispose();
+            throw;
+        }
     }
 
     private static IHost CreateHost(

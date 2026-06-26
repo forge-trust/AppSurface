@@ -103,7 +103,12 @@ public static class AppSurfaceAuthTestAssert
             Throw($"Expected ProblemDetails property '{propertyName}' to be a number.");
         }
 
-        return property.GetInt32();
+        if (!property.TryGetInt32(out var value))
+        {
+            Throw($"Expected ProblemDetails property '{propertyName}' to be a 32-bit integer.");
+        }
+
+        return value;
     }
 
     private static void Throw(string message)

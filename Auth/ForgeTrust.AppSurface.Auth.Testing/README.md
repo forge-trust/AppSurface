@@ -13,7 +13,7 @@ AppSurface publishes coordinated `v0.1.0` release candidates. Before installing 
 Install the package in a test project:
 
 ```bash
-dotnet add package ForgeTrust.AppSurface.Auth.Testing
+dotnet add package ForgeTrust.AppSurface.Auth.Testing --prerelease
 ```
 
 Configure the factory with explicit personas:
@@ -73,7 +73,7 @@ builder.Services.AddAppSurfaceTestAuth(options =>
 });
 ```
 
-`AddAppSurfaceTestAuth(...)` composes `ForgeTrust.AppSurface.Auth.AspNetCore`, registers a test authentication scheme, and creates an immutable persona registry. Normal ASP.NET Core authorization policies still run. AppSurface still maps the result through `AppSurfaceAuthResult` and `RequireSurfacePolicy(...)` still renders AppSurface-shaped ProblemDetails for API callers.
+`AddAppSurfaceTestAuth(...)` composes `ForgeTrust.AppSurface.Auth.AspNetCore`, creates an immutable persona registry, and registers a test authentication scheme when the selected `SchemeMode` enables it. Normal ASP.NET Core authorization policies still run. AppSurface still maps the result through `AppSurfaceAuthResult` and `RequireSurfacePolicy(...)` still renders AppSurface-shaped ProblemDetails for API callers.
 
 If the host registered a custom `IAppSurfaceAspNetCorePolicyEvaluator` before calling `AddAppSurfaceTestAuth(...)`, Auth.Testing decorates that evaluator instead of replacing it. The host evaluator continues to own policy evaluation and result mapping; Auth.Testing only adds the test-only unknown-persona diagnostic.
 

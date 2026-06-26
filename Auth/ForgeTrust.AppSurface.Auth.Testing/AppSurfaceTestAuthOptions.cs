@@ -14,6 +14,15 @@ namespace ForgeTrust.AppSurface.Auth.Testing;
 public sealed class AppSurfaceTestAuthOptions
 {
     private readonly List<AppSurfaceTestPersona> _personas = [];
+    private readonly IReadOnlyList<AppSurfaceTestPersona> _personasView;
+
+    /// <summary>
+    /// Creates AppSurface test auth options.
+    /// </summary>
+    public AppSurfaceTestAuthOptions()
+    {
+        _personasView = _personas.AsReadOnly();
+    }
 
     /// <summary>
     /// Gets or sets the ASP.NET Core authentication scheme registered for test personas.
@@ -47,7 +56,7 @@ public sealed class AppSurfaceTestAuthOptions
     /// <summary>
     /// Gets the configured immutable persona definitions.
     /// </summary>
-    public IReadOnlyList<AppSurfaceTestPersona> Personas => _personas;
+    public IReadOnlyList<AppSurfaceTestPersona> Personas => _personasView;
 
     /// <summary>
     /// Adds a persona with the supplied subject and claims.

@@ -8,6 +8,8 @@ namespace ForgeTrust.AppSurface.Auth.Testing;
 /// <see cref="DefaultScheme" /> for the quickest WebApplicationFactory path, <see cref="NamedScheme" /> when policies
 /// opt in to a specific scheme, and <see cref="NoDefault" /> when the test host must keep every existing default
 /// authentication setting untouched.
+/// The numeric values are explicit because this public enum may be persisted, serialized, or bound by applications. New
+/// values should be appended without changing the values documented here.
 /// </remarks>
 public enum AppSurfaceTestAuthSchemeMode
 {
