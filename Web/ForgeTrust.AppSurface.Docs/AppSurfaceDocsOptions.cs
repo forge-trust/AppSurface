@@ -617,13 +617,26 @@ public sealed class AppSurfaceDocsDiagnosticsOptions
     public AppSurfaceDocsHarvestHealthExposure ShowChrome { get; set; } = AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly;
 
     /// <summary>
+    /// Gets or sets the host-owned authorization policy required for mutating AppSurface Docs operator actions.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="null"/>, which denies packaged operator writes such as
+    /// <c>{DocsRootPath}/_harvest/rebuild</c>. Set this to the name of a policy registered with ASP.NET Core
+    /// authorization when trusted maintainers may rebuild the live source-backed docs harvest from browser forms or
+    /// host automation. When this option is blank, AppSurface Docs falls back to <see cref="SearchIndexRefreshPolicy"/>
+    /// for source compatibility with hosts that already configured the older search-index refresh endpoint.
+    /// </remarks>
+    public string? OperatorWritePolicy { get; set; }
+
+    /// <summary>
     /// Gets or sets the host-owned authorization policy required to refresh the live docs search-index cache.
     /// </summary>
     /// <remarks>
     /// The default is <see langword="null"/>, which denies the packaged
     /// <c>{DocsRootPath}/_search-index/refresh</c> endpoint. Set this to the name of a policy registered with
-    /// ASP.NET Core authorization when a host wants browser-form-based operator refresh. AppSurface Docs does not
-    /// register a permissive fallback policy because cache refresh is a mutating operator action.
+    /// ASP.NET Core authorization when a host wants browser-form-based operator refresh. New hosts should prefer
+    /// <see cref="OperatorWritePolicy"/> so one docs-maintainer policy covers harvest rebuild and search refresh. AppSurface
+    /// Docs does not register a permissive fallback policy because cache refresh is a mutating operator action.
     /// </remarks>
     public string? SearchIndexRefreshPolicy { get; set; }
 }
@@ -2161,6 +2174,7 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
                && (trimmed.Equals("search", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("search-index.json", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("_search-index", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("_harvest", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("_health", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("_health.json", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("_routes", StringComparison.OrdinalIgnoreCase)

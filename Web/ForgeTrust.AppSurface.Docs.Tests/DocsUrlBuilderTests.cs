@@ -41,6 +41,9 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/docs/search", disabledBuilder.Routes.Search);
         Assert.Equal("/docs/_search-index/refresh", disabledBuilder.Routes.SearchIndexRefresh);
         Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, disabledBuilder.Routes.SearchIndexRefreshMethod);
+        Assert.Equal("/docs/_harvest", disabledBuilder.Routes.Harvest);
+        Assert.Equal("/docs/_harvest/rebuild", disabledBuilder.Routes.HarvestRebuild);
+        Assert.Equal(DocsUrlBuilder.HarvestRebuildMethod, disabledBuilder.Routes.HarvestRebuildMethod);
         Assert.Equal("/docs/_health", disabledBuilder.Routes.Health);
         Assert.Equal("/docs/_health.json", disabledBuilder.Routes.HealthJson);
         Assert.Equal("/docs/_routes", disabledBuilder.Routes.RouteInspector);
@@ -94,6 +97,8 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/foo/bar", disabledBuilder.RouteRootPath);
         Assert.Equal("/foo/bar", disabledBuilder.CurrentDocsRootPath);
         Assert.Equal("/foo/bar/search", disabledBuilder.Routes.Search);
+        Assert.Equal("/foo/bar/_harvest", disabledBuilder.BuildHarvestUrl());
+        Assert.Equal("/foo/bar/_harvest/rebuild", disabledBuilder.BuildHarvestRebuildUrl());
         Assert.Equal("/foo/bar/_health", disabledBuilder.BuildHealthUrl());
         Assert.Equal("/foo/bar/_health.json", disabledBuilder.BuildHealthJsonUrl());
         Assert.Equal("/foo/bar/_routes", disabledBuilder.BuildRouteInspectorUrl());
@@ -151,6 +156,9 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/v/1.2.3", builder.BuildVersionRootUrl("1.2.3"));
         Assert.Equal("/next/_search-index/refresh", builder.Routes.SearchIndexRefresh);
         Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, builder.Routes.SearchIndexRefreshMethod);
+        Assert.Equal("/next/_harvest", builder.Routes.Harvest);
+        Assert.Equal("/next/_harvest/rebuild", builder.Routes.HarvestRebuild);
+        Assert.Equal(DocsUrlBuilder.HarvestRebuildMethod, builder.Routes.HarvestRebuildMethod);
         Assert.Equal("/next/_health", builder.Routes.Health);
         Assert.Equal("/next/_health.json", builder.Routes.HealthJson);
         Assert.Equal("/next/_routes", builder.Routes.RouteInspector);
@@ -166,6 +174,8 @@ public sealed class DocsUrlBuilderTests
             Search = "/docs/search",
             SearchIndex = "/docs/search-index.json",
             SearchIndexRefresh = "/docs/_search-index/refresh",
+            Harvest = "/docs/_harvest",
+            HarvestRebuild = "/docs/_harvest/rebuild",
             Versions = "/docs/versions",
             Health = "/docs/_health",
             HealthJson = "/docs/_health.json",
@@ -174,6 +184,8 @@ public sealed class DocsUrlBuilderTests
         };
 
         Assert.Equal("/docs", routes.Home);
+        Assert.Equal("/docs/_harvest", routes.Harvest);
+        Assert.Equal("/docs/_harvest/rebuild", routes.HarvestRebuild);
         Assert.Equal("/docs/_health", routes.Health);
         Assert.Equal("/docs/_health.json", routes.HealthJson);
         Assert.Equal("/docs/_routes", routes.RouteInspector);
@@ -200,9 +212,12 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/docs/versions", versions);
         Assert.Equal(string.Empty, routes.Health);
         Assert.Equal(string.Empty, routes.HealthJson);
+        Assert.Equal(string.Empty, routes.Harvest);
+        Assert.Equal(string.Empty, routes.HarvestRebuild);
         Assert.Equal(string.Empty, routes.RouteInspector);
         Assert.Equal(string.Empty, routes.RouteInspectorJson);
         Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, routes.SearchIndexRefreshMethod);
+        Assert.Equal(DocsUrlBuilder.HarvestRebuildMethod, routes.HarvestRebuildMethod);
     }
 
     [Fact]
@@ -255,6 +270,38 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/docs/_routes", routeInspector);
         Assert.Equal("/docs/_routes.json", routeInspectorJson);
         Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, routes.SearchIndexRefreshMethod);
+    }
+
+    [Fact]
+    public void Routes_ShouldRoundTripHarvestRoutes_ForFullConstructorAndDeconstruct()
+    {
+        var routes = new AppSurfaceDocsRouteReferences(
+            "/docs",
+            "/docs/search",
+            "/docs/search-index.json",
+            "/docs/_search-index/refresh",
+            "/docs/versions",
+            "/docs/_harvest",
+            "/docs/_harvest/rebuild",
+            "/docs/_health",
+            "/docs/_health.json",
+            "/docs/_routes",
+            "/docs/_routes.json");
+
+        var (home, search, searchIndex, searchIndexRefresh, versions, harvest, harvestRebuild, health, healthJson, routeInspector, routeInspectorJson) = routes;
+
+        Assert.Equal("/docs", home);
+        Assert.Equal("/docs/search", search);
+        Assert.Equal("/docs/search-index.json", searchIndex);
+        Assert.Equal("/docs/_search-index/refresh", searchIndexRefresh);
+        Assert.Equal("/docs/versions", versions);
+        Assert.Equal("/docs/_harvest", harvest);
+        Assert.Equal("/docs/_harvest/rebuild", harvestRebuild);
+        Assert.Equal("/docs/_health", health);
+        Assert.Equal("/docs/_health.json", healthJson);
+        Assert.Equal("/docs/_routes", routeInspector);
+        Assert.Equal("/docs/_routes.json", routeInspectorJson);
+        Assert.Equal(DocsUrlBuilder.HarvestRebuildMethod, routes.HarvestRebuildMethod);
     }
 
     [Fact]
@@ -425,6 +472,8 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/search", builder.BuildSearchUrl());
         Assert.Equal("/search-index.json", builder.BuildSearchIndexUrl());
         Assert.Equal("/_search-index/refresh", builder.BuildSearchIndexRefreshUrl());
+        Assert.Equal("/_harvest", builder.BuildHarvestUrl());
+        Assert.Equal("/_harvest/rebuild", builder.BuildHarvestRebuildUrl());
         Assert.Equal("/search.css", builder.BuildAssetUrl("search.css"));
         Assert.Equal("/outline-client.js", builder.BuildAssetUrl("outline-client.js"));
         Assert.Equal("/guides/start.md", builder.BuildDocUrl("guides/start.md"));

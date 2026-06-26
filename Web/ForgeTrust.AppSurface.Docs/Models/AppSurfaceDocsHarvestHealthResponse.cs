@@ -69,6 +69,16 @@ public sealed record AppSurfaceDocsHarvestHealthResponse
     public IReadOnlyList<AppSurfaceDocsHarvestDiagnosticResponse> Diagnostics { get; init; } = [];
 
     /// <summary>
+    /// Gets the trusted operator rebuild form metadata used by the HTML health page.
+    /// </summary>
+    /// <remarks>
+    /// This value is intentionally ignored by JSON serialization because it contains request-scoped browser URLs and
+    /// anti-forgery form context rather than harvest-health facts.
+    /// </remarks>
+    [JsonIgnore]
+    public AppSurfaceDocsHarvestRebuildForm? RebuildForm { get; init; }
+
+    /// <summary>
     /// Creates a redacted response from the full server-side harvest health snapshot.
     /// </summary>
     /// <param name="health">The server-side harvest health snapshot.</param>
@@ -105,6 +115,43 @@ public sealed record AppSurfaceDocsHarvestHealthResponse
     {
         return IsOk(status) ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable;
     }
+}
+
+/// <summary>
+/// Request-scoped trusted operator action metadata for rebuilding the live AppSurface Docs harvest.
+/// </summary>
+public sealed record AppSurfaceDocsHarvestRebuildForm
+{
+    /// <summary>
+    /// Gets the path-base-aware rebuild form action.
+    /// </summary>
+    public string Action { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the HTTP method required by the rebuild endpoint.
+    /// </summary>
+    public string Method { get; init; } = DocsUrlBuilder.HarvestRebuildMethod;
+
+    /// <summary>
+    /// Gets the validated app-relative docs URL to revisit after rebuild completion.
+    /// </summary>
+    public string ReturnUrl { get; init; } = "/";
+
+    /// <summary>
+    /// Gets a value indicating whether the current request user may submit the rebuild form.
+    /// </summary>
+    public bool IsAuthorized { get; init; } = true;
+
+    /// <summary>
+    /// Gets the short visible state for the rebuild action.
+    /// </summary>
+    public string Status { get; init; } = "Ready";
+
+    /// <summary>
+    /// Gets the operator-facing explanation for the current rebuild action state.
+    /// </summary>
+    public string Description { get; init; } =
+        "Rebuild the live docs snapshot from source and watch progress before returning to this docs context.";
 }
 
 /// <summary>

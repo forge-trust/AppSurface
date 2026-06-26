@@ -15,6 +15,12 @@
           "Microsoft.CodeAnalysis.Analyzers": "3.11.0"
         }
       },
+      "forgetrust.appsurface.auth": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
@@ -63,6 +69,7 @@
       "forgetrust.razorwire": {
         "type": "Project",
         "dependencies": {
+          "ForgeTrust.AppSurface.Auth": "[0.1.0, )",
           "ForgeTrust.AppSurface.Intelligence": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
