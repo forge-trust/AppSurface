@@ -9,6 +9,13 @@ namespace ForgeTrust.AppSurface.Web.Tests;
 public sealed class AppSurfacePwaHeadTagHelperTests
 {
     [Fact]
+    public void Constructor_RejectsNullDependencies()
+    {
+        Assert.Throws<ArgumentNullException>(() => new AppSurfacePwaHeadTagHelper(null!, new PwaOptions()));
+        Assert.Throws<ArgumentNullException>(() => new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), null!));
+    }
+
+    [Fact]
     public void Process_WhenDisabled_EmitsNoHeadTags()
     {
         var helper = new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), new PwaOptions())

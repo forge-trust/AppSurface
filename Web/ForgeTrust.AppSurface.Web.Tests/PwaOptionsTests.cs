@@ -55,6 +55,25 @@ public sealed class PwaOptionsTests
     }
 
     [Fact]
+    public void ThrowIfInvalid_ReportsUnsafeUrlsDiagnosticsPathAndColors()
+    {
+        var options = CreateValidOptions();
+        options.ThemeColor = "blue";
+        options.BackgroundColor = "#12";
+        options.StartUrl = "/start?from=test";
+        options.Scope = "//cdn.example.test/";
+        options.DiagnosticsPath = "/_appsurface/pwa#status";
+
+        var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Contains("ASPWA003", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ASPWA004", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ASPWA006", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ASPWA007", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ASPWA008", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ThrowIfInvalid_RequiresOfflineFallback_WhenOfflineIsEnabled()
     {
         var options = CreateValidOptions();

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using CliFx;
 using CliFx.Infrastructure;
 
@@ -62,6 +63,27 @@ public sealed class PwaVerifierTests
     {
         Assert.Throws<ArgumentNullException>(() => new PwaVerifyCommand(null!));
         Assert.Throws<ArgumentNullException>(() => new PwaVerifier(null!));
+    }
+
+    [Fact]
+    public async Task HttpClientAdapter_ReturnsStatusContentTypeBodyAndSuccessState()
+    {
+        using var httpClient = new HttpClient(
+            new StubHttpMessageHandler(
+                new HttpResponseMessage(HttpStatusCode.Accepted)
+                {
+                    Content = new StringContent("adapter-body", Encoding.UTF8, "text/plain")
+                }));
+        var adapter = new PwaVerificationHttpClient(httpClient);
+
+        var response = await adapter.GetAsync(new Uri("https://app.example.test/status"), CancellationToken.None);
+        var failed = new PwaHttpResponse(HttpStatusCode.BadGateway, string.Empty, string.Empty);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.Equal("text/plain", response.ContentType);
+        Assert.Equal("adapter-body", response.Body);
+        Assert.True(response.IsSuccess);
+        Assert.False(failed.IsSuccess);
     }
 
     [Fact]
@@ -582,6 +604,14 @@ public sealed class PwaVerifierTests
             return Task.FromResult(_responses.TryGetValue(uri.ToString().TrimEnd('/'), out var response)
                 ? response
                 : new PwaHttpResponse(HttpStatusCode.NotFound, "text/plain", string.Empty));
+        }
+    }
+
+    private sealed class StubHttpMessageHandler(HttpResponseMessage response) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(response);
         }
     }
 }
