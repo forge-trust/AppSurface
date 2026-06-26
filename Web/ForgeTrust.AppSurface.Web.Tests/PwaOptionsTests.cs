@@ -55,6 +55,7 @@ public sealed class PwaOptionsTests
     [InlineData("/manifest {tenant}.webmanifest", "ASPWA005")]
     [InlineData("/../manifest.webmanifest", "ASPWA005")]
     [InlineData("/%2e%2e/manifest.webmanifest", "ASPWA005")]
+    [InlineData("/%/manifest.webmanifest", "ASPWA005")]
     [InlineData("/%zz/manifest.webmanifest", "ASPWA005")]
     [InlineData("manifest.webmanifest", "ASPWA005")]
     public void ThrowIfInvalid_RejectsUnsafeManifestPaths(string manifestPath, string expectedCode)
@@ -97,6 +98,18 @@ public sealed class PwaOptionsTests
         Assert.Null(exception);
     }
 
+    [Fact]
+    public void ThrowIfInvalid_AcceptsSafeEscapedPaths()
+    {
+        var options = CreateValidOptions();
+        options.ManifestPath = "/manifests/%66ield.webmanifest";
+        options.StartUrl = "/start%2fnotes?source=pwa";
+
+        var exception = Record.Exception(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Null(exception);
+    }
+
     [Theory]
     [InlineData("//cdn.example.test/start")]
     [InlineData("https://example.test/start")]
@@ -104,6 +117,7 @@ public sealed class PwaOptionsTests
     [InlineData("/start {tenant}?source=pwa")]
     [InlineData("/../start?source=pwa")]
     [InlineData("/%2e%2e/start?source=pwa")]
+    [InlineData("/%/start?source=pwa")]
     [InlineData("/%zz/start?source=pwa")]
     [InlineData("/start\\admin?source=pwa")]
     public void ThrowIfInvalid_RejectsUnsafeStartUrls(string startUrl)
