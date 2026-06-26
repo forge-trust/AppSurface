@@ -155,6 +155,23 @@ public sealed class PwaEndpointTests
     }
 
     [Fact]
+    public async Task Diagnostics_DoNotWarnWhenRequestIsHttps()
+    {
+        await using var app = await StartHostAsync(
+            options => ConfigureValidPwa(options.Pwa),
+            Environments.Development,
+            forceHttpsScheme: true);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/_appsurface/pwa/status.json");
+        request.Headers.Host = "app.example.test";
+
+        using var response = await app.Client.SendAsync(request);
+        var json = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.DoesNotContain("\"code\": \"ASPWA018\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task OfflineStrategy_MapsServiceWorkerOnlyWhenExplicitlyEnabled()
     {
         await using var disabled = await StartHostAsync(options => ConfigureValidPwa(options.Pwa));
@@ -240,9 +257,10 @@ public sealed class PwaEndpointTests
     private static async Task<RunningApp> StartHostAsync(
         Action<WebOptions> configureOptions,
         string environment = "Development",
-        string pathBase = "")
+        string pathBase = "",
+        bool forceHttpsScheme = false)
     {
-        var module = new TestWebModule(pathBase);
+        var module = new TestWebModule(pathBase, forceHttpsScheme);
         var startup = new TestWebStartup(module);
         startup.WithOptions(configureOptions);
         var context = new StartupContext(["--environment", environment], module);
@@ -273,12 +291,15 @@ public sealed class PwaEndpointTests
         {
         }
 
-        public TestWebModule(string pathBase)
+        public TestWebModule(string pathBase, bool forceHttpsScheme)
         {
             PathBase = pathBase;
+            ForceHttpsScheme = forceHttpsScheme;
         }
 
         private string PathBase { get; } = string.Empty;
+
+        private bool ForceHttpsScheme { get; }
 
         public void ConfigureServices(StartupContext context, IServiceCollection services)
         {
@@ -302,6 +323,15 @@ public sealed class PwaEndpointTests
 
         public void ConfigureWebApplication(StartupContext context, IApplicationBuilder app)
         {
+            if (ForceHttpsScheme)
+            {
+                app.Use((httpContext, next) =>
+                {
+                    httpContext.Request.Scheme = "https";
+                    return next(httpContext);
+                });
+            }
+
             if (!string.IsNullOrWhiteSpace(PathBase))
             {
                 app.UsePathBase(PathBase);
