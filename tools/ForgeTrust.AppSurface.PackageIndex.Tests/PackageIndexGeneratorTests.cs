@@ -2486,9 +2486,9 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         Assert.Equal(1, exitCode);
         Assert.NotNull(capturedRequest);
-        Assert.Equal(Path.Combine(_repositoryRoot, "packages-in"), capturedRequest.ArtifactsInputPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "packages-in", "artifacts.json"), capturedRequest.ArtifactManifestPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "publish.md"), capturedRequest.PublishLogPath);
+        Assert.Equal(TestPathUtils.PathUnder(_repositoryRoot, "packages-in"), capturedRequest.ArtifactsInputPath);
+        Assert.Equal(TestPathUtils.PathUnder(_repositoryRoot, "packages-in/artifacts.json"), capturedRequest.ArtifactManifestPath);
+        Assert.Equal(TestPathUtils.PathUnder(_repositoryRoot, "reports/publish.md"), capturedRequest.PublishLogPath);
         Assert.Equal("https://example.test/v3/index.json", capturedRequest.Source);
         Assert.Equal("TEST_KEY", capturedRequest.ApiKeyEnvironmentVariable);
         Assert.Contains("Published 0 prerelease package artifacts for 0.0.0-ci.99. Log: reports/publish.md.", stdout.ToString(), StringComparison.Ordinal);
@@ -2533,12 +2533,52 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         Assert.Equal(1, exitCode);
         Assert.NotNull(capturedRequest);
-        Assert.Equal(Path.Combine(_repositoryRoot, "packages-in"), capturedRequest.ArtifactsInputPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "packages-in", "artifacts.json"), capturedRequest.ArtifactManifestPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "publish.md"), capturedRequest.PublishLogPath);
+        Assert.Equal(TestPathUtils.PathUnder(_repositoryRoot, "packages-in"), capturedRequest.ArtifactsInputPath);
+        Assert.Equal(TestPathUtils.PathUnder(_repositoryRoot, "packages-in/artifacts.json"), capturedRequest.ArtifactManifestPath);
+        Assert.Equal(TestPathUtils.PathUnder(_repositoryRoot, "reports/publish.md"), capturedRequest.PublishLogPath);
         Assert.Equal("https://example.test/v3/index.json", capturedRequest.Source);
         Assert.Equal("TEST_KEY", capturedRequest.ApiKeyEnvironmentVariable);
         Assert.Contains("Published 0 stable package artifacts for 0.1.0. Log: reports/publish.md.", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    [Fact]
+    public async Task RunAsync_PublishStable_ReturnsSuccessWhenLedgerHasNoFailures()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            [
+                "publish-stable",
+                "--publish-log", "reports/publish.md",
+                "--source", "https://example.test/v3/index.json"
+            ],
+            stdout,
+            stderr,
+            _repositoryRoot,
+            publishStableAsync: (request, _) => Task.FromResult(new PackagePublishLedger(
+                "0.1.0",
+                request.Source,
+                [
+                    new PackagePublishLedgerEntry(
+                        "ForgeTrust.AppSurface.Core",
+                        "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj",
+                        "ForgeTrust.AppSurface.Core.0.1.0.nupkg",
+                        PackagePublishStatus.Pushed,
+                        0,
+                        string.Empty),
+                    new PackagePublishLedgerEntry(
+                        "ForgeTrust.AppSurface.Web",
+                        "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                        "ForgeTrust.AppSurface.Web.0.1.0.nupkg",
+                        PackagePublishStatus.DuplicateReported,
+                        0,
+                        "already exists")
+                ])));
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Published 2 stable package artifacts for 0.1.0. Log: reports/publish.md.", stdout.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr.ToString());
     }
 

@@ -369,6 +369,34 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_AcceptsStablePackageVersion()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web",
+            "0.1.0",
+            EmptyDependencies);
+
+        var report = new PackageArtifactValidator().Validate(
+            new PackagePublishPlan([
+                new PackagePublishPlanEntry(
+                    "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                    "ForgeTrust.AppSurface.Web",
+                    PackagePublishDecision.Publish,
+                    [],
+                    IsTool: false)
+            ]),
+            artifactDirectory,
+            "0.1.0");
+
+        var entry = Assert.Single(report.Entries);
+        Assert.Equal("0.1.0", report.PackageVersion);
+        Assert.Equal("ForgeTrust.AppSurface.Web", entry.PackageId);
+    }
+
+    [Fact]
     public void PackageArtifactValidator_ThrowsWhenToolSettingsCommandDoesNotMatchPlan()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
