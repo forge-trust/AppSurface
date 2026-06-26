@@ -53,10 +53,15 @@ public sealed class PwaEndpointTests
             },
             Environments.Development);
 
-        using var manifest = await app.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/manifest.webmanifest"));
-        using var diagnostics = await app.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/_appsurface/pwa"));
-        using var status = await app.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/_appsurface/pwa/status.json"));
-        using var serviceWorker = await app.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/service-worker.js"));
+        using var manifestRequest = new HttpRequestMessage(HttpMethod.Head, "/manifest.webmanifest");
+        using var diagnosticsRequest = new HttpRequestMessage(HttpMethod.Head, "/_appsurface/pwa");
+        using var statusRequest = new HttpRequestMessage(HttpMethod.Head, "/_appsurface/pwa/status.json");
+        using var serviceWorkerRequest = new HttpRequestMessage(HttpMethod.Head, "/service-worker.js");
+
+        using var manifest = await app.Client.SendAsync(manifestRequest);
+        using var diagnostics = await app.Client.SendAsync(diagnosticsRequest);
+        using var status = await app.Client.SendAsync(statusRequest);
+        using var serviceWorker = await app.Client.SendAsync(serviceWorkerRequest);
 
         Assert.Equal(HttpStatusCode.OK, manifest.StatusCode);
         Assert.Equal("application/manifest+json", manifest.Content.Headers.ContentType?.MediaType);
