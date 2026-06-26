@@ -1396,13 +1396,16 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         var configuredPath = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
         if (!string.IsNullOrWhiteSpace(configuredPath))
         {
+            Directory.CreateDirectory(configuredPath);
             return configuredPath;
         }
 
-        return Path.Join(
+        var packagesPath = Path.Join(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".nuget",
             "packages");
+        Directory.CreateDirectory(packagesPath);
+        return packagesPath;
     }
 
     private string CreateNuGetPackageCacheDirectory(string name)

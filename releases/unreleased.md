@@ -50,8 +50,8 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Web CORS startup validation now fails closed before policy registration when non-development
   `CorsOptions.AllowedOrigins` includes the exact literal `*`, while preserving Development all-origin convenience and
   wildcard subdomain origins such as `https://*.example.com`.
-- Package verification tests now keep packed-tool smoke restores out of the user-level NuGet package cache and clean up
-  generated RazorWire ToolVerifier package entries after the tool contract proof completes.
+- Package verification tests now keep Tailwind packed-consumer smoke restores out of the user-level NuGet package cache
+  and clean up generated RazorWire ToolVerifier package entries after the tool contract proof completes.
 
 ### AppSurface Flow
 
