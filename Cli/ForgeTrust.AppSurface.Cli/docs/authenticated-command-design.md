@@ -104,8 +104,8 @@ Expected first-run output contract:
 | `dotnet tool run appsurface --version` | stdout | `appsurface <semver>` | standard .NET tool failure |
 | `dotnet tool run appsurface auth status` | stdout for cache/profile summary; stderr only for diagnostics | `ASCLI100 auth_status_ready` with profile, tenant, issuer, cache health, expiry, and next action | `ASCLI101 not_logged_in` when no usable token exists |
 | `dotnet tool run appsurface auth login --profile default --tenant demo` | stdout for user-action instructions; stderr only for diagnostics | `ASCLI110 login_complete` with profile, tenant, issuer, auth method, cache health, and next action | `ASCLI102 ci_prompt_blocked`, `ASCLI103 cache_unavailable`, provider denial, expiry, timeout, or cancellation diagnostic |
-| `dotnet tool run appsurface auth whoami` | stdout | `ASCLI120 identity_ready` with display-safe subject, tenant, profile, scopes, expiry, and auth method | `ASCLI101 not_logged_in` or `ASCLI104 scope_missing` |
-| `dotnet tool run appsurface docs publish --archive ./dist/docs --site demo --dry-run` | stdout for dry-run plan; stderr only for diagnostics | `ASCLI130 command_authorized` followed by dry-run publish summary | `ASCLI101 not_logged_in`, `ASCLI104 scope_missing`, `ASCLI105 tenant_required`, `ASCLI106 publish_resource_denied`, or `ASCLI102 ci_prompt_blocked` |
+| `dotnet tool run appsurface auth whoami` | stdout | `ASCLI120 identity_ready` with display-safe subject, tenant, profile, scopes, expiry, and auth method | `ASCLI101 not_logged_in`, `ASCLI104 scope_missing`, or `ASCLI107 profile_ambiguous` |
+| `dotnet tool run appsurface docs publish --archive ./dist/docs --site demo --dry-run` | stdout for dry-run plan; stderr only for diagnostics | `ASCLI130 command_authorized` followed by dry-run publish summary | `ASCLI101 not_logged_in`, `ASCLI104 scope_missing`, `ASCLI105 tenant_required`, `ASCLI106 publish_resource_denied`, `ASCLI107 profile_ambiguous`, or `ASCLI102 ci_prompt_blocked` |
 
 Sample safe status output:
 
@@ -188,6 +188,7 @@ Auth diagnostics must use deterministic `ASCLI1xx` codes and follow the existing
 | `ASCLI104` | `scope_missing` | stderr | 14 | no | `profile`, `tenant`, `resource`, `required_scopes` |
 | `ASCLI105` | `tenant_required` | stderr | 15 | yes | `profile`, `candidate_tenants`, `resource` |
 | `ASCLI106` | `publish_resource_denied` | stderr | 16 | no | `profile`, `tenant`, `site`, `resource` |
+| `ASCLI107` | `profile_ambiguous` | stderr | 17 | yes | `candidate_profiles`, `tenant`, `resource`, `next_action` |
 | `ASCLI110` | `login_complete` | stdout | 0 | no | `profile`, `tenant`, `issuer`, `auth_method`, `cache_status`, `next_action` |
 | `ASCLI120` | `identity_ready` | stdout | 0 | no | `profile`, `tenant`, `issuer`, `subject_kind`, `scopes`, `expires_at` |
 | `ASCLI130` | `command_authorized` | stdout | 0 | no | `profile`, `tenant`, `resource`, `scopes`, `dry_run` |
@@ -218,6 +219,15 @@ Problem: The secure token cache is unavailable.
 Cause: The OS credential store is locked, unsupported, or unreachable.
 Fix: Unlock the credential store, choose a supported platform, or use an explicit non-interactive credential in CI. AppSurface will not fall back to plaintext refresh-token storage.
 Docs: https://forge-trust.com/docs/appsurface-cli/auth#ascli103
+Retryable: yes
+```
+
+```text
+ASCLI107 profile_ambiguous
+Problem: AppSurface CLI could not choose an active profile.
+Cause: Multiple profiles can satisfy this command and no `--profile` value was supplied.
+Fix: Re-run with `--profile <name>` or set an active profile with `appsurface auth profile switch`.
+Docs: https://forge-trust.com/docs/appsurface-cli/auth#ascli107
 Retryable: yes
 ```
 
@@ -291,7 +301,7 @@ LOAD_CACHE
 START
   -> --profile supplied           -> use supplied profile
   -> one active profile           -> use active profile
-  -> multiple active profiles     -> ASCLI101 not_logged_in with profile fix
+  -> multiple active profiles     -> ASCLI107 profile_ambiguous
   -> --tenant supplied            -> use supplied tenant
   -> one tenant bound to profile  -> use bound tenant
   -> no tenant or ambiguous tenant -> ASCLI105 tenant_required

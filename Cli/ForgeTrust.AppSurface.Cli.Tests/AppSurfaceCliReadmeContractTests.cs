@@ -8,9 +8,12 @@ public sealed class AppSurfaceCliReadmeContractTests
     public void Readme_Should_Link_AuthenticatedCommandDesign()
     {
         var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
+        var authReadme = File.ReadAllText(GetAppSurfaceAuthReadmePath());
         var standaloneAppSettings = File.ReadAllText(GetStandaloneDocsAppSettingsPath());
 
         Assert.Contains("[authenticated command design](docs/authenticated-command-design.md)", readme, StringComparison.Ordinal);
+        Assert.Contains("[AppSurface CLI authenticated command design](../../Cli/ForgeTrust.AppSurface.Cli/docs/authenticated-command-design.md)", authReadme, StringComparison.Ordinal);
+        Assert.Contains("CLI auth remains outside this package", authReadme, StringComparison.Ordinal);
         Assert.Contains("\"Cli/**/docs/**/*.md\"", standaloneAppSettings, StringComparison.Ordinal);
         Assert.Contains("appsurface docs publish --archive ./dist/docs --site <site>", readme, StringComparison.Ordinal);
         Assert.Contains("RFC 8628 device flow", readme, StringComparison.Ordinal);
@@ -27,7 +30,7 @@ public sealed class AppSurfaceCliReadmeContractTests
 
         Assert.Contains("Issue `#425` defines the design contract", design, StringComparison.Ordinal);
         Assert.Contains("does not add auth commands yet", design, StringComparison.Ordinal);
-        Assert.Contains("ForgeTrust.AppSurface.Auth` stays passive", design, StringComparison.Ordinal);
+        Assert.Contains("`ForgeTrust.AppSurface.Auth` stays passive", design, StringComparison.Ordinal);
         Assert.Contains("CLI auth must not depend on ASP.NET Core", design, StringComparison.Ordinal);
         Assert.Contains("For v0, the CLI-auth boundary lives inside `ForgeTrust.AppSurface.Cli`", design, StringComparison.Ordinal);
         Assert.Contains("Promote those contracts to a future package such as `ForgeTrust.AppSurface.Auth.Cli` only after", design, StringComparison.Ordinal);
@@ -51,6 +54,8 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.DoesNotContain("Expires: 2026-06-21T20:30:00Z", design, StringComparison.Ordinal);
         Assert.Contains("When credentials are missing in CI or `--non-interactive` mode, the command must fail with `ASCLI102 ci_prompt_blocked` on stderr and exit code `12`.", design, StringComparison.Ordinal);
         Assert.Contains("| `ASCLI103` | `cache_unavailable` | stderr | 13 | yes |", design, StringComparison.Ordinal);
+        Assert.Contains("| `ASCLI107` | `profile_ambiguous` | stderr | 17 | yes |", design, StringComparison.Ordinal);
+        Assert.Contains("multiple active profiles     -> ASCLI107 profile_ambiguous", design, StringComparison.Ordinal);
         Assert.Contains("Auth status and success markers write to stdout.", design, StringComparison.Ordinal);
         Assert.Contains("Token values, refresh-token state, raw provider payloads, email, display name, and unredacted subject claims must never appear on either stream.", design, StringComparison.Ordinal);
         Assert.Contains("### Device-Flow Polling", design, StringComparison.Ordinal);
@@ -116,6 +121,12 @@ public sealed class AppSurfaceCliReadmeContractTests
     {
         var repositoryRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         return Path.Join(repositoryRoot, "Cli", "ForgeTrust.AppSurface.Cli", "README.md");
+    }
+
+    private static string GetAppSurfaceAuthReadmePath()
+    {
+        var repositoryRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        return Path.Join(repositoryRoot, "Auth", "ForgeTrust.AppSurface.Auth", "README.md");
     }
 
     private static string GetAuthenticatedCommandDesignPath()
