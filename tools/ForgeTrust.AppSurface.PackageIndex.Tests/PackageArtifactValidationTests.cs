@@ -3061,6 +3061,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public void PackageVersionValidator_AppliesReleaseClassificationPolicy()
     {
+        PackageVersionValidator.RequirePrerelease("1.2.3-ci.4");
         PackageVersionValidator.Require("1.2.3", PackageVersionPolicy.StableOnly);
         PackageVersionValidator.Require("1.2.3", PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata);
         PackageVersionValidator.Require("1.2.3-ci.4", PackageVersionPolicy.PrereleaseOnly);

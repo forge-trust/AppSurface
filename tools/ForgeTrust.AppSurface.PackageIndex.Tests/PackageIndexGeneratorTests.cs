@@ -2496,6 +2496,46 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_PublishPrerelease_ReturnsSuccessWhenLedgerHasNoFailures()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            [
+                "publish-prerelease",
+                "--publish-log", "reports/publish.md",
+                "--source", "https://example.test/v3/index.json"
+            ],
+            stdout,
+            stderr,
+            _repositoryRoot,
+            publishPrereleaseAsync: (request, _) => Task.FromResult(new PackagePublishLedger(
+                "0.1.0-rc.5",
+                request.Source,
+                [
+                    new PackagePublishLedgerEntry(
+                        "ForgeTrust.AppSurface.Core",
+                        "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj",
+                        "ForgeTrust.AppSurface.Core.0.1.0-rc.5.nupkg",
+                        PackagePublishStatus.Pushed,
+                        0,
+                        string.Empty),
+                    new PackagePublishLedgerEntry(
+                        "ForgeTrust.AppSurface.Web",
+                        "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                        "ForgeTrust.AppSurface.Web.0.1.0-rc.5.nupkg",
+                        PackagePublishStatus.DuplicateReported,
+                        0,
+                        "already exists")
+                ])));
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Published 2 prerelease package artifacts for 0.1.0-rc.5. Log: reports/publish.md.", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    [Fact]
     public async Task RunAsync_PublishStable_UsesWorkflowAndReturnsFailureWhenLedgerFails()
     {
         using var stdout = new StringWriter();
@@ -2580,6 +2620,33 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(0, exitCode);
         Assert.Contains("Published 2 stable package artifacts for 0.1.0. Log: reports/publish.md.", stdout.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    [Fact]
+    public async Task RunAsync_PublishStable_DefaultWorkflowReportsMissingArtifacts()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Install this first.
+                includes: Base web hosting.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+            """);
+
+        var exitCode = await Program.RunAsync(["publish-stable"], stdout, stderr, _repositoryRoot);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Package artifact input directory", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout.ToString());
     }
 
     [Fact]
