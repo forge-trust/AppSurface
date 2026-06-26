@@ -115,6 +115,20 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
     [CommandOption("github-output", Description = "Optional GITHUB_OUTPUT file for publish workflow outputs.")]
     public string? GitHubOutputPath { get; set; }
 
+    /// <summary>
+    /// Gets the branch that must contain the annotated tag commit.
+    /// </summary>
+    /// <remarks>
+    /// Publish defaults to <c>main</c>. Use this option when a maintained release branch, such as
+    /// <c>release/0.1.0</c>, owns the tag provenance for a release. The command accepts branch names and branch refs
+    /// shaped as <c>origin/&lt;branch&gt;</c>, <c>refs/heads/&lt;branch&gt;</c>, or
+    /// <c>refs/remotes/origin/&lt;branch&gt;</c>, then normalizes them before validation fetches and checks
+    /// <c>origin/&lt;branch&gt;</c>. Tags, SHAs, empty branch names, and unsupported refs such as <c>refs/tags/v1.2.3</c>
+    /// are invalid because publish validation must prove protected branch reachability.
+    /// </remarks>
+    [CommandOption("base-ref", Description = "Branch name or supported branch ref (origin/<branch>, refs/heads/<branch>, refs/remotes/origin/<branch>) that must contain the annotated tag commit. Defaults to main; tags and SHAs are invalid.")]
+    public string? BaseRef { get; set; }
+
     /// <inheritdoc />
     protected override string CommandName => "publish";
 
@@ -150,6 +164,106 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
         return string.IsNullOrWhiteSpace(GitHubOutputPath)
             ? null
             : Path.GetFullPath(GitHubOutputPath, repoRoot);
+    }
+
+    /// <inheritdoc />
+    protected override string ResolveBaseRef()
+    {
+        return NormalizeBaseRef(BaseRef);
+    }
+
+    private static string NormalizeBaseRef(string? baseRef)
+    {
+        if (string.IsNullOrWhiteSpace(baseRef))
+        {
+            return "main";
+        }
+
+        var normalized = baseRef.Trim();
+        const string remoteBranchPrefix = "refs/remotes/origin/";
+        const string branchPrefix = "refs/heads/";
+        const string originPrefix = "origin/";
+
+        if (normalized.StartsWith(remoteBranchPrefix, StringComparison.Ordinal))
+        {
+            return ValidateNormalizedBaseRef(normalized[remoteBranchPrefix.Length..], baseRef);
+        }
+
+        if (normalized.StartsWith(branchPrefix, StringComparison.Ordinal))
+        {
+            return ValidateNormalizedBaseRef(normalized[branchPrefix.Length..], baseRef);
+        }
+
+        if (normalized.StartsWith(originPrefix, StringComparison.Ordinal))
+        {
+            return ValidateNormalizedBaseRef(normalized[originPrefix.Length..], baseRef);
+        }
+
+        return ValidateNormalizedBaseRef(normalized, baseRef);
+    }
+
+    private static string ValidateNormalizedBaseRef(string normalizedBaseRef, string originalBaseRef)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedBaseRef)
+            || normalizedBaseRef.StartsWith("refs/", StringComparison.Ordinal)
+            || IsFullObjectId(normalizedBaseRef)
+            || !IsValidBranchRef(normalizedBaseRef))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-base-ref-invalid",
+                "The requested base ref is not a supported branch ref.",
+                $"`--base-ref {originalBaseRef}` normalizes to `{normalizedBaseRef}`.",
+                "Pass a branch name, `origin/<branch>`, `refs/heads/<branch>`, or `refs/remotes/origin/<branch>`. Do not pass tags, full object IDs, empty refs, or unsupported refs.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+        }
+
+        return normalizedBaseRef;
+    }
+
+    private static bool IsFullObjectId(string value)
+    {
+        if (value.Length is not (40 or 64))
+        {
+            return false;
+        }
+
+        return value.All(IsHexObjectIdCharacter);
+    }
+
+    private static bool IsHexObjectIdCharacter(char character)
+    {
+        return (character >= '0' && character <= '9')
+            || (character >= 'a' && character <= 'f')
+            || (character >= 'A' && character <= 'F');
+    }
+
+    private static bool IsValidBranchRef(string value)
+    {
+        if (value is "@"
+            || value.StartsWith("/", StringComparison.Ordinal)
+            || value.StartsWith(".", StringComparison.Ordinal)
+            || value.StartsWith("-", StringComparison.Ordinal)
+            || value.EndsWith("/", StringComparison.Ordinal)
+            || value.EndsWith(".", StringComparison.Ordinal)
+            || value.Contains("//", StringComparison.Ordinal)
+            || value.Contains("..", StringComparison.Ordinal)
+            || value.Contains("@{", StringComparison.Ordinal)
+            || !value.All(IsValidBranchRefCharacter))
+        {
+            return false;
+        }
+
+        return value
+            .Split('/')
+            .All(component => !component.StartsWith(".", StringComparison.Ordinal)
+                && !component.EndsWith(".lock", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsValidBranchRefCharacter(char character)
+    {
+        return character > ' '
+            && character != '\u007f'
+            && character is not ('~' or '^' or ':' or '?' or '*' or '[' or '\\');
     }
 
     /// <inheritdoc />

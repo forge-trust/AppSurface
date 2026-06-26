@@ -804,7 +804,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
 /// </summary>
 /// <param name="RepositoryRoot">Repository root used for safety checks and reproduction instructions.</param>
 /// <param name="ArtifactsDirectory">Directory containing locally packed package artifacts.</param>
-/// <param name="PackageVersion">Exact prerelease package version under proof.</param>
+/// <param name="PackageVersion">Exact stable or prerelease package version under proof.</param>
 /// <param name="WorkDirectory">Isolated proof workspace that can be deleted and recreated.</param>
 /// <param name="Source">NuGet source for third-party dependencies.</param>
 internal sealed record CoverageCliConsumerProofRequest(

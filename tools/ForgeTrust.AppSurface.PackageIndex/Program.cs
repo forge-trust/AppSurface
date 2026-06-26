@@ -12,12 +12,13 @@ internal static class Program
     private const string VerifyCommand = "verify";
     private const string GateCommand = "gate";
     private const string PublishPrereleaseCommand = "publish-prerelease";
+    private const string PublishStableCommand = "publish-stable";
     private const string SmokeInstallCommand = "smoke-install";
 
     private static readonly string Usage = """
         ForgeTrust.AppSurface.PackageIndex
 
-        Generates and verifies the public AppSurface package chooser, maintainer readiness dashboard, release gate, and prerelease package artifacts.
+        Generates and verifies the public AppSurface package chooser, maintainer readiness dashboard, release gate, and package artifacts.
 
         Usage:
           dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- <command> [options]
@@ -26,11 +27,13 @@ internal static class Program
           generate    Rewrites packages/README.md and packages/readiness.md from packages/package-index.yml and project metadata.
           verify      Check that packages/README.md and packages/readiness.md are already up to date.
           verify-packages
-                      Pack and validate prerelease .nupkg artifacts without publishing them.
+                      Pack and validate stable or prerelease .nupkg artifacts without SemVer build metadata, without publishing them.
           publish-prerelease
                       Publish validated prerelease package artifacts to NuGet from a protected workflow job.
+          publish-stable
+                      Publish validated stable package artifacts to NuGet from a protected workflow job.
           smoke-install
-                      Restore published prerelease packages from a clean NuGet configuration.
+                      Restore published packages from a clean NuGet configuration.
           gate        Validate release metadata, package class rules, and stale brand strings.
 
         Options:
@@ -46,7 +49,7 @@ internal static class Program
           --artifact-manifest <path>
                                 Machine-readable validated artifact manifest path. Defaults to artifacts/package-artifact-manifest.json.
           --package-version <version>
-                                Required prerelease package version for verify-packages.
+                                Required stable or prerelease package version without SemVer build metadata for verify-packages.
           --report <path>       Package artifact report path. Defaults to artifacts/package-validation-report.md.
           --coverage-proof-work-dir <path>
                                 Isolated packaged coverage CLI proof work directory. Defaults to <artifacts-output>/coverage-cli-consumer-proof.
@@ -85,6 +88,7 @@ internal static class Program
     /// <param name="cancellationToken">Cancellation token propagated to generator operations.</param>
     /// <param name="verifyPackagesAsync">Optional package artifact workflow override used by tests.</param>
     /// <param name="publishPrereleaseAsync">Optional prerelease publish workflow override used by tests.</param>
+    /// <param name="publishStableAsync">Optional stable publish workflow override used by tests.</param>
     /// <param name="smokeInstallAsync">Optional smoke install workflow override used by tests.</param>
     /// <returns><c>0</c> when the command succeeds; otherwise a non-zero exit code.</returns>
     internal static async Task<int> RunAsync(
@@ -94,7 +98,8 @@ internal static class Program
         string currentDirectory,
         CancellationToken cancellationToken = default,
         Func<PackageArtifactRequest, CancellationToken, Task<PackageArtifactValidationReport>>? verifyPackagesAsync = null,
-        Func<PackagePrereleasePublishRequest, CancellationToken, Task<PackagePublishLedger>>? publishPrereleaseAsync = null,
+        Func<PackagePublishRequest, CancellationToken, Task<PackagePublishLedger>>? publishPrereleaseAsync = null,
+        Func<PackagePublishRequest, CancellationToken, Task<PackagePublishLedger>>? publishStableAsync = null,
         Func<PackageSmokeInstallRequest, CancellationToken, Task<PackageSmokeInstallReport>>? smokeInstallAsync = null)
     {
         ArgumentNullException.ThrowIfNull(args);
@@ -129,6 +134,7 @@ internal static class Program
                 and not VerifyPackagesCommand
                 and not GateCommand
                 and not PublishPrereleaseCommand
+                and not PublishStableCommand
                 and not SmokeInstallCommand)
             {
                 await standardError.WriteLineAsync($"Unknown command '{command}'.");
@@ -163,12 +169,23 @@ internal static class Program
 
             if (normalizedCommand == PublishPrereleaseCommand)
             {
-                var publishRequest = options.CreatePackagePrereleasePublishRequest();
-                publishPrereleaseAsync ??= RunPackagePrereleasePublishWorkflowAsync;
+                var publishRequest = options.CreatePackagePublishRequest();
+                publishPrereleaseAsync ??= RunPackagePublishWorkflowAsync;
                 var ledger = await publishPrereleaseAsync(publishRequest, cancellationToken);
                 var reportPath = FormatDisplayPath(publishRequest.RepositoryRoot, publishRequest.PublishLogPath);
                 await standardOut.WriteLineAsync(
-                    $"Published {ledger.Entries.Count(entry => entry.Status is PackagePublishStatus.Pushed or PackagePublishStatus.DuplicateReported)} package artifacts for {ledger.PackageVersion}. Log: {reportPath}.");
+                    $"Published {ledger.Entries.Count(entry => entry.Status is PackagePublishStatus.Pushed or PackagePublishStatus.DuplicateReported)} prerelease package artifacts for {ledger.PackageVersion}. Log: {reportPath}.");
+                return ledger.Entries.Any(entry => entry.Status == PackagePublishStatus.Failed) ? 1 : 0;
+            }
+
+            if (normalizedCommand == PublishStableCommand)
+            {
+                var publishRequest = options.CreatePackagePublishRequest();
+                publishStableAsync ??= RunPackageStablePublishWorkflowAsync;
+                var ledger = await publishStableAsync(publishRequest, cancellationToken);
+                var reportPath = FormatDisplayPath(publishRequest.RepositoryRoot, publishRequest.PublishLogPath);
+                await standardOut.WriteLineAsync(
+                    $"Published {ledger.Entries.Count(entry => entry.Status is PackagePublishStatus.Pushed or PackagePublishStatus.DuplicateReported)} stable package artifacts for {ledger.PackageVersion}. Log: {reportPath}.");
                 return ledger.Entries.Any(entry => entry.Status == PackagePublishStatus.Failed) ? 1 : 0;
             }
 
@@ -179,7 +196,7 @@ internal static class Program
                 var smokeReport = await smokeInstallAsync(smokeRequest, cancellationToken);
                 var reportPath = FormatDisplayPath(smokeRequest.RepositoryRoot, smokeRequest.ReportPath);
                 await standardOut.WriteLineAsync(
-                    $"Smoke installed {smokeReport.Entries.Count(entry => entry.Status == PackageSmokeInstallStatus.Restored)} published prerelease packages for {smokeReport.PackageVersion}. Report: {reportPath}.");
+                    $"Smoke installed {smokeReport.Entries.Count(entry => entry.Status == PackageSmokeInstallStatus.Restored)} published packages for {smokeReport.PackageVersion}. Report: {reportPath}.");
                 return smokeReport.Entries.Any(entry => entry.Status == PackageSmokeInstallStatus.Failed) ? 1 : 0;
             }
 
@@ -226,16 +243,32 @@ internal static class Program
     }
 
     [ExcludeFromCodeCoverage(Justification = "Default CLI dependency wiring is covered by package prerelease workflow tests.")]
-    private static async Task<PackagePublishLedger> RunPackagePrereleasePublishWorkflowAsync(
-        PackagePrereleasePublishRequest request,
+    private static async Task<PackagePublishLedger> RunPackagePublishWorkflowAsync(
+        PackagePublishRequest request,
         CancellationToken cancellationToken)
     {
-        var workflow = new PackagePrereleasePublishWorkflow(
+        var workflow = new PackagePublishWorkflow(
             new PackagePublishPlanResolver(
                 new PackageProjectScanner(),
                 new DotNetProjectMetadataProvider(),
                 new PackageManifestLoader()),
-            new PackageArtifactManifestReader(),
+            new PackageArtifactManifestReader(PackageVersionPolicy.PrereleaseOnly),
+            new CliWrapCommandRunner(),
+            new PackagePublishLedgerRenderer());
+        return await workflow.RunAsync(request, cancellationToken);
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Default CLI dependency wiring is covered by package stable workflow tests.")]
+    private static async Task<PackagePublishLedger> RunPackageStablePublishWorkflowAsync(
+        PackagePublishRequest request,
+        CancellationToken cancellationToken)
+    {
+        var workflow = new PackagePublishWorkflow(
+            new PackagePublishPlanResolver(
+                new PackageProjectScanner(),
+                new DotNetProjectMetadataProvider(),
+                new PackageManifestLoader()),
+            new PackageArtifactManifestReader(PackageVersionPolicy.StableOnly),
             new CliWrapCommandRunner(),
             new PackagePublishLedgerRenderer());
         return await workflow.RunAsync(request, cancellationToken);
@@ -490,12 +523,12 @@ internal sealed record CommandLineOptions(
     }
 
     /// <summary>
-    /// Converts parsed CLI options into a protected prerelease publish request.
+    /// Converts parsed CLI options into a protected package publish request.
     /// </summary>
-    /// <returns>The prerelease publish request.</returns>
-    internal PackagePrereleasePublishRequest CreatePackagePrereleasePublishRequest()
+    /// <returns>The package publish request.</returns>
+    internal PackagePublishRequest CreatePackagePublishRequest()
     {
-        return new PackagePrereleasePublishRequest(
+        return new PackagePublishRequest(
             Request.RepositoryRoot,
             Request.ManifestPath,
             ArtifactsInputPath,
