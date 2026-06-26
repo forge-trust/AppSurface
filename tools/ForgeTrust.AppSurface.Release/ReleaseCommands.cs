@@ -207,7 +207,6 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
         if (string.IsNullOrWhiteSpace(normalizedBaseRef)
             || normalizedBaseRef.StartsWith("refs/", StringComparison.Ordinal)
             || IsFullObjectId(normalizedBaseRef)
-            || normalizedBaseRef.StartsWith("-", StringComparison.Ordinal)
             || normalizedBaseRef.Contains("..", StringComparison.Ordinal)
             || normalizedBaseRef.Contains(' ')
             || normalizedBaseRef.Contains('\\')

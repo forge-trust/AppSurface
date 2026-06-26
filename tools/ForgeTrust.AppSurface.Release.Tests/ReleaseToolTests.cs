@@ -1392,7 +1392,16 @@ public sealed class ReleaseToolTests : IDisposable
     [InlineData("refs/remotes/origin/")]
     [InlineData("refs/tags/v0.1.0")]
     [InlineData("refs/remotes/upstream/release/0.1.0")]
+    [InlineData("release..0.1.0")]
+    [InlineData("release 0.1.0")]
+    [InlineData("release\\0.1.0")]
+    [InlineData("release~0.1.0")]
+    [InlineData("release^0.1.0")]
+    [InlineData("release:0.1.0")]
+    [InlineData("release/")]
     [InlineData("0123456789abcdef0123456789abcdef01234567")]
+    [InlineData("0123456789ABCDEF0123456789ABCDEF01234567")]
+    [InlineData("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")]
     public async Task PublishRejectsUnsupportedBaseRefShapes(string baseRef)
     {
         await SeedRepositoryAsync();
