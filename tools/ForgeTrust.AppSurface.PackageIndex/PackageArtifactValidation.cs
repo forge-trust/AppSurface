@@ -1238,18 +1238,10 @@ internal static class PackageVersionValidator
             return false;
         }
 
-        var identifiers = prerelease.Split('.');
-        foreach (var identifier in identifiers)
-        {
-            if (identifier.Length == 0
-                || !identifier.All(character => char.IsAsciiLetterOrDigit(character) || character == '-')
-                || (identifier.All(IsAsciiDigit) && !IsValidNumericIdentifier(identifier)))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return prerelease.Split('.').All(identifier =>
+            identifier.Length > 0
+            && identifier.All(character => char.IsAsciiLetterOrDigit(character) || character == '-')
+            && (!identifier.All(IsAsciiDigit) || IsValidNumericIdentifier(identifier)));
     }
 
     private static bool IsAsciiDigit(char value)
