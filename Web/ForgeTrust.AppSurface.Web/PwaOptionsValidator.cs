@@ -101,16 +101,9 @@ internal static partial class PwaOptionsValidator
 
     private static bool HasTraversalSegment(string path)
     {
-        try
-        {
-            return path.Split('/', StringSplitOptions.RemoveEmptyEntries)
-                .Any(segment => ContainsMalformedEscape(segment)
-                    || string.Equals(Uri.UnescapeDataString(segment), "..", StringComparison.Ordinal));
-        }
-        catch (UriFormatException)
-        {
-            return true;
-        }
+        return path.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Any(segment => ContainsMalformedEscape(segment)
+                || string.Equals(Uri.UnescapeDataString(segment), "..", StringComparison.Ordinal));
     }
 
     private static bool ContainsMalformedEscape(string segment)

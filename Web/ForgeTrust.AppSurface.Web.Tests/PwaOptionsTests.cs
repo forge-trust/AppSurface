@@ -111,6 +111,7 @@ public sealed class PwaOptionsTests
     }
 
     [Theory]
+    [InlineData("")]
     [InlineData("//cdn.example.test/start")]
     [InlineData("https://example.test/start")]
     [InlineData("/start#launch")]
