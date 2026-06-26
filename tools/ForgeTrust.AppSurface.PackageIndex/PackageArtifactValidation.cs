@@ -8,7 +8,7 @@ using System.Xml.Linq;
 namespace ForgeTrust.AppSurface.PackageIndex;
 
 /// <summary>
-/// Validates prerelease package artifacts against the resolved publish plan.
+/// Validates package artifacts against the resolved publish plan.
 /// </summary>
 internal sealed class PackageArtifactValidator
 {
@@ -46,7 +46,7 @@ internal sealed class PackageArtifactValidator
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentException.ThrowIfNullOrWhiteSpace(artifactsDirectory);
-        PackageVersionValidator.RequirePrerelease(packageVersion);
+        PackageVersionValidator.Require(packageVersion, PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata);
 
         if (!Directory.Exists(artifactsDirectory))
         {
@@ -1144,7 +1144,28 @@ internal static class PackageArtifactReportRenderer
 }
 
 /// <summary>
-/// Ensures package versions used by the prerelease workflow are safe for NuGet identity.
+/// Package version policies used by release-classified package workflows.
+/// </summary>
+internal enum PackageVersionPolicy
+{
+    /// <summary>
+    /// Accepts only prerelease SemVer identities without build metadata.
+    /// </summary>
+    PrereleaseOnly,
+
+    /// <summary>
+    /// Accepts only stable SemVer identities without build metadata.
+    /// </summary>
+    StableOnly,
+
+    /// <summary>
+    /// Accepts stable or prerelease SemVer identities without build metadata.
+    /// </summary>
+    StableOrPrereleaseNoBuildMetadata
+}
+
+/// <summary>
+/// Ensures package versions used by release workflows are safe for NuGet identity.
 /// </summary>
 internal static class PackageVersionValidator
 {
@@ -1153,6 +1174,16 @@ internal static class PackageVersionValidator
     /// </summary>
     /// <param name="packageVersion">Package version to validate.</param>
     internal static void RequirePrerelease(string packageVersion)
+    {
+        Require(packageVersion, PackageVersionPolicy.PrereleaseOnly);
+    }
+
+    /// <summary>
+    /// Validates a package version against the requested release classification policy.
+    /// </summary>
+    /// <param name="packageVersion">Package version to validate.</param>
+    /// <param name="policy">Version policy required by the calling workflow.</param>
+    internal static void Require(string packageVersion, PackageVersionPolicy policy)
     {
         if (string.IsNullOrWhiteSpace(packageVersion))
         {
@@ -1164,17 +1195,58 @@ internal static class PackageVersionValidator
             throw new PackageIndexException("Package version must not include SemVer build metadata because NuGet strips build metadata from package identity.");
         }
 
-        var parts = packageVersion.Split('-', 2, StringSplitOptions.TrimEntries);
-        if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[1]))
+        if (!string.Equals(packageVersion, packageVersion.Trim(), StringComparison.Ordinal))
+        {
+            throw new PackageIndexException($"Package version '{packageVersion}' must not include leading or trailing whitespace.");
+        }
+
+        var parts = packageVersion.Split('-', 2, StringSplitOptions.None);
+        var versionParts = parts[0].Split('.');
+        if (versionParts.Length != 3 || versionParts.Any(part => !IsValidNumericIdentifier(part)))
+        {
+            throw new PackageIndexException($"Package version '{packageVersion}' must use a major.minor.patch SemVer core.");
+        }
+
+        var isPrerelease = parts.Length == 2;
+        if (isPrerelease && !IsValidPrerelease(parts[1]))
+        {
+            throw new PackageIndexException($"Package version '{packageVersion}' must use a valid SemVer prerelease suffix.");
+        }
+
+        if (policy == PackageVersionPolicy.PrereleaseOnly && !isPrerelease)
         {
             throw new PackageIndexException($"Package version '{packageVersion}' must be a prerelease version with a SemVer suffix.");
         }
 
-        var versionParts = parts[0].Split('.');
-        if (versionParts.Length != 3 || versionParts.Any(part => !int.TryParse(part, out _)))
+        if (policy == PackageVersionPolicy.StableOnly && isPrerelease)
         {
-            throw new PackageIndexException($"Package version '{packageVersion}' must use a major.minor.patch SemVer core.");
+            throw new PackageIndexException($"Package version '{packageVersion}' must be a stable version without a SemVer prerelease suffix.");
         }
+    }
+
+    private static bool IsValidNumericIdentifier(string value)
+    {
+        return value.Length > 0
+            && value.All(IsAsciiDigit)
+            && (value.Length == 1 || value[0] != '0');
+    }
+
+    private static bool IsValidPrerelease(string prerelease)
+    {
+        if (prerelease.Length == 0)
+        {
+            return false;
+        }
+
+        return prerelease.Split('.').All(identifier =>
+            identifier.Length > 0
+            && identifier.All(character => char.IsAsciiLetterOrDigit(character) || character == '-')
+            && (!identifier.All(IsAsciiDigit) || IsValidNumericIdentifier(identifier)));
+    }
+
+    private static bool IsAsciiDigit(char value)
+    {
+        return value is >= '0' and <= '9';
     }
 }
 

@@ -1,7 +1,7 @@
 namespace ForgeTrust.AppSurface.PackageIndex;
 
 /// <summary>
-/// Coordinates prerelease package artifact packing and validation without publishing to NuGet.
+/// Coordinates package artifact packing and validation without publishing to NuGet.
 /// </summary>
 internal sealed class PackageArtifactWorkflow
 {
@@ -41,7 +41,7 @@ internal sealed class PackageArtifactWorkflow
     }
 
     /// <summary>
-    /// Packs and validates prerelease package artifacts.
+    /// Packs and validates package artifacts.
     /// </summary>
     /// <param name="request">Artifact workflow request.</param>
     /// <param name="cancellationToken">Cancellation token propagated to external commands and file writes.</param>
@@ -51,7 +51,7 @@ internal sealed class PackageArtifactWorkflow
         CancellationToken cancellationToken = default)
     {
         ValidateRequest(request);
-        PackageVersionValidator.RequirePrerelease(request.PackageVersion);
+        PackageVersionValidator.Require(request.PackageVersion, PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata);
 
         var plan = await _planResolver.ResolveAsync(
             request.RepositoryRoot,
@@ -281,7 +281,7 @@ internal sealed class PackageArtifactWorkflow
 /// <param name="ManifestPath">Absolute package manifest path.</param>
 /// <param name="ArtifactsOutputPath">Directory that receives produced <c>.nupkg</c> artifacts.</param>
 /// <param name="ReportPath">Markdown validation report path.</param>
-/// <param name="PackageVersion">Exact prerelease package version to pack and validate.</param>
+/// <param name="PackageVersion">Exact stable or prerelease package version to pack and validate. SemVer build metadata such as <c>1.2.3+sha</c> is rejected because NuGet strips it from package identity.</param>
 /// <param name="ArtifactManifestPath">Machine-readable validation manifest path for the publish workflow.</param>
 /// <param name="CoverageProofWorkDirectory">Isolated work directory for the packaged coverage CLI consumer proof.</param>
 /// <param name="CoverageProofReportPath">Standalone markdown report path for the packaged coverage CLI consumer proof.</param>

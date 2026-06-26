@@ -23,6 +23,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- Stable package release automation now has a protected NuGet publish gate for annotated `vX.Y.Z` tags, including stable-only package-version validation, trusted-publishing environment checks, fresh smoke-install proof, publish-ledger evidence, and `./eng/release publish --base-ref` support so GitHub Release creation can be tied to the intended source branch after NuGet proof is complete.
 - `examples/auth-web-razorwire-proof` now gives package adopters a five-minute browser proof for `ForgeTrust.AppSurface.Auth.AspNetCore`: one host-owned `OperatorsOnly` policy drives both a Minimal API response and a RazorWire-facing rendered state while all fake auth and persona switching stays sample-local.
 - Added `ExternalSubject`, `AppUserId`, `IAppSurfaceUserIdentityResolver`, `AppSurfaceUserIdentityResolutionContext`, `AppSurfaceUserIdentityResult`, and `AppSurfaceUserIdentityStatus`, with README guidance for uniqueness, idempotency, cancellation, concurrency, PII-safe diagnostics, and ASP.NET Core adapter integration planning.
 - `ForgeTrust.AppSurface.Auth.AspNetCore` documents the new Minimal API policy helper flow, package chooser metadata, safe ProblemDetails failure shape, and when native ASP.NET Core `RequireAuthorization(...)` remains the better choice.

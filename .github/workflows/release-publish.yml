@@ -9,6 +9,10 @@ on:
       tag:
         description: Annotated tag to publish, for example v0.1.0-preview.1.
         required: true
+      base-ref:
+        description: Branch or ref that must contain the tag commit.
+        required: false
+        default: main
 
 concurrency:
   group: release-publish-${{ inputs.tag }}
@@ -38,25 +42,28 @@ jobs:
           dotnet-version: |
             10.0.x
 
-      - name: Fetch release tag and main
+      - name: Fetch release tag and base
         env:
           TAG: ${{ inputs.tag }}
+          BASE_REF: ${{ inputs.base-ref }}
         run: |
           set -euo pipefail
           git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
-          git fetch origin main:refs/remotes/origin/main
+          git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
 
       - name: Validate tag-bound release evidence
         id: release
         env:
           VERSION: ${{ inputs.version }}
           TAG: ${{ inputs.tag }}
+          BASE_REF: ${{ inputs.base-ref }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           ./eng/release publish \
             --version "${VERSION}" \
             --tag "${TAG}" \
+            --base-ref "${BASE_REF}" \
             --dry-run \
             --github-output "${GITHUB_OUTPUT}"
 
