@@ -42,6 +42,11 @@ This is the living release note for the next coordinated AppSurface version afte
   `/bin/secret-tool`, or an explicit trusted absolute path through `AppSurfaceLocalSecretsOptions.LinuxSecretToolPath`
   and `appsurface secrets --secret-tool-path`. PATH matches are reported only as ignored diagnostic context, invalid
   overrides fail before command launch, and `--secret-tool-path` cannot be combined with `--store-file`.
+- AppSurface LocalSecrets startup failures that happen before the platform command can run now report `Unavailable` with
+  `local-secret-store-unavailable` instead of being classified by words in raw OS exception messages. Real locked-store
+  process output still maps to `Locked`; startup diagnostics include exception type, `HResult`, and synthetic exit code
+  while intentionally omitting raw exception messages, command paths, arguments, absolute paths, logical values, and
+  secret values.
 - AppSurface Web CORS startup validation now fails closed before policy registration when non-development
   `CorsOptions.AllowedOrigins` includes the exact literal `*`, while preserving Development all-origin convenience and
   wildcard subdomain origins such as `https://*.example.com`.

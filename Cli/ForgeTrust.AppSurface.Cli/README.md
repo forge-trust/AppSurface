@@ -87,6 +87,12 @@ deterministic examples and tests; normal local development should use the OS-bac
 available. Use environment variables, key-per-file, or a remote vault for CI, containers, team environments, and
 production.
 
+When a command reports `local-secret-store-unavailable`, run `appsurface secrets doctor --app <app> --environment <env>`
+for the same namespace. On Linux, verify the trusted `secret-tool` executable path and the current DBus or desktop
+session. Startup failures before the platform command runs are reported as `Unavailable` with exception type, `HResult`,
+and synthetic exit code only; raw OS exception messages, command paths, arguments, absolute paths, logical values, and
+secret values are omitted by design.
+
 For explicit file fallback, `doctor` can render these value-safe posture codes:
 
 ```text

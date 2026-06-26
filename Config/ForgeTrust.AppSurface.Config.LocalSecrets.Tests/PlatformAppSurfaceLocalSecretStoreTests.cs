@@ -53,7 +53,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     {
         var store = new PlatformAppSurfaceLocalSecretStore.LinuxSecretServiceLocalSecretStore(
             "/usr/bin/secret-tool",
-            new FixedCommandRunner(new PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult(
+            new FixedCommandRunner(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.FromProcess(
                 1,
                 string.Empty,
                 "Cannot autolaunch D-Bus without X11 $DISPLAY.")));
@@ -62,6 +62,22 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
         Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void LinuxGet_Should_ReturnLocked_WhenRealSecretToolReportsInteractiveLock()
+    {
+        var store = new PlatformAppSurfaceLocalSecretStore.LinuxSecretServiceLocalSecretStore(
+            UsrSecretTool,
+            new FixedCommandRunner(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.FromProcess(
+                1,
+                string.Empty,
+                "User interaction is not allowed while the collection is locked.")));
+
+        var result = store.Get(Identity);
+
+        Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
+        Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
     }
 
     [Fact]
@@ -78,18 +94,86 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.True(result.Diagnostic?.Retryable);
     }
 
-    [Fact]
-    public void LinuxGet_Should_ReturnUnavailable_WhenSecretToolCannotStart()
+    [Theory]
+    [InlineData("permission denied before launch")]
+    [InlineData("the local collection is locked before launch")]
+    [InlineData("/tmp/appsurface/secret-tool could not be executed")]
+    public void LinuxGet_Should_ReturnUnavailable_WhenSecretToolCannotStart(string message)
     {
+        var exception = new StartFailureException(message, unchecked((int)0x80070005));
         var store = new PlatformAppSurfaceLocalSecretStore.LinuxSecretServiceLocalSecretStore(
             UsrSecretTool,
-            new FixedCommandRunner(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.StartFailed(new InvalidOperationException("bad executable"))));
+            new FixedCommandRunner(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.StartFailed(exception)));
 
         var result = store.Get(Identity);
 
         Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
         Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
-        Assert.Contains("exit code -2", result.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.Contains("ExitCode=-2", result.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.Contains(typeof(StartFailureException).FullName!, result.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.DoesNotContain(message, result.Diagnostic?.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LinuxGet_Should_ReturnUnavailable_WhenSyntheticStartFailureHasNoError()
+    {
+        var store = new PlatformAppSurfaceLocalSecretStore.LinuxSecretServiceLocalSecretStore(
+            UsrSecretTool,
+            new FixedCommandRunner(new PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult(
+                PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.StartFailedExitCode,
+                string.Empty,
+                string.Empty,
+                PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResultKind.StartFailed)));
+
+        var result = store.Get(Identity);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void LinuxDelete_Should_ReturnUnavailable_WhenSyntheticStartFailureHasNoError()
+    {
+        var store = new PlatformAppSurfaceLocalSecretStore.LinuxSecretServiceLocalSecretStore(
+            UsrSecretTool,
+            new FixedCommandRunner(new PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult(
+                PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.StartFailedExitCode,
+                string.Empty,
+                string.Empty,
+                PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResultKind.StartFailed)));
+
+        var result = store.Delete(Identity);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void PlatformSecretCommandResult_Should_SanitizeStartFailureException()
+    {
+        var rawMessage = $"permission denied at {Path.Join(Path.GetTempPath(), "secret-tool")}";
+        var exception = new StartFailureException(rawMessage, unchecked((int)0x80070005));
+
+        var result = PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.StartFailed(exception);
+
+        Assert.Equal(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResultKind.StartFailed, result.Kind);
+        Assert.Equal(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.StartFailedExitCode, result.ExitCode);
+        Assert.Contains(typeof(StartFailureException).FullName!, result.Error, StringComparison.Ordinal);
+        Assert.Contains($"HResult={exception.HResult}", result.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(rawMessage, result.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(Path.GetTempPath(), result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PlatformSecretCommandResult_Should_RejectSyntheticExitCodesForProcessOutput()
+    {
+        var error = Assert.Throws<ArgumentOutOfRangeException>(
+            () => PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.FromProcess(
+                PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.StartFailedExitCode,
+                string.Empty,
+                string.Empty));
+
+        Assert.Equal("exitCode", error.ParamName);
     }
 
     [Fact]
@@ -110,6 +194,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         var result = runner.Run(fileName, arguments, null);
 
         Assert.Equal(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.TimedOutExitCode, result.ExitCode);
+        Assert.Equal(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResultKind.TimedOut, result.Kind);
         Assert.Empty(result.Output);
         Assert.Contains("Timed out", result.Error, StringComparison.Ordinal);
     }
@@ -122,7 +207,10 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         var result = runner.Run(Path.Join(Path.GetTempPath(), $"appsurface-missing-command-{Guid.NewGuid():N}"), [], null);
 
         Assert.Equal(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.StartFailedExitCode, result.ExitCode);
+        Assert.Equal(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResultKind.StartFailed, result.Kind);
         Assert.Empty(result.Output);
+        Assert.Contains("ExceptionType=", result.Error, StringComparison.Ordinal);
+        Assert.Contains("HResult=", result.Error, StringComparison.Ordinal);
         Assert.Contains("Could not start", result.Error, StringComparison.Ordinal);
     }
 
@@ -560,6 +648,15 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
             IReadOnlyList<string> arguments,
             string? standardInput) =>
             result;
+    }
+
+    private sealed class StartFailureException : Exception
+    {
+        public StartFailureException(string message, int hResult)
+            : base(message)
+        {
+            HResult = hResult;
+        }
     }
 
     private static PlatformAppSurfaceLocalSecretStore.LinuxSecretToolResolver Resolver(
