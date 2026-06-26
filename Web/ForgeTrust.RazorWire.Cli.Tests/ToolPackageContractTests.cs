@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
@@ -282,10 +283,12 @@ public sealed class ToolPackageContractTests
     {
         public void Dispose()
         {
+            var packageIdSegment = GetSafePackagePathSegment(packageId, nameof(packageId));
+            var packageVersionSegment = GetSafePackagePathSegment(packageVersion, nameof(packageVersion));
             var packageVersionDirectory = System.IO.Path.Combine(
                 nugetPackagesDirectory,
-                packageId.ToLowerInvariant(),
-                packageVersion.ToLowerInvariant());
+                packageIdSegment,
+                packageVersionSegment);
 
             try
             {
@@ -294,12 +297,32 @@ public sealed class ToolPackageContractTests
                     Directory.Delete(packageVersionDirectory, recursive: true);
                 }
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                Trace.TraceWarning(
+                    "Could not delete generated NuGet package cache directory '{0}': {1}",
+                    packageVersionDirectory,
+                    ex);
             }
-            catch (UnauthorizedAccessException)
+            catch (UnauthorizedAccessException ex)
             {
+                Trace.TraceWarning(
+                    "Could not delete generated NuGet package cache directory '{0}': {1}",
+                    packageVersionDirectory,
+                    ex);
             }
+        }
+
+        private static string GetSafePackagePathSegment(string value, string parameterName)
+        {
+            if (System.IO.Path.IsPathRooted(value)
+                || value.IndexOf(System.IO.Path.DirectorySeparatorChar, StringComparison.Ordinal) >= 0
+                || value.IndexOf(System.IO.Path.AltDirectorySeparatorChar, StringComparison.Ordinal) >= 0)
+            {
+                throw new InvalidOperationException($"{parameterName} must be a NuGet package path segment.");
+            }
+
+            return value.ToLowerInvariant();
         }
     }
 
@@ -332,11 +355,13 @@ public sealed class ToolPackageContractTests
             {
                 Directory.Delete(Path, recursive: true);
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                Trace.TraceWarning("Could not delete temporary directory '{0}': {1}", Path, ex);
             }
-            catch (UnauthorizedAccessException)
+            catch (UnauthorizedAccessException ex)
             {
+                Trace.TraceWarning("Could not delete temporary directory '{0}': {1}", Path, ex);
             }
         }
     }
