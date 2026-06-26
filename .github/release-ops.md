@@ -95,12 +95,13 @@ that matches:
 v<major>.<minor>.<patch>
 ```
 
-For `v0.1.0`, the stable workflow treats `release/0.1.0` as the source base.
-It force-fetches the exact remote tag ref, resolves annotated tags to the
-tagged commit with `refs/tags/<tag>^{commit}`, verifies that commit is reachable
-from `origin/release/0.1.0`, and then checks that `build.yml` and
-`package-gate.yml` have successful completed runs for that exact commit on
-`release/0.1.0` before any protected publish job can start.
+On main, the stable workflow treats `main` as the source base. It force-fetches
+the exact remote tag ref, resolves annotated tags to the tagged commit with
+`refs/tags/<tag>^{commit}`, verifies that commit is reachable from
+`origin/main`, and then checks that `build.yml` and `package-gate.yml` have
+successful completed runs for that exact commit on `main` before any protected
+publish job can start. Maintained release branches should backport the workflow
+and set `STABLE_BASE_REF` to that release branch, such as `release/0.1.0`.
 
 Before creating the stable tag, create the GitHub environments used by the
 workflow. Create `nuget-stable` with required reviewers and prevent self-review
@@ -152,8 +153,9 @@ with the same tag and package version; already published packages should become
 `duplicate-reported`. For content or metadata defects after any stable package
 is accepted, do not retag `v0.1.0`; fix forward with a new stable patch version.
 Only dispatch `release-publish.yml` after `nuget-stable-publish.yml` has
-published and smoke-installed successfully. For the stable `v0.1.0` release,
-dispatch GitHub Release creation with `base-ref=release/0.1.0`.
+published and smoke-installed successfully. For maintained release-branch
+publishing, dispatch GitHub Release creation with the matching release branch as
+`base-ref`, such as `release/0.1.0`.
 
 ## Protected NuGet prerelease publish
 
