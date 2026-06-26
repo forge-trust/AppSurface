@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Net;
 using System.Security.Claims;
 using System.Text.Json;
@@ -263,6 +264,19 @@ public sealed class AppSurfaceTestAuthHarnessTests
 
         Assert.NotSame(first, second);
         Assert.Equal(2, instances);
+    }
+
+    [Fact]
+    public void AddAppSurfaceTestAuth_WhenUpstreamPolicyEvaluatorRegistrationIsUnavailable_ThrowsDiagnosticFailure()
+    {
+        var services = new DroppingPolicyEvaluatorServiceCollection();
+
+        var exception = Assert.Throws<InvalidOperationException>(() => services.AddAppSurfaceTestAuth());
+
+        Assert.Contains(
+            "Problem: AppSurface ASP.NET Core policy evaluator was not registered.",
+            exception.Message,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -860,6 +874,19 @@ public sealed class AppSurfaceTestAuthHarnessTests
             _ = resource;
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(authorize());
+        }
+    }
+
+    private sealed class DroppingPolicyEvaluatorServiceCollection : Collection<ServiceDescriptor>, IServiceCollection
+    {
+        protected override void InsertItem(int index, ServiceDescriptor item)
+        {
+            if (item.ServiceType == typeof(IAppSurfaceAspNetCorePolicyEvaluator))
+            {
+                return;
+            }
+
+            base.InsertItem(index, item);
         }
     }
 }
