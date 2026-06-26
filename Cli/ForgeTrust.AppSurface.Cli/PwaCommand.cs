@@ -331,9 +331,8 @@ internal sealed partial class PwaVerifier
 
     private static string? ExtractManifestPath(string html)
     {
-        foreach (Match link in LinkTagRegex().Matches(html))
+        foreach (var tag in LinkTagRegex().Matches(html).Cast<Match>().Select(link => link.Value))
         {
-            var tag = link.Value;
             var rel = RelAttributeRegex().Match(tag);
             if (!rel.Success
                 || !rel.Groups["value"].Value
