@@ -26,6 +26,8 @@ Preview `--port` values bind localhost only. Add `--all-hosts` to a `--port` pre
 
 Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands. After final files are materialized, export writes `.appsurface-docs-release-manifest.json` and prints the `releaseManifestSha256` catalog snippet to copy into the published version catalog. Use `appsurface docs verify-archive --catalog <path> --version <version>` to check a pinned archive locally before deploy. Pass `--trusted-release-root <path>` when the runtime catalog resolves root-relative `exactTreePath` values through `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`; this keeps local verification on the same trusted-root contract as production.
 
+Generated exact-archive files must stay in a regular physical output tree. The RazorWire exporter rejects symlinks, junctions, reparse points, and lexical escapes for HTML, CSS, assets, docs partials, redirect alias HTML, `_redirects`, `.appsurface-docs-route-manifest.json`, and `.appsurface-docs-release-manifest.json` with `RWEXPORT009` before directory creation, final writes, release manifest enumeration, metadata reads, or hashing. `RWEXPORT009` is separate from `RWEXPORT008`, which protects unsafe HTTP redirects while fetching artifacts, and from `ASDOCSARCHIVE005`, which remains the archive content-contract diagnostic for unsupported manifest paths such as hidden deployment files.
+
 `appsurface docs export` does not expose `--publish-root-extras`. Exact docs exports must remain clean release archive artifacts: `.appsurface-docs-route-manifest.json` and `.appsurface-docs-release-manifest.json` cover the archive-owned files, while deployment-owned publish-root extras such as `CNAME`, `.nojekyll`, and `/.well-known/security.txt` belong outside the exact release tree in the surrounding upload root. Use `appsurface export` or `razorwire export --publish-root-extras ./deploy/export-extras.yml` for arbitrary app exports that need explicit single-file extras; keep AppSurface Docs exact archives immutable.
 
 Redirect aliases default to HTML fallback materialization. Omit `--redirects`, or pass `--redirects html`, for GitHub Pages and generic static hosts. Pass `--mode cdn --redirects netlify` for Netlify-compatible CDN publishing; export writes one root `_redirects` file with exact site-local `301!` rules and does not write alias HTML files. Netlify export validates the encoded provider rule paths, so self-redirects and same-source aliases that point at different canonical routes fail before files are written. Do not hand-author `_redirects` in the export output because the exporter reserves that file for validated redirect rules.
@@ -393,35 +395,42 @@ The `Testing*Delay*Milliseconds` options are local/manual testing knobs. The def
 
 When the harvest completes successfully, AppSurface Docs first publishes the completed observatory state with replay enabled, then publishes a live-only RazorWire `rw-visit` command for active subscribers. Replay stays state-only, so late subscribers see the completed state and the plain continuation link without being auto-navigated by an old command. The completion view also renders a normal return link so no-JavaScript users can continue manually.
 
-The harvest progress stream is authorized with the same route-exposure policy as the operator health endpoints and, outside Development, with a host-owned RazorWire channel authorizer. In Development it is exposed by default. In non-development hosts, `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` exposes the health routes but does not by itself authorize the live progress stream.
+The harvest progress stream is authorized with the same route-exposure policy as the operator health endpoints and, outside Development, with a host-owned RazorWire stream authorizer. In Development it is exposed by default. In non-development hosts, `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` exposes the health routes but does not by itself authorize the live progress stream.
 
 ### Production live harvest stream authorization
 
-Production or preview hosts that want users to see live harvest progress must register a custom `IRazorWireChannelAuthorizer` before calling `AddAppSurfaceDocs()`. Use `AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel)` instead of hardcoding the channel name:
+Production or preview hosts that want users to see live harvest progress should register a custom `IRazorWireStreamAuthorizer` before calling `AddAppSurfaceDocs()`. Use `AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(context.Channel)` instead of hardcoding the channel name:
 
 ```csharp
+using ForgeTrust.AppSurface.Auth;
 using ForgeTrust.AppSurface.Docs;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.RazorWire.Streams;
-using Microsoft.AspNetCore.Http;
 
-public sealed class DocsHarvestStreamAuthorizer : IRazorWireChannelAuthorizer
+public sealed class DocsHarvestStreamAuthorizer : IRazorWireStreamAuthorizer
 {
-    public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+    public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
     {
-        if (!AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel))
+        if (!AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(context.Channel))
         {
-            return new ValueTask<bool>(false);
+            return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Forbidden());
         }
 
-        var allowed = context.User.Identity?.IsAuthenticated == true
-                      && context.User.IsInRole("DocsOperator");
+        if (context.HttpContext.User.Identity?.IsAuthenticated != true)
+        {
+            return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Unauthenticated());
+        }
 
-        return new ValueTask<bool>(allowed);
+        if (!context.HttpContext.User.IsInRole("DocsOperator"))
+        {
+            return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Forbidden());
+        }
+
+        return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Allowed());
     }
 }
 
-services.AddSingleton<IRazorWireChannelAuthorizer, DocsHarvestStreamAuthorizer>();
+services.AddSingleton<IRazorWireStreamAuthorizer, DocsHarvestStreamAuthorizer>();
 services.AddAppSurfaceDocs();
 ```
 
@@ -439,7 +448,7 @@ And enable the harvest health routes so the custom authorizer can approve the li
 }
 ```
 
-The built-in RazorWire `AllowAll` mode is not treated as production authorization for the AppSurface Docs harvest progress stream. Registering `IRazorWireChannelAuthorizer` after `AddAppSurfaceDocs()` is an advanced replacement mode: the later authorizer replaces the AppSurface Docs wrapper and must apply the harvest-progress predicate itself.
+The built-in RazorWire `AllowAll` mode is not treated as production authorization for the AppSurface Docs harvest progress stream. Existing `IRazorWireChannelAuthorizer` implementations still work as legacy allow/deny compatibility when registered before `AddAppSurfaceDocs()`. Registering `IRazorWireStreamAuthorizer` or `IRazorWireChannelAuthorizer` after `AddAppSurfaceDocs()` is an advanced replacement mode: the later authorizer replaces the AppSurface Docs wrapper and must apply the harvest-progress predicate itself.
 
 Pitfalls:
 
@@ -451,7 +460,7 @@ Pitfalls:
 
 ### Operator Diagnostics Routes
 
-AppSurface Docs reserves a redacted operator health page at `{DocsRootPath}/_health` and a machine-readable JSON endpoint at `{DocsRootPath}/_health.json` ahead of the docs catch-all route. Both endpoints return health responses by default only when the host environment is `Development`; otherwise they return `404`. Non-development hosts must opt in with `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always`.
+AppSurface Docs reserves a redacted operator health page at `{DocsRootPath}/_health`, a live harvest observatory at `{DocsRootPath}/_harvest`, a rebuild form endpoint at `POST {DocsRootPath}/_harvest/rebuild`, and a machine-readable JSON endpoint at `{DocsRootPath}/_health.json` ahead of the docs catch-all route. The read routes return health or observatory responses by default only when the host environment is `Development`; otherwise they return `404`. Non-development hosts must opt in with `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always`.
 
 The JSON response uses the camelCase wire form of `AppSurfaceDocsHarvestHealthResponse`:
 
@@ -478,6 +487,8 @@ The sidebar health entry follows `AppSurfaceDocs:Harvest:Health:ShowChrome`, whi
 ```
 
 Allowed exposure values are `DevelopmentOnly`, `Always`, and `Never`. If you set `ExposeRoutes=Always`, the reserved health endpoints become an operator surface in that environment. Protect them with host-owned authentication, authorization, or network controls when they are reachable by untrusted users.
+
+The built-in `_health` page renders a trusted maintainer action band when an effective docs operator-write policy is configured. Posting `Rebuild docs` starts a full source-backed harvest when the coordinator is idle, queues exactly one rebuild behind a running harvest, or reports the existing queued rebuild by redirecting back to `_harvest`. The observatory shows the live redacted progress stream when the current request may subscribe to the harvest channel and falls back to a manual continue link when live progress is disabled or JavaScript is unavailable.
 
 AppSurface Docs also reserves a route inspector at `{DocsRootPath}/_routes` and a machine-readable JSON endpoint at `{DocsRootPath}/_routes.json`. The inspector shows the public route manifest for the current cached docs snapshot: canonical browser URLs, source-shaped Markdown recovery aliases, declared redirect aliases, and route diagnostics. Add `?path=` to either endpoint to probe a source path, public route, or app-relative docs URL and see whether it resolves directly, redirects through an alias, is hidden, is reserved, or is invalid input.
 
@@ -917,7 +928,7 @@ var healthJson = routes.HealthJson;
 var routeInspectorJson = routes.RouteInspectorJson;
 ```
 
-`AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `SearchIndexRefreshMethod`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
+`AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `SearchIndexRefreshMethod`, `Harvest`, `HarvestRebuild`, `HarvestRebuildMethod`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
 
 The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state. Search browse recovery is search-only: it can choose representative documents from the harvested snapshot, then fills remaining space with the harvest-free recovery links for Start Here, Packages, and Docs home. Public reader retry should use `Routes.SearchIndex`; operator UI should submit a browser form to `Routes.SearchIndexRefresh` with `Routes.SearchIndexRefreshMethod`.
 
@@ -936,7 +947,7 @@ Default route behavior:
 - Generated API docs and other non-Markdown docs keep the existing `.html` route shape, such as `{DocsRootPath}/Namespaces/ForgeTrust.AppSurface.Web.html`.
 - Fragments stay fragments. A harvested source path like `guides/intro.md#setup` publishes as `{DocsRootPath}/guides/intro#setup`.
 
-AppSurface Docs reserves document routes that belong to chrome, diagnostics, health, search, sections, versions, and assets. The reserved set includes the docs home, `search`, `search-index.json`, `_health`, `_health.json`, `_routes`, `_routes.json`, `search.css`, `search-client.js`, `outline-client.js`, `minisearch.min.js`, `versions`, and the `sections/` and `v/` route prefixes. Docs that resolve to reserved routes remain internally available for source lookup, but they are not public document winners and emit route diagnostics.
+AppSurface Docs reserves document routes that belong to chrome, diagnostics, health, harvest operations, search, sections, versions, and assets. The reserved set includes the docs home, `search`, `search-index.json`, `_harvest`, `_harvest/rebuild`, `_health`, `_health.json`, `_routes`, `_routes.json`, `search.css`, `search-client.js`, `outline-client.js`, `minisearch.min.js`, `versions`, and the `sections/`, `_harvest/`, and `v/` route prefixes. Docs that resolve to reserved routes remain internally available for source lookup, but they are not public document winners and emit route diagnostics.
 
 Markdown route segments are normalized deterministically: Unicode is folded where possible, non-spacing marks are removed, ASCII letters are lower-cased, dots are preserved, and unsafe separators become hyphens. When that conversion is lossy, AppSurface Docs emits `DocLossySlugNormalization` so authors can decide whether to set an explicit route.
 
@@ -1183,6 +1194,11 @@ static web assets.
   - Defaults to `DevelopmentOnly`.
   - Controls whether `{DocsRootPath}/_routes` and `{DocsRootPath}/_routes.json` return the route inspector and manifest responses.
   - AppSurface Docs always reserves the endpoint patterns before the docs catch-all route so route-inspector URLs do not fall through to document lookup.
+- `AppSurfaceDocs:Diagnostics:OperatorWritePolicy`
+  - Defaults to `null`.
+  - Names the host-owned ASP.NET Core authorization policy required by mutating packaged docs operator routes such as `POST {DocsRootPath}/_harvest/rebuild`.
+  - Blank values normalize to `null`. When unset, AppSurface Docs falls back to `SearchIndexRefreshPolicy` for source compatibility with older hosts.
+  - Prefer this neutral maintainer policy for new hosts so harvest rebuild and search-index refresh share one explicit operator-write gate.
   - `Always` exposes route-manifest diagnostics in non-development environments; protect the endpoints at the host boundary when they are publicly reachable.
   - `Never` keeps the reserved endpoints returning `404`, including in development.
 - `AppSurfaceDocs:Diagnostics:ShowChrome`
@@ -1706,17 +1722,26 @@ After:
 
 `AppSurfaceDocs:CacheExpirationMinutes` is interpreted as minutes. Use shorter values for source-backed development hosts where authors need edits to appear quickly; use longer values for production hosts when harvesters are expensive or the docs corpus changes only during deploys.
 
-### Search index refresh
+### Harvest rebuild and search index refresh
 
 `GET {DocsRootPath}/search-index.json` is a read-only reader endpoint. Legacy query strings such as `?refresh=1` and `?refresh=true` are ignored so crawlers, browser reloads, and copied reader links cannot mutate the server snapshot cache.
 
-Packaged operator refresh lives at `POST {DocsRootPath}/_search-index/refresh`. The endpoint always requires MVC anti-forgery validation and a host-owned authorization policy named by `AppSurfaceDocs:Diagnostics:SearchIndexRefreshPolicy`. Blank or whitespace policy names are normalized to `null`; when the policy is missing, the packaged endpoint denies refresh.
+Packaged operator rebuild lives at `POST {DocsRootPath}/_harvest/rebuild`. The endpoint always requires MVC anti-forgery validation and a host-owned authorization policy named by `AppSurfaceDocs:Diagnostics:OperatorWritePolicy`. Blank or whitespace policy names are normalized to `null`; when `OperatorWritePolicy` is missing, AppSurface Docs falls back to `AppSurfaceDocs:Diagnostics:SearchIndexRefreshPolicy` for older hosts. When both are missing, packaged operator writes deny.
+
+Packaged operator search-index refresh remains at `POST {DocsRootPath}/_search-index/refresh`. New hosts should prefer the neutral `OperatorWritePolicy`; existing hosts can keep `SearchIndexRefreshPolicy` while migrating.
+
+| Surface | Route | Work performed | Browser return behavior | Preferred use |
+| --- | --- | --- | --- | --- |
+| Harvest rebuild | `POST {DocsRootPath}/_harvest/rebuild` | Invalidates the memoized docs snapshot and starts or queues a full source-backed harvest. | Redirects to `{DocsRootPath}/_harvest`; completion returns to the validated docs return URL. | Trusted maintainer authoring loop after source edits, package docs changes, or release verification. |
+| Search-index refresh | `POST {DocsRootPath}/_search-index/refresh` | Invalidates the existing docs/search cache. The next reader or health request rebuilds on demand. | Returns `204 No Content`. | Compatibility with existing operator controls that only need cache invalidation. |
+
+The target maintainer loop is under 5 minutes from a cold source-backed harvest and under 90 seconds for a warm rebuild where caches and build outputs are already available. Those are product targets, not hard timeouts: large repositories, slow harvesters, or strict health failures can exceed them.
 
 ```json
 {
   "AppSurfaceDocs": {
     "Diagnostics": {
-      "SearchIndexRefreshPolicy": "DocsSearchIndexRefresh"
+      "OperatorWritePolicy": "DocsMaintainerWrite"
     }
   }
 }
@@ -1726,33 +1751,61 @@ Packaged operator refresh lives at `POST {DocsRootPath}/_search-index/refresh`. 
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy(
-        "DocsSearchIndexRefresh",
+        "DocsMaintainerWrite",
         policy => policy.RequireAuthenticatedUser()
-            .RequireClaim("scope", "docs.search-index.refresh"));
+            .RequireClaim("scope", "docs.maintainer.write"));
 });
 ```
 
-A Razor/MVC operator surface can post to the packaged endpoint with the normal anti-forgery token:
+Production opt-in checklist:
+
+- Set `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` only in environments where trusted maintainers should access `_health` and `_harvest`.
+- Configure `AppSurfaceDocs:Diagnostics:OperatorWritePolicy` to a host-owned policy that identifies docs maintainers explicitly. Do not rely on route exposure, network position, or development defaults as authorization.
+- Keep MVC anti-forgery enabled for browser forms. Host-owned automation should use a separate authenticated job/admin endpoint when anti-forgery is not appropriate.
+- Ensure the harvest-progress stream authorizer allows the same trusted operator audience when live progress should be visible outside Development.
+- Audit and rate-limit host-owned automation paths. The packaged browser route queues one rebuild behind an active run, but external job endpoints still decide their own replay and audit model.
+
+A Razor/MVC operator surface can post to the packaged rebuild endpoint with the normal anti-forgery token:
 
 ```cshtml
 @inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrls
 
-<form method="@DocsUrls.Routes.SearchIndexRefreshMethod" action="@DocsUrls.Routes.SearchIndexRefresh">
+<form method="@DocsUrls.Routes.HarvestRebuildMethod" action="@DocsUrls.Routes.HarvestRebuild">
     @Html.AntiForgeryToken()
-    <button type="submit">Refresh search index</button>
+    <input type="hidden" name="returnUrl" value="@DocsUrls.Routes.Search" />
+    <button type="submit">Rebuild docs</button>
 </form>
 ```
 
-Host automation should usually use a host-owned admin or job endpoint instead of the browser-form-shaped packaged route. After applying host-specific authentication, authorization, audit logging, and replay controls, call `DocAggregator.InvalidateCache()` directly.
+Host automation should usually use a host-owned admin or job endpoint instead of the browser-form-shaped packaged route. After applying host-specific authentication, authorization, audit logging, and replay controls, call `AppSurfaceDocsHarvestCoordinator.RequestRebuildAsync(...)` so active rebuilds are queued through the same coordinator-owned state machine.
+
+```csharp
+app.MapPost(
+    "/ops/docs/rebuild",
+    async (
+        ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsHarvestCoordinator coordinator,
+        CancellationToken cancellationToken) =>
+    {
+        var result = await coordinator.RequestRebuildAsync(cancellationToken);
+        return Results.Ok(new { result = result.ToString() });
+    })
+    .RequireAuthorization("DocsMaintainerWrite");
+```
 
 | Request state | Response |
 | --- | --- |
 | Missing or invalid anti-forgery token | Framework anti-forgery failure, normally `400` |
-| No configured refresh policy, blank policy, missing policy provider/service, or policy not found | `403` |
+| No configured operator-write or compatibility refresh policy, blank policy, missing policy provider/service, or policy not found | `403` |
 | Unauthenticated user after anti-forgery succeeds | `403` |
 | Authenticated user who fails the configured policy | `403` |
-| Authenticated user who satisfies the configured policy | `204`, cache invalidated |
+| Authorized rebuild while no harvest is active | `302` to `_harvest`; rebuild starts immediately |
+| Authorized rebuild while a harvest is active | `302` to `_harvest`; one rebuild is queued and the superseded run does not trigger terminal navigation |
+| Authorized rebuild while a rebuild is already queued | `302` to `_harvest`; no duplicate rebuild is queued |
+| Authorized search-index refresh | `204`, cache invalidated |
+| Unsafe rebuild `returnUrl`, non-docs same-origin path, or `_harvest` loop | Accepted request falls back to the docs home as the completion return URL |
+| Health routes hidden by exposure options | `404` for `_health`, `_harvest`, and `_harvest/rebuild` |
 | Non-POST request to `{DocsRootPath}/_search-index/refresh` | `405` |
+| Non-POST request to `{DocsRootPath}/_harvest/rebuild` | `405` |
 
 Pitfalls:
 
@@ -1762,6 +1815,7 @@ Pitfalls:
 - Do not set huge finite values such as `double.MaxValue`. AppSurface Docs caps the value so the derived search-index `Cache-Control` `max-age` remains representable.
 - The search-index response uses the same duration for its private `Cache-Control` `max-age`, so client refresh behavior stays aligned with server-side snapshot reuse.
 - Do not use `{DocsRootPath}/search-index.json?refresh=1` for operations. It is intentionally read-only compatibility noise; use the POST operator route or a host-owned automation path.
+- Do not use `_harvest` as the completion `returnUrl`. AppSurface Docs rejects harvest-loop return URLs and returns to the docs home instead.
 
 ## Contributor Provenance
 

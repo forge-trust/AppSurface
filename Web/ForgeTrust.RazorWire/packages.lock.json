@@ -26,6 +26,12 @@
           "Microsoft.CodeAnalysis.Analyzers": "3.11.0"
         }
       },
+      "forgetrust.appsurface.auth": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {

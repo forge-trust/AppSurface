@@ -36,14 +36,19 @@ internal static class ReleaseArchiveManifestWriter
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
 
-        Directory.CreateDirectory(outputPath);
+        ExportOutputPathGuards.EnsureOutputRootReady(
+            outputPath,
+            "release archive output root",
+            route: null,
+            "create-directory");
         var fullOutputPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputPath));
         var manifestPath = Path.Join(fullOutputPath, FileName);
         var entries = new List<ReleaseArchiveManifestFile>();
 
-        foreach (var filePath in EnumerateArchiveFiles(fullOutputPath))
+        foreach (var filePath in EnumerateArchiveFiles(fullOutputPath, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            ExportOutputPathGuards.ValidateArchiveEntryPath(fullOutputPath, filePath, "archive-enumerate");
 
             var relativePath = NormalizeRelativePath(fullOutputPath, filePath);
             if (string.Equals(relativePath, FileName, StringComparison.Ordinal))
@@ -62,6 +67,7 @@ internal static class ReleaseArchiveManifestWriter
                     ]);
             }
 
+            ExportOutputPathGuards.ValidateArchiveEntryPath(fullOutputPath, filePath, "archive-hash");
             var fileInfo = new FileInfo(filePath);
             entries.Add(
                 new ReleaseArchiveManifestFile(
@@ -69,7 +75,7 @@ internal static class ReleaseArchiveManifestWriter
                     fileInfo.Length,
                     ResolveContentType(relativePath),
                     "sha256",
-                    await ComputeFileSha256Async(filePath, cancellationToken)));
+                    await ComputeFileSha256Async(fullOutputPath, filePath, cancellationToken)));
         }
 
         var document = new ReleaseArchiveManifestDocument(
@@ -79,21 +85,53 @@ internal static class ReleaseArchiveManifestWriter
                 .ToArray());
 
         var payload = JsonSerializer.Serialize(document, SerializerOptions) + "\n";
-        await File.WriteAllTextAsync(manifestPath, payload, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
-        var manifestDigest = await ComputeFileSha256Async(manifestPath, cancellationToken);
+        await ExportOutputPathGuards.WriteTextArtifactAsync(
+            fullOutputPath,
+            manifestPath,
+            "release archive manifest",
+            route: "/" + FileName,
+            payload,
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            cancellationToken);
+        var manifestDigest = await ComputeFileSha256Async(fullOutputPath, manifestPath, cancellationToken);
 
         return new ReleaseArchiveManifestSummary(manifestPath, Schema, document.Files.Count, manifestDigest);
     }
 
-    private static IEnumerable<string> EnumerateArchiveFiles(string outputPath)
+    private static IEnumerable<string> EnumerateArchiveFiles(string outputPath, CancellationToken cancellationToken)
     {
         if (!Directory.Exists(outputPath))
         {
             return [];
         }
 
-        return Directory.EnumerateFiles(outputPath, "*", SearchOption.AllDirectories)
-            .OrderBy(path => NormalizeRelativePath(outputPath, path), StringComparer.Ordinal);
+        var files = new List<string>();
+        var directories = new Stack<string>();
+        directories.Push(outputPath);
+
+        while (directories.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var directoryPath = directories.Pop();
+            ExportOutputPathGuards.ValidateArchiveEntryPath(outputPath, directoryPath, "archive-enumerate");
+
+            foreach (var entryPath in Directory.EnumerateFileSystemEntries(directoryPath)
+                         .OrderBy(path => NormalizeRelativePath(outputPath, path), StringComparer.Ordinal))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ExportOutputPathGuards.ValidateArchiveEntryPath(outputPath, entryPath, "archive-enumerate");
+                var attributes = File.GetAttributes(entryPath);
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    directories.Push(entryPath);
+                    continue;
+                }
+
+                files.Add(entryPath);
+            }
+        }
+
+        return files.OrderBy(path => NormalizeRelativePath(outputPath, path), StringComparer.Ordinal);
     }
 
     private static string NormalizeRelativePath(string outputPath, string filePath)
@@ -134,8 +172,12 @@ internal static class ReleaseArchiveManifestWriter
         return true;
     }
 
-    private static async Task<string> ComputeFileSha256Async(string filePath, CancellationToken cancellationToken)
+    private static async Task<string> ComputeFileSha256Async(
+        string outputPath,
+        string filePath,
+        CancellationToken cancellationToken)
     {
+        ExportOutputPathGuards.ValidateArchiveEntryPath(outputPath, filePath, "archive-hash");
         await using var stream = new FileStream(
             filePath,
             FileMode.Open,

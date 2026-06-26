@@ -25,4 +25,71 @@ public sealed class DocsControllerHarvestReturnUrlTests
     {
         Assert.False(DocsController.IsSafeAppRelativeUrl(url));
     }
+
+    [Theory]
+    [InlineData("/docs", null, "/docs")]
+    [InlineData("/docs/search?q=api", null, "/docs")]
+    [InlineData("/docs/packages/guide%20one.html", null, "/docs")]
+    [InlineData("/docs/%25%34%31-note.html", null, "/docs")]
+    [InlineData("/base/docs/packages/README.md.html", "/base", "/docs")]
+    [InlineData("/base/docs/search", "base/", "docs/")]
+    [InlineData("/base", "base", "/")]
+    [InlineData("/search?q=api", null, "/")]
+    public void IsSafeDocsHarvestReturnUrl_WhenUrlStaysInDocsAndAvoidsHarvestLoop_ReturnsTrue(
+        string url,
+        string? pathBase,
+        string docsRootPath)
+    {
+        Assert.True(DocsController.IsSafeDocsHarvestReturnUrl(url, pathBase, docsRootPath));
+    }
+
+    [Theory]
+    [InlineData("/admin", null, "/docs")]
+    [InlineData("/base/admin", "/base", "/docs")]
+    [InlineData("/docs/search", "/base", "/docs")]
+    [InlineData("/docs/../admin", null, "/docs")]
+    [InlineData("/docs/section/../../admin", null, "/docs")]
+    [InlineData("/docs/%2e%2e/admin", null, "/docs")]
+    [InlineData("/docs/%2E%2E/_harvest", null, "/docs")]
+    [InlineData("/docs/%252e%252e/admin", null, "/docs")]
+    [InlineData("/docs/%25%32%65%25%32%65/admin", null, "/docs")]
+    [InlineData("/docs/%25%32%66admin", null, "/docs")]
+    [InlineData("/docs/%25%35%63admin", null, "/docs")]
+    [InlineData("/docs/%25%30%61", null, "/docs")]
+    [InlineData("/base/docs/../admin", "/base", "/docs")]
+    [InlineData("/base/docs/%2e%2e/admin", "/base", "/docs")]
+    [InlineData("/base/docs/%25%32%65%25%32%65/admin", "/base", "/docs")]
+    [InlineData("/docs/%", null, "/docs")]
+    [InlineData("/docs/%0a", null, "/docs")]
+    [InlineData("/docs/_harvest", null, "/docs")]
+    [InlineData("/docs//_harvest", null, "/docs")]
+    [InlineData("/docs/%5Fharvest", null, "/docs")]
+    [InlineData("/docs/%2F%5Fharvest", null, "/docs")]
+    [InlineData("/docs/_harvest/rebuild", null, "/docs")]
+    [InlineData("/docs/%5Fharvest/rebuild", null, "/docs")]
+    [InlineData("/docs/_harvest/extra", null, "/docs")]
+    [InlineData("/docs/%5Fharvest/extra", null, "/docs")]
+    [InlineData("/_harvest", null, "/")]
+    [InlineData("//_harvest", null, "/")]
+    [InlineData("/%5Fharvest", null, "/")]
+    [InlineData("/%2F%5Fharvest", null, "/")]
+    [InlineData("/base/docs/_harvest", "/base", "/docs")]
+    [InlineData("/base/docs//_harvest", "/base", "/docs")]
+    [InlineData("/base/docs/%5Fharvest", "/base", "/docs")]
+    [InlineData("/base/docs/%2F%5Fharvest", "/base", "/docs")]
+    [InlineData("/base/docs/_harvest/rebuild", "/base", "/docs")]
+    [InlineData("/base/docs/%5Fharvest/rebuild", "/base", "/docs")]
+    [InlineData("/base/docs/_harvest/extra", "/base", "/docs")]
+    [InlineData("/base/docs/%5Fharvest/extra", "/base", "/docs")]
+    [InlineData("/base/_harvest", "/base", "/")]
+    [InlineData("/base//_harvest", "/base", "/")]
+    [InlineData("/base/%5Fharvest", "/base", "/")]
+    [InlineData("/base/%2F%5Fharvest", "/base", "/")]
+    public void IsSafeDocsHarvestReturnUrl_WhenUrlLeavesDocsOrLoopsToHarvest_ReturnsFalse(
+        string url,
+        string? pathBase,
+        string docsRootPath)
+    {
+        Assert.False(DocsController.IsSafeDocsHarvestReturnUrl(url, pathBase, docsRootPath));
+    }
 }

@@ -80,11 +80,7 @@ internal static class AppSurfaceCliApp
         services.AddSingleton(TimeProvider.System);
         services.AddTransient<CoverageRunWorkflow>();
         services.AddTransient<CoverageMergeWorkflow>();
-        services.AddSingleton<ExportEngine>();
-        services.AddSingleton<ExportSourceRequestFactory>();
-        services.AddSingleton<ExportSourceResolver>();
-        services.AddSingleton<ITargetAppProcessFactory, TargetAppProcessFactory>();
-        services.AddHttpClient("ExportEngine", client => { client.Timeout = TimeSpan.FromSeconds(60); });
+        AddExportEngineServices(services);
         services.AddHttpClient<IAppSurfaceDocsHealthHttpClient, AppSurfaceDocsHealthHttpClient>(
             client => { client.Timeout = TimeSpan.FromSeconds(60); });
         services.AddLogging(builder =>
@@ -124,6 +120,27 @@ internal static class AppSurfaceCliApp
         {
             CommandService.PrimaryServiceProvider = previousServiceProvider;
         }
+    }
+
+    /// <summary>
+    /// Registers the RazorWire export engine dependencies used by AppSurface-owned export commands.
+    /// </summary>
+    /// <param name="services">The service collection to populate.</param>
+    /// <remarks>
+    /// The named <c>ExportEngine</c> HTTP client disables automatic redirects so artifact-producing requests are
+    /// surfaced to <see cref="ExportEngine"/>. The engine then applies its explicit redirect boundary checks before
+    /// reading or writing redirected response bodies, while source and readiness probes continue to treat surfaced HTTP
+    /// redirect responses as evidence that an app endpoint is reachable.
+    /// </remarks>
+    internal static void AddExportEngineServices(IServiceCollection services)
+    {
+        services.AddSingleton<ExportEngine>();
+        services.AddSingleton<ExportSourceRequestFactory>();
+        services.AddSingleton<ExportSourceResolver>();
+        services.AddSingleton<ITargetAppProcessFactory, TargetAppProcessFactory>();
+        services
+            .AddHttpClient("ExportEngine", client => { client.Timeout = TimeSpan.FromSeconds(60); })
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
     }
 
     [ExcludeFromCodeCoverage(

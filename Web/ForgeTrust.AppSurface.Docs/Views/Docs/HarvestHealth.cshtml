@@ -22,6 +22,50 @@
         </p>
     </header>
 
+    @if (Model.RebuildForm is not null)
+    {
+        <section class="mt-8 rounded-lg border border-[#1b2a43] bg-[#050b17]/55 p-4" aria-labelledby="harvest-rebuild-heading">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <h2 id="harvest-rebuild-heading" class="text-lg font-semibold text-white">Source harvest</h2>
+                    <p class="mt-1 text-sm leading-6 text-slate-300">
+                        @Model.RebuildForm.Description
+                    </p>
+                    @if (!Model.RebuildForm.IsAuthorized)
+                    {
+                        <p class="mt-2 text-xs font-semibold uppercase tracking-[0.16em] text-amber-200">
+                            Rebuild @Model.RebuildForm.Status.ToLowerInvariant()
+                        </p>
+                    }
+                    @if (Model.RebuildForm.IsAuthorized)
+                    {
+                        <noscript>
+                            <p class="mt-2 text-sm leading-6 text-amber-200">
+                                JavaScript is disabled. The rebuild still starts, and the observatory includes a manual continue link.
+                            </p>
+                        </noscript>
+                    }
+                </div>
+                @if (Model.RebuildForm.IsAuthorized)
+                {
+                    <form method="@Model.RebuildForm.Method" action="@Model.RebuildForm.Action" class="shrink-0">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="returnUrl" value="@Model.RebuildForm.ReturnUrl" />
+                        <button type="submit" class="inline-flex items-center justify-center rounded-md border border-[#14b8a6]/50 bg-[#14b8a6] px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm transition hover:bg-[#2dd4bf] focus:outline-none focus:ring-2 focus:ring-[#5eead4] focus:ring-offset-2 focus:ring-offset-slate-950">
+                            Rebuild docs
+                        </button>
+                    </form>
+                }
+                else
+                {
+                    <button type="button" disabled class="inline-flex cursor-not-allowed items-center justify-center rounded-md border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-500" aria-disabled="true">
+                        Rebuild docs
+                    </button>
+                }
+            </div>
+        </section>
+    }
+
     <section class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Harvest summary">
         <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Docs</p>
