@@ -22,19 +22,19 @@ Configure the factory with explicit personas:
 using System.Security.Claims;
 using ForgeTrust.AppSurface.Auth.Testing;
 
-var factory = new WebApplicationFactory<Program>()
-    .WithAppSurfaceTestAuth(options =>
-    {
-        options.SubjectClaimType = "sub";
-        options.AddPersona(
-            "operator",
-            "operator-1",
-            [new Claim("role", "operator")]);
-        options.AddPersona(
-            "viewer",
-            "viewer-1",
-            [new Claim("role", "viewer")]);
-    });
+await using var baseFactory = new WebApplicationFactory<Program>();
+await using var factory = baseFactory.WithAppSurfaceTestAuth(options =>
+{
+    options.SubjectClaimType = "sub";
+    options.AddPersona(
+        "operator",
+        "operator-1",
+        [new Claim("role", "operator")]);
+    options.AddPersona(
+        "viewer",
+        "viewer-1",
+        [new Claim("role", "viewer")]);
+});
 
 using var operatorClient = factory.CreateAppSurfaceClient("operator");
 using var response = await operatorClient.GetAsync("/operator-work");
@@ -52,7 +52,8 @@ For request-level switching, apply the helper to one message:
 ```csharp
 using var request = new HttpRequestMessage(HttpMethod.Get, "/operator-work")
     .WithAppSurfaceTestPersona("viewer");
-using var response = await factory.CreateClient().SendAsync(request);
+using var client = factory.CreateClient();
+using var response = await client.SendAsync(request);
 ```
 
 `CreateAppSurfaceClient(...)` validates the persona before sending a request. `WithAppSurfaceTestPersona(...)`
