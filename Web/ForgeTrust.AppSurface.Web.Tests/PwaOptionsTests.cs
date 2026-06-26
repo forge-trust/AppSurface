@@ -39,6 +39,17 @@ public sealed class PwaOptionsTests
     }
 
     [Theory]
+    [InlineData(PwaDisplayMode.Browser, "browser")]
+    [InlineData(PwaDisplayMode.MinimalUi, "minimal-ui")]
+    [InlineData(PwaDisplayMode.Standalone, "standalone")]
+    [InlineData(PwaDisplayMode.Fullscreen, "fullscreen")]
+    [InlineData((PwaDisplayMode)999, "999")]
+    public void FormatDisplayMode_ReturnsManifestDisplayValue(PwaDisplayMode displayMode, string expected)
+    {
+        Assert.Equal(expected, PwaOptionsValidator.FormatDisplayMode(displayMode));
+    }
+
+    [Theory]
     [InlineData("//cdn.example.com/manifest.webmanifest", "ASPWA005")]
     [InlineData("/manifest.webmanifest?version=1", "ASPWA005")]
     [InlineData("/../manifest.webmanifest", "ASPWA005")]
