@@ -12,6 +12,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\ForgeTrust.RazorWire\ForgeTrust.RazorWire.csproj" />
     <ProjectReference Include="..\ForgeTrust.AppSurface.Web.Tailwind\ForgeTrust.AppSurface.Web.Tailwind.csproj" />
+    <ProjectReference Include="..\..\Auth\ForgeTrust.AppSurface.Auth\ForgeTrust.AppSurface.Auth.csproj" />
     <ProjectReference Include="..\..\Caching\ForgeTrust.AppSurface.Caching\ForgeTrust.AppSurface.Caching.csproj" />
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config\ForgeTrust.AppSurface.Config.csproj" />
     <ProjectReference Include="..\..\Intelligence\ForgeTrust.AppSurface.Intelligence\ForgeTrust.AppSurface.Intelligence.csproj" />

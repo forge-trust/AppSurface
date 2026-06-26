@@ -48,6 +48,7 @@
       "forgetrust.razorwire": {
         "type": "Project",
         "dependencies": {
+          "ForgeTrust.AppSurface.Auth": "[0.1.0, )",
           "ForgeTrust.AppSurface.Intelligence": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"

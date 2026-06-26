@@ -37,6 +37,13 @@ public static class RazorWireServiceCollectionExtensions
     /// <see cref="IRazorWireChannelAuthorizer"/> before or after this method when stream access depends on the current
     /// request, user, tenant, or workflow. Unknown authorization-mode values throw <see cref="InvalidOperationException"/>
     /// during authorizer resolution instead of falling back to an unsafe allow path.
+    ///
+    /// New stream authorization code should prefer <see cref="IRazorWireStreamAuthorizer"/> when it needs
+    /// unauthenticated, forbidden, stale-session, unsafe-navigation, or setup-failure outcomes. Existing
+    /// <see cref="IRazorWireChannelAuthorizer"/> registrations continue to work through a compatibility adapter when
+    /// no custom result authorizer is registered. A result authorizer registered before this method suppresses the
+    /// adapter; a result authorizer registered after this method wins through normal Microsoft DI last-registration
+    /// behavior.
     /// </remarks>
     /// <returns>The same <see cref="IServiceCollection"/> instance with RazorWire registrations added.</returns>
     public static IServiceCollection AddRazorWire(
@@ -56,6 +63,7 @@ public static class RazorWireServiceCollectionExtensions
 
         services.TryAddSingleton<IRazorWireStreamHub, InMemoryRazorWireStreamHub>();
         services.TryAddSingleton<RazorWireStreamAdmissionController>();
+        services.TryAddSingleton<RazorWireStreamAuthorizationResponseMapper>();
         services.TryAddSingleton<DenyAllRazorWireChannelAuthorizer>();
         services.TryAddSingleton<AllowAllRazorWireChannelAuthorizer>();
         services.TryAddSingleton<IRazorWireChannelAuthorizer>(sp =>
@@ -73,6 +81,7 @@ public static class RazorWireServiceCollectionExtensions
                     $"{nameof(IRazorWireChannelAuthorizer)}.")
             };
         });
+        services.TryAddSingleton<IRazorWireStreamAuthorizer, RazorWireBoolChannelAuthorizerAdapter>();
         services.TryAddSingleton<IRazorPartialRenderer, RazorPartialRenderer>();
         services.TryAddSingleton<RazorWireFormRequestClassifier>();
         services.TryAddScoped<RazorWireAntiforgeryFailureFilter>();

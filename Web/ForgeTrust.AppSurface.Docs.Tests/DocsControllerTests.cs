@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using AngleSharp;
 using FakeItEasy;
+using ForgeTrust.AppSurface.Auth;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Docs.Controllers;
 using ForgeTrust.AppSurface.Docs.Models;
@@ -2276,6 +2277,20 @@ public class DocsControllerTests : IDisposable
             Environments.Production,
             AppSurfaceDocsHarvestHealthExposure.Always,
             new UnexpectedHarvestProgressAuthorizer());
+
+        var result = await pending.Controller.Search();
+
+        AssertHarvestingView(result, "/docs/search", canUseLiveProgress: false);
+    }
+
+    [Fact]
+    public async Task Search_ShouldRenderHarvestingWithoutLiveProgress_WhenProductionResultAuthorizerThrowsUnexpectedException()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/search",
+            Environments.Production,
+            AppSurfaceDocsHarvestHealthExposure.Always,
+            streamAuthorizer: new UnexpectedHarvestProgressStreamAuthorizer());
 
         var result = await pending.Controller.Search();
 
@@ -6013,6 +6028,7 @@ public class DocsControllerTests : IDisposable
         string environmentName = "Development",
         AppSurfaceDocsHarvestHealthExposure exposure = AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
         IRazorWireChannelAuthorizer? authorizer = null,
+        IRazorWireStreamAuthorizer? streamAuthorizer = null,
         bool registerAuthorizer = true,
         Action<AppSurfaceDocsOptions>? configureOptions = null)
     {
@@ -6055,6 +6071,11 @@ public class DocsControllerTests : IDisposable
 
         if (registerAuthorizer)
         {
+            if (streamAuthorizer is not null)
+            {
+                requestServicesBuilder.AddSingleton(streamAuthorizer);
+            }
+
             requestServicesBuilder.AddSingleton<IRazorWireChannelAuthorizer>(effectiveAuthorizer);
         }
 
@@ -6266,6 +6287,14 @@ public class DocsControllerTests : IDisposable
     private sealed class UnexpectedHarvestProgressAuthorizer : IRazorWireChannelAuthorizer
     {
         public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            throw new NullReferenceException("Authorizer dependencies are unavailable.");
+        }
+    }
+
+    private sealed class UnexpectedHarvestProgressStreamAuthorizer : IRazorWireStreamAuthorizer
+    {
+        public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
         {
             throw new NullReferenceException("Authorizer dependencies are unavailable.");
         }

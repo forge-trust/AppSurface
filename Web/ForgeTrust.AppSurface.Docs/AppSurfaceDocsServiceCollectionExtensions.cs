@@ -25,6 +25,9 @@ namespace ForgeTrust.AppSurface.Docs;
 /// </remarks>
 public static class AppSurfaceDocsServiceCollectionExtensions
 {
+    private const string RazorWireBoolChannelAuthorizerAdapterTypeName =
+        "ForgeTrust.RazorWire.Streams.RazorWireBoolChannelAuthorizerAdapter";
+
     /// <summary>
     /// Adds the AppSurface Docs package services, normalized options, and routing helpers to the service collection.
     /// </summary>
@@ -70,12 +73,13 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// <see cref="AppSurfaceDocsHarvestProgressReporter"/>, and <see cref="AppSurfaceDocsHarvestPathPolicy"/>.
     /// </para>
     /// <para>
-    /// If an <see cref="IRazorWireChannelAuthorizer"/> is already registered, AppSurface Docs wraps that authorizer with
-    /// <see cref="AppSurfaceDocsHarvestChannelAuthorizer"/> so its harvest-progress channel rules run before delegating
-    /// to the existing authorizer. Register a custom authorizer before calling this method to participate in that
-    /// wrapper. Registering an authorizer after this method is an advanced replacement mode: the application replaces
-    /// the AppSurface Docs wrapper and must apply any AppSurface Docs harvest-progress checks itself, typically with
-    /// <see cref="AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(string?)"/>. In non-development
+    /// If an <see cref="IRazorWireStreamAuthorizer"/> is already registered, AppSurface Docs wraps that result-bearing
+    /// authorizer so its harvest-progress channel rules run before delegating to the existing authorizer. Existing
+    /// <see cref="IRazorWireChannelAuthorizer"/> registrations still work through the legacy bool facade when plain
+    /// allow/deny compatibility is sufficient. Register a custom authorizer before calling this method to participate in
+    /// that wrapper. Registering an authorizer after this method is an advanced replacement mode: the application
+    /// replaces the AppSurface Docs wrapper and must apply any AppSurface Docs harvest-progress checks itself, typically
+    /// with <see cref="AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(string?)"/>. In non-development
     /// environments, <c>AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always</c> exposes the health routes but does not
     /// authorize the live harvest stream unless a custom authorizer allows it. Built-in RazorWire allow-all/deny-all
     /// authorizers are not considered custom authorization for that docs-owned stream. Call this method once during
@@ -262,17 +266,46 @@ public static class AppSurfaceDocsServiceCollectionExtensions
 
     private static void TryAddHarvestChannelAuthorizer(IServiceCollection services)
     {
-        var existing = services.LastOrDefault(descriptor => descriptor.ServiceType == typeof(IRazorWireChannelAuthorizer));
+        var existingStream = services.LastOrDefault(descriptor => descriptor.ServiceType == typeof(IRazorWireStreamAuthorizer));
+        var existingChannel = services.LastOrDefault(descriptor => descriptor.ServiceType == typeof(IRazorWireChannelAuthorizer));
+        var lifetime = GetHarvestAuthorizerLifetime(existingStream, existingChannel);
+
+        services.RemoveAll<IRazorWireStreamAuthorizer>();
         services.RemoveAll<IRazorWireChannelAuthorizer>();
-        var lifetime = existing?.Lifetime ?? ServiceLifetime.Singleton;
+        services.Add(
+            ServiceDescriptor.Describe(
+                typeof(IRazorWireStreamAuthorizer),
+                provider =>
+                {
+                    var innerStreamAuthorizer = CreateInnerStreamAuthorizer(provider, existingStream);
+
+                    return new AppSurfaceDocsHarvestStreamAuthorizer(
+                        provider.GetRequiredService<AppSurfaceDocsOptions>(),
+                        ResolveHostEnvironment(provider),
+                        innerStreamAuthorizer,
+                        innerStreamAuthorizer is null ? CreateInnerChannelAuthorizer(provider, existingChannel) : null);
+                },
+                lifetime));
         services.Add(
             ServiceDescriptor.Describe(
                 typeof(IRazorWireChannelAuthorizer),
                 provider => new AppSurfaceDocsHarvestChannelAuthorizer(
-                    provider.GetRequiredService<AppSurfaceDocsOptions>(),
-                    ResolveHostEnvironment(provider),
-                    CreateInnerChannelAuthorizer(provider, existing)),
+                    provider.GetRequiredService<IRazorWireStreamAuthorizer>()),
                 lifetime));
+    }
+
+    private static ServiceLifetime GetHarvestAuthorizerLifetime(
+        ServiceDescriptor? streamDescriptor,
+        ServiceDescriptor? channelDescriptor)
+    {
+        if (streamDescriptor is not null && !IsRazorWireBoolChannelAuthorizerAdapter(streamDescriptor))
+        {
+            return streamDescriptor.ImplementationFactory is not null && channelDescriptor is not null
+                ? ShorterLifetime(streamDescriptor.Lifetime, channelDescriptor.Lifetime)
+                : streamDescriptor.Lifetime;
+        }
+
+        return channelDescriptor?.Lifetime ?? ServiceLifetime.Singleton;
     }
 
     private static IHostEnvironment ResolveHostEnvironment(IServiceProvider provider)
@@ -313,10 +346,68 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         return null;
     }
 
+    private static IRazorWireStreamAuthorizer? CreateInnerStreamAuthorizer(
+        IServiceProvider provider,
+        ServiceDescriptor? descriptor)
+    {
+        if (descriptor is null || IsRazorWireBoolChannelAuthorizerAdapter(descriptor))
+        {
+            return null;
+        }
+
+        if (descriptor.ImplementationInstance is IRazorWireStreamAuthorizer instance)
+        {
+            return instance;
+        }
+
+        if (descriptor.ImplementationFactory is not null)
+        {
+            return FilterBoolChannelAuthorizerAdapter(
+                descriptor.ImplementationFactory(provider) as IRazorWireStreamAuthorizer);
+        }
+
+        return descriptor.ImplementationType is not null
+            ? (IRazorWireStreamAuthorizer)ActivatorUtilities.CreateInstance(provider, descriptor.ImplementationType)
+            : null;
+    }
+
     private static IRazorWireChannelAuthorizer? FilterBuiltInDenyAllAuthorizer(
         IRazorWireChannelAuthorizer? authorizer)
     {
         return authorizer is DenyAllRazorWireChannelAuthorizer ? null : authorizer;
+    }
+
+    private static bool IsRazorWireBoolChannelAuthorizerAdapter(ServiceDescriptor descriptor)
+    {
+        return descriptor.ImplementationType?.FullName == RazorWireBoolChannelAuthorizerAdapterTypeName
+               || IsRazorWireBoolChannelAuthorizerAdapter(descriptor.ImplementationInstance);
+    }
+
+    private static IRazorWireStreamAuthorizer? FilterBoolChannelAuthorizerAdapter(
+        IRazorWireStreamAuthorizer? authorizer)
+    {
+        return IsRazorWireBoolChannelAuthorizerAdapter(authorizer) ? null : authorizer;
+    }
+
+    private static bool IsRazorWireBoolChannelAuthorizerAdapter(object? instance)
+    {
+        return instance?.GetType().FullName == RazorWireBoolChannelAuthorizerAdapterTypeName;
+    }
+
+    private static ServiceLifetime ShorterLifetime(ServiceLifetime first, ServiceLifetime second)
+    {
+        return LifetimeRank(first) <= LifetimeRank(second) ? first : second;
+    }
+
+    private static int LifetimeRank(ServiceLifetime lifetime)
+    {
+        return lifetime switch
+        {
+            ServiceLifetime.Transient => 0,
+            ServiceLifetime.Scoped => 1,
+            ServiceLifetime.Singleton => 2,
+            _ => 0
+        };
     }
 
     private static void TryAddMarkdownHarvester(IServiceCollection services)

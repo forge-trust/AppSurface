@@ -127,8 +127,10 @@ public class RazorWireStreamOptions
     /// <remarks>
     /// RazorWire streams are safe by default because channel names frequently encode user, tenant, or workflow context.
     /// Use <see cref="RazorWireStreamAuthorizationMode.AllowAll"/> only for public, demo, or otherwise non-sensitive
-    /// channels. Register <see cref="Streams.IRazorWireChannelAuthorizer"/> when subscription decisions must inspect
-    /// the current <c>HttpContext</c>, user, claims, route data, or tenant state.
+    /// channels. Register <see cref="Streams.IRazorWireStreamAuthorizer"/> when subscription decisions must inspect the
+    /// current <c>HttpContext</c>, user, claims, route data, or tenant state and need result-aware denial semantics.
+    /// Existing <see cref="Streams.IRazorWireChannelAuthorizer"/> registrations remain supported for simple legacy
+    /// allow/deny compatibility.
     /// </remarks>
     public RazorWireStreamAuthorizationMode AuthorizationMode { get; set; } = RazorWireStreamAuthorizationMode.DenyAll;
 
@@ -184,7 +186,8 @@ public class RazorWireStreamOptions
 public enum RazorWireStreamAuthorizationMode
 {
     /// <summary>
-    /// Deny every stream subscription unless the app registers a custom <see cref="Streams.IRazorWireChannelAuthorizer"/>.
+    /// Deny every stream subscription unless the app registers a custom <see cref="Streams.IRazorWireStreamAuthorizer"/>
+    /// or legacy <see cref="Streams.IRazorWireChannelAuthorizer"/>.
     /// </summary>
     /// <remarks>
     /// This is the default and is appropriate for apps that have not yet made an explicit channel authorization decision.
@@ -197,7 +200,8 @@ public enum RazorWireStreamAuthorizationMode
     /// <remarks>
     /// Use this only for public, demo, or local-development streams that do not expose user-specific, tenant-specific,
     /// or workflow-specific data. Production streams should usually register a custom
-    /// <see cref="Streams.IRazorWireChannelAuthorizer"/> instead.
+    /// <see cref="Streams.IRazorWireStreamAuthorizer"/> instead; keep
+    /// <see cref="Streams.IRazorWireChannelAuthorizer"/> for simple legacy allow/deny compatibility.
     /// </remarks>
     AllowAll = 1
 }

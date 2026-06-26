@@ -4,10 +4,10 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// Provides stable helpers for host-owned AppSurface Docs RazorWire stream authorization.
 /// </summary>
 /// <remarks>
-/// Host applications that implement <c>IRazorWireChannelAuthorizer</c> should use
-/// <see cref="IsHarvestProgressChannel(string?)"/> when applying production authorization rules to the AppSurface Docs
-/// live harvest progress stream. Prefer the predicate over raw string comparison so future docs-owned stream naming
-/// remains centralized.
+/// Host applications that implement <c>IRazorWireStreamAuthorizer</c>, or legacy
+/// <c>IRazorWireChannelAuthorizer</c> compatibility policies, should use <see cref="IsHarvestProgressChannel(string?)"/>
+/// when applying production authorization rules to the AppSurface Docs live harvest progress stream. Prefer the
+/// predicate over raw string comparison so future docs-owned stream naming remains centralized.
 /// </remarks>
 public static class AppSurfaceDocsStreamAuthorization
 {
