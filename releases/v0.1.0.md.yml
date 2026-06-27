@@ -1,19 +1,31 @@
-title: Release 0.1.0-rc.4
-summary: Coordinated AppSurface release 0.1.0-rc.4, tagged on 2026-06-16.
+title: Release 0.1.0
+summary: Coordinated AppSurface release 0.1.0, tagged on 2026-06-27.
 page_type: release-note
 nav_group: Releases
 order: 10
 breadcrumbs:
 - Releases
-- v0.1.0-rc.4
+- v0.1.0
 redirect_aliases:
 - releases/v0.1-preview
 - releases/v0.1-preview.md
 - releases/v0.1-preview.md.html
+- releases/v0.1.0-rc.1
+- releases/v0.1.0-rc.1.md
+- releases/v0.1.0-rc.1.md.html
+- releases/v0.1.0-rc.2
+- releases/v0.1.0-rc.2.md
+- releases/v0.1.0-rc.2.md.html
+- releases/v0.1.0-rc.3
+- releases/v0.1.0-rc.3.md
+- releases/v0.1.0-rc.3.md.html
+- releases/v0.1.0-rc.4
+- releases/v0.1.0-rc.4.md
+- releases/v0.1.0-rc.4.md.html
 trust:
   status: Tagged
-  summary: This page is the final narrative release note for AppSurface 0.1.0-rc.4.
-  freshness: Tagged on 2026-06-16.
+  summary: This page is the final narrative release note for AppSurface 0.1.0.
+  freshness: Tagged on 2026-06-27.
   change_scope: Repository-wide. Packages, CLI tooling, examples, and docs-facing behavior ship in one coordinated version.
   archive: The matching compact ledger entry lives in CHANGELOG.md.
   sources:
