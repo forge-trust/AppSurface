@@ -54,6 +54,8 @@ This is the living release note for the next coordinated AppSurface version afte
   wildcard subdomain origins such as `https://*.example.com`.
 - Package verification tests now keep Tailwind packed-consumer smoke restores out of the user-level NuGet package cache
   and clean up generated RazorWire ToolVerifier package entries after the tool contract proof completes.
+- Coverage gate tests now create their disposable Git fixture commits with commit signing disabled for the child process,
+  so local solution coverage runs no longer fail when a developer has SSH commit signing enabled.
 
 ### AppSurface Flow
 
