@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading.Channels;
+using ForgeTrust.AppSurface.Auth;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Intelligence;
 using ForgeTrust.AppSurface.Web;
@@ -24,13 +25,13 @@ namespace ForgeTrust.RazorWire.Tests;
 public class RazorWireEndpointAuthorizationTests
 {
     [Fact]
-    public async Task StreamEndpoint_DefaultConfiguration_ReturnsForbidden()
+    public async Task StreamEndpoint_DefaultConfiguration_ReturnsUnauthorizedForAnonymousCaller()
     {
         await using var fixture = await RazorWireEndpointFixture.StartAsync(Environments.Production);
 
         using var response = await fixture.Client.GetAsync("/_rw/streams/public");
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
@@ -43,7 +44,7 @@ public class RazorWireEndpointAuthorizationTests
 
         using var response = await fixture.Client.GetAsync("/_rw/streams/sensitive-channel");
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.NotEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
         Assert.Equal(0, hub.SubscribeCount);
     }
@@ -56,11 +57,11 @@ public class RazorWireEndpointAuthorizationTests
         using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
         var body = await response.Content.ReadAsStringAsync();
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Equal("text/plain", response.Content.Headers.ContentType?.MediaType);
-        Assert.Contains("Streams deny subscriptions by default", body, StringComparison.Ordinal);
-        Assert.Contains(nameof(RazorWireStreamAuthorizationMode.AllowAll), body, StringComparison.Ordinal);
-        Assert.Contains(nameof(IRazorWireChannelAuthorizer), body, StringComparison.Ordinal);
+        Assert.Contains("The caller must authenticate before this stream can open", body, StringComparison.Ordinal);
+        Assert.Contains("Authenticate the request in host middleware", body, StringComparison.Ordinal);
+        Assert.Contains(nameof(AppSurfaceAuthOutcome.Challenge), body, StringComparison.Ordinal);
         Assert.DoesNotContain("tenant-secret-42", body, StringComparison.Ordinal);
     }
 
@@ -72,8 +73,218 @@ public class RazorWireEndpointAuthorizationTests
         using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
         var body = await response.Content.ReadAsStringAsync();
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Equal(string.Empty, body);
+    }
+
+    public static TheoryData<AppSurfaceAuthResult, HttpStatusCode, string> ResultDenials =>
+        new()
+        {
+            { AppSurfaceAuthResult.Unauthenticated(), HttpStatusCode.Unauthorized, nameof(AppSurfaceAuthOutcome.Challenge) },
+            { AppSurfaceAuthResult.Forbidden(), HttpStatusCode.Forbidden, nameof(AppSurfaceAuthOutcome.Forbid) },
+            { AppSurfaceAuthResult.MissingPolicy(), HttpStatusCode.InternalServerError, nameof(AppSurfaceAuthOutcome.SetupFailure) },
+            { AppSurfaceAuthResult.MissingServices(), HttpStatusCode.InternalServerError, nameof(AppSurfaceAuthOutcome.SetupFailure) },
+            { AppSurfaceAuthResult.MissingSubject(), HttpStatusCode.InternalServerError, nameof(AppSurfaceAuthOutcome.SetupFailure) },
+            { AppSurfaceAuthResult.UnsafeReturnUrl(), HttpStatusCode.BadRequest, nameof(AppSurfaceAuthOutcome.UnsafeNavigation) },
+            { AppSurfaceAuthResult.StaleOrUnknownSession(), HttpStatusCode.Unauthorized, nameof(AppSurfaceAuthOutcome.StaleOrUnknownSession) }
+        };
+
+    [Theory]
+    [MemberData(nameof(ResultDenials))]
+    public async Task StreamEndpoint_ResultDenial_ReturnsMappedStatusBeforeSseOrSubscribe(
+        AppSurfaceAuthResult result,
+        HttpStatusCode expectedStatus,
+        string expectedOutcome)
+    {
+        var hub = new TrackingStreamHub();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireStreamAuthorizer>(new FixedStreamAuthorizer(result));
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(expectedStatus, response.StatusCode);
+        Assert.NotEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains("Problem:", body, StringComparison.Ordinal);
+        Assert.Contains("Cause:", body, StringComparison.Ordinal);
+        Assert.Contains("Fix:", body, StringComparison.Ordinal);
+        Assert.Contains("Docs: Web/ForgeTrust.RazorWire/Docs/stream-authorization.md", body, StringComparison.Ordinal);
+        Assert.Contains(expectedOutcome, body, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-secret-42", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_ResultAuthorizerPrivacy_OmitsAppMessageMetadataExceptionChannelAndClaims()
+    {
+        var hub = new TrackingStreamHub();
+        var loggerProvider = new CapturingLoggerProvider();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            configureServices: services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireStreamAuthorizer>(
+                    new FixedStreamAuthorizer(
+                        AppSurfaceAuthResult.Forbidden(
+                            message: "token=secret-token-123 and andrew@example.test",
+                            metadata: new Dictionary<string, string>
+                            {
+                                ["return_url"] = "https://evil.example.test/phish?token=secret-token-123"
+                            })));
+            },
+            configureLogging: logging =>
+            {
+                logging.ClearProviders();
+                logging.AddProvider(loggerProvider);
+            },
+            configureApp: app =>
+            {
+                app.Use(async (context, next) =>
+                {
+                    context.User = new ClaimsPrincipal(
+                        new ClaimsIdentity(
+                            [
+                                new Claim(ClaimTypes.NameIdentifier, "user-123"),
+                                new Claim(ClaimTypes.Email, "andrew@example.test")
+                            ],
+                            "TestAuth"));
+
+                    await next();
+                });
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
+        var body = await response.Content.ReadAsStringAsync();
+        var deniedLog = Assert.Single(loggerProvider.Entries, entry => entry.EventId.Id == 13700);
+        var renderedState = string.Join(" ", deniedLog.State.Select(pair => $"{pair.Key}={pair.Value}"));
+        var combined = body + " " + deniedLog.Message + " " + renderedState;
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.DoesNotContain("tenant-secret-42", combined, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token-123", combined, StringComparison.Ordinal);
+        Assert.DoesNotContain("evil.example.test", combined, StringComparison.Ordinal);
+        Assert.DoesNotContain("user-123", combined, StringComparison.Ordinal);
+        Assert.DoesNotContain("andrew@example.test", combined, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_NullResult_FailsClosedBeforeSseOrSubscribe()
+    {
+        var hub = new TrackingStreamHub();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireStreamAuthorizer, NullStreamAuthorizer>();
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/public");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains("NullResult", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_AuthorizerException_FailsClosedAndLogsExceptionTypeOnly()
+    {
+        var hub = new TrackingStreamHub();
+        var loggerProvider = new CapturingLoggerProvider();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            configureServices: services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireStreamAuthorizer, ThrowingStreamAuthorizer>();
+            },
+            configureLogging: logging =>
+            {
+                logging.ClearProviders();
+                logging.AddProvider(loggerProvider);
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/public");
+        var body = await response.Content.ReadAsStringAsync();
+        var entry = Assert.Single(loggerProvider.Entries, log => log.EventId.Id == 13700);
+        var renderedState = string.Join(" ", entry.State.Select(pair => $"{pair.Key}={pair.Value}"));
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains("Exception", body, StringComparison.Ordinal);
+        Assert.Contains(nameof(InvalidOperationException), renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain("exploded secret", entry.Message + renderedState + body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_LegacyAuthorizerFactoryException_FailsClosedAndLogsExceptionTypeOnly()
+    {
+        var hub = new TrackingStreamHub();
+        var loggerProvider = new CapturingLoggerProvider();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            configureServices: services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireChannelAuthorizer>(_ => throw new InvalidOperationException("legacy secret"));
+            },
+            configureLogging: logging =>
+            {
+                logging.ClearProviders();
+                logging.AddProvider(loggerProvider);
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/public");
+        var body = await response.Content.ReadAsStringAsync();
+        var entry = Assert.Single(loggerProvider.Entries, log => log.EventId.Id == 13700);
+        var renderedState = string.Join(" ", entry.State.Select(pair => $"{pair.Key}={pair.Value}"));
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.NotEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains("Exception", body, StringComparison.Ordinal);
+        Assert.Contains(nameof(InvalidOperationException), renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain("legacy secret", entry.Message + renderedState + body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_LegacyAuthorizerMethodException_LogsLegacyAuthorizerType()
+    {
+        var hub = new TrackingStreamHub();
+        var loggerProvider = new CapturingLoggerProvider();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            configureServices: services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireChannelAuthorizer, ThrowingLegacyChannelAuthorizer>();
+            },
+            configureLogging: logging =>
+            {
+                logging.ClearProviders();
+                logging.AddProvider(loggerProvider);
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/public");
+        var body = await response.Content.ReadAsStringAsync();
+        var entry = Assert.Single(loggerProvider.Entries, log => log.EventId.Id == 13700);
+        var renderedState = string.Join(" ", entry.State.Select(pair => $"{pair.Key}={pair.Value}"));
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.NotEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains(nameof(ThrowingLegacyChannelAuthorizer), renderedState, StringComparison.Ordinal);
+        Assert.Contains(nameof(InvalidOperationException), renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain(nameof(RazorWireBoolChannelAuthorizerAdapter), renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain("legacy method secret", entry.Message + renderedState + body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -742,6 +953,30 @@ public class RazorWireEndpointAuthorizationTests
         }
     }
 
+    private sealed class FixedStreamAuthorizer(AppSurfaceAuthResult result) : IRazorWireStreamAuthorizer
+    {
+        public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            return new ValueTask<AppSurfaceAuthResult>(result);
+        }
+    }
+
+    private sealed class NullStreamAuthorizer : IRazorWireStreamAuthorizer
+    {
+        public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            return new ValueTask<AppSurfaceAuthResult>((AppSurfaceAuthResult)null!);
+        }
+    }
+
+    private sealed class ThrowingStreamAuthorizer : IRazorWireStreamAuthorizer
+    {
+        public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            throw new InvalidOperationException("exploded secret");
+        }
+    }
+
     private sealed class CountingAllowAuthorizer : IRazorWireChannelAuthorizer
     {
         private int _callCount;
@@ -752,6 +987,14 @@ public class RazorWireEndpointAuthorizationTests
         {
             Interlocked.Increment(ref _callCount);
             return ValueTask.FromResult(true);
+        }
+    }
+
+    private sealed class ThrowingLegacyChannelAuthorizer : IRazorWireChannelAuthorizer
+    {
+        public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            throw new InvalidOperationException("legacy method secret");
         }
     }
 

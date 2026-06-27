@@ -122,12 +122,12 @@ public sealed class AppSurfaceAuthResult
     public AppSurfaceAuthContext? Context { get; }
 
     /// <summary>
-    /// Gets an optional display-safe message supplied by the host adapter.
+    /// Gets an optional message supplied by the host adapter for that adapter's own display contract.
     /// </summary>
     public string? Message { get; }
 
     /// <summary>
-    /// Gets copied metadata that can help adapters or diagnostics preserve host-specific context.
+    /// Gets copied metadata that can help adapters preserve host-specific context.
     /// </summary>
     public IReadOnlyDictionary<string, string> Metadata { get; }
 
@@ -150,8 +150,8 @@ public sealed class AppSurfaceAuthResult
     /// Creates a result that allows the requested operation.
     /// </summary>
     /// <param name="context">Optional auth context that was evaluated.</param>
-    /// <param name="message">Optional display-safe message supplied by the host adapter.</param>
-    /// <param name="metadata">Optional display or diagnostic metadata copied with ordinal keys.</param>
+    /// <param name="message">Optional message supplied by the host adapter for its own display contract.</param>
+    /// <param name="metadata">Optional metadata copied with ordinal keys.</param>
     /// <returns>An allowed auth result.</returns>
     public static AppSurfaceAuthResult Allowed(
         AppSurfaceAuthContext? context = null,
@@ -170,8 +170,8 @@ public sealed class AppSurfaceAuthResult
     /// Creates a result indicating that the caller should authenticate before retrying.
     /// </summary>
     /// <param name="context">Optional auth context that was evaluated.</param>
-    /// <param name="message">Optional display-safe message supplied by the host adapter.</param>
-    /// <param name="metadata">Optional display or diagnostic metadata copied with ordinal keys.</param>
+    /// <param name="message">Optional message supplied by the host adapter for its own display contract.</param>
+    /// <param name="metadata">Optional metadata copied with ordinal keys.</param>
     /// <returns>A challenge auth result.</returns>
     public static AppSurfaceAuthResult Challenge(
         AppSurfaceAuthContext? context = null,
@@ -190,8 +190,8 @@ public sealed class AppSurfaceAuthResult
     /// Creates a result indicating that the caller is not authenticated.
     /// </summary>
     /// <param name="context">Optional auth context that was evaluated.</param>
-    /// <param name="message">Optional display-safe message supplied by the host adapter.</param>
-    /// <param name="metadata">Optional display or diagnostic metadata copied with ordinal keys.</param>
+    /// <param name="message">Optional message supplied by the host adapter for its own display contract.</param>
+    /// <param name="metadata">Optional metadata copied with ordinal keys.</param>
     /// <returns>A challenge auth result.</returns>
     public static AppSurfaceAuthResult Unauthenticated(
         AppSurfaceAuthContext? context = null,
@@ -205,8 +205,8 @@ public sealed class AppSurfaceAuthResult
     /// Creates a result indicating that the authenticated caller is forbidden.
     /// </summary>
     /// <param name="context">Optional auth context that was evaluated.</param>
-    /// <param name="message">Optional display-safe message supplied by the host adapter.</param>
-    /// <param name="metadata">Optional display or diagnostic metadata copied with ordinal keys.</param>
+    /// <param name="message">Optional message supplied by the host adapter for its own display contract.</param>
+    /// <param name="metadata">Optional metadata copied with ordinal keys.</param>
     /// <returns>A forbidden auth result.</returns>
     public static AppSurfaceAuthResult Forbid(
         AppSurfaceAuthContext? context = null,
@@ -225,8 +225,8 @@ public sealed class AppSurfaceAuthResult
     /// Creates a result indicating that the authenticated caller is forbidden.
     /// </summary>
     /// <param name="context">Optional auth context that was evaluated.</param>
-    /// <param name="message">Optional display-safe message supplied by the host adapter.</param>
-    /// <param name="metadata">Optional display or diagnostic metadata copied with ordinal keys.</param>
+    /// <param name="message">Optional message supplied by the host adapter for its own display contract.</param>
+    /// <param name="metadata">Optional metadata copied with ordinal keys.</param>
     /// <returns>A forbidden auth result.</returns>
     public static AppSurfaceAuthResult Forbidden(
         AppSurfaceAuthContext? context = null,
@@ -240,8 +240,8 @@ public sealed class AppSurfaceAuthResult
     /// Creates a setup-failure result for a missing host-owned policy.
     /// </summary>
     /// <param name="context">Optional auth context that was evaluated.</param>
-    /// <param name="message">Optional display-safe message supplied by the host adapter.</param>
-    /// <param name="metadata">Optional display or diagnostic metadata copied with ordinal keys.</param>
+    /// <param name="message">Optional message supplied by the host adapter for its own display contract.</param>
+    /// <param name="metadata">Optional metadata copied with ordinal keys.</param>
     /// <returns>A setup-failure auth result.</returns>
     public static AppSurfaceAuthResult MissingPolicy(
         AppSurfaceAuthContext? context = null,
@@ -260,8 +260,8 @@ public sealed class AppSurfaceAuthResult
     /// Creates a setup-failure result for missing host-owned auth services.
     /// </summary>
     /// <param name="context">Optional auth context that was evaluated.</param>
-    /// <param name="message">Optional display-safe message supplied by the host adapter.</param>
-    /// <param name="metadata">Optional display or diagnostic metadata copied with ordinal keys.</param>
+    /// <param name="message">Optional message supplied by the host adapter for its own display contract.</param>
+    /// <param name="metadata">Optional metadata copied with ordinal keys.</param>
     /// <returns>A setup-failure auth result.</returns>
     public static AppSurfaceAuthResult MissingServices(
         AppSurfaceAuthContext? context = null,
@@ -280,8 +280,8 @@ public sealed class AppSurfaceAuthResult
     /// Creates a setup-failure result for an authenticated caller that could not be mapped to a stable subject.
     /// </summary>
     /// <param name="context">Optional auth context that was evaluated.</param>
-    /// <param name="message">Optional display-safe message supplied by the host adapter.</param>
-    /// <param name="metadata">Optional display or diagnostic metadata copied with ordinal keys.</param>
+    /// <param name="message">Optional message supplied by the host adapter for its own display contract.</param>
+    /// <param name="metadata">Optional metadata copied with ordinal keys.</param>
     /// <returns>A setup-failure auth result.</returns>
     public static AppSurfaceAuthResult MissingSubject(
         AppSurfaceAuthContext? context = null,
@@ -300,8 +300,8 @@ public sealed class AppSurfaceAuthResult
     /// Creates a result for an unsafe return or navigation target.
     /// </summary>
     /// <param name="context">Optional auth context that was evaluated.</param>
-    /// <param name="message">Optional display-safe message supplied by the host adapter.</param>
-    /// <param name="metadata">Optional display or diagnostic metadata copied with ordinal keys.</param>
+    /// <param name="message">Optional message supplied by the host adapter for its own display contract.</param>
+    /// <param name="metadata">Optional metadata copied with ordinal keys.</param>
     /// <returns>An unsafe-navigation auth result.</returns>
     public static AppSurfaceAuthResult UnsafeReturnUrl(
         AppSurfaceAuthContext? context = null,
@@ -320,8 +320,8 @@ public sealed class AppSurfaceAuthResult
     /// Creates a result for stale, expired, missing, or unresolved session state.
     /// </summary>
     /// <param name="context">Optional auth context that was evaluated.</param>
-    /// <param name="message">Optional display-safe message supplied by the host adapter.</param>
-    /// <param name="metadata">Optional display or diagnostic metadata copied with ordinal keys.</param>
+    /// <param name="message">Optional message supplied by the host adapter for its own display contract.</param>
+    /// <param name="metadata">Optional metadata copied with ordinal keys.</param>
     /// <returns>A stale-or-unknown-session auth result.</returns>
     public static AppSurfaceAuthResult StaleOrUnknownSession(
         AppSurfaceAuthContext? context = null,

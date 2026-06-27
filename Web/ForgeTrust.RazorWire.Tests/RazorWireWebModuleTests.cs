@@ -158,6 +158,7 @@ public class RazorWireWebModuleTests
         var hub = new RecordingRazorWireStreamHub();
         builder.Services.AddSingleton(new RazorWireOptions());
         builder.Services.AddSingleton<IRazorWireChannelAuthorizer, AllowAllRazorWireChannelAuthorizer>();
+        builder.Services.AddSingleton<IRazorWireStreamAuthorizer, RazorWireBoolChannelAuthorizerAdapter>();
         builder.Services.AddSingleton<IRazorWireStreamHub>(hub);
         await using var app = builder.Build();
         var module = new RazorWireWebModule();
@@ -191,6 +192,7 @@ public class RazorWireWebModuleTests
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton(new RazorWireOptions());
         builder.Services.AddSingleton<IRazorWireChannelAuthorizer, AllowAllRazorWireChannelAuthorizer>();
+        builder.Services.AddSingleton<IRazorWireStreamAuthorizer, RazorWireBoolChannelAuthorizerAdapter>();
         builder.Services.AddSingleton<IRazorWireStreamHub, InMemoryRazorWireStreamHub>();
 
         await using var app = builder.Build();

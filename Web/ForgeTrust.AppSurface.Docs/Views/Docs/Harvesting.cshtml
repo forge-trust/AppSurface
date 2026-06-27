@@ -13,7 +13,28 @@
     {
         <rw:stream-source channel="@AppSurfaceDocsStreamAuthorization.HarvestProgressChannel" replay="true"></rw:stream-source>
     }
-    <div id="docs-harvest-observatory">
+    @if (Model.RebuildRequestResult is not null)
+    {
+        var rebuildStatus = Model.RebuildRequestResult switch
+        {
+            AppSurfaceDocsHarvestRebuildRequestResult.Started => "Rebuild started",
+            AppSurfaceDocsHarvestRebuildRequestResult.Queued => "Rebuild queued",
+            AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued => "Rebuild already queued",
+            _ => "Rebuild requested"
+        };
+        var rebuildDescription = Model.RebuildRequestResult switch
+        {
+            AppSurfaceDocsHarvestRebuildRequestResult.Started => "A fresh source-backed docs harvest is running now.",
+            AppSurfaceDocsHarvestRebuildRequestResult.Queued => "A source-backed docs harvest will run after the active harvest finishes.",
+            AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued => "A rebuild was already waiting, so no duplicate harvest was scheduled.",
+            _ => "Watch this page for the current harvest state."
+        };
+        <section class="docs-harvest-request-state" role="status" aria-live="polite">
+            <h2>@rebuildStatus</h2>
+            <p>@rebuildDescription</p>
+        </section>
+    }
+    <div id="docs-harvest-observatory" aria-live="polite" aria-atomic="false" tabindex="-1">
         @AppSurfaceDocsHarvestProgressRenderer.RenderHtml(
             Model.Progress,
             Model.CompletionNavigationDelayMilliseconds)
@@ -28,4 +49,10 @@
     <p class="docs-harvest-return-link">
         <a href="@Model.ReturnUrl">Continue to your docs page</a>
     </p>
+    <noscript>
+        <p class="docs-harvest-live-disabled">
+            JavaScript is disabled. Refresh this page to check the latest harvest state, or continue manually when the
+            snapshot is ready.
+        </p>
+    </noscript>
 </div>

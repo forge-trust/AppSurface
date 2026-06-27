@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Threading.Channels;
+using ForgeTrust.AppSurface.Auth;
 using ForgeTrust.AppSurface.Intelligence;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Antiforgery;
@@ -20,14 +21,8 @@ namespace ForgeTrust.RazorWire;
 /// </summary>
 public static class RazorWireEndpointRouteBuilderExtensions
 {
-    private static readonly EventId StreamSubscriptionDeniedEventId = new(13700, "StreamSubscriptionDenied");
     private static readonly EventId StreamAdmissionRejectedEventId = new(13701, "StreamAdmissionRejected");
     private const string StreamLoggerCategory = "ForgeTrust.RazorWire.Streams";
-    private const string DevelopmentDeniedSubscriptionMessage =
-        "RazorWire denied this stream subscription.\n\n" +
-        "Streams deny subscriptions by default. Set RazorWireOptions.Streams.AuthorizationMode = " +
-        "RazorWireStreamAuthorizationMode.AllowAll only for public or demo streams. Register " +
-        "IRazorWireChannelAuthorizer for user, tenant, or workflow-specific streams.";
 
     /// <summary>
     /// Registers a Server-Sent Events (SSE) GET endpoint at the configured streams base path that streams messages for a named channel.
@@ -79,23 +74,24 @@ public static class RazorWireEndpointRouteBuilderExtensions
                         return;
                     }
 
-                    var authorizer = context.RequestServices.GetRequiredService<IRazorWireChannelAuthorizer>();
-                    if (!await authorizer.CanSubscribeAsync(context, channel))
+                    var streamAuthorizer = context.RequestServices.GetRequiredService<IRazorWireStreamAuthorizer>();
+                    var authorization = await TryAuthorizeStreamAsync(context, options, streamAuthorizer, channel);
+                    if (authorization is null)
                     {
-                        LogDeniedSubscription(
-                            context,
-                            options.Streams.AuthorizationMode,
-                            authorizer.GetType().FullName ?? authorizer.GetType().Name,
-                            channel);
+                        return;
+                    }
 
-                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                        if (IsDevelopment(context))
-                        {
-                            context.Response.ContentType = "text/plain; charset=utf-8";
-                            await context.Response.WriteAsync(
-                                DevelopmentDeniedSubscriptionMessage,
-                                context.RequestAborted);
-                        }
+                    if (!authorization.Result.IsAllowed)
+                    {
+                        var responseMapper = context.RequestServices.GetRequiredService<RazorWireStreamAuthorizationResponseMapper>();
+                        await responseMapper.WriteDeniedAsync(
+                            context,
+                            options,
+                            authorization.Result,
+                            authorization.AuthorizerType,
+                            channel,
+                            authorization.FailureKind,
+                            authorization.ExceptionType);
 
                         return;
                     }
@@ -107,7 +103,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
                             context,
                             options,
                             admissionResult,
-                            authorizer.GetType().FullName ?? authorizer.GetType().Name);
+                            authorization.AuthorizerType);
 
                         return;
                     }
@@ -215,30 +211,69 @@ public static class RazorWireEndpointRouteBuilderExtensions
         return context.RequestServices.GetService<IWebHostEnvironment>()?.IsDevelopment() == true;
     }
 
-    private static void LogDeniedSubscription(
+    private static async ValueTask<RazorWireStreamAuthorizationDecision?> TryAuthorizeStreamAsync(
         HttpContext context,
-        RazorWireStreamAuthorizationMode authorizationMode,
-        string authorizerType,
+        RazorWireOptions options,
+        IRazorWireStreamAuthorizer authorizer,
         string channel)
     {
-        var logger = context.RequestServices.GetService<ILoggerFactory>()?.CreateLogger(StreamLoggerCategory);
-        if (logger is null)
+        var authorizerType = authorizer.GetType().FullName ?? authorizer.GetType().Name;
+        var authorizationContext = new RazorWireStreamAuthorizationContext(
+            context,
+            channel,
+            options.Streams.AuthorizationMode);
+
+        try
         {
-            return;
+            if (authorizer is RazorWireBoolChannelAuthorizerAdapter boolAdapter)
+            {
+                var channelAuthorizer = boolAdapter.ResolveChannelAuthorizer(authorizationContext);
+                authorizerType = RazorWireBoolChannelAuthorizerAdapter.GetAuthorizerType(channelAuthorizer);
+                var boolDecision = await boolAdapter.AuthorizeWithResolvedAuthorizerAsync(
+                    authorizationContext,
+                    channelAuthorizer);
+
+                return new RazorWireStreamAuthorizationDecision(boolDecision.Result, boolDecision.AuthorizerType);
+            }
+
+            var result = await authorizer.AuthorizeAsync(authorizationContext);
+            if (result is not null)
+            {
+                return new RazorWireStreamAuthorizationDecision(result, authorizerType);
+            }
+
+            return new RazorWireStreamAuthorizationDecision(
+                AppSurfaceAuthResult.MissingServices(),
+                authorizerType,
+                "NullResult");
         }
-
-        var environment = context.RequestServices.GetService<IWebHostEnvironment>()?.EnvironmentName ?? "Unknown";
-        var isAuthenticated = context.User?.Identity?.IsAuthenticated == true;
-
-        logger.LogWarning(
-            StreamSubscriptionDeniedEventId,
-            "RazorWire stream subscription denied. Environment: {Environment}; ConfiguredAuthorizationMode: {ConfiguredAuthorizationMode}; AuthorizerType: {AuthorizerType}; IsAuthenticated: {IsAuthenticated}; ChannelLength: {ChannelLength}",
-            environment,
-            authorizationMode,
-            authorizerType,
-            isAuthenticated,
-            channel.Length);
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (OperationCanceledException ex)
+        {
+            return new RazorWireStreamAuthorizationDecision(
+                AppSurfaceAuthResult.MissingServices(),
+                authorizerType,
+                "Canceled",
+                ex.GetType().FullName ?? ex.GetType().Name);
+        }
+        catch (Exception ex)
+        {
+            return new RazorWireStreamAuthorizationDecision(
+                AppSurfaceAuthResult.MissingServices(),
+                authorizerType,
+                "Exception",
+                ex.GetType().FullName ?? ex.GetType().Name);
+        }
     }
+
+    private sealed record RazorWireStreamAuthorizationDecision(
+        AppSurfaceAuthResult Result,
+        string AuthorizerType,
+        string? FailureKind = null,
+        string? ExceptionType = null);
 
     private static async Task RejectAdmissionAsync(
         HttpContext context,

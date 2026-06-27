@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using ForgeTrust.AppSurface.Docs.Services;
 
 namespace ForgeTrust.AppSurface.Docs.Models;
 
@@ -33,10 +34,20 @@ public sealed record AppSurfaceDocsHarvestingViewModel
     /// <remarks>
     /// When this value is <see langword="false"/>, the harvesting view renders the current redacted progress snapshot
     /// and a manual continuation path without emitting a RazorWire stream source. Controllers should compute this from
-    /// the effective runtime <c>IRazorWireChannelAuthorizer</c> so the view matches the stream endpoint's authorization
-    /// decision.
+    /// the effective runtime <c>IRazorWireStreamAuthorizer</c>, with legacy bool authorizer fallback when needed, so the
+    /// view matches the stream endpoint's authorization decision.
     /// </remarks>
     public bool CanUseLiveProgress { get; init; } = true;
+
+    /// <summary>
+    /// Gets the result of the rebuild request that navigated to the observatory, when one is available.
+    /// </summary>
+    /// <remarks>
+    /// Controllers should only assign values produced by <see cref="AppSurfaceDocsHarvestCoordinator.RequestRebuildAsync"/>.
+    /// The harvesting view renders this as non-secret operator feedback; live progress remains the source of truth for
+    /// actual harvest completion.
+    /// </remarks>
+    public AppSurfaceDocsHarvestRebuildRequestResult? RebuildRequestResult { get; init; }
 }
 
 /// <summary>

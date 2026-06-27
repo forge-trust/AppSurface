@@ -42,6 +42,8 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
     [InlineData("/docs/search-index.json", "reserved-route")]
     [InlineData("/docs/search.css", "reserved-route")]
     [InlineData("/docs/search-client.js", "reserved-route")]
+    [InlineData("/docs/_harvest", "reserved-route")]
+    [InlineData("/docs/_harvest/rebuild", "reserved-route")]
     [InlineData("/docs/_health", "reserved-route")]
     [InlineData("/docs/_routes", "reserved-route")]
     [InlineData("/docs/_search-index/refresh", "reserved-route")]
@@ -161,6 +163,7 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
         foreach (var path in new[]
         {
             "/docs/versions/search",
+            "/docs/versions/_harvest/rebuild",
             "/docs/versions/_health",
             "/docs/versions/_search-index/refresh",
             "/docs/versions/1.2.3/_search-index/refresh"

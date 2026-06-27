@@ -429,6 +429,7 @@ function isReservedSearchResultRoute(relativePath: string) {
     'search-client.js',
     'outline-client.js',
     'minisearch.min.js',
+    '_harvest',
     '_health',
     '_health.json',
     '_routes',
@@ -436,7 +437,7 @@ function isReservedSearchResultRoute(relativePath: string) {
     '_search-index',
     'v',
     'versions'
-  ].includes(trimmed) || trimmed.startsWith('_search-index/');
+  ].includes(trimmed) || trimmed.startsWith('_harvest/') || trimmed.startsWith('_search-index/');
 }
 
 function stripArchiveVersionSegment(relativePath: string) {

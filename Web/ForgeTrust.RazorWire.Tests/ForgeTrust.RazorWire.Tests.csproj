@@ -28,6 +28,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth/ForgeTrust.AppSurface.Auth.csproj" />
     <ProjectReference Include="../../Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj" />
     <ProjectReference Include="../ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj" />
   </ItemGroup>

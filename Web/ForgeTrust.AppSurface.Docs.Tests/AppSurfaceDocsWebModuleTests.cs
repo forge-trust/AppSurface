@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using FakeItEasy;
+using ForgeTrust.AppSurface.Auth;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs.Controllers;
@@ -10,6 +11,7 @@ using ForgeTrust.AppSurface.Docs.Standalone;
 using ForgeTrust.AppSurface.Web.Tailwind;
 using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
@@ -98,6 +100,10 @@ public class AppSurfaceDocsWebModuleTests
             services,
             s => s.ServiceType == typeof(IRazorWireChannelAuthorizer)
                  && s.ImplementationFactory is not null);
+        Assert.Contains(
+            services,
+            s => s.ServiceType == typeof(IRazorWireStreamAuthorizer)
+                 && s.ImplementationFactory is not null);
         Assert.Contains(services, s => s.ServiceType == typeof(AppSurfaceDocsHarvestPathPolicy));
         Assert.Contains(
             services,
@@ -124,6 +130,7 @@ public class AppSurfaceDocsWebModuleTests
         Assert.NotNull(serviceProvider.GetRequiredService<RazorWireOptions>());
         Assert.NotNull(serviceProvider.GetRequiredService<IRazorWireStreamHub>());
         Assert.NotNull(serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>());
+        Assert.NotNull(serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>());
         Assert.NotNull(serviceProvider.GetRequiredService<DocAggregator>());
         Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestProgressReporter>());
         Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestCoordinator>());
@@ -517,6 +524,76 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostChannelAuthorizerIsKeyed_DoesNotUseItAsUnkeyedInnerAuthorizer()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddKeyedSingleton<IRazorWireChannelAuthorizer>("host", new AllowAllChannelAuthorizer());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.False(await authorizer.CanSubscribeAsync(context, AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+        Assert.False(await authorizer.CanSubscribeAsync(context, "host-channel"));
+        Assert.IsType<AllowAllChannelAuthorizer>(
+            serviceProvider.GetRequiredKeyedService<IRazorWireChannelAuthorizer>("host"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostStreamAuthorizerIsKeyed_DoesNotUseItAsUnkeyedInnerAuthorizer()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddKeyedSingleton<IRazorWireStreamAuthorizer>("host", new AllowAllStreamAuthorizer());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.Equal(
+            AppSurfaceAuthOutcome.Forbid,
+            (await authorizer.AuthorizeAsync(new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll))).Outcome);
+        Assert.Equal(
+            AppSurfaceAuthOutcome.Forbid,
+            (await authorizer.AuthorizeAsync(new RazorWireStreamAuthorizationContext(
+                context,
+                "host-channel",
+                RazorWireStreamAuthorizationMode.DenyAll))).Outcome);
+        Assert.IsType<AllowAllStreamAuthorizer>(
+            serviceProvider.GetRequiredKeyedService<IRazorWireStreamAuthorizer>("host"));
+    }
+
+    [Fact]
     public async Task AddAppSurfaceDocs_WhenCustomAuthorizerIsRegisteredBeforeDocs_AllowsVisibleHarvestChannel()
     {
         var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
@@ -566,10 +643,181 @@ public class AppSurfaceDocsWebModuleTests
 
         await using var serviceProvider = services.BuildServiceProvider();
         var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
         var context = new DefaultHttpContext { RequestServices = serviceProvider };
 
         Assert.IsType<AllowAllChannelAuthorizer>(authorizer);
         Assert.True(await authorizer.CanSubscribeAsync(context, AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+        Assert.True((await streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed);
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerIsRegisteredBeforeDocs_AllowsVisibleHarvestChannel()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireStreamAuthorizer, AllowAllStreamAuthorizer>();
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var channelAuthorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.True((await streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed);
+        Assert.True(await channelAuthorizer.CanSubscribeAsync(context, AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+        Assert.True(await channelAuthorizer.CanSubscribeAsync(context, "host-channel"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerInstanceIsRegisteredBeforeDocs_AllowsVisibleHarvestChannel()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireStreamAuthorizer>(new AllowAllStreamAuthorizer());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.True((await streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed);
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerFactoryIsRegisteredBeforeDocs_DelegatesToFactoryResult()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireStreamAuthorizer>(_ => new ForbiddenStreamAuthorizer());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        var result = await streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll));
+
+        Assert.Equal(AppSurfaceAuthOutcome.Forbid, result.Outcome);
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerIsRegisteredBeforeDocs_DoesNotResolveLegacyBoolAuthorizer()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireStreamAuthorizer, AllowAllStreamAuthorizer>();
+        services.AddSingleton<IRazorWireChannelAuthorizer>(
+            _ => throw new InvalidOperationException("The legacy bool authorizer should not be resolved."));
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var channelAuthorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.True((await streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed);
+        Assert.True(await channelAuthorizer.CanSubscribeAsync(context, "host-channel"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerIsRegisteredAfterDocs_ReplacesDocsWrapper()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Never"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+        services.AddSingleton<IRazorWireStreamAuthorizer, AllowAllStreamAuthorizer>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.IsType<AllowAllStreamAuthorizer>(streamAuthorizer);
+        Assert.True((await streamAuthorizer.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                context,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+                RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed);
     }
 
     [Fact]
@@ -734,6 +982,8 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("docs/search", routePatterns);
         Assert.Contains("docs/search-index.json", routePatterns);
         Assert.Contains("docs/_search-index/refresh", routePatterns);
+        Assert.Contains("docs/_harvest", routePatterns);
+        Assert.Contains("docs/_harvest/rebuild", routePatterns);
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
         Assert.Contains("docs/_routes", routePatterns);
@@ -754,6 +1004,8 @@ public class AppSurfaceDocsWebModuleTests
 
         var searchIndex = prioritizedPatterns.IndexOf("docs/search");
         var searchIndexRefresh = prioritizedPatterns.IndexOf("docs/_search-index/refresh");
+        var harvestIndex = prioritizedPatterns.IndexOf("docs/_harvest");
+        var harvestRebuildIndex = prioritizedPatterns.IndexOf("docs/_harvest/rebuild");
         var healthIndex = prioritizedPatterns.IndexOf("docs/_health");
         var healthJsonIndex = prioritizedPatterns.IndexOf("docs/_health.json");
         var routeInspectorIndex = prioritizedPatterns.IndexOf("docs/_routes");
@@ -761,6 +1013,8 @@ public class AppSurfaceDocsWebModuleTests
         var catchAllIndex = prioritizedPatterns.IndexOf("docs/{*path}");
         Assert.True(searchIndex >= 0, "Expected docs/search route declaration.");
         Assert.True(searchIndexRefresh >= 0, "Expected docs/_search-index/refresh route declaration.");
+        Assert.True(harvestIndex >= 0, "Expected docs/_harvest route declaration.");
+        Assert.True(harvestRebuildIndex >= 0, "Expected docs/_harvest/rebuild route declaration.");
         Assert.True(healthIndex >= 0, "Expected docs/_health route declaration.");
         Assert.True(healthJsonIndex >= 0, "Expected docs/_health.json route declaration.");
         Assert.True(routeInspectorIndex >= 0, "Expected docs/_routes route declaration.");
@@ -768,10 +1022,57 @@ public class AppSurfaceDocsWebModuleTests
         Assert.True(catchAllIndex >= 0, "Expected docs/{*path} route declaration.");
         Assert.True(searchIndex < catchAllIndex, "docs/search must be prioritized before docs/{*path}.");
         Assert.True(searchIndexRefresh < catchAllIndex, "docs/_search-index/refresh must be prioritized before docs/{*path}.");
+        Assert.True(harvestIndex < catchAllIndex, "docs/_harvest must be prioritized before docs/{*path}.");
+        Assert.True(harvestRebuildIndex < catchAllIndex, "docs/_harvest/rebuild must be prioritized before docs/{*path}.");
         Assert.True(healthIndex < catchAllIndex, "docs/_health must be prioritized before docs/{*path}.");
         Assert.True(healthJsonIndex < catchAllIndex, "docs/_health.json must be prioritized before docs/{*path}.");
         Assert.True(routeInspectorIndex < catchAllIndex, "docs/_routes must be prioritized before docs/{*path}.");
         Assert.True(routeInspectorJsonIndex < catchAllIndex, "docs/_routes.json must be prioritized before docs/{*path}.");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldMapHarvestRebuildWithPostOnlyOperatorRoute()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var rebuildEndpoints = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(endpoint => endpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_harvest/rebuild")
+            .ToList();
+
+        Assert.NotEmpty(rebuildEndpoints);
+        Assert.Contains(
+            rebuildEndpoints,
+            endpoint =>
+            {
+                var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                return methods is not null
+                    && methods.Count == 1
+                    && methods.Contains(HttpMethods.Post);
+            });
+
+        Assert.Contains(
+            rebuildEndpoints,
+            endpoint =>
+            {
+                var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                return methods is not null
+                    && methods.Contains(HttpMethods.Get)
+                    && methods.Contains(HttpMethods.Head)
+                    && methods.Contains(HttpMethods.Put)
+                    && methods.Contains(HttpMethods.Patch)
+                    && methods.Contains(HttpMethods.Delete)
+                    && methods.Contains(HttpMethods.Options)
+                    && !methods.Contains(HttpMethods.Post);
+            });
     }
 
     [Fact]
@@ -817,6 +1118,80 @@ public class AppSurfaceDocsWebModuleTests
                     && methods.Contains(HttpMethods.Options)
                     && !methods.Contains(HttpMethods.Post);
             });
+    }
+
+    [Fact]
+    public async Task HarvestRebuildUnsupportedMethodEndpoint_ShouldReturnMethodNotAllowedAndDisableStatusPages()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var endpoint = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Single(
+                endpoint =>
+                {
+                    var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                    return endpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_harvest/rebuild"
+                        && methods is not null
+                        && methods.Contains(HttpMethods.Get)
+                        && !methods.Contains(HttpMethods.Post);
+                });
+        await using var responseBody = new MemoryStream();
+        var statusCodePages = A.Fake<IStatusCodePagesFeature>();
+        statusCodePages.Enabled = true;
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = responseBody;
+        httpContext.Features.Set(statusCodePages);
+
+        await endpoint.RequestDelegate!(httpContext);
+        await httpContext.Response.StartAsync();
+
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, httpContext.Response.StatusCode);
+        Assert.False(statusCodePages.Enabled);
+        Assert.Equal(DocsUrlBuilder.HarvestRebuildMethod, httpContext.Response.Headers.Allow);
+    }
+
+    [Fact]
+    public async Task HarvestRebuildUnsupportedMethodEndpoint_ShouldReturnMethodNotAllowed_WhenStatusPagesAreAbsent()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var endpoint = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Single(
+                endpoint =>
+                {
+                    var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                    return endpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_harvest/rebuild"
+                        && methods is not null
+                        && methods.Contains(HttpMethods.Get)
+                        && !methods.Contains(HttpMethods.Post);
+                });
+        await using var responseBody = new MemoryStream();
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = responseBody;
+
+        await endpoint.RequestDelegate!(httpContext);
+        await httpContext.Response.StartAsync();
+
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, httpContext.Response.StatusCode);
+        Assert.Equal(DocsUrlBuilder.HarvestRebuildMethod, httpContext.Response.Headers.Allow);
     }
 
     [Fact]
@@ -1180,6 +1555,8 @@ public class AppSurfaceDocsWebModuleTests
 
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_harvest", routePatterns);
+        Assert.Contains("docs/_harvest/rebuild", routePatterns);
         Assert.Contains("docs/_routes", routePatterns);
         Assert.Contains("docs/_routes.json", routePatterns);
     }
@@ -1253,6 +1630,157 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("docs/_health.json", routePatterns);
         Assert.Contains("docs/_routes", routePatterns);
         Assert.Contains("docs/_routes.json", routePatterns);
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldApplyConfiguredHealthAuthorizationPolicyOnlyToHealthRoutes()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    AuthorizationPolicy = "DocsHealthRead"
+                }
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<AppSurfaceDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertHealthAuthorizationPolicy(routeBuilder, "docs/_health", "DocsHealthRead");
+        AssertHealthAuthorizationPolicy(routeBuilder, "docs/_health.json", "DocsHealthRead");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_harvest");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_harvest/rebuild");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_routes");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_routes.json");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_search-index/refresh");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotApplyHealthAuthorizationPolicy_WhenUnset()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health.json");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ConfigureEndpoints_ShouldNotApplyHealthAuthorizationPolicy_WhenPolicyIsBlank(string authorizationPolicy)
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    AuthorizationPolicy = authorizationPolicy
+                }
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<AppSurfaceDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health.json");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotApplyHealthAuthorizationPolicy_WhenHarvestOptionsAreNull()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = null!
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<AppSurfaceDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health.json");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotApplyHealthAuthorizationPolicy_WhenHealthOptionsAreNull()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = null!
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<AppSurfaceDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health.json");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotApplyHealthAuthorizationPolicy_WhenHostEnvironmentIsUnavailable()
+    {
+        var services = new ServiceCollection();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    AuthorizationPolicy = "DocsHealthRead"
+                }
+            }
+        };
+        using var provider = services.BuildServiceProvider();
+
+        var policyName = AppSurfaceDocsWebModule.ResolveHealthAuthorizationPolicyName(options, provider);
+
+        Assert.Null(policyName);
     }
 
     [Fact]
@@ -1337,6 +1865,8 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("docs/next/search", routePatterns);
         Assert.Contains("docs/next/search-index.json", routePatterns);
         Assert.Contains("docs/next/_search-index/refresh", routePatterns);
+        Assert.Contains("docs/next/_harvest", routePatterns);
+        Assert.Contains("docs/next/_harvest/rebuild", routePatterns);
         Assert.Contains("docs/next/_health", routePatterns);
         Assert.Contains("docs/next/_health.json", routePatterns);
         Assert.Contains("docs/next/{*path}", routePatterns);
@@ -1375,6 +1905,8 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("search", routePatterns);
         Assert.Contains("search-index.json", routePatterns);
         Assert.Contains("_search-index/refresh", routePatterns);
+        Assert.Contains("_harvest", routePatterns);
+        Assert.Contains("_harvest/rebuild", routePatterns);
         Assert.Contains("_health", routePatterns);
         Assert.Contains("_health.json", routePatterns);
         Assert.Contains("sections/{sectionSlug}", routePatterns);
@@ -2010,6 +2542,43 @@ public class AppSurfaceDocsWebModuleTests
         return new StartupContext(Array.Empty<string>(), rootModuleFake, "TestApp", envFake);
     }
 
+    private static void AssertHealthAuthorizationPolicy(
+        IEndpointRouteBuilder routeBuilder,
+        string routePattern,
+        string expectedPolicy)
+    {
+        var endpoints = GetRouteEndpoints(routeBuilder, routePattern);
+
+        Assert.NotEmpty(endpoints);
+        Assert.All(
+            endpoints,
+            endpoint =>
+            {
+                var authorizeData = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>();
+                Assert.Contains(authorizeData, metadata => string.Equals(metadata.Policy, expectedPolicy, StringComparison.Ordinal));
+            });
+    }
+
+    private static void AssertNoAuthorizationPolicy(IEndpointRouteBuilder routeBuilder, string routePattern)
+    {
+        var endpoints = GetRouteEndpoints(routeBuilder, routePattern);
+
+        Assert.NotEmpty(endpoints);
+        foreach (var endpoint in endpoints)
+        {
+            Assert.Empty(endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>());
+        }
+    }
+
+    private static IReadOnlyList<RouteEndpoint> GetRouteEndpoints(IEndpointRouteBuilder routeBuilder, string routePattern)
+    {
+        return routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(endpoint => string.Equals(endpoint.RoutePattern.RawText?.TrimStart('/'), routePattern, StringComparison.Ordinal))
+            .ToArray();
+    }
+
     private static string WriteReleaseManifest(string root)
     {
         var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
@@ -2140,6 +2709,22 @@ public class AppSurfaceDocsWebModuleTests
         public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
         {
             return new ValueTask<bool>(false);
+        }
+    }
+
+    private sealed class AllowAllStreamAuthorizer : IRazorWireStreamAuthorizer
+    {
+        public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Allowed());
+        }
+    }
+
+    private sealed class ForbiddenStreamAuthorizer : IRazorWireStreamAuthorizer
+    {
+        public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            return new ValueTask<AppSurfaceAuthResult>(AppSurfaceAuthResult.Forbidden());
         }
     }
 

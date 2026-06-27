@@ -12,6 +12,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Observability package defaults for sending app-side logs, traces, and metrics to Aspire or another OTLP collector.
 - LocalSecrets platform-index self-healing so `appsurface secrets list` no longer surfaces stale names whose stored
   values are missing.
+- The AppSurface CLI now carries the design contract for future authenticated command execution. The design keeps `ForgeTrust.AppSurface.Auth` passive, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the protected command wedge, treats RFC 8628 device flow as one auth method rather than the whole CLI story, and requires secure token-cache boundaries, CI no-prompt behavior, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 - LocalSecrets Linux `secret-tool` resolution now uses trusted system candidates or an explicit absolute override instead
   of executing the first `secret-tool` discovered on `PATH`.
 - `ForgeTrust.AppSurface.Web` now rejects the literal CORS origin wildcard `*` outside Development when AppSurface owns
@@ -22,6 +23,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- Stable package release automation now has a protected NuGet publish gate for annotated `vX.Y.Z` tags, including stable-only package-version validation, trusted-publishing environment checks, fresh smoke-install proof, publish-ledger evidence, and `./eng/release publish --base-ref` support so GitHub Release creation can be tied to the intended source branch after NuGet proof is complete.
 - `examples/auth-web-razorwire-proof` now gives package adopters a five-minute browser proof for `ForgeTrust.AppSurface.Auth.AspNetCore`: one host-owned `OperatorsOnly` policy drives both a Minimal API response and a RazorWire-facing rendered state while all fake auth and persona switching stays sample-local.
 - Added `ExternalSubject`, `AppUserId`, `IAppSurfaceUserIdentityResolver`, `AppSurfaceUserIdentityResolutionContext`, `AppSurfaceUserIdentityResult`, and `AppSurfaceUserIdentityStatus`, with README guidance for uniqueness, idempotency, cancellation, concurrency, PII-safe diagnostics, and ASP.NET Core adapter integration planning.
 - `ForgeTrust.AppSurface.Auth.AspNetCore` documents the new Minimal API policy helper flow, package chooser metadata, safe ProblemDetails failure shape, and when native ASP.NET Core `RequireAuthorization(...)` remains the better choice.
@@ -30,14 +32,19 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Config now exposes a sanitized config audit diff surface. `ConfigAuditReportDiffer` compares two existing `ConfigAuditReport` snapshots without re-resolving providers, `ConfigAuditDiffTextRenderer` renders deterministic same-host or captured-snapshot evidence with redaction uncertainty called out, and `ConfigAuditDiffCommandRunner` gives apps command-framework-agnostic same-host and captured JSON workflows with display-safe problem/cause/fix/docs-link failures.
 - `ForgeTrust.AppSurface.Config.LocalSecrets` hardens the explicit file fallback path. Unix fallback directories are created with `0700` mode bits when missing, existing loose parent directories fail closed instead of being modified in place, and JSON files are written or repaired with `0600` mode bits during `set`, `delete`, and `doctor`; reads reject symbolic-link paths and non-canonical mode bits before returning a secret value. `appsurface secrets doctor --store-file` now treats `ready`, `repaired`, and `degraded` posture diagnostics as doctor-style success while keeping `unsupported` path shapes terminal. This is Unix mode-bit hardening, not Windows ACL hardening or a universal POSIX ACL proof; OS-backed LocalSecrets stores remain the recommended local-development path.
 - AppSurface Observability adds `ForgeTrust.AppSurface.Observability` with module-first OpenTelemetry logging, tracing, and metrics registration, endpoint-driven OTLP exporter setup, service identity resource metadata, and docs for Aspire and non-Aspire adoption paths.
+- AppSurface Docs adds a trusted maintainer harvest rebuild loop: `_health` can render a `Rebuild docs` action, `POST {DocsRootPath}/_harvest/rebuild` starts or queues a full source-backed harvest through `AppSurfaceDocsHarvestCoordinator.RequestRebuildAsync(...)`, and `{DocsRootPath}/_harvest` shows the live observatory before returning to the validated docs/search context.
+- AppSurface Docs health routes now support `AppSurfaceDocs:Harvest:Health:AuthorizationPolicy`, an optional host-owned ASP.NET Core policy for `{DocsRootPath}/_health` and `{DocsRootPath}/_health.json`; route exposure, health read authorization, and operator write authorization remain separate configuration concepts, with broader operator-read diagnostics tracked in forge-trust/AppSurface#578.
 - RazorWire hybrid islands now reject inline `data:` module specifiers from both `client-module`/`data-rw-module` and `window.RazorWireIslandModules`, and also reject protocol-relative `//...` module URLs. Move any prototype inline module such as `data:text/javascript,...` into a served module like `/js/my-island.js` that exports `mount(root, props)`.
 - RazorWire export now owns HTTP redirect handling for artifact-producing fetches, including crawled routes and conventional `404.html` staging. Same-origin redirects remain supported, while redirects outside the configured export origin and base path fail with `RWEXPORT008` before response content is read or written; routes that intentionally point to a different host or app path should be modeled as external references instead of exporter-managed artifacts.
+- RazorWire stream authorization can now return `AppSurfaceAuthResult` through `IRazorWireStreamAuthorizer`, preserving legacy bool authorizers while mapping challenge, forbid, setup failure, unsafe navigation, and stale session outcomes before SSE starts.
 - AppSurface CLI export and docs export now configure the shared RazorWire `ExportEngine` HTTP client with automatic redirects disabled, so `RWEXPORT008` redirect-boundary checks run before artifact response bodies are read or written.
+- RazorWire export now guards generated artifact materialization and AppSurface Docs release archive traversal with `RWEXPORT009`. HTML, CSS, binary assets, `404.html`, docs partials, redirect alias HTML, `_redirects`, frozen route manifests, and release manifests are validated before parent creation, final writes, archive enumeration, metadata reads, or hashing, so symlinks, junctions, reparse points, and lexical output-root escapes are rejected without following them.
 - RazorWire form interactions now give server-rendered apps stable local mechanics for conditional form targets and one-dimensional ASP.NET Core model-bound collections. Use raw `data-rw-*` attributes or the matching TagHelpers to reveal and disable app-owned fields, add rows from an app-authored `__index__` template, duplicate editable values without copying identity/delete/concurrency fields, and choose between physical remove or explicit mark-for-removal.
 - AppSurface LocalSecrets platform-backed stores now validate indexed names against live stored values during
   `appsurface secrets list`. Missing values are pruned from the index when validation and repair succeed, and
   `appsurface secrets delete KEY` repairs a stale indexed name when the value is already gone while preserving
   `local-secret-missing` for keys that never existed.
+- `Cli/ForgeTrust.AppSurface.Cli/docs/authenticated-command-design.md` documents the future CLI auth ladder, including browser/loopback PKCE, RFC 8628 device flow, non-interactive CI tokens, command-gate state, token-cache threat modeling, deterministic auth diagnostics, and follow-up issue slices.
 - AppSurface LocalSecrets now hardens Linux Secret Service command selection. Linux uses `/usr/bin/secret-tool`, then
   `/bin/secret-tool`, or an explicit trusted absolute path through `AppSurfaceLocalSecretsOptions.LinuxSecretToolPath`
   and `appsurface secrets --secret-tool-path`. PATH matches are reported only as ignored diagnostic context, invalid
@@ -50,6 +57,8 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Web CORS startup validation now fails closed before policy registration when non-development
   `CorsOptions.AllowedOrigins` includes the exact literal `*`, while preserving Development all-origin convenience and
   wildcard subdomain origins such as `https://*.example.com`.
+- Package verification tests now keep Tailwind packed-consumer smoke restores out of the user-level NuGet package cache
+  and clean up generated RazorWire ToolVerifier package entries after the tool contract proof completes.
 
 ### AppSurface Flow
 

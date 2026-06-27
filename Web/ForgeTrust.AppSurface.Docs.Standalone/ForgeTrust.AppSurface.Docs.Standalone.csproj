@@ -16,6 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Auth\ForgeTrust.AppSurface.Auth\ForgeTrust.AppSurface.Auth.csproj" />
     <ProjectReference Include="..\ForgeTrust.AppSurface.Docs\ForgeTrust.AppSurface.Docs.csproj" />
   </ItemGroup>
 
