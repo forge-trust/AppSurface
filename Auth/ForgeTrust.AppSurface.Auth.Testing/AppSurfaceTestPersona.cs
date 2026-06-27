@@ -14,7 +14,6 @@ namespace ForgeTrust.AppSurface.Auth.Testing;
 public sealed class AppSurfaceTestPersona
 {
     private readonly Claim[] _claims;
-    private readonly IReadOnlyList<Claim> _claimsView;
 
     /// <summary>
     /// Creates a test persona.
@@ -30,7 +29,6 @@ public sealed class AppSurfaceTestPersona
         Name = name.Trim();
         SubjectId = subjectId.Trim();
         _claims = claims?.Select(CloneClaim).ToArray() ?? [];
-        _claimsView = Array.AsReadOnly(_claims);
     }
 
     /// <summary>
@@ -44,9 +42,9 @@ public sealed class AppSurfaceTestPersona
     public string SubjectId { get; }
 
     /// <summary>
-    /// Gets additional claims copied into the generated principal.
+    /// Gets additional claim snapshots copied into the generated principal.
     /// </summary>
-    public IReadOnlyList<Claim> Claims => _claimsView;
+    public IReadOnlyList<Claim> Claims => Array.AsReadOnly(_claims.Select(CloneClaim).ToArray());
 
     internal IEnumerable<Claim> CreateClaims(string subjectClaimType)
     {

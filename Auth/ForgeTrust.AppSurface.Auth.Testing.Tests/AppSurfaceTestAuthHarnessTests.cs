@@ -699,8 +699,11 @@ public sealed class AppSurfaceTestAuthHarnessTests
         var claim = Assert.Single(persona.Claims);
         Assert.Equal("operator", claim.Value);
         Assert.Equal("original", claim.Properties["evidence"]);
+        claim.Properties["evidence"] = "mutated";
         Assert.Throws<NotSupportedException>(() =>
             ((IList<Claim>)persona.Claims)[0] = new Claim("role", "viewer"));
+        var freshClaim = Assert.Single(persona.Claims);
+        Assert.Equal("original", freshClaim.Properties["evidence"]);
         var generatedClaim = persona.CreateClaims(SubjectClaimType).Single(claim => claim.Type == "role");
         Assert.Equal("operator", generatedClaim.Value);
         Assert.Equal("original", generatedClaim.Properties["evidence"]);
