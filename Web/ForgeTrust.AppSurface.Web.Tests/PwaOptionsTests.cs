@@ -123,6 +123,18 @@ public sealed class PwaOptionsTests
     }
 
     [Fact]
+    public void ThrowIfInvalid_AcceptsStartUrlEqualToScopeWithoutTrailingSlash()
+    {
+        var options = CreateValidOptions();
+        options.StartUrl = "/app";
+        options.Scope = "/app";
+
+        var exception = Record.Exception(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
     public void ThrowIfInvalid_AcceptsSafeEscapedPaths()
     {
         var options = CreateValidOptions();
