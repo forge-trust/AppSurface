@@ -2686,6 +2686,12 @@ public sealed class CoverageGateTests
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        if (arguments.Length > 0 && string.Equals(arguments[0], "commit", StringComparison.Ordinal))
+        {
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add("commit.gpgsign=false");
+        }
+
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
