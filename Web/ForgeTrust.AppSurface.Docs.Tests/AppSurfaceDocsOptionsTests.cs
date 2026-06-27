@@ -56,6 +56,9 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(1, (int)DocHarvestDiagnosticSeverity.Warning);
         Assert.Equal(2, (int)DocHarvestDiagnosticSeverity.Error);
         Assert.Equal(3, (int)DocHarvestDiagnosticSeverity.Critical);
+        Assert.Equal(1, (int)AppSurfaceDocsHarvestRebuildRequestResult.Started);
+        Assert.Equal(2, (int)AppSurfaceDocsHarvestRebuildRequestResult.Queued);
+        Assert.Equal(3, (int)AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued);
     }
 
     [Fact]
@@ -870,6 +873,7 @@ public sealed class AppSurfaceDocsOptionsTests
     [InlineData("search")]
     [InlineData("search-index.json")]
     [InlineData("_search-index")]
+    [InlineData("_harvest")]
     [InlineData("_health")]
     [InlineData("_health.json")]
     [InlineData("_routes")]
@@ -973,6 +977,7 @@ public sealed class AppSurfaceDocsOptionsTests
                 .AddInMemoryCollection(
                     new Dictionary<string, string?>
                     {
+                        ["AppSurfaceDocs:Harvest:Health:AuthorizationPolicy"] = " DocsHealthRead ",
                         ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always",
                         ["AppSurfaceDocs:Harvest:Health:ShowChrome"] = "Never"
                     })
@@ -983,6 +988,7 @@ public sealed class AppSurfaceDocsOptionsTests
         using var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
 
+        Assert.Equal("DocsHealthRead", options.Harvest.Health.AuthorizationPolicy);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
     }
@@ -997,7 +1003,8 @@ public sealed class AppSurfaceDocsOptionsTests
                     new Dictionary<string, string?>
                     {
                         ["AppSurfaceDocs:Diagnostics:ExposeRouteInspector"] = "Always",
-                        ["AppSurfaceDocs:Diagnostics:ShowChrome"] = "Never"
+                        ["AppSurfaceDocs:Diagnostics:ShowChrome"] = "Never",
+                        ["AppSurfaceDocs:Diagnostics:OperatorWritePolicy"] = " DocsWrite "
                     })
                 .Build());
 
@@ -1008,6 +1015,7 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Diagnostics.ShowChrome);
+        Assert.Equal("DocsWrite", options.Diagnostics.OperatorWritePolicy);
     }
 
     [Fact]
@@ -1467,6 +1475,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Contributor);
         Assert.NotNull(options.Localization);
         Assert.False(options.Harvest.FailOnFailure);
+        Assert.Null(options.Harvest.Health.AuthorizationPolicy);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
@@ -1492,11 +1501,13 @@ public sealed class AppSurfaceDocsOptionsTests
 
         var source = new AppSurfaceDocsSourceOptions { RepositoryRoot = " /tmp/configured-root " };
         var harvest = new AppSurfaceDocsHarvestOptions { FailOnFailure = true };
+        harvest.Health.AuthorizationPolicy = " DocsHealthRead ";
         harvest.Health.ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never;
         var diagnostics = new AppSurfaceDocsDiagnosticsOptions
         {
             ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always,
             ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never,
+            OperatorWritePolicy = " DocsWrite ",
             SearchIndexRefreshPolicy = " DocsRefresh "
         };
         var bundle = new AppSurfaceDocsBundleOptions { Path = " /tmp/docs.bundle.json " };
@@ -1553,9 +1564,11 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Same(localization, options.Localization);
         Assert.Equal("/tmp/configured-root", options.Source.RepositoryRoot);
         Assert.True(options.Harvest.FailOnFailure);
+        Assert.Equal("DocsHealthRead", options.Harvest.Health.AuthorizationPolicy);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Diagnostics.ShowChrome);
+        Assert.Equal("DocsWrite", options.Diagnostics.OperatorWritePolicy);
         Assert.Equal("DocsRefresh", options.Diagnostics.SearchIndexRefreshPolicy);
         Assert.Equal("/tmp/docs.bundle.json", options.Bundle.Path);
         Assert.Equal(["Contoso.Product."], options.Sidebar.NamespacePrefixes);
@@ -1653,6 +1666,27 @@ public sealed class AppSurfaceDocsOptionsTests
         var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
 
         Assert.Null(options.Diagnostics.SearchIndexRefreshPolicy);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldNormalizeBlankHarvestHealthAuthorizationPolicyToNull()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:AuthorizationPolicy"] = "   "
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Null(options.Harvest.Health.AuthorizationPolicy);
     }
 
     [Fact]

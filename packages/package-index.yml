@@ -295,8 +295,8 @@ packages:
     release_notes_path: releases/v0.1.0-rc.4.md
     order: 100
     use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, islands, local declarative form interactions, or passive auth-result UI projection without moving to a separate frontend app.
-    includes: RazorWire modules, TagHelpers, stream helpers, Razor fragment updates, hybrid island support, failed-form UX, page navigation, section copy, stable form interactions for conditional targets and one-dimensional model-bound collections, and passive auth projection helpers over ForgeTrust.AppSurface.Auth results.
-    does_not_include: OpenAPI generation, API reference UI, Tailwind asset compilation, ASP.NET Core policy evaluation, authentication schemes, cookies, OIDC, ASP.NET Identity, challenge or forbid execution, DevAuth persona controls, or endpoint authorization.
+    includes: RazorWire modules, TagHelpers, stream helpers, result-bearing stream authorization, Razor fragment updates, hybrid island support, failed-form UX, page navigation, section copy, stable form interactions for conditional targets and one-dimensional model-bound collections, and passive auth projection helpers over ForgeTrust.AppSurface.Auth results.
+    does_not_include: OpenAPI generation, API reference UI, Tailwind asset compilation, ASP.NET Core policy evaluation, authentication schemes, cookies, OIDC, ASP.NET Identity, challenge or forbid execution, redirects, DevAuth persona controls, endpoint authorization, or policy definitions.
     start_here_path: Web/ForgeTrust.RazorWire/README.md
     recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, server-rendered islands, local declarative form interactions, or passive auth-result UI projection.
     depends_on:
@@ -370,6 +370,7 @@ packages:
     start_here_path: Web/ForgeTrust.AppSurface.Docs/README.md
     start_here_label: AppSurface Docs README
     expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Auth
       - ForgeTrust.AppSurface.Caching
       - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Intelligence

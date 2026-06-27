@@ -354,10 +354,14 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// </para>
     /// <para>
     /// The operator-facing diagnostics route patterns are always registered before the catch-all docs route so
-    /// <c>{DocsRootPath}/_health</c>, <c>{DocsRootPath}/_health.json</c>, <c>{DocsRootPath}/_routes</c>, and
-    /// <c>{DocsRootPath}/_routes.json</c> remain reserved operator paths rather than falling through to document lookup.
-    /// The route named <c>appsurfacedocs_harvest_health</c> maps the current docs root health pattern from
-    /// <see cref="DocsUrlBuilder.BuildHealthUrl"/> to <c>DocsController.HarvestHealth</c>, and
+    /// <c>{DocsRootPath}/_harvest</c>, <c>{DocsRootPath}/_harvest/rebuild</c>, <c>{DocsRootPath}/_health</c>,
+    /// <c>{DocsRootPath}/_health.json</c>, <c>{DocsRootPath}/_routes</c>, and <c>{DocsRootPath}/_routes.json</c>
+    /// remain reserved operator paths rather than falling through to document lookup.
+    /// The route named <c>appsurfacedocs_harvest</c> maps the current docs root harvest observatory pattern from
+    /// <see cref="DocsUrlBuilder.BuildHarvestUrl"/> to <c>DocsController.Harvest</c>. The route named
+    /// <c>appsurfacedocs_harvest_rebuild</c> maps <see cref="DocsUrlBuilder.BuildHarvestRebuildUrl"/> to
+    /// <c>DocsController.RebuildHarvest</c>. The route named <c>appsurfacedocs_harvest_health</c> maps the current docs
+    /// root health pattern from <see cref="DocsUrlBuilder.BuildHealthUrl"/> to <c>DocsController.HarvestHealth</c>, and
     /// <c>appsurfacedocs_harvest_health_json</c> maps <see cref="DocsUrlBuilder.BuildHealthJsonUrl"/> to
     /// <c>DocsController.HarvestHealthJson</c>. Route inspector routes map
     /// <see cref="DocsUrlBuilder.BuildRouteInspectorUrl"/> and <see cref="DocsUrlBuilder.BuildRouteInspectorJsonUrl"/>
@@ -460,6 +464,8 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var currentSearchPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchUrl());
         var currentSearchIndexPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchIndexUrl());
         var currentSearchIndexRefreshPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchIndexRefreshUrl());
+        var currentHarvestPattern = TrimLeadingSlash(docsUrlBuilder.BuildHarvestUrl());
+        var currentHarvestRebuildPattern = TrimLeadingSlash(docsUrlBuilder.BuildHarvestRebuildUrl());
         var currentHealthPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthUrl());
         var currentHealthJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthJsonUrl());
         var currentRouteInspectorPattern = TrimLeadingSlash(docsUrlBuilder.BuildRouteInspectorUrl());
@@ -525,6 +531,37 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
 
         endpoints.MapControllerRoute(
+            name: "appsurfacedocs_harvest",
+            pattern: currentHarvestPattern,
+            defaults: new
+            {
+                controller = "Docs",
+                action = "Harvest"
+            });
+
+        endpoints.MapMethods(
+            currentHarvestRebuildPattern,
+            [
+                HttpMethods.Delete,
+                HttpMethods.Get,
+                HttpMethods.Head,
+                HttpMethods.Options,
+                HttpMethods.Patch,
+                HttpMethods.Put
+            ],
+            RejectHarvestRebuildUnsupportedMethodAsync);
+
+        endpoints.MapControllerRoute(
+                name: "appsurfacedocs_harvest_rebuild",
+                pattern: currentHarvestRebuildPattern,
+                defaults: new
+                {
+                    controller = "Docs",
+                    action = "RebuildHarvest"
+                })
+            .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
+
+        var health = endpoints.MapControllerRoute(
             name: "appsurfacedocs_harvest_health",
             pattern: currentHealthPattern,
             defaults: new
@@ -533,7 +570,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 action = "HarvestHealth"
             });
 
-        endpoints.MapControllerRoute(
+        var healthJson = endpoints.MapControllerRoute(
             name: "appsurfacedocs_harvest_health_json",
             pattern: currentHealthJsonPattern,
             defaults: new
@@ -541,6 +578,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "HarvestHealthJson"
             });
+        ApplyHealthAuthorizationPolicy(health, healthJson, docsOptions, endpoints.ServiceProvider);
 
         endpoints.MapControllerRoute(
             name: "appsurfacedocs_route_inspector",
@@ -614,6 +652,49 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "Details"
             });
+    }
+
+    private static void ApplyHealthAuthorizationPolicy(
+        IEndpointConventionBuilder health,
+        IEndpointConventionBuilder healthJson,
+        AppSurfaceDocsOptions docsOptions,
+        IServiceProvider services)
+    {
+        var policyName = ResolveHealthAuthorizationPolicyName(docsOptions, services);
+        if (policyName is null)
+        {
+            return;
+        }
+
+        health.RequireAuthorization(policyName);
+        healthJson.RequireAuthorization(policyName);
+    }
+
+    /// <summary>
+    /// Resolves the effective health-route authorization policy name, or <see langword="null"/> when no policy should be
+    /// applied.
+    /// </summary>
+    /// <remarks>
+    /// Returns <see langword="null"/> when <see cref="AppSurfaceDocsHarvestHealthOptions.AuthorizationPolicy"/> is blank,
+    /// when no <see cref="IWebHostEnvironment"/> is available, or when the health routes are not exposed for the current
+    /// environment. <see cref="ApplyHealthAuthorizationPolicy"/> depends on this ordering so hidden health routes keep
+    /// returning <c>404</c> before authorization metadata is added.
+    /// </remarks>
+    internal static string? ResolveHealthAuthorizationPolicyName(AppSurfaceDocsOptions docsOptions, IServiceProvider services)
+    {
+        var policyName = docsOptions.Harvest?.Health?.AuthorizationPolicy;
+        if (string.IsNullOrWhiteSpace(policyName))
+        {
+            return null;
+        }
+
+        var environment = services.GetService(typeof(IWebHostEnvironment)) as IWebHostEnvironment;
+        if (environment is null || !AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(docsOptions, environment))
+        {
+            return null;
+        }
+
+        return policyName;
     }
 
     private static void MapLegacyAssetRedirect(IEndpointRouteBuilder endpoints, string route, string targetPath)
@@ -729,6 +810,19 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             },
             context);
         context.Response.Headers["Allow"] = DocsUrlBuilder.SearchIndexRefreshMethod;
+        context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+        return Task.CompletedTask;
+    }
+
+    private static Task RejectHarvestRebuildUnsupportedMethodAsync(HttpContext context)
+    {
+        var statusCodePages = context.Features.Get<IStatusCodePagesFeature>();
+        if (statusCodePages is not null)
+        {
+            statusCodePages.Enabled = false;
+        }
+
+        context.Response.Headers["Allow"] = DocsUrlBuilder.HarvestRebuildMethod;
         context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
         return Task.CompletedTask;
     }

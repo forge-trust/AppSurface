@@ -336,6 +336,7 @@
         "type": "Project",
         "dependencies": {
           "Acornima": "[1.6.2, )",
+          "ForgeTrust.AppSurface.Auth": "[0.1.0, )",
           "ForgeTrust.AppSurface.Caching": "[0.1.0, )",
           "ForgeTrust.AppSurface.Config": "[0.1.0, )",
           "ForgeTrust.AppSurface.Intelligence": "[0.1.0, )",
@@ -352,6 +353,7 @@
       "forgetrust.appsurface.docs.standalone": {
         "type": "Project",
         "dependencies": {
+          "ForgeTrust.AppSurface.Auth": "[0.1.0, )",
           "ForgeTrust.AppSurface.Docs": "[0.1.0, )"
         }
       },

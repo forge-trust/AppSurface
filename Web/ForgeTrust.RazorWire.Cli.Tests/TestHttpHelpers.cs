@@ -14,8 +14,11 @@ internal static class TestHttpHelpers
             _responseFactory = responseFactory;
         }
 
+        public List<string> RequestedClientNames { get; } = [];
+
         public HttpClient CreateClient(string name)
         {
+            RequestedClientNames.Add(name);
             return new HttpClient(new StaticHandler(_responseFactory));
         }
     }

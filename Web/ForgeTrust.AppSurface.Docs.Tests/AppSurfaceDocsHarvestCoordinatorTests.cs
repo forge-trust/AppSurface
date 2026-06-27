@@ -222,6 +222,163 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
         Assert.Equal(3, coordinator.CurrentProgress.TotalDocs);
     }
 
+    [Fact]
+    public async Task RequestRebuildAsync_WhenNoHarvestIsActive_StartsImmediately()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        await using var services = new ServiceCollection().BuildServiceProvider();
+        var harvester = new SequencedBlockingHarvester();
+        var coordinator = CreateCoordinator(harvester, cache, services);
+
+        var result = await coordinator.RequestRebuildAsync(CancellationToken.None);
+
+        Assert.Equal(AppSurfaceDocsHarvestRebuildRequestResult.Started, result);
+        await WaitUntilAsync(() => harvester.CallCount == 1);
+        Assert.True(coordinator.HasActiveOrQueuedHarvest);
+
+        harvester.CompleteCall(1, new DocNode("Ready", "README.md", "<p>Ready</p>"));
+
+        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(3), CancellationToken.None));
+        Assert.Equal(1, harvester.CallCount);
+        Assert.False(coordinator.HasActiveOrQueuedHarvest);
+        Assert.Equal(AppSurfaceDocsHarvestRunState.Completed, coordinator.CurrentProgress.State);
+    }
+
+    [Fact]
+    public async Task RequestRebuildAsync_WhenHarvestIsActive_QueuesOneSupersedingRun()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        await using var services = new ServiceCollection().BuildServiceProvider();
+        var harvester = new SequencedBlockingHarvester();
+        var coordinator = CreateCoordinator(harvester, cache, services);
+
+        Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
+        await WaitUntilAsync(() => harvester.CallCount == 1);
+
+        var queued = await coordinator.RequestRebuildAsync(CancellationToken.None);
+        var alreadyQueued = await coordinator.RequestRebuildAsync(CancellationToken.None);
+
+        Assert.Equal(AppSurfaceDocsHarvestRebuildRequestResult.Queued, queued);
+        Assert.Equal(AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued, alreadyQueued);
+        Assert.True(coordinator.HasActiveOrQueuedHarvest);
+
+        harvester.CompleteCall(1, new DocNode("First", "first.md", "<p>First</p>"));
+        await WaitUntilAsync(() => harvester.CallCount == 2);
+
+        harvester.CompleteCall(2, new DocNode("Second", "second.md", "<p>Second</p>"));
+
+        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(3), CancellationToken.None));
+        Assert.Equal(2, harvester.CallCount);
+        Assert.Equal(1, coordinator.CurrentProgress.TotalDocs);
+        Assert.Equal(AppSurfaceDocsHarvestRunState.Completed, coordinator.CurrentProgress.State);
+    }
+
+    [Fact]
+    public async Task RequestRebuildAsync_WhenActiveRunFailsStillStartsQueuedRebuild()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        await using var services = new ServiceCollection().BuildServiceProvider();
+        var harvester = new SequencedBlockingHarvester();
+        var coordinator = CreateCoordinator(harvester, cache, services);
+
+        Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
+        await WaitUntilAsync(() => harvester.CallCount == 1);
+        Assert.Equal(AppSurfaceDocsHarvestRebuildRequestResult.Queued, await coordinator.RequestRebuildAsync(CancellationToken.None));
+
+        harvester.FailCall(1, new InvalidOperationException("first run failed"));
+        await WaitUntilAsync(() => harvester.CallCount == 2);
+        harvester.CompleteCall(2, new DocNode("Recovered", "README.md", "<p>Recovered</p>"));
+
+        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(3), CancellationToken.None));
+        Assert.Equal(2, harvester.CallCount);
+        Assert.Equal(AppSurfaceDocsHarvestRunState.Completed, coordinator.CurrentProgress.State);
+    }
+
+    [Fact]
+    public async Task RequestRebuildAsync_WhenActiveRunFaultsStillStartsQueuedRebuild()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        await using var services = new ServiceCollection().BuildServiceProvider();
+        var harvester = new SequencedBlockingHarvester();
+        var sanitizer = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
+        var sanitizeCalls = 0;
+        A.CallTo(() => sanitizer.Sanitize(A<string>._))
+            .ReturnsLazily(
+                (string value) =>
+                {
+                    if (Interlocked.Increment(ref sanitizeCalls) == 1)
+                    {
+                        throw new InvalidOperationException("sanitizer failed");
+                    }
+
+                    return value;
+                });
+        var coordinator = CreateCoordinator(
+            harvester,
+            cache,
+            services,
+            sanitizer);
+
+        Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
+        await WaitUntilAsync(() => harvester.CallCount == 1);
+        Assert.Equal(AppSurfaceDocsHarvestRebuildRequestResult.Queued, await coordinator.RequestRebuildAsync(CancellationToken.None));
+
+        harvester.CompleteCall(1, new DocNode("First", "first.md", "<p>First</p>"));
+        await WaitUntilAsync(() => harvester.CallCount == 2);
+        harvester.CompleteCall(2, new DocNode("Recovered", "README.md", "<p>Recovered</p>"));
+
+        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(3), CancellationToken.None));
+        Assert.Equal(2, harvester.CallCount);
+        Assert.Equal(AppSurfaceDocsHarvestRunState.Completed, coordinator.CurrentProgress.State);
+    }
+
+    [Fact]
+    public async Task RequestRebuildAsync_WhenManyPostsRace_QueuesOnlyOneRebuild()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        await using var services = new ServiceCollection().BuildServiceProvider();
+        var harvester = new SequencedBlockingHarvester();
+        var coordinator = CreateCoordinator(harvester, cache, services);
+
+        Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
+        await WaitUntilAsync(() => harvester.CallCount == 1);
+
+        using var gate = new ManualResetEventSlim(false);
+        var requests = Enumerable.Range(0, 20)
+            .Select(_ => Task.Run(
+                async () =>
+                {
+                    gate.Wait();
+                    return await coordinator.RequestRebuildAsync(CancellationToken.None);
+                }))
+            .ToArray();
+        gate.Set();
+        var results = await Task.WhenAll(requests);
+
+        Assert.Equal(1, results.Count(result => result == AppSurfaceDocsHarvestRebuildRequestResult.Queued));
+        Assert.Equal(19, results.Count(result => result == AppSurfaceDocsHarvestRebuildRequestResult.AlreadyQueued));
+
+        harvester.CompleteCall(1, new DocNode("First", "first.md", "<p>First</p>"));
+        await WaitUntilAsync(() => harvester.CallCount == 2);
+        harvester.CompleteCall(2, new DocNode("Second", "second.md", "<p>Second</p>"));
+
+        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(3), CancellationToken.None));
+        Assert.Equal(2, harvester.CallCount);
+    }
+
+    [Theory]
+    [InlineData(typeof(InvalidOperationException), false)]
+    [InlineData(typeof(OperationCanceledException), false)]
+    [InlineData(typeof(OutOfMemoryException), true)]
+    [InlineData(typeof(StackOverflowException), true)]
+    [InlineData(typeof(AccessViolationException), true)]
+    public void IsFatalHarvestException_ShouldClassifyProcessFatalFailures(Type exceptionType, bool expected)
+    {
+        var exception = (Exception)Activator.CreateInstance(exceptionType)!;
+
+        Assert.Equal(expected, AppSurfaceDocsHarvestCoordinator.IsFatalHarvestException(exception));
+    }
+
     private static AppSurfaceDocsHarvestCoordinator CreateCoordinator(
         IDocHarvester harvester,
         IMemoryCache cache,
@@ -304,6 +461,52 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
         public void Complete(params DocNode[] docs)
         {
             _completed.TrySetResult(docs);
+        }
+    }
+
+    private sealed class SequencedBlockingHarvester : IDocHarvester
+    {
+        private readonly object _gate = new();
+        private readonly List<TaskCompletionSource<IReadOnlyList<DocNode>>> _calls = [];
+
+        public int CallCount
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _calls.Count;
+                }
+            }
+        }
+
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
+        {
+            var completion = new TaskCompletionSource<IReadOnlyList<DocNode>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_gate)
+            {
+                _calls.Add(completion);
+            }
+
+            return completion.Task;
+        }
+
+        public void CompleteCall(int callNumber, params DocNode[] docs)
+        {
+            GetCall(callNumber).TrySetResult(docs);
+        }
+
+        public void FailCall(int callNumber, Exception exception)
+        {
+            GetCall(callNumber).TrySetException(exception);
+        }
+
+        private TaskCompletionSource<IReadOnlyList<DocNode>> GetCall(int callNumber)
+        {
+            lock (_gate)
+            {
+                return _calls[callNumber - 1];
+            }
         }
     }
 

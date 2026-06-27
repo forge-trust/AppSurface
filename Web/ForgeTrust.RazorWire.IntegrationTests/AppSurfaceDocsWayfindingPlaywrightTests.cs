@@ -1645,15 +1645,20 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
 
         Assert.Equal(expectedUrl, await page.InputValueAsync("[data-rw-section-copy-fallback='true'] input"));
         await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
-        Assert.True(await page.Locator("[data-rw-section-copy-fallback='true']").EvaluateAsync<bool>(
+        await page.WaitForFunctionAsync(
             """
-            fallback => {
+            () => {
+              const fallback = document.querySelector("[data-rw-section-copy-fallback='true']");
+              if (!fallback) {
+                return false;
+              }
+
               const input = fallback.querySelector("input");
               return document.activeElement === input
                 && input.selectionStart === 0
                 && input.selectionEnd === input.value.length;
             }
-            """));
+            """);
 
         await page.ClickAsync("[data-rw-section-copy-fallback='true'] input");
         Assert.Equal(1, await page.Locator("[data-rw-section-copy-fallback='true']").CountAsync());

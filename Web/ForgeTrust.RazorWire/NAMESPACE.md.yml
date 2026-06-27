@@ -27,6 +27,12 @@ entry_points:
     keywords:
       - configuration
       - options
+  - label: IRazorWireStreamAuthorizer
+    summary: Return passive AppSurface auth results for stream subscriptions before RazorWire opens SSE.
+    href: /docs/web/forgetrust.razorwire/docs/stream-authorization
+    keywords:
+      - stream authorization
+      - AppSurfaceAuthResult
   - label: RazorWireWebModule
     summary: Use the AppSurface module when you want package registration and endpoint mapping through module conventions.
     target: ForgeTrust-RazorWire-RazorWireWebModule

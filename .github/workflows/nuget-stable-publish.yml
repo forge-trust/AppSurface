@@ -1,0 +1,336 @@
+name: NuGet Stable Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: nuget-stable-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  STABLE_BASE_REF: main
+
+jobs:
+  validate-tag:
+    if: ${{ github.repository == 'forge-trust/AppSurface' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      package-version: ${{ steps.tag.outputs.package-version }}
+      tag-commit: ${{ steps.tag.outputs.tag-commit }}
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate stable tag
+        id: tag
+        run: |
+          set -euo pipefail
+
+          tag_name="${GITHUB_REF_NAME}"
+          tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [[ ! "${tag_name}" =~ ${tag_pattern} ]]; then
+            echo "Tag '${tag_name}' must match v<major>.<minor>.<patch> for stable publishing." >&2
+            exit 1
+          fi
+
+          git fetch --force origin "refs/tags/${tag_name}:refs/tags/${tag_name}"
+          tag_type="$(git cat-file -t "refs/tags/${tag_name}")"
+          if [[ "${tag_type}" != "tag" ]]; then
+            echo "Stable publish requires an annotated tag. '${tag_name}' is ${tag_type}." >&2
+            exit 1
+          fi
+
+          tag_commit="$(git rev-parse "refs/tags/${tag_name}^{commit}")"
+          git fetch origin "${STABLE_BASE_REF}:refs/remotes/origin/${STABLE_BASE_REF}"
+          if ! git merge-base --is-ancestor "${tag_commit}" "origin/${STABLE_BASE_REF}"; then
+            echo "Tag '${tag_name}' resolves to ${tag_commit}, which is not reachable from origin/${STABLE_BASE_REF}." >&2
+            exit 1
+          fi
+
+          {
+            echo "package-version=${tag_name#v}"
+            echo "tag-commit=${tag_commit}"
+          } >> "${GITHUB_OUTPUT}"
+
+  validate-release-environment:
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      deployments: read
+
+    steps:
+      - name: Validate protected NuGet environments
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if ! environment_json="$(gh api "repos/${GITHUB_REPOSITORY}/environments/nuget-stable")"; then
+            echo "Environment 'nuget-stable' must exist before stable publishing can run." >&2
+            exit 1
+          fi
+
+          required_reviewer_rules="$(jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length' <<< "${environment_json}")"
+          prevent_self_review_rules="$(jq '[.protection_rules[]? | select(.type == "required_reviewers" and .prevent_self_review == true)] | length' <<< "${environment_json}")"
+
+          if [[ "${required_reviewer_rules}" -lt 1 ]]; then
+            echo "Environment 'nuget-stable' must exist with required reviewers before stable publishing can run." >&2
+            exit 1
+          fi
+
+          if [[ "${prevent_self_review_rules}" -lt 1 ]]; then
+            echo "Environment 'nuget-stable' must prevent self-review before stable publishing can run." >&2
+            exit 1
+          fi
+
+          if ! smoke_environment_json="$(gh api "repos/${GITHUB_REPOSITORY}/environments/nuget-stable-smoke")"; then
+            echo "Environment 'nuget-stable-smoke' must exist before stable smoke install can run." >&2
+            exit 1
+          fi
+
+          smoke_wait_timer_rules="$(jq '[.protection_rules[]? | select(.type == "wait_timer" and .wait_timer == 25)] | length' <<< "${smoke_environment_json}")"
+          smoke_required_reviewer_rules="$(jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length' <<< "${smoke_environment_json}")"
+
+          if [[ "${smoke_wait_timer_rules}" -lt 1 ]]; then
+            echo "Environment 'nuget-stable-smoke' must enforce a 25-minute wait timer before stable smoke install can run." >&2
+            exit 1
+          fi
+
+          if [[ "${smoke_required_reviewer_rules}" -gt 0 ]]; then
+            echo "Environment 'nuget-stable-smoke' must not require reviewers before stable smoke install can run." >&2
+            exit 1
+          fi
+
+  validate-source-ci:
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Required so gh run list can verify source CI for the tag commit.
+      actions: read
+      contents: read
+
+    steps:
+      - name: Validate source workflows succeeded
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_COMMIT: ${{ needs.validate-tag.outputs.tag-commit }}
+        run: |
+          set -euo pipefail
+
+          for workflow in build.yml package-gate.yml; do
+            run_url="$(gh run list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --workflow "${workflow}" \
+              --branch "${STABLE_BASE_REF}" \
+              --commit "${TAG_COMMIT}" \
+              --json conclusion,status,url \
+              --jq '[.[] | select(.status == "completed" and .conclusion == "success")][0].url // ""')"
+
+            if [[ -z "${run_url}" ]]; then
+              echo "Required workflow '${workflow}' has no successful completed run for ${TAG_COMMIT} on ${STABLE_BASE_REF}." >&2
+              exit 1
+            fi
+
+            echo "Validated ${workflow}: ${run_url}"
+          done
+
+  pack-and-verify:
+    needs:
+      - validate-tag
+      - validate-source-ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout tag commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag-commit }}
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 11.1.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Verify web assets
+        run: |
+          pnpm --dir Web install --frozen-lockfile
+          pnpm --dir Web run assets:typecheck
+          pnpm --dir Web run assets:test
+          pnpm --dir Web run assets:verify
+
+      - name: Verify package artifacts
+        env:
+          PACKAGE_VERSION: ${{ needs.validate-tag.outputs.package-version }}
+          PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+            verify-packages \
+            --package-version "${PACKAGE_VERSION}" \
+            --artifacts-output "${PACKAGE_ARTIFACTS}" \
+            --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.json" \
+            --report "${PACKAGE_ARTIFACTS}/package-validation-report.md"
+
+      - name: Upload package validation diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appsurface-stable-validation-diagnostics-${{ needs.validate-tag.outputs.package-version }}
+          path: |
+            ${{ runner.temp }}/package-artifacts/package-validation-report.md
+            ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof.md
+            ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/NuGet.tool.config
+            ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/consumer/NuGet.config
+            ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/consumer/.config/dotnet-tools.json
+            ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/consumer/TestResults/**
+            ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/logs/**
+          if-no-files-found: warn
+
+      - name: Upload validated package artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appsurface-stable-packages-${{ needs.validate-tag.outputs.package-version }}
+          path: ${{ runner.temp }}/package-artifacts
+          if-no-files-found: error
+
+  publish-nuget:
+    needs:
+      - validate-tag
+      - validate-release-environment
+      - pack-and-verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Required for NuGet trusted publishing to request an OIDC token.
+      id-token: write
+    environment: nuget-stable
+
+    steps:
+      - name: Checkout tag commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag-commit }}
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Download validated package artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: appsurface-stable-packages-${{ needs.validate-tag.outputs.package-version }}
+          path: ${{ runner.temp }}/package-artifacts
+
+      - name: Validate NuGet trusted publishing configuration
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${NUGET_USER}" ]]; then
+            echo "Environment or repository variable 'NUGET_USER' must contain the nuget.org profile name used by the trusted publishing policy." >&2
+            exit 1
+          fi
+
+      - name: Request NuGet trusted publishing token
+        id: nuget-login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish packages to NuGet
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+          PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+            publish-stable \
+            --artifacts-input "${PACKAGE_ARTIFACTS}" \
+            --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.json" \
+            --publish-log "${PACKAGE_ARTIFACTS}/package-publish-log.md"
+
+      - name: Upload publish ledger
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appsurface-stable-publish-log-${{ needs.validate-tag.outputs.package-version }}
+          path: ${{ runner.temp }}/package-artifacts/package-publish-log.md
+          if-no-files-found: warn
+
+  smoke-install:
+    needs:
+      - validate-tag
+      - publish-nuget
+    runs-on: ubuntu-latest
+    environment:
+      name: nuget-stable-smoke
+      deployment: false
+    timeout-minutes: 70
+
+    steps:
+      - name: Checkout tag commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag-commit }}
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Download validated package artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: appsurface-stable-packages-${{ needs.validate-tag.outputs.package-version }}
+          path: ${{ runner.temp }}/package-artifacts
+
+      - name: Smoke install published packages
+        env:
+          PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+          SMOKE_WORK_DIR: ${{ runner.temp }}/package-smoke
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+            smoke-install \
+            --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.json" \
+            --smoke-work-dir "${SMOKE_WORK_DIR}" \
+            --smoke-report "${SMOKE_WORK_DIR}/package-smoke-report.md"
+
+      - name: Upload smoke install report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appsurface-stable-smoke-${{ needs.validate-tag.outputs.package-version }}
+          path: ${{ runner.temp }}/package-smoke/package-smoke-report.md
+          if-no-files-found: warn

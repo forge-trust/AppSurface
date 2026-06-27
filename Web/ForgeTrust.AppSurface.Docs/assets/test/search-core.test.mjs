@@ -402,10 +402,13 @@ test('validateSearchResultPath rejects executable, off-root, reserved, and encod
     ['/docs/search', 'reserved-route'],
     ['/docs/search-index.json', 'reserved-route'],
     ['/docs/search-client.js', 'reserved-route'],
+    ['/docs/_harvest', 'reserved-route'],
+    ['/docs/_harvest/rebuild', 'reserved-route'],
     ['/docs/_search-index/refresh', 'reserved-route'],
     ['/docs/v/9.9.9/guide.html', 'reserved-route'],
     ['/docs/versions/1.2.3/guide.html', 'reserved-route'],
     ['/docs/versions/search', 'reserved-route'],
+    ['/docs/versions/_harvest/rebuild', 'reserved-route'],
     ['/docs/versions/_health', 'reserved-route'],
     ['/docs/versions/_search-index/refresh', 'reserved-route'],
     ['/docs/versions/1.2.3/_search-index/refresh', 'reserved-route'],
@@ -427,6 +430,7 @@ test('validateSearchResultPath rejects executable, off-root, reserved, and encod
   for (const [path, reason] of cases) {
     const options = [
       '/docs/versions/search',
+      '/docs/versions/_harvest/rebuild',
       '/docs/versions/_health',
       '/docs/versions/_search-index/refresh',
       '/docs/versions/1.2.3/_search-index/refresh'

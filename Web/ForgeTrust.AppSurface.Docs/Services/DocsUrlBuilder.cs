@@ -34,6 +34,11 @@ public sealed class DocsUrlBuilder
     /// </summary>
     public const string SearchIndexRefreshMethod = "POST";
 
+    /// <summary>
+    /// Gets the HTTP method required by the live docs harvest rebuild route.
+    /// </summary>
+    public const string HarvestRebuildMethod = "POST";
+
     private readonly string _currentDocsRootPath;
     private readonly string _routeRootPath;
     private readonly string _docsVersionPrefixPath;
@@ -61,6 +66,8 @@ public sealed class DocsUrlBuilder
             SearchIndex = BuildSearchIndexUrl(),
             SearchIndexRefresh = BuildSearchIndexRefreshUrl(),
             Versions = BuildVersionsUrl(),
+            Harvest = BuildHarvestUrl(),
+            HarvestRebuild = BuildHarvestRebuildUrl(),
             Health = BuildHealthUrl(),
             HealthJson = BuildHealthJsonUrl(),
             RouteInspector = BuildRouteInspectorUrl(),
@@ -160,6 +167,28 @@ public sealed class DocsUrlBuilder
     public string BuildSearchIndexRefreshUrl()
     {
         return JoinPath(_currentDocsRootPath, "_search-index/refresh");
+    }
+
+    /// <summary>
+    /// Builds the current live docs harvest observatory URL.
+    /// </summary>
+    /// <returns>The app-relative operator harvest observatory URL for the current docs surface.</returns>
+    public string BuildHarvestUrl()
+    {
+        return JoinPath(_currentDocsRootPath, "_harvest");
+    }
+
+    /// <summary>
+    /// Builds the current live docs harvest rebuild URL.
+    /// </summary>
+    /// <returns>
+    /// The app-relative operator rebuild route for the current docs harvest. Callers must send
+    /// <see cref="HarvestRebuildMethod"/> with a valid MVC anti-forgery token and satisfy the host-configured
+    /// AppSurface Docs operator-write policy.
+    /// </returns>
+    public string BuildHarvestRebuildUrl()
+    {
+        return JoinPath(_currentDocsRootPath, "_harvest/rebuild");
     }
 
     /// <summary>
@@ -481,6 +510,8 @@ public sealed class DocsUrlBuilder
                || string.Equals(path, "/search", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search-index.json", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/_search-index/refresh", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(path, "/_harvest", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(path, "/_harvest/rebuild", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/_health", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/_health.json", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/_routes", StringComparison.OrdinalIgnoreCase)
@@ -642,12 +673,55 @@ public sealed record AppSurfaceDocsRouteReferences
         string healthJson,
         string routeInspector,
         string routeInspectorJson)
+        : this(
+            home,
+            search,
+            searchIndex,
+            searchIndexRefresh,
+            versions,
+            string.Empty,
+            string.Empty,
+            health,
+            healthJson,
+            routeInspector,
+            routeInspectorJson)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsRouteReferences"/> record with all known routes.
+    /// </summary>
+    /// <param name="home">The current live docs home route.</param>
+    /// <param name="search">The current live docs search workspace route.</param>
+    /// <param name="searchIndex">The current live docs search-index JSON route.</param>
+    /// <param name="searchIndexRefresh">The authenticated search-index refresh route.</param>
+    /// <param name="versions">The route-family archive route.</param>
+    /// <param name="harvest">The current live docs harvest observatory route.</param>
+    /// <param name="harvestRebuild">The authenticated harvest rebuild route.</param>
+    /// <param name="health">The current live docs harvest health HTML route.</param>
+    /// <param name="healthJson">The current live docs harvest health JSON route.</param>
+    /// <param name="routeInspector">The current live docs route inspector HTML route.</param>
+    /// <param name="routeInspectorJson">The current live docs route inspector JSON route.</param>
+    public AppSurfaceDocsRouteReferences(
+        string home,
+        string search,
+        string searchIndex,
+        string searchIndexRefresh,
+        string versions,
+        string harvest,
+        string harvestRebuild,
+        string health,
+        string healthJson,
+        string routeInspector,
+        string routeInspectorJson)
     {
         Home = home;
         Search = search;
         SearchIndex = searchIndex;
         SearchIndexRefresh = searchIndexRefresh;
         Versions = versions;
+        Harvest = harvest;
+        HarvestRebuild = harvestRebuild;
         Health = health;
         HealthJson = healthJson;
         RouteInspector = routeInspector;
@@ -678,6 +752,21 @@ public sealed record AppSurfaceDocsRouteReferences
     /// Gets the HTTP method callers must use with <see cref="SearchIndexRefresh"/>.
     /// </summary>
     public string SearchIndexRefreshMethod { get; init; } = DocsUrlBuilder.SearchIndexRefreshMethod;
+
+    /// <summary>
+    /// Gets the current live docs harvest observatory route.
+    /// </summary>
+    public string Harvest { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the authenticated harvest rebuild route.
+    /// </summary>
+    public string HarvestRebuild { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the HTTP method callers must use with <see cref="HarvestRebuild"/>.
+    /// </summary>
+    public string HarvestRebuildMethod { get; init; } = DocsUrlBuilder.HarvestRebuildMethod;
 
     /// <summary>
     /// Gets the route-family archive route, whether or not versioning endpoints are currently enabled.
@@ -792,6 +881,46 @@ public sealed record AppSurfaceDocsRouteReferences
         searchIndex = SearchIndex;
         searchIndexRefresh = SearchIndexRefresh;
         versions = Versions;
+        health = Health;
+        healthJson = HealthJson;
+        routeInspector = RouteInspector;
+        routeInspectorJson = RouteInspectorJson;
+    }
+
+    /// <summary>
+    /// Deconstructs all known routes including harvest rebuild and diagnostics routes.
+    /// </summary>
+    /// <param name="home">The current live docs home route.</param>
+    /// <param name="search">The current live docs search workspace route.</param>
+    /// <param name="searchIndex">The current live docs search-index JSON route.</param>
+    /// <param name="searchIndexRefresh">The authenticated search-index refresh route.</param>
+    /// <param name="versions">The route-family archive route.</param>
+    /// <param name="harvest">The current live docs harvest observatory route.</param>
+    /// <param name="harvestRebuild">The authenticated harvest rebuild route.</param>
+    /// <param name="health">The current live docs harvest health HTML route.</param>
+    /// <param name="healthJson">The current live docs harvest health JSON route.</param>
+    /// <param name="routeInspector">The current live docs route inspector HTML route.</param>
+    /// <param name="routeInspectorJson">The current live docs route inspector JSON route.</param>
+    public void Deconstruct(
+        out string home,
+        out string search,
+        out string searchIndex,
+        out string searchIndexRefresh,
+        out string versions,
+        out string harvest,
+        out string harvestRebuild,
+        out string health,
+        out string healthJson,
+        out string routeInspector,
+        out string routeInspectorJson)
+    {
+        home = Home;
+        search = Search;
+        searchIndex = SearchIndex;
+        searchIndexRefresh = SearchIndexRefresh;
+        versions = Versions;
+        harvest = Harvest;
+        harvestRebuild = HarvestRebuild;
         health = Health;
         healthJson = HealthJson;
         routeInspector = RouteInspector;

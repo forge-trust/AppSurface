@@ -16,7 +16,8 @@ internal sealed record ReleaseOptions(
     string? ReportPath,
     string? GitHubOutputPath,
     bool FailOnWarnings,
-    bool AllowExistingTargets);
+    bool AllowExistingTargets,
+    string BaseRef = "main");
 
 /// <summary>
 /// Minimal SemVer 2.0 model used by release automation.

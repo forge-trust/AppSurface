@@ -223,6 +223,8 @@ Use AppSurface auth contracts when an AppSurface module needs to describe a user
 
 Use `ExternalSubject`, `AppUserId`, and `IAppSurfaceUserIdentityResolver` when a host-authenticated subject must be mapped to durable app-owned user state. Keep persistence, provisioning policy, tenant authority, and permission checks in the consuming app.
 
+For future CLI authentication, see the [AppSurface CLI authenticated command design](../../Cli/ForgeTrust.AppSurface.Cli/docs/authenticated-command-design.md). CLI auth remains outside this package until the command-gate, token-cache, and non-interactive auth contracts prove which pieces are genuinely surface-neutral.
+
 ## ASP.NET Core Adapter
 
 Use [`ForgeTrust.AppSurface.Auth.AspNetCore`](../ForgeTrust.AppSurface.Auth.AspNetCore/README.md) when an ASP.NET Core host already owns authentication and authorization, but AppSurface-aware code needs mapped request context or named host-policy results.
