@@ -224,11 +224,13 @@ internal static partial class PwaOptionsValidator
             return true;
         }
 
-        var normalizedScope = scope.EndsWith("/", StringComparison.Ordinal)
-            ? scope
-            : scope + "/";
-        return string.Equals(path, scope.TrimEnd('/'), StringComparison.Ordinal)
-            || path.StartsWith(normalizedScope, StringComparison.Ordinal);
+        if (scope.EndsWith("/", StringComparison.Ordinal))
+        {
+            return path.StartsWith(scope, StringComparison.Ordinal);
+        }
+
+        return string.Equals(path, scope, StringComparison.Ordinal)
+            || path.StartsWith(scope + "/", StringComparison.Ordinal);
     }
 
     [GeneratedRegex("^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")]

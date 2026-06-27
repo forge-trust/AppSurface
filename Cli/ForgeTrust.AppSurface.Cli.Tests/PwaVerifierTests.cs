@@ -483,6 +483,26 @@ public sealed class PwaVerifierTests
     }
 
     [Fact]
+    public async Task VerifyAsync_FailsWhenStartUrlEqualsScopePathWithoutRequiredTrailingSlash()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", HtmlWithManifestLink(), "text/html");
+        http.Add(
+            "https://app.example.test/manifest.webmanifest",
+            ValidManifest("/app", "/app/"),
+            "application/manifest+json");
+        http.Add("https://app.example.test/icons/app-192.png", "png", "image/png");
+        http.Add("https://app.example.test/icons/app-512.png", "png", "image/png");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA239");
+    }
+
+    [Fact]
     public async Task VerifyAsync_FailsForOffOriginOutsideBaseAndNonImageIcons()
     {
         var http = new FakePwaHttpClient();
