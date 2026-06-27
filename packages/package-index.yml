@@ -118,6 +118,22 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
       - ForgeTrust.AppSurface.Auth
+  - project: Auth/ForgeTrust.AppSurface.Auth.Testing/ForgeTrust.AppSurface.Auth.Testing.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 38
+    use_when: Add this in ASP.NET Core integration tests when a consumer needs deterministic AppSurface auth personas, policy outcomes, and ProblemDetails assertions without writing a one-off fake authentication handler.
+    includes: AddAppSurfaceTestAuth registration, WebApplicationFactory WithAppSurfaceTestAuth setup, persona registry, CreateAppSurfaceClient persona clients, request-level persona selection, explicit scheme modes, production-environment guard, stable test diagnostics, and framework-neutral AppSurface auth result and ProblemDetails assertions.
+    does_not_include: Production authentication, cookies, JWT/OIDC, ASP.NET Identity, identity providers, authorization policy ownership, middleware replacement, user stores, session freshness simulation, Dev Auth runtime personas, browser login flows, or policy bypasses.
+    start_here_path: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.Testing` to integration test projects when AppSurface Auth.AspNetCore policy results need deterministic personas and canonical assertions; use Dev Auth instead for local runtime personas.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Auth.AspNetCore
+      - ForgeTrust.AppSurface.Auth
   - project: Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj
     classification: public
     publish_decision: publish
