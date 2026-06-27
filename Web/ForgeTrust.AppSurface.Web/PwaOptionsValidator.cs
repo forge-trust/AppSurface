@@ -23,6 +23,7 @@ internal static partial class PwaOptionsValidator
         RequireLocalStartUrl(options.StartUrl, "ASPWA006", "PwaOptions.StartUrl must be an app-root-relative URL such as /.", diagnostics);
         RequireLocalPath(options.Scope, "ASPWA007", "PwaOptions.Scope must be an app-root-relative URL such as /.", diagnostics);
         RequireLocalPath(options.DiagnosticsPath, "ASPWA008", "PwaOptions.DiagnosticsPath must be an app-root-relative path such as /_appsurface/pwa.", diagnostics);
+        RequireStartUrlWithinScope(options.StartUrl, options.Scope, diagnostics);
 
         if (!Enum.IsDefined(options.Display))
         {
@@ -191,6 +192,43 @@ internal static partial class PwaOptionsValidator
         var queryStart = startUrl.IndexOf('?');
         var path = queryStart < 0 ? startUrl : startUrl[..queryStart];
         return !HasTraversalSegment(path);
+    }
+
+    private static void RequireStartUrlWithinScope(string? startUrl, string? scope, List<PwaDiagnostic> diagnostics)
+    {
+        if (!IsSafeLocalStartUrl(startUrl) || !IsSafeLocalPath(scope))
+        {
+            return;
+        }
+
+        if (!IsPathWithinScope(GetPathWithoutQuery(startUrl!.Trim()), scope!.Trim()))
+        {
+            diagnostics.Add(
+                new PwaDiagnostic(
+                    "ASPWA019",
+                    PwaDiagnosticSeverity.Error,
+                    "PwaOptions.StartUrl must stay within PwaOptions.Scope."));
+        }
+    }
+
+    private static string GetPathWithoutQuery(string value)
+    {
+        var queryStart = value.IndexOf('?');
+        return queryStart < 0 ? value : value[..queryStart];
+    }
+
+    private static bool IsPathWithinScope(string path, string scope)
+    {
+        if (scope == "/")
+        {
+            return true;
+        }
+
+        var normalizedScope = scope.EndsWith("/", StringComparison.Ordinal)
+            ? scope
+            : scope + "/";
+        return string.Equals(path, scope.TrimEnd('/'), StringComparison.Ordinal)
+            || path.StartsWith(normalizedScope, StringComparison.Ordinal);
     }
 
     [GeneratedRegex("^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")]

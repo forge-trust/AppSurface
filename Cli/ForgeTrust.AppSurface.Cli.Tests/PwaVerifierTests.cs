@@ -348,7 +348,7 @@ public sealed class PwaVerifierTests
     }
 
     [Fact]
-    public async Task VerifyAsync_WarnsAndUsesDefaultManifestWhenRootIsNotHtml()
+    public async Task VerifyAsync_FailsWhenRootIsNotHtml()
     {
         var http = new FakePwaHttpClient();
         http.Add("https://app.example.test/", "ok", "text/plain");
@@ -360,9 +360,9 @@ public sealed class PwaVerifierTests
 
         var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
 
-        Assert.True(report.Passed);
+        Assert.False(report.Passed);
         Assert.Equal("/manifest.webmanifest", report.ManifestPath);
-        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA201" && diagnostic.Severity == "warning");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA201" && diagnostic.Severity == "error");
     }
 
     [Fact]
@@ -440,6 +440,26 @@ public sealed class PwaVerifierTests
 
         Assert.False(report.Passed);
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA231");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_FailsWhenStartUrlLeavesManifestScope()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", HtmlWithManifestLink(), "text/html");
+        http.Add(
+            "https://app.example.test/manifest.webmanifest",
+            ValidManifest("/admin/?source=pwa", "/app/"),
+            "application/manifest+json");
+        http.Add("https://app.example.test/icons/app-192.png", "png", "image/png");
+        http.Add("https://app.example.test/icons/app-512.png", "png", "image/png");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA239");
     }
 
     [Fact]

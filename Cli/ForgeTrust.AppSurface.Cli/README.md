@@ -76,7 +76,7 @@ appsurface pwa verify --url https://app.example.com
 appsurface pwa verify --url http://localhost:5055 --json
 ```
 
-The verifier accepts HTTPS origins and localhost development origins. It reports stable `ASPWA2xx` diagnostics for manifest reachability, required manifest fields, required `192x192` and `512x512` icons, icon content types, root-page manifest links, development diagnostics, and offline service worker posture when the app enables an offline strategy. JSON output is intended for CI or smoke tests; text output is optimized for local copy-paste debugging.
+The verifier accepts HTTPS origins and localhost development origins. It reports stable `ASPWA2xx` diagnostics for manifest reachability, required manifest fields, required `192x192` and `512x512` icons, icon content types, root-page manifest links, `start_url`/`scope` consistency, development diagnostics, and offline service worker posture when the app enables an offline strategy. JSON output is intended for CI or smoke tests; text output is optimized for local copy-paste debugging.
 
 ### `appsurface secrets`
 

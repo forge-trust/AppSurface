@@ -118,7 +118,7 @@ internal sealed partial class PwaVerifier
         }
         else
         {
-            diagnostics.Add(Warning("ASPWA201", "The app root did not return HTML, so the verifier used manifest.webmanifest under the verified base path."));
+            diagnostics.Add(Error("ASPWA201", "The app root must return HTML so browsers can discover the manifest link in the document head."));
         }
 
         var manifest = await _httpClient.GetAsync(manifestUri, cancellationToken);
@@ -265,6 +265,7 @@ internal sealed partial class PwaVerifier
         RequireDisplayMode(manifest.Display, diagnostics);
         RequireSameOriginPath(target, manifestUri, manifest.StartUrl, "ASPWA208", "Manifest start_url must resolve to the app origin.", diagnostics);
         RequireSameOriginPath(target, manifestUri, manifest.Scope, "ASPWA209", "Manifest scope must resolve to the app origin.", diagnostics);
+        RequireStartUrlWithinScope(target, manifestUri, manifest.StartUrl, manifest.Scope, diagnostics);
         RequireHexColor(manifest.ThemeColor, "ASPWA232", "Manifest theme_color must be a CSS hex color such as #2563eb.", diagnostics);
         RequireHexColor(manifest.BackgroundColor, "ASPWA233", "Manifest background_color must be a CSS hex color such as #ffffff.", diagnostics);
 
@@ -346,6 +347,51 @@ internal sealed partial class PwaVerifier
             && uri.Scheme == target.Origin.Scheme
             && uri.Host == target.Origin.Host
             && uri.Port == target.Origin.Port;
+    }
+
+    private static void RequireStartUrlWithinScope(
+        PwaVerificationTarget target,
+        Uri baseUri,
+        string? startUrl,
+        string? scope,
+        List<PwaVerificationDiagnostic> diagnostics)
+    {
+        if (!TryResolveVerifiedPath(target, baseUri, startUrl, out var startUri)
+            || !TryResolveVerifiedPath(target, baseUri, scope, out var scopeUri))
+        {
+            return;
+        }
+
+        if (!IsPathWithinScope(startUri.AbsolutePath, scopeUri.AbsolutePath))
+        {
+            diagnostics.Add(Error("ASPWA239", "Manifest start_url must stay within manifest scope."));
+        }
+    }
+
+    private static bool TryResolveVerifiedPath(
+        PwaVerificationTarget target,
+        Uri baseUri,
+        string? value,
+        out Uri uri)
+    {
+        uri = default!;
+        return !string.IsNullOrWhiteSpace(value)
+            && ResolvesToOrigin(target, baseUri, value, out uri)
+            && IsUnderBasePath(target, uri.AbsolutePath);
+    }
+
+    private static bool IsPathWithinScope(string path, string scope)
+    {
+        if (scope == "/")
+        {
+            return true;
+        }
+
+        var normalizedScope = scope.EndsWith("/", StringComparison.Ordinal)
+            ? scope
+            : scope + "/";
+        return string.Equals(path, scope.TrimEnd('/'), StringComparison.Ordinal)
+            || path.StartsWith(normalizedScope, StringComparison.Ordinal);
     }
 
     private static bool IsSecureInstallContext(Uri origin)

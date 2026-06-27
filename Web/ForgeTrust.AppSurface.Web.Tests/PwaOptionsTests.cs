@@ -99,6 +99,30 @@ public sealed class PwaOptionsTests
     }
 
     [Fact]
+    public void ThrowIfInvalid_RejectsStartUrlOutsideScope()
+    {
+        var options = CreateValidOptions();
+        options.StartUrl = "/admin/?source=pwa";
+        options.Scope = "/app/";
+
+        var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Contains("ASPWA019", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThrowIfInvalid_AcceptsStartUrlInsideScope()
+    {
+        var options = CreateValidOptions();
+        options.StartUrl = "/app/dashboard?source=pwa";
+        options.Scope = "/app/";
+
+        var exception = Record.Exception(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
     public void ThrowIfInvalid_AcceptsSafeEscapedPaths()
     {
         var options = CreateValidOptions();

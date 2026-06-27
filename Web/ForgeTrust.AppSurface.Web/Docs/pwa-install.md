@@ -46,7 +46,7 @@ Required values when enabled:
 |--------|---------|-------|
 | `Name` | Empty | Full app name used by the manifest and head metadata. |
 | `ShortName` | Empty | Short launcher name. |
-| `StartUrl` | `/` | Must be an app-root-relative URL path. |
+| `StartUrl` | `/` | Must be an app-root-relative URL path and stay within `Scope`. |
 | `Scope` | `/` | Must be an app-root-relative URL path. Keep it at or above `StartUrl`. |
 | `Display` | `Standalone` | Maps to `standalone`, `minimal-ui`, `fullscreen`, or `browser`. |
 | `ThemeColor` | Empty | Hex color emitted to the manifest and `<meta name="theme-color">`. |
@@ -110,7 +110,7 @@ The status JSON reports stable AppSurface diagnostics for startup-validatable co
 - HTTPS or localhost install-context acceptability.
 - Root HTML manifest link presence.
 - Manifest route reachability and `application/manifest+json` content type.
-- Manifest fields, display mode, same-origin `start_url`, and same-origin `scope`.
+- Manifest fields, display mode, same-origin `start_url`, same-origin `scope`, and `start_url` within `scope`.
 - Required `192x192` and `512x512` icons.
 - Icon reachability and basic image content type.
 - Diagnostic endpoint posture.
