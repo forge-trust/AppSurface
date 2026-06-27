@@ -39,11 +39,9 @@ The release evidence bundle is not a GitHub artifact attestation. Keep `id-token
 
 Release preparation pull requests must include the four generated artifacts for
 the prepared version: release note, sidecar, release manifest, and release
-evidence bundle. They may also update an older generated release sidecar only
-when carrying `redirect_aliases` forward to the new canonical release-candidate
-note, or replace an older generated release note with a stub that points at the
-prepared canonical note. Do not use those allowances for content edits,
-trust-bar edits, or manifest/evidence rewrites from older releases.
+evidence bundle. The release-prep review counts those artifacts with Git rename
+detection disabled so deleting superseded release-candidate artifacts cannot
+hide the newly generated stable sidecar behind a rename.
 
 ## Package artifact dry run
 

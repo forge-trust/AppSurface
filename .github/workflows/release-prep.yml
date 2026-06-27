@@ -136,7 +136,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin "${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
-          mapfile -t release_artifacts < <(git diff --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- \
+          mapfile -t release_artifacts < <(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- \
             ':(glob)releases/v*.md' \
             ':(glob)releases/v*.md.yml' \
             ':(glob)releases/v*.release.json' \
@@ -147,12 +147,12 @@ jobs:
             exit 0
           fi
 
-          mapfile -t manifests < <(git diff --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')
+          mapfile -t manifests < <(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')
           if [[ "${#manifests[@]}" -ne 1 ]]; then
             echo "Expected exactly one added or modified release manifest in this release preparation pull request; found ${#manifests[@]}." >&2
             exit 1
           fi
-          mapfile -t evidence_files < <(git diff --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.evidence.json')
+          mapfile -t evidence_files < <(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.evidence.json')
           if [[ "${#evidence_files[@]}" -ne 1 ]]; then
             echo "Expected exactly one added or modified release evidence bundle in this release preparation pull request; found ${#evidence_files[@]}." >&2
             exit 1
@@ -182,19 +182,7 @@ jobs:
             if printf '%s\n' "${sorted_expected_artifacts[@]}" | grep -Fxq "${artifact}"; then
               continue
             fi
-            if [[ "${artifact}" == releases/v*.md.yml ]]; then
-              echo "Allowing superseded release sidecar '${artifact}' for redirect_aliases migration."
-              continue
-            fi
-            if [[ "${artifact}" == releases/v*.md ]]; then
-              if grep -Fq "./v${version}.md" "${artifact}"; then
-                echo "Allowing superseded release note stub '${artifact}' pointing at v${version}."
-                continue
-              fi
-              echo "Superseded release note stub '${artifact}' must point at ./v${version}.md." >&2
-              exit 1
-            fi
-            echo "Release preparation pull requests must change exactly the four generated artifacts for v${version}, plus superseded release note stubs and sidecars only for redirect_aliases migration; found: ${sorted_release_artifacts[*]}." >&2
+            echo "Release preparation pull requests must change exactly the four generated artifacts for v${version}; found: ${sorted_release_artifacts[*]}." >&2
             exit 1
           done
           ./eng/release check --version "${version}" --fail-on-warnings --allow-existing-targets
