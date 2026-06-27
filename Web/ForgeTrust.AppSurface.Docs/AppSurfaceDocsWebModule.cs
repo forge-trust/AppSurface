@@ -660,20 +660,31 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         AppSurfaceDocsOptions docsOptions,
         IServiceProvider services)
     {
-        var policyName = docsOptions.Harvest?.Health?.AuthorizationPolicy;
-        if (string.IsNullOrWhiteSpace(policyName))
-        {
-            return;
-        }
-
-        var environment = services.GetService(typeof(IWebHostEnvironment)) as IWebHostEnvironment;
-        if (environment is null || !AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(docsOptions, environment))
+        var policyName = ResolveHealthAuthorizationPolicyName(docsOptions, services);
+        if (policyName is null)
         {
             return;
         }
 
         health.RequireAuthorization(policyName);
         healthJson.RequireAuthorization(policyName);
+    }
+
+    internal static string? ResolveHealthAuthorizationPolicyName(AppSurfaceDocsOptions docsOptions, IServiceProvider services)
+    {
+        var policyName = docsOptions.Harvest?.Health?.AuthorizationPolicy;
+        if (string.IsNullOrWhiteSpace(policyName))
+        {
+            return null;
+        }
+
+        var environment = services.GetService(typeof(IWebHostEnvironment)) as IWebHostEnvironment;
+        if (environment is null || !AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(docsOptions, environment))
+        {
+            return null;
+        }
+
+        return policyName;
     }
 
     private static void MapLegacyAssetRedirect(IEndpointRouteBuilder endpoints, string route, string targetPath)
