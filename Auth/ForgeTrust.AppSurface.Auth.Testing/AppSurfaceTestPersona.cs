@@ -67,11 +67,18 @@ public sealed class AppSurfaceTestPersona
     {
         ArgumentNullException.ThrowIfNull(claim);
 
-        return new Claim(
+        var clone = new Claim(
             claim.Type,
             claim.Value,
             claim.ValueType,
             claim.Issuer,
             claim.OriginalIssuer);
+
+        foreach (var property in claim.Properties)
+        {
+            clone.Properties[property.Key] = property.Value;
+        }
+
+        return clone;
     }
 }

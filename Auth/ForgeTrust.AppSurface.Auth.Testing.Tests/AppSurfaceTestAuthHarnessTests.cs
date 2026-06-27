@@ -687,19 +687,23 @@ public sealed class AppSurfaceTestAuthHarnessTests
     [Fact]
     public void Persona_ExposesImmutableAdditionalClaimsSnapshot()
     {
-        Claim[] claims = [new Claim("role", "operator")];
+        var sourceClaim = new Claim("role", "operator");
+        sourceClaim.Properties["evidence"] = "original";
+        Claim[] claims = [sourceClaim];
         var persona = new AppSurfaceTestPersona(" operator ", " operator-1 ", claims);
+        sourceClaim.Properties["evidence"] = "changed";
         claims[0] = new Claim("role", "viewer");
 
         Assert.Equal("operator", persona.Name);
         Assert.Equal("operator-1", persona.SubjectId);
         var claim = Assert.Single(persona.Claims);
         Assert.Equal("operator", claim.Value);
+        Assert.Equal("original", claim.Properties["evidence"]);
         Assert.Throws<NotSupportedException>(() =>
             ((IList<Claim>)persona.Claims)[0] = new Claim("role", "viewer"));
-        Assert.Equal(
-            "operator",
-            persona.CreateClaims(SubjectClaimType).Single(claim => claim.Type == "role").Value);
+        var generatedClaim = persona.CreateClaims(SubjectClaimType).Single(claim => claim.Type == "role");
+        Assert.Equal("operator", generatedClaim.Value);
+        Assert.Equal("original", generatedClaim.Properties["evidence"]);
     }
 
     [Fact]
