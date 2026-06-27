@@ -50,15 +50,16 @@ public static class AppSurfaceTestAuthWebApplicationFactoryExtensions
     {
         ArgumentNullException.ThrowIfNull(factory);
         ArgumentException.ThrowIfNullOrWhiteSpace(personaName);
+        var normalizedPersonaName = AppSurfaceTestPersonaRegistry.NormalizePersonaName(personaName);
 
         var registry = factory.Services.GetService(typeof(AppSurfaceTestPersonaRegistry)) as AppSurfaceTestPersonaRegistry
             ?? throw new InvalidOperationException(
                 "Problem: AppSurface test auth is not registered. Cause: CreateAppSurfaceClient was called on a factory that was not configured with WithAppSurfaceTestAuth. Fix: call factory.WithAppSurfaceTestAuth(...) before creating persona clients. Docs: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md.");
-        registry.Require(personaName);
+        registry.Require(normalizedPersonaName);
 
         var client = options is null ? factory.CreateClient() : factory.CreateClient(options);
         client.DefaultRequestHeaders.Remove(AppSurfaceTestAuthTransport.PersonaHeaderName);
-        client.DefaultRequestHeaders.Add(AppSurfaceTestAuthTransport.PersonaHeaderName, personaName);
+        client.DefaultRequestHeaders.Add(AppSurfaceTestAuthTransport.PersonaHeaderName, normalizedPersonaName);
         return client;
     }
 }

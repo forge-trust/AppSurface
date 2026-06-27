@@ -19,9 +19,10 @@ public static class AppSurfaceTestAuthHttpRequestMessageExtensions
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(personaName);
+        var normalizedPersonaName = AppSurfaceTestPersonaRegistry.NormalizePersonaName(personaName);
 
         request.Headers.Remove(AppSurfaceTestAuthTransport.PersonaHeaderName);
-        request.Headers.Add(AppSurfaceTestAuthTransport.PersonaHeaderName, personaName);
+        request.Headers.Add(AppSurfaceTestAuthTransport.PersonaHeaderName, normalizedPersonaName);
         return request;
     }
 }

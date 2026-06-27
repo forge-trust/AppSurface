@@ -47,28 +47,48 @@ internal sealed class AppSurfaceTestPersonaRegistry
     /// <summary>
     /// Gets a registered persona or throws a setup diagnostic for public helper failures.
     /// </summary>
-    /// <param name="personaName">Ordinal persona name.</param>
+    /// <param name="personaName">Ordinal persona name. Leading and trailing whitespace is trimmed before lookup.</param>
     /// <returns>The matching persona.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="personaName" /> is blank.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the persona is not registered.</exception>
     public AppSurfaceTestPersona Require(string personaName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(personaName);
+        var normalizedPersonaName = NormalizePersonaName(personaName);
 
-        return TryGet(personaName, out var persona)
+        return TryGet(normalizedPersonaName, out var persona)
             ? persona
             : throw new InvalidOperationException(
-                $"Problem: AppSurface test auth persona '{personaName}' was not found. Cause: the persona was not registered in WithAppSurfaceTestAuth/AddAppSurfaceTestAuth. Fix: add the persona to AppSurfaceTestAuthOptions before creating the client. Docs: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md. Code: {AppSurfaceTestAuthDiagnosticCodes.UnknownPersona}.");
+                $"Problem: AppSurface test auth persona '{normalizedPersonaName}' was not found. Cause: the persona was not registered in WithAppSurfaceTestAuth/AddAppSurfaceTestAuth. Fix: add the persona to AppSurfaceTestAuthOptions before creating the client. Docs: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md. Code: {AppSurfaceTestAuthDiagnosticCodes.UnknownPersona}.");
     }
 
     /// <summary>
-    /// Attempts to get a persona by ordinal name without throwing.
+    /// Attempts to get a persona by ordinal name without throwing for missing, blank, or null values.
     /// </summary>
-    /// <param name="personaName">Ordinal persona name.</param>
+    /// <param name="personaName">Ordinal persona name. Leading and trailing whitespace is trimmed before lookup.</param>
     /// <param name="persona">The matching persona when found.</param>
     /// <returns><see langword="true" /> when the persona exists; otherwise <see langword="false" />.</returns>
-    public bool TryGet(string personaName, out AppSurfaceTestPersona persona)
+    public bool TryGet(string? personaName, out AppSurfaceTestPersona persona)
     {
-        return _personas.TryGetValue(personaName, out persona!);
+        if (personaName is null)
+        {
+            persona = null!;
+            return false;
+        }
+
+        var normalizedPersonaName = NormalizePersonaName(personaName);
+        if (normalizedPersonaName.Length == 0)
+        {
+            persona = null!;
+            return false;
+        }
+
+        return _personas.TryGetValue(normalizedPersonaName, out persona!);
+    }
+
+    internal static string NormalizePersonaName(string personaName)
+    {
+        ArgumentNullException.ThrowIfNull(personaName);
+        return personaName.Trim();
     }
 }

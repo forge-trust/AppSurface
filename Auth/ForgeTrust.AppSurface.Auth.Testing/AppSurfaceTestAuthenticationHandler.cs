@@ -25,8 +25,9 @@ internal sealed class AppSurfaceTestAuthenticationHandler : AuthenticationHandle
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        var personaName = Request.Headers[AppSurfaceTestAuthTransport.PersonaHeaderName].ToString();
-        if (string.IsNullOrWhiteSpace(personaName))
+        var personaName = AppSurfaceTestPersonaRegistry.NormalizePersonaName(
+            Request.Headers[AppSurfaceTestAuthTransport.PersonaHeaderName].ToString());
+        if (personaName.Length == 0)
         {
             return Task.FromResult(AuthenticateResult.NoResult());
         }

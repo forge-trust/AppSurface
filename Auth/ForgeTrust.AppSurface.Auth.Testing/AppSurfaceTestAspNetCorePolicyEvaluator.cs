@@ -66,8 +66,9 @@ internal sealed class AppSurfaceTestAspNetCorePolicyEvaluator : IAppSurfaceAspNe
             return false;
         }
 
-        var requestPersona = httpContext.Request.Headers[AppSurfaceTestAuthTransport.PersonaHeaderName].ToString();
-        if (!string.IsNullOrWhiteSpace(requestPersona) && !_personaRegistry.TryGet(requestPersona, out _))
+        var requestPersona = AppSurfaceTestPersonaRegistry.NormalizePersonaName(
+            httpContext.Request.Headers[AppSurfaceTestAuthTransport.PersonaHeaderName].ToString());
+        if (requestPersona.Length > 0 && !_personaRegistry.TryGet(requestPersona, out _))
         {
             personaName = requestPersona;
             return true;

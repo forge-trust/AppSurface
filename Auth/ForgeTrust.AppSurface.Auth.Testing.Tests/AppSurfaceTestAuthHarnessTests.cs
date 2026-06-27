@@ -102,6 +102,26 @@ public sealed class AppSurfaceTestAuthHarnessTests
     }
 
     [Fact]
+    public async Task DefaultScheme_WithWhitespaceRawRequestPersona_UsesCanonicalPersona()
+    {
+        using var host = await CreateHostAsync(options =>
+        {
+            options.SubjectClaimType = SubjectClaimType;
+            options.AddPersona("operator", "operator-1", [new Claim("role", "operator")]);
+        });
+        using var client = host.GetTestClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/result");
+        request.Headers.Add(AppSurfaceTestAuthTransport.PersonaHeaderName, " operator ");
+
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(body);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("operator-1", ReadNullableString(json.RootElement, "subject"));
+    }
+
+    [Fact]
     public async Task AddAppSurfaceTestAuth_DecoratesExistingPolicyEvaluator()
     {
         var calls = 0;
@@ -612,6 +632,18 @@ public sealed class AppSurfaceTestAuthHarnessTests
     }
 
     [Fact]
+    public void RequestPersonaHelper_TrimsPersonaHeader()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/");
+
+        request.WithAppSurfaceTestPersona(" operator ");
+
+        Assert.Equal(
+            "operator",
+            Assert.Single(request.Headers.GetValues(AppSurfaceTestAuthTransport.PersonaHeaderName)));
+    }
+
+    [Fact]
     public void WebApplicationFactoryHelpers_ValidateArguments()
     {
         WebApplicationFactory<object>? factory = null;
@@ -629,9 +661,11 @@ public sealed class AppSurfaceTestAuthHarnessTests
         options.AddPersona("operator", "operator-1");
         var registry = AppSurfaceTestPersonaRegistry.Create(options);
 
-        var persona = registry.Require("operator");
+        var persona = registry.Require(" operator ");
 
         Assert.Equal("operator-1", persona.SubjectId);
+        Assert.False(registry.TryGet(null, out _));
+        Assert.False(registry.TryGet(" ", out _));
     }
 
     [Fact]

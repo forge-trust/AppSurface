@@ -58,6 +58,22 @@ public sealed class AuthWebRazorWireProofExampleTests
     }
 
     [Fact]
+    public async Task WebApplicationFactoryProof_PersonaClientTrimsPersonaName()
+    {
+        await WithAuthTestingFactoryAsync(async factory =>
+        {
+            using var client = factory.CreateAppSurfaceClient(" operator ");
+
+            using var response = await client.GetAsync("/api/auth-proof");
+            var body = await response.Content.ReadAsStringAsync();
+            using var json = JsonDocument.Parse(body);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("operator-1", ReadNullableString(json, "subject"));
+        });
+    }
+
+    [Fact]
     public async Task WebApplicationFactoryProof_NoPersonaSelectionRemainsAnonymous()
     {
         await WithAuthTestingFactoryAsync(async factory =>
