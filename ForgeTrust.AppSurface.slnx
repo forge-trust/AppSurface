@@ -96,6 +96,8 @@
   </Folder>
   <Folder Name="/Web/">
     <Project Path="Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj" />
+    <Project Path="Web/ForgeTrust.RazorWire.Auth.AspNetCore.Tests/ForgeTrust.RazorWire.Auth.AspNetCore.Tests.csproj" />
+    <Project Path="Web/ForgeTrust.RazorWire.Auth.AspNetCore/ForgeTrust.RazorWire.Auth.AspNetCore.csproj" />
     <Project Path="Web/ForgeTrust.RazorWire.Cli.Tests/ForgeTrust.RazorWire.Cli.Tests.csproj" />
     <Project Path="Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj" />
     <Project Path="Web/ForgeTrust.RazorWire.Tests/ForgeTrust.RazorWire.Tests.csproj" />

@@ -513,6 +513,41 @@ Injects the client scripts RazorWire needs, including Turbo and the RazorWire as
 
 The script tag also carries failed-form runtime configuration derived from `RazorWireOptions.Forms`; no inline configuration script is required.
 
+### `rw:auth-view`
+
+Projects a passive auth result into one server-rendered slot. Child slots include `rw:auth-allowed`,
+`rw:auth-anonymous`, `rw:auth-forbidden`, `rw:auth-setup-failure`, `rw:auth-unsafe-navigation`, `rw:auth-stale`, and
+`rw:auth-unknown`.
+
+```html
+<rw:auth-view policy="docs.publish">
+  <rw:auth-allowed>Allowed content</rw:auth-allowed>
+  <rw:auth-anonymous>Sign in prompt</rw:auth-anonymous>
+</rw:auth-view>
+```
+
+### `rw:auth-gate` and `rw:permission-gate`
+
+Conditionally render child content when a projected policy reaches the requested state. `rw:permission-gate` is an
+allowed-state alias for policy-oriented markup.
+
+```html
+<rw:auth-gate policy="docs.publish" state="forbidden">
+  You do not have permission.
+</rw:auth-gate>
+```
+
+### `rw:login-link` and `rw:logout-button`
+
+Render host-owned sign-in and sign-out routes without executing auth side effects. `return-url-policy="current-path"`
+adds the current local path as `returnUrl`. `rw:logout-button` emits a POST form and includes an ASP.NET Core
+anti-forgery hidden input for local or same-origin actions when `IAntiforgery` is available from the host.
+
+```html
+<rw:login-link href="/login" return-url-policy="current-path">Sign in</rw:login-link>
+<rw:logout-button action="/logout" return-url-policy="current-path">Sign out</rw:logout-button>
+```
+
 ## Utilities
 
 ### `StringUtils`
@@ -539,6 +574,60 @@ export function mount(root, props) {
   root.textContent = `chart points: ${props.data.length}`;
 }
 ```
+
+## Project Auth Results Into UI
+
+RazorWire auth helpers render passive UI states from `ForgeTrust.AppSurface.Auth` results. They do not sign users in,
+sign users out, select authentication schemes, mutate cookies, challenge, forbid, redirect, or protect endpoints. Use
+them when a page should show the same host-owned policy result that an endpoint enforces.
+
+Register the ASP.NET Core adapter package in hosts that want RazorWire to evaluate AppSurface-shaped ASP.NET Core
+policy results:
+
+```csharp
+using ForgeTrust.AppSurface.Auth.AspNetCore;
+using ForgeTrust.RazorWire.Auth.AspNetCore;
+
+builder.Services.AddRazorWire();
+builder.Services.AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim("sub"));
+builder.Services.AddRazorWireAspNetCoreAuth();
+```
+
+Project the host policy in Razor:
+
+```cshtml
+<rw:auth-view policy="docs.publish">
+    <rw:auth-allowed>
+        <button type="submit">Publish</button>
+    </rw:auth-allowed>
+    <rw:auth-anonymous>
+        <rw:login-link href="/login" return-url-policy="current-path">Sign in</rw:login-link>
+    </rw:auth-anonymous>
+    <rw:auth-forbidden>
+        You do not have permission to publish this page.
+    </rw:auth-forbidden>
+    <rw:auth-setup-failure>
+        Publishing is unavailable right now.
+    </rw:auth-setup-failure>
+</rw:auth-view>
+```
+
+Enforce the same policy on the endpoint or action:
+
+```csharp
+app.MapPost("/docs/publish", PublishAsync)
+   .RequireSurfacePolicy("docs.publish");
+```
+
+`rw:auth-view` emits safe default hooks such as `data-rw-auth-state`, `data-rw-auth-outcome`, and
+`data-rw-auth-helper`. Policy names and reason details are emitted only when `include-diagnostics="true"` is set. Raw
+`AppSurfaceAuthResult.Message`, arbitrary metadata, persona names, subjects, schemes, and DevAuth state are not rendered
+by default.
+
+Available states are `allowed`, `anonymous`, `forbidden`, `setup-failure`, `unsafe-navigation`,
+`stale-or-unknown-session`, and `unknown`. `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` remains separate local
+tooling; render `AppSurfaceDevAuthMarker` beside a proof page when fake personas should stay visible during
+Development.
 
 | Specifier form | Direct `client-module` / `data-rw-module` | `window.RazorWireIslandModules` value |
 | --- | --- | --- |

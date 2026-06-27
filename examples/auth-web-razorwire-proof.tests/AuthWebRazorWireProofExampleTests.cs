@@ -93,8 +93,8 @@ public sealed class AuthWebRazorWireProofExampleTests
     }
 
     [Theory]
-    [InlineData("anonymous", "anonymous", "Challenge", "Unauthenticated", "unauthenticated", null)]
-    [InlineData("unknown", "anonymous", "Challenge", "Unauthenticated", "unauthenticated", null)]
+    [InlineData("anonymous", "anonymous", "Challenge", "Unauthenticated", "anonymous", null)]
+    [InlineData("unknown", "anonymous", "Challenge", "Unauthenticated", "anonymous", null)]
     [InlineData("viewer", "viewer", "Forbid", "Forbidden", "forbidden", "viewer-1")]
     [InlineData("operator", "operator", "Allowed", "None", "allowed", "operator-1")]
     public async Task BrowserProof_RendersApiAndRazorWireStatesForPersona(
@@ -115,6 +115,7 @@ public sealed class AuthWebRazorWireProofExampleTests
         Assert.Contains($"data-auth-proof-ui-reason=\"{expectedReason}\"", html, StringComparison.Ordinal);
         Assert.Contains($"data-auth-proof-state=\"{expectedState}\"", html, StringComparison.Ordinal);
         Assert.Contains($"<td>{expectedPersona}</td>", html, StringComparison.Ordinal);
+        Assert.Contains($"data-auth-proof-rendered-slot=\"{MapRenderedSlot(expectedOutcome)}\"", html, StringComparison.Ordinal);
 
         if (expectedSubject is null)
         {
@@ -158,9 +159,9 @@ public sealed class AuthWebRazorWireProofExampleTests
         Assert.Contains("Your host owns auth. This sample only changes the local proof persona.", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("The browser switch keeps the selected persona in URL-local proof state.", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("registers it with `AddAppSurfacePolicy(...)`", sampleReadme, StringComparison.Ordinal);
+        Assert.Contains("`AddRazorWireAspNetCoreAuth()` lets `rw:auth-view` project that result", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("prefer `RequireSurfacePolicy(...)`", sampleReadme, StringComparison.Ordinal);
-        Assert.Contains("This sample calls the evaluator directly", sampleReadme, StringComparison.Ordinal);
-        Assert.Contains("| `anonymous` | `401` | `Challenge` | `Unauthenticated` | unauthenticated |", sampleReadme, StringComparison.Ordinal);
+        Assert.Contains("| `anonymous` | `401` | `Challenge` | `Unauthenticated` | anonymous |", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("| `operator` | `200` | `Allowed` | `None` | allowed |", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("X-Proof-User", sampleReadme, StringComparison.Ordinal);
         Assert.Contains("auth-web-razorwire-proof/README.md", authAspNetCoreReadme, StringComparison.Ordinal);
@@ -181,20 +182,21 @@ public sealed class AuthWebRazorWireProofExampleTests
         Assert.DoesNotContain("#419", publicDocs, StringComparison.Ordinal);
         Assert.DoesNotContain("#421", publicDocs, StringComparison.Ordinal);
         Assert.DoesNotContain("#422", publicDocs, StringComparison.Ordinal);
-        Assert.DoesNotContain("adds a result-bearing RazorWire auth adapter", publicDocs, StringComparison.Ordinal);
-        Assert.DoesNotContain("projects the same auth result states into RazorWire UI components", publicDocs, StringComparison.Ordinal);
+        Assert.Contains("ForgeTrust.RazorWire.Auth.AspNetCore", publicDocs, StringComparison.Ordinal);
+        Assert.Contains("rw:auth-view", publicDocs, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ProductSource_DoesNotIntroduceRazorWireAuthGateApi()
+    public void ProductSource_KeepsRazorWireAuthProjectionSeparateFromDevAuth()
     {
         var source = string.Join(
             Environment.NewLine,
-            _fixture.ReadProductSourceFiles("Auth", "Web/ForgeTrust.RazorWire"));
+            _fixture.ReadProductSourceFiles("Web/ForgeTrust.RazorWire", "Web/ForgeTrust.RazorWire.Auth.AspNetCore"));
 
-        Assert.DoesNotContain("class AuthGate", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("class AuthView", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("class PermissionGate", source, StringComparison.Ordinal);
+        Assert.Contains("class AuthGateTagHelper", source, StringComparison.Ordinal);
+        Assert.Contains("class AuthViewTagHelper", source, StringComparison.Ordinal);
+        Assert.Contains("class PermissionGateTagHelper", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppSurfaceDevAuthMarker", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -225,5 +227,15 @@ public sealed class AuthWebRazorWireProofExampleTests
     private static int ReadInt32(JsonDocument json, string propertyName)
     {
         return json.RootElement.GetProperty(propertyName).GetInt32();
+    }
+
+    private static string MapRenderedSlot(string outcome)
+    {
+        return outcome switch
+        {
+            "Allowed" => "allowed",
+            "Forbid" => "forbidden",
+            _ => "anonymous",
+        };
     }
 }

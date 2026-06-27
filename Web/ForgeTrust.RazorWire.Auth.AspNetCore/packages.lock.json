@@ -54,13 +54,6 @@
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
         }
       },
-      "forgetrust.razorwire.auth.aspnetcore": {
-        "type": "Project",
-        "dependencies": {
-          "ForgeTrust.AppSurface.Auth.AspNetCore": "[0.1.0, )",
-          "ForgeTrust.RazorWire": "[0.1.0, )"
-        }
-      },
       "CliWrap": {
         "type": "CentralTransitive",
         "requested": "[3.10.1, )",

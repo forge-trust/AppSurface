@@ -3,6 +3,7 @@ using AuthWebRazorWireProofExample.Models;
 using ForgeTrust.AppSurface.Auth;
 using ForgeTrust.AppSurface.Auth.AspNetCore;
 using ForgeTrust.RazorWire;
+using ForgeTrust.RazorWire.Auth.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -26,6 +27,7 @@ builder.Services.AddAuthorization(options =>
 });
 
 builder.Services.AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim(AuthProofPolicy.SubjectClaimType));
+builder.Services.AddRazorWireAspNetCoreAuth();
 
 var app = builder.Build();
 

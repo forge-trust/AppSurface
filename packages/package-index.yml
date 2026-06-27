@@ -294,17 +294,38 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.4.md
     order: 100
-    use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, islands, or local declarative form interactions without moving to a separate frontend app.
-    includes: RazorWire modules, TagHelpers, stream helpers, Razor fragment updates, hybrid island support, failed-form UX, page navigation, section copy, and stable form interactions for conditional targets and one-dimensional model-bound collections.
-    does_not_include: OpenAPI generation, API reference UI, or Tailwind asset compilation.
+    use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, islands, local declarative form interactions, or passive auth-result UI projection without moving to a separate frontend app.
+    includes: RazorWire modules, TagHelpers, stream helpers, Razor fragment updates, hybrid island support, failed-form UX, page navigation, section copy, stable form interactions for conditional targets and one-dimensional model-bound collections, and passive auth projection helpers over ForgeTrust.AppSurface.Auth results.
+    does_not_include: OpenAPI generation, API reference UI, Tailwind asset compilation, ASP.NET Core policy evaluation, authentication schemes, cookies, OIDC, ASP.NET Identity, challenge or forbid execution, DevAuth persona controls, or endpoint authorization.
     start_here_path: Web/ForgeTrust.RazorWire/README.md
-    recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, server-rendered islands, and local declarative form interactions.
+    recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, server-rendered islands, local declarative form interactions, or passive auth-result UI projection.
     depends_on:
+      - ForgeTrust.AppSurface.Auth
       - ForgeTrust.AppSurface.Intelligence
       - ForgeTrust.AppSurface.Web
     expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Auth
       - ForgeTrust.AppSurface.Intelligence
       - ForgeTrust.AppSurface.Web
+  - project: Web/ForgeTrust.RazorWire.Auth.AspNetCore/ForgeTrust.RazorWire.Auth.AspNetCore.csproj
+    classification: public
+    publish_decision: publish
+    product_family: razorwire
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 101
+    use_when: Add this in an ASP.NET Core host that already owns authentication and authorization when RazorWire auth projection helpers should render AppSurface-shaped host policy results.
+    includes: AddRazorWireAspNetCoreAuth registration and an IRazorWireAuthResultProvider adapter over IAppSurfaceAspNetCorePolicyEvaluator.
+    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policy definitions, middleware insertion, browser challenge or forbid execution, redirects, DevAuth persona controls, endpoint authorization, or RazorWire core UI primitives by itself.
+    start_here_path: Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md
+    recipe_summary: Add `ForgeTrust.RazorWire.Auth.AspNetCore` after `ForgeTrust.RazorWire` and `ForgeTrust.AppSurface.Auth.AspNetCore` when Razor views should project host policy results without owning auth enforcement.
+    depends_on:
+      - ForgeTrust.AppSurface.Auth.AspNetCore
+      - ForgeTrust.RazorWire
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Auth.AspNetCore
+      - ForgeTrust.RazorWire
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj
     classification: public
     publish_decision: publish
