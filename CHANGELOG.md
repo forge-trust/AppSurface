@@ -32,6 +32,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - `ForgeTrust.AppSurface.Web` now fails startup for AppSurface-managed production CORS when `CorsOptions.AllowedOrigins` contains the literal origin wildcard `*`; replace it with explicit origins such as `https://app.example.com`, keep permissive all-origin behavior to Development through `EnableAllOriginsInDevelopment`, or register host-owned ASP.NET Core CORS for intentionally public wildcard APIs.
 - RazorWire hybrid islands now block inline `data:` module specifiers and protocol-relative `//...` module URLs; serve client modules from relative, root-relative, same-origin, explicit HTTPS, or import-map specifiers instead.
 - RazorWire stream authorization can now return `AppSurfaceAuthResult` outcomes before SSE starts, while existing bool authorizers keep working through a compatibility adapter.
+- RazorWire now renders passive AppSurface auth-result UI states with `rw:auth-view`, gate, login-link, and logout-button helpers, plus an ASP.NET Core adapter package that delegates to host-owned AppSurface policy evaluation.
 - RazorWire now provides stable local form interactions for conditional targets and one-dimensional ASP.NET Core model-bound collections without page-local JavaScript.
 - Package verification tests now keep Tailwind packed-consumer smoke restores out of the user-level NuGet package cache and remove generated RazorWire ToolVerifier package entries after the tool contract proof completes.
 
