@@ -246,22 +246,27 @@ public class AppSurfaceDocsWebModuleRegressionTests
         Assert.Equal(HttpStatusCode.OK, authorized.StatusCode);
     }
 
-    [Fact]
-    public async Task HarvestHealthAuthorizationPolicy_ShouldStillReturnNotFound_WhenProductionHealthRoutesAreHidden()
+    [Theory]
+    [InlineData("/docs/_health", null)]
+    [InlineData("/docs/_health", "docs.other")]
+    [InlineData("/docs/_health", "docs.health.read")]
+    [InlineData("/docs/_health.json", null)]
+    [InlineData("/docs/_health.json", "docs.other")]
+    [InlineData("/docs/_health.json", "docs.health.read")]
+    public async Task HarvestHealthAuthorizationPolicy_ShouldStillReturnNotFound_WhenProductionHealthRoutesAreHidden(
+        string requestPath,
+        string? scope)
     {
         await using var host = await StartHealthAuthorizationHostAsync(
             Environments.Production,
             exposeHealthRoutes: false);
 
-        using var anonymous = await host.Client.GetAsync("/docs/_health");
-        using var forbiddenRequest = CreateHealthRequest("/docs/_health.json", "alice", "docs.other");
-        using var forbidden = await host.Client.SendAsync(forbiddenRequest);
-        using var authorizedRequest = CreateHealthRequest("/docs/_health.json", "alice", "docs.health.read");
-        using var authorized = await host.Client.SendAsync(authorizedRequest);
+        using var request = scope is null
+            ? new HttpRequestMessage(HttpMethod.Get, requestPath)
+            : CreateHealthRequest(requestPath, "alice", scope);
+        using var response = await host.Client.SendAsync(request);
 
-        Assert.Equal(HttpStatusCode.NotFound, anonymous.StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, forbidden.StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, authorized.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]

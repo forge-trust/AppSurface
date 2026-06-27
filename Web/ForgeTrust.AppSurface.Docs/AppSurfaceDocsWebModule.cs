@@ -670,6 +670,16 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         healthJson.RequireAuthorization(policyName);
     }
 
+    /// <summary>
+    /// Resolves the effective health-route authorization policy name, or <see langword="null"/> when no policy should be
+    /// applied.
+    /// </summary>
+    /// <remarks>
+    /// Returns <see langword="null"/> when <see cref="AppSurfaceDocsHarvestHealthOptions.AuthorizationPolicy"/> is blank,
+    /// when no <see cref="IWebHostEnvironment"/> is available, or when the health routes are not exposed for the current
+    /// environment. <see cref="ApplyHealthAuthorizationPolicy"/> depends on this ordering so hidden health routes keep
+    /// returning <c>404</c> before authorization metadata is added.
+    /// </remarks>
     internal static string? ResolveHealthAuthorizationPolicyName(AppSurfaceDocsOptions docsOptions, IServiceProvider services)
     {
         var policyName = docsOptions.Harvest?.Health?.AuthorizationPolicy;

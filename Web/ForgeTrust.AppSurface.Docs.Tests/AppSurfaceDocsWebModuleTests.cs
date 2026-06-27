@@ -1682,6 +1682,37 @@ public class AppSurfaceDocsWebModuleTests
         AssertNoAuthorizationPolicy(routeBuilder, "docs/_health.json");
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ConfigureEndpoints_ShouldNotApplyHealthAuthorizationPolicy_WhenPolicyIsBlank(string authorizationPolicy)
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    AuthorizationPolicy = authorizationPolicy
+                }
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<AppSurfaceDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health.json");
+    }
+
     [Fact]
     public void ConfigureEndpoints_ShouldNotApplyHealthAuthorizationPolicy_WhenHarvestOptionsAreNull()
     {
