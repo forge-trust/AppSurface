@@ -92,12 +92,15 @@ internal sealed class ReleaseChecker
 
         if (options.Version.IsStable)
         {
-            warnings.Add(ReleaseDiagnostic.Warning(
-                "release-stable-package-policy-missing",
-                "Stable GitHub Release publishing is currently blocked.",
-                "The repository has a protected prerelease NuGet path, but no protected stable NuGet publish workflow yet.",
-                "Ship a prerelease tag such as `0.1.0-preview.1`, or add a reviewed stable package publish path before publishing `v0.1.0`.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#stable-release-policy"));
+            if (!File.Exists(_workspace.PathFor(".github/workflows/nuget-stable-publish.yml")))
+            {
+                warnings.Add(ReleaseDiagnostic.Warning(
+                    "release-stable-package-policy-missing",
+                    "Stable GitHub Release publishing is currently blocked.",
+                    "The repository has a protected prerelease NuGet path, but no protected stable NuGet publish workflow yet.",
+                    "Ship a prerelease tag such as `0.1.0-preview.1`, or add a reviewed stable package publish path before publishing `v0.1.0`.",
+                    "tools/ForgeTrust.AppSurface.Release/README.md#stable-release-policy"));
+            }
         }
         else if (!options.Version.IsProtectedPrereleaseWorkflowCompatible)
         {
