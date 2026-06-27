@@ -41,8 +41,9 @@ Release preparation pull requests must include the four generated artifacts for
 the prepared version: release note, sidecar, release manifest, and release
 evidence bundle. They may also update an older generated release sidecar only
 when carrying `redirect_aliases` forward to the new canonical release-candidate
-note. Do not use that sidecar allowance for content edits, trust-bar edits, or
-manifest/evidence rewrites from older releases.
+note, or replace an older generated release note with a stub that points at the
+prepared canonical note. Do not use those allowances for content edits,
+trust-bar edits, or manifest/evidence rewrites from older releases.
 
 ## Package artifact dry run
 

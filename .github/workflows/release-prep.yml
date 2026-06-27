@@ -186,7 +186,15 @@ jobs:
               echo "Allowing superseded release sidecar '${artifact}' for redirect_aliases migration."
               continue
             fi
-            echo "Release preparation pull requests must change exactly the four generated artifacts for v${version}, plus superseded release sidecars only for redirect_aliases migration; found: ${sorted_release_artifacts[*]}." >&2
+            if [[ "${artifact}" == releases/v*.md ]]; then
+              if grep -Fq "./v${version}.md" "${artifact}"; then
+                echo "Allowing superseded release note stub '${artifact}' pointing at v${version}."
+                continue
+              fi
+              echo "Superseded release note stub '${artifact}' must point at ./v${version}.md." >&2
+              exit 1
+            fi
+            echo "Release preparation pull requests must change exactly the four generated artifacts for v${version}, plus superseded release note stubs and sidecars only for redirect_aliases migration; found: ${sorted_release_artifacts[*]}." >&2
             exit 1
           done
           ./eng/release check --version "${version}" --fail-on-warnings --allow-existing-targets
