@@ -192,29 +192,56 @@ internal sealed partial class PwaVerifier
             try
             {
                 var status = JsonSerializer.Deserialize<PwaStatusProbe>(diagnosticsResponse.Body, JsonOptions);
-                if (status?.OfflineEnabled == true && string.IsNullOrWhiteSpace(status.ServiceWorkerPath))
+                if (status?.OfflineEnabled == true)
                 {
-                    diagnostics.Add(Error("ASPWA222", "Diagnostics report offline enabled without a service worker path."));
-                }
-                else if (status?.OfflineEnabled == true)
-                {
-                    var serviceWorkerPath = status.ServiceWorkerPath!;
-                    if (!ResolvesToOrigin(target, target.BaseUri, serviceWorkerPath, out var serviceWorkerUri))
+                    if (string.IsNullOrWhiteSpace(status.ServiceWorkerPath))
                     {
-                        diagnostics.Add(Error("ASPWA229", "Diagnostics service worker path must resolve to the app origin."));
-                        return BuildReport(target, manifestUri, diagnostics, diagnostics.All(d => d.Severity != "error"));
+                        diagnostics.Add(Error("ASPWA222", "Diagnostics report offline enabled without a service worker path."));
+                    }
+                    else
+                    {
+                        var serviceWorkerPath = status.ServiceWorkerPath!;
+                        if (!ResolvesToOrigin(target, target.BaseUri, serviceWorkerPath, out var serviceWorkerUri))
+                        {
+                            diagnostics.Add(Error("ASPWA229", "Diagnostics service worker path must resolve to the app origin."));
+                        }
+                        else if (!IsUnderBasePath(target, serviceWorkerUri.AbsolutePath))
+                        {
+                            diagnostics.Add(Error("ASPWA230", "Diagnostics service worker path must stay under the verified base path."));
+                        }
+                        else
+                        {
+                            var serviceWorker = await _httpClient.GetAsync(serviceWorkerUri, cancellationToken);
+                            if (!serviceWorker.IsSuccess)
+                            {
+                                diagnostics.Add(Error("ASPWA226", $"Service worker {serviceWorkerPath} returned HTTP {(int)serviceWorker.StatusCode}."));
+                            }
+                        }
                     }
 
-                    if (!IsUnderBasePath(target, serviceWorkerUri.AbsolutePath))
+                    if (string.IsNullOrWhiteSpace(status.OfflineFallbackPath))
                     {
-                        diagnostics.Add(Error("ASPWA230", "Diagnostics service worker path must stay under the verified base path."));
-                        return BuildReport(target, manifestUri, diagnostics, diagnostics.All(d => d.Severity != "error"));
+                        diagnostics.Add(Error("ASPWA235", "Diagnostics report offline enabled without an offline fallback path."));
                     }
-
-                    var serviceWorker = await _httpClient.GetAsync(serviceWorkerUri, cancellationToken);
-                    if (!serviceWorker.IsSuccess)
+                    else
                     {
-                        diagnostics.Add(Error("ASPWA226", $"Service worker {serviceWorkerPath} returned HTTP {(int)serviceWorker.StatusCode}."));
+                        var offlineFallbackPath = status.OfflineFallbackPath!;
+                        if (!ResolvesToOrigin(target, target.BaseUri, offlineFallbackPath, out var offlineFallbackUri))
+                        {
+                            diagnostics.Add(Error("ASPWA236", "Diagnostics offline fallback path must resolve to the app origin."));
+                        }
+                        else if (!IsUnderBasePath(target, offlineFallbackUri.AbsolutePath))
+                        {
+                            diagnostics.Add(Error("ASPWA237", "Diagnostics offline fallback path must stay under the verified base path."));
+                        }
+                        else
+                        {
+                            var offlineFallback = await _httpClient.GetAsync(offlineFallbackUri, cancellationToken);
+                            if (!offlineFallback.IsSuccess)
+                            {
+                                diagnostics.Add(Error("ASPWA238", $"Offline fallback {offlineFallbackPath} returned HTTP {(int)offlineFallback.StatusCode}."));
+                            }
+                        }
                     }
                 }
             }
@@ -331,7 +358,13 @@ internal sealed partial class PwaVerifier
 
     private static string? ExtractManifestPath(string html)
     {
-        foreach (var tag in LinkTagRegex().Matches(html).Cast<Match>().Select(link => link.Value))
+        var head = HeadRegex().Match(html);
+        if (!head.Success)
+        {
+            return null;
+        }
+
+        foreach (var tag in LinkTagRegex().Matches(head.Groups["content"].Value).Cast<Match>().Select(link => link.Value))
         {
             var rel = RelAttributeRegex().Match(tag);
             if (!rel.Success
@@ -381,6 +414,9 @@ internal sealed partial class PwaVerifier
     private static PwaVerificationDiagnostic Warning(string code, string message) => new(code, "warning", message);
 
     private static PwaVerificationDiagnostic Info(string code, string message) => new(code, "info", message);
+
+    [GeneratedRegex("""<head\b[^>]*>(?<content>.*?)</head>""", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex HeadRegex();
 
     [GeneratedRegex("""<link\b[^>]*>""", RegexOptions.IgnoreCase)]
     private static partial Regex LinkTagRegex();
@@ -456,4 +492,5 @@ internal sealed record PwaIconProbe(
 internal sealed record PwaStatusProbe(
     bool Enabled,
     bool OfflineEnabled,
-    string? ServiceWorkerPath);
+    string? ServiceWorkerPath,
+    string? OfflineFallbackPath);

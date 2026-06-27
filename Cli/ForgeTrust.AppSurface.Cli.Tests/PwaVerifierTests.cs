@@ -129,9 +129,10 @@ public sealed class PwaVerifierTests
         http.Add("https://app.example.test/tenant/icons/app-512.png", "png", "image/png");
         http.Add(
             "https://app.example.test/tenant/_appsurface/pwa/status.json",
-            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"/tenant/service-worker.js"}""",
+            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"/tenant/service-worker.js","offlineFallbackPath":"/tenant/offline.html"}""",
             "application/json");
         http.Add("https://app.example.test/tenant/service-worker.js", "js", "text/javascript");
+        http.Add("https://app.example.test/tenant/offline.html", "offline", "text/html");
         var verifier = new PwaVerifier(http);
 
         var report = await verifier.VerifyAsync(new Uri("https://app.example.test/tenant/"), CancellationToken.None);
@@ -199,10 +200,30 @@ public sealed class PwaVerifierTests
     }
 
     [Fact]
+    public async Task VerifyAsync_FailsWhenManifestLinkIsOutsideHead()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add(
+            "https://app.example.test/",
+            """<!doctype html><html><head></head><body><link rel="manifest" href="/manifest.webmanifest"></body></html>""",
+            "text/html");
+        http.Add("https://app.example.test/manifest.webmanifest", ValidManifest(), "application/manifest+json");
+        http.Add("https://app.example.test/icons/app-192.png", "png", "image/png");
+        http.Add("https://app.example.test/icons/app-512.png", "png", "image/png");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA224");
+    }
+
+    [Fact]
     public async Task VerifyAsync_FailsWhenManifestOmitsInstallColors()
     {
         var http = new FakePwaHttpClient();
-        http.Add("https://app.example.test/", """<link rel="manifest" href="/manifest.webmanifest">""", "text/html");
+        http.Add("https://app.example.test/", HtmlWithManifestLink(), "text/html");
         http.Add(
             "https://app.example.test/manifest.webmanifest",
             ManifestWithoutInstallColors(),
@@ -223,7 +244,7 @@ public sealed class PwaVerifierTests
     public async Task VerifyAsync_FailsWhenManifestInstallColorsAreInvalid()
     {
         var http = new FakePwaHttpClient();
-        http.Add("https://app.example.test/", """<link rel="manifest" href="/manifest.webmanifest">""", "text/html");
+        http.Add("https://app.example.test/", HtmlWithManifestLink(), "text/html");
         http.Add(
             "https://app.example.test/manifest.webmanifest",
             ValidManifest(themeColor: "blue", backgroundColor: "ffffff"),
@@ -244,7 +265,7 @@ public sealed class PwaVerifierTests
     public async Task VerifyAsync_FailsWhenManifestDisplayIsUnsupported()
     {
         var http = new FakePwaHttpClient();
-        http.Add("https://app.example.test/", """<link rel="manifest" href="/manifest.webmanifest">""", "text/html");
+        http.Add("https://app.example.test/", HtmlWithManifestLink(), "text/html");
         http.Add(
             "https://app.example.test/manifest.webmanifest",
             ValidManifest(display: "wat"),
@@ -288,7 +309,7 @@ public sealed class PwaVerifierTests
     public async Task VerifyAsync_FailsWhenIconIsNotReachable()
     {
         var http = new FakePwaHttpClient();
-        http.Add("http://localhost:5000/", """<link rel="manifest" href="/manifest.webmanifest">""", "text/html");
+        http.Add("http://localhost:5000/", HtmlWithManifestLink(), "text/html");
         http.Add("http://localhost:5000/manifest.webmanifest", ValidManifest(), "application/manifest+json");
         http.Add("http://localhost:5000/icons/app-192.png", string.Empty, "text/plain", HttpStatusCode.NotFound);
         http.Add("http://localhost:5000/icons/app-512.png", "png", "image/png");
@@ -305,15 +326,19 @@ public sealed class PwaVerifierTests
     public async Task VerifyAsync_FailsWhenOfflineDiagnosticsServiceWorkerIsMissing()
     {
         var http = new FakePwaHttpClient();
-        http.Add("http://localhost:5000/", """<link href="/manifest.webmanifest" rel="manifest">""", "text/html");
+        http.Add(
+            "http://localhost:5000/",
+            """<!doctype html><html><head><link href="/manifest.webmanifest" rel="manifest"></head><body></body></html>""",
+            "text/html");
         http.Add("http://localhost:5000/manifest.webmanifest", ValidManifest(), "application/manifest+json");
         http.Add("http://localhost:5000/icons/app-192.png", "png", "image/png");
         http.Add("http://localhost:5000/icons/app-512.png", "png", "image/png");
         http.Add(
             "http://localhost:5000/_appsurface/pwa/status.json",
-            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"/service-worker.js"}""",
+            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"/service-worker.js","offlineFallbackPath":"/offline.html"}""",
             "application/json");
         http.Add("http://localhost:5000/service-worker.js", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        http.Add("http://localhost:5000/offline.html", "offline", "text/html");
         var verifier = new PwaVerifier(http);
 
         var report = await verifier.VerifyAsync(new Uri("http://localhost:5000"), CancellationToken.None);
@@ -364,7 +389,7 @@ public sealed class PwaVerifierTests
     public async Task VerifyAsync_FailsWhenManifestHasWrongContentTypeAndInvalidJson()
     {
         var http = new FakePwaHttpClient();
-        http.Add("https://app.example.test/", """<link rel="manifest" href="/manifest.webmanifest">""", "text/html");
+        http.Add("https://app.example.test/", HtmlWithManifestLink(), "text/html");
         http.Add("https://app.example.test/manifest.webmanifest", "{", "text/plain");
         http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
         var verifier = new PwaVerifier(http);
@@ -380,7 +405,7 @@ public sealed class PwaVerifierTests
     public async Task VerifyAsync_FailsWhenManifestOmitsRequiredInstallFields()
     {
         var http = new FakePwaHttpClient();
-        http.Add("https://app.example.test/", """<link rel="manifest" href="/manifest.webmanifest">""", "text/html");
+        http.Add("https://app.example.test/", HtmlWithManifestLink(), "text/html");
         http.Add("https://app.example.test/manifest.webmanifest", "{}", "application/manifest+json");
         http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
         var verifier = new PwaVerifier(http);
@@ -401,7 +426,7 @@ public sealed class PwaVerifierTests
     public async Task VerifyAsync_FailsWhenScopeLeavesVerifiedPathBase()
     {
         var http = new FakePwaHttpClient();
-        http.Add("https://app.example.test/tenant/", """<link rel="manifest" href="/tenant/manifest.webmanifest">""", "text/html");
+        http.Add("https://app.example.test/tenant/", HtmlWithManifestLink("/tenant/manifest.webmanifest"), "text/html");
         http.Add(
             "https://app.example.test/tenant/manifest.webmanifest",
             ValidManifest("/tenant/", "/admin/", "/tenant/icons/app-192.png", "/tenant/icons/app-512.png"),
@@ -421,7 +446,7 @@ public sealed class PwaVerifierTests
     public async Task VerifyAsync_FailsForOffOriginOutsideBaseAndNonImageIcons()
     {
         var http = new FakePwaHttpClient();
-        http.Add("https://app.example.test/tenant/", """<link rel="manifest" href="/tenant/manifest.webmanifest">""", "text/html");
+        http.Add("https://app.example.test/tenant/", HtmlWithManifestLink("/tenant/manifest.webmanifest"), "text/html");
         http.Add(
             "https://app.example.test/tenant/manifest.webmanifest",
             """
@@ -502,8 +527,9 @@ public sealed class PwaVerifierTests
         AddValidInstallResponses(http, "https://app.example.test");
         http.Add(
             "https://app.example.test/_appsurface/pwa/status.json",
-            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"https://cdn.example.test/service-worker.js"}""",
+            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"https://cdn.example.test/service-worker.js","offlineFallbackPath":"/offline.html"}""",
             "application/json");
+        http.Add("https://app.example.test/offline.html", "offline", "text/html");
         var verifier = new PwaVerifier(http);
 
         var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
@@ -516,7 +542,7 @@ public sealed class PwaVerifierTests
     public async Task VerifyAsync_FailsWhenOfflineDiagnosticsServiceWorkerLeavesPathBase()
     {
         var http = new FakePwaHttpClient();
-        http.Add("https://app.example.test/tenant/", """<link rel="manifest" href="/tenant/manifest.webmanifest">""", "text/html");
+        http.Add("https://app.example.test/tenant/", HtmlWithManifestLink("/tenant/manifest.webmanifest"), "text/html");
         http.Add(
             "https://app.example.test/tenant/manifest.webmanifest",
             ValidManifest("/tenant/", "/tenant/", "/tenant/icons/app-192.png", "/tenant/icons/app-512.png"),
@@ -525,8 +551,9 @@ public sealed class PwaVerifierTests
         http.Add("https://app.example.test/tenant/icons/app-512.png", "png", "image/png");
         http.Add(
             "https://app.example.test/tenant/_appsurface/pwa/status.json",
-            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"/service-worker.js"}""",
+            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"/service-worker.js","offlineFallbackPath":"/tenant/offline.html"}""",
             "application/json");
+        http.Add("https://app.example.test/tenant/offline.html", "offline", "text/html");
         var verifier = new PwaVerifier(http);
 
         var report = await verifier.VerifyAsync(new Uri("https://app.example.test/tenant/"), CancellationToken.None);
@@ -535,12 +562,96 @@ public sealed class PwaVerifierTests
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA230");
     }
 
+    [Fact]
+    public async Task VerifyAsync_FailsWhenOfflineDiagnosticsOmitFallbackPath()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"/service-worker.js"}""",
+            "application/json");
+        http.Add("https://app.example.test/service-worker.js", "js", "text/javascript");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA235");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_FailsWhenOfflineDiagnosticsFallbackLeavesOrigin()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"/service-worker.js","offlineFallbackPath":"https://cdn.example.test/offline.html"}""",
+            "application/json");
+        http.Add("https://app.example.test/service-worker.js", "js", "text/javascript");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA236");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_FailsWhenOfflineDiagnosticsFallbackLeavesPathBase()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/tenant/", HtmlWithManifestLink("/tenant/manifest.webmanifest"), "text/html");
+        http.Add(
+            "https://app.example.test/tenant/manifest.webmanifest",
+            ValidManifest("/tenant/", "/tenant/", "/tenant/icons/app-192.png", "/tenant/icons/app-512.png"),
+            "application/manifest+json");
+        http.Add("https://app.example.test/tenant/icons/app-192.png", "png", "image/png");
+        http.Add("https://app.example.test/tenant/icons/app-512.png", "png", "image/png");
+        http.Add(
+            "https://app.example.test/tenant/_appsurface/pwa/status.json",
+            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"/tenant/service-worker.js","offlineFallbackPath":"/offline.html"}""",
+            "application/json");
+        http.Add("https://app.example.test/tenant/service-worker.js", "js", "text/javascript");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test/tenant/"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA237");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_FailsWhenOfflineDiagnosticsFallbackIsMissing()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"/service-worker.js","offlineFallbackPath":"/offline.html"}""",
+            "application/json");
+        http.Add("https://app.example.test/service-worker.js", "js", "text/javascript");
+        http.Add("https://app.example.test/offline.html", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA238");
+    }
+
     private static void AddValidInstallResponses(FakePwaHttpClient http, string origin)
     {
-        http.Add(origin + "/", """<link rel="manifest" href="/manifest.webmanifest">""", "text/html");
+        http.Add(origin + "/", HtmlWithManifestLink(), "text/html");
         http.Add(origin + "/manifest.webmanifest", ValidManifest(), "application/manifest+json");
         http.Add(origin + "/icons/app-192.png", "png", "image/png");
         http.Add(origin + "/icons/app-512.png", "png", "image/png");
+    }
+
+    private static string HtmlWithManifestLink(string href = "/manifest.webmanifest")
+    {
+        return $"""<!doctype html><html><head><link rel="manifest" href="{href}"></head><body></body></html>""";
     }
 
     private static string ValidManifest(
