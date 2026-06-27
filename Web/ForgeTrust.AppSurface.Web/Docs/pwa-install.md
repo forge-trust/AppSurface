@@ -58,7 +58,7 @@ Optional values:
 | Option | Default | Notes |
 |--------|---------|-------|
 | `ManifestPath` | `/manifest.webmanifest` | App-root-relative endpoint for generated manifest JSON. |
-| `Diagnostics` | `DevelopmentOnly` | `Always`, `DevelopmentOnly`, or `Never` for `/_appsurface/pwa`. |
+| `DiagnosticsExposure` | `DevelopmentOnly` | `Always`, `DevelopmentOnly`, or `Never` for `/_appsurface/pwa`. |
 | `Offline.Enabled` | `false` | Controls whether AppSurface maps a service worker endpoint. |
 | `Offline.ServiceWorkerPath` | `/service-worker.js` | App-root-relative service worker endpoint. |
 | `Offline.OfflineFallbackPath` | Empty | Required when offline is enabled. |
@@ -73,7 +73,7 @@ All AppSurface-owned endpoint paths must be app-root-relative. Absolute URLs, pr
 - `<link rel="manifest" href="/manifest.webmanifest">`
 - `<meta name="theme-color" ...>`
 - `<meta name="application-name" ...>`
-- Apple mobile-web-app capable, title, and status-bar metadata.
+- Apple mobile-web-app capable and title metadata.
 - `<link rel="icon" sizes="..." type="..." href="...">` for each configured icon.
 
 The helper respects `PathBase` and uses ASP.NET Core file versioning for icon hrefs when static assets provide a versioned path. If PWA support is disabled, it emits no output.

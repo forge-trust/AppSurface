@@ -90,6 +90,11 @@ internal static partial class PwaOptionsValidator
         }
 
         var value = path.Trim();
+        if (!string.Equals(value, path, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         return value.StartsWith('/')
             && !value.StartsWith("//", StringComparison.Ordinal)
             && !value.Contains('\\')
@@ -179,6 +184,11 @@ internal static partial class PwaOptionsValidator
         }
 
         var startUrl = value.Trim();
+        if (!string.Equals(startUrl, value, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         if (!startUrl.StartsWith('/')
             || startUrl.StartsWith("//", StringComparison.Ordinal)
             || startUrl.Contains('\\')
