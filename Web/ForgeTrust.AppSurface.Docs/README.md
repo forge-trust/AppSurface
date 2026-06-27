@@ -488,7 +488,52 @@ The sidebar health entry follows `AppSurfaceDocs:Harvest:Health:ShowChrome`, whi
 
 Allowed exposure values are `DevelopmentOnly`, `Always`, and `Never`. If you set `ExposeRoutes=Always`, the reserved health endpoints become an operator surface in that environment. Protect them with host-owned authentication, authorization, or network controls when they are reachable by untrusted users.
 
+Set `AppSurfaceDocs:Harvest:Health:AuthorizationPolicy` when `_health` and `_health.json` should require a host-owned ASP.NET Core authorization policy before the health response is returned. Blank values are normalized to `null`, which preserves the existing exposure-only behavior. This option protects only the two health read routes; it does not protect `_harvest`, `_harvest/rebuild`, `_routes`, `_routes.json`, metrics, search refresh, or public docs pages.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Health": {
+        "ExposeRoutes": "Always",
+        "AuthorizationPolicy": "DocsHealthRead"
+      }
+    }
+  }
+}
+```
+
+The host owns authentication schemes, identities, cookies, challenges, and policy definitions:
+
+```csharp
+builder.Services.AddAuthentication(/* host scheme configuration */);
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(
+        "DocsHealthRead",
+        policy => policy.RequireAuthenticatedUser()
+            .RequireClaim("scope", "docs.health.read"));
+});
+```
+
+Register authentication before authorization from the root or host integration module's endpoint-aware middleware hook so endpoint metadata has already been selected and the policy runs before endpoint execution:
+
+```csharp
+public sealed class HostWebModule : IAppSurfaceWebModule
+{
+    public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+    {
+        app.UseAuthentication();
+        app.UseAuthorization();
+    }
+}
+```
+
+If `AuthorizationPolicy` names an unregistered policy, or the host omits the authorization middleware, ASP.NET Core treats that as host setup failure. The health JSON shape and health HTTP status-code semantics apply after authorization succeeds; challenges and forbids follow the host's normal authentication and authorization behavior.
+
 The built-in `_health` page renders a trusted maintainer action band when an effective docs operator-write policy is configured. Posting `Rebuild docs` starts a full source-backed harvest when the coordinator is idle, queues exactly one rebuild behind a running harvest, or reports the existing queued rebuild by redirecting back to `_harvest`. The observatory shows the live redacted progress stream when the current request may subscribe to the harvest channel and falls back to a manual continue link when live progress is disabled or JavaScript is unavailable.
+
+Broader operator-read hardening for `_harvest`, route inspector, and any shared diagnostics read policy is intentionally separate from this health-route policy. Track that in forge-trust/AppSurface#578 rather than assuming the health policy covers every operator diagnostics route.
 
 AppSurface Docs also reserves a route inspector at `{DocsRootPath}/_routes` and a machine-readable JSON endpoint at `{DocsRootPath}/_routes.json`. The inspector shows the public route manifest for the current cached docs snapshot: canonical browser URLs, source-shaped Markdown recovery aliases, declared redirect aliases, and route diagnostics. Add `?path=` to either endpoint to probe a source path, public route, or app-relative docs URL and see whether it resolves directly, redirects through an alias, is hidden, is reserved, or is invalid input.
 
@@ -1185,6 +1230,12 @@ static web assets.
   - AppSurface Docs always reserves the endpoint patterns before the docs catch-all route so health URLs do not fall through to document lookup.
   - `Always` exposes the responses in non-development environments; protect the endpoints at the host boundary when they are publicly reachable.
   - `Never` keeps the reserved endpoints returning `404`, including in development.
+- `AppSurfaceDocs:Harvest:Health:AuthorizationPolicy`
+  - Defaults to `null`.
+  - Names the host-owned ASP.NET Core authorization policy required before `{DocsRootPath}/_health` and `{DocsRootPath}/_health.json` return health responses.
+  - Blank values normalize to `null`, preserving existing behavior.
+  - Requires the host to register authentication before authorization in `ConfigureEndpointAwareMiddleware`.
+  - Does not apply to `_harvest`, `_harvest/rebuild`, route inspector, metrics, search refresh, operator writes, or public docs pages.
 - `AppSurfaceDocs:Harvest:Health:ShowChrome`
   - Defaults to `DevelopmentOnly`.
   - Controls whether the built-in sidebar shows health status chrome.
@@ -1760,6 +1811,7 @@ builder.Services.AddAuthorization(options =>
 Production opt-in checklist:
 
 - Set `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` only in environments where trusted maintainers should access `_health` and `_harvest`.
+- Set `AppSurfaceDocs:Harvest:Health:AuthorizationPolicy` when `_health` and `_health.json` should require a host-owned read policy; register `UseAuthentication()` before `UseAuthorization()` in `ConfigureEndpointAwareMiddleware`.
 - Configure `AppSurfaceDocs:Diagnostics:OperatorWritePolicy` to a host-owned policy that identifies docs maintainers explicitly. Do not rely on route exposure, network position, or development defaults as authorization.
 - Keep MVC anti-forgery enabled for browser forms. Host-owned automation should use a separate authenticated job/admin endpoint when anti-forgery is not appropriate.
 - Ensure the harvest-progress stream authorizer allows the same trusted operator audience when live progress should be visible outside Development.

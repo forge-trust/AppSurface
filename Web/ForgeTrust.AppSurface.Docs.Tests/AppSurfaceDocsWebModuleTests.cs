@@ -11,6 +11,7 @@ using ForgeTrust.AppSurface.Docs.Standalone;
 using ForgeTrust.AppSurface.Web.Tailwind;
 using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
@@ -1632,6 +1633,157 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
+    public void ConfigureEndpoints_ShouldApplyConfiguredHealthAuthorizationPolicyOnlyToHealthRoutes()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    AuthorizationPolicy = "DocsHealthRead"
+                }
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<AppSurfaceDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertHealthAuthorizationPolicy(routeBuilder, "docs/_health", "DocsHealthRead");
+        AssertHealthAuthorizationPolicy(routeBuilder, "docs/_health.json", "DocsHealthRead");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_harvest");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_harvest/rebuild");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_routes");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_routes.json");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_search-index/refresh");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotApplyHealthAuthorizationPolicy_WhenUnset()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health.json");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ConfigureEndpoints_ShouldNotApplyHealthAuthorizationPolicy_WhenPolicyIsBlank(string authorizationPolicy)
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    AuthorizationPolicy = authorizationPolicy
+                }
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<AppSurfaceDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health.json");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotApplyHealthAuthorizationPolicy_WhenHarvestOptionsAreNull()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = null!
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<AppSurfaceDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health.json");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotApplyHealthAuthorizationPolicy_WhenHealthOptionsAreNull()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = null!
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<AppSurfaceDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health.json");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotApplyHealthAuthorizationPolicy_WhenHostEnvironmentIsUnavailable()
+    {
+        var services = new ServiceCollection();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    AuthorizationPolicy = "DocsHealthRead"
+                }
+            }
+        };
+        using var provider = services.BuildServiceProvider();
+
+        var policyName = AppSurfaceDocsWebModule.ResolveHealthAuthorizationPolicyName(options, provider);
+
+        Assert.Null(policyName);
+    }
+
+    [Fact]
     public void ConfigureEndpoints_ShouldReserveHealthRoutes_InDevelopmentWhenExplicitlyDisabled()
     {
         var context = CreateStartupContext();
@@ -2388,6 +2540,43 @@ public class AppSurfaceDocsWebModuleTests
         var rootModuleFake = A.Fake<IAppSurfaceHostModule>();
         var envFake = A.Fake<IEnvironmentProvider>();
         return new StartupContext(Array.Empty<string>(), rootModuleFake, "TestApp", envFake);
+    }
+
+    private static void AssertHealthAuthorizationPolicy(
+        IEndpointRouteBuilder routeBuilder,
+        string routePattern,
+        string expectedPolicy)
+    {
+        var endpoints = GetRouteEndpoints(routeBuilder, routePattern);
+
+        Assert.NotEmpty(endpoints);
+        Assert.All(
+            endpoints,
+            endpoint =>
+            {
+                var authorizeData = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>();
+                Assert.Contains(authorizeData, metadata => string.Equals(metadata.Policy, expectedPolicy, StringComparison.Ordinal));
+            });
+    }
+
+    private static void AssertNoAuthorizationPolicy(IEndpointRouteBuilder routeBuilder, string routePattern)
+    {
+        var endpoints = GetRouteEndpoints(routeBuilder, routePattern);
+
+        Assert.NotEmpty(endpoints);
+        foreach (var endpoint in endpoints)
+        {
+            Assert.Empty(endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>());
+        }
+    }
+
+    private static IReadOnlyList<RouteEndpoint> GetRouteEndpoints(IEndpointRouteBuilder routeBuilder, string routePattern)
+    {
+        return routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(endpoint => string.Equals(endpoint.RoutePattern.RawText?.TrimStart('/'), routePattern, StringComparison.Ordinal))
+            .ToArray();
     }
 
     private static string WriteReleaseManifest(string root)

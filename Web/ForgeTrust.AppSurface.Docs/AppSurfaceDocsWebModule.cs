@@ -561,7 +561,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 })
             .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
 
-        endpoints.MapControllerRoute(
+        var health = endpoints.MapControllerRoute(
             name: "appsurfacedocs_harvest_health",
             pattern: currentHealthPattern,
             defaults: new
@@ -570,7 +570,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 action = "HarvestHealth"
             });
 
-        endpoints.MapControllerRoute(
+        var healthJson = endpoints.MapControllerRoute(
             name: "appsurfacedocs_harvest_health_json",
             pattern: currentHealthJsonPattern,
             defaults: new
@@ -578,6 +578,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "HarvestHealthJson"
             });
+        ApplyHealthAuthorizationPolicy(health, healthJson, docsOptions, endpoints.ServiceProvider);
 
         endpoints.MapControllerRoute(
             name: "appsurfacedocs_route_inspector",
@@ -651,6 +652,49 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "Details"
             });
+    }
+
+    private static void ApplyHealthAuthorizationPolicy(
+        IEndpointConventionBuilder health,
+        IEndpointConventionBuilder healthJson,
+        AppSurfaceDocsOptions docsOptions,
+        IServiceProvider services)
+    {
+        var policyName = ResolveHealthAuthorizationPolicyName(docsOptions, services);
+        if (policyName is null)
+        {
+            return;
+        }
+
+        health.RequireAuthorization(policyName);
+        healthJson.RequireAuthorization(policyName);
+    }
+
+    /// <summary>
+    /// Resolves the effective health-route authorization policy name, or <see langword="null"/> when no policy should be
+    /// applied.
+    /// </summary>
+    /// <remarks>
+    /// Returns <see langword="null"/> when <see cref="AppSurfaceDocsHarvestHealthOptions.AuthorizationPolicy"/> is blank,
+    /// when no <see cref="IWebHostEnvironment"/> is available, or when the health routes are not exposed for the current
+    /// environment. <see cref="ApplyHealthAuthorizationPolicy"/> depends on this ordering so hidden health routes keep
+    /// returning <c>404</c> before authorization metadata is added.
+    /// </remarks>
+    internal static string? ResolveHealthAuthorizationPolicyName(AppSurfaceDocsOptions docsOptions, IServiceProvider services)
+    {
+        var policyName = docsOptions.Harvest?.Health?.AuthorizationPolicy;
+        if (string.IsNullOrWhiteSpace(policyName))
+        {
+            return null;
+        }
+
+        var environment = services.GetService(typeof(IWebHostEnvironment)) as IWebHostEnvironment;
+        if (environment is null || !AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(docsOptions, environment))
+        {
+            return null;
+        }
+
+        return policyName;
     }
 
     private static void MapLegacyAssetRedirect(IEndpointRouteBuilder endpoints, string route, string targetPath)
