@@ -18,6 +18,8 @@ This is the living release note for the next coordinated AppSurface version afte
   an offline fallback strategy. MVC and Razor apps can add `<appsurface:pwa-head />`; custom layouts can copy equivalent
   tags from diagnostics; `appsurface pwa verify --url <origin>` checks the live metadata, icons, secure-origin posture,
   diagnostics, and opt-in service worker.
+- The generated starter PWA service worker now scopes cache cleanup to the current AppSurface registration scope so it
+  does not prune unrelated origin caches or another path-mounted AppSurface app's offline cache.
 
 ## Migration watch
 
