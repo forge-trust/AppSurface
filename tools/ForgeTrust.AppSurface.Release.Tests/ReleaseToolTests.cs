@@ -2233,6 +2233,28 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task StableDocsArchiveGateRejectsBlankReleaseManifestContentType()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var indexBytes = await ReadDocsArchiveFileAsync(docs, "index.html");
+        var entry = CreateDocsManifestFile(
+            "index.html",
+            indexBytes.Length,
+            Convert.ToHexString(SHA256.HashData(indexBytes)).ToLowerInvariant()).ToDictionary();
+        entry["contentType"] = " ";
+        docs = await RewriteDocsReleaseManifestAsync(
+            docs,
+            "appsurface-docs-release-manifest-v1",
+            [entry]);
+
+        var result = await ValidateStableDocsArchiveGateAsync(docs);
+
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-docs-archive-verification-failed");
+        Assert.Contains("invalid contentType", result.Diagnostics[0].Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublishRejectsStableReleaseWhenReleaseManifestContainsNullEntry()
     {
         await SeedRepositoryAsync();

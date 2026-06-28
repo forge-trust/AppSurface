@@ -605,6 +605,12 @@ internal static class ReleaseDocsArchiveGate
             return false;
         }
 
+        if (entry.ContentType is not null && string.IsNullOrWhiteSpace(entry.ContentType))
+        {
+            issue = $"Release manifest file `{entry.Path}` has an invalid contentType value.";
+            return false;
+        }
+
         var hasUnsafeSegment = path
             .Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Where(segment => string.IsNullOrWhiteSpace(segment)
