@@ -2004,6 +2004,21 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void StableDocsArchiveGateRejectsMissingCandidateSegment()
+    {
+        var trustedRoot = RepositoryPath("dist/docs");
+        Directory.CreateDirectory(trustedRoot);
+
+        var result = ReleaseDocsArchiveGate.TryValidateNoReparseSegments(
+            trustedRoot,
+            Path.Join(trustedRoot, "missing"),
+            out var detail);
+
+        Assert.False(result);
+        Assert.Contains("does not exist", detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StableDocsArchiveGateRejectsEmptyExactTreePath()
     {
         var trustedRoot = RepositoryPath("dist/docs");
@@ -2574,6 +2589,34 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("Code: release-docs-archive-verification-failed", result.Stderr, StringComparison.Ordinal);
         Assert.Contains("symlink", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWhenArchiveDirectoryCannotBeEnumerated()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var restrictedPath = DocsArchivePath(docs, "restricted");
+        Directory.CreateDirectory(restrictedPath);
+        File.SetUnixFileMode(restrictedPath, UnixFileMode.None);
+
+        try
+        {
+            var result = await RunStablePublishWithDocsAsync(docs);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Code: release-docs-archive-verification-failed", result.Stderr, StringComparison.Ordinal);
+            Assert.Contains("could not be inspected", result.Stderr, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.SetUnixFileMode(restrictedPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
     }
 
     [Fact]

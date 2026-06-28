@@ -266,7 +266,24 @@ internal static class ReleaseDocsArchiveGate
 
             current = Path.Join(current, segment);
             var info = new DirectoryInfo(current);
-            if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+            if (!info.Exists)
+            {
+                detail = $"Directory segment `{DisplayPath(current)}` does not exist.";
+                return false;
+            }
+
+            FileAttributes attributes;
+            try
+            {
+                attributes = info.Attributes;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                detail = $"Directory segment `{DisplayPath(current)}` could not be inspected: {ex.Message}";
+                return false;
+            }
+
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
             {
                 detail = $"Directory segment `{DisplayPath(current)}` is a symlink, junction, or reparse point.";
                 return false;
@@ -606,10 +623,10 @@ internal static class ReleaseDocsArchiveGate
         while (directories.Count > 0)
         {
             var directory = directories.Pop();
-            IEnumerable<FileSystemInfo> entries;
+            FileSystemInfo[] entries;
             try
             {
-                entries = directory.EnumerateFileSystemInfos();
+                entries = directory.EnumerateFileSystemInfos().ToArray();
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
             {
