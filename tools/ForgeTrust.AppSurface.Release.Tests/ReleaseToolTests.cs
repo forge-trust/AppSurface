@@ -1586,7 +1586,7 @@ public sealed class ReleaseToolTests : IDisposable
         await SeedRepositoryAsync();
         var docs = await SeedDocsArchiveAsync("0.1.0");
         await File.WriteAllBytesAsync(
-            Path.Join(docs.TrustedReleaseRootPath, docs.ExactTreePath, "favicon.ico"),
+            TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath, "favicon.ico"),
             [0, 1, 2, 3]);
         var runner = CreateSuccessfulStablePublishRunner(docs: docs);
 

@@ -14,6 +14,9 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
+- Stable package release publishing now requires verified AppSurface Docs archive evidence, so release authors can prove
+  the public docs catalog, exact tree, release manifest, and serveable files match before GitHub Releases receive a
+  stable package.
 - `ForgeTrust.AppSurface.Web` now owns first-class PWA install metadata: enable `WebOptions.Pwa` to serve a manifest, emit Razor head metadata, expose development diagnostics, and opt into a starter offline fallback, then prove the running app with `appsurface pwa verify`.
 
 ## 0.2.0-preview.1 - 2026-06-28
