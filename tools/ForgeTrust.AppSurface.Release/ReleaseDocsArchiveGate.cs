@@ -685,12 +685,7 @@ internal static class ReleaseDocsArchiveGate
         try
         {
             var normalizedFilePath = NormalizePhysicalPath(filePath);
-            var directoryPath = Path.GetDirectoryName(normalizedFilePath);
-            if (directoryPath is null)
-            {
-                issue = $"Release manifest file `{displayPath}` is outside the ordinary exact tree.";
-                return false;
-            }
+            var directoryPath = Path.GetDirectoryName(normalizedFilePath)!;
 
             if (!TryValidateNoReparseSegments(rootPath, directoryPath, out var detail))
             {
