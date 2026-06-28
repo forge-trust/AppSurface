@@ -1941,6 +1941,57 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void StableDocsArchiveGateRejectsCandidateOutsideTrustedRoot()
+    {
+        var trustedRoot = RepositoryPath("dist/docs");
+        var outsideRoot = RepositoryPath("dist-other/docs");
+        Directory.CreateDirectory(trustedRoot);
+        Directory.CreateDirectory(outsideRoot);
+
+        var result = ReleaseDocsArchiveGate.TryValidateNoReparseSegments(
+            trustedRoot,
+            outsideRoot,
+            out var detail);
+
+        Assert.False(result);
+        Assert.Contains("outside trusted root", detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StableDocsArchiveGateRejectsEmptyExactTreePath()
+    {
+        var trustedRoot = RepositoryPath("dist/docs");
+        Directory.CreateDirectory(trustedRoot);
+
+        var result = ReleaseDocsArchiveGate.TryResolveExactTreePath(
+            trustedRoot,
+            " ",
+            out var physicalExactTreePath,
+            out var issue);
+
+        Assert.False(result);
+        Assert.Null(physicalExactTreePath);
+        Assert.Contains("empty", issue, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StableDocsArchiveGateRejectsExactTreePathEscapingUnnormalizedTrustedRoot()
+    {
+        var trustedRoot = RepositoryPath("dist/docs");
+        Directory.CreateDirectory(trustedRoot);
+
+        var result = ReleaseDocsArchiveGate.TryResolveExactTreePath(
+            trustedRoot + Path.DirectorySeparatorChar,
+            "releases/0.1.0",
+            out var physicalExactTreePath,
+            out var issue);
+
+        Assert.False(result);
+        Assert.NotNull(physicalExactTreePath);
+        Assert.Contains("escapes the trusted release root", issue, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task StableDocsArchiveGateDefaultsTrustedRootToCatalogDirectory()
     {
         await SeedRepositoryAsync();

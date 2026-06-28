@@ -227,7 +227,7 @@ internal static class ReleaseDocsArchiveGate
         }
     }
 
-    private static bool TryValidateNoReparseSegments(string rootPath, string candidatePath, out string? detail)
+    internal static bool TryValidateNoReparseSegments(string rootPath, string candidatePath, out string? detail)
     {
         detail = null;
         var root = NormalizePhysicalPath(rootPath);
@@ -370,7 +370,7 @@ internal static class ReleaseDocsArchiveGate
             && string.Equals(docsArchive.ReleaseManifestSha256, catalogEntry.ReleaseManifestSha256, StringComparison.Ordinal);
     }
 
-    private static bool TryResolveExactTreePath(
+    internal static bool TryResolveExactTreePath(
         string trustedReleaseRoot,
         string exactTreePath,
         out string? physicalExactTreePath,
