@@ -577,11 +577,11 @@ internal static class ReleaseDocsArchiveGate
             }
         }
 
-        var serveableFiles = Directory.EnumerateFiles(exactTreePath, "*", SearchOption.AllDirectories)
-            .Select(path => Path.GetRelativePath(exactTreePath, path).Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/'))
-            .Where(path => !string.Equals(path, ReleaseManifestFileName, StringComparison.Ordinal))
-            .Where(IsHandlerServeablePath)
-            .ToArray();
+        if (!TryEnumerateOrdinaryServeableFiles(exactTreePath, out var serveableFiles, out issue))
+        {
+            return false;
+        }
+
         foreach (var serveableFile in serveableFiles.Where(path => !files.ContainsKey(path)))
         {
             issue = $"Release archive contains serveable file `{serveableFile}` that is not listed in the release manifest.";
@@ -589,6 +589,70 @@ internal static class ReleaseDocsArchiveGate
         }
 
         fileCount = files.Count;
+        return true;
+    }
+
+    private static bool TryEnumerateOrdinaryServeableFiles(
+        string exactTreePath,
+        out IReadOnlyList<string> serveableFiles,
+        out string? issue)
+    {
+        var files = new List<string>();
+        var directories = new Stack<DirectoryInfo>();
+        directories.Push(new DirectoryInfo(exactTreePath));
+        serveableFiles = files;
+        issue = null;
+
+        while (directories.Count > 0)
+        {
+            var directory = directories.Pop();
+            IEnumerable<FileSystemInfo> entries;
+            try
+            {
+                entries = directory.EnumerateFileSystemInfos();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                issue = $"Release archive directory `{DisplayPath(directory.FullName)}` could not be inspected: {ex.Message}";
+                return false;
+            }
+
+            foreach (var entry in entries)
+            {
+                FileAttributes attributes;
+                try
+                {
+                    attributes = entry.Attributes;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+                {
+                    issue = $"Release archive entry `{DisplayPath(entry.FullName)}` could not be inspected: {ex.Message}";
+                    return false;
+                }
+
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    issue = $"Release archive entry `{DisplayPath(entry.FullName)}` is a symlink or reparse point.";
+                    return false;
+                }
+
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    directories.Push(new DirectoryInfo(entry.FullName));
+                    continue;
+                }
+
+                var relativePath = Path.GetRelativePath(exactTreePath, entry.FullName)
+                    .Replace(Path.DirectorySeparatorChar, '/')
+                    .Replace(Path.AltDirectorySeparatorChar, '/');
+                if (!string.Equals(relativePath, ReleaseManifestFileName, StringComparison.Ordinal)
+                    && IsHandlerServeablePath(relativePath))
+                {
+                    files.Add(relativePath);
+                }
+            }
+        }
+
         return true;
     }
 

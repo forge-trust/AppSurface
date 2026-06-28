@@ -2555,6 +2555,28 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PublishRejectsStableReleaseWhenArchiveContainsUnlistedSymlinkDirectory()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var realAssetsPath = RepositoryPath("unlisted-real-doc-assets");
+        Directory.CreateDirectory(realAssetsPath);
+        await File.WriteAllTextAsync(Path.Join(realAssetsPath, "app.css"), "body{}");
+        Directory.CreateSymbolicLink(DocsArchivePath(docs, "unlisted-assets"), realAssetsPath);
+
+        var result = await RunStablePublishWithDocsAsync(docs);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-archive-verification-failed", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("symlink", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublishRejectsStableReleaseWhenReleaseManifestFileDigestMismatches()
     {
         await SeedRepositoryAsync();
