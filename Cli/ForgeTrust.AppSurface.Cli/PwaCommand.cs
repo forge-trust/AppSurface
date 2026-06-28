@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Web;
 
 namespace ForgeTrust.AppSurface.Cli;
 
@@ -362,7 +363,7 @@ internal sealed partial class PwaVerifier
             return;
         }
 
-        if (!IsPathWithinScope(startUri.AbsolutePath, scopeUri.AbsolutePath))
+        if (!PwaScopePathMatcher.IsPathWithinScope(startUri.AbsolutePath, scopeUri.AbsolutePath))
         {
             diagnostics.Add(Error("ASPWA239", "Manifest start_url must stay within manifest scope."));
         }
@@ -378,22 +379,6 @@ internal sealed partial class PwaVerifier
         return !string.IsNullOrWhiteSpace(value)
             && ResolvesToOrigin(target, baseUri, value, out uri)
             && IsUnderBasePath(target, uri.AbsolutePath);
-    }
-
-    private static bool IsPathWithinScope(string path, string scope)
-    {
-        if (scope == "/")
-        {
-            return true;
-        }
-
-        if (scope.EndsWith("/", StringComparison.Ordinal))
-        {
-            return path.StartsWith(scope, StringComparison.Ordinal);
-        }
-
-        return string.Equals(path, scope, StringComparison.Ordinal)
-            || path.StartsWith(scope + "/", StringComparison.Ordinal);
     }
 
     private static bool IsSecureInstallContext(Uri origin)

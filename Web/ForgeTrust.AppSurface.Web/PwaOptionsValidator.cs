@@ -211,7 +211,7 @@ internal static partial class PwaOptionsValidator
             return;
         }
 
-        if (!IsPathWithinScope(GetPathWithoutQuery(startUrl!.Trim()), scope!.Trim()))
+        if (!PwaScopePathMatcher.IsPathWithinScope(GetPathWithoutQuery(startUrl!), scope!))
         {
             diagnostics.Add(
                 new PwaDiagnostic(
@@ -225,22 +225,6 @@ internal static partial class PwaOptionsValidator
     {
         var queryStart = value.IndexOf('?');
         return queryStart < 0 ? value : value[..queryStart];
-    }
-
-    private static bool IsPathWithinScope(string path, string scope)
-    {
-        if (scope == "/")
-        {
-            return true;
-        }
-
-        if (scope.EndsWith("/", StringComparison.Ordinal))
-        {
-            return path.StartsWith(scope, StringComparison.Ordinal);
-        }
-
-        return string.Equals(path, scope, StringComparison.Ordinal)
-            || path.StartsWith(scope + "/", StringComparison.Ordinal);
     }
 
     [GeneratedRegex("^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")]

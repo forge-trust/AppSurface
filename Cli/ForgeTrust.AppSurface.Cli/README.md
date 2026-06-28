@@ -16,7 +16,7 @@ The CLI also includes public coverage commands for private-by-default CI coverag
 
 `appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, delete keys, and run doctor diagnostics for platform availability.
 
-`appsurface pwa verify` checks the install metadata served by `ForgeTrust.AppSurface.Web`: secure origin posture, manifest discovery and content, icon reachability, same-origin start URL and scope, head link presence, diagnostics exposure, and opt-in offline service worker posture.
+`appsurface pwa verify` checks the install metadata served by `ForgeTrust.AppSurface.Web`: secure origin posture, manifest discovery and content, icon reachability, same-origin start URL and scope, head link presence, diagnostics exposure, and opt-in offline service worker plus fallback posture.
 
 Future CLI authentication is design-only today. The [authenticated command design](docs/authenticated-command-design.md) keeps auth centered on protected command execution, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the first protected command wedge, and requires browser/loopback PKCE, RFC 8628 device flow, CI no-prompt behavior, secure token-cache boundaries, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 
@@ -76,7 +76,7 @@ appsurface pwa verify --url https://app.example.com
 appsurface pwa verify --url http://localhost:5055 --json
 ```
 
-The verifier accepts HTTPS origins and localhost development origins. It reports stable `ASPWA2xx` diagnostics for manifest reachability, required manifest fields, required `192x192` and `512x512` icons, icon content types, root-page manifest links, `start_url`/`scope` consistency, development diagnostics, and offline service worker posture when the app enables an offline strategy. JSON output is intended for CI or smoke tests; text output is optimized for local copy-paste debugging.
+The verifier accepts HTTPS origins plus localhost, `127.0.0.1`, and `::1` development origins. It reports stable `ASPWA2xx` diagnostics for manifest reachability, required manifest fields, required `192x192` and `512x512` icons, icon content types, root-page manifest links, `start_url`/`scope` consistency, development diagnostics, and offline service worker plus offline fallback reachability when the app enables an offline strategy. JSON output is intended for CI or smoke tests; text output is optimized for local copy-paste debugging.
 
 ### `appsurface secrets`
 
