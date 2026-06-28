@@ -133,7 +133,7 @@ Use environment variables, key-per-file, or a remote vault in CI, containers, te
 
 ## Release Guidance
 
-Use the [v0.1.0 RC 4 release note](../../releases/v0.1.0-rc.4.md) for the current package-facing prerelease story, risk notes, and migration guidance.
+Use the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for the current package-facing prerelease story, risk notes, and migration guidance.
 
 ## Structured Statuses
 

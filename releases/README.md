@@ -11,7 +11,7 @@ It also acts as a concrete AppSurface Docs example for teams that want stronger 
 ## Start here
 
 - [Package chooser](../packages/README.md) is the fastest install map for deciding which AppSurface package to add first.
-- [v0.1.0 RC 4](./v0.1.0-rc.4.md) is the current package-facing story for the coordinated AppSurface prerelease.
+- [v0.2.0-preview.1](./v0.2.0-preview.1.md) is the current package-facing story for the coordinated AppSurface prerelease.
 - [Unreleased](./unreleased.md) is the living proof artifact for the next coordinated AppSurface version: the current merged-work ledger, not the final tagged narrative.
 - [Changelog](../CHANGELOG.md) is the compact ledger that points to unreleased and tagged stories.
 - [Pre-1.0 upgrade policy](./upgrade-policy.md) explains the stability contract before `v1.0.0`.

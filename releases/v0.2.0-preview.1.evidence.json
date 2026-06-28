@@ -1,0 +1,144 @@
+{
+  "schema": "appsurface-release-evidence-bundle-v1",
+  "version": "0.2.0-preview.1",
+  "tag": "v0.2.0-preview.1",
+  "releaseClassification": "prerelease",
+  "releaseNotePath": "releases/v0.2.0-preview.1.md",
+  "releaseSidecarPath": "releases/v0.2.0-preview.1.md.yml",
+  "releaseManifestPath": "releases/v0.2.0-preview.1.release.json",
+  "evidencePath": "releases/v0.2.0-preview.1.evidence.json",
+  "releaseManifestDigest": {
+    "algorithm": "sha256",
+    "value": "a78e059fa62e0a738d2a64ea3ab171900dc7657ca10991b974046e69050d0804"
+  },
+  "releaseArtifactDigests": [
+    {
+      "path": "releases/v0.2.0-preview.1.md",
+      "algorithm": "sha256",
+      "value": "e046b671800c4c777b9b19a4b68c3ddbd86d3113da6c39fca7ed9e0488408ad9"
+    },
+    {
+      "path": "releases/v0.2.0-preview.1.md.yml",
+      "algorithm": "sha256",
+      "value": "89c452cec79dde5d006f73ff5a9fab6a9e06f8f150c2273276b33a53c4b97de5"
+    },
+    {
+      "path": "releases/v0.2.0-preview.1.release.json",
+      "algorithm": "sha256",
+      "value": "a78e059fa62e0a738d2a64ea3ab171900dc7657ca10991b974046e69050d0804"
+    }
+  ],
+  "packageReleaseNotePaths": [
+    {
+      "project": "Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Auth/ForgeTrust.AppSurface.Auth.Testing/ForgeTrust.AppSurface.Auth.Testing.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Auth/ForgeTrust.AppSurface.Auth/ForgeTrust.AppSurface.Auth.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Caching/ForgeTrust.AppSurface.Caching/ForgeTrust.AppSurface.Caching.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Config/ForgeTrust.AppSurface.Config.LocalSecrets/ForgeTrust.AppSurface.Config.LocalSecrets.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Observability/ForgeTrust.AppSurface.Observability/ForgeTrust.AppSurface.Observability.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Web/ForgeTrust.AppSurface.Web.Scalar/ForgeTrust.AppSurface.Web.Scalar.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    },
+    {
+      "project": "Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.1.md"
+    }
+  ],
+  "docsArchive": {
+    "status": "notConfigured",
+    "exactTreePath": null,
+    "releaseManifestSha256": null,
+    "releaseManifestSchema": null,
+    "fileCount": null,
+    "catalogEntry": null
+  },
+  "commits": {
+    "contentSourceCommit": "f68ae1a350c0bc6d8d70938ea1739f5c331a6118",
+    "releasePreparationCommit": null,
+    "tagCommit": null,
+    "workflowRunId": null
+  },
+  "generatedBy": {
+    "tool": "./eng/release"
+  },
+  "generatedAtUtc": "2026-06-28T01:14:19.7937170Z",
+  "subject": {
+    "name": "releases/v0.2.0-preview.1.evidence.json",
+    "sha256": "7415f98e20634d584c203fa65f6b8d7fb7dbcc6ac20632e5cb808e7975720f5c"
+  },
+  "attestation": null
+}
