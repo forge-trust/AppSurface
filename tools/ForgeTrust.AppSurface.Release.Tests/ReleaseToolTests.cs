@@ -1957,13 +1957,13 @@ public sealed class ReleaseToolTests : IDisposable
     {
         await SeedRepositoryAsync();
         var docs = await SeedDocsArchiveAsync("0.1.0");
-        foreach (var file in Directory.EnumerateFiles(Path.Join(docs.TrustedReleaseRootPath, docs.ExactTreePath)))
+        foreach (var file in Directory.EnumerateFiles(TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath)))
         {
-            var target = Path.Join(docs.TrustedReleaseRootPath, Path.GetFileName(file));
+            var target = TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, Path.GetFileName(file));
             File.Copy(file, target, overwrite: true);
         }
 
-        Directory.Delete(Path.Join(docs.TrustedReleaseRootPath, "releases"), recursive: true);
+        Directory.Delete(TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, "releases"), recursive: true);
         File.Delete(docs.CatalogPath);
         docs = docs with
         {
