@@ -394,6 +394,43 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldNotWarn_WhenPublicEventDocletMatchesBareAndComputedLiteralDispatches()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Bare dispatch changed.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:bare-dispatch
+             * @target window
+             * @firesWhen a global dispatch occurs.
+             * @detail none
+             */
+            dispatchEvent(new CustomEvent("razorwire:bare-dispatch"));
+
+            /**
+             * Computed dispatch changed.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:computed-dispatch
+             * @target window
+             * @firesWhen a computed dispatch occurs.
+             * @detail none
+             */
+            window["dispatchEvent"](new CustomEvent("razorwire:computed-dispatch"));
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldWarn_WhenPublicEventDocletHasNoLiteralDispatch()
     {
         await WriteAsync(
@@ -517,6 +554,71 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
         _ = await harvester.HarvestAsync(_testRoot);
 
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipPrivateAndInternalEventDoclets_WhenVerifyingDispatches()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Internal event.
+             * @public
+             * @internal
+             * @namespace RazorWire
+             * @event razorwire:internal-only
+             * @target document
+             * @firesWhen internal state changes.
+             * @detail none
+             */
+
+            /**
+             * Private event.
+             * @public
+             * @private
+             * @namespace RazorWire
+             * @event razorwire:private-only
+             * @target document
+             * @firesWhen private state changes.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipTypeScriptOnlySources_WhenVerifyingDispatches()
+    {
+        await WriteAsync(
+            "src/runtime.ts",
+            """
+            /**
+             * TypeScript-only event.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:typescript-only
+             * @target document
+             * @firesWhen TypeScript source dispatches.
+             * @detail none
+             */
+            document.dispatchEvent(new CustomEvent("razorwire:typescript-only"));
+            """);
+        var options = CreateEnabledOptions("src/runtime.ts");
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
         Assert.Empty(GetDiagnostics(harvester));
     }
 
