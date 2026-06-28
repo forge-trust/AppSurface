@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Release;
@@ -118,6 +120,13 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Equal(1, publish.ExitCode);
         Assert.Contains("--allow-existing-targets", publish.Stderr, StringComparison.Ordinal);
+
+        var prepareWithDocs = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--docs-catalog", "dist/docs/versions.json"],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, prepareWithDocs.ExitCode);
+        Assert.Contains("--docs-catalog", prepareWithDocs.Stderr, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -631,14 +640,14 @@ public sealed class ReleaseToolTests : IDisposable
     {
         await SeedRepositoryAsync();
         var prepare = await RunAsync(
-            ["prepare", "--version", "0.1.0", "--date", "2026-05-25"],
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
             FakeCommandRunner.WithSourceCommit("abc123"));
         Assert.Equal(0, prepare.ExitCode);
-        await WriteFileAsync("releases/v0.1.0-preview.1.evidence.json", "{}\n");
+        await WriteFileAsync("releases/v0.1.0-preview.2.evidence.json", "{}\n");
         await WriteFileAsync("releases/v0.1.00.evidence.json", "{}\n");
 
         var result = await RunAsync(
-            ["check", "--version", "0.1.0", "--allow-existing-targets"],
+            ["check", "--version", "0.1.0-preview.1", "--allow-existing-targets"],
             FakeCommandRunner.WithSourceCommit("release-prep-commit"));
 
         Assert.Equal(0, result.ExitCode);
@@ -650,13 +659,13 @@ public sealed class ReleaseToolTests : IDisposable
     {
         await SeedRepositoryAsync();
         var prepare = await RunAsync(
-            ["prepare", "--version", "0.1.0", "--date", "2026-05-25"],
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
             FakeCommandRunner.WithSourceCommit("abc123"));
         Assert.Equal(0, prepare.ExitCode);
         await WriteFileAsync("releases/vnot-semver.evidence.json", "{}\n");
 
         var result = await RunAsync(
-            ["check", "--version", "0.1.0", "--allow-existing-targets"],
+            ["check", "--version", "0.1.0-preview.1", "--allow-existing-targets"],
             FakeCommandRunner.WithSourceCommit("release-prep-commit"));
 
         Assert.Equal(0, result.ExitCode);
@@ -1095,7 +1104,7 @@ public sealed class ReleaseToolTests : IDisposable
             releaseManifest,
             ReleaseEvidence.Serialize(mismatched));
 
-        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-docs-manifest-digest-mismatch");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-docs-archive-incomplete");
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-subject-digest-mismatch");
     }
 
@@ -1127,7 +1136,7 @@ public sealed class ReleaseToolTests : IDisposable
             releaseManifest,
             ReleaseEvidence.Serialize(mismatched));
 
-        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-docs-manifest-digest-mismatch");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-docs-archive-incomplete");
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-subject-digest-mismatch");
     }
 
@@ -1159,7 +1168,7 @@ public sealed class ReleaseToolTests : IDisposable
             releaseManifest,
             ReleaseEvidence.Serialize(mismatched));
 
-        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-catalog-entry-mismatch");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-docs-exacttreepath-unsafe");
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-docs-manifest-digest-mismatch");
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-subject-digest-mismatch");
     }
@@ -1226,6 +1235,11 @@ public sealed class ReleaseToolTests : IDisposable
                 new string('a', 64),
                 new string('b', 64),
                 "releases/0.1.0-preview.1",
+                "availableVerified",
+                "dist/docs/versions.json",
+                "dist/docs",
+                "dist/docs/releases/0.1.0-preview.1",
+                3,
                 "tag-commit",
                 "not required"),
             [],
@@ -1235,6 +1249,9 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Contains("- Docs archive manifest SHA-256: `" + new string('b', 64) + "`", report, StringComparison.Ordinal);
         Assert.Contains("- Catalog exact tree path: `releases/0.1.0-preview.1`", report, StringComparison.Ordinal);
+        Assert.Contains("- Docs archive verification: `availableVerified`", report, StringComparison.Ordinal);
+        Assert.Contains("- Docs catalog input: `dist/docs/versions.json`", report, StringComparison.Ordinal);
+        Assert.Contains("- Docs verified file count: `3`", report, StringComparison.Ordinal);
         Assert.Contains("- Tag commit: `tag-commit`", report, StringComparison.Ordinal);
     }
 
@@ -1347,10 +1364,22 @@ public sealed class ReleaseToolTests : IDisposable
     public async Task PublishStableReleaseValidatesStablePackageWorkflow()
     {
         await SeedRepositoryAsync();
-        var runner = CreateSuccessfulStablePublishRunner();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var runner = CreateSuccessfulStablePublishRunner(docs: docs);
 
         var result = await RunAsync(
-            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--dry-run"],
+            [
+                "publish",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--dry-run",
+                "--docs-catalog",
+                docs.CatalogPath,
+                "--docs-trusted-release-root",
+                docs.TrustedReleaseRootPath
+            ],
             runner);
 
         Assert.Equal(0, result.ExitCode);
@@ -1358,13 +1387,275 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PublishRejectsStableReleaseWithoutDocsCatalogInput()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var runner = CreateSuccessfulStablePublishRunner(docs: docs);
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-catalog-input-missing", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWithoutDocsArchiveEvidence()
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulStablePublishRunner();
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-evidence-docs-archive-required", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWithoutDocsArchiveCatalogEntry()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var runner = CreateSuccessfulStablePublishRunner(docs: docs, includeDocsCatalogEntry: false);
+
+        var result = await RunAsync(
+            [
+                "publish",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--dry-run",
+                "--docs-catalog",
+                docs.CatalogPath,
+                "--docs-trusted-release-root",
+                docs.TrustedReleaseRootPath
+            ],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-evidence-docs-archive-incomplete", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWhenCatalogEntryDoesNotMatchEvidence()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var runner = CreateSuccessfulStablePublishRunner(docs: docs);
+        await File.WriteAllTextAsync(
+            docs.CatalogPath,
+            JsonSerializer.Serialize(
+                new
+                {
+                    versions = new[]
+                    {
+                        new
+                        {
+                            version = "0.1.0",
+                            exactTreePath = "releases/other",
+                            releaseManifestSha256 = docs.ReleaseManifestSha256
+                        }
+                    }
+                },
+                ReleaseJson.Options) + Environment.NewLine);
+
+        var result = await RunAsync(
+            [
+                "publish",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--dry-run",
+                "--docs-catalog",
+                docs.CatalogPath,
+                "--docs-trusted-release-root",
+                docs.TrustedReleaseRootPath
+            ],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-evidence-catalog-entry-mismatch", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWhenArchiveBytesChangeAfterCatalogPin()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var runner = CreateSuccessfulStablePublishRunner(docs: docs);
+        await File.WriteAllTextAsync(
+            Path.Join(docs.TrustedReleaseRootPath, "releases", "0.1.0", "index.html"),
+            "<!doctype html><title>changed</title>");
+
+        var result = await RunAsync(
+            [
+                "publish",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--dry-run",
+                "--docs-catalog",
+                docs.CatalogPath,
+                "--docs-trusted-release-root",
+                docs.TrustedReleaseRootPath
+            ],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-archive-verification-failed", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWhenRouteManifestIsMalformed()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0", routeManifestJson: "{");
+        var runner = CreateSuccessfulStablePublishRunner(docs: docs);
+
+        var result = await RunAsync(
+            [
+                "publish",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--dry-run",
+                "--docs-catalog",
+                docs.CatalogPath,
+                "--docs-trusted-release-root",
+                docs.TrustedReleaseRootPath
+            ],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-archive-verification-failed", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains(".appsurface-docs-route-manifest.json", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWhenRouteManifestRoutesAreInvalid()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync(
+            "0.1.0",
+            routeManifestJson: """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "index.html",
+                  "canonicalRoutePath": "../outside",
+                  "recoveryAliases": [],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var runner = CreateSuccessfulStablePublishRunner(docs: docs);
+
+        var result = await RunAsync(
+            [
+                "publish",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--dry-run",
+                "--docs-catalog",
+                docs.CatalogPath,
+                "--docs-trusted-release-root",
+                docs.TrustedReleaseRootPath
+            ],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-archive-verification-failed", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("unsafe canonical route", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWhenManifestOmitsRuntimeServeableAsset()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        await File.WriteAllBytesAsync(
+            Path.Join(docs.TrustedReleaseRootPath, docs.ExactTreePath, "favicon.ico"),
+            [0, 1, 2, 3]);
+        var runner = CreateSuccessfulStablePublishRunner(docs: docs);
+
+        var result = await RunAsync(
+            [
+                "publish",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--dry-run",
+                "--docs-catalog",
+                docs.CatalogPath,
+                "--docs-trusted-release-root",
+                docs.TrustedReleaseRootPath
+            ],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-archive-verification-failed", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("favicon.ico", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckStablePreparedReleaseVerifiesFallbackDocsCatalog()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(".github/workflows/nuget-stable-publish.yml", "name: NuGet Stable Publish\n");
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var prepare = await RunAsync(
+            ["prepare", "--version", "0.1.0", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+        Assert.Equal(0, prepare.ExitCode);
+
+        var evidenceJson = await ReadFileAsync("releases/v0.1.0.evidence.json");
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(evidenceJson, ReleaseJson.Options)!;
+        await WriteFileAsync("releases/v0.1.0.evidence.json", ReleaseEvidence.Serialize(PinDocsArchive(bundle, docs)));
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0", "--allow-existing-targets"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("- Docs archive verification: `availableVerified`", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("- Docs verified file count: `2`", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublishUsesConfiguredBaseRefForReachability()
     {
         await SeedRepositoryAsync();
-        var runner = CreateSuccessfulStablePublishRunner(baseRef: "release/0.1.0");
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var runner = CreateSuccessfulStablePublishRunner(baseRef: "release/0.1.0", docs: docs);
 
         var result = await RunAsync(
-            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--base-ref", "release/0.1.0", "--dry-run"],
+            [
+                "publish",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--base-ref",
+                "release/0.1.0",
+                "--dry-run",
+                "--docs-catalog",
+                docs.CatalogPath,
+                "--docs-trusted-release-root",
+                docs.TrustedReleaseRootPath
+            ],
             runner);
 
         Assert.Equal(0, result.ExitCode);
@@ -1377,10 +1668,24 @@ public sealed class ReleaseToolTests : IDisposable
     public async Task PublishNormalizesBranchishBaseRefForReachability(string baseRef)
     {
         await SeedRepositoryAsync();
-        var runner = CreateSuccessfulStablePublishRunner(baseRef: "release/0.1.0");
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var runner = CreateSuccessfulStablePublishRunner(baseRef: "release/0.1.0", docs: docs);
 
         var result = await RunAsync(
-            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--base-ref", baseRef, "--dry-run"],
+            [
+                "publish",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--base-ref",
+                baseRef,
+                "--dry-run",
+                "--docs-catalog",
+                docs.CatalogPath,
+                "--docs-trusted-release-root",
+                docs.TrustedReleaseRootPath
+            ],
             runner);
 
         Assert.Equal(0, result.ExitCode);
@@ -1390,11 +1695,25 @@ public sealed class ReleaseToolTests : IDisposable
     public async Task PublishAllowsObjectIdLengthBranchNameWhenItIsNotAFullObjectId()
     {
         await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
         var baseRef = "0123456789abcdef0123456789abcdef0123456g";
-        var runner = CreateSuccessfulStablePublishRunner(baseRef: baseRef);
+        var runner = CreateSuccessfulStablePublishRunner(baseRef: baseRef, docs: docs);
 
         var result = await RunAsync(
-            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--base-ref", baseRef, "--dry-run"],
+            [
+                "publish",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--base-ref",
+                baseRef,
+                "--dry-run",
+                "--docs-catalog",
+                docs.CatalogPath,
+                "--docs-trusted-release-root",
+                docs.TrustedReleaseRootPath
+            ],
             runner);
 
         Assert.Equal(0, result.ExitCode);
@@ -1989,10 +2308,20 @@ public sealed class ReleaseToolTests : IDisposable
         return runner;
     }
 
-    private static FakeCommandRunner CreateSuccessfulStablePublishRunner(string baseRef = "main")
+    private static FakeCommandRunner CreateSuccessfulStablePublishRunner(
+        string baseRef = "main",
+        DocsArchiveFixture? docs = null,
+        bool includeDocsCatalogEntry = true)
     {
         var runner = new FakeCommandRunner();
         var releaseManifest = CreateReleaseManifestJson(versionText: "0.1.0");
+        var releaseEvidence = CreateReleaseEvidenceJson(
+            releaseManifest,
+            "0.1.0",
+            docs?.ExactTreePath,
+            docs?.ReleaseManifestSha256,
+            docs?.FileCount,
+            includeDocsCatalogEntry);
         runner.Add("git cat-file -t refs/tags/v0.1.0", new CommandResult(0, "tag\n", ""));
         runner.Add("git rev-parse refs/tags/v0.1.0^{commit}", new CommandResult(0, "abc123\n", ""));
         runner.Add($"git merge-base --is-ancestor abc123 origin/{baseRef}", new CommandResult(0, "", ""));
@@ -2001,7 +2330,7 @@ public sealed class ReleaseToolTests : IDisposable
         runner.Add("git show v0.1.0:releases/v0.1.0.md", new CommandResult(0, TaggedReleaseNoteContent, ""));
         runner.Add("git show v0.1.0:releases/v0.1.0.md.yml", new CommandResult(0, TaggedReleaseSidecarContent, ""));
         runner.Add("git show v0.1.0:releases/v0.1.0.release.json", new CommandResult(0, releaseManifest, ""));
-        runner.Add("git show v0.1.0:releases/v0.1.0.evidence.json", new CommandResult(0, CreateReleaseEvidenceJson(releaseManifest, "0.1.0"), ""));
+        runner.Add("git show v0.1.0:releases/v0.1.0.evidence.json", new CommandResult(0, releaseEvidence, ""));
         return runner;
     }
 
@@ -2029,7 +2358,13 @@ public sealed class ReleaseToolTests : IDisposable
         return JsonSerializer.Serialize(manifest, ReleaseJson.Options) + Environment.NewLine;
     }
 
-    private static string CreateReleaseEvidenceJson(string releaseManifestJson, string versionText = "0.1.0-preview.1")
+    private static string CreateReleaseEvidenceJson(
+        string releaseManifestJson,
+        string versionText = "0.1.0-preview.1",
+        string? docsExactTreePath = null,
+        string? docsReleaseManifestSha256 = null,
+        int? docsFileCount = null,
+        bool includeDocsCatalogEntry = true)
     {
         var version = SemVer.Parse(versionText);
         var releasePath = $"releases/v{version}.md";
@@ -2044,7 +2379,138 @@ public sealed class ReleaseToolTests : IDisposable
             TaggedReleaseSidecarContent,
             releaseManifestJson,
             [new PackagePathUpdate("Core/ForgeTrust.AppSurface.Core.csproj", "releases/unreleased.md", releasePath)]);
+        if (!string.IsNullOrWhiteSpace(docsExactTreePath) && !string.IsNullOrWhiteSpace(docsReleaseManifestSha256))
+        {
+            evidence = RefreshSubject(evidence with
+            {
+                DocsArchive = new ReleaseEvidenceDocsArchive(
+                    "catalogPinned",
+                    docsExactTreePath,
+                    docsReleaseManifestSha256,
+                    "appsurface-docs-release-manifest-v1",
+                    docsFileCount,
+                    includeDocsCatalogEntry
+                        ? new ReleaseEvidenceCatalogEntry(docsExactTreePath, docsReleaseManifestSha256)
+                        : null)
+            });
+        }
+
         return ReleaseEvidence.Serialize(evidence);
+    }
+
+    private async Task<DocsArchiveFixture> SeedDocsArchiveAsync(
+        string versionText,
+        string routeManifestJson = """
+        {
+          "schema": "appsurface-docs-route-manifest-v1",
+          "entries": []
+        }
+        """)
+    {
+        var exactTreePath = $"releases/{versionText}";
+        var trustedReleaseRootPath = RepositoryPath("dist/docs");
+        var exactTreePhysicalPath = Path.Join(trustedReleaseRootPath, "releases", versionText);
+        Directory.CreateDirectory(exactTreePhysicalPath);
+
+        var indexBytes = Encoding.UTF8.GetBytes("<!doctype html><title>AppSurface Docs</title>");
+        var indexPath = Path.Join(exactTreePhysicalPath, "index.html");
+        await File.WriteAllBytesAsync(indexPath, indexBytes);
+        var indexSha256 = Convert.ToHexString(SHA256.HashData(indexBytes)).ToLowerInvariant();
+        var routeManifestBytes = Encoding.UTF8.GetBytes(routeManifestJson);
+        var routeManifestPath = Path.Join(exactTreePhysicalPath, ".appsurface-docs-route-manifest.json");
+        await File.WriteAllBytesAsync(routeManifestPath, routeManifestBytes);
+        var routeManifestSha256 = Convert.ToHexString(SHA256.HashData(routeManifestBytes)).ToLowerInvariant();
+        var manifestJson = JsonSerializer.Serialize(
+            new
+            {
+                schema = "appsurface-docs-release-manifest-v1",
+                files = new[]
+                {
+                    new
+                    {
+                        path = "index.html",
+                        length = indexBytes.Length,
+                        contentType = "text/html",
+                        hashAlgorithm = "sha256",
+                        sha256 = indexSha256
+                    },
+                    new
+                    {
+                        path = ".appsurface-docs-route-manifest.json",
+                        length = routeManifestBytes.Length,
+                        contentType = "application/json",
+                        hashAlgorithm = "sha256",
+                        sha256 = routeManifestSha256
+                    }
+                }
+            },
+            ReleaseJson.Options) + Environment.NewLine;
+        var manifestBytes = Encoding.UTF8.GetBytes(manifestJson);
+        await File.WriteAllBytesAsync(Path.Join(exactTreePhysicalPath, ".appsurface-docs-release-manifest.json"), manifestBytes);
+        var releaseManifestSha256 = Convert.ToHexString(SHA256.HashData(manifestBytes)).ToLowerInvariant();
+        var catalogPath = Path.Join(trustedReleaseRootPath, "versions.json");
+        var catalogJson = JsonSerializer.Serialize(
+            new
+            {
+                versions = new[]
+                {
+                    new
+                    {
+                        version = versionText,
+                        label = versionText,
+                        exactTreePath,
+                        releaseManifestSha256,
+                        visibility = "Public"
+                    }
+                }
+            },
+            ReleaseJson.Options) + Environment.NewLine;
+        await File.WriteAllTextAsync(catalogPath, catalogJson);
+        return new DocsArchiveFixture(
+            catalogPath,
+            trustedReleaseRootPath,
+            exactTreePath,
+            releaseManifestSha256,
+            FileCount: 2);
+    }
+
+    private static ReleaseEvidenceBundle PinDocsArchive(ReleaseEvidenceBundle bundle, DocsArchiveFixture docs)
+    {
+        return RefreshSubject(bundle with
+        {
+            DocsArchive = new ReleaseEvidenceDocsArchive(
+                "catalogPinned",
+                docs.ExactTreePath,
+                docs.ReleaseManifestSha256,
+                "appsurface-docs-release-manifest-v1",
+                docs.FileCount,
+                new ReleaseEvidenceCatalogEntry(docs.ExactTreePath, docs.ReleaseManifestSha256))
+        });
+    }
+
+    private static ReleaseEvidenceBundle RefreshSubject(ReleaseEvidenceBundle bundle)
+    {
+        var subjectInput = new ReleaseEvidenceSubjectInput(
+            bundle.Schema,
+            bundle.Version,
+            bundle.Tag,
+            bundle.ReleaseClassification,
+            bundle.ReleaseNotePath,
+            bundle.ReleaseSidecarPath,
+            bundle.ReleaseManifestPath,
+            bundle.EvidencePath,
+            bundle.ReleaseManifestDigest,
+            bundle.ReleaseArtifactDigests,
+            bundle.PackageReleaseNotePaths,
+            bundle.DocsArchive,
+            bundle.Commits,
+            bundle.GeneratedBy,
+            bundle.Attestation);
+        var subjectDigest = ReleaseEvidence.ComputeSha256Hex(JsonSerializer.Serialize(subjectInput, ReleaseJson.Options));
+        return bundle with
+        {
+            Subject = bundle.Subject with { Sha256 = subjectDigest }
+        };
     }
 
     private static string CreateReleaseEvidenceJsonWithNull(string releaseManifestJson, params string[] path)
@@ -2063,6 +2529,13 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     private sealed record CliResult(int ExitCode, string Stdout, string Stderr);
+
+    private sealed record DocsArchiveFixture(
+        string CatalogPath,
+        string TrustedReleaseRootPath,
+        string ExactTreePath,
+        string ReleaseManifestSha256,
+        int FileCount);
 
     private sealed class FakeCommandRunner : ICommandRunner
     {

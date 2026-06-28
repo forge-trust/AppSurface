@@ -17,7 +17,9 @@ internal sealed record ReleaseOptions(
     string? GitHubOutputPath,
     bool FailOnWarnings,
     bool AllowExistingTargets,
-    string BaseRef = "main");
+    string BaseRef = "main",
+    string? DocsCatalogPath = null,
+    string? DocsTrustedReleaseRootPath = null);
 
 /// <summary>
 /// Minimal SemVer 2.0 model used by release automation.

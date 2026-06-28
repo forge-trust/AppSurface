@@ -157,7 +157,9 @@ internal abstract class ReleaseCommandBase
             ResolveGitHubOutputPath(repoRoot),
             FailOnWarnings,
             AllowExistingTargets,
-            ResolveBaseRef());
+            ResolveBaseRef(),
+            ResolveDocsCatalogPath(repoRoot),
+            ResolveDocsTrustedReleaseRootPath(repoRoot));
     }
 
     /// <summary>
@@ -178,6 +180,20 @@ internal abstract class ReleaseCommandBase
     /// <param name="repoRoot">Resolved repository root.</param>
     /// <returns>The output path, or <see langword="null"/> for commands that do not write workflow outputs.</returns>
     protected virtual string? ResolveGitHubOutputPath(string repoRoot) => null;
+
+    /// <summary>
+    /// Resolves the AppSurface Docs version catalog path, when the command supports stable docs evidence verification.
+    /// </summary>
+    /// <param name="repoRoot">Resolved repository root.</param>
+    /// <returns>The catalog path, or <see langword="null"/> when the command does not accept docs catalog input.</returns>
+    protected virtual string? ResolveDocsCatalogPath(string repoRoot) => null;
+
+    /// <summary>
+    /// Resolves the trusted release root path used to interpret docs catalog exact-tree paths.
+    /// </summary>
+    /// <param name="repoRoot">Resolved repository root.</param>
+    /// <returns>The trusted release root, or <see langword="null"/> to default to the catalog directory.</returns>
+    protected virtual string? ResolveDocsTrustedReleaseRootPath(string repoRoot) => null;
 
     /// <summary>
     /// Resolves the branch name used for publish-time reachability and source workflow checks.

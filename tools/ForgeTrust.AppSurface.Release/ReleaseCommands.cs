@@ -32,11 +32,39 @@ internal sealed partial class ReleaseCheckCommand : ReleaseCommandBase, ICommand
     [CommandOption("allow-existing-targets", Description = "Allow check to review already-generated release artifacts.")]
     public bool AllowExistingTargetsOption { get; set; }
 
+    /// <summary>
+    /// Gets the AppSurface Docs version catalog used to verify stable release evidence.
+    /// </summary>
+    [CommandOption("docs-catalog", Description = "AppSurface Docs versions.json used to verify stable release evidence. Check falls back to dist/docs/versions.json when omitted and present.")]
+    public string? DocsCatalogPath { get; set; }
+
+    /// <summary>
+    /// Gets the trusted release root used to resolve catalog exactTreePath values.
+    /// </summary>
+    [CommandOption("docs-trusted-release-root", Description = "Trusted release root that contains docs exact trees. Defaults to the docs catalog directory.")]
+    public string? DocsTrustedReleaseRootPath { get; set; }
+
     /// <inheritdoc />
     protected override bool FailOnWarnings => FailOnWarningsOption;
 
     /// <inheritdoc />
     protected override bool AllowExistingTargets => AllowExistingTargetsOption;
+
+    /// <inheritdoc />
+    protected override string? ResolveDocsCatalogPath(string repoRoot)
+    {
+        return string.IsNullOrWhiteSpace(DocsCatalogPath)
+            ? null
+            : Path.GetFullPath(DocsCatalogPath, repoRoot);
+    }
+
+    /// <inheritdoc />
+    protected override string? ResolveDocsTrustedReleaseRootPath(string repoRoot)
+    {
+        return string.IsNullOrWhiteSpace(DocsTrustedReleaseRootPath)
+            ? null
+            : Path.GetFullPath(DocsTrustedReleaseRootPath, repoRoot);
+    }
 
     /// <inheritdoc />
     public ValueTask ExecuteAsync(IConsole console)
@@ -129,6 +157,18 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
     [CommandOption("base-ref", Description = "Branch name or supported branch ref (origin/<branch>, refs/heads/<branch>, refs/remotes/origin/<branch>) that must contain the annotated tag commit. Defaults to main; tags and SHAs are invalid.")]
     public string? BaseRef { get; set; }
 
+    /// <summary>
+    /// Gets the staged AppSurface Docs version catalog used to verify stable release evidence.
+    /// </summary>
+    [CommandOption("docs-catalog", Description = "Staged AppSurface Docs versions.json used to verify stable release evidence.")]
+    public string? DocsCatalogPath { get; set; }
+
+    /// <summary>
+    /// Gets the trusted release root used to resolve catalog exactTreePath values.
+    /// </summary>
+    [CommandOption("docs-trusted-release-root", Description = "Trusted release root that contains docs exact trees. Defaults to the docs catalog directory.")]
+    public string? DocsTrustedReleaseRootPath { get; set; }
+
     /// <inheritdoc />
     protected override string CommandName => "publish";
 
@@ -170,6 +210,22 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
     protected override string ResolveBaseRef()
     {
         return NormalizeBaseRef(BaseRef);
+    }
+
+    /// <inheritdoc />
+    protected override string? ResolveDocsCatalogPath(string repoRoot)
+    {
+        return string.IsNullOrWhiteSpace(DocsCatalogPath)
+            ? null
+            : Path.GetFullPath(DocsCatalogPath, repoRoot);
+    }
+
+    /// <inheritdoc />
+    protected override string? ResolveDocsTrustedReleaseRootPath(string repoRoot)
+    {
+        return string.IsNullOrWhiteSpace(DocsTrustedReleaseRootPath)
+            ? null
+            : Path.GetFullPath(DocsTrustedReleaseRootPath, repoRoot);
     }
 
     private static string NormalizeBaseRef(string? baseRef)

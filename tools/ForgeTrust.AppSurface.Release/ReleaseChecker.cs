@@ -145,6 +145,29 @@ internal sealed class ReleaseChecker
                 cancellationToken);
             evidenceSummary = evidence.Summary;
             errors.AddRange(evidence.Diagnostics);
+            if (options.Version.IsStable
+                && evidence.Bundle is not null
+                && evidence.Summary is not null
+                && evidence.Diagnostics.Count == 0)
+            {
+                var docsEvidence = await ReleaseDocsArchiveGate.ValidateStableAsync(
+                    _workspace,
+                    options,
+                    evidence.Bundle,
+                    cancellationToken);
+                errors.AddRange(docsEvidence.Diagnostics);
+                if (docsEvidence.Proof is not null)
+                {
+                    evidenceSummary = evidence.Summary with
+                    {
+                        DocsArchiveVerificationState = docsEvidence.Proof.State,
+                        DocsCatalogPath = docsEvidence.Proof.CatalogPath,
+                        DocsTrustedReleaseRootPath = docsEvidence.Proof.TrustedReleaseRootPath,
+                        DocsPhysicalExactTreePath = docsEvidence.Proof.PhysicalExactTreePath,
+                        DocsVerifiedFileCount = docsEvidence.Proof.VerifiedFileCount
+                    };
+                }
+            }
         }
 
         return new ReleaseCheckResult(

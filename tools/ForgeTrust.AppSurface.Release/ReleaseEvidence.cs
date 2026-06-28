@@ -96,7 +96,7 @@ internal static class ReleaseEvidence
                 "Release-prep review must include the generated release evidence bundle alongside the release note, sidecar, and release JSON.",
                 $"Run `./eng/release prepare --version {version}` and include `{workspace.DisplayPath(evidencePath)}` in the release preparation pull request.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
-            return new ReleaseEvidenceValidationResult(null, diagnostics);
+            return new ReleaseEvidenceValidationResult(null, diagnostics, null);
         }
 
         ReleaseEvidenceBundle? bundle = null;
@@ -140,7 +140,7 @@ internal static class ReleaseEvidence
                 "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
         }
 
-        return new ReleaseEvidenceValidationResult(bundle?.ToSummary("draft evidence for release-prep review"), diagnostics);
+        return new ReleaseEvidenceValidationResult(bundle?.ToSummary("draft evidence for release-prep review"), diagnostics, bundle);
     }
 
     /// <summary>
@@ -208,7 +208,7 @@ internal static class ReleaseEvidence
                 ValidateArtifactDigests(bundle, releaseNoteJson, releaseSidecarJson, releaseManifestJson, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#publish");
                 ValidatePackagePaths(version, bundle, diagnostics);
                 ValidateSubject(bundle, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#publish");
-                ValidateDocsArchive(bundle, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#publish");
+                ValidateDocsArchive(bundle, releaseClassification, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#publish");
             }
         }
         else if (diagnostics.All(diagnostic => diagnostic.Code != "release-evidence-schema-invalid"))
@@ -221,7 +221,7 @@ internal static class ReleaseEvidence
         var summary = bundle is null
             ? null
             : bundle.ToSummary("tag-bound evidence validated for publish") with { TagCommit = tagCommit };
-        return new ReleaseEvidenceValidationResult(summary, diagnostics);
+        return new ReleaseEvidenceValidationResult(summary, diagnostics, bundle);
     }
 
     internal static string Serialize(ReleaseEvidenceBundle bundle)
@@ -294,7 +294,7 @@ internal static class ReleaseEvidence
 
         ValidatePackagePaths(version, bundle, diagnostics);
         ValidateSubject(bundle, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle");
-        ValidateDocsArchive(bundle, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle");
+        ValidateDocsArchive(bundle, releaseClassification, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle");
         return diagnostics;
     }
 
@@ -578,6 +578,7 @@ internal static class ReleaseEvidence
 
     private static void ValidateDocsArchive(
         ReleaseEvidenceBundle bundle,
+        string releaseClassification,
         List<ReleaseDiagnostic> diagnostics,
         string docsPath)
     {
@@ -598,13 +599,34 @@ internal static class ReleaseEvidence
             && string.IsNullOrWhiteSpace(docs.ExactTreePath)
             && string.IsNullOrWhiteSpace(docs.ReleaseManifestSha256))
         {
+            if (string.Equals(releaseClassification, "stable", StringComparison.Ordinal))
+            {
+                diagnostics.Add(ReleaseDiagnostic.Error(
+                    "release-evidence-docs-archive-required",
+                    "Stable release evidence must include AppSurface Docs archive fields.",
+                    "The docsArchive status is `notConfigured`, so stable publish has no catalog-pinned exact tree to verify.",
+                    "Regenerate release evidence from the staged AppSurface Docs export and catalog entry before publishing a stable release.",
+                    docsPath));
+            }
+
             return;
+        }
+
+        if (string.Equals(releaseClassification, "stable", StringComparison.Ordinal)
+            && docs.CatalogEntry is null)
+        {
+            diagnostics.Add(ReleaseDiagnostic.Error(
+                "release-evidence-docs-archive-incomplete",
+                "Stable release evidence docs archive catalog entry is missing.",
+                "Stable evidence must include docsArchive.catalogEntry.exactTreePath and docsArchive.catalogEntry.releaseManifestSha256 so maintainers can review the authored catalog pin separately from the archive summary.",
+                "Regenerate stable release evidence from the staged AppSurface Docs export and version catalog.",
+                docsPath));
         }
 
         if (string.IsNullOrWhiteSpace(docs.ExactTreePath) || string.IsNullOrWhiteSpace(docs.ReleaseManifestSha256))
         {
             diagnostics.Add(ReleaseDiagnostic.Error(
-                "release-evidence-docs-manifest-digest-mismatch",
+                "release-evidence-docs-archive-incomplete",
                 "Release evidence docs archive fields are incomplete.",
                 "A docs archive evidence entry must include both exactTreePath and releaseManifestSha256.",
                 "Regenerate release evidence from a completed AppSurface Docs export, or leave docs archive evidence pending.",
@@ -613,12 +635,13 @@ internal static class ReleaseEvidence
         }
 
         var normalizedExactTreePath = docs.ExactTreePath!.Replace('\\', '/');
-        if (Path.IsPathRooted(normalizedExactTreePath) || normalizedExactTreePath.Split('/').Any(segment => segment == ".."))
+        if (Path.IsPathRooted(normalizedExactTreePath)
+            || normalizedExactTreePath.Split('/').Any(segment => segment == ".." || (segment.StartsWith(".", StringComparison.Ordinal) && segment != ".")))
         {
             diagnostics.Add(ReleaseDiagnostic.Error(
-                "release-evidence-catalog-entry-mismatch",
+                "release-evidence-docs-exacttreepath-unsafe",
                 "Release evidence exactTreePath is unsafe.",
-                $"Exact tree path `{docs.ExactTreePath}` must be trusted-release-root-relative and must not contain traversal.",
+                $"Exact tree path `{docs.ExactTreePath}` must be trusted-release-root-relative and must not contain parent or hidden path segments.",
                 "Regenerate release evidence with a trusted-root-relative AppSurface Docs catalog entry.",
                 docsPath));
         }
@@ -687,7 +710,8 @@ internal static class ReleaseEvidence
 
 internal sealed record ReleaseEvidenceValidationResult(
     ReleaseEvidenceSummary? Summary,
-    IReadOnlyList<ReleaseDiagnostic> Diagnostics);
+    IReadOnlyList<ReleaseDiagnostic> Diagnostics,
+    ReleaseEvidenceBundle? Bundle);
 
 internal sealed record ReleaseEvidenceBundle(
     string Schema,
@@ -717,6 +741,11 @@ internal sealed record ReleaseEvidenceBundle(
             Subject.Sha256,
             DocsArchive.ReleaseManifestSha256,
             DocsArchive.ExactTreePath,
+            null,
+            null,
+            null,
+            null,
+            null,
             Commits.TagCommit,
             Attestation is null ? "not required" : Attestation.Mode);
     }

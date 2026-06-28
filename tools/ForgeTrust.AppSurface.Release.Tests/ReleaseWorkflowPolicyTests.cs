@@ -48,6 +48,13 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.DoesNotContain("find releases -maxdepth 1 -name 'v*.release.json'", prep, StringComparison.Ordinal);
         Assert.Contains("--github-output", publish, StringComparison.Ordinal);
         Assert.Contains("Validate tag-bound release evidence", publish, StringComparison.Ordinal);
+        Assert.Contains("docs-catalog:", publish, StringComparison.Ordinal);
+        Assert.Contains("docs-trusted-release-root:", publish, StringComparison.Ordinal);
+        Assert.Contains("DOCS_CATALOG: ${{ inputs.docs-catalog }}", publish, StringComparison.Ordinal);
+        Assert.Contains("DOCS_TRUSTED_RELEASE_ROOT: ${{ inputs.docs-trusted-release-root }}", publish, StringComparison.Ordinal);
+        Assert.Contains("docs_args+=(--docs-catalog \"${DOCS_CATALOG}\")", publish, StringComparison.Ordinal);
+        Assert.Contains("docs_args+=(--docs-trusted-release-root \"${DOCS_TRUSTED_RELEASE_ROOT}\")", publish, StringComparison.Ordinal);
+        Assert.Contains("\"${docs_args[@]}\"", publish, StringComparison.Ordinal);
         Assert.Contains("base-ref:", publish, StringComparison.Ordinal);
         Assert.Contains("BASE_REF: ${{ inputs.base-ref }}", publish, StringComparison.Ordinal);
         Assert.Contains("--base-ref \"${BASE_REF}\"", publish, StringComparison.Ordinal);
