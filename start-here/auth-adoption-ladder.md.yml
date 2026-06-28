@@ -1,5 +1,5 @@
 title: AppSurface Auth Adoption Ladder
-summary: Choose the smallest AppSurface Auth package for an existing ASP.NET Core auth stack, then run the proof that matches that adoption rung.
+summary: Decide whether to stay on raw ASP.NET Core auth or adopt an AppSurface Auth package, then run the proof that matches that adoption rung.
 page_type: guide
 nav_group: Start Here
 sequence_key: auth-adoption
