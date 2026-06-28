@@ -12,6 +12,13 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- AppSurface LocalSecrets startup failures that happen before the platform command can run now report `Unavailable` with
+  `local-secret-store-unavailable` instead of being classified by words in raw OS exception messages. Real locked-store
+  process output still maps to `Locked`; startup diagnostics include exception type, `HResult`, and synthetic exit code
+  while intentionally omitting raw exception messages, command paths, arguments, absolute paths, logical values, and
+  secret values.
+- Coverage gate tests now create their disposable Git fixture commits with commit signing disabled for the child process,
+  so local solution coverage runs no longer fail when a developer has SSH commit signing enabled.
 - AppSurface Web adds first-class PWA install support without a new package. `WebOptions.Pwa` stays disabled by default,
   requires install-critical metadata when enabled, serves `/manifest.webmanifest` as `application/manifest+json`, maps
   development-only diagnostics under `/_appsurface/pwa`, and emits no service worker unless the app explicitly configures

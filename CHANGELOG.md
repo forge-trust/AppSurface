@@ -17,6 +17,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Stable package release publishing now requires AppSurface Docs archive evidence that has been verified, so release authors can prove
   the public docs catalog, exact tree, release manifest, and serveable files match before GitHub Releases receive a
   stable package.
+- AppSurface LocalSecrets startup failures before platform commands run now report `local-secret-store-unavailable` with exception type, `HResult`, and synthetic exit code only; run `appsurface secrets doctor` for the same namespace to diagnose missing tools or headless sessions without leaking raw OS exception messages.
 - `ForgeTrust.AppSurface.Web` now owns first-class PWA install metadata: enable `WebOptions.Pwa` to serve a manifest, emit Razor head metadata, expose development diagnostics, and opt into a starter offline fallback, then prove the running app with `appsurface pwa verify`.
 
 ## 0.2.0-preview.1 - 2026-06-28
