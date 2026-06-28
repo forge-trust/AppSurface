@@ -8,9 +8,10 @@ namespace ForgeTrust.AppSurface.Docs.Models;
 /// Redacted operator-facing AppSurface Docs harvest health response shared by the HTML and JSON health surfaces.
 /// </summary>
 /// <remarks>
-/// This contract intentionally omits repository roots, diagnostic cause text, raw exception messages, stack traces, and
-/// other host-local details. Use <see cref="DocAggregator.GetHarvestHealthAsync(System.Threading.CancellationToken)"/>
-/// for server-side inspection when trusted code needs the full snapshot.
+/// This contract intentionally omits repository roots, raw exception messages, stack traces, and other host-local
+/// details. Diagnostic cause text is included only after harvesters redact it to repository-relative, operator-safe
+/// evidence. Use <see cref="DocAggregator.GetHarvestHealthAsync(System.Threading.CancellationToken)"/> for server-side
+/// inspection when trusted code needs the full snapshot.
 /// </remarks>
 public sealed record AppSurfaceDocsHarvestHealthResponse
 {

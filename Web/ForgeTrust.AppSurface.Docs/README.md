@@ -339,6 +339,8 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet` (`appsurfacedocs.javascript.malformed_public_doclet`)
 - `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet` (`appsurfacedocs.javascript.incomplete_public_doclet`)
 - `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`)
+- `DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing` (`appsurfacedocs.javascript.event_doclet_dispatch_missing`)
+- `DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing` (`appsurfacedocs.javascript.event_dispatch_doclet_missing`)
 - `DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor` (`appsurfacedocs.javascript.duplicate_anchor`)
 
 ### Oversized source diagnostics
@@ -469,7 +471,7 @@ The JSON response uses the camelCase wire form of `AppSurfaceDocsHarvestHealthRe
 - `verification.httpStatusCode`: `200` for `Healthy` and `Empty`; `503` for `Degraded` and `Failed`.
 - `generatedUtc`, harvester counts, total docs, per-harvester status, and redacted diagnostics.
 
-The response omits `RepositoryRoot`, diagnostic `Cause`, raw exception messages, stack traces, and absolute filesystem paths. Health routes set `Cache-Control: no-store, no-cache` so local and CI checks do not pass or fail on stale operator data.
+The response omits `RepositoryRoot`, raw exception messages, stack traces, and absolute filesystem paths. Diagnostic `Cause` is included only after harvesters redact it to repository-relative, operator-safe evidence. Health routes set `Cache-Control: no-store, no-cache` so local and CI checks do not pass or fail on stale operator data.
 
 The sidebar health entry follows `AppSurfaceDocs:Harvest:Health:ShowChrome`, which is independent from route exposure. This lets a host expose `_health.json` for a script without advertising the health page in the docs chrome, or show status-only chrome while the reserved health endpoints still return `404`. When chrome is visible but `ExposeRoutes` hides responses for the current environment, AppSurface Docs renders a non-clickable status chip instead of a link.
 
