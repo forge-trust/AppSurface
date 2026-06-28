@@ -218,23 +218,39 @@ public sealed class PwaEndpointTests
                 options.Pwa.Offline.StaticAssetPaths = ["/css/site.css"];
             },
             pathBase: "/tenant");
+        await using var changedManifestScopeApp = await StartHostAsync(options =>
+        {
+            ConfigureValidPwa(options.Pwa);
+            options.Pwa.Scope = "/workspace/";
+            options.Pwa.StartUrl = "/workspace/";
+            options.Pwa.Offline.Enabled = true;
+            options.Pwa.Offline.OfflineFallbackPath = "/offline.html";
+            options.Pwa.Offline.StaticAssetPaths = ["/css/site.css"];
+        });
 
         using var rootResponse = await rootApp.Client.GetAsync("/service-worker.js");
         using var tenantResponse = await tenantApp.Client.GetAsync("/tenant/service-worker.js");
+        using var changedManifestScopeResponse = await changedManifestScopeApp.Client.GetAsync("/service-worker.js");
         var rootScript = await rootResponse.Content.ReadAsStringAsync();
         var tenantScript = await tenantResponse.Content.ReadAsStringAsync();
+        var changedManifestScopeScript = await changedManifestScopeResponse.Content.ReadAsStringAsync();
 
         var rootCachePrefix = ExtractScriptConstant(rootScript, "CACHE_PREFIX");
         var tenantCachePrefix = ExtractScriptConstant(tenantScript, "CACHE_PREFIX");
+        var changedManifestScopeCachePrefix = ExtractScriptConstant(changedManifestScopeScript, "CACHE_PREFIX");
 
         Assert.StartsWith("appsurface-pwa-", rootCachePrefix, StringComparison.Ordinal);
         Assert.StartsWith("appsurface-pwa-", tenantCachePrefix, StringComparison.Ordinal);
         Assert.NotEqual(rootCachePrefix, tenantCachePrefix);
+        Assert.Equal(rootCachePrefix, changedManifestScopeCachePrefix);
         Assert.Contains($"""const CACHE_NAME = "{rootCachePrefix}v1";""", rootScript, StringComparison.Ordinal);
         Assert.Contains(
-            "key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME",
+            "return (key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME) || LEGACY_CACHE_NAMES.includes(key);",
             rootScript,
             StringComparison.Ordinal);
+        Assert.Contains("""const LEGACY_CACHE_NAMES = ["appsurface-pwa-v1"];""", rootScript, StringComparison.Ordinal);
+        Assert.Contains("await self.skipWaiting();", rootScript, StringComparison.Ordinal);
+        Assert.Contains("await self.clients.claim();", rootScript, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "keys.filter(key => key !== CACHE_NAME)",
             rootScript,

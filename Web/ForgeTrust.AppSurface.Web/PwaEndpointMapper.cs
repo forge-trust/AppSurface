@@ -225,18 +225,29 @@ internal static class PwaEndpointMapper
             $$"""
             const CACHE_PREFIX = {{cachePrefixJson}};
             const CACHE_NAME = {{cacheNameJson}};
+            const LEGACY_CACHE_NAMES = ["appsurface-pwa-v1"];
             const STATIC_ASSETS = {{assetsJson}};
             const OFFLINE_FALLBACK = {{fallbackJson}};
 
             self.addEventListener("install", event => {
-              event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS)));
-              self.skipWaiting();
+              event.waitUntil((async () => {
+                const cache = await caches.open(CACHE_NAME);
+                await cache.addAll(STATIC_ASSETS);
+                await self.skipWaiting();
+              })());
             });
 
             self.addEventListener("activate", event => {
-              event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME).map(key => caches.delete(key)))));
-              self.clients.claim();
+              event.waitUntil((async () => {
+                const keys = await caches.keys();
+                await Promise.all(keys.filter(shouldDeleteCache).map(key => caches.delete(key)));
+                await self.clients.claim();
+              })());
             });
+
+            function shouldDeleteCache(key) {
+              return (key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME) || LEGACY_CACHE_NAMES.includes(key);
+            }
 
             self.addEventListener("fetch", event => {
               const request = event.request;
@@ -264,8 +275,8 @@ internal static class PwaEndpointMapper
 
     private static string BuildCacheScopeKey(PathString pathBase, PwaOptions options)
     {
-        var scope = AddPathBase(pathBase, options.Scope);
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(scope));
+        var serviceWorkerPath = AddPathBase(pathBase, options.Offline.ServiceWorkerPath);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(serviceWorkerPath));
         return Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant();
     }
 }
