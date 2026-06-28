@@ -74,6 +74,8 @@ internal static class AppSurfaceCliApp
         services.AddSingleton<ICoverageRunProcessRunner, CliWrapCoverageRunProcessRunner>();
         services.AddSingleton<IReportGeneratorPackageLocator, ReportGeneratorPackageLocator>();
         services.AddSingleton<ICoverageRunReportGenerator, CoverageRunReportGenerator>();
+        AddPwaVerifierServices(services);
+        services.AddTransient<PwaVerifier>();
         services.AddSingleton(TimeProvider.System);
         services.AddTransient<CoverageRunWorkflow>();
         services.AddTransient<CoverageMergeWorkflow>();
@@ -84,6 +86,7 @@ internal static class AppSurfaceCliApp
         {
             builder.AddConsole();
             builder.SetMinimumLevel(LogLevel.Information);
+            builder.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
         });
 
         foreach (var commandType in commandTypes)
@@ -136,6 +139,23 @@ internal static class AppSurfaceCliApp
         services.AddSingleton<ITargetAppProcessFactory, TargetAppProcessFactory>();
         services
             .AddHttpClient("ExportEngine", client => { client.Timeout = TimeSpan.FromSeconds(60); })
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+    }
+
+    /// <summary>
+    /// Registers the HTTP client used by <c>appsurface pwa verify</c>.
+    /// </summary>
+    /// <param name="services">The service collection to populate.</param>
+    /// <remarks>
+    /// Automatic redirects are disabled so the verifier observes the requested manifest, icon, diagnostics, and offline
+    /// fallback URLs directly. That keeps the verifier's same-origin and base-path checks authoritative instead of letting
+    /// <see cref="HttpClient"/> silently follow a redirect outside the app being verified.
+    /// </remarks>
+    internal static void AddPwaVerifierServices(IServiceCollection services)
+    {
+        services
+            .AddHttpClient<IPwaVerificationHttpClient, PwaVerificationHttpClient>(
+                client => { client.Timeout = TimeSpan.FromSeconds(30); })
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
     }
 

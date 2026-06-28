@@ -43,6 +43,16 @@ public record WebOptions
     public ErrorPagesOptions Errors { get; set; } = ErrorPagesOptions.Default;
 
     /// <summary>
+    /// Gets or sets Progressive Web App install metadata, diagnostics, and explicit offline behavior.
+    /// </summary>
+    /// <remarks>
+    /// PWA support is disabled by default. When enabled, AppSurface maps a web app manifest endpoint, optional
+    /// development diagnostics, and a service-worker endpoint only when an explicit offline strategy is configured.
+    /// AppSurface does not cache app routes, authenticated pages, POST responses, or user-specific data by default.
+    /// </remarks>
+    public PwaOptions Pwa { get; set; } = new();
+
+    /// <summary>
     /// Gets or sets the amount of time AppSurface waits for the web host to complete startup before failing fast.
     /// </summary>
     /// <remarks>
