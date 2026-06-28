@@ -32,6 +32,7 @@ related_pages:
   - Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md
   - Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md
   - Auth/ForgeTrust.AppSurface.Auth.Testing/README.md
+  - Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md
   - examples/auth-web-razorwire-proof/README.md
 trust:
   status: preview adoption guide
@@ -46,3 +47,4 @@ trust:
     - Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md
     - Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md
     - Auth/ForgeTrust.AppSurface.Auth.Testing/README.md
+    - Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md
