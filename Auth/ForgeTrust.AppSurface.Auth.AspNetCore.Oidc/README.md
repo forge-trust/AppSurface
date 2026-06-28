@@ -6,7 +6,7 @@ Use this package when an ASP.NET Core web app already has an identity provider s
 
 ## Release Guidance
 
-AppSurface publishes coordinated `v0.1.0` release candidates. Before installing this package from a prerelease feed, read the [v0.1.0 RC 4 release note](../../releases/v0.1.0-rc.4.md), the [unreleased proof artifact](../../releases/unreleased.md), and the current [package chooser](../../packages/README.md) for release risk and package readiness.
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
 
 ## Quickstart: Register Named Cookie And OIDC Schemes
 
