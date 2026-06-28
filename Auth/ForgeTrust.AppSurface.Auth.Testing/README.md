@@ -8,6 +8,8 @@ Use this package in integration test projects when a consumer needs deterministi
 
 AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
 
+Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.md) when choosing between Auth.Testing, DevAuth, OIDC, and host-owned ASP.NET Core authentication.
+
 ## Quickstart: WebApplicationFactory Personas
 
 Install the package in a test project:

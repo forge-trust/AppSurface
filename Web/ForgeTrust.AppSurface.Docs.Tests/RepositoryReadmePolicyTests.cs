@@ -146,6 +146,118 @@ public sealed partial class RepositoryReadmePolicyTests
     }
 
     [Fact]
+    public void AuthAdoptionLadder_ShouldBeHarvestedAndLinkedFromDiscoverySurfaces()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        const string ladderPath = "start-here/auth-adoption-ladder.md";
+        var ladderFullPath = ResolveRepositoryRelativePath(repoRoot, ladderPath, "Auth adoption ladder path");
+        using var provider = CreatePolicyProvider(repoRoot);
+        var policy = provider.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>();
+
+        Assert.True(File.Exists(ladderFullPath), "The Auth adoption ladder must exist as an authored Start Here guide.");
+        Assert.True(
+            policy.ShouldIncludeFilePath(ladderPath, AppSurfaceDocsHarvestSourceKind.Markdown),
+            "The Auth adoption ladder must be harvested by standalone AppSurface Docs.");
+        var expectedLadderTarget = Path.GetFullPath(ladderFullPath);
+
+        AssertMarkdownLinksTo(repoRoot, "README.md", expectedLadderTarget);
+        Assert.Contains(
+            ladderPath,
+            File.ReadAllText(ResolveRepositoryRelativePath(repoRoot, "README.md.yml", "Root README metadata path")),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ladderPath,
+            File.ReadAllText(ResolveRepositoryRelativePath(repoRoot, "packages/package-index.yml", "Package index path")),
+            StringComparison.Ordinal);
+        AssertMarkdownLinksTo(repoRoot, "packages/README.md", expectedLadderTarget);
+
+        var authReadmes = ReadPackageManifestEntries(repoRoot)
+            .Where(IsPublishedAuthPackageEntry)
+            .Select(entry => entry.StartHerePath!)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        foreach (var readmePath in authReadmes)
+        {
+            var fullReadmePath = ResolveRepositoryRelativePath(repoRoot, readmePath, $"{readmePath} README path");
+            var content = File.ReadAllText(fullReadmePath);
+            var linkTargets = MarkdownLinkRegex()
+                .Matches(content)
+                .Select(match => ResolveRelativeLinkTarget(
+                    Path.GetDirectoryName(fullReadmePath)!,
+                    match.Groups["href"].Value,
+                    readmePath))
+                .ToArray();
+
+            Assert.True(
+                linkTargets.Any(target => string.Equals(target, expectedLadderTarget, StringComparison.Ordinal)),
+                $"{readmePath} must link to the Auth adoption ladder.");
+        }
+
+        AssertMarkdownLinksTo(repoRoot, "examples/auth-web-razorwire-proof/README.md", expectedLadderTarget);
+        AssertMarkdownLinksTo(repoRoot, "examples/auth-aspnetcore-dev-auth/README.md", expectedLadderTarget);
+        AssertMarkdownLinksTo(repoRoot, "examples/auth-aspnetcore-oidc/README.md", expectedLadderTarget);
+    }
+
+    [Fact]
+    public void AuthAdoptionLadder_ShouldMatchPublishedAuthPackagesAndPreserveHostOwnedBoundaries()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var ladder = File.ReadAllText(TestPathUtils.PathUnder(repoRoot, "start-here/auth-adoption-ladder.md"));
+        var authPackageIds = ReadPackageManifestEntries(repoRoot)
+            .Where(IsPublishedAuthPackageEntry)
+            .Select(entry => Path.GetFileNameWithoutExtension(entry.Project))
+            .OrderBy(packageId => packageId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Assert.Equal(
+            [
+                "ForgeTrust.AppSurface.Auth",
+                "ForgeTrust.AppSurface.Auth.AspNetCore",
+                "ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth",
+                "ForgeTrust.AppSurface.Auth.AspNetCore.Oidc",
+                "ForgeTrust.AppSurface.Auth.Testing"
+            ],
+            authPackageIds);
+
+        foreach (var packageId in authPackageIds)
+        {
+            Assert.Contains(packageId, ladder, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("Host apps own identity providers, schemes/middleware, policies/enforcement, user stores, and production behavior.", ladder, StringComparison.Ordinal);
+        Assert.Contains("ForgeTrust.RazorWire.Auth.AspNetCore", ladder, StringComparison.Ordinal);
+        Assert.Contains("dotnet package add ForgeTrust.RazorWire.Auth.AspNetCore", ladder, StringComparison.Ordinal);
+        Assert.Contains("UI may reflect host policy results, but endpoints still need ASP.NET Core/AppSurface enforcement.", ladder, StringComparison.Ordinal);
+        Assert.Contains("Problem", ladder, StringComparison.Ordinal);
+        Assert.Contains("Cause", ladder, StringComparison.Ordinal);
+        Assert.Contains("Fix", ladder, StringComparison.Ordinal);
+        Assert.Contains("Docs", ladder, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("dotnet package add ForgeTrust.AppSurface.Auth.Keycloak", ladder, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppSurface secures your app", ladder, StringComparison.Ordinal);
+        Assert.DoesNotContain("DevAuth login", ladder, StringComparison.Ordinal);
+        Assert.DoesNotContain("RazorWire enforces policy", ladder, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AuthAdoptionDocs_ShouldNotTreatAuthTestingAsFutureOnly()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var publicAuthDocs = string.Join(
+            Environment.NewLine,
+            File.ReadAllText(TestPathUtils.PathUnder(repoRoot, "start-here/auth-adoption-ladder.md")),
+            File.ReadAllText(TestPathUtils.PathUnder(repoRoot, "Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md")),
+            File.ReadAllText(TestPathUtils.PathUnder(repoRoot, "Auth/ForgeTrust.AppSurface.Auth.Testing/README.md")),
+            File.ReadAllText(TestPathUtils.PathUnder(repoRoot, "examples/auth-aspnetcore-dev-auth/README.md")),
+            File.ReadAllText(TestPathUtils.PathUnder(repoRoot, "packages/package-index.yml")));
+
+        Assert.Contains("ForgeTrust.AppSurface.Auth.Testing", publicAuthDocs, StringComparison.Ordinal);
+        Assert.DoesNotContain("future test harness", publicAuthDocs, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("once that package exists", publicAuthDocs, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void StartsWithYamlFrontMatter_ShouldReturnTrue_WhenContentStartsWithBomPrefixedYamlMarker()
     {
         Assert.True(
@@ -234,6 +346,12 @@ public sealed partial class RepositoryReadmePolicyTests
                && !string.IsNullOrWhiteSpace(entry.StartHerePath);
     }
 
+    private static bool IsPublishedAuthPackageEntry(PackageManifestReadmeEntry entry)
+    {
+        return IsPublicPublishedStartHereEntry(entry)
+               && entry.Project.StartsWith("Auth/ForgeTrust.AppSurface.Auth", StringComparison.Ordinal);
+    }
+
     private static string ResolveRepositoryRelativePath(string repoRoot, string repositoryRelativePath, string description)
     {
         try
@@ -246,6 +364,23 @@ public sealed partial class RepositoryReadmePolicyTests
                 $"{description} must be repository-relative and stay under the repository root.",
                 exception);
         }
+    }
+
+    private static void AssertMarkdownLinksTo(string repoRoot, string markdownPath, string expectedTarget)
+    {
+        var fullMarkdownPath = ResolveRepositoryRelativePath(repoRoot, markdownPath, $"{markdownPath} markdown path");
+        var content = File.ReadAllText(fullMarkdownPath);
+        var linkTargets = MarkdownLinkRegex()
+            .Matches(content)
+            .Select(match => ResolveRelativeLinkTarget(
+                Path.GetDirectoryName(fullMarkdownPath)!,
+                match.Groups["href"].Value,
+                markdownPath))
+            .ToArray();
+
+        Assert.True(
+            linkTargets.Any(target => string.Equals(target, expectedTarget, StringComparison.Ordinal)),
+            $"{markdownPath} must link to {Path.GetRelativePath(repoRoot, expectedTarget)}.");
     }
 
     private static string ResolveRelativeLinkTarget(string baseDirectory, string href, string readmePath)

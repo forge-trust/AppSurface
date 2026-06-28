@@ -16,7 +16,7 @@
 
 ForgeTrust.AppSurface is a collection of .NET libraries designed to provide a lightweight, modular startup pipeline for both console and web applications.
 
-If you are deciding which package to install first, start with the [AppSurface v0.1 package chooser](./packages/README.md).
+If you are deciding which package to install first, start with the [AppSurface v0.1 package chooser](./packages/README.md). If you are choosing among Auth packages, use the [AppSurface Auth adoption ladder](./start-here/auth-adoption-ladder.md) before installing optional auth adapters.
 
 ## Vision
 
@@ -61,6 +61,7 @@ This approach aims to:
 
 ### [Auth](./Auth/ForgeTrust.AppSurface.Auth/README.md)
 
+- [**AppSurface Auth adoption ladder**](./start-here/auth-adoption-ladder.md) - Start here when you need to choose between host-owned ASP.NET Core auth, AppSurface Auth contracts, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces.
 - [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, durable external-subject to app-user-id mapping contracts, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) – ASP.NET Core adapter that maps existing host request auth context and named policies into AppSurface auth results without owning schemes, middleware, challenges, forbids, redirects, or identity-provider setup. Run the [Auth Web/RazorWire proof](./examples/auth-web-razorwire-proof/README.md) to see one host policy drive both API and rendered UI state.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) – Development-only selectable persona auth for local AppSurface policy proofs, with a visible control page, embeddable state overlay, named fake scheme, startup guard, and no production identity-provider behavior.

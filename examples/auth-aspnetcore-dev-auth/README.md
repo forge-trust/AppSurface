@@ -2,7 +2,9 @@
 
 This example proves `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` can give a local package consumer a fake, visible, Development-only persona lab without configuring an external identity provider.
 
-DevAuth is local tooling. It is not production authentication, OIDC, ASP.NET Identity, a user store, a durable app-user mapping layer, or the future test harness.
+DevAuth is local tooling. It is not production authentication, OIDC, ASP.NET Identity, a user store, a durable app-user mapping layer, or the Auth.Testing integration-test harness.
+
+Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.md) when deciding whether this local persona proof, Auth.Testing, OIDC, or raw ASP.NET Core authentication is the right next step.
 
 The root page renders `AppSurfaceDevAuthMarker` as a persistent in-app overlay. Selecting `Local Admin`, `Local Viewer`, or `Clear` from the overlay posts to the DevAuth control endpoints and returns to the same page, so the fake auth state remains visible while you use the app. Consumers can skin that marker by passing `AppSurfaceDevAuthMarkerOptions`, including `CssClassPrefix`, `AdditionalCssClass`, and `IncludeDefaultStyles = false`.
 
