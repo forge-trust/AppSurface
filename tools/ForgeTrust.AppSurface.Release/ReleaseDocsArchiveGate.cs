@@ -227,6 +227,17 @@ internal static class ReleaseDocsArchiveGate
         }
     }
 
+    /// <summary>
+    /// Validates that a physical directory candidate stays below an ordinary trusted root without crossing reparse segments.
+    /// </summary>
+    /// <param name="rootPath">Trusted exact-tree root or trusted release root to contain <paramref name="candidatePath"/>.</param>
+    /// <param name="candidatePath">Physical directory path to validate after canonicalization.</param>
+    /// <param name="detail">Receives diagnostic detail when the candidate escapes the root or crosses a symlink, junction, or reparse point.</param>
+    /// <returns><see langword="true"/> when the candidate equals or descends from the root and every directory segment is ordinary.</returns>
+    /// <remarks>
+    /// This test seam validates directory ancestors. File leaves still need a separate <see cref="FileInfo"/> check before hashing or reading
+    /// bytes so a manifest entry cannot point at a symlinked file inside an otherwise ordinary directory.
+    /// </remarks>
     internal static bool TryValidateNoReparseSegments(string rootPath, string candidatePath, out string? detail)
     {
         detail = null;
@@ -299,7 +310,8 @@ internal static class ReleaseDocsArchiveGate
         if (!element.TryGetProperty("visibility", out var visibilityElement)
             || visibilityElement.ValueKind == JsonValueKind.Null)
         {
-            return true;
+            issue = "The selected version must declare public visibility.";
+            return false;
         }
 
         if (visibilityElement.ValueKind == JsonValueKind.String)
@@ -370,6 +382,18 @@ internal static class ReleaseDocsArchiveGate
             && string.Equals(docsArchive.ReleaseManifestSha256, catalogEntry.ReleaseManifestSha256, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Resolves a catalog <c>exactTreePath</c> into a physical path beneath the trusted release root.
+    /// </summary>
+    /// <param name="trustedReleaseRoot">Canonical trusted release root that contains staged exact-tree archives.</param>
+    /// <param name="exactTreePath">Catalog-authored exact-tree path. It must be relative and must avoid parent or hidden segments.</param>
+    /// <param name="physicalExactTreePath">Receives the canonical physical exact-tree path when resolution succeeds; otherwise <see langword="null"/> unless containment fails after normalization.</param>
+    /// <param name="issue">Receives a maintainer-facing reason when the catalog path is empty, rooted, unsafe, escaping, or invalid.</param>
+    /// <returns><see langword="true"/> when the authored path can be safely resolved under <paramref name="trustedReleaseRoot"/>.</returns>
+    /// <remarks>
+    /// The trusted root is supplied by release operators or defaults from the catalog directory. Callers should validate the returned directory
+    /// exists and has no reparse segments before reading archive content.
+    /// </remarks>
     internal static bool TryResolveExactTreePath(
         string trustedReleaseRoot,
         string exactTreePath,
@@ -454,9 +478,8 @@ internal static class ReleaseDocsArchiveGate
         fileCount = 0;
         issue = null;
         var manifestPath = Path.Join(exactTreePath, ReleaseManifestFileName);
-        if (!File.Exists(manifestPath))
+        if (!TryValidateOrdinaryFile(exactTreePath, manifestPath, ReleaseManifestFileName, out _, out issue))
         {
-            issue = $"Release manifest `{ReleaseManifestFileName}` is missing.";
             return false;
         }
 
@@ -511,16 +534,8 @@ internal static class ReleaseDocsArchiveGate
             }
 
             var physicalFile = Path.Join(exactTreePath, normalizedEntry.Path.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(physicalFile))
+            if (!TryValidateOrdinaryFile(exactTreePath, physicalFile, normalizedEntry.Path, out var info, out issue))
             {
-                issue = $"Release manifest lists missing file `{normalizedEntry.Path}`.";
-                return false;
-            }
-
-            var info = new FileInfo(physicalFile);
-            if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
-            {
-                issue = $"Release manifest file `{normalizedEntry.Path}` is a symlink or reparse point.";
                 return false;
             }
 
@@ -575,6 +590,57 @@ internal static class ReleaseDocsArchiveGate
 
         fileCount = files.Count;
         return true;
+    }
+
+    private static bool TryValidateOrdinaryFile(
+        string rootPath,
+        string filePath,
+        string displayPath,
+        out FileInfo fileInfo,
+        out string? issue)
+    {
+        fileInfo = null!;
+        issue = null;
+        try
+        {
+            var normalizedFilePath = NormalizePhysicalPath(filePath);
+            var directoryPath = Path.GetDirectoryName(normalizedFilePath);
+            if (directoryPath is null)
+            {
+                issue = $"Release manifest file `{displayPath}` is outside the ordinary exact tree.";
+                return false;
+            }
+
+            if (!TryValidateNoReparseSegments(rootPath, directoryPath, out var detail))
+            {
+                issue = detail ?? $"Release manifest file `{displayPath}` is outside the ordinary exact tree.";
+                return false;
+            }
+
+            fileInfo = new FileInfo(normalizedFilePath);
+            if (!fileInfo.Exists)
+            {
+                issue = string.Equals(displayPath, ReleaseManifestFileName, StringComparison.Ordinal)
+                    ? $"Release manifest `{ReleaseManifestFileName}` is missing."
+                    : $"Release manifest lists missing file `{displayPath}`.";
+                return false;
+            }
+
+            if ((fileInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                issue = string.Equals(displayPath, ReleaseManifestFileName, StringComparison.Ordinal)
+                    ? $"Release manifest `{ReleaseManifestFileName}` is a symlink or reparse point."
+                    : $"Release manifest file `{displayPath}` is a symlink or reparse point.";
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            issue = $"Release manifest file `{displayPath}` could not be inspected: {ex.Message}";
+            return false;
+        }
     }
 
     private static bool TryValidateManifestEntry(
@@ -856,6 +922,15 @@ internal static class ReleaseDocsArchiveGate
         IReadOnlyList<string>? DeclaredAliases);
 }
 
+/// <summary>
+/// Result of stable docs archive verification.
+/// </summary>
+/// <param name="Proof">Verification proof when the catalog entry, exact tree, manifest, and serveable files matched; otherwise <see langword="null"/>.</param>
+/// <param name="Diagnostics">Blocking diagnostics explaining why stable docs archive verification could not produce proof.</param>
+/// <remarks>
+/// Successful results have a non-null proof and no diagnostics. Failure results keep proof null so check and publish callers cannot accidentally
+/// treat a partially inspected archive as verified.
+/// </remarks>
 internal sealed record ReleaseDocsArchiveGateResult(
     ReleaseDocsArchiveVerificationProof? Proof,
     IReadOnlyList<ReleaseDiagnostic> Diagnostics)
@@ -866,6 +941,20 @@ internal sealed record ReleaseDocsArchiveGateResult(
     }
 }
 
+/// <summary>
+/// Immutable proof that the stable release docs catalog entry and staged exact tree were verified.
+/// </summary>
+/// <param name="State">Verification state written into release reports. Successful verification uses <see cref="ReleaseDocsArchiveGate.VerifiedState"/>.</param>
+/// <param name="CatalogPath">Physical path to the staged AppSurface Docs <c>versions.json</c> that supplied the selected catalog entry.</param>
+/// <param name="TrustedReleaseRootPath">Canonical trusted release root used to resolve the catalog exact tree path.</param>
+/// <param name="CatalogExactTreePath">Catalog-authored exact tree path reviewed by maintainers.</param>
+/// <param name="CatalogReleaseManifestSha256">Catalog-pinned release manifest digest that matched the staged manifest bytes.</param>
+/// <param name="PhysicalExactTreePath">Canonical physical exact tree path that was inspected for ordinary directories and verified content.</param>
+/// <param name="VerifiedFileCount">Number of release manifest entries that were byte-verified.</param>
+/// <remarks>
+/// The proof intentionally carries both authored catalog values and resolved physical paths. Maintainers should review the authored values for
+/// release identity and the physical values for staging provenance.
+/// </remarks>
 internal sealed record ReleaseDocsArchiveVerificationProof(
     string State,
     string CatalogPath,

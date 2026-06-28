@@ -35,12 +35,22 @@ internal sealed partial class ReleaseCheckCommand : ReleaseCommandBase, ICommand
     /// <summary>
     /// Gets the AppSurface Docs version catalog used to verify stable release evidence.
     /// </summary>
+    /// <remarks>
+    /// <c>check</c> may omit this value to use <c>dist/docs/versions.json</c> when that local review fallback exists. Stable checks that
+    /// review prepared artifacts should pass the staged catalog explicitly when possible. Relative paths are resolved from the repository
+    /// root, and invalid or missing catalogs surface release diagnostics rather than mutating release files.
+    /// </remarks>
     [CommandOption("docs-catalog", Description = "AppSurface Docs versions.json used to verify stable release evidence. Check falls back to dist/docs/versions.json when omitted and present.")]
     public string? DocsCatalogPath { get; set; }
 
     /// <summary>
     /// Gets the trusted release root used to resolve catalog exactTreePath values.
     /// </summary>
+    /// <remarks>
+    /// When omitted, the verifier uses the catalog directory as the trusted release root. Pass this option when the catalog is staged outside
+    /// the directory that contains the exact tree paths. The root must be an ordinary directory, and catalog <c>exactTreePath</c> values must
+    /// stay relative to it without hidden or parent segments.
+    /// </remarks>
     [CommandOption("docs-trusted-release-root", Description = "Trusted release root that contains docs exact trees. Defaults to the docs catalog directory.")]
     public string? DocsTrustedReleaseRootPath { get; set; }
 
@@ -160,12 +170,22 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
     /// <summary>
     /// Gets the staged AppSurface Docs version catalog used to verify stable release evidence.
     /// </summary>
+    /// <remarks>
+    /// Stable publish requires this explicit path because GitHub Release creation must verify the staged docs artifact selected by the
+    /// maintainer. Relative paths are resolved from the repository root. Prerelease publish accepts the option but does not require docs
+    /// archive proof.
+    /// </remarks>
     [CommandOption("docs-catalog", Description = "Staged AppSurface Docs versions.json used to verify stable release evidence.")]
     public string? DocsCatalogPath { get; set; }
 
     /// <summary>
     /// Gets the trusted release root used to resolve catalog exactTreePath values.
     /// </summary>
+    /// <remarks>
+    /// When omitted, stable publish resolves exact trees relative to the staged catalog directory. Supply this option when the artifact layout
+    /// stores <c>versions.json</c> separately from the exact release trees; the path must resolve under the repository root when relative and
+    /// must point at the ordinary directory that owns the catalog exact-tree paths.
+    /// </remarks>
     [CommandOption("docs-trusted-release-root", Description = "Trusted release root that contains docs exact trees. Defaults to the docs catalog directory.")]
     public string? DocsTrustedReleaseRootPath { get; set; }
 

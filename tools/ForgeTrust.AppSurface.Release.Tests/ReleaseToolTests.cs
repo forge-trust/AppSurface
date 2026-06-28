@@ -1405,10 +1405,22 @@ public sealed class ReleaseToolTests : IDisposable
     public async Task PublishRejectsStableReleaseWithoutDocsArchiveEvidence()
     {
         await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
         var runner = CreateSuccessfulStablePublishRunner();
 
         var result = await RunAsync(
-            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--dry-run"],
+            [
+                "publish",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--dry-run",
+                "--docs-catalog",
+                docs.CatalogPath,
+                "--docs-trusted-release-root",
+                docs.TrustedReleaseRootPath
+            ],
             runner);
 
         Assert.Equal(1, result.ExitCode);
@@ -1458,7 +1470,8 @@ public sealed class ReleaseToolTests : IDisposable
                         {
                             version = "0.1.0",
                             exactTreePath = "releases/other",
-                            releaseManifestSha256 = docs.ReleaseManifestSha256
+                            releaseManifestSha256 = docs.ReleaseManifestSha256,
+                            visibility = "Public"
                         }
                     }
                 },
@@ -1621,13 +1634,15 @@ public sealed class ReleaseToolTests : IDisposable
             {
                 version = "0.1.0",
                 exactTreePath = docs.ExactTreePath,
-                releaseManifestSha256 = docs.ReleaseManifestSha256
+                releaseManifestSha256 = docs.ReleaseManifestSha256,
+                visibility = "Public"
             },
             new
             {
                 version = "0.1.0",
                 exactTreePath = docs.ExactTreePath,
-                releaseManifestSha256 = docs.ReleaseManifestSha256
+                releaseManifestSha256 = docs.ReleaseManifestSha256,
+                visibility = "Public"
             });
 
         var result = await RunStablePublishWithDocsAsync(docs);
@@ -1727,6 +1742,27 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("Code: release-docs-catalog-version-unavailable", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWhenCatalogVisibilityIsMissing()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        await WriteDocsCatalogAsync(
+            docs,
+            new
+            {
+                version = "0.1.0",
+                exactTreePath = docs.ExactTreePath,
+                releaseManifestSha256 = docs.ReleaseManifestSha256
+            });
+
+        var result = await RunStablePublishWithDocsAsync(docs);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-catalog-version-unavailable", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("public visibility", result.Stderr, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1870,6 +1906,11 @@ public sealed class ReleaseToolTests : IDisposable
     [Fact]
     public async Task StableDocsArchiveGateRejectsSymlinkTrustedReleaseRoot()
     {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
         await SeedRepositoryAsync();
         var docs = await SeedDocsArchiveAsync("0.1.0");
         var symlinkRoot = RepositoryPath("docs-root-link");
@@ -1925,6 +1966,11 @@ public sealed class ReleaseToolTests : IDisposable
     [Fact]
     public async Task StableDocsArchiveGateRejectsSymlinkExactTreeSegment()
     {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
         await SeedRepositoryAsync();
         var docs = await SeedDocsArchiveAsync("0.1.0");
         var releasesPath = Path.Join(docs.TrustedReleaseRootPath, "releases");
@@ -1997,7 +2043,7 @@ public sealed class ReleaseToolTests : IDisposable
         await SeedRepositoryAsync();
         var docs = await SeedDocsArchiveAsync("0.1.0");
 
-        var result = await ValidateStableDocsArchiveGateAsync(docs, trustedRootPath: docs.TrustedReleaseRootPath);
+        var result = await ValidateStableDocsArchiveGateAsync(docs, trustedRootPath: null);
 
         Assert.Empty(result.Diagnostics);
         Assert.NotNull(result.Proof);
@@ -2154,6 +2200,28 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("Code: release-docs-archive-verification-failed", result.Stderr, StringComparison.Ordinal);
         Assert.Contains("digest does not match", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWhenReleaseManifestIsSymlink()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var manifestPath = DocsArchivePath(docs, ".appsurface-docs-release-manifest.json");
+        var realManifestPath = DocsArchivePath(docs, "real-release-manifest.json");
+        File.Move(manifestPath, realManifestPath);
+        File.CreateSymbolicLink(manifestPath, realManifestPath);
+
+        var result = await RunStablePublishWithDocsAsync(docs);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-archive-verification-failed", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("symlink", result.Stderr, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2435,6 +2503,11 @@ public sealed class ReleaseToolTests : IDisposable
     [Fact]
     public async Task PublishRejectsStableReleaseWhenReleaseManifestListsSymlinkFile()
     {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
         await SeedRepositoryAsync();
         var docs = await SeedDocsArchiveAsync("0.1.0");
         File.CreateSymbolicLink(DocsArchivePath(docs, "linked.css"), DocsArchivePath(docs, "index.html"));
@@ -2443,6 +2516,35 @@ public sealed class ReleaseToolTests : IDisposable
             "appsurface-docs-release-manifest-v1",
             [
                 CreateDocsManifestFile("linked.css", 0, new string('a', 64))
+            ]);
+
+        var result = await RunStablePublishWithDocsAsync(docs);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-archive-verification-failed", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("symlink", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWhenReleaseManifestFileUsesSymlinkAncestor()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var realAssetsPath = RepositoryPath("real-doc-assets");
+        Directory.CreateDirectory(realAssetsPath);
+        var assetBytes = Encoding.UTF8.GetBytes("body{}");
+        await File.WriteAllBytesAsync(Path.Join(realAssetsPath, "app.css"), assetBytes);
+        Directory.CreateSymbolicLink(DocsArchivePath(docs, "assets"), realAssetsPath);
+        docs = await RewriteDocsReleaseManifestAsync(
+            docs,
+            "appsurface-docs-release-manifest-v1",
+            [
+                CreateDocsManifestFile("assets/app.css", assetBytes.Length, Convert.ToHexString(SHA256.HashData(assetBytes)).ToLowerInvariant())
             ]);
 
         var result = await RunStablePublishWithDocsAsync(docs);

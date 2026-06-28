@@ -708,6 +708,16 @@ internal static class ReleaseEvidence
     }
 }
 
+/// <summary>
+/// Describes the outcome of release evidence validation.
+/// </summary>
+/// <param name="Summary">Structured summary when the evidence shape was readable enough to summarize; otherwise <see langword="null"/>.</param>
+/// <param name="Diagnostics">Errors or warnings discovered while validating the release evidence bundle.</param>
+/// <param name="Bundle">Deserialized evidence bundle when parsing and top-level shape validation reached the bundle. This can be <see langword="null"/> for unreadable evidence and can be non-null while <paramref name="Diagnostics"/> contains errors.</param>
+/// <remarks>
+/// Stable docs archive verification depends on <paramref name="Bundle"/> only after callers have checked diagnostics. Do not treat a non-null
+/// bundle as proof that the evidence is publishable.
+/// </remarks>
 internal sealed record ReleaseEvidenceValidationResult(
     ReleaseEvidenceSummary? Summary,
     IReadOnlyList<ReleaseDiagnostic> Diagnostics,
