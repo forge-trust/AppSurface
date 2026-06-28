@@ -333,7 +333,7 @@ internal static class ReleaseDocsArchiveGate
 
         if (visibilityElement.ValueKind == JsonValueKind.String)
         {
-            var value = visibilityElement.GetString()?.Trim();
+            var value = visibilityElement.GetString()!.Trim();
             if (string.Equals(value, "public", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
@@ -379,7 +379,7 @@ internal static class ReleaseDocsArchiveGate
             return false;
         }
 
-        value = property.GetString()?.Trim();
+        value = property.GetString()!.Trim();
         return true;
     }
 
@@ -599,10 +599,13 @@ internal static class ReleaseDocsArchiveGate
             return false;
         }
 
-        foreach (var serveableFile in serveableFiles.Where(path => !files.ContainsKey(path)))
+        foreach (var serveableFile in serveableFiles)
         {
-            issue = $"Release archive contains serveable file `{serveableFile}` that is not listed in the release manifest.";
-            return false;
+            if (!files.ContainsKey(serveableFile))
+            {
+                issue = $"Release archive contains serveable file `{serveableFile}` that is not listed in the release manifest.";
+                return false;
+            }
         }
 
         fileCount = files.Count;
@@ -689,7 +692,7 @@ internal static class ReleaseDocsArchiveGate
 
             if (!TryValidateNoReparseSegments(rootPath, directoryPath, out var detail))
             {
-                issue = detail ?? $"Release manifest file `{displayPath}` is outside the ordinary exact tree.";
+                issue = detail;
                 return false;
             }
 

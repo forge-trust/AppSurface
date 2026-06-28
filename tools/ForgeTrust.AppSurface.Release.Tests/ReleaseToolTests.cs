@@ -1678,6 +1678,7 @@ public sealed class ReleaseToolTests : IDisposable
     [InlineData("invalid-visibility")]
     [InlineData("missing-exact-tree")]
     [InlineData("non-string-exact-tree")]
+    [InlineData("missing-digest")]
     [InlineData("invalid-digest")]
     public async Task PublishRejectsStableReleaseWhenCatalogEntryShapeIsInvalid(string shape)
     {
@@ -1703,6 +1704,12 @@ public sealed class ReleaseToolTests : IDisposable
                 version = "0.1.0",
                 exactTreePath = 5,
                 releaseManifestSha256 = docs.ReleaseManifestSha256,
+                visibility = "Public"
+            },
+            "missing-digest" => new
+            {
+                version = "0.1.0",
+                exactTreePath = docs.ExactTreePath,
                 visibility = "Public"
             },
             _ => new
