@@ -22,4 +22,25 @@ public class PublicEnumContractTests
     {
         Assert.Equal(expected, (int)value);
     }
+
+    [Theory]
+    [InlineData(PwaDisplayMode.Browser, 0)]
+    [InlineData(PwaDisplayMode.MinimalUi, 1)]
+    [InlineData(PwaDisplayMode.Standalone, 2)]
+    [InlineData(PwaDisplayMode.Fullscreen, 3)]
+    public void PwaDisplayMode_NumericValues_AreStable(PwaDisplayMode value, int expected)
+    {
+        Assert.Equal(expected, (int)value);
+    }
+
+    [Theory]
+    [InlineData(PwaDiagnosticEndpointExposure.DevelopmentOnly, 0)]
+    [InlineData(PwaDiagnosticEndpointExposure.Always, 1)]
+    [InlineData(PwaDiagnosticEndpointExposure.Never, 2)]
+    public void PwaDiagnosticEndpointExposure_NumericValues_AreStable(
+        PwaDiagnosticEndpointExposure value,
+        int expected)
+    {
+        Assert.Equal(expected, (int)value);
+    }
 }

@@ -347,6 +347,12 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
             _options.StaticFiles.EnableStaticFiles = true;
         }
 
+        if (_options.Pwa.Enabled)
+        {
+            PwaOptionsValidator.ThrowIfInvalid(_options.Pwa);
+            _options.StaticFiles.EnableStaticFiles = true;
+        }
+
         _optionsBuilt = true;
     }
 
@@ -360,6 +366,8 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
     {
         BuildModules(context);
         BuildWebOptions(context);
+
+        services.AddSingleton(_options.Pwa);
 
         var mvcOpts = _options.Mvc;
 
@@ -601,6 +609,8 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
 
             // Map direct endpoints, if provided.
             _options.MapEndpoints?.Invoke(endpoints);
+
+            PwaEndpointMapper.Map(endpoints, _options.Pwa, context.IsDevelopment);
 
             if (_options.Mvc.MvcSupportLevel > MvcSupport.None)
             {
