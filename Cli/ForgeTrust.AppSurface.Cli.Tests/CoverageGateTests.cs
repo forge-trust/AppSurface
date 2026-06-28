@@ -2677,6 +2677,20 @@ public sealed class CoverageGateTests
         Assert.Contains("must not contain", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task RunGitAsync_WhenCommitFails_ReportsExecutedCommitArguments()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await RunGitAsync(temp.Path, "commit", "-m", "empty"));
+
+        Assert.Contains("git -c commit.gpgsign=false commit -m empty failed:", exception.Message, StringComparison.Ordinal);
+    }
+
     private static async Task RunGitAsync(string workingDirectory, params string[] arguments)
     {
         var startInfo = new ProcessStartInfo("git")
@@ -2686,7 +2700,19 @@ public sealed class CoverageGateTests
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        var executedArguments = new List<string>(arguments.Length + 2);
+        if (arguments.Length > 0 && string.Equals(arguments[0], "commit", StringComparison.Ordinal))
+        {
+            executedArguments.Add("-c");
+            executedArguments.Add("commit.gpgsign=false");
+        }
+
         foreach (var argument in arguments)
+        {
+            executedArguments.Add(argument);
+        }
+
+        foreach (var argument in executedArguments)
         {
             startInfo.ArgumentList.Add(argument);
         }
@@ -2699,7 +2725,7 @@ public sealed class CoverageGateTests
         var standardError = await standardErrorTask;
         if (process.ExitCode != 0)
         {
-            throw new InvalidOperationException($"git {string.Join(' ', arguments)} failed: {standardError}");
+            throw new InvalidOperationException($"git {string.Join(' ', executedArguments)} failed: {standardError}");
         }
     }
 

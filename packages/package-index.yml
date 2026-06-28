@@ -262,11 +262,11 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.1.md
     order: 70
-    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline before layering on optional UI or docs packages.
-    includes: Base ASP.NET Core hosting, pre-routing and endpoint-aware middleware composition, endpoint composition, conventional browser error-page hooks, and the core AppSurface web module contract.
-    does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, or the AppSurface Docs host.
+    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, conventional browser affordances, and PWA install metadata before layering on optional UI or docs packages.
+    includes: Base ASP.NET Core hosting, pre-routing and endpoint-aware middleware composition, endpoint composition, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/service-worker endpoints, and the core AppSurface web module contract.
+    does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, AppSurface Docs host, browser-specific install prompt UI, or broad offline route/app-data caching.
     start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Web.OpenApi` after `ForgeTrust.AppSurface.Web` when you want generated OpenAPI endpoints.
+    recipe_summary: Start with `ForgeTrust.AppSurface.Web` for AppSurface ASP.NET Core hosting; enable `WebOptions.Pwa` in the same package when the app needs installable PWA metadata and diagnostics.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj
