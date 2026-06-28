@@ -200,6 +200,48 @@ public sealed class PwaEndpointTests
     }
 
     [Fact]
+    public async Task OfflineStrategy_ServiceWorkerPrunesOnlyCurrentAppSurfaceScopeCaches()
+    {
+        await using var rootApp = await StartHostAsync(options =>
+        {
+            ConfigureValidPwa(options.Pwa);
+            options.Pwa.Offline.Enabled = true;
+            options.Pwa.Offline.OfflineFallbackPath = "/offline.html";
+            options.Pwa.Offline.StaticAssetPaths = ["/css/site.css"];
+        });
+        await using var tenantApp = await StartHostAsync(
+            options =>
+            {
+                ConfigureValidPwa(options.Pwa);
+                options.Pwa.Offline.Enabled = true;
+                options.Pwa.Offline.OfflineFallbackPath = "/offline.html";
+                options.Pwa.Offline.StaticAssetPaths = ["/css/site.css"];
+            },
+            pathBase: "/tenant");
+
+        using var rootResponse = await rootApp.Client.GetAsync("/service-worker.js");
+        using var tenantResponse = await tenantApp.Client.GetAsync("/tenant/service-worker.js");
+        var rootScript = await rootResponse.Content.ReadAsStringAsync();
+        var tenantScript = await tenantResponse.Content.ReadAsStringAsync();
+
+        var rootCachePrefix = ExtractScriptConstant(rootScript, "CACHE_PREFIX");
+        var tenantCachePrefix = ExtractScriptConstant(tenantScript, "CACHE_PREFIX");
+
+        Assert.StartsWith("appsurface-pwa-", rootCachePrefix, StringComparison.Ordinal);
+        Assert.StartsWith("appsurface-pwa-", tenantCachePrefix, StringComparison.Ordinal);
+        Assert.NotEqual(rootCachePrefix, tenantCachePrefix);
+        Assert.Contains($"""const CACHE_NAME = "{rootCachePrefix}v1";""", rootScript, StringComparison.Ordinal);
+        Assert.Contains(
+            "key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME",
+            rootScript,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "keys.filter(key => key !== CACHE_NAME)",
+            rootScript,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PathBase_IsAppliedToManifestDiagnosticsAndServiceWorker()
     {
         await using var app = await StartHostAsync(
@@ -252,6 +294,17 @@ public sealed class PwaEndpointTests
         pwa.BackgroundColor = valid.BackgroundColor;
         pwa.Icons.Add(new PwaIcon { Source = "/icons/app-192.png", Sizes = "192x192", Type = "image/png" });
         pwa.Icons.Add(new PwaIcon { Source = "/icons/app-512.png", Sizes = "512x512", Type = "image/png" });
+    }
+
+    private static string ExtractScriptConstant(string script, string name)
+    {
+        var marker = $"const {name} = \"";
+        var start = script.IndexOf(marker, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Expected {name} to be declared in the service worker script.");
+        start += marker.Length;
+        var end = script.IndexOf('"', start);
+        Assert.True(end > start, $"Expected {name} to have a string literal value.");
+        return script[start..end];
     }
 
     private static async Task<RunningApp> StartHostAsync(

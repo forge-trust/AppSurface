@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -216,10 +217,14 @@ internal static class PwaEndpointMapper
         var offlineFallbackPath = AddPathBase(httpContext.Request.PathBase, options.Offline.OfflineFallbackPath);
         var assetsJson = JsonSerializer.Serialize(paths);
         var fallbackJson = JsonSerializer.Serialize(offlineFallbackPath);
+        var cachePrefix = $"appsurface-pwa-{BuildCacheScopeKey(httpContext.Request.PathBase, options)}-";
+        var cachePrefixJson = JsonSerializer.Serialize(cachePrefix);
+        var cacheNameJson = JsonSerializer.Serialize(cachePrefix + "v1");
 
         await httpContext.Response.WriteAsync(
             $$"""
-            const CACHE_NAME = "appsurface-pwa-v1";
+            const CACHE_PREFIX = {{cachePrefixJson}};
+            const CACHE_NAME = {{cacheNameJson}};
             const STATIC_ASSETS = {{assetsJson}};
             const OFFLINE_FALLBACK = {{fallbackJson}};
 
@@ -229,7 +234,7 @@ internal static class PwaEndpointMapper
             });
 
             self.addEventListener("activate", event => {
-              event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)))));
+              event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME).map(key => caches.delete(key)))));
               self.clients.claim();
             });
 
@@ -255,6 +260,13 @@ internal static class PwaEndpointMapper
     private static string AddPathBase(PathString pathBase, string path)
     {
         return pathBase.Add(new PathString(path)).Value ?? path;
+    }
+
+    private static string BuildCacheScopeKey(PathString pathBase, PwaOptions options)
+    {
+        var scope = AddPathBase(pathBase, options.Scope);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(scope));
+        return Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant();
     }
 }
 
