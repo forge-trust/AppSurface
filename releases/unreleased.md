@@ -27,6 +27,9 @@ This is the living release note for the next coordinated AppSurface version afte
   diagnostics, and opt-in service worker.
 - The generated starter PWA service worker now scopes cache cleanup to the current AppSurface service-worker owner and
   reaps the earlier global AppSurface cache name without pruning unrelated origin caches or another path-mounted app.
+- AppSurface Auth now has a Start Here adoption ladder that helps package consumers choose between host-owned
+  ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces
+  without implying AppSurface owns production identity providers, policies, user stores, or enforcement.
 
 ## Migration watch
 
