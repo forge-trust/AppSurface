@@ -247,6 +247,12 @@ public sealed record AppSurfaceDocsHarvestDiagnosticResponse
     public string Problem { get; init; } = string.Empty;
 
     /// <summary>
+    /// Gets the operator-facing explanation for why AppSurface Docs reported the diagnostic.
+    /// </summary>
+    [JsonPropertyName("cause")]
+    public string Cause { get; init; } = string.Empty;
+
+    /// <summary>
     /// Gets the suggested operator or docs-author recovery action.
     /// </summary>
     [JsonPropertyName("fix")]
@@ -262,6 +268,7 @@ public sealed record AppSurfaceDocsHarvestDiagnosticResponse
             Severity = diagnostic.Severity.ToString(),
             HarvesterType = diagnostic.HarvesterType,
             Problem = diagnostic.Problem,
+            Cause = diagnostic.Cause,
             Fix = diagnostic.Fix
         };
     }

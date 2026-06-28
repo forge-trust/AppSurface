@@ -1042,6 +1042,16 @@ public static class DocHarvestDiagnosticCodes
     public const string JavaScriptIncompletePublicEventDoclet = "appsurfacedocs.javascript.incomplete_public_event_doclet";
 
     /// <summary>
+    /// A public JavaScript event doclet did not have matching literal dispatch evidence in verifier inputs.
+    /// </summary>
+    public const string JavaScriptEventDocletDispatchMissing = "appsurfacedocs.javascript.event_doclet_dispatch_missing";
+
+    /// <summary>
+    /// A literal JavaScript CustomEvent dispatch did not have a matching public event doclet in verifier inputs.
+    /// </summary>
+    public const string JavaScriptEventDispatchDocletMissing = "appsurfacedocs.javascript.event_dispatch_doclet_missing";
+
+    /// <summary>
     /// Multiple JavaScript API items normalized to the same anchor and required deterministic suffixes.
     /// </summary>
     public const string JavaScriptDuplicateAnchor = "appsurfacedocs.javascript.duplicate_anchor";
