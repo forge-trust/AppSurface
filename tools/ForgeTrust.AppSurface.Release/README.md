@@ -23,7 +23,7 @@ Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`
 
 For prereleases, `check` warns when the version cannot trigger protected NuGet prerelease publishing. The protected workflow currently accepts `preview`, `alpha`, `beta`, and `rc` labels with a positive numeric suffix, for example `0.1.0-preview.1`.
 
-For stable releases, `check --allow-existing-targets` also verifies the AppSurface Docs catalog entry and exact archive tree recorded in the prepared release evidence. Pass `--docs-catalog <path>` to the staged `versions.json` and `--docs-trusted-release-root <path>` to the directory that contains the catalog exact trees. When `--docs-catalog` is omitted, `check` uses `dist/docs/versions.json` only as a local review fallback if it exists.
+For stable releases, `check` also validates prepared release evidence and verifies the AppSurface Docs catalog entry and exact archive tree recorded there. Pass `--docs-catalog <path>` to the staged `versions.json` and `--docs-trusted-release-root <path>` to the directory that contains the catalog exact trees. When `--docs-catalog` is omitted, `check` uses `dist/docs/versions.json` only as a local review fallback if it exists. Use `--allow-existing-targets` for the release-prep review pass so generated target files are treated as the prepared artifact set instead of stale collisions.
 
 ## Prepare
 

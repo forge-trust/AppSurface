@@ -339,7 +339,7 @@ public sealed class ReleaseToolTests : IDisposable
             ["check", "--version", "0.1.0", "--fail-on-warnings"],
             FakeCommandRunner.WithSourceCommit("abc123"));
 
-        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(1, result.ExitCode);
         Assert.DoesNotContain("release-stable-package-policy-missing", result.Stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("release-prerelease-label-unprotected", result.Stdout, StringComparison.Ordinal);
     }
@@ -2901,6 +2901,24 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("- Docs archive verification: `availableVerified`", result.Stdout, StringComparison.Ordinal);
         Assert.Contains("- Docs verified file count: `2`", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckStablePreparedReleaseRequiresDocsEvidenceWithoutAllowExistingTargets()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(".github/workflows/nuget-stable-publish.yml", "name: NuGet Stable Publish\n");
+        var prepare = await RunAsync(
+            ["prepare", "--version", "0.1.0", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+        Assert.Equal(0, prepare.ExitCode);
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-evidence-docs-archive-required", result.Stdout, StringComparison.Ordinal);
     }
 
     [Fact]

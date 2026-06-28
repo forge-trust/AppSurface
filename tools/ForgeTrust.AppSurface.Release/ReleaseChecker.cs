@@ -135,7 +135,8 @@ internal sealed class ReleaseChecker
         }
 
         var sourceCommit = await TryGetSourceCommitAsync(cancellationToken);
-        if (options.AllowExistingTargets && string.Equals(options.Command, "check", StringComparison.Ordinal))
+        if (string.Equals(options.Command, "check", StringComparison.Ordinal)
+            && (options.AllowExistingTargets || options.Version.IsStable))
         {
             var evidence = await ReleaseEvidence.ValidatePreparedAsync(
                 _workspace,
