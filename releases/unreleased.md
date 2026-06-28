@@ -4,7 +4,9 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
-- Add merged public changes here as they land.
+- `ForgeTrust.AppSurface.Web` now owns the baseline PWA install contract in the existing Web package: app-owned
+  `WebOptions.Pwa` metadata maps a manifest endpoint, MVC/Razor head tags, development diagnostics, and an explicit
+  opt-in offline fallback, with `appsurface pwa verify` providing a copy-paste CLI proof for the running origin.
 
 ## Included in the next coordinated version
 
@@ -15,6 +17,12 @@ This is the living release note for the next coordinated AppSurface version afte
   process output still maps to `Locked`; startup diagnostics include exception type, `HResult`, and synthetic exit code
   while intentionally omitting raw exception messages, command paths, arguments, absolute paths, logical values, and
   secret values.
+- AppSurface Web adds first-class PWA install support without a new package. `WebOptions.Pwa` stays disabled by default,
+  requires install-critical metadata when enabled, serves `/manifest.webmanifest` as `application/manifest+json`, maps
+  development-only diagnostics under `/_appsurface/pwa`, and emits no service worker unless the app explicitly configures
+  an offline fallback strategy. MVC and Razor apps can add `<appsurface:pwa-head />`; custom layouts can copy equivalent
+  tags from diagnostics; `appsurface pwa verify --url <origin>` checks the live metadata, icons, secure-origin posture,
+  diagnostics, and opt-in service worker.
 
 ## Migration watch
 

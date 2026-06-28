@@ -1,0 +1,115 @@
+using ForgeTrust.AppSurface.Web.TagHelpers;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using Microsoft.AspNetCore.Razor.TagHelpers;
+
+namespace ForgeTrust.AppSurface.Web.Tests;
+
+public sealed class AppSurfacePwaHeadTagHelperTests
+{
+    [Fact]
+    public void Constructor_RejectsNullDependencies()
+    {
+        Assert.Throws<ArgumentNullException>(() => new AppSurfacePwaHeadTagHelper(null!, new PwaOptions()));
+        Assert.Throws<ArgumentNullException>(() => new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), null!));
+    }
+
+    [Fact]
+    public void Process_WhenDisabled_EmitsNoHeadTags()
+    {
+        var helper = new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), new PwaOptions())
+        {
+            ViewContext = CreateViewContext()
+        };
+        var output = CreateOutput();
+
+        helper.Process(CreateContext(), output);
+
+        Assert.Null(output.TagName);
+        Assert.Equal(string.Empty, output.Content.GetContent());
+    }
+
+    [Fact]
+    public void Process_WhenEnabled_EmitsManifestThemeIconsAndServiceWorkerMetadata()
+    {
+        var options = PwaOptionsTests.CreateValidOptions();
+        options.Offline.Enabled = true;
+        options.Offline.OfflineFallbackPath = "/offline.html";
+        var helper = new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), options)
+        {
+            ViewContext = CreateViewContext("/tenant")
+        };
+        var output = CreateOutput();
+
+        helper.Process(CreateContext(), output);
+
+        var html = output.Content.GetContent();
+        Assert.Contains("<link rel=\"manifest\" href=\"/tenant/manifest.webmanifest\"", html, StringComparison.Ordinal);
+        Assert.Contains("<meta name=\"theme-color\" content=\"#2563eb\"", html, StringComparison.Ordinal);
+        Assert.Contains("<meta name=\"application-name\" content=\"Field Notes\"", html, StringComparison.Ordinal);
+        Assert.Contains("<meta name=\"apple-mobile-web-app-capable\" content=\"yes\"", html, StringComparison.Ordinal);
+        Assert.Contains("href=\"/tenant/icons/app-192.png?v=asset\"", html, StringComparison.Ordinal);
+        Assert.Contains("sizes=\"512x512\"", html, StringComparison.Ordinal);
+        Assert.Contains("<meta name=\"appsurface:pwa-service-worker\" content=\"/tenant/service-worker.js\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Process_WhenIconSourceIsUnsafe_EmitsEncodedFallbackWithoutVersioning()
+    {
+        var options = PwaOptionsTests.CreateValidOptions();
+        options.Icons.Clear();
+        options.Icons.Add(
+            new PwaIcon
+            {
+                Source = "https://cdn.example.test/icon 192.png?token=<unsafe>",
+                Sizes = "192x192",
+                Type = "image/png"
+            });
+        var helper = new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), options)
+        {
+            ViewContext = CreateViewContext("/tenant")
+        };
+        var output = CreateOutput();
+
+        helper.Process(CreateContext(), output);
+
+        var html = output.Content.GetContent();
+        Assert.Contains(
+            "href=\"https://cdn.example.test/icon 192.png?token=&lt;unsafe&gt;\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("?v=asset", html, StringComparison.Ordinal);
+    }
+
+    private static TagHelperContext CreateContext()
+    {
+        return new TagHelperContext(
+            new TagHelperAttributeList(),
+            new Dictionary<object, object>(),
+            Guid.NewGuid().ToString("N"));
+    }
+
+    private static TagHelperOutput CreateOutput()
+    {
+        return new TagHelperOutput(
+            "appsurface:pwa-head",
+            new TagHelperAttributeList(),
+            (_, _) => Task.FromResult<TagHelperContent>(new DefaultTagHelperContent()));
+    }
+
+    private static ViewContext CreateViewContext(string pathBase = "")
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.PathBase = pathBase;
+        return new ViewContext { HttpContext = httpContext };
+    }
+
+    private sealed class StubFileVersionProvider : IFileVersionProvider
+    {
+        public string AddFileVersionToPath(PathString requestPathBase, string path)
+        {
+            return requestPathBase.Add(new PathString(path)).Value + "?v=asset";
+        }
+    }
+}
