@@ -997,7 +997,6 @@ internal static class ReleaseDocsArchiveGate
         IReadOnlyList<RouteManifestEntry>? Entries);
 
     private sealed record RouteManifestEntry(
-        string? SourcePath,
         string? CanonicalRoutePath,
         IReadOnlyList<string>? RecoveryAliases,
         IReadOnlyList<string>? DeclaredAliases);
