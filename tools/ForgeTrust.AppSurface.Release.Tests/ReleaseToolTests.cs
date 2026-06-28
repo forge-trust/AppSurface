@@ -1745,6 +1745,50 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PublishRejectsStableReleaseWhenCatalogVisibilityNumberIsNotIntegral()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        await WriteDocsCatalogAsync(
+            docs,
+            new
+            {
+                version = "0.1.0",
+                exactTreePath = docs.ExactTreePath,
+                releaseManifestSha256 = docs.ReleaseManifestSha256,
+                visibility = 0.5
+            });
+
+        var result = await RunStablePublishWithDocsAsync(docs);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-catalog-version-unavailable", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("invalid visibility", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWhenCatalogVisibilityIsBoolean()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        await WriteDocsCatalogAsync(
+            docs,
+            new
+            {
+                version = "0.1.0",
+                exactTreePath = docs.ExactTreePath,
+                releaseManifestSha256 = docs.ReleaseManifestSha256,
+                visibility = true
+            });
+
+        var result = await RunStablePublishWithDocsAsync(docs);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-catalog-version-unavailable", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("invalid visibility", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublishRejectsStableReleaseWhenCatalogVisibilityIsMissing()
     {
         await SeedRepositoryAsync();
@@ -2174,6 +2218,20 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task StableDocsArchiveGateAcceptsUnlistedNonServeableArchiveFiles()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        await File.WriteAllTextAsync(DocsArchivePath(docs, "notes.txt"), "not served by docs routing");
+
+        var result = await ValidateStableDocsArchiveGateAsync(docs);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.NotNull(result.Proof);
+        Assert.Equal(docs.FileCount, result.Proof.VerifiedFileCount);
+    }
+
+    [Fact]
     public async Task PublishRejectsStableReleaseWhenReleaseManifestSchemaIsInvalid()
     {
         await SeedRepositoryAsync();
@@ -2386,6 +2444,35 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-docs-archive-verification-failed");
         Assert.Contains("invalid contentType", result.Diagnostics[0].Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StableDocsArchiveGateAcceptsNullReleaseManifestContentType()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var indexBytes = await ReadDocsArchiveFileAsync(docs, "index.html");
+        var entry = CreateDocsManifestFile(
+            "index.html",
+            indexBytes.Length,
+            Convert.ToHexString(SHA256.HashData(indexBytes)).ToLowerInvariant()).ToDictionary();
+        entry["contentType"] = null;
+        var routeManifestBytes = await ReadDocsArchiveFileAsync(docs, ".appsurface-docs-route-manifest.json");
+        docs = await RewriteDocsReleaseManifestAsync(
+            docs,
+            "appsurface-docs-release-manifest-v1",
+            [
+                entry,
+                CreateDocsManifestFile(
+                    ".appsurface-docs-route-manifest.json",
+                    routeManifestBytes.Length,
+                    Convert.ToHexString(SHA256.HashData(routeManifestBytes)).ToLowerInvariant())
+            ]);
+
+        var result = await ValidateStableDocsArchiveGateAsync(docs);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.NotNull(result.Proof);
     }
 
     [Fact]
@@ -2861,6 +2948,9 @@ public sealed class ReleaseToolTests : IDisposable
         }
         """,
         "points at multiple canonical routes")]
+    [InlineData(
+        "null",
+        "malformed")]
     public async Task PublishRejectsStableReleaseWhenRouteManifestShapeIsInvalid(
         string routeManifestJson,
         string expectedMessage)
