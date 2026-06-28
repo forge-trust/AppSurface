@@ -129,6 +129,8 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
         Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
+        Assert.Contains("No additional startup detail was reported; ExitCode=-2.", result.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.DoesNotContain(". ;", result.Diagnostic?.Cause, StringComparison.Ordinal);
     }
 
     [Fact]

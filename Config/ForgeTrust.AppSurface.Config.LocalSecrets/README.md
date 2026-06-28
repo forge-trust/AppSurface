@@ -51,9 +51,9 @@ remote vault instead of OS-backed LocalSecrets. Use `--store-file <path>` only f
 and tests.
 
 Startup failures that happen before a platform command can run report `Unavailable`, not `Locked`, even when the raw OS
-exception message contains words such as `denied` or `locked`. The display-safe diagnostic includes the status,
-operation, exception type, `HResult`, and synthetic exit code. It intentionally omits secret values, logical values, raw
-OS exception messages, command paths, command arguments, and absolute paths.
+exception message contains words such as `denied` or `locked`. The display-safe diagnostic includes the operation,
+exception type, `HResult`, and synthetic exit code. It intentionally omits secret values, logical values, raw OS
+exception messages, command paths, command arguments, and absolute paths.
 
 ### File fallback posture
 

@@ -1237,6 +1237,26 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             _commandRunner = commandRunner;
         }
 
+        /// <summary>
+        /// Maps a failed platform command result into the LocalSecrets diagnostic contract.
+        /// </summary>
+        /// <remarks>
+        /// Only <see cref="PlatformSecretCommandResultKind.ProcessExited"/> carries real platform process output that can
+        /// prove a locked or denied user secret store. Synthetic <see cref="PlatformSecretCommandResultKind.TimedOut"/>
+        /// and <see cref="PlatformSecretCommandResultKind.StartFailed"/> results must remain
+        /// <see cref="LocalSecretResultStatus.Unavailable"/> and use redacted cause text, even when the underlying
+        /// exception message contains words such as <c>locked</c> or <c>denied</c>. Custom internal runners should use
+        /// <see cref="PlatformSecretCommandResult.FromProcess(int, string, string)"/> only after a platform command
+        /// exits, and should keep command paths, arguments, logical values, absolute paths, and secret values out of
+        /// <see cref="AppSurfaceLocalSecretDiagnostic"/> provenance fields.
+        /// </remarks>
+        /// <param name="result">The platform command result with explicit real-process or synthetic provenance.</param>
+        /// <param name="operation">The display-safe LocalSecrets operation name, such as <c>get</c> or <c>delete</c>.</param>
+        /// <returns>
+        /// A retryable not-found result classified as <see cref="LocalSecretResultStatus.Locked"/> for real locked-store
+        /// process output, or <see cref="LocalSecretResultStatus.Unavailable"/> for timeouts, startup failures, and other
+        /// process failures.
+        /// </returns>
         protected AppSurfaceLocalSecretResult MapCommandFailure(PlatformSecretCommandResult result, string operation)
         {
             var status = result.Kind == PlatformSecretCommandResultKind.ProcessExited
@@ -1259,15 +1279,30 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 Name);
         }
 
-        private static string BuildCommandFailureCause(PlatformSecretCommandResult result, string operation) =>
-            result.Kind switch
+        /// <summary>
+        /// Builds the display-safe diagnostic cause for a failed platform command.
+        /// </summary>
+        /// <remarks>
+        /// Real process exits report only the exit code because platform stderr can contain provider-specific text.
+        /// Synthetic startup failures report sanitized exception provenance prepared by
+        /// <see cref="PlatformSecretCommandResult.StartFailed(Exception)"/>; if an internal runner constructs a startup
+        /// failure without detail, the cause uses a stable fallback instead of rendering empty punctuation.
+        /// </remarks>
+        private static string BuildCommandFailureCause(PlatformSecretCommandResult result, string operation)
+        {
+            var redactedStartupDetail = string.IsNullOrWhiteSpace(result.Error)
+                ? "No additional startup detail was reported"
+                : result.Error.Trim();
+
+            return result.Kind switch
             {
                 PlatformSecretCommandResultKind.StartFailed =>
-                    $"The platform store failed during `{operation}` before the platform command could start. {result.Error}; ExitCode={result.ExitCode}.",
+                    $"The platform store failed during `{operation}` before the platform command could start. {redactedStartupDetail}; ExitCode={result.ExitCode}.",
                 PlatformSecretCommandResultKind.TimedOut =>
                     $"The platform store failed during `{operation}` because the platform command timed out. ExitCode={result.ExitCode}.",
                 _ => $"The platform store failed during `{operation}` with exit code {result.ExitCode}."
             };
+        }
 
         protected PlatformSecretCommandResult Run(string fileName, IReadOnlyList<string> arguments, string? standardInput) =>
             _commandRunner.Run(fileName, arguments, standardInput);
