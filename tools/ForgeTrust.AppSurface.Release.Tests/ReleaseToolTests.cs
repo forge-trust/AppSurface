@@ -1979,6 +1979,89 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task StableDocsArchiveGateAcceptsRouteManifestWithRecoveryAliasesOnly()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync(
+            "0.1.0",
+            routeManifestJson: """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "index.html",
+                  "canonicalRoutePath": "packages",
+                  "recoveryAliases": ["old-packages"]
+                }
+              ]
+            }
+            """);
+
+        var result = await ValidateStableDocsArchiveGateAsync(docs);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.NotNull(result.Proof);
+        var proof = result.Proof;
+        Assert.Equal(ReleaseDocsArchiveGate.VerifiedState, proof.State);
+        Assert.Equal(docs.CatalogPath, proof.CatalogPath);
+        Assert.Equal(docs.TrustedReleaseRootPath, proof.TrustedReleaseRootPath);
+        Assert.Equal(docs.ExactTreePath, proof.CatalogExactTreePath);
+        Assert.Equal(docs.ReleaseManifestSha256, proof.CatalogReleaseManifestSha256);
+        Assert.Equal(TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath), proof.PhysicalExactTreePath);
+        Assert.Equal(docs.FileCount, proof.VerifiedFileCount);
+    }
+
+    [Fact]
+    public async Task StableDocsArchiveGateAcceptsListedServeableAssetExtensions()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var files = new List<IReadOnlyDictionary<string, object?>>();
+        var indexBytes = await ReadDocsArchiveFileAsync(docs, "index.html");
+        files.Add(CreateDocsManifestFile("index.html", indexBytes.Length, Sha256(indexBytes)));
+        var routeManifestBytes = await ReadDocsArchiveFileAsync(docs, ".appsurface-docs-route-manifest.json");
+        files.Add(CreateDocsManifestFile(
+            ".appsurface-docs-route-manifest.json",
+            routeManifestBytes.Length,
+            Sha256(routeManifestBytes)));
+
+        foreach (var relativePath in new[]
+                 {
+                     "app.js",
+                     "site.css",
+                     "icon.svg",
+                     "image.png",
+                     "photo.jpg",
+                     "photo-alt.jpeg",
+                     "spinner.gif",
+                     "hero.webp",
+                     "favicon.ico",
+                     "font.woff",
+                     "font.woff2",
+                     "font.ttf",
+                     "font.eot"
+                 })
+        {
+            var bytes = Encoding.UTF8.GetBytes(relativePath);
+            await File.WriteAllBytesAsync(DocsArchivePath(docs, relativePath), bytes);
+            files.Add(CreateDocsManifestFile(relativePath, bytes.Length, Sha256(bytes)));
+        }
+
+        docs = await RewriteDocsReleaseManifestAsync(docs, "appsurface-docs-release-manifest-v1", files);
+
+        var result = await ValidateStableDocsArchiveGateAsync(docs);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.NotNull(result.Proof);
+        Assert.Equal(files.Count, result.Proof.VerifiedFileCount);
+
+        static string Sha256(byte[] bytes)
+        {
+            return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        }
+    }
+
+    [Fact]
     public async Task PublishRejectsStableReleaseWhenReleaseManifestSchemaIsInvalid()
     {
         await SeedRepositoryAsync();
