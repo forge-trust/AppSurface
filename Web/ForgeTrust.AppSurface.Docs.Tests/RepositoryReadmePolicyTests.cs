@@ -98,7 +98,7 @@ public sealed partial class RepositoryReadmePolicyTests
     }
 
     [Fact]
-    public void PublicPackageReadmes_ShouldLinkToCurrentReleaseCandidate()
+    public void PublicPackageReadmes_ShouldLinkToStableReleaseSurfaces()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var entries = ReadPackageManifestEntries(repoRoot);
@@ -124,16 +124,21 @@ public sealed partial class RepositoryReadmePolicyTests
 
             Assert.Contains("## Release Guidance", content, StringComparison.Ordinal);
 
-            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1.0-rc.4.md"), repoRoot);
-            var linksToReleaseNote = MarkdownLinkRegex()
+            var linkTargets = MarkdownLinkRegex()
                 .Matches(content)
                 .Select(match => ResolveRelativeLinkTarget(
                     Path.GetDirectoryName(fullReadmePath)!,
                     match.Groups["href"].Value,
                     readmePath))
-                .Any(target => string.Equals(target, expectedTarget, StringComparison.Ordinal));
+                .ToArray();
 
-            Assert.True(linksToReleaseNote, $"{readmePath} must link to the v0.1.0 RC 4 release note.");
+            var expectedPackageChooserTarget = Path.GetFullPath(Path.Join("packages", "README.md"), repoRoot);
+            var expectedReleaseHubTarget = Path.GetFullPath(Path.Join("releases", "README.md"), repoRoot);
+            var linksToPackageChooser = linkTargets.Any(target => string.Equals(target, expectedPackageChooserTarget, StringComparison.Ordinal));
+            var linksToReleaseHub = linkTargets.Any(target => string.Equals(target, expectedReleaseHubTarget, StringComparison.Ordinal));
+
+            Assert.True(linksToPackageChooser, $"{readmePath} must link to the stable package chooser.");
+            Assert.True(linksToReleaseHub, $"{readmePath} must link to the release hub.");
         }
     }
 

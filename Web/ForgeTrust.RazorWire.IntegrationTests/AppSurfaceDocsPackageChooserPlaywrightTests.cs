@@ -8,8 +8,6 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
 {
     private const string PackageChooserReleaseNotePath = "/docs/releases/v0.2.0-preview.1";
     private const string PackageChooserReleaseNoteHeading = "Release 0.2.0-preview.1";
-    private const string PackageReadmeReleaseNotePath = "/docs/releases/v0.1.0-rc.4";
-    private const string PackageReadmeReleaseNoteHeading = "Release 0.1.0-rc.4";
     private const string WebPackageQuickstartPath = "/docs/start-here/first-success-path#package-first-path";
 
     private readonly AppSurfaceDocsPlaywrightFixture _fixture;
@@ -118,7 +116,7 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
     }
 
     [Fact]
-    public async Task PublicPackageReadmes_LinkToCurrentReleaseCandidate()
+    public async Task PublicPackageReadmes_LinkToStableReleaseSurfaces()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
@@ -128,9 +126,8 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             "() => document.querySelector('h1')?.textContent?.trim() === 'ForgeTrust.AppSurface.Core'",
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
-        Assert.Equal(
-            PackageReadmeReleaseNotePath,
-            await page.GetAttributeAsync($".docs-content a[href='{PackageReadmeReleaseNotePath}']", "href"));
+        Assert.Equal("/docs/packages", await page.GetAttributeAsync(".docs-content a[href='/docs/packages']", "href"));
+        Assert.Equal("/docs/releases", await page.GetAttributeAsync(".docs-content a[href='/docs/releases']", "href"));
 
         await page.GotoAsync($"{_fixture.DocsUrl}/web/forgetrust.appsurface.web.openapi");
         await page.WaitForFunctionAsync(
@@ -138,9 +135,15 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
 
-        await page.Locator($".docs-content a[href='{PackageReadmeReleaseNotePath}']").First.ClickAsync();
-        await WaitForPathAndHeadingAsync(page, PackageReadmeReleaseNotePath, PackageReadmeReleaseNoteHeading);
-        Assert.Equal(PackageReadmeReleaseNoteHeading, (await page.TextContentAsync("h1"))?.Trim());
+        Assert.Equal("/docs/packages", await page.GetAttributeAsync(".docs-content a[href='/docs/packages']", "href"));
+        Assert.Equal("/docs/releases", await page.GetAttributeAsync(".docs-content a[href='/docs/releases']", "href"));
+
+        await page.Locator(".docs-content a[href='/docs/packages']").First.ClickAsync();
+        await WaitForPathAndHeadingAsync(page, "/docs/packages", "AppSurface v0.1 package chooser");
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/web/forgetrust.appsurface.web.openapi");
+        await page.Locator(".docs-content a[href='/docs/releases']").First.ClickAsync();
+        await WaitForPathAndHeadingAsync(page, "/docs/releases", "Releases");
     }
 
     [Fact]
