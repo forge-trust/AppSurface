@@ -65,6 +65,7 @@ This approach aims to:
 - [**ForgeTrust.AppSurface.Auth.AspNetCore**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) – ASP.NET Core adapter that maps existing host request auth context and named policies into AppSurface auth results without owning schemes, middleware, challenges, forbids, redirects, or identity-provider setup. Run the [Auth Web/RazorWire proof](./examples/auth-web-razorwire-proof/README.md) to see one host policy drive both API and rendered UI state.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) – Development-only selectable persona auth for local AppSurface policy proofs, with a visible control page, embeddable state overlay, named fake scheme, startup guard, and no production identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore.Oidc**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) – ASP.NET Core cookie + OIDC convenience registration with explicit AppSurface scheme names, conservative token defaults, passive prompt helpers, and safe diagnostics without silent default-scheme takeover or identity-provider ownership.
+- [**ForgeTrust.AppSurface.Auth.Testing**](./Auth/ForgeTrust.AppSurface.Auth.Testing/README.md) – Test-only ASP.NET Core harness for deterministic AppSurface auth personas, WebApplicationFactory integration tests, canonical auth result assertions, and ProblemDetails checks without becoming production authentication or Dev Auth.
 
 ### [Intelligence](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md)
 

@@ -275,7 +275,7 @@ public class AuthGateTagHelper : TagHelper
     {
         var result = await AuthViewTagHelper.ResolveResultAsync(ViewContext.HttpContext, Policy, Resource);
         var projection = RazorWireAuthProjection.FromResult(result);
-        if (projection.State != ParseState(State))
+        if (projection.State != TargetState)
         {
             output.SuppressOutput();
             return;
@@ -299,6 +299,11 @@ public class AuthGateTagHelper : TagHelper
     /// </summary>
     protected virtual string HelperName => "auth-gate";
 
+    /// <summary>
+    /// Gets the projected state required for rendering.
+    /// </summary>
+    protected virtual RazorWireAuthProjectionState TargetState => ParseState(State);
+
     private static RazorWireAuthProjectionState ParseState(string? value)
     {
         var normalized = value?.Trim().ToLowerInvariant();
@@ -310,6 +315,7 @@ public class AuthGateTagHelper : TagHelper
             "setup-failure" or "setupfailure" => RazorWireAuthProjectionState.SetupFailure,
             "unsafe-navigation" or "unsafenavigation" => RazorWireAuthProjectionState.UnsafeNavigation,
             "stale" or "stale-or-unknown-session" => RazorWireAuthProjectionState.StaleOrUnknownSession,
+            "unknown" or "loading" => RazorWireAuthProjectionState.Unknown,
             _ => RazorWireAuthProjectionState.Unknown,
         };
     }
@@ -321,8 +327,17 @@ public class AuthGateTagHelper : TagHelper
 [HtmlTargetElement("rw:permission-gate", Attributes = "policy")]
 public sealed class PermissionGateTagHelper : AuthGateTagHelper
 {
+    /// <summary>
+    /// Hides the general gate state selector because permission gates are allowed-only aliases.
+    /// </summary>
+    [HtmlAttributeNotBound]
+    public new string? State { get; set; }
+
     /// <inheritdoc />
     protected override string HelperName => "permission-gate";
+
+    /// <inheritdoc />
+    protected override RazorWireAuthProjectionState TargetState => RazorWireAuthProjectionState.Allowed;
 }
 
 /// <summary>
@@ -355,12 +370,16 @@ public sealed class LoginLinkTagHelper : TagHelper
     public ViewContext ViewContext { get; set; } = default!;
 
     /// <inheritdoc />
-    public override void Process(TagHelperContext context, TagHelperOutput output)
+    public override async Task ProcessAsync(TagHelperContext context, TagHelperOutput output)
     {
+        var childContent = await output.GetChildContentAsync();
+        var linkText = string.IsNullOrWhiteSpace(childContent.GetContent()) ? "Sign in" : childContent.GetContent();
+
         output.TagName = "a";
         output.Attributes.RemoveAll("return-url-policy");
         output.Attributes.SetAttribute("href", ResolveHref(ViewContext.HttpContext, Href, ReturnUrlPolicy));
         output.Attributes.SetAttribute("data-rw-auth-helper", "login-link");
+        output.Content.SetContent(linkText);
     }
 
     private static string ResolveHref(HttpContext httpContext, string? href, string? returnUrlPolicy)

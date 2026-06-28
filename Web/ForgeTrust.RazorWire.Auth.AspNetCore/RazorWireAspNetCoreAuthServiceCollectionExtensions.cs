@@ -18,6 +18,10 @@ public static class RazorWireAspNetCoreAuthServiceCollectionExtensions
     /// Call this after registering `ForgeTrust.AppSurface.Auth.AspNetCore` with
     /// <c>AddAppSurfaceAspNetCoreAuth(...)</c>. This method does not call <c>AddAuthentication</c>,
     /// <c>AddAuthorization</c>, <c>AddRazorWire</c>, or any challenge/forbid APIs; those remain host-owned.
+    /// The default provider is added with <c>TryAddScoped</c>, so an existing
+    /// <see cref="IRazorWireAuthResultProvider"/> registration is preserved. Keep a custom provider when a host
+    /// needs non-policy projection, custom tenant/resource resolution, or a test-specific auth result source instead
+    /// of the ASP.NET Core policy adapter.
     /// </remarks>
     public static IServiceCollection AddRazorWireAspNetCoreAuth(this IServiceCollection services)
     {

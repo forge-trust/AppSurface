@@ -81,6 +81,37 @@ public sealed class AuthProjectionTests
         Assert.Equal("This action is unavailable right now.", output.Content.GetContent());
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task AuthView_ResolveResultAsync_WhenPolicyMissing_ReturnsDiagnosticSetupFailure(string? policy)
+    {
+        var viewContext = CreateViewContext(new StubAuthResultProvider(AppSurfaceAuthResult.Allowed()));
+
+        var result = await AuthViewTagHelper.ResolveResultAsync(viewContext.HttpContext, policy, resource: null);
+
+        Assert.Equal(AppSurfaceAuthOutcome.SetupFailure, result.Outcome);
+        Assert.Equal(AppSurfaceAuthReason.MissingPolicy, result.Reason);
+        Assert.Equal(
+            RazorWireAuthDiagnostics.MissingPolicy,
+            result.Metadata[RazorWireAuthDiagnostics.DiagnosticCodeMetadataKey]);
+    }
+
+    [Fact]
+    public void RazorWireAuthRequest_WhenPolicyMissing_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => new RazorWireAuthRequest(" "));
+    }
+
+    [Fact]
+    public void RazorWireAuthRequest_TrimsPolicy()
+    {
+        var request = new RazorWireAuthRequest(" docs.publish ");
+
+        Assert.Equal("docs.publish", request.PolicyName);
+    }
+
     [Fact]
     public void Slot_Process_WhenStateMatches_RendersChildWithoutWrapper()
     {
@@ -140,42 +171,149 @@ public sealed class AuthProjectionTests
         Assert.Equal(string.Empty, output.Content.GetContent());
     }
 
+    [Theory]
+    [InlineData("unauthenticated", "anonymous", nameof(AppSurfaceAuthResult.Challenge))]
+    [InlineData("setupfailure", "setup-failure", nameof(AppSurfaceAuthResult.MissingServices))]
+    [InlineData("unsafenavigation", "unsafe-navigation", nameof(AppSurfaceAuthResult.UnsafeReturnUrl))]
+    [InlineData("stale", "stale-or-unknown-session", nameof(AppSurfaceAuthResult.StaleOrUnknownSession))]
+    public async Task AuthGate_ProcessAsync_SupportsDocumentedStateAliases(
+        string state,
+        string expectedToken,
+        string resultFactory)
+    {
+        var output = CreateOutput("rw:auth-gate", "Publish", "policy", "docs.publish");
+        var provider = new StubAuthResultProvider(CreateAuthResult(resultFactory));
+
+        await new AuthGateTagHelper
+        {
+            Policy = "docs.publish",
+            State = state,
+            ViewContext = CreateViewContext(provider),
+        }.ProcessAsync(CreateContext("rw:auth-gate"), output);
+
+        Assert.Equal("div", output.TagName);
+        Assert.Equal(expectedToken, output.Attributes["data-rw-auth-state"].Value);
+    }
+
     [Fact]
-    public void LoginLink_Process_AppendsCurrentPathReturnUrlWithoutExecutingAuth()
+    public async Task AuthGate_ProcessAsync_WhenStateIsLoadingAlias_SuppressesResolvedResult()
+    {
+        var output = CreateOutput("rw:auth-gate", "Publish", "policy", "docs.publish");
+        var provider = new StubAuthResultProvider(AppSurfaceAuthResult.Allowed());
+
+        await new AuthGateTagHelper
+        {
+            Policy = "docs.publish",
+            State = "loading",
+            ViewContext = CreateViewContext(provider),
+        }.ProcessAsync(CreateContext("rw:auth-gate"), output);
+
+        Assert.Null(output.TagName);
+        Assert.Equal(string.Empty, output.Content.GetContent());
+    }
+
+    [Fact]
+    public async Task PermissionGate_ProcessAsync_IgnoresStateAndRendersOnlyAllowed()
+    {
+        var output = CreateOutput("rw:permission-gate", "Publish", "policy", "docs.publish", "state", "forbidden");
+        var provider = new StubAuthResultProvider(AppSurfaceAuthResult.Allowed());
+
+        await new PermissionGateTagHelper
+        {
+            Policy = "docs.publish",
+            State = "forbidden",
+            ViewContext = CreateViewContext(provider),
+        }.ProcessAsync(CreateContext("rw:permission-gate"), output);
+
+        Assert.Equal("div", output.TagName);
+        Assert.Equal("permission-gate", output.Attributes["data-rw-auth-helper"].Value);
+        Assert.Equal("allowed", output.Attributes["data-rw-auth-state"].Value);
+        Assert.False(output.Attributes.ContainsName("state"));
+    }
+
+    [Fact]
+    public async Task PermissionGate_ProcessAsync_WhenForbidden_SuppressesEvenIfStateAttributeRequestsForbidden()
+    {
+        var output = CreateOutput("rw:permission-gate", "Publish", "policy", "docs.publish", "state", "forbidden");
+        var provider = new StubAuthResultProvider(AppSurfaceAuthResult.Forbidden());
+
+        await new PermissionGateTagHelper
+        {
+            Policy = "docs.publish",
+            State = "forbidden",
+            ViewContext = CreateViewContext(provider),
+        }.ProcessAsync(CreateContext("rw:permission-gate"), output);
+
+        Assert.Null(output.TagName);
+        Assert.Equal(string.Empty, output.Content.GetContent());
+    }
+
+    [Fact]
+    public void UnknownSlot_Process_WhenStateIsUnknown_RendersChildWithoutWrapper()
+    {
+        var context = CreateContext("rw:auth-unknown");
+        context.Items[AuthViewTagHelper.SlotContextKey] = new AuthViewTagHelper.AuthSlotContext(RazorWireAuthProjectionState.Unknown);
+        var output = CreateOutput("rw:auth-unknown", "Loading");
+
+        new AuthUnknownSlotTagHelper().Process(context, output);
+
+        Assert.Null(output.TagName);
+        Assert.False(output.IsContentModified);
+    }
+
+    [Fact]
+    public async Task LoginLink_Process_AppendsCurrentPathReturnUrlWithoutExecutingAuth()
     {
         var output = CreateOutput("rw:login-link", "Sign in", "href", "/login");
         var viewContext = CreateViewContext(provider: null, "/docs", "?tab=auth");
 
-        new LoginLinkTagHelper
+        await new LoginLinkTagHelper
         {
             Href = "/login",
             ReturnUrlPolicy = "current-path",
             ViewContext = viewContext,
-        }.Process(CreateContext("rw:login-link"), output);
+        }.ProcessAsync(CreateContext("rw:login-link"), output);
 
         Assert.Equal("a", output.TagName);
         Assert.Equal("/login?returnUrl=%2Fdocs%3Ftab%3Dauth", output.Attributes["href"].Value);
         Assert.Equal("login-link", output.Attributes["data-rw-auth-helper"].Value);
+        Assert.Equal("Sign in", output.Content.GetContent());
     }
 
     [Theory]
     [InlineData("/login#signin", "/login?returnUrl=%2Fdocs%3Ftab%3Dauth#signin")]
     [InlineData("/login?tenant=docs#signin", "/login?tenant=docs&returnUrl=%2Fdocs%3Ftab%3Dauth#signin")]
-    public void LoginLink_Process_AppendsCurrentPathReturnUrlBeforeFragment(string href, string expectedHref)
+    public async Task LoginLink_Process_AppendsCurrentPathReturnUrlBeforeFragment(string href, string expectedHref)
     {
         var output = CreateOutput("rw:login-link", "Sign in", "href", href);
         var viewContext = CreateViewContext(provider: null, "/docs", "?tab=auth");
 
-        new LoginLinkTagHelper
+        await new LoginLinkTagHelper
         {
             Href = href,
             ReturnUrlPolicy = "current-path",
             ViewContext = viewContext,
-        }.Process(CreateContext("rw:login-link"), output);
+        }.ProcessAsync(CreateContext("rw:login-link"), output);
 
         Assert.Equal("a", output.TagName);
         Assert.Equal(expectedHref, output.Attributes["href"].Value);
         Assert.Equal("login-link", output.Attributes["data-rw-auth-helper"].Value);
+    }
+
+    [Fact]
+    public async Task LoginLink_ProcessAsync_WhenChildContentEmpty_RendersDefaultLabel()
+    {
+        var output = CreateOutput("rw:login-link", string.Empty, "href", "/login");
+
+        await new LoginLinkTagHelper
+        {
+            Href = "/login",
+            ViewContext = CreateViewContext(provider: null),
+        }.ProcessAsync(CreateContext("rw:login-link"), output);
+
+        Assert.Equal("a", output.TagName);
+        Assert.Equal("/login", output.Attributes["href"].Value);
+        Assert.Equal("Sign in", output.Content.GetContent());
     }
 
     [Fact]
@@ -230,6 +368,63 @@ public sealed class AuthProjectionTests
         Assert.DoesNotContain("request-token", output.Content.GetContent(), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("//idp.example/logout")]
+    [InlineData("\\logout")]
+    [InlineData("/logout\u0001")]
+    public async Task LogoutButton_ProcessAsync_WhenActionIsUnsafeRelative_DoesNotRenderRequestToken(string action)
+    {
+        var output = CreateOutput("rw:logout-button", "Sign out", "action", action);
+
+        await new LogoutButtonTagHelper(new StubAntiforgery())
+        {
+            Action = action,
+            ViewContext = CreateViewContext(provider: null),
+        }.ProcessAsync(CreateContext("rw:logout-button"), output);
+
+        Assert.Equal(action, output.Attributes["action"].Value);
+        Assert.DoesNotContain("__RequestVerificationToken", output.Content.GetContent(), StringComparison.Ordinal);
+        Assert.DoesNotContain("request-token", output.Content.GetContent(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LogoutButton_ProcessAsync_WhenActionIsSameOriginAbsolute_RendersRequestToken()
+    {
+        var output = CreateOutput("rw:logout-button", "Sign out", "action", "https://example.test/logout");
+        var viewContext = CreateViewContext(provider: null);
+        viewContext.HttpContext.Request.Scheme = "https";
+        viewContext.HttpContext.Request.Host = new HostString("example.test");
+
+        await new LogoutButtonTagHelper(new StubAntiforgery())
+        {
+            Action = "https://example.test/logout",
+            ViewContext = viewContext,
+        }.ProcessAsync(CreateContext("rw:logout-button"), output);
+
+        Assert.Contains(
+            "name=\"__RequestVerificationToken\" value=\"request-token\"",
+            output.Content.GetContent(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LogoutButton_ProcessAsync_WhenActionIsCrossOriginAbsolute_DoesNotRenderRequestToken()
+    {
+        var output = CreateOutput("rw:logout-button", "Sign out", "action", "https://idp.example/logout");
+        var viewContext = CreateViewContext(provider: null);
+        viewContext.HttpContext.Request.Scheme = "https";
+        viewContext.HttpContext.Request.Host = new HostString("example.test");
+
+        await new LogoutButtonTagHelper(new StubAntiforgery())
+        {
+            Action = "https://idp.example/logout",
+            ViewContext = viewContext,
+        }.ProcessAsync(CreateContext("rw:logout-button"), output);
+
+        Assert.DoesNotContain("__RequestVerificationToken", output.Content.GetContent(), StringComparison.Ordinal);
+        Assert.DoesNotContain("request-token", output.Content.GetContent(), StringComparison.Ordinal);
+    }
+
     public static TheoryData<AppSurfaceAuthResult, RazorWireAuthProjectionState, string> ProjectionCases()
     {
         return new TheoryData<AppSurfaceAuthResult, RazorWireAuthProjectionState, string>
@@ -265,6 +460,18 @@ public sealed class AuthProjectionTests
             new TempDataDictionary(httpContext, new NullTempDataProvider()),
             TextWriter.Null,
             new HtmlHelperOptions());
+    }
+
+    private static AppSurfaceAuthResult CreateAuthResult(string factory)
+    {
+        return factory switch
+        {
+            nameof(AppSurfaceAuthResult.Challenge) => AppSurfaceAuthResult.Challenge(),
+            nameof(AppSurfaceAuthResult.MissingServices) => AppSurfaceAuthResult.MissingServices(),
+            nameof(AppSurfaceAuthResult.UnsafeReturnUrl) => AppSurfaceAuthResult.UnsafeReturnUrl(),
+            nameof(AppSurfaceAuthResult.StaleOrUnknownSession) => AppSurfaceAuthResult.StaleOrUnknownSession(),
+            _ => throw new ArgumentOutOfRangeException(nameof(factory), factory, "Unknown auth result factory."),
+        };
     }
 
     private static TagHelperContext CreateContext(string tagName)

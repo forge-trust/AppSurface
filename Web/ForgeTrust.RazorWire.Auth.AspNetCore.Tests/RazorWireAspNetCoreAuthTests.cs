@@ -44,6 +44,26 @@ public sealed class RazorWireAspNetCoreAuthTests
     }
 
     [Fact]
+    public void Provider_WhenServiceProviderNull_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new RazorWireAspNetCoreAuthResultProvider(null!));
+    }
+
+    [Fact]
+    public async Task Provider_WhenRequestNull_Throws()
+    {
+        var provider = new RazorWireAspNetCoreAuthResultProvider(new ServiceCollection().BuildServiceProvider());
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() => provider.AuthorizeAsync(null!));
+    }
+
+    [Fact]
+    public void AddRazorWireAspNetCoreAuth_WhenServicesNull_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => RazorWireAspNetCoreAuthServiceCollectionExtensions.AddRazorWireAspNetCoreAuth(null!));
+    }
+
+    [Fact]
     public void AddRazorWireAspNetCoreAuth_RegistersProviderWithoutReplacingExisting()
     {
         var services = new ServiceCollection();
@@ -54,6 +74,18 @@ public sealed class RazorWireAspNetCoreAuthTests
 
         using var provider = services.BuildServiceProvider();
         Assert.Same(custom, provider.GetRequiredService<IRazorWireAuthResultProvider>());
+    }
+
+    [Fact]
+    public void AddRazorWireAspNetCoreAuth_RegistersAdapterWhenMissing()
+    {
+        var services = new ServiceCollection();
+
+        services.AddRazorWireAspNetCoreAuth();
+
+        using var provider = services.BuildServiceProvider();
+        Assert.IsType<RazorWireAspNetCoreAuthResultProvider>(
+            provider.GetRequiredService<IRazorWireAuthResultProvider>());
     }
 
     [Fact]

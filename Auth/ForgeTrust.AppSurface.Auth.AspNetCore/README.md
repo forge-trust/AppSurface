@@ -6,7 +6,7 @@ Use this package when an ASP.NET Core app already owns authentication and author
 
 ## Release Guidance
 
-AppSurface publishes coordinated `v0.1.0` release candidates. Before installing this package from a prerelease feed, read the [v0.1.0 RC 4 release note](../../releases/v0.1.0-rc.4.md) for current release risk, migration guidance, and package readiness.
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
 
 ## Quickstart: Protect A Minimal API Endpoint
 
@@ -81,7 +81,7 @@ app.MapGet(
     });
 ```
 
-For the five-minute browser proof, run the [Auth Web/RazorWire proof](../../examples/auth-web-razorwire-proof/README.md). It shows one host-owned ASP.NET Core policy driving both a Minimal API response and a RazorWire-facing state. For a local proof with fake selectable personas, use [`ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth`](../ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) and [the DevAuth example](../../examples/auth-aspnetcore-dev-auth/README.md). The older [ASP.NET Core auth bridge example](../../examples/auth-aspnetcore-bridge/README.md) remains a low-level adapter proof for hosts that already own their authentication scheme.
+For the five-minute browser proof, run the [Auth Web/RazorWire proof](../../examples/auth-web-razorwire-proof/README.md). It shows one host-owned ASP.NET Core policy driving both a Minimal API response and a RazorWire-facing state. For integration tests that need deterministic personas without a sample-local fake handler, use [ForgeTrust.AppSurface.Auth.Testing](../ForgeTrust.AppSurface.Auth.Testing/README.md). For a local proof with fake selectable personas, use [`ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth`](../ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) and [the DevAuth example](../../examples/auth-aspnetcore-dev-auth/README.md). The older [ASP.NET Core auth bridge example](../../examples/auth-aspnetcore-bridge/README.md) remains a low-level adapter proof for hosts that already own their authentication scheme.
 
 ## What The Package Includes
 

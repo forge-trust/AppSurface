@@ -51,3 +51,10 @@ app.MapControllerRoute(
     pattern: "{controller=AuthProof}/{action=Index}/{id?}");
 
 await app.RunAsync();
+
+/// <summary>
+/// Public entry point marker used by WebApplicationFactory-based sample tests.
+/// </summary>
+public partial class Program
+{
+}
