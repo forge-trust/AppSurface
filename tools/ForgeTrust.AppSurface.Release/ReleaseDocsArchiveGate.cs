@@ -605,17 +605,18 @@ internal static class ReleaseDocsArchiveGate
             return false;
         }
 
-        foreach (var segment in path.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        var hasUnsafeSegment = path
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Where(segment => string.IsNullOrWhiteSpace(segment)
+                              || segment == "."
+                              || segment == ".."
+                              || (segment.StartsWith(".", StringComparison.Ordinal)
+                                  && !string.Equals(path, RouteManifestFileName, StringComparison.Ordinal)))
+            .Any();
+        if (hasUnsafeSegment)
         {
-            if (string.IsNullOrWhiteSpace(segment)
-                || segment == "."
-                || segment == ".."
-                || (segment.StartsWith(".", StringComparison.Ordinal)
-                    && !string.Equals(path, RouteManifestFileName, StringComparison.Ordinal)))
-            {
-                issue = $"Release manifest contains unsafe file path `{entry.Path}`.";
-                return false;
-            }
+            issue = $"Release manifest contains unsafe file path `{entry.Path}`.";
+            return false;
         }
 
         normalizedEntry = entry with { Path = path, Sha256 = normalizedDigest };
