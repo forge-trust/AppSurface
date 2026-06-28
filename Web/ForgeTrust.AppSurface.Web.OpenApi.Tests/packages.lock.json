@@ -116,6 +116,12 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "forgetrust.appsurface.config": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
@@ -125,6 +131,7 @@
       "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {
+          "ForgeTrust.AppSurface.Config": "[0.1.0, )",
           "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },

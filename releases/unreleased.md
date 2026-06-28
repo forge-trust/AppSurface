@@ -8,6 +8,8 @@ This is the living release note for the next coordinated AppSurface version afte
 - `ForgeTrust.AppSurface.Web` now owns the baseline PWA install contract in the existing Web package: app-owned
   `WebOptions.Pwa` metadata maps a manifest endpoint, MVC/Razor head tags, development diagnostics, and an explicit
   opt-in offline fallback, with `appsurface pwa verify` providing a copy-paste CLI proof for the running origin.
+- Add an explicit AppSurface Web mapper for an authenticated `GET /_appsurface/config/audit` endpoint that returns the
+  active host's sanitized Config audit JSON for support-sensitive operator evidence capture.
 
 ## Included in the next coordinated version
 
@@ -32,6 +34,8 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Auth now has a Start Here adoption ladder that helps package consumers choose between host-owned
   ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces
   without implying AppSurface owns production identity providers, policies, user stores, or enforcement.
+- Document the Config audit HTTP workflow, OpenAPI-hidden default behavior, native ASP.NET Core auth response ownership,
+  host-owned rate limiting, and the Config captured-snapshot diff path.
 
 ## Migration watch
 
