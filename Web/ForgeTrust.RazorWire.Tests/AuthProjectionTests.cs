@@ -317,6 +317,22 @@ public sealed class AuthProjectionTests
     }
 
     [Fact]
+    public async Task LoginLink_ProcessAsync_WhenChildContentContainsMarkup_PreservesMarkup()
+    {
+        var output = CreateOutput("rw:login-link", "<strong>Sign in</strong>", "href", "/login");
+
+        await new LoginLinkTagHelper
+        {
+            Href = "/login",
+            ViewContext = CreateViewContext(provider: null),
+        }.ProcessAsync(CreateContext("rw:login-link"), output);
+
+        Assert.Equal("a", output.TagName);
+        Assert.Equal("/login", output.Attributes["href"].Value);
+        Assert.Equal("<strong>Sign in</strong>", output.Content.GetContent());
+    }
+
+    [Fact]
     public async Task LogoutButton_ProcessAsync_RendersHostOwnedPostForm()
     {
         var output = CreateOutput("rw:logout-button", "Sign out", "action", "/logout");

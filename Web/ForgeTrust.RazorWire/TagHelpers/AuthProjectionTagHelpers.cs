@@ -373,13 +373,20 @@ public sealed class LoginLinkTagHelper : TagHelper
     public override async Task ProcessAsync(TagHelperContext context, TagHelperOutput output)
     {
         var childContent = await output.GetChildContentAsync();
-        var linkText = string.IsNullOrWhiteSpace(childContent.GetContent()) ? "Sign in" : childContent.GetContent();
+        var childHtml = childContent.GetContent();
 
         output.TagName = "a";
         output.Attributes.RemoveAll("return-url-policy");
         output.Attributes.SetAttribute("href", ResolveHref(ViewContext.HttpContext, Href, ReturnUrlPolicy));
         output.Attributes.SetAttribute("data-rw-auth-helper", "login-link");
-        output.Content.SetContent(linkText);
+        if (string.IsNullOrWhiteSpace(childHtml))
+        {
+            output.Content.SetContent("Sign in");
+        }
+        else
+        {
+            output.Content.SetHtmlContent(childContent);
+        }
     }
 
     private static string ResolveHref(HttpContext httpContext, string? href, string? returnUrlPolicy)
