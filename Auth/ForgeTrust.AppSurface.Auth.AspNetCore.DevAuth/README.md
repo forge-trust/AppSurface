@@ -2,11 +2,13 @@
 
 `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` adds fake, local-only ASP.NET Core authentication for AppSurface package consumers who need to try auth-aware endpoints without configuring OIDC, cookies, ASP.NET Identity, or an external identity provider.
 
-DevAuth is development tooling. It is not production authentication, a user store, durable app-user mapping, OIDC, token validation, tenant authority, audit logging, or the future test harness.
+DevAuth is development tooling. It is not production authentication, a user store, durable app-user mapping, OIDC, token validation, tenant authority, audit logging, or the Auth.Testing integration-test harness.
 
 ## Release Guidance
 
 AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
+
+Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.md) when choosing between DevAuth, Auth.Testing, OIDC, and host-owned ASP.NET Core authentication.
 
 ## Quickstart
 
@@ -135,7 +137,7 @@ Use DevAuth only when you need fake local personas in Development so a package c
 
 Use OIDC or native ASP.NET Core authentication packages for real sign-in, cookies, external identity providers, redirects, token validation, and production auth flows.
 
-Use the future test harness for deterministic automated auth scenarios once that package exists. DevAuth is for local developer interaction, not browser automation authority.
+Use `ForgeTrust.AppSurface.Auth.Testing` for deterministic automated auth scenarios. DevAuth is for local developer interaction, not browser automation authority.
 
 ## What Not To Copy To Production
 

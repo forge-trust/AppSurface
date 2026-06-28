@@ -60,6 +60,20 @@
             <div class="state-row"><dt>Reason</dt><dd>@Model.RazorWire.Reason</dd></div>
             <div class="state-row"><dt>Subject</dt><dd>@(Model.RazorWire.Subject ?? "none")</dd></div>
         </dl>
+        <rw:auth-view policy="@AuthProofPolicy.Name" include-diagnostics="true">
+            <rw:auth-allowed>
+                <p data-auth-proof-rendered-slot="allowed">RazorWire projected the host policy as allowed.</p>
+            </rw:auth-allowed>
+            <rw:auth-anonymous>
+                <p data-auth-proof-rendered-slot="anonymous">RazorWire projected the host policy as anonymous.</p>
+            </rw:auth-anonymous>
+            <rw:auth-forbidden>
+                <p data-auth-proof-rendered-slot="forbidden">RazorWire projected the host policy as forbidden.</p>
+            </rw:auth-forbidden>
+            <rw:auth-setup-failure>
+                <p data-auth-proof-rendered-slot="setup-failure">RazorWire projected a host setup failure.</p>
+            </rw:auth-setup-failure>
+        </rw:auth-view>
     </article>
 </section>
 
@@ -80,7 +94,7 @@
             <td>401</td>
             <td>Challenge</td>
             <td>Unauthenticated</td>
-            <td>unauthenticated</td>
+            <td>anonymous</td>
         </tr>
         <tr>
             <td>viewer</td>

@@ -23,6 +23,7 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
         "start-here/appsurface-evaluator.md",
         "start-here/should-i-use-appsurface.md",
         "start-here/first-success-path.md",
+        "start-here/auth-adoption-ladder.md",
         "guides/from-program-cs-to-module.md",
         "troubleshooting/startup-and-modules.md",
         "concepts/glossary.md"
@@ -62,6 +63,7 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
         AssertFeaturedPage(groups, "evaluate-appsurface", "start-here/appsurface-evaluator.md");
         AssertFeaturedPage(groups, "prove-first-service", "start-here/first-success-path.md");
         AssertFeaturedPage(groups, "prove-first-service", "guides/from-program-cs-to-module.md");
+        AssertFeaturedPage(groups, "choose-package", "start-here/auth-adoption-ladder.md");
         AssertFeaturedPage(groups, "recover-and-read", "troubleshooting/startup-and-modules.md");
         AssertFeaturedPage(groups, "recover-and-read", "concepts/glossary.md");
     }
@@ -98,6 +100,11 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
             "start-here/appsurface-evaluator.md",
             aliases: ["startup standardization"],
             keywords: []);
+        AssertSearchMetadata(
+            searchIndex,
+            "start-here/auth-adoption-ladder.md",
+            aliases: ["Auth.Testing"],
+            keywords: ["host-owned auth", "ProblemDetails"]);
         AssertSearchMetadata(
             searchIndex,
             "troubleshooting/startup-and-modules.md",
@@ -224,6 +231,7 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
                 "start-here/should-i-use-appsurface.md",
                 "start-here/first-success-path.md",
                 "packages/README.md",
+                "start-here/auth-adoption-ladder.md",
                 "Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md"
             ],
             startHere.VisiblePages

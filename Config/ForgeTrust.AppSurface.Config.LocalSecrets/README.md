@@ -30,6 +30,31 @@ appsurface config diagnostics
 
 The diagnostics path reports where a value came from without printing the raw secret value.
 
+### When You See `local-secret-store-unavailable`
+
+`local-secret-store-unavailable` means the OS-backed LocalSecrets store could not complete the requested operation.
+It is retryable, but only a true `Missing` result falls through to lower-priority configuration.
+
+Start with:
+
+```bash
+appsurface secrets doctor --app MyApp --environment Development
+```
+
+On Linux, verify that the trusted `secret-tool` path is installed and executable. AppSurface uses `/usr/bin/secret-tool`,
+then `/bin/secret-tool`, unless you pass a verified absolute path through `--secret-tool-path` or
+`AppSurfaceLocalSecretsOptions.LinuxSecretToolPath`. Also check that the current DBus or desktop session can reach a
+Secret Service implementation.
+
+For CI, headless sessions, containers, team environments, and production, use environment variables, key-per-file, or a
+remote vault instead of OS-backed LocalSecrets. Use `--store-file <path>` only for deterministic local fallback examples
+and tests.
+
+Startup failures that happen before a platform command can run report `Unavailable`, not `Locked`, even when the raw OS
+exception message contains words such as `denied` or `locked`. The display-safe diagnostic includes the operation,
+exception type, `HResult`, and synthetic exit code. It intentionally omits secret values, logical values, raw OS
+exception messages, command paths, command arguments, and absolute paths.
+
 ### File fallback posture
 
 The OS-backed stores are the normal LocalSecrets path. The `--store-file <path>` fallback exists for deterministic
