@@ -8,7 +8,7 @@ This package is not authentication, sign-in UI, sign-out UI, OIDC, cookies, ASP.
 
 ## Release Guidance
 
-AppSurface publishes coordinated prereleases. Read the current [v0.2.0-preview.1 release note](../../releases/v0.2.0-preview.1.md) for the package-facing baseline, and read the [Unreleased note](../../releases/unreleased.md) for this adapter's queued release guidance and readiness context.
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
 
 ## Quickstart
 
