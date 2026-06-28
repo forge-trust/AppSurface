@@ -1,0 +1,151 @@
+using System.Diagnostics.CodeAnalysis;
+using ForgeTrust.AppSurface.Auth.AspNetCore;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
+namespace ForgeTrust.AppSurface.Auth.Testing;
+
+/// <summary>
+/// Registers AppSurface test authentication services for ASP.NET Core integration tests.
+/// </summary>
+public static class AppSurfaceTestAuthServiceCollectionExtensions
+{
+    /// <summary>
+    /// Adds a test-only authentication scheme and immutable persona registry for AppSurface auth tests.
+    /// </summary>
+    /// <param name="services">Service collection that receives the test harness.</param>
+    /// <param name="configure">Optional test auth options callback.</param>
+    /// <returns>The same service collection for chaining.</returns>
+    /// <remarks>
+    /// This method composes <c>ForgeTrust.AppSurface.Auth.AspNetCore</c> so normal ASP.NET Core policy evaluation and
+    /// AppSurface result mapping still run. It does not create production users, identity providers, cookies, tokens,
+    /// or session freshness checks.
+    /// </remarks>
+    public static IServiceCollection AddAppSurfaceTestAuth(
+        this IServiceCollection services,
+        Action<AppSurfaceTestAuthOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var configuredOptions = new AppSurfaceTestAuthOptions();
+        configure?.Invoke(configuredOptions);
+        ValidateOptions(configuredOptions);
+
+        if (string.IsNullOrWhiteSpace(configuredOptions.SubjectClaimType))
+        {
+            services.AddAppSurfaceAspNetCoreAuth();
+        }
+        else
+        {
+            services.AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim(configuredOptions.SubjectClaimType));
+        }
+
+        services.AddSingleton(configuredOptions);
+        services.AddSingleton(AppSurfaceTestPersonaRegistry.Create(configuredOptions));
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IStartupFilter, AppSurfaceTestAuthStartupFilter>());
+        services.DecorateAppSurfaceTestPolicyEvaluator();
+
+        if (configuredOptions.SchemeMode == AppSurfaceTestAuthSchemeMode.NoDefault)
+        {
+            services.AddAuthentication();
+            return services;
+        }
+
+        var authenticationBuilder = configuredOptions.SchemeMode == AppSurfaceTestAuthSchemeMode.DefaultScheme
+            ? services.AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = configuredOptions.SchemeName;
+                options.DefaultChallengeScheme = configuredOptions.SchemeName;
+                options.DefaultForbidScheme = configuredOptions.SchemeName;
+            })
+            : services.AddAuthentication();
+
+        authenticationBuilder.AddScheme<AuthenticationSchemeOptions, AppSurfaceTestAuthenticationHandler>(
+            configuredOptions.SchemeName,
+            options => { _ = options; });
+
+        return services;
+    }
+
+    private static void ValidateOptions(AppSurfaceTestAuthOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.SchemeName))
+        {
+            throw new InvalidOperationException(
+                $"Problem: AppSurface test auth scheme name is blank. Cause: AppSurfaceTestAuthOptions.SchemeName was empty. Fix: set a non-blank scheme name. Docs: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md. Code: {AppSurfaceTestAuthDiagnosticCodes.BlankSchemeName}.");
+        }
+
+        if (options.SubjectClaimType is not null && string.IsNullOrWhiteSpace(options.SubjectClaimType))
+        {
+            throw new InvalidOperationException(
+                $"Problem: AppSurface test auth subject claim type is blank. Cause: AppSurfaceTestAuthOptions.SubjectClaimType was empty. Fix: set a non-blank subject claim type or leave it null to preserve host mapping. Docs: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md. Code: {AppSurfaceTestAuthDiagnosticCodes.BlankSubjectClaimType}.");
+        }
+
+        _ = AppSurfaceTestPersonaRegistry.Create(options);
+    }
+
+    private static void DecorateAppSurfaceTestPolicyEvaluator(this IServiceCollection services)
+    {
+        var descriptorIndex = FindLastPolicyEvaluator(services);
+        if (descriptorIndex < 0) ThrowMissingPolicyEvaluator();
+
+        var descriptor = services[descriptorIndex];
+        services.RemoveAt(descriptorIndex);
+        services.Add(ServiceDescriptor.Describe(
+            typeof(AppSurfaceTestInnerPolicyEvaluator),
+            serviceProvider => new AppSurfaceTestInnerPolicyEvaluator(CreateInnerPolicyEvaluator(serviceProvider, descriptor)),
+            descriptor.Lifetime));
+        services.Add(ServiceDescriptor.Describe(
+            typeof(IAppSurfaceAspNetCorePolicyEvaluator),
+            serviceProvider => ActivatorUtilities.CreateInstance<AppSurfaceTestAspNetCorePolicyEvaluator>(serviceProvider),
+            descriptor.Lifetime));
+    }
+
+    private static int FindLastPolicyEvaluator(IServiceCollection services)
+    {
+        return Enumerable.Range(0, services.Count)
+            .Reverse()
+            .FirstOrDefault(
+                index => services[index].ServiceType == typeof(IAppSurfaceAspNetCorePolicyEvaluator),
+                -1);
+    }
+
+    private static IAppSurfaceAspNetCorePolicyEvaluator CreateInnerPolicyEvaluator(
+        IServiceProvider serviceProvider,
+        ServiceDescriptor descriptor)
+    {
+        if (descriptor.ImplementationInstance is IAppSurfaceAspNetCorePolicyEvaluator instance)
+        {
+            return instance;
+        }
+
+        if (descriptor.ImplementationFactory is not null)
+        {
+            return (IAppSurfaceAspNetCorePolicyEvaluator)descriptor.ImplementationFactory(serviceProvider)!;
+        }
+
+        return descriptor.ImplementationType is null
+            ? ThrowUndecoratablePolicyEvaluator()
+            : (IAppSurfaceAspNetCorePolicyEvaluator)ActivatorUtilities.CreateInstance(
+                serviceProvider,
+                descriptor.ImplementationType);
+    }
+
+    [DoesNotReturn]
+    [ExcludeFromCodeCoverage(Justification = "Defensive invariant guard for unexpected DI corruption after AddAppSurfaceAspNetCoreAuth registers the evaluator.")]
+    private static void ThrowMissingPolicyEvaluator()
+    {
+        throw new InvalidOperationException(
+            "Problem: AppSurface ASP.NET Core policy evaluator was not registered. Cause: AddAppSurfaceTestAuth could not find the evaluator added by AddAppSurfaceAspNetCoreAuth. Fix: register IAppSurfaceAspNetCorePolicyEvaluator before AddAppSurfaceTestAuth or call AddAppSurfaceAspNetCoreAuth successfully.");
+    }
+
+    [DoesNotReturn]
+    [ExcludeFromCodeCoverage(Justification = "Defensive invariant guard for an invalid ServiceDescriptor shape that cannot be produced by public IServiceCollection registration APIs.")]
+    private static IAppSurfaceAspNetCorePolicyEvaluator ThrowUndecoratablePolicyEvaluator()
+    {
+        throw new InvalidOperationException(
+            "Problem: AppSurface ASP.NET Core policy evaluator registration could not be decorated. Cause: the service descriptor did not expose an implementation instance, factory, or type. Fix: register IAppSurfaceAspNetCorePolicyEvaluator with a concrete implementation descriptor before AddAppSurfaceTestAuth.");
+    }
+}
