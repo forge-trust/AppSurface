@@ -23,7 +23,7 @@ namespace AuthWebRazorWireProofExample.Models;
 /// </param>
 /// <param name="UiState">
 /// Selector-friendly page-state token derived from <paramref name="Outcome"/>. Expected sample values are
-/// <c>allowed</c>, <c>unauthenticated</c>, <c>forbidden</c>, or <c>setup-failure</c>.
+/// <c>allowed</c>, <c>anonymous</c>, <c>forbidden</c>, or <c>setup-failure</c>.
 /// </param>
 /// <param name="Subject">
 /// The mapped subject identifier from the evaluated request, or <see langword="null"/> when the request is
@@ -56,7 +56,7 @@ public sealed record AuthProofState(
     /// </returns>
     /// <remarks>
     /// Allowed maps to HTTP 200 and <c>allowed</c>; challenge maps to HTTP 401 and
-    /// <c>unauthenticated</c>; forbid maps to HTTP 403 and <c>forbidden</c>. Other outcomes are treated as
+    /// <c>anonymous</c>; forbid maps to HTTP 403 and <c>forbidden</c>. Other outcomes are treated as
     /// setup failures for this sample and map to HTTP 500 plus <c>setup-failure</c>, which keeps unexpected
     /// configuration problems distinct from denied users.
     /// </remarks>
@@ -91,7 +91,7 @@ public sealed record AuthProofState(
         return outcome switch
         {
             AppSurfaceAuthOutcome.Allowed => "allowed",
-            AppSurfaceAuthOutcome.Challenge => "unauthenticated",
+            AppSurfaceAuthOutcome.Challenge => "anonymous",
             AppSurfaceAuthOutcome.Forbid => "forbidden",
             _ => "setup-failure",
         };
