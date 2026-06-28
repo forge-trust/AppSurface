@@ -49,6 +49,10 @@ featured_page_groups:
         path: packages/README.md
         supporting_copy: Start with the generated package chooser, then add only the optional modules your app actually needs.
         order: 10
+      - question: Which Auth package do I need?
+        path: start-here/auth-adoption-ladder.md
+        supporting_copy: Choose between host-owned ASP.NET Core auth, AppSurface Auth contracts, DevAuth, OIDC, and Auth.Testing before copying auth proof code.
+        order: 20
   - intent: evaluate-release
     label: Evaluate release risk
     summary: Use these routes when you need to decide whether current changes are safe to adopt.

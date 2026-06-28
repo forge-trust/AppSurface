@@ -33,6 +33,9 @@ This is the living release note for the next coordinated AppSurface version afte
   staged docs `versions.json` and trusted archive root into `appsurface-release check` or `publish`; the tool verifies the
   selected public catalog entry, exact tree path, pinned release-manifest digest, route manifest safety, and every
   serveable file before stable GitHub Release publishing can continue.
+- AppSurface Auth now has a Start Here adoption ladder that helps package consumers choose between host-owned
+  ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces
+  without implying AppSurface owns production identity providers, policies, user stores, or enforcement.
 
 ## Migration watch
 
