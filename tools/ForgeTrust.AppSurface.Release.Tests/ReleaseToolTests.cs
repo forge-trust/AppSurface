@@ -2063,6 +2063,22 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void StableDocsArchiveGateAcceptsOrdinaryCandidateSegment()
+    {
+        var trustedRoot = RepositoryPath("dist/docs");
+        var candidate = Path.Join(trustedRoot, "releases", "0.1.0");
+        Directory.CreateDirectory(candidate);
+
+        var result = ReleaseDocsArchiveGate.TryValidateNoReparseSegments(
+            trustedRoot,
+            candidate,
+            out var detail);
+
+        Assert.True(result);
+        Assert.Null(detail);
+    }
+
+    [Fact]
     public void StableDocsArchiveGateRejectsEmptyExactTreePath()
     {
         var trustedRoot = RepositoryPath("dist/docs");
