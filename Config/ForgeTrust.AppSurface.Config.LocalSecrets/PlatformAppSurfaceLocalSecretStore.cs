@@ -780,7 +780,8 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         }
 
         private static bool IsLinuxMissing(PlatformSecretCommandResult result) =>
-            result.ExitCode != 0
+            result.Kind == PlatformSecretCommandResultKind.ProcessExited
+            && result.ExitCode != 0
             && string.IsNullOrWhiteSpace(result.Output)
             && string.IsNullOrWhiteSpace(result.Error);
 
@@ -1236,11 +1237,32 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             _commandRunner = commandRunner;
         }
 
+        /// <summary>
+        /// Maps a failed platform command result into the LocalSecrets diagnostic contract.
+        /// </summary>
+        /// <remarks>
+        /// Only <see cref="PlatformSecretCommandResultKind.ProcessExited"/> carries real platform process output that can
+        /// prove a locked or denied user secret store. Synthetic <see cref="PlatformSecretCommandResultKind.TimedOut"/>
+        /// and <see cref="PlatformSecretCommandResultKind.StartFailed"/> results must remain
+        /// <see cref="LocalSecretResultStatus.Unavailable"/> and use redacted cause text, even when the underlying
+        /// exception message contains words such as <c>locked</c> or <c>denied</c>. Custom internal runners should use
+        /// <see cref="PlatformSecretCommandResult.FromProcess(int, string, string)"/> only after a platform command
+        /// exits, and should keep command paths, arguments, logical values, absolute paths, and secret values out of
+        /// <see cref="AppSurfaceLocalSecretDiagnostic"/> provenance fields.
+        /// </remarks>
+        /// <param name="result">The platform command result with explicit real-process or synthetic provenance.</param>
+        /// <param name="operation">The display-safe LocalSecrets operation name, such as <c>get</c> or <c>delete</c>.</param>
+        /// <returns>
+        /// A retryable not-found result classified as <see cref="LocalSecretResultStatus.Locked"/> for real locked-store
+        /// process output, or <see cref="LocalSecretResultStatus.Unavailable"/> for timeouts, startup failures, and other
+        /// process failures.
+        /// </returns>
         protected AppSurfaceLocalSecretResult MapCommandFailure(PlatformSecretCommandResult result, string operation)
         {
-            var status = result.Error.Contains("User interaction is not allowed", StringComparison.OrdinalIgnoreCase)
-                         || result.Error.Contains("locked", StringComparison.OrdinalIgnoreCase)
-                         || result.Error.Contains("denied", StringComparison.OrdinalIgnoreCase)
+            var status = result.Kind == PlatformSecretCommandResultKind.ProcessExited
+                         && (result.Error.Contains("User interaction is not allowed", StringComparison.OrdinalIgnoreCase)
+                             || result.Error.Contains("locked", StringComparison.OrdinalIgnoreCase)
+                             || result.Error.Contains("denied", StringComparison.OrdinalIgnoreCase))
                 ? LocalSecretResultStatus.Locked
                 : LocalSecretResultStatus.Unavailable;
             return AppSurfaceLocalSecretResult.NotFound(
@@ -1248,11 +1270,38 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 new AppSurfaceLocalSecretDiagnostic(
                     status == LocalSecretResultStatus.Locked ? "local-secret-store-locked" : "local-secret-store-unavailable",
                     "Local secret store could not complete the request.",
-                    $"The platform store failed during `{operation}` with exit code {result.ExitCode}.",
-                    "Unlock the user secret store, run in an interactive desktop session, or use environment variables/key-per-file for this environment.",
+                    BuildCommandFailureCause(result, operation),
+                    status == LocalSecretResultStatus.Locked
+                        ? "Unlock the user secret store, run in an interactive desktop session, or use environment variables/key-per-file for this environment."
+                        : "Verify the platform tool is installed and executable, run in an interactive desktop session when using OS-backed stores, or use environment variables/key-per-file for CI and headless environments.",
                     "local-secrets-platform-compatibility",
                     retryable: true),
                 Name);
+        }
+
+        /// <summary>
+        /// Builds the display-safe diagnostic cause for a failed platform command.
+        /// </summary>
+        /// <remarks>
+        /// Real process exits report only the exit code because platform stderr can contain provider-specific text.
+        /// Synthetic startup failures report sanitized exception provenance prepared by
+        /// <see cref="PlatformSecretCommandResult.StartFailed(Exception)"/>; if an internal runner constructs a startup
+        /// failure without detail, the cause uses a stable fallback instead of rendering empty punctuation.
+        /// </remarks>
+        private static string BuildCommandFailureCause(PlatformSecretCommandResult result, string operation)
+        {
+            var redactedStartupDetail = string.IsNullOrWhiteSpace(result.Error)
+                ? "No additional startup detail was reported"
+                : result.Error.Trim();
+
+            return result.Kind switch
+            {
+                PlatformSecretCommandResultKind.StartFailed =>
+                    $"The platform store failed during `{operation}` before the platform command could start. {redactedStartupDetail}; ExitCode={result.ExitCode}.",
+                PlatformSecretCommandResultKind.TimedOut =>
+                    $"The platform store failed during `{operation}` because the platform command timed out. ExitCode={result.ExitCode}.",
+                _ => $"The platform store failed during `{operation}` with exit code {result.ExitCode}."
+            };
         }
 
         protected PlatformSecretCommandResult Run(string fileName, IReadOnlyList<string> arguments, string? standardInput) =>
@@ -1329,7 +1378,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             Task.WhenAll(outputTask, errorTask).GetAwaiter().GetResult();
             var output = outputTask.GetAwaiter().GetResult().TrimEnd('\r', '\n');
             var error = errorTask.GetAwaiter().GetResult();
-            return new PlatformSecretCommandResult(process.ExitCode, output, error);
+            return PlatformSecretCommandResult.FromProcess(process.ExitCode, output, error);
         }
 
         private static void KillTimedOutProcess(Process process)
@@ -1359,18 +1408,140 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 exception.HResult);
     }
 
-    internal sealed record PlatformSecretCommandResult(int ExitCode, string Output, string Error)
+    /// <summary>
+    /// Identifies whether a platform secret command result came from an exited process or a runner-level synthetic failure.
+    /// </summary>
+    internal enum PlatformSecretCommandResultKind
+    {
+        /// <summary>
+        /// The platform command started, exited, and produced real process output.
+        /// </summary>
+        ProcessExited,
+
+        /// <summary>
+        /// The platform command started but exceeded the configured timeout.
+        /// </summary>
+        TimedOut,
+
+        /// <summary>
+        /// The platform command could not be started by the process runner.
+        /// </summary>
+        StartFailed
+    }
+
+    /// <summary>
+    /// Captures display-safe output and provenance for one platform secret command attempt.
+    /// </summary>
+    internal sealed record PlatformSecretCommandResult
     {
         internal const int TimedOutExitCode = -1;
         internal const int StartFailedExitCode = -2;
 
-        public static PlatformSecretCommandResult TimedOut { get; } =
-            new(TimedOutExitCode, string.Empty, "Timed out waiting for the platform secret command to finish.");
+        /// <summary>
+        /// Initializes a result from a platform process that started and exited.
+        /// </summary>
+        /// <param name="exitCode">The process exit code.</param>
+        /// <param name="output">The trimmed standard output.</param>
+        /// <param name="error">The standard error output.</param>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="exitCode"/> is reserved for synthetic runner failures.
+        /// </exception>
+        public PlatformSecretCommandResult(int exitCode, string output, string error)
+            : this(exitCode, output, error, PlatformSecretCommandResultKind.ProcessExited)
+        {
+        }
 
-        public static PlatformSecretCommandResult StartFailed(Exception exception) =>
+        /// <summary>
+        /// Initializes a result with explicit provenance for deterministic tests and runner factories.
+        /// </summary>
+        /// <param name="exitCode">The process or synthetic exit code.</param>
+        /// <param name="output">The standard output payload.</param>
+        /// <param name="error">The display-safe error payload.</param>
+        /// <param name="kind">The result provenance.</param>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="exitCode"/> does not match <paramref name="kind"/>.</exception>
+        internal PlatformSecretCommandResult(int exitCode, string output, string error, PlatformSecretCommandResultKind kind)
+        {
+            ArgumentNullException.ThrowIfNull(output);
+            ArgumentNullException.ThrowIfNull(error);
+
+            if (kind == PlatformSecretCommandResultKind.ProcessExited && IsReservedSyntheticExitCode(exitCode))
+            {
+                throw new ArgumentOutOfRangeException(nameof(exitCode), exitCode, "Process results cannot use synthetic LocalSecrets command exit codes.");
+            }
+
+            if (kind == PlatformSecretCommandResultKind.TimedOut && exitCode != TimedOutExitCode)
+            {
+                throw new ArgumentOutOfRangeException(nameof(exitCode), exitCode, "Timed-out results must use the LocalSecrets timeout exit code.");
+            }
+
+            if (kind == PlatformSecretCommandResultKind.StartFailed && exitCode != StartFailedExitCode)
+            {
+                throw new ArgumentOutOfRangeException(nameof(exitCode), exitCode, "Start-failed results must use the LocalSecrets startup failure exit code.");
+            }
+
+            ExitCode = exitCode;
+            Output = output;
+            Error = error;
+            Kind = kind;
+        }
+
+        /// <summary>
+        /// Gets the process exit code or the synthetic failure code for runner-level failures.
+        /// </summary>
+        public int ExitCode { get; }
+
+        /// <summary>
+        /// Gets the trimmed standard output for process results.
+        /// </summary>
+        public string Output { get; }
+
+        /// <summary>
+        /// Gets standard error or display-safe synthetic failure details.
+        /// </summary>
+        public string Error { get; }
+
+        /// <summary>
+        /// Gets the result provenance used by platform status mapping.
+        /// </summary>
+        internal PlatformSecretCommandResultKind Kind { get; }
+
+        /// <summary>
+        /// Creates a result from a platform process that started and exited.
+        /// </summary>
+        /// <param name="exitCode">The process exit code.</param>
+        /// <param name="output">The trimmed standard output.</param>
+        /// <param name="error">The standard error output.</param>
+        /// <returns>A process-exited command result.</returns>
+        public static PlatformSecretCommandResult FromProcess(int exitCode, string output, string error) =>
+            new(exitCode, output, error);
+
+        /// <summary>
+        /// Gets the synthetic result used when the platform command exceeds the timeout.
+        /// </summary>
+        public static PlatformSecretCommandResult TimedOut { get; } =
             new(
+                TimedOutExitCode,
+                string.Empty,
+                "Timed out waiting for the platform secret command to finish.",
+                PlatformSecretCommandResultKind.TimedOut);
+
+        /// <summary>
+        /// Creates the synthetic result used when the platform command cannot be started.
+        /// </summary>
+        /// <param name="exception">The runner exception caught while starting the process.</param>
+        /// <returns>A display-safe startup failure result.</returns>
+        public static PlatformSecretCommandResult StartFailed(Exception exception)
+        {
+            ArgumentNullException.ThrowIfNull(exception);
+
+            return new(
                 StartFailedExitCode,
                 string.Empty,
-                $"Could not start the platform secret command. Exception={exception.GetType().Name}; Message={exception.Message}");
+                $"Could not start the platform secret command. ExceptionType={exception.GetType().FullName}; HResult={exception.HResult}",
+                PlatformSecretCommandResultKind.StartFailed);
+        }
+
+        private static bool IsReservedSyntheticExitCode(int exitCode) =>
+            exitCode is TimedOutExitCode or StartFailedExitCode;
     }
 }
