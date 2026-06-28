@@ -537,6 +537,19 @@ public enum AppSurfaceDocsHarvestStartupMode
 public sealed class AppSurfaceDocsHarvestHealthOptions
 {
     /// <summary>
+    /// Gets or sets the host-owned authorization policy required before AppSurface Docs returns health responses from
+    /// <c>{DocsRootPath}/_health</c> and <c>{DocsRootPath}/_health.json</c>.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="null"/>, which preserves the existing route-exposure behavior without adding
+    /// authorization metadata. Set this to the name of an ASP.NET Core authorization policy registered by the host when
+    /// exposed health routes should require authenticated maintainer access. AppSurface Docs does not register
+    /// authentication schemes, identities, cookies, or fallback policies for this option; hosts must register normal
+    /// ASP.NET Core authentication and authorization middleware before endpoint execution.
+    /// </remarks>
+    public string? AuthorizationPolicy { get; set; }
+
+    /// <summary>
     /// Gets or sets when AppSurface Docs should return health responses from <c>{DocsRootPath}/_health</c> and
     /// <c>{DocsRootPath}/_health.json</c>.
     /// </summary>

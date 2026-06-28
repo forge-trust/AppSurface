@@ -85,6 +85,12 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// authorizers are not considered custom authorization for that docs-owned stream. Call this method once during
     /// startup; repeated registration can nest authorizer wrappers and obscure the
     /// intended channel policy.
+    /// </para>
+    /// <para>
+    /// <c>AppSurfaceDocs:Harvest:Health:AuthorizationPolicy</c> names an optional host-owned ASP.NET Core
+    /// authorization policy for the package health read routes. When set, AppSurface Docs attaches endpoint
+    /// authorization metadata to <c>{DocsRootPath}/_health</c> and <c>{DocsRootPath}/_health.json</c> only. Hosts that
+    /// configure it must register authentication before authorization in the endpoint-aware middleware phase.
     /// Consumers that resolve <see cref="AppSurfaceDocsOptions"/> directly should expect the normalized values rather than
     /// raw configuration text, and applications that need custom routing or catalog paths should provide those values
     /// before this method runs so the normalized singleton graph stays consistent.
@@ -149,6 +155,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Harvest.Paths.DefaultExclusions =
                         NormalizeDefaultExclusions(options.Harvest.Paths.DefaultExclusions);
                     options.Harvest.Paths.VcsIgnore.AllowGlobs = NormalizeGlobArray(options.Harvest.Paths.VcsIgnore.AllowGlobs);
+                    options.Harvest.Health.AuthorizationPolicy = NormalizeOrNull(options.Harvest.Health.AuthorizationPolicy);
                     options.Diagnostics.OperatorWritePolicy = NormalizeOrNull(options.Diagnostics.OperatorWritePolicy);
                     options.Diagnostics.SearchIndexRefreshPolicy = NormalizeOrNull(options.Diagnostics.SearchIndexRefreshPolicy);
                     options.Metrics.BrowserCollector.EndpointUrl =

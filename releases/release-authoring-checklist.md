@@ -12,7 +12,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 
 ## When cutting the tagged release note
 
-- run `./eng/release prepare --version x.y.z --date YYYY-MM-DD` from an up-to-date `main` branch
+- run `./eng/release prepare --version x.y.z --date YYYY-MM-DD` from an up-to-date release base branch (`main` for normal releases, or the maintained release branch such as `release/0.1.0`)
 - review the generated `releases/vx.y.z.md`, `releases/vx.y.z.md.yml`, `releases/vx.y.z.release.json`, and `releases/vx.y.z.evidence.json`
 - confirm the generated package path updates described in the [package registry](../packages/README.md) point every `classification: public` plus `publish_decision: publish` package at the tagged note
 - review the generated [package readiness evidence](../packages/readiness.md) and resolve or explicitly track package-index blockers before asking maintainers to approve package artifacts; this package-index evidence is separate from the per-version release evidence bundle
@@ -24,8 +24,9 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 ## After the tag ships
 
 - create the annotated tag from the maintainer-reviewed merge commit outside the release tool; v1 never creates tags automatically
-- run `./eng/release publish --version x.y.z --tag vx.y.z --dry-run` before the publish workflow creates the GitHub Release; publish validation checks the release evidence bundle at the annotated tag commit, not the local worktree
-- keep stable releases blocked until a protected stable NuGet publish workflow exists and the release cockpit verifies it; `v0.1.0` must not become a GitHub-only release
+- wait for the protected NuGet workflow for the tag classification to finish first: `nuget-prerelease-publish.yml` for prerelease tags, `nuget-stable-publish.yml` for stable tags
+- run `./eng/release publish --version x.y.z --tag vx.y.z --base-ref <release-base> --dry-run` before the publish workflow creates the GitHub Release; publish validation checks the release evidence bundle and protected package publish proof at the annotated tag commit, not the local worktree
+- keep stable releases blocked until `nuget-stable` publish and `nuget-stable-smoke` install proof exists; `v0.1.0` must not become a GitHub-only release
 - verify the `/docs` release hub resolves to the new tagged note and current policy pages
 
 ## Diagnostics and escape hatches

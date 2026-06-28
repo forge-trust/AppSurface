@@ -10,6 +10,8 @@
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Tests/ForgeTrust.AppSurface.Auth.AspNetCore.Tests.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj" />
+    <Project Path="Auth/ForgeTrust.AppSurface.Auth.Testing.Tests/ForgeTrust.AppSurface.Auth.Testing.Tests.csproj" />
+    <Project Path="Auth/ForgeTrust.AppSurface.Auth.Testing/ForgeTrust.AppSurface.Auth.Testing.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.Tests/ForgeTrust.AppSurface.Auth.Tests.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth/ForgeTrust.AppSurface.Auth.csproj" />
   </Folder>
