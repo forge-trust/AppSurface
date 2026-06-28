@@ -2927,6 +2927,32 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PublishAcceptsStableReleaseWhenRouteManifestSkipsBlankAliases()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync(
+            "0.1.0",
+            routeManifestJson: """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "index.html",
+                  "canonicalRoutePath": "packages",
+                  "recoveryAliases": [" ", "old-packages"],
+                  "declaredAliases": [""]
+                }
+              ]
+            }
+            """);
+
+        var result = await RunStablePublishWithDocsAsync(docs);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("\"releaseClassification\": \"stable\"", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublishAcceptsStableReleaseWhenRouteManifestOmitsEntries()
     {
         await SeedRepositoryAsync();
