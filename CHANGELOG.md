@@ -14,6 +14,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
+- RazorWire now renders passive AppSurface auth-result UI states with `rw:auth-view`, gate, login-link, and logout-button helpers, plus an ASP.NET Core adapter package that delegates to host-owned AppSurface policy evaluation.
 - AppSurface LocalSecrets startup failures before platform commands run now report `local-secret-store-unavailable` with exception type, `HResult`, and synthetic exit code only; run `appsurface secrets doctor` for the same namespace to diagnose missing tools or headless sessions without leaking raw OS exception messages.
 - `ForgeTrust.AppSurface.Web` now owns first-class PWA install metadata: enable `WebOptions.Pwa` to serve a manifest, emit Razor head metadata, expose development diagnostics, and opt into a starter offline fallback, then prove the running app with `appsurface pwa verify`.
 - AppSurface Auth adds a Start Here adoption ladder for choosing between host-owned ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces while keeping production identity providers, policies, user stores, and enforcement host-owned.

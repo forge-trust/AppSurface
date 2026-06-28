@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj" />
+    <ProjectReference Include="../../Web/ForgeTrust.RazorWire.Auth.AspNetCore/ForgeTrust.RazorWire.Auth.AspNetCore.csproj" />
     <ProjectReference Include="../../Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj" />
   </ItemGroup>
 </Project>
