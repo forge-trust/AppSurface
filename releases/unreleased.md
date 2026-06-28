@@ -4,7 +4,9 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
-- Add merged public changes here as they land.
+- `ForgeTrust.AppSurface.Web` now owns the baseline PWA install contract in the existing Web package: app-owned
+  `WebOptions.Pwa` metadata maps a manifest endpoint, MVC/Razor head tags, development diagnostics, and an explicit
+  opt-in offline fallback, with `appsurface pwa verify` providing a copy-paste CLI proof for the running origin.
 
 ## Included in the next coordinated version
 
@@ -12,6 +14,12 @@ This is the living release note for the next coordinated AppSurface version afte
 
 - Coverage gate tests now create their disposable Git fixture commits with commit signing disabled for the child process,
   so local solution coverage runs no longer fail when a developer has SSH commit signing enabled.
+- AppSurface Web adds first-class PWA install support without a new package. `WebOptions.Pwa` stays disabled by default,
+  requires install-critical metadata when enabled, serves `/manifest.webmanifest` as `application/manifest+json`, maps
+  development-only diagnostics under `/_appsurface/pwa`, and emits no service worker unless the app explicitly configures
+  an offline fallback strategy. MVC and Razor apps can add `<appsurface:pwa-head />`; custom layouts can copy equivalent
+  tags from diagnostics; `appsurface pwa verify --url <origin>` checks the live metadata, icons, secure-origin posture,
+  diagnostics, and opt-in service worker.
 
 ## Migration watch
 

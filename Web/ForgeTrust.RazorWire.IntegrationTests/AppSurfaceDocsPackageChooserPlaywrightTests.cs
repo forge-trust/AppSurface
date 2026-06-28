@@ -6,8 +6,8 @@ namespace ForgeTrust.RazorWire.IntegrationTests;
 [Trait("Category", "Integration")]
 public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
 {
-    private const string CurrentPackageReleaseNotePath = "/docs/releases/v0.2.0-preview.1";
-    private const string CurrentPackageReleaseNoteHeading = "Release 0.2.0-preview.1";
+    private const string PackageChooserReleaseNotePath = "/docs/releases/v0.2.0-preview.1";
+    private const string PackageChooserReleaseNoteHeading = "Release 0.2.0-preview.1";
     private const string WebPackageQuickstartPath = "/docs/start-here/first-success-path#package-first-path";
 
     private readonly AppSurfaceDocsPlaywrightFixture _fixture;
@@ -47,8 +47,8 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             await page.GetAttributeAsync($".docs-content a[href='{WebPackageQuickstartPath}']", "href"));
         Assert.NotNull(await page.GetAttributeAsync(".docs-content a[href='/docs/releases']", "href"));
         Assert.Equal(
-            CurrentPackageReleaseNotePath,
-            await page.GetAttributeAsync($".docs-content a[href='{CurrentPackageReleaseNotePath}']", "href"));
+            PackageChooserReleaseNotePath,
+            await page.GetAttributeAsync($".docs-content a[href='{PackageChooserReleaseNotePath}']", "href"));
 
         var openApiRow = page.Locator(".docs-content table tbody tr:has-text('ForgeTrust.AppSurface.Web.OpenApi')").First;
         await openApiRow.WaitForAsync(new LocatorWaitForOptions
@@ -88,21 +88,21 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
         var page = await context.NewPageAsync();
 
         await page.GotoAsync($"{_fixture.DocsUrl}/packages");
-        await page.WaitForSelectorAsync($".docs-content a[href='{CurrentPackageReleaseNotePath}']", new PageWaitForSelectorOptions
+        await page.WaitForSelectorAsync($".docs-content a[href='{PackageChooserReleaseNotePath}']", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
             State = WaitForSelectorState.Visible
         });
 
-        await page.Locator($".docs-content a[href='{CurrentPackageReleaseNotePath}']").First.ClickAsync();
-        await WaitForPathAndHeadingAsync(page, CurrentPackageReleaseNotePath, CurrentPackageReleaseNoteHeading);
+        await page.Locator($".docs-content a[href='{PackageChooserReleaseNotePath}']").First.ClickAsync();
+        await WaitForPathAndHeadingAsync(page, PackageChooserReleaseNotePath, PackageChooserReleaseNoteHeading);
         await page.WaitForSelectorAsync(".docs-trust-bar", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
             State = WaitForSelectorState.Visible
         });
 
-        Assert.Equal(CurrentPackageReleaseNoteHeading, (await page.TextContentAsync("h1"))?.Trim());
+        Assert.Equal(PackageChooserReleaseNoteHeading, (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("release note", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
 
         await page.GotoAsync($"{_fixture.DocsUrl}/packages");

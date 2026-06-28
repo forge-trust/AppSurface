@@ -37,6 +37,46 @@ The base class for the application bootstrapping logic. While `WebApp` uses a ge
 
 ## Features
 
+### PWA Install Metadata
+
+AppSurface Web can serve the baseline Progressive Web App install contract from `WebOptions.Pwa`: a manifest endpoint, MVC/Razor head tags, development diagnostics, and an explicit starter offline service worker. PWA support is disabled by default, and offline caching stays off until the app configures an offline strategy.
+
+#### 3-minute PWA install path
+
+Configure install metadata in the existing Web package:
+
+```csharp
+await WebApp<MyRootModule>.RunAsync(
+    args,
+    options =>
+    {
+        options.Mvc = options.Mvc with { MvcSupportLevel = MvcSupport.ControllersWithViews };
+        options.Pwa.Enabled = true;
+        options.Pwa.Name = "Contoso Field Notes";
+        options.Pwa.ShortName = "Field Notes";
+        options.Pwa.ThemeColor = "#2563eb";
+        options.Pwa.BackgroundColor = "#ffffff";
+        options.Pwa.Icons.Add(new PwaIcon { Source = "/icons/app-192.png", Sizes = "192x192", Type = "image/png" });
+        options.Pwa.Icons.Add(new PwaIcon { Source = "/icons/app-512.png", Sizes = "512x512", Type = "image/png" });
+    });
+```
+
+Add the head helper to your MVC layout:
+
+```cshtml
+<appsurface:pwa-head />
+```
+
+Run the app on HTTPS or localhost, then verify the install contract:
+
+```bash
+appsurface pwa verify --url https://app.example.com
+```
+
+AppSurface maps `/manifest.webmanifest` with `application/manifest+json`, exposes development-only diagnostics at `/_appsurface/pwa`, and emits no service worker unless `options.Pwa.Offline.Enabled` is true. Minimal API and custom-layout apps can copy the exact generated tags from `/_appsurface/pwa` instead of using the TagHelper.
+
+For the full API shape, browser caveats, offline pitfalls, and CLI proof flow, see [PWA install support](Docs/pwa-install.md). For executable proof, run [examples/web-pwa-install](../../examples/web-pwa-install/README.md).
+
 ### Middleware Lifecycle
 
 AppSurface Web keeps middleware and endpoint mapping in three explicit phases:

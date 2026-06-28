@@ -9,6 +9,38 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class AppSurfaceCliAppTests
 {
     [Fact]
+    public async Task AddPwaVerifierServices_Should_Disable_Automatic_Redirects_For_Pwa_Client()
+    {
+        var services = new ServiceCollection();
+
+        AppSurfaceCliApp.AddPwaVerifierServices(services);
+        services.AddTransient<PwaVerifier>();
+
+        using var provider = services.BuildServiceProvider();
+        using var redirectListener = new TcpListener(IPAddress.Loopback, port: 0);
+        using var targetListener = new TcpListener(IPAddress.Loopback, port: 0);
+        redirectListener.Start();
+        targetListener.Start();
+        var redirectPort = ((IPEndPoint)redirectListener.LocalEndpoint).Port;
+        var targetPort = ((IPEndPoint)targetListener.LocalEndpoint).Port;
+        var targetUrl = $"http://127.0.0.1:{targetPort}/target";
+        var redirectTask = ServeRedirectAsync(redirectListener, targetUrl);
+        var targetRequestTask = AcceptRequestWithinAsync(targetListener, TimeSpan.FromMilliseconds(250));
+
+        var client = provider.GetRequiredService<IPwaVerificationHttpClient>();
+        var response = await client.GetAsync(new Uri($"http://127.0.0.1:{redirectPort}/redirect"), CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        Assert.False(response.IsSuccess);
+        Assert.NotNull(provider.GetService<PwaVerifier>());
+        Assert.False(await targetRequestTask);
+
+        redirectListener.Stop();
+        targetListener.Stop();
+        await redirectTask;
+    }
+
+    [Fact]
     public async Task AddExportEngineServices_Should_Disable_Automatic_Redirects_For_ExportEngine_Client()
     {
         var services = new ServiceCollection();
