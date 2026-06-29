@@ -257,13 +257,10 @@ internal static class ReleaseDocsArchiveGate
         }
 
         var current = root;
-        foreach (var segment in relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+        foreach (var segment in relativePath
+                     .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
+                     .Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
-            if (string.IsNullOrEmpty(segment))
-            {
-                continue;
-            }
-
             current = Path.Join(current, segment);
             var info = new DirectoryInfo(current);
             if (!info.Exists)
@@ -599,13 +596,13 @@ internal static class ReleaseDocsArchiveGate
             return false;
         }
 
-        foreach (var serveableFile in serveableFiles)
+        var unmanifestedServeableFile = serveableFiles
+            .Where(serveableFile => !files.ContainsKey(serveableFile))
+            .FirstOrDefault();
+        if (unmanifestedServeableFile is not null)
         {
-            if (!files.ContainsKey(serveableFile))
-            {
-                issue = $"Release archive contains serveable file `{serveableFile}` that is not listed in the release manifest.";
-                return false;
-            }
+            issue = $"Release archive contains serveable file `{unmanifestedServeableFile}` that is not listed in the release manifest.";
+            return false;
         }
 
         fileCount = files.Count;
@@ -865,11 +862,6 @@ internal static class ReleaseDocsArchiveGate
         var canonicalRouteByAlias = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in document.Entries ?? [])
         {
-            if (entry.CanonicalRoutePath is null)
-            {
-                continue;
-            }
-
             var canonicalRoutePath = NormalizeRoutePath(entry.CanonicalRoutePath);
             var canonicalRoutePathPart = GetRoutePathPart(canonicalRoutePath);
             foreach (var aliasRoutePath in (entry.RecoveryAliases ?? [])
