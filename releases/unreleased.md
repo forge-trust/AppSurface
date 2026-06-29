@@ -29,6 +29,10 @@ This is the living release note for the next coordinated AppSurface version afte
   diagnostics, and opt-in service worker.
 - The generated starter PWA service worker now scopes cache cleanup to the current AppSurface service-worker owner and
   reaps the earlier global AppSurface cache name without pruning unrelated origin caches or another path-mounted app.
+- Stable package release publishing now gates on verified AppSurface Docs archive evidence. Release authors pass the
+  staged docs `versions.json` and trusted archive root into `appsurface-release check` or `publish`; the tool verifies the
+  selected public catalog entry, exact tree path, pinned release-manifest digest, route manifest safety, and every
+  serveable file before stable GitHub Release publishing can continue.
 - AppSurface Auth now has a Start Here adoption ladder that helps package consumers choose between host-owned
   ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces
   without implying AppSurface owns production identity providers, policies, user stores, or enforcement.
