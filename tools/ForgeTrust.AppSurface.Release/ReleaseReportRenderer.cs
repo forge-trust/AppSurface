@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace ForgeTrust.AppSurface.Release;
 
 internal static class ReleaseReportRenderer
@@ -80,6 +82,11 @@ internal static class ReleaseReportRenderer
         builder.AppendLine($"- Subject SHA-256: `{summary.SubjectSha256}`");
         builder.AppendLine($"- Docs archive manifest SHA-256: `{summary.DocsReleaseManifestSha256 ?? "pending"}`");
         builder.AppendLine($"- Catalog exact tree path: `{summary.CatalogExactTreePath ?? "pending"}`");
+        builder.AppendLine($"- Docs archive verification: `{summary.DocsArchiveVerificationState ?? "pending"}`");
+        builder.AppendLine($"- Docs catalog input: `{summary.DocsCatalogPath ?? "pending"}`");
+        builder.AppendLine($"- Docs trusted release root: `{summary.DocsTrustedReleaseRootPath ?? "pending"}`");
+        builder.AppendLine($"- Docs physical exact tree: `{summary.DocsPhysicalExactTreePath ?? "pending"}`");
+        builder.AppendLine($"- Docs verified file count: `{summary.DocsVerifiedFileCount?.ToString(CultureInfo.InvariantCulture) ?? "pending"}`");
         builder.AppendLine($"- Tag commit: `{summary.TagCommit ?? "pending until publish validation"}`");
         builder.AppendLine($"- Attestation: {summary.Attestation}");
     }

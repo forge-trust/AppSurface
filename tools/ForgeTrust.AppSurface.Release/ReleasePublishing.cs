@@ -84,6 +84,32 @@ internal sealed class ReleasePublishing
                 "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
         }
 
+        var evidenceSummary = evidence.Summary;
+        if (options.Version.IsStable && evidence.Bundle is not null)
+        {
+            var docsEvidence = await ReleaseDocsArchiveGate.ValidateStableAsync(
+                _workspace,
+                options,
+                evidence.Bundle,
+                cancellationToken);
+            if (docsEvidence.Diagnostics.Count > 0)
+            {
+                throw new ReleaseToolException(docsEvidence.Diagnostics[0]);
+            }
+
+            if (docsEvidence.Proof is not null)
+            {
+                evidenceSummary = evidenceSummary with
+                {
+                    DocsArchiveVerificationState = docsEvidence.Proof.State,
+                    DocsCatalogPath = docsEvidence.Proof.CatalogPath,
+                    DocsTrustedReleaseRootPath = docsEvidence.Proof.TrustedReleaseRootPath,
+                    DocsPhysicalExactTreePath = docsEvidence.Proof.PhysicalExactTreePath,
+                    DocsVerifiedFileCount = docsEvidence.Proof.VerifiedFileCount
+                };
+            }
+        }
+
         var tempDirectory = Path.Join(Path.GetTempPath(), "appsurface-release", safeTagSegment);
         Directory.CreateDirectory(tempDirectory);
         var notesFile = Path.Join(tempDirectory, "release-notes.md");
@@ -97,9 +123,9 @@ internal sealed class ReleasePublishing
             notesFile,
             options.Version.IsStable ? "stable" : "prerelease",
             evidencePathInTag,
-            evidence.Summary.SubjectSha256,
+            evidenceSummary.SubjectSha256,
             tagCommit.Trim(),
-            evidence.Summary.DocsReleaseManifestSha256,
+            evidenceSummary.DocsReleaseManifestSha256,
             !options.Version.IsStable,
             options.DryRun);
     }
