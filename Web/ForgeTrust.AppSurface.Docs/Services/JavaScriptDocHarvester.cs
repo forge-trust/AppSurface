@@ -387,18 +387,31 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         Node script,
         string relativePath)
     {
-        var dispatches = new List<JavaScriptEventDispatchEvidence>();
-        foreach (var node in EnumerateNodes(script))
+        return EnumerateNodes(script)
+            .Select(node => CreateEventDispatchEvidence(node, relativePath))
+            .Where(static dispatch => dispatch.HasValue)
+            .Select(static dispatch => dispatch.GetValueOrDefault())
+            .ToArray();
+    }
+
+    private static JavaScriptEventDispatchEvidence? CreateEventDispatchEvidence(Node node, string relativePath)
+    {
+        if (node is not CallExpression callExpression)
         {
-            if (node is CallExpression callExpression
-                && IsDispatchEventCallee(callExpression.Callee)
-                && TryGetDirectCustomEventName(callExpression, out var eventName))
-            {
-                dispatches.Add(new JavaScriptEventDispatchEvidence(eventName, relativePath, callExpression.Location.Start.Line));
-            }
+            return null;
         }
 
-        return dispatches;
+        if (!IsDispatchEventCallee(callExpression.Callee))
+        {
+            return null;
+        }
+
+        if (!TryGetDirectCustomEventName(callExpression, out var eventName))
+        {
+            return null;
+        }
+
+        return new JavaScriptEventDispatchEvidence(eventName, relativePath, callExpression.Location.Start.Line);
     }
 
     private static bool IsDispatchEventCallee(Expression callee)

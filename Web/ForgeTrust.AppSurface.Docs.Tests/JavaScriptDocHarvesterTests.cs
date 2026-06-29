@@ -537,12 +537,17 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             "src/runtime.js",
             """
             const constantName = "razorwire:constant";
+            const dispatchName = "dispatchEvent";
             const held = new CustomEvent("razorwire:held");
             const eventName = `razorwire:${mode}`;
+            document.dispatchEvent();
+            document.dispatchEvent(new CustomEvent());
+            document.dispatchEvent(new CustomEvent("   "));
             document.dispatchEvent(new CustomEvent(constantName));
             document.dispatchEvent(new CustomEvent(`razorwire:template`));
             document.dispatchEvent(held);
             document.dispatchEvent(new Event("razorwire:event"));
+            window[dispatchName](new CustomEvent("razorwire:computed-variable"));
             fire("razorwire:helper");
             function fire(name) {
               document.dispatchEvent(new CustomEvent(name));
