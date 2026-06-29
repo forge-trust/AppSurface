@@ -210,6 +210,23 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
     }
 
     [Fact]
+    public async Task MapAppSurfaceConfigAuditDiagnostics_ReturnsSafeProblemWhenEnvironmentProviderThrows()
+    {
+        await using var host = await StartHostAsync(environmentProviderThrows: true);
+
+        using var request = CreateAuthorizedRequest(AppSurfaceConfigAuditDiagnosticsDefaults.DefaultRoute);
+        using var response = await host.Client.SendAsync(request);
+        var json = await response.Content.ReadAsStringAsync();
+        using var problem = JsonDocument.Parse(json);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        AssertProblem(problem, "AppSurface environment services failed.", "environment provider threw");
+        Assert.DoesNotContain("raw-secret", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("InvalidOperationException", json, StringComparison.Ordinal);
+        AssertNoStore(response);
+    }
+
+    [Fact]
     public async Task MapAppSurfaceConfigAuditDiagnostics_ReturnsSafeProblemWhenReporterThrows()
     {
         await using var host = await StartHostAsync(reporterThrows: true);
@@ -224,6 +241,44 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
         Assert.DoesNotContain("raw-secret", json, StringComparison.Ordinal);
         Assert.DoesNotContain("InvalidOperationException", json, StringComparison.Ordinal);
         AssertNoStore(response);
+    }
+
+    [Fact]
+    public async Task MapAppSurfaceConfigAuditDiagnostics_ReturnsSafeProblemWhenJsonSerializationFails()
+    {
+        var services = new ServiceCollection();
+        ConfigureServices(
+            services,
+            registerPolicy: true,
+            registerReporter: true,
+            registerEnvironmentProvider: true,
+            reporterThrows: false,
+            environmentProviderThrows: false,
+            environmentName: "Production");
+        using var serviceProvider = services.BuildServiceProvider();
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = serviceProvider,
+            Response =
+            {
+                Body = new MemoryStream()
+            }
+        };
+
+        var result = AppSurfaceConfigAuditDiagnosticsEndpointRouteBuilderExtensions.CreateReportResult(
+            httpContext,
+            _ => throw new NotSupportedException("raw-secret should never leak"));
+        await result.ExecuteAsync(httpContext);
+        var json = await ReadResponseBodyAsync(httpContext.Response);
+        using var problem = JsonDocument.Parse(json);
+
+        Assert.Equal(StatusCodes.Status500InternalServerError, httpContext.Response.StatusCode);
+        AssertProblem(problem, "AppSurface config audit JSON failed.", "could not serialize");
+        Assert.DoesNotContain("raw-secret", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotSupportedException", json, StringComparison.Ordinal);
+        Assert.Equal("application/problem+json", httpContext.Response.ContentType);
+        Assert.Equal("no-store", httpContext.Response.Headers.CacheControl);
+        Assert.Equal("no-cache", httpContext.Response.Headers.Pragma);
     }
 
     private static WebApplication CreateUnstartedApp()
@@ -245,6 +300,7 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
         bool registerReporter = true,
         bool registerEnvironmentProvider = true,
         bool reporterThrows = false,
+        bool environmentProviderThrows = false,
         string environmentName = "Production")
     {
         if (!registerAuthorizationMiddleware)
@@ -260,6 +316,7 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
             registerReporter,
             registerEnvironmentProvider,
             reporterThrows,
+            environmentProviderThrows,
             environmentName);
 
         var app = builder.Build();
@@ -296,6 +353,7 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
                         registerReporter: true,
                         registerEnvironmentProvider: true,
                         reporterThrows: false,
+                        environmentProviderThrows: false,
                         environmentName: "Production");
                 });
                 webBuilder.Configure(app =>
@@ -324,8 +382,10 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
         bool registerReporter,
         bool registerEnvironmentProvider,
         bool reporterThrows,
+        bool environmentProviderThrows,
         string environmentName)
     {
+        services.AddLogging();
         services
             .AddAuthentication(HeaderAuthenticationHandler.SchemeName)
             .AddScheme<AuthenticationSchemeOptions, HeaderAuthenticationHandler>(
@@ -346,7 +406,10 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
 
         if (registerEnvironmentProvider)
         {
-            services.AddSingleton<IEnvironmentProvider>(new TestEnvironmentProvider(environmentName));
+            services.AddSingleton<IEnvironmentProvider>(
+                environmentProviderThrows
+                    ? new ThrowingEnvironmentProvider()
+                    : new TestEnvironmentProvider(environmentName));
         }
     }
 
@@ -384,6 +447,13 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
     {
         Assert.True(response.Headers.CacheControl?.NoStore);
         Assert.Contains("no-cache", response.Headers.Pragma.Select(value => value.Name));
+    }
+
+    private static async Task<string> ReadResponseBodyAsync(HttpResponse response)
+    {
+        response.Body.Position = 0;
+        using var reader = new StreamReader(response.Body);
+        return await reader.ReadToEndAsync();
     }
 
     private sealed class StartedHost(IHost host, HttpClient client) : IAsyncDisposable
@@ -432,6 +502,15 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
         public string Environment => environmentName;
 
         public bool IsDevelopment => string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase);
+
+        public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
+    }
+
+    private sealed class ThrowingEnvironmentProvider : IEnvironmentProvider
+    {
+        public string Environment => throw new InvalidOperationException("raw-secret should never leak");
+
+        public bool IsDevelopment => false;
 
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
     }

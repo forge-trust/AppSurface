@@ -59,15 +59,21 @@ public static class AppSurfaceConfigAuditDiagnosticsEndpointRouteBuilderExtensio
         ArgumentException.ThrowIfNullOrWhiteSpace(authorizationPolicyName);
 
         return endpoints
-            .MapGet(pattern, CreateReportResult)
+            .MapGet(pattern, (Func<HttpContext, IResult>)CreateReportResult)
             .WithDisplayName("AppSurface configuration audit diagnostics")
             .ExcludeFromDescription()
             .RequireAuthorization(authorizationPolicyName);
     }
 
-    private static IResult CreateReportResult(HttpContext httpContext)
+    private static IResult CreateReportResult(HttpContext httpContext) =>
+        CreateReportResult(httpContext, SerializeReport);
+
+    internal static IResult CreateReportResult(
+        HttpContext httpContext,
+        Func<ConfigAuditReport, string> serializeReport)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
+        ArgumentNullException.ThrowIfNull(serializeReport);
         SetNoStoreHeaders(httpContext);
 
         var services = httpContext.RequestServices;
@@ -131,7 +137,7 @@ public static class AppSurfaceConfigAuditDiagnosticsEndpointRouteBuilderExtensio
 
         try
         {
-            var json = JsonSerializer.Serialize(report, ReportJsonOptions);
+            var json = serializeReport(report);
             return Results.Text(json, MediaTypeNames.Application.Json, Encoding.UTF8);
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
@@ -149,6 +155,9 @@ public static class AppSurfaceConfigAuditDiagnosticsEndpointRouteBuilderExtensio
         httpContext.Response.Headers.CacheControl = "no-store";
         httpContext.Response.Headers.Pragma = "no-cache";
     }
+
+    private static string SerializeReport(ConfigAuditReport report) =>
+        JsonSerializer.Serialize(report, ReportJsonOptions);
 
     private static IResult CreateSetupProblem(string title, string problem, string cause, string fix) =>
         CreateProblem(title, problem, cause, fix);
