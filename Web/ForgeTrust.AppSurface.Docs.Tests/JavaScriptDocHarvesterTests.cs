@@ -394,6 +394,48 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldFilterVerifierDocletsToPublicEvents()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public helper.
+             * @public
+             */
+            export function wireHelper() {}
+
+            /**
+             * Internal event.
+             * @event razorwire:internal-status
+             * @target document
+             * @firesWhen internal status changes.
+             * @detail none
+             */
+
+            /**
+             * Public event.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:public-status
+             * @target document
+             * @firesWhen status changes.
+             * @detail none
+             */
+            document.dispatchEvent(new CustomEvent("razorwire:public-status"));
+            (function noop() {})();
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequirePublicTag = false;
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldNotWarn_WhenPublicEventDocletMatchesBareAndComputedLiteralDispatches()
     {
         await WriteAsync(
