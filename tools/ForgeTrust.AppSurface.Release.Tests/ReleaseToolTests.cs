@@ -2730,6 +2730,91 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task StableDocsArchiveGateReportsTrustedRootInspectionFailure()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        using var inspectorScope = ReleaseDocsArchiveGate.UseFileSystemInspectorForTesting(
+            new DelegatingFileSystemInspector
+            {
+                DirectoryAttributes = directory => string.Equals(directory.FullName, docs.TrustedReleaseRootPath, StringComparison.Ordinal)
+                    ? throw new IOException("trusted root attributes unavailable")
+                    : directory.Attributes
+            });
+
+        var result = await ValidateStableDocsArchiveGateAsync(docs);
+
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Null(result.Proof);
+        Assert.Equal("release-docs-archive-verification-failed", diagnostic.Code);
+        Assert.Contains("trusted root", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("trusted root attributes unavailable", diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StableDocsArchiveGateReportsExactTreeSegmentInspectionFailure()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var releasesPath = Path.Join(docs.TrustedReleaseRootPath, "releases");
+        using var inspectorScope = ReleaseDocsArchiveGate.UseFileSystemInspectorForTesting(
+            new DelegatingFileSystemInspector
+            {
+                DirectoryAttributes = directory => string.Equals(directory.FullName, releasesPath, StringComparison.Ordinal)
+                    ? throw new IOException("release segment attributes unavailable")
+                    : directory.Attributes
+            });
+
+        var result = await ValidateStableDocsArchiveGateAsync(docs);
+
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Null(result.Proof);
+        Assert.Equal("release-docs-archive-verification-failed", diagnostic.Code);
+        Assert.Contains("exact tree is unsafe", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("release segment attributes unavailable", diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWhenArchiveEntryAttributesCannotBeRead()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        using var inspectorScope = ReleaseDocsArchiveGate.UseFileSystemInspectorForTesting(
+            new DelegatingFileSystemInspector
+            {
+                FileSystemInfoAttributes = entry => string.Equals(entry.Name, "index.html", StringComparison.Ordinal)
+                    ? throw new IOException("archive entry attributes unavailable")
+                    : entry.Attributes
+            });
+
+        var result = await RunStablePublishWithDocsAsync(docs);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-archive-verification-failed", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("archive entry attributes unavailable", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsStableReleaseWhenReleaseManifestFileAttributesCannotBeRead()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        using var inspectorScope = ReleaseDocsArchiveGate.UseFileSystemInspectorForTesting(
+            new DelegatingFileSystemInspector
+            {
+                FileAttributes = file => string.Equals(file.Name, ".appsurface-docs-release-manifest.json", StringComparison.Ordinal)
+                    ? throw new IOException("release manifest attributes unavailable")
+                    : file.Attributes
+            });
+
+        var result = await RunStablePublishWithDocsAsync(docs);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-archive-verification-failed", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("release manifest attributes unavailable", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublishRejectsStableReleaseWhenReleaseManifestFileDigestMismatches()
     {
         await SeedRepositoryAsync();
@@ -4187,6 +4272,51 @@ public sealed class ReleaseToolTests : IDisposable
 
         current.AsObject()[path[^1]] = null;
         return root.ToJsonString(ReleaseJson.Options) + Environment.NewLine;
+    }
+
+    private sealed class DelegatingFileSystemInspector : ReleaseDocsArchiveGate.IFileSystemInspector
+    {
+        internal Func<DirectoryInfo, bool>? DirectoryExists { get; init; }
+
+        internal Func<DirectoryInfo, FileAttributes>? DirectoryAttributes { get; init; }
+
+        internal Func<DirectoryInfo, FileSystemInfo[]>? FileSystemInfos { get; init; }
+
+        internal Func<FileSystemInfo, FileAttributes>? FileSystemInfoAttributes { get; init; }
+
+        internal Func<FileInfo, bool>? FileExists { get; init; }
+
+        internal Func<FileInfo, FileAttributes>? FileAttributes { get; init; }
+
+        bool ReleaseDocsArchiveGate.IFileSystemInspector.DirectoryExists(DirectoryInfo directory)
+        {
+            return DirectoryExists?.Invoke(directory) ?? directory.Exists;
+        }
+
+        FileAttributes ReleaseDocsArchiveGate.IFileSystemInspector.GetDirectoryAttributes(DirectoryInfo directory)
+        {
+            return DirectoryAttributes?.Invoke(directory) ?? directory.Attributes;
+        }
+
+        FileSystemInfo[] ReleaseDocsArchiveGate.IFileSystemInspector.EnumerateFileSystemInfos(DirectoryInfo directory)
+        {
+            return FileSystemInfos?.Invoke(directory) ?? directory.EnumerateFileSystemInfos().ToArray();
+        }
+
+        FileAttributes ReleaseDocsArchiveGate.IFileSystemInspector.GetFileSystemInfoAttributes(FileSystemInfo entry)
+        {
+            return FileSystemInfoAttributes?.Invoke(entry) ?? entry.Attributes;
+        }
+
+        bool ReleaseDocsArchiveGate.IFileSystemInspector.FileExists(FileInfo file)
+        {
+            return FileExists?.Invoke(file) ?? file.Exists;
+        }
+
+        FileAttributes ReleaseDocsArchiveGate.IFileSystemInspector.GetFileAttributes(FileInfo file)
+        {
+            return FileAttributes?.Invoke(file) ?? file.Attributes;
+        }
     }
 
     private sealed record CliResult(int ExitCode, string Stdout, string Stderr);

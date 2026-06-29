@@ -27,6 +27,9 @@ internal static class ReleaseDocsArchiveGate
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
+    private static readonly PhysicalFileSystemInspector DefaultFileSystemInspector = new();
+    private static readonly AsyncLocal<IFileSystemInspector?> FileSystemInspectorOverride = new();
+
     /// <summary>
     /// Validates the stable release docs archive contract using command-supplied catalog inputs.
     /// </summary>
@@ -263,7 +266,7 @@ internal static class ReleaseDocsArchiveGate
         {
             current = Path.Join(current, segment);
             var info = new DirectoryInfo(current);
-            if (!info.Exists)
+            if (!FileSystemInspector.DirectoryExists(info))
             {
                 detail = $"Directory segment `{DisplayPath(current)}` does not exist.";
                 return false;
@@ -272,7 +275,7 @@ internal static class ReleaseDocsArchiveGate
             FileAttributes attributes;
             try
             {
-                attributes = info.Attributes;
+                attributes = FileSystemInspector.GetDirectoryAttributes(info);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
             {
@@ -457,7 +460,7 @@ internal static class ReleaseDocsArchiveGate
         try
         {
             var info = new DirectoryInfo(directoryPath);
-            if (!info.Exists)
+            if (!FileSystemInspector.DirectoryExists(info))
             {
                 publicIssue = "Directory is missing.";
                 detail = File.Exists(directoryPath)
@@ -466,7 +469,7 @@ internal static class ReleaseDocsArchiveGate
                 return false;
             }
 
-            if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+            if ((FileSystemInspector.GetDirectoryAttributes(info) & FileAttributes.ReparsePoint) != 0)
             {
                 publicIssue = "Directory is unsafe.";
                 detail = $"Directory `{DisplayPath(directoryPath)}` is a symlink, junction, or reparse point.";
@@ -626,7 +629,7 @@ internal static class ReleaseDocsArchiveGate
             FileSystemInfo[] entries;
             try
             {
-                entries = directory.EnumerateFileSystemInfos().ToArray();
+                entries = FileSystemInspector.EnumerateFileSystemInfos(directory);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
             {
@@ -639,7 +642,7 @@ internal static class ReleaseDocsArchiveGate
                 FileAttributes attributes;
                 try
                 {
-                    attributes = entry.Attributes;
+                    attributes = FileSystemInspector.GetFileSystemInfoAttributes(entry);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
                 {
@@ -694,7 +697,7 @@ internal static class ReleaseDocsArchiveGate
             }
 
             fileInfo = new FileInfo(normalizedFilePath);
-            if (!fileInfo.Exists)
+            if (!FileSystemInspector.FileExists(fileInfo))
             {
                 issue = string.Equals(displayPath, ReleaseManifestFileName, StringComparison.Ordinal)
                     ? $"Release manifest `{ReleaseManifestFileName}` is missing."
@@ -702,7 +705,7 @@ internal static class ReleaseDocsArchiveGate
                 return false;
             }
 
-            if ((fileInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+            if ((FileSystemInspector.GetFileAttributes(fileInfo) & FileAttributes.ReparsePoint) != 0)
             {
                 issue = string.Equals(displayPath, ReleaseManifestFileName, StringComparison.Ordinal)
                     ? $"Release manifest `{ReleaseManifestFileName}` is a symlink or reparse point."
@@ -965,9 +968,109 @@ internal static class ReleaseDocsArchiveGate
         return path.Replace('\\', '/');
     }
 
+    private static IFileSystemInspector FileSystemInspector => FileSystemInspectorOverride.Value ?? DefaultFileSystemInspector;
+
+    /// <summary>
+    /// Overrides release docs archive filesystem inspection for the current async test flow.
+    /// </summary>
+    /// <param name="inspector">Inspector used to read filesystem metadata until the returned scope is disposed.</param>
+    /// <returns>A disposable scope that restores the previous inspector.</returns>
+    /// <remarks>
+    /// Production code uses the default physical inspector. Tests use this seam to force deterministic metadata and enumeration failures that
+    /// operating systems otherwise expose only through race-prone permission or reparse-point behavior.
+    /// </remarks>
+    internal static IDisposable UseFileSystemInspectorForTesting(IFileSystemInspector inspector)
+    {
+        ArgumentNullException.ThrowIfNull(inspector);
+        var previous = FileSystemInspectorOverride.Value;
+        FileSystemInspectorOverride.Value = inspector;
+        return new FileSystemInspectorScope(previous);
+    }
+
     private static StringComparison PhysicalPathComparison { get; } = OperatingSystem.IsWindows()
         ? StringComparison.OrdinalIgnoreCase
         : StringComparison.Ordinal;
+
+    /// <summary>
+    /// Reads filesystem metadata used by stable docs archive validation.
+    /// </summary>
+    /// <remarks>
+    /// The interface is intentionally narrow and internal: callers should not use it to virtualize archive bytes, only metadata operations whose
+    /// real filesystem failures are difficult to trigger deterministically in tests.
+    /// </remarks>
+    internal interface IFileSystemInspector
+    {
+        /// <summary>
+        /// Returns whether the directory currently exists.
+        /// </summary>
+        bool DirectoryExists(DirectoryInfo directory);
+
+        /// <summary>
+        /// Reads directory attributes, throwing the same filesystem exceptions as <see cref="FileSystemInfo.Attributes"/>.
+        /// </summary>
+        FileAttributes GetDirectoryAttributes(DirectoryInfo directory);
+
+        /// <summary>
+        /// Enumerates immediate entries in a directory.
+        /// </summary>
+        FileSystemInfo[] EnumerateFileSystemInfos(DirectoryInfo directory);
+
+        /// <summary>
+        /// Reads attributes for a file or directory entry discovered during archive traversal.
+        /// </summary>
+        FileAttributes GetFileSystemInfoAttributes(FileSystemInfo entry);
+
+        /// <summary>
+        /// Returns whether the file currently exists.
+        /// </summary>
+        bool FileExists(FileInfo file);
+
+        /// <summary>
+        /// Reads file attributes, throwing the same filesystem exceptions as <see cref="FileSystemInfo.Attributes"/>.
+        /// </summary>
+        FileAttributes GetFileAttributes(FileInfo file);
+    }
+
+    private sealed class PhysicalFileSystemInspector : IFileSystemInspector
+    {
+        public bool DirectoryExists(DirectoryInfo directory)
+        {
+            return directory.Exists;
+        }
+
+        public FileAttributes GetDirectoryAttributes(DirectoryInfo directory)
+        {
+            return directory.Attributes;
+        }
+
+        public FileSystemInfo[] EnumerateFileSystemInfos(DirectoryInfo directory)
+        {
+            return directory.EnumerateFileSystemInfos().ToArray();
+        }
+
+        public FileAttributes GetFileSystemInfoAttributes(FileSystemInfo entry)
+        {
+            return entry.Attributes;
+        }
+
+        public bool FileExists(FileInfo file)
+        {
+            return file.Exists;
+        }
+
+        public FileAttributes GetFileAttributes(FileInfo file)
+        {
+            return file.Attributes;
+        }
+    }
+
+    private sealed class FileSystemInspectorScope(IFileSystemInspector? previous) : IDisposable
+    {
+        public void Dispose()
+        {
+            FileSystemInspectorOverride.Value = previous;
+        }
+    }
 
     private sealed record ReleaseDocsCatalogEntry(string ExactTreePath, string ReleaseManifestSha256);
 
