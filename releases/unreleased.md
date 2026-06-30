@@ -8,6 +8,10 @@ This is the living release note for the next coordinated AppSurface version afte
 - `ForgeTrust.AppSurface.Web` now owns the baseline PWA install contract in the existing Web package: app-owned
   `WebOptions.Pwa` metadata maps a manifest endpoint, MVC/Razor head tags, development diagnostics, and an explicit
   opt-in offline fallback, with `appsurface pwa verify` providing a copy-paste CLI proof for the running origin.
+- `ForgeTrust.AppSurface.Workers` and `ForgeTrust.AppSurface.Workers.DurableTask` introduce a DurableTask-first worker
+  path: host-neutral claim/completion/projection-repair contracts, privacy-safe repair diagnostics, bounded projection
+  repair requests, and passive Durable Task-facing schedule/wait/repair/complete/fault/retry/timeout decisions without
+  adding an EF/Postgres queue or scheduler runtime.
 
 ## Included in the next coordinated version
 
@@ -36,6 +40,10 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Auth now has a Start Here adoption ladder that helps package consumers choose between host-owned
   ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces
   without implying AppSurface owns production identity providers, policies, user stores, or enforcement.
+- AppSurface Workers adds a durable worker contract layer and DurableTask adapter. Worker chains separate executor
+  claims, terminal completion facts, and projection repair so stale projections can be reconciled without re-running
+  side effects. Durable Task remains the preferred runtime boundary; EF/Postgres is left to app-owned product state or a
+  future optional adapter, not the v1 AppSurface runtime.
 
 ## Migration watch
 
