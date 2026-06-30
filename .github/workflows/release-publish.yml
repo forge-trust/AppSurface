@@ -116,6 +116,20 @@ jobs:
         env:
           VERSION: ${{ needs.validate-release.outputs.version }}
           EXISTING_PAGES_ROOT: ${{ runner.temp }}/appsurface-existing-pages
+          AppSurfaceDocs__Contributor__DefaultBranch: ${{ inputs.base-ref }}
+          AppSurfaceDocs__Contributor__SourceRef: ${{ needs.validate-release.outputs.tag_commit }}
+          AppSurfaceDocs__Contributor__SourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{branch}/{path}
+          AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{ref}/{path}#L{line}
+          AppSurfaceDocs__Contributor__EditUrlTemplate: https://github.com/${{ github.repository }}/edit/{branch}/{path}
+          AppSurfaceDocs__Contributor__LastUpdatedMode: Git
+          AppSurfaceDocs__Identity__DisplayName: AppSurface
+          AppSurfaceDocs__Identity__Wordmark__HighlightText: Surface
+          AppSurfaceDocs__Identity__Wordmark__HighlightColor: "#3b82f6"
+          AppSurfaceDocs__Identity__BrandingAssets__DirectoryPath: branding
+          AppSurfaceDocs__Identity__BrandingAssets__AllowSvgAssets: "true"
+          AppSurfaceDocs__Identity__Logo__Path: /branding/appsurface-site-icon.svg
+          AppSurfaceDocs__Identity__Favicon__SvgPath: /branding/appsurface-site-icon.svg
+          AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js
         run: |
           set -euo pipefail
           exact_tree="${RUNNER_TEMP}/appsurface-docs-exact/releases/${VERSION}"

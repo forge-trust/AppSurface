@@ -237,6 +237,32 @@ internal sealed class ReleasePublishing
                 "Recover manually or cut a fix-forward release; this tool does not mutate already-public releases.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
         }
+
+        if (IsGitHubReleaseNotFound(result))
+        {
+            return;
+        }
+
+        var detail = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput.Trim() : result.StandardError.Trim();
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            detail = $"`gh release view {tag}` exited with code {result.ExitCode}.";
+        }
+
+        throw new ReleaseToolException(ReleaseDiagnostic.Error(
+            "release-github-release-state-unavailable",
+            $"GitHub Release '{tag}' state could not be verified.",
+            detail,
+            "Retry after GitHub CLI authentication, API availability, or rate-limit issues are resolved.",
+            "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+    }
+
+    private static bool IsGitHubReleaseNotFound(CommandResult result)
+    {
+        var output = string.Concat(result.StandardOutput, "\n", result.StandardError);
+        return output.Contains("not found", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("release not found", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("could not find a release", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task ValidatePackagePublishingSucceededAsync(SemVer version, string tag, string tagCommit, CancellationToken cancellationToken)

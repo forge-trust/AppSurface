@@ -45,6 +45,7 @@ internal sealed class ReleaseDocsPublication
         }
 
         ValidateExactTreePath(request.ExactTreePath);
+        ValidatePublicationOutputPaths(request);
         Directory.CreateDirectory(Path.GetDirectoryName(request.ArchivePath)!);
         Directory.CreateDirectory(Path.GetDirectoryName(request.PlanPath)!);
         Directory.CreateDirectory(request.PagesStagingRoot);
@@ -247,12 +248,14 @@ internal sealed class ReleaseDocsPublication
         var promotedStable = request.Version.IsStable && request.PromoteRecommended;
         if (promotedStable)
         {
-            var highestStable = versions
+            var stableCandidates = versions
                 .Select(version => version.TryGetPropertyValue("version", out var value) ? value?.GetValue<string>() : null)
+                .Append(existingRecommendedVersion)
                 .Where(value => !string.IsNullOrWhiteSpace(value))
                 .Select(value => TryParseStable(value!, out var parsed) ? parsed : null)
                 .Where(value => value is not null)
-                .Cast<SemVer>()
+                .Cast<SemVer>();
+            var highestStable = stableCandidates
                 .OrderByDescending(value => value.Major)
                 .ThenByDescending(value => value.Minor)
                 .ThenByDescending(value => value.Patch)
@@ -439,6 +442,53 @@ internal sealed class ReleaseDocsPublication
                     "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
             }
         }
+    }
+
+    private void ValidatePublicationOutputPaths(DocsPublicationRequest request)
+    {
+        ValidatePagesStagingRoot(request.PagesStagingRoot, "repository root", _workspace.RepositoryRoot);
+        ValidatePagesStagingRoot(request.PagesStagingRoot, "docs exact tree", request.ExactTreePath);
+        ValidatePagesStagingRoot(request.PagesStagingRoot, "archive output", request.ArchivePath);
+        ValidatePagesStagingRoot(request.PagesStagingRoot, "publication plan output", request.PlanPath);
+        if (!string.IsNullOrWhiteSpace(request.SummaryPath))
+        {
+            ValidatePagesStagingRoot(request.PagesStagingRoot, "recovery summary output", request.SummaryPath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.ExistingPagesRoot))
+        {
+            ValidatePagesStagingRoot(request.PagesStagingRoot, "existing Pages root", request.ExistingPagesRoot);
+        }
+    }
+
+    private void ValidatePagesStagingRoot(string stagingRoot, string relatedPathDescription, string relatedPath)
+    {
+        var fullStagingRoot = NormalizePath(stagingRoot);
+        var fullRelatedPath = NormalizePath(relatedPath);
+        if (IsFilesystemRoot(fullStagingRoot)
+            || string.Equals(fullStagingRoot, fullRelatedPath, StringComparison.Ordinal)
+            || ReleaseWorkspace.IsUnderPath(fullStagingRoot, fullRelatedPath)
+            || ReleaseWorkspace.IsUnderPath(fullRelatedPath, fullStagingRoot))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-docs-publication-output-path-unsafe",
+                "Docs publication received an unsafe Pages staging root.",
+                $"`--pages-staging-root {_workspace.DisplayPath(fullStagingRoot)}` overlaps the {relatedPathDescription} `{_workspace.DisplayPath(fullRelatedPath)}`.",
+                "Use a disposable staging directory that is separate from the repository, exact tree, existing Pages root, and generated artifact outputs.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
+        }
+    }
+
+    private static string NormalizePath(string path)
+    {
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+    }
+
+    private static bool IsFilesystemRoot(string path)
+    {
+        var root = Path.GetPathRoot(path);
+        return !string.IsNullOrEmpty(root)
+            && string.Equals(path, Path.TrimEndingDirectorySeparator(root), StringComparison.Ordinal);
     }
 
     [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(

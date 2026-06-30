@@ -11,7 +11,7 @@
 ./eng/release publish --version 0.1.0-preview.1 --tag v0.1.0-preview.1 --dry-run
 ./eng/release check --version 0.1.0 --allow-existing-targets --fail-on-warnings --docs-catalog ./dist/docs/versions.json --docs-trusted-release-root ./dist/docs
 ./eng/release publish --version 0.1.0 --tag v0.1.0 --base-ref release/0.1.0 --dry-run
-./eng/release docs-publication --version 0.1.0 --tag v0.1.0 --docs-exact-tree ./dist/docs --archive-output ./artifacts/appsurface-docs-v0.1.0.tar.gz --pages-staging-root ./artifacts/pages --plan-output ./artifacts/docs-publication-plan.json --expected-release-manifest-sha256 <sha256>
+./eng/release docs-publication --version 0.1.0 --tag v0.1.0 --docs-exact-tree ./dist/docs --archive-output ./artifacts/appsurface-docs-v0.1.0.tar.gz --pages-staging-root /tmp/appsurface-pages --plan-output ./artifacts/docs-publication-plan.json --expected-release-manifest-sha256 <sha256>
 ```
 
 Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`, where the tag must already exist and must be annotated. `publish` defaults `--base-ref` to `main`; pass the release branch, such as `--base-ref release/0.1.0`, when publishing from a maintained release branch. `--base-ref` accepts branch names plus `origin/<branch>`, `refs/heads/<branch>`, and `refs/remotes/origin/<branch>` refs, then normalizes them before checking reachability from `origin/<branch>`. Tags, full object IDs, empty branch names, and unsupported refs are rejected because the publish gate must prove protected branch reachability.
@@ -67,6 +67,8 @@ Stable release docs publication is handled by the `docs-publication` command and
 
 Stable publication rejects release-manifest digest mismatches and recommended-version downgrades. GitHub Release assets are policy-immutable rather than platform-immutable: draft assets may be replaced during recovery for the same tag, but public release assets are no-clobber and require manual recovery or a fix-forward release.
 
+`--pages-staging-root` is reset before the verified Pages payload is copied into it. Use a disposable directory outside the repository and outside the exported exact tree, existing Pages root, archive output, plan output, and recovery summary output. The command rejects root paths and overlapping staging paths before deleting anything.
+
 ## Release Evidence Bundle
 
 `releases/v{version}.evidence.json` uses schema `appsurface-release-evidence-bundle-v1`. The release JSON describes the coordinated release metadata and generated release files; the release evidence bundle proves the generated release artifacts agree. Draft evidence is validated during release-prep pull request review. Tag-bound evidence is validated by `publish` against the resolved annotated tag commit.
@@ -86,7 +88,7 @@ appsurface docs export --repo . --output ./dist/docs --strict
 appsurface docs verify-archive --catalog ./dist/docs/versions.json --version 0.1.0 --trusted-release-root ./dist/docs
 ./eng/release check --version 0.1.0 --allow-existing-targets --fail-on-warnings --docs-catalog ./dist/docs/versions.json --docs-trusted-release-root ./dist/docs
 ./eng/release publish --version 0.1.0 --tag v0.1.0 --dry-run
-./eng/release docs-publication --version 0.1.0 --tag v0.1.0 --docs-exact-tree ./dist/docs --archive-output ./artifacts/appsurface-docs-v0.1.0.tar.gz --pages-staging-root ./artifacts/pages --plan-output ./artifacts/docs-publication-plan.json --expected-release-manifest-sha256 <sha256>
+./eng/release docs-publication --version 0.1.0 --tag v0.1.0 --docs-exact-tree ./dist/docs --archive-output ./artifacts/appsurface-docs-v0.1.0.tar.gz --pages-staging-root /tmp/appsurface-pages --plan-output ./artifacts/docs-publication-plan.json --expected-release-manifest-sha256 <sha256>
 ```
 
 `appsurface docs verify-archive` checks the same catalog-pinned exact tree used by runtime docs mounting. The release tool adds the release-specific gate: the selected stable catalog entry must be unique, public, available, pinned with `releaseManifestSha256`, equal to the release evidence docs fields, safely relative to the trusted release root, and byte-verified against `.appsurface-docs-release-manifest.json`. The release readiness report prints the authored catalog exact tree path and manifest digest separately from the resolved physical exact tree, catalog path, trusted root, verification state, and verified file count.
@@ -102,6 +104,7 @@ Repair loops are intentionally concrete:
 - `release-evidence-docs-exacttreepath-unsafe`: make `exactTreePath` trusted-root-relative with no parent or hidden segments.
 - `release-docs-archive-verification-failed` or `release-evidence-docs-manifest-digest-mismatch`: rerun docs export, restore the exact tree, or copy the matching manifest digest printed by export.
 - `release-docs-publication-manifest-digest-mismatch`: re-export docs from the annotated tag commit; the exact-tree manifest does not match release evidence.
+- `release-docs-publication-output-path-unsafe`: move `--pages-staging-root` to a disposable directory that cannot delete the repository, exact tree, existing Pages root, or generated artifact outputs.
 - `release-docs-publication-recommended-downgrade`: publish a newer stable release or perform documented manual recovery before changing `recommendedVersion`.
 
 ## Stable Release Policy
@@ -119,4 +122,4 @@ Every failure uses the same envelope:
 - `Fix`
 - `Docs`
 
-Common codes include `release-version-leading-v`, `release-version-invalid`, `release-target-exists`, `release-sidecar-invalid`, `release-stable-package-policy-missing`, `release-stable-packages-not-published`, `release-prerelease-label-unprotected`, `release-prerelease-packages-not-published`, `release-base-ref-invalid`, `release-tag-lightweight`, `release-tag-unreachable-from-base-ref`, `release-github-output-path-invalid`, `release-github-release-exists`, `release-evidence-missing`, `release-evidence-duplicate`, `release-evidence-schema-invalid`, `release-evidence-version-mismatch`, `release-evidence-artifact-digest-mismatch`, `release-evidence-content-source-commit-mismatch`, `release-evidence-release-manifest-schema-invalid`, `release-evidence-subject-digest-mismatch`, `release-evidence-docs-archive-required`, `release-evidence-docs-archive-incomplete`, `release-evidence-docs-exacttreepath-unsafe`, `release-evidence-docs-manifest-digest-mismatch`, `release-evidence-catalog-entry-mismatch`, `release-docs-catalog-input-missing`, `release-docs-catalog-version-unavailable`, `release-docs-archive-verification-failed`, `release-docs-publication-manifest-digest-mismatch`, `release-docs-publication-recommended-downgrade`, and `release-evidence-tag-commit-mismatch`.
+Common codes include `release-version-leading-v`, `release-version-invalid`, `release-target-exists`, `release-sidecar-invalid`, `release-stable-package-policy-missing`, `release-stable-packages-not-published`, `release-prerelease-label-unprotected`, `release-prerelease-packages-not-published`, `release-base-ref-invalid`, `release-tag-lightweight`, `release-tag-unreachable-from-base-ref`, `release-github-output-path-invalid`, `release-github-release-exists`, `release-github-release-state-unavailable`, `release-evidence-missing`, `release-evidence-duplicate`, `release-evidence-schema-invalid`, `release-evidence-version-mismatch`, `release-evidence-artifact-digest-mismatch`, `release-evidence-content-source-commit-mismatch`, `release-evidence-release-manifest-schema-invalid`, `release-evidence-subject-digest-mismatch`, `release-evidence-docs-archive-required`, `release-evidence-docs-archive-incomplete`, `release-evidence-docs-exacttreepath-unsafe`, `release-evidence-docs-manifest-digest-mismatch`, `release-evidence-catalog-entry-mismatch`, `release-docs-catalog-input-missing`, `release-docs-catalog-version-unavailable`, `release-docs-archive-verification-failed`, `release-docs-publication-manifest-digest-mismatch`, `release-docs-publication-output-path-unsafe`, `release-docs-publication-recommended-downgrade`, and `release-evidence-tag-commit-mismatch`.
