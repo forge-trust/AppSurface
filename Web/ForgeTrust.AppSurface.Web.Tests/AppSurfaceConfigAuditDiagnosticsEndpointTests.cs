@@ -168,7 +168,7 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
         Assert.DoesNotContain(references, name => name == "ForgeTrust.AppSurface.Web");
 
         var repositoryRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        var projectPath = Path.Combine(
+        var projectPath = Path.Join(
             repositoryRoot,
             "Config",
             "ForgeTrust.AppSurface.Config",
