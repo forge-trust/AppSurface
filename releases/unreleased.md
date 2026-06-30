@@ -48,6 +48,9 @@ This is the living release note for the next coordinated AppSurface version afte
   claims, terminal completion facts, and projection repair so stale projections can be reconciled without re-running
   side effects. Durable Task remains the preferred runtime boundary; EF/Postgres is left to app-owned product state or a
   future optional adapter, not the v1 AppSurface runtime.
+- AppSurface Docs now enriches exact same-group JavaScript typedef references across params, properties, returns, and
+  `@type` metadata. Rendered pages, item stubs, and search payloads link the reference to the canonical typedef and show
+  a bounded preview, while missing or ambiguous simple references emit warning diagnostics instead of breaking harvests.
 - Document the Config audit HTTP workflow, OpenAPI-hidden default behavior, native ASP.NET Core auth response ownership,
   host-owned rate limiting, and the Config captured-snapshot diff path.
 

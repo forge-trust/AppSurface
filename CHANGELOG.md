@@ -23,6 +23,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - `ForgeTrust.AppSurface.Web` now owns first-class PWA install metadata: enable `WebOptions.Pwa` to serve a manifest, emit Razor head metadata, expose development diagnostics, and opt into a starter offline fallback, then prove the running app with `appsurface pwa verify`.
 - AppSurface Auth adds a Start Here adoption ladder for choosing between host-owned ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces while keeping production identity providers, policies, user stores, and enforcement host-owned.
 - AppSurface Workers adds DurableTask-first worker contracts and adapter packages for claim, completion, retry, wait, timeout, stale-signal, and projection-repair decisions without introducing an EF/Postgres worker runtime.
+- AppSurface Docs now links exact same-group JavaScript typedef references from params, properties, returns, and `@type` metadata, adds bounded payload previews, and warns when a simple typedef reference is missing or ambiguous.
 
 ## 0.2.0-preview.1 - 2026-06-28
 
