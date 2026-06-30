@@ -145,7 +145,7 @@ public class RazorWireEndpointAuthorizationTests
     }
 
     [Fact]
-    public async Task StreamEndpoint_FilterDenial_RunsBeforeFallbackAuthorizationPolicy()
+    public async Task StreamEndpoint_FallbackAuthorizationPolicy_RunsBeforeStreamFiltersForAnonymousCaller()
     {
         await using var fixture = await RazorWireEndpointFixture.StartAsync(
             Environments.Development,
@@ -176,6 +176,45 @@ public class RazorWireEndpointAuthorizationTests
             });
 
         using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_FilterDenial_RunsAfterFallbackAuthorizationPolicyForAuthorizedCaller()
+    {
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            services =>
+            {
+                services
+                    .AddAuthentication(RazorWireHeaderAuthenticationHandler.SchemeName)
+                    .AddScheme<AuthenticationSchemeOptions, RazorWireHeaderAuthenticationHandler>(
+                        RazorWireHeaderAuthenticationHandler.SchemeName,
+                        _ => { });
+                services.AddAuthorization(
+                    options =>
+                    {
+                        options.FallbackPolicy = new AuthorizationPolicyBuilder(RazorWireHeaderAuthenticationHandler.SchemeName)
+                            .RequireAuthenticatedUser()
+                            .RequireClaim("scope", "app.fallback")
+                            .Build();
+                    });
+                services.AddSingleton<IRazorWireStreamAuthorizationFilter>(
+                    new FixedStreamAuthorizationFilter(AppSurfaceAuthResult.Forbidden()));
+                services.AddSingleton<IRazorWireStreamAuthorizer>(
+                    new FixedStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+            },
+            configureApp: app =>
+            {
+                app.UseAuthentication();
+                app.UseAuthorization();
+            });
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/_rw/streams/tenant-secret-42");
+        request.Headers.Add(RazorWireHeaderAuthenticationHandler.UserHeaderName, "razorwire-user");
+        request.Headers.Add(RazorWireHeaderAuthenticationHandler.ScopeHeaderName, "app.fallback");
+        using var response = await fixture.Client.SendAsync(request);
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -906,6 +945,7 @@ public class RazorWireEndpointAuthorizationTests
     {
         public const string SchemeName = "RazorWireHeaderTest";
         public const string UserHeaderName = "X-Test-User";
+        public const string ScopeHeaderName = "X-Test-Scope";
 
         public RazorWireHeaderAuthenticationHandler(
             IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -924,11 +964,21 @@ public class RazorWireEndpointAuthorizationTests
             }
 
             var userName = userValues[0]!;
+            var claims = new List<Claim>
+            {
+                new(ClaimTypes.Name, userName),
+                new(ClaimTypes.NameIdentifier, userName)
+            };
+            if (Request.Headers.TryGetValue(ScopeHeaderName, out var scopeValues))
+            {
+                claims.AddRange(
+                    scopeValues
+                        .SelectMany(value => value?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [])
+                        .Select(scope => new Claim("scope", scope)));
+            }
+
             var identity = new ClaimsIdentity(
-                [
-                    new Claim(ClaimTypes.Name, userName),
-                    new Claim(ClaimTypes.NameIdentifier, userName)
-                ],
+                claims,
                 SchemeName);
             var principal = new ClaimsPrincipal(identity);
             var ticket = new AuthenticationTicket(principal, SchemeName);

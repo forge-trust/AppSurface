@@ -181,7 +181,6 @@ public static class RazorWireEndpointRouteBuilderExtensions
                         }
                     }
                 })
-            .AllowAnonymous()
             .ExcludeFromDescription();
 
         if (!string.IsNullOrWhiteSpace(options.Hybrid.CorsPolicyName))
