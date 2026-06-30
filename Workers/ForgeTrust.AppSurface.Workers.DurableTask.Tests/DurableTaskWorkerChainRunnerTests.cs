@@ -104,6 +104,7 @@ public sealed class DurableTaskWorkerChainRunnerTests
 
         Assert.Equal(DurableTaskWorkerDecisionKind.Complete, decision.Kind);
         Assert.Null(decision.RetryPolicy);
+        Assert.Null(decision.Projection);
     }
 
     [Fact]

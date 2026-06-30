@@ -25,8 +25,8 @@ AppSurface ships as a coordinated package family. Before installing this package
 Durable Task owns persistence, replay, timers, activities, and external event delivery. This package owns the AppSurface worker mapping contract around those host responsibilities:
 
 1. Claim outcomes map to executor scheduling only when the app-owned contract returns `Claimed`.
-2. Completion outcomes map to projection repair only when a fresh terminal fact was recorded.
-3. Projection repair maps to completion, stale-signal, retry, or fault decisions and never schedules executor activity.
+2. Completion outcomes map to projection repair only when a fresh terminal fact was recorded; duplicate completion completes without carrying a projection payload.
+3. Projection repair maps to completion with a projection payload, stale-signal, retry, or fault decisions and never schedules executor activity.
 4. Wait and timeout decisions carry event and timeout metadata for host orchestration code to translate into Durable Task APIs.
 
 `FlowRetryPolicy` values describe retry intent only. The adapter does not execute retries; the Durable Task host translates the policy into activity or timer behavior.

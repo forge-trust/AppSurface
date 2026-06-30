@@ -66,15 +66,34 @@ public sealed class DurableTaskWorkerDecisionTests
     }
 
     [Fact]
-    public void Complete_CarriesProjectionPayloadWhenPayloadMatchesProjectionType()
+    public void Complete_DoesNotCarryProjectionPayloadWhenPayloadMatchesProjectionType()
     {
         var envelope = Envelope(DurableWorkerProjectionOutcome.Reconciled);
 
         var decision = DurableTaskWorkerDecision<string, string, string>.Complete(envelope);
 
         Assert.Equal(DurableTaskWorkerDecisionKind.Complete, decision.Kind);
+        Assert.Null(decision.Projection);
+        Assert.Equal(DurableWorkerProjectionOutcome.Reconciled, decision.SourceOutcome);
+    }
+
+    [Fact]
+    public void CompleteProjection_CarriesProjectionPayload()
+    {
+        var envelope = Envelope(DurableWorkerProjectionOutcome.Reconciled);
+
+        var decision = DurableTaskWorkerDecision<string, string, string>.CompleteProjection(envelope);
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.Complete, decision.Kind);
         Assert.Equal("payload", decision.Projection);
         Assert.Equal(DurableWorkerProjectionOutcome.Reconciled, decision.SourceOutcome);
+    }
+
+    [Fact]
+    public void CompleteProjection_RejectsNullEnvelope()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            DurableTaskWorkerDecision<string, string, string>.CompleteProjection(null!));
     }
 
     [Fact]

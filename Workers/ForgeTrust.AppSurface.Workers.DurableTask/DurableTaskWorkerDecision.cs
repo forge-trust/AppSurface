@@ -115,7 +115,7 @@ public sealed record DurableTaskWorkerDecision<TWork, TResult, TProjection>
             claim.Payload,
             default,
             default,
-            null,
+            default,
             null,
             retryPolicy,
             claim.Outcome);
@@ -182,7 +182,7 @@ public sealed record DurableTaskWorkerDecision<TWork, TResult, TProjection>
     }
 
     /// <summary>
-    /// Creates a complete decision from a worker envelope.
+    /// Creates a complete decision from a worker envelope without carrying a projection payload.
     /// </summary>
     /// <typeparam name="TPayload">Envelope payload type.</typeparam>
     /// <param name="envelope">Envelope that completed the worker chain.</param>
@@ -199,7 +199,31 @@ public sealed record DurableTaskWorkerDecision<TWork, TResult, TProjection>
             envelope.Diagnostic,
             default,
             default,
-            envelope.Payload is TProjection projection ? projection : default,
+            default,
+            null,
+            null,
+            null,
+            envelope.Outcome);
+    }
+
+    /// <summary>
+    /// Creates a complete decision from a reconciled projection envelope.
+    /// </summary>
+    /// <param name="envelope">Projection envelope produced by projection repair.</param>
+    /// <returns>A complete decision that carries the repaired projection.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="envelope"/> is null.</exception>
+    public static DurableTaskWorkerDecision<TWork, TResult, TProjection> CompleteProjection(
+        DurableWorkerEnvelope<TProjection> envelope)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+
+        return new(
+            DurableTaskWorkerDecisionKind.Complete,
+            envelope.Correlation,
+            envelope.Diagnostic,
+            default,
+            default,
+            envelope.Payload,
             null,
             null,
             null,

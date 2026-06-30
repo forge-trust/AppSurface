@@ -254,6 +254,6 @@ public sealed class DurableTaskWorkerChainRunner<TWork, TResult, TProjection>
                     _options.Value.ProjectionRetryPolicy),
             DurableWorkerProjectionOutcome.Conflict or DurableWorkerProjectionOutcome.Unrecoverable =>
                 DurableTaskWorkerDecision<TWork, TResult, TProjection>.Fault(envelope),
-            _ => DurableTaskWorkerDecision<TWork, TResult, TProjection>.Complete(envelope),
+            _ => DurableTaskWorkerDecision<TWork, TResult, TProjection>.CompleteProjection(envelope),
         };
 }
