@@ -95,8 +95,8 @@ The control page lets you select a seeded persona, clear the persona cookie, ins
 ## API Reference
 
 - `AddAppSurfaceDevAuth(IHostEnvironment environment, Action<AppSurfaceDevAuthOptions> configure)` registers the named DevAuth authentication scheme and startup safety validation. The `configure` callback is evaluated once during registration, and the same validated options are used for both scheme registration and runtime DevAuth behavior.
-- `MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)` maps the local-only control page, status JSON, select persona endpoint, and clear persona endpoint.
-- `AppSurfaceDevAuthMarker.Render(HttpContext, IHostEnvironment, IOptions<AppSurfaceDevAuthOptions>, IDataProtectionProvider, Action<AppSurfaceDevAuthMarkerOptions>?)` returns safe HTML for an explicit in-app DevAuth state marker. Render it only in Development pages where fake auth should remain visible.
+- `MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)` maps the local-only control page, status JSON, select persona endpoint, and clear persona endpoint. The control page root always includes `data-appsurface-dev-auth="control-page"` so static export audits can reject DevAuth UI before it is written to disk.
+- `AppSurfaceDevAuthMarker.Render(HttpContext, IHostEnvironment, IOptions<AppSurfaceDevAuthOptions>, IDataProtectionProvider, Action<AppSurfaceDevAuthMarkerOptions>?)` returns safe HTML for an explicit in-app DevAuth state marker. Render it only in Development pages where fake auth should remain visible. The marker root always includes `data-appsurface-dev-auth="marker"` so static export audits can reject DevAuth UI even when the CSS class prefix is customized.
 - `AppSurfaceDevAuthDefaults.AuthenticationScheme` is `AppSurface.DevAuth`.
 - `AppSurfaceDevAuthDefaults.PathPrefix` is `/_appsurface/dev-auth`.
 - `AppSurfaceDevAuthDefaults.CookieName` is `.AppSurface.DevAuth.Persona`.

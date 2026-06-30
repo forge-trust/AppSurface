@@ -599,6 +599,10 @@ Projects a passive auth result into one server-rendered slot. Child slots includ
 </rw:auth-view>
 ```
 
+Static export forces auth projection into a public anonymous/fallback state and never writes protected allowed content to
+disk. Exported protected views need an explicit `rw:auth-anonymous` fallback. See
+[Static Auth Projection](Docs/static-auth-projection.md).
+
 ### `rw:auth-gate` and `rw:permission-gate`
 
 Conditionally render child content when a projected policy reaches the requested state. `rw:permission-gate` is an
@@ -696,6 +700,11 @@ app.MapPost("/docs/publish", PublishAsync)
 `data-rw-auth-helper`. Policy names and reason details are emitted only when `include-diagnostics="true"` is set. Raw
 `AppSurfaceAuthResult.Message`, arbitrary metadata, persona names, subjects, schemes, and DevAuth state are not rendered
 by default.
+
+Static export is stricter: the exporter sends `X-RazorWire-Static-Export: auth-anonymous-v1`, renders only explicit
+anonymous fallback output, rejects allowed gates and logout forms, strips outcome details from static auth markers, and
+fails with `RWEXPORT010` before writing unsafe text artifacts. See
+[Static Auth Projection](Docs/static-auth-projection.md).
 
 Available states are `allowed`, `anonymous`, `forbidden`, `setup-failure`, `unsafe-navigation`,
 `stale-or-unknown-session`, and `unknown`. `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` remains separate local

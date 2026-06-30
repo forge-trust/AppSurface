@@ -165,6 +165,8 @@ public class ExportEngine
                 context.ReleaseArchiveManifest.Sha256);
         }
 
+        await ValidateFinalAuthArtifactInventoryAsync(context, cancellationToken);
+
         sw.Stop();
         _logger.LogInformation("Export completed in {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
     }
@@ -247,13 +249,29 @@ public class ExportEngine
             }
             else
             {
-                await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                await using var fileStream = ExportOutputPathGuards.OpenWritableArtifactStream(
-                    context.OutputPath,
-                    filePath,
-                    "non-HTML route asset",
-                    route);
-                await contentStream.CopyToAsync(fileStream, cancellationToken);
+                if (ExportAuthArtifactAuditor.IsTextArtifact(contentType, filePath))
+                {
+                    var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                    await ExportAuthArtifactAuditor.WriteTextArtifactAsync(
+                        context.OutputPath,
+                        filePath,
+                        "text route asset",
+                        route,
+                        body,
+                        encoding: null,
+                        cancellationToken);
+                }
+                else
+                {
+                    await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                    await using var fileStream = ExportOutputPathGuards.OpenWritableArtifactStream(
+                        context.OutputPath,
+                        filePath,
+                        "non-HTML route asset",
+                        route);
+                    await contentStream.CopyToAsync(fileStream, cancellationToken);
+                }
+
                 context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl);
             }
         }
@@ -465,6 +483,15 @@ public class ExportEngine
         var targetPath = ExportDeploymentExtras.MapPublishPathToFilePath(outputPath, extra.PublishPath);
         // Keep the copy helper defensive if future call paths bypass the batch preflight.
         ExportDeploymentExtras.ValidateTargetParentPath(outputPath, targetPath, extra.PublishPath);
+        if (ExportAuthArtifactAuditor.ShouldAuditLocalTextArtifact(targetPath))
+        {
+            ExportAuthArtifactAuditor.ValidateTextArtifact(
+                await File.ReadAllTextAsync(extra.SourcePath, cancellationToken),
+                "publish-root deployment extra",
+                extra.PublishPath,
+                targetPath);
+        }
+
         var targetDirectory = Path.GetDirectoryName(targetPath);
         if (!string.IsNullOrWhiteSpace(targetDirectory))
         {
@@ -508,6 +535,34 @@ public class ExportEngine
                 "copy-failed",
                 $"Publish-root deployment extra '{extra.PublishPath}' could not be copied from '{extra.SourcePath}' to '{targetPath}': {ex.Message}. Fix: verify file permissions and export to a clean output directory.",
                 extra.PublishPath);
+        }
+    }
+
+    private static async Task ValidateFinalAuthArtifactInventoryAsync(
+        ExportContext context,
+        CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(context.OutputPath))
+        {
+            return;
+        }
+
+        foreach (var filePath in Directory.EnumerateFiles(context.OutputPath, "*", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ExportOutputPathGuards.ValidateArchiveEntryPath(context.OutputPath, filePath, "auth-inventory");
+            if (!ExportAuthArtifactAuditor.ShouldAuditLocalTextArtifact(filePath))
+            {
+                continue;
+            }
+
+            var relativePath = Path.GetRelativePath(context.OutputPath, filePath)
+                .Replace(Path.DirectorySeparatorChar, '/');
+            ExportAuthArtifactAuditor.ValidateTextArtifact(
+                await File.ReadAllTextAsync(filePath, cancellationToken),
+                "final export artifact",
+                "/" + relativePath,
+                filePath);
         }
     }
 
@@ -1024,7 +1079,7 @@ public class ExportEngine
             var artifactUrl = MapFilePathToArtifactUrl(artifactPath, context.OutputPath, artifact.AliasRoute);
             if (writtenArtifactPaths.Add(artifactPath))
             {
-                await ExportOutputPathGuards.WriteTextArtifactAsync(
+                await ExportAuthArtifactAuditor.WriteTextArtifactAsync(
                     context.OutputPath,
                     artifactPath,
                     "redirect alias HTML artifact",
@@ -1067,7 +1122,7 @@ public class ExportEngine
         var body = string.Join(
             Environment.NewLine,
             rules.Select(rule => $"{rule.From} {rule.To} 301!"));
-        await ExportOutputPathGuards.WriteTextArtifactAsync(
+        await ExportAuthArtifactAuditor.WriteTextArtifactAsync(
             context.OutputPath,
             redirectsPath,
             "Netlify redirects artifact",
@@ -1151,6 +1206,9 @@ public class ExportEngine
         for (var redirectCount = 0; redirectCount <= MaxArtifactRedirects; redirectCount++)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
+            request.Headers.TryAddWithoutValidation(
+                RazorWireStaticExportRequest.HeaderName,
+                RazorWireStaticExportRequest.HeaderValue);
             var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             var finalUri = response.RequestMessage?.RequestUri ?? currentUri;
             if (!IsWithinExportBoundary(finalUri, baseUri))
@@ -1326,7 +1384,7 @@ public class ExportEngine
         htmlForWrite = rewriteManagedReferences
             ? RewriteManagedReferences(htmlForWrite, route, htmlScope: true, context)
             : htmlForWrite;
-        await ExportOutputPathGuards.WriteTextArtifactAsync(
+        await ExportAuthArtifactAuditor.WriteTextArtifactAsync(
             context.OutputPath,
             filePath,
             isDocsPage ? "AppSurface Docs HTML artifact" : "HTML route artifact",
@@ -1387,7 +1445,7 @@ public class ExportEngine
         var cssForWrite = rewriteManagedReferences
             ? RewriteManagedReferences(body, route, htmlScope: false, context)
             : body;
-        await ExportOutputPathGuards.WriteTextArtifactAsync(
+        await ExportAuthArtifactAuditor.WriteTextArtifactAsync(
             context.OutputPath,
             filePath,
             "CSS route artifact",
@@ -2069,7 +2127,7 @@ public class ExportEngine
         }
 
         var partialPath = MapHtmlFilePathToPartialPath(htmlFilePath);
-        await ExportOutputPathGuards.WriteTextArtifactAsync(
+        await ExportAuthArtifactAuditor.WriteTextArtifactAsync(
             context.OutputPath,
             partialPath,
             "AppSurface Docs partial artifact",

@@ -60,6 +60,17 @@ public sealed class RazorWireCliReadmeContractTests
     }
 
     [Fact]
+    public void Readme_Should_Document_StaticAuthProjectionDiagnostics()
+    {
+        var readme = File.ReadAllText(GetRazorWireCliReadmePath());
+
+        Assert.Contains("`RWEXPORT010`: static auth projection found protected allowed content", readme, StringComparison.Ordinal);
+        Assert.Contains("`auth-missing-fallback`, `auth-private-content`, `auth-unsafe-metadata`, `auth-diagnostics`, and `auth-artifact-leak`", readme, StringComparison.Ordinal);
+        Assert.Contains("Add an explicit `rw:auth-anonymous` fallback", readme, StringComparison.Ordinal);
+        Assert.Contains("../ForgeTrust.RazorWire/Docs/static-auth-projection.md", readme, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Readme_Should_CrossReference_HybridHostingGuide()
     {
         var readme = File.ReadAllText(GetRazorWireCliReadmePath());

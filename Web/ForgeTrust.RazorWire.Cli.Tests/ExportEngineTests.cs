@@ -28,6 +28,126 @@ public class ExportEngineTests
         Assert.Throws<ArgumentNullException>(() => new ExportEngine(_logger, null!));
     }
 
+    [Fact]
+    public async Task RunAsync_ShouldSendStaticAuthProjectionHeader_OnArtifactRequests()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-header-");
+        using var handler = new StaticAuthHeaderCaptureHandler();
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+        A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+        var context = new ExportContext(outputPath, null, "http://localhost:5000");
+
+        await _sut.RunAsync(context);
+
+        Assert.NotEmpty(handler.HeaderValues);
+        Assert.All(
+            handler.HeaderValues,
+            value => Assert.Equal(RazorWireStaticExportRequest.HeaderValue, value));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailBeforeWriting_TextAssetWithAuthViolation()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-js-");
+        using var client = new HttpClient(new StaticAuthUnsafeScriptHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+        A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+        var context = new ExportContext(outputPath, null, "http://localhost:5000");
+
+        var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+        var diagnostic = Assert.Single(exception.Diagnostics);
+        Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+        Assert.Equal("/app.js", diagnostic.Route);
+        Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Join(outputPath, "app.js")));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailBeforeWriting_StructuredJsonTextAssetWithAuthViolation()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-problem-json-");
+        using var client = new HttpClient(
+            new SingleRouteHandler(
+                "/problem",
+                "application/problem+json",
+                """{"html":"\u003Cdiv data-rw-auth-state=\u0022allowed\u0022\u003E\u003C/div\u003E"}"""))
+        {
+            BaseAddress = new Uri("http://localhost:5000")
+        };
+        A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+        var context = new ExportContext(outputPath, null, ["/problem"], "http://localhost:5000");
+
+        var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+        var diagnostic = Assert.Single(exception.Diagnostics);
+        Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+        Assert.Equal("/problem", diagnostic.Route);
+        Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Join(outputPath, "problem")));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailBeforeCopying_ExtensionlessTextExtraWithAuthViolation()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-extra-");
+        var sourceRoot = CreateSafeTempDirectory("static-auth-extra-source-");
+        try
+        {
+            var sourcePath = Path.Join(sourceRoot, "CNAME");
+            await File.WriteAllTextAsync(sourcePath, """<div data-rw-auth-state="allowed"></div>""");
+            using var client = new HttpClient(new TestHttpMessageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(outputPath, null, "http://localhost:5000");
+            context.AddDeploymentExtra(sourcePath, "/CNAME");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/CNAME", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(outputPath, "CNAME")));
+        }
+        finally
+        {
+            if (Directory.Exists(outputPath))
+            {
+                Directory.Delete(outputPath, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailFinalInventory_ForExtensionlessTextArtifactWithoutTextContentType()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-final-inventory-");
+        try
+        {
+            using var client = new HttpClient(new StaticAuthUnsafeExtensionlessAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(outputPath, null, "http://localhost:5000");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/leak", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(outputPath))
+            {
+                Directory.Delete(outputPath, true);
+            }
+        }
+    }
+
     [Theory]
     [InlineData("/css/style.css", "background.png", "/css/background.png")]
     [InlineData("/css/style.css", "../images/bg.png", "/images/bg.png")]
@@ -5330,6 +5450,56 @@ public class ExportEngineTests
             }
 
             return NotFound();
+        }
+    }
+
+    private sealed class StaticAuthHeaderCaptureHandler : HttpMessageHandler
+    {
+        public List<string?> HeaderValues { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            HeaderValues.Add(
+                request.Headers.TryGetValues(RazorWireStaticExportRequest.HeaderName, out var values)
+                    ? values.SingleOrDefault()
+                    : null);
+
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path == "/"
+                ? Html("<html><body><h1>Home</h1></body></html>")
+                : NotFound();
+        }
+    }
+
+    private sealed class StaticAuthUnsafeScriptHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path switch
+            {
+                "/" => Html("""<html><body><script src="/app.js"></script></body></html>"""),
+                "/app.js" => Text(
+                    """document.body.dataset.proof = '<div data-rw-auth-state="allowed"></div>';""",
+                    "application/javascript"),
+                _ => NotFound(),
+            };
+        }
+    }
+
+    private sealed class StaticAuthUnsafeExtensionlessAssetHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path switch
+            {
+                "/" => Html("""<html><body><a href="/leak">Leak</a></body></html>"""),
+                "/leak" => Bytes(
+                    "application/octet-stream",
+                    Encoding.UTF8.GetBytes("""<div data-rw-auth-state="allowed"></div>""")),
+                _ => NotFound(),
+            };
         }
     }
 
