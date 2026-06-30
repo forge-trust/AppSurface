@@ -43,6 +43,11 @@ public sealed class ExportAuthArtifactAuditorTests
     [InlineData("""<aside data-appsurface-dev-auth="marker"></aside>""", "auth-artifact-leak")]
     [InlineData("""{"html":"&lt;main data-appsurface-dev-auth=&quot;control-page&quot;&gt;&lt;/main&gt;"}""", "auth-artifact-leak")]
     [InlineData("""{"html":"\u003Cmain data-appsurface-dev-auth=\u0022control-page\u0022\u003E\u003C/main\u003E"}""", "auth-artifact-leak")]
+    [InlineData("""{"title":"data-appsurface-dev-auth"}""", "auth-artifact-leak")]
+    [InlineData("""{"body":"appsurface-dev-auth-marker"}""", "auth-artifact-leak")]
+    [InlineData("""{"body":"data-appsurface-persona"}""", "auth-artifact-leak")]
+    [InlineData("""{"body":"data-appsurface-subject"}""", "auth-artifact-leak")]
+    [InlineData("""{"body":"data-appsurface-dev-\u0061uth"}""", "auth-artifact-leak")]
     public void ValidateTextArtifact_ShouldReject_StaticUnsafeAuthOutput(string contents, string expectedReason)
     {
         var exception = Assert.Throws<ExportValidationException>(

@@ -59,6 +59,14 @@ internal static class ExportAuthArtifactAuditor
         "_redirects"
     ];
 
+    private static readonly string[] ArtifactLeakMarkers =
+    [
+        "appsurface-dev-auth-marker",
+        "data-appsurface-dev-auth",
+        "data-appsurface-persona",
+        "data-appsurface-subject"
+    ];
+
     internal static async Task WriteTextArtifactAsync(
         string outputPath,
         string artifactPath,
@@ -111,10 +119,7 @@ internal static class ExportAuthArtifactAuditor
                 throw CreateException(PrivateContent, artifactKind, route, helper: null, artifactPath);
             }
 
-            if (ContainsAttributeValue(auditContents, "class", "appsurface-dev-auth-marker")
-                || ContainsAttribute(auditContents, "data-appsurface-dev-auth")
-                || ContainsAttribute(auditContents, "data-appsurface-persona")
-                || ContainsAttribute(auditContents, "data-appsurface-subject"))
+            if (ContainsArtifactLeakMarker(auditContents))
             {
                 throw CreateException(ArtifactLeak, artifactKind, route, helper: null, artifactPath);
             }
@@ -399,6 +404,11 @@ internal static class ExportAuthArtifactAuditor
             .Cast<Match>()
             .Any(match => string.Equals(match.Groups["name"].Value, "data-rw-auth-state", StringComparison.OrdinalIgnoreCase)
                           && string.Equals(AttributeValue(match), "allowed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool ContainsArtifactLeakMarker(string contents)
+    {
+        return ArtifactLeakMarkers.Any(marker => contents.Contains(marker, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool HasTextArtifactPath(string artifactPath)
