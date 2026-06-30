@@ -247,6 +247,102 @@ public class AppSurfaceDocsWebModuleRegressionTests
     }
 
     [Theory]
+    [InlineData("/docs/_harvest", HttpStatusCode.Found)]
+    [InlineData("/docs/_routes", HttpStatusCode.OK)]
+    [InlineData("/docs/_routes.json", HttpStatusCode.OK)]
+    public async Task OperatorReadPolicy_ShouldProtectProductionDiagnosticsReadRoutes_WhenExplicitlyExposed(
+        string requestPath,
+        HttpStatusCode authorizedStatusCode)
+    {
+        await using var host = await StartHealthAuthorizationHostAsync(
+            Environments.Production,
+            exposeHealthRoutes: true,
+            exposeRouteInspector: true,
+            configureOperatorReadPolicy: true);
+
+        using var anonymous = await host.Client.GetAsync(requestPath);
+        using var forbiddenRequest = CreateHealthRequest(requestPath, "alice", "docs.other");
+        using var forbidden = await host.Client.SendAsync(forbiddenRequest);
+        using var authorizedRequest = CreateHealthRequest(requestPath, "alice", "docs.read");
+        using var authorized = await host.Client.SendAsync(authorizedRequest);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.Equal(authorizedStatusCode, authorized.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("/docs/_health")]
+    [InlineData("/docs/_health.json")]
+    public async Task OperatorReadPolicy_ShouldProtectHealthRoutes_WhenLegacyHealthPolicyIsAbsent(string requestPath)
+    {
+        await using var host = await StartHealthAuthorizationHostAsync(
+            Environments.Production,
+            exposeHealthRoutes: true,
+            configureHealthPolicy: false,
+            configureOperatorReadPolicy: true);
+
+        using var anonymous = await host.Client.GetAsync(requestPath);
+        using var authorizedRequest = CreateHealthRequest(requestPath, "alice", "docs.read");
+        using var authorized = await host.Client.SendAsync(authorizedRequest);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, authorized.StatusCode);
+    }
+
+    [Fact]
+    public async Task OperatorReadPolicy_ShouldPreserveHealthOnlyPolicy_WhenBothPoliciesAreConfigured()
+    {
+        await using var host = await StartHealthAuthorizationHostAsync(
+            Environments.Production,
+            exposeHealthRoutes: true,
+            configureOperatorReadPolicy: true);
+
+        using var healthReadRequest = CreateHealthRequest("/docs/_health.json", "alice", "docs.read");
+        using var healthReadResponse = await host.Client.SendAsync(healthReadRequest);
+        using var healthAuthorizedRequest = CreateHealthRequest("/docs/_health.json", "alice", "docs.health.read");
+        using var healthAuthorizedResponse = await host.Client.SendAsync(healthAuthorizedRequest);
+
+        Assert.Equal(HttpStatusCode.Forbidden, healthReadResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, healthAuthorizedResponse.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("/docs/_harvest", "docs.read")]
+    [InlineData("/docs/_routes", "docs.read")]
+    [InlineData("/docs/_routes.json", "docs.read")]
+    public async Task OperatorReadPolicy_ShouldStillReturnNotFound_WhenProductionDiagnosticsRoutesAreHidden(
+        string requestPath,
+        string scope)
+    {
+        await using var host = await StartHealthAuthorizationHostAsync(
+            Environments.Production,
+            configureOperatorReadPolicy: true,
+            configureFallbackPolicy: true);
+
+        using var request = CreateHealthRequest(requestPath, "alice", scope);
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("POST")]
+    public async Task HarvestRebuild_ShouldStillReturnNotFound_WhenProductionHarvestRoutesAreHidden(string method)
+    {
+        await using var host = await StartHealthAuthorizationHostAsync(
+            Environments.Production,
+            configureOperatorReadPolicy: true,
+            configureFallbackPolicy: true);
+
+        using var request = CreateHealthRequest(new HttpMethod(method), "/docs/_harvest/rebuild", "alice", "docs.read");
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Theory]
     [InlineData("/docs/_health", null)]
     [InlineData("/docs/_health", "docs.other")]
     [InlineData("/docs/_health", "docs.health.read")]
@@ -259,7 +355,8 @@ public class AppSurfaceDocsWebModuleRegressionTests
     {
         await using var host = await StartHealthAuthorizationHostAsync(
             Environments.Production,
-            exposeHealthRoutes: false);
+            exposeHealthRoutes: false,
+            configureFallbackPolicy: true);
 
         using var request = scope is null
             ? new HttpRequestMessage(HttpMethod.Get, requestPath)
@@ -2178,8 +2275,11 @@ public class AppSurfaceDocsWebModuleRegressionTests
     }
 
     private static HttpRequestMessage CreateHealthRequest(string requestPath, string userName, string scope)
+        => CreateHealthRequest(HttpMethod.Get, requestPath, userName, scope);
+
+    private static HttpRequestMessage CreateHealthRequest(HttpMethod method, string requestPath, string userName, string scope)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, requestPath);
+        var request = new HttpRequestMessage(method, requestPath);
         request.Headers.Add(HeaderAuthenticationHandler.UserHeaderName, userName);
         request.Headers.Add(HeaderAuthenticationHandler.ScopeHeaderName, scope);
         return request;
@@ -2188,13 +2288,18 @@ public class AppSurfaceDocsWebModuleRegressionTests
     private static async Task<StartedHealthAuthorizationHost> StartHealthAuthorizationHostAsync(
         string environmentName,
         bool exposeHealthRoutes = false,
+        bool exposeRouteInspector = false,
+        bool configureHealthPolicy = true,
+        bool configureOperatorReadPolicy = false,
+        bool configureFallbackPolicy = false,
         bool registerPolicy = true,
         bool registerAuthorizationMiddleware = true)
     {
         var root = new HealthAuthorizationRootModule
         {
             RegisterPolicy = registerPolicy,
-            RegisterAuthorizationMiddleware = registerAuthorizationMiddleware
+            RegisterAuthorizationMiddleware = registerAuthorizationMiddleware,
+            ConfigureFallbackPolicy = configureFallbackPolicy
         };
         var startup = new TestHealthAuthorizationStartup(root);
         var context = new StartupContext(["--environment", environmentName], root, "TestApp")
@@ -2208,11 +2313,25 @@ public class AppSurfaceDocsWebModuleRegressionTests
             {
                 var values = new Dictionary<string, string?>
                 {
-                    ["AppSurfaceDocs:Harvest:Health:AuthorizationPolicy"] = "DocsHealthRead"
                 };
+                if (configureHealthPolicy)
+                {
+                    values["AppSurfaceDocs:Harvest:Health:AuthorizationPolicy"] = "DocsHealthRead";
+                }
+
+                if (configureOperatorReadPolicy)
+                {
+                    values["AppSurfaceDocs:Diagnostics:OperatorReadPolicy"] = "DocsRead";
+                }
+
                 if (exposeHealthRoutes)
                 {
                     values["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always";
+                }
+
+                if (exposeRouteInspector)
+                {
+                    values["AppSurfaceDocs:Diagnostics:ExposeRouteInspector"] = "Always";
                 }
 
                 configuration.AddInMemoryCollection(values);
@@ -2417,6 +2536,8 @@ public class AppSurfaceDocsWebModuleRegressionTests
 
         public bool RegisterAuthorizationMiddleware { get; init; } = true;
 
+        public bool ConfigureFallbackPolicy { get; init; }
+
         public void ConfigureServices(StartupContext context, IServiceCollection services)
         {
             services
@@ -2433,6 +2554,18 @@ public class AppSurfaceDocsWebModuleRegressionTests
                             "DocsHealthRead",
                             policy => policy.RequireAuthenticatedUser()
                                 .RequireClaim("scope", "docs.health.read"));
+                        options.AddPolicy(
+                            "DocsRead",
+                            policy => policy.RequireAuthenticatedUser()
+                                .RequireClaim("scope", "docs.read"));
+                    }
+
+                    if (ConfigureFallbackPolicy)
+                    {
+                        options.FallbackPolicy = new AuthorizationPolicyBuilder(HeaderAuthenticationHandler.SchemeName)
+                            .RequireAuthenticatedUser()
+                            .RequireClaim("scope", "app.fallback")
+                            .Build();
                     }
                 });
         }

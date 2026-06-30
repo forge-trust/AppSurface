@@ -1083,40 +1083,44 @@ public class DocsController : Controller
 
     private async ValueTask<bool> CanUseLiveHarvestProgressAsync()
     {
-        // The Docs-installed result authorizer owns the same harvest-progress decision as the RazorWire endpoint. The
-        // legacy bool authorizer remains a facade over that result path for existing callers and tests.
-        var authorizer = HttpContext.RequestServices.GetService<IRazorWireStreamAuthorizer>();
-        if (authorizer is null)
+        // RazorWire stream filters and the Docs-installed result authorizer own the same harvest-progress decision as
+        // the stream endpoint. The legacy bool authorizer remains a facade over that result path for existing callers
+        // and tests.
+        var streamAuthorizationContext = new RazorWireStreamAuthorizationContext(
+            HttpContext,
+            AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+            HttpContext.RequestServices.GetService<RazorWireOptions>()?.Streams.AuthorizationMode
+            ?? RazorWireStreamAuthorizationMode.DenyAll);
+
+        try
         {
+            foreach (var filter in HttpContext.RequestServices.GetServices<IRazorWireStreamAuthorizationFilter>())
+            {
+                var filterResult = await filter.AuthorizeAsync(streamAuthorizationContext);
+                if (filterResult is not null && !filterResult.IsAllowed)
+                {
+                    return false;
+                }
+            }
+
+            var authorizer = HttpContext.RequestServices.GetService<IRazorWireStreamAuthorizer>();
+            if (authorizer is not null)
+            {
+                var result = await authorizer.AuthorizeAsync(streamAuthorizationContext);
+
+                return result.IsAllowed;
+            }
+
             var channelAuthorizer = HttpContext.RequestServices.GetService<IRazorWireChannelAuthorizer>();
             if (channelAuthorizer is not null)
             {
-                try
-                {
-                    return await channelAuthorizer.CanSubscribeAsync(
-                        HttpContext,
-                        AppSurfaceDocsStreamAuthorization.HarvestProgressChannel);
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException || !HttpContext.RequestAborted.IsCancellationRequested)
-                {
-                    return LogLiveHarvestProgressAuthorizationFailure(exception);
-                }
+                return await channelAuthorizer.CanSubscribeAsync(
+                    HttpContext,
+                    AppSurfaceDocsStreamAuthorization.HarvestProgressChannel);
             }
 
             return AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment)
                    && _environment.IsDevelopment();
-        }
-
-        try
-        {
-            var result = await authorizer.AuthorizeAsync(
-                new RazorWireStreamAuthorizationContext(
-                    HttpContext,
-                    AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
-                    HttpContext.RequestServices.GetService<RazorWireOptions>()?.Streams.AuthorizationMode
-                    ?? RazorWireStreamAuthorizationMode.DenyAll));
-
-            return result.IsAllowed;
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !HttpContext.RequestAborted.IsCancellationRequested)
         {

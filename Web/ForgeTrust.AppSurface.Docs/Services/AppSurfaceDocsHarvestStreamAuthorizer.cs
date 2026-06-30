@@ -12,10 +12,10 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// </summary>
 /// <remarks>
 /// Use this wrapper when AppSurface Docs owns the harvest-progress channel but must preserve host RazorWire
-/// authorization for other channels. The decision order is: after-registration legacy replacement authorizer,
-/// non-harvest host-channel delegation, harvest route visibility, Development fallback, custom result authorizer,
-/// custom legacy bool authorizer, then deny. Built-in RazorWire allow-all and deny-all authorizers are compatibility
-/// defaults and do not authorize the Docs harvest stream in non-Development hosts.
+/// authorization for other channels. The harvest decision order is: harvest route visibility, configured shared
+/// diagnostics read policy, optional custom host authorizer narrowing, Development fallback, compatibility custom
+/// authorizers, then deny. Built-in RazorWire allow-all and deny-all authorizers are compatibility defaults and do not
+/// authorize the Docs harvest stream in non-Development hosts.
 /// </remarks>
 internal sealed class AppSurfaceDocsHarvestStreamAuthorizer : IRazorWireStreamAuthorizer
 {
@@ -52,11 +52,6 @@ internal sealed class AppSurfaceDocsHarvestStreamAuthorizer : IRazorWireStreamAu
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (TryGetReplacementChannelAuthorizer(context.HttpContext) is { } replacementChannelAuthorizer)
-        {
-            return await AuthorizeWithLegacyChannelAuthorizerAsync(context, replacementChannelAuthorizer);
-        }
-
         if (!AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(context.Channel))
         {
             return await AuthorizeHostChannelAsync(context);
@@ -67,9 +62,29 @@ internal sealed class AppSurfaceDocsHarvestStreamAuthorizer : IRazorWireStreamAu
             return AppSurfaceAuthResult.Forbidden();
         }
 
+        var readPolicy = _options.Diagnostics?.OperatorReadPolicy;
+        if (!string.IsNullOrWhiteSpace(readPolicy))
+        {
+            var policyResult = await AppSurfaceDocsOperatorReadPolicyEvaluator.AuthorizeAsync(
+                context.HttpContext,
+                readPolicy,
+                context.HttpContext.RequestAborted);
+            if (!policyResult.IsAllowed)
+            {
+                return policyResult;
+            }
+
+            return await AuthorizeConfiguredReadPolicyNarrowingAsync(context);
+        }
+
         if (_environment.IsDevelopment())
         {
             return AppSurfaceAuthResult.Allowed();
+        }
+
+        if (TryGetReplacementChannelAuthorizer(context.HttpContext) is { } replacementChannelAuthorizer)
+        {
+            return await AuthorizeWithLegacyChannelAuthorizerAsync(context, replacementChannelAuthorizer);
         }
 
         if (_innerStreamAuthorizer is not null)
@@ -87,6 +102,11 @@ internal sealed class AppSurfaceDocsHarvestStreamAuthorizer : IRazorWireStreamAu
 
     private async ValueTask<AppSurfaceAuthResult> AuthorizeHostChannelAsync(RazorWireStreamAuthorizationContext context)
     {
+        if (TryGetReplacementChannelAuthorizer(context.HttpContext) is { } replacementChannelAuthorizer)
+        {
+            return await AuthorizeWithLegacyChannelAuthorizerAsync(context, replacementChannelAuthorizer);
+        }
+
         if (_innerStreamAuthorizer is not null)
         {
             return await _innerStreamAuthorizer.AuthorizeAsync(context);
@@ -95,6 +115,28 @@ internal sealed class AppSurfaceDocsHarvestStreamAuthorizer : IRazorWireStreamAu
         return _innerChannelAuthorizer is not null
             ? await AuthorizeWithLegacyChannelAuthorizerAsync(context, _innerChannelAuthorizer)
             : AppSurfaceAuthResult.Forbidden();
+    }
+
+    private async ValueTask<AppSurfaceAuthResult> AuthorizeConfiguredReadPolicyNarrowingAsync(
+        RazorWireStreamAuthorizationContext context)
+    {
+        if (TryGetReplacementChannelAuthorizer(context.HttpContext) is { } replacementChannelAuthorizer
+            && !IsBuiltInAuthorizer(replacementChannelAuthorizer))
+        {
+            return await AuthorizeWithLegacyChannelAuthorizerAsync(context, replacementChannelAuthorizer);
+        }
+
+        if (_innerStreamAuthorizer is not null)
+        {
+            return await _innerStreamAuthorizer.AuthorizeAsync(context);
+        }
+
+        if (_innerChannelAuthorizer is not null && !IsBuiltInAuthorizer(_innerChannelAuthorizer))
+        {
+            return await AuthorizeWithLegacyChannelAuthorizerAsync(context, _innerChannelAuthorizer);
+        }
+
+        return AppSurfaceAuthResult.Allowed();
     }
 
     private static async ValueTask<AppSurfaceAuthResult> AuthorizeWithLegacyChannelAuthorizerAsync(

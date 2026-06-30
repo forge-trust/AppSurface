@@ -395,11 +395,11 @@ The `Testing*Delay*Milliseconds` options are local/manual testing knobs. The def
 
 When the harvest completes successfully, AppSurface Docs first publishes the completed observatory state with replay enabled, then publishes a live-only RazorWire `rw-visit` command for active subscribers. Replay stays state-only, so late subscribers see the completed state and the plain continuation link without being auto-navigated by an old command. The completion view also renders a normal return link so no-JavaScript users can continue manually.
 
-The harvest progress stream is authorized with the same route-exposure policy as the operator health endpoints and, outside Development, with a host-owned RazorWire stream authorizer. In Development it is exposed by default. In non-development hosts, `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` exposes the health routes but does not by itself authorize the live progress stream.
+The harvest progress stream follows the same route-exposure policy as the operator health endpoints. In Development it is exposed by default. In non-development hosts, `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` exposes the harvest diagnostics routes, and `AppSurfaceDocs:Diagnostics:OperatorReadPolicy` is the shared host-owned ASP.NET Core policy for `_harvest`, route inspector, and the docs-owned harvest progress stream.
 
 ### Production live harvest stream authorization
 
-Production or preview hosts that want users to see live harvest progress should register a custom `IRazorWireStreamAuthorizer` before calling `AddAppSurfaceDocs()`. Use `AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(context.Channel)` instead of hardcoding the channel name:
+Production or preview hosts that want users to see live harvest progress should start with `AppSurfaceDocs:Diagnostics:OperatorReadPolicy`; see [Protect diagnostics reads](#protect-diagnostics-reads). A custom `IRazorWireStreamAuthorizer` or legacy `IRazorWireChannelAuthorizer` registered before `AddAppSurfaceDocs()` can still narrow access after that shared policy succeeds. Use `AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(context.Channel)` instead of hardcoding the channel name:
 
 ```csharp
 using ForgeTrust.AppSurface.Auth;
@@ -434,7 +434,7 @@ services.AddSingleton<IRazorWireStreamAuthorizer, DocsHarvestStreamAuthorizer>()
 services.AddAppSurfaceDocs();
 ```
 
-And enable the harvest health routes so the custom authorizer can approve the live progress stream:
+And enable the harvest diagnostics routes plus the shared read policy:
 
 ```json
 {
@@ -443,12 +443,15 @@ And enable the harvest health routes so the custom authorizer can approve the li
       "Health": {
         "ExposeRoutes": "Always"
       }
+    },
+    "Diagnostics": {
+      "OperatorReadPolicy": "DocsOperatorRead"
     }
   }
 }
 ```
 
-The built-in RazorWire `AllowAll` mode is not treated as production authorization for the AppSurface Docs harvest progress stream. Existing `IRazorWireChannelAuthorizer` implementations still work as legacy allow/deny compatibility when registered before `AddAppSurfaceDocs()`. Registering `IRazorWireStreamAuthorizer` or `IRazorWireChannelAuthorizer` after `AddAppSurfaceDocs()` is an advanced replacement mode: the later authorizer replaces the AppSurface Docs wrapper and must apply the harvest-progress predicate itself.
+The built-in RazorWire `AllowAll` mode is not treated as production authorization for the AppSurface Docs harvest progress stream. Existing `IRazorWireChannelAuthorizer` implementations still work as legacy allow/deny compatibility when registered before `AddAppSurfaceDocs()` and no `OperatorReadPolicy` is configured. Once `OperatorReadPolicy` is configured, custom stream or channel authorizers may narrow access but cannot bypass the shared read policy. Registering `IRazorWireStreamAuthorizer` after `AddAppSurfaceDocs()` replaces the normal Docs stream wrapper, but the docs-owned harvest stream still passes through the hidden-route and shared read-policy gate before the replacement authorizer can narrow access.
 
 Pitfalls:
 
@@ -456,7 +459,7 @@ Pitfalls:
 - Do not rely on file-level progress counts in v1. The current stream reports harvester-level progress and aggregate document counts.
 - Do not retain or replay visit commands. Keep replay enabled only for safe progress state; navigation commands are live-only.
 - Do not use `StartupMode=Disabled` for hosts where first navigation latency matters; that preserves the old lazy-harvest behavior.
-- Do not assume `ExposeRoutes=Always` authorizes the live progress stream in non-development environments. It exposes health routes; live progress also needs a custom stream authorizer.
+- Do not assume `ExposeRoutes=Always` authorizes the live progress stream in non-development environments. It exposes harvest diagnostics routes; live progress also needs `Diagnostics:OperatorReadPolicy` or an explicit custom authorizer that narrows the already-gated operator audience.
 
 ### Operator Diagnostics Routes
 
@@ -529,11 +532,77 @@ public sealed class HostWebModule : IAppSurfaceWebModule
 }
 ```
 
+#### Protect diagnostics reads
+
+Use `AppSurfaceDocs:Diagnostics:OperatorReadPolicy` when a non-development host exposes diagnostics reads. This one policy protects `_harvest`, `_routes`, `_routes.json`, and the docs-owned harvest progress stream. It also protects `_health` and `_health.json` when `AppSurfaceDocs:Harvest:Health:AuthorizationPolicy` is not set.
+
+Copy this configuration into a protected operator host:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Health": {
+        "ExposeRoutes": "Always"
+      }
+    },
+    "Diagnostics": {
+      "ExposeRouteInspector": "Always",
+      "OperatorReadPolicy": "DocsOperatorRead",
+      "OperatorWritePolicy": "DocsOperatorWrite"
+    }
+  }
+}
+```
+
+Register the matching host policies and normal ASP.NET Core auth middleware:
+
+```csharp
+builder.Services.AddAuthentication(/* host scheme configuration */);
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(
+        "DocsOperatorRead",
+        policy => policy.RequireAuthenticatedUser()
+            .RequireClaim("scope", "docs.operator.read"));
+
+    options.AddPolicy(
+        "DocsOperatorWrite",
+        policy => policy.RequireAuthenticatedUser()
+            .RequireClaim("scope", "docs.operator.write"));
+});
+
+public sealed class HostWebModule : IAppSurfaceWebModule
+{
+    public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+    {
+        app.UseAuthentication();
+        app.UseAuthorization();
+    }
+}
+```
+
+Verify the setup from a non-development host:
+
+```bash
+curl -i https://example.com/docs/_routes.json
+curl -i -H "Authorization: Bearer <operator-read-token>" https://example.com/docs/_routes.json
+curl -i https://example.com/docs/_harvest
+curl -i -X POST https://example.com/docs/_harvest/rebuild
+```
+
+Expected results:
+
+- Anonymous diagnostics reads challenge or forbid according to the host auth stack.
+- Requests with the read policy succeed for `_harvest`, `_routes`, `_routes.json`, and the harvest progress stream.
+- Hidden diagnostics routes still return `404` before authorization when exposure is `DevelopmentOnly` in Production or `Never`.
+- `POST _harvest/rebuild` still requires `Diagnostics:OperatorWritePolicy` and anti-forgery; the read policy never authorizes writes.
+
 If `AuthorizationPolicy` names an unregistered policy, or the host omits the authorization middleware, ASP.NET Core treats that as host setup failure. The health JSON shape and health HTTP status-code semantics apply after authorization succeeds; challenges and forbids follow the host's normal authentication and authorization behavior.
 
 The built-in `_health` page renders a trusted maintainer action band when an effective docs operator-write policy is configured. Posting `Rebuild docs` starts a full source-backed harvest when the coordinator is idle, queues exactly one rebuild behind a running harvest, or reports the existing queued rebuild by redirecting back to `_harvest`. The observatory shows the live redacted progress stream when the current request may subscribe to the harvest channel and falls back to a manual continue link when live progress is disabled or JavaScript is unavailable.
 
-Broader operator-read hardening for `_harvest`, route inspector, and any shared diagnostics read policy is intentionally separate from this health-route policy. Track that in forge-trust/AppSurface#578 rather than assuming the health policy covers every operator diagnostics route.
+`AppSurfaceDocs:Harvest:Health:AuthorizationPolicy` remains a health-only compatibility policy. If both health and diagnostics read policies are configured, health routes use the health-only policy and broader diagnostics routes use `Diagnostics:OperatorReadPolicy`. If a host wants one operator audience for every diagnostics read, set both options to the same policy name or omit the health-only policy.
 
 AppSurface Docs also reserves a route inspector at `{DocsRootPath}/_routes` and a machine-readable JSON endpoint at `{DocsRootPath}/_routes.json`. The inspector shows the public route manifest for the current cached docs snapshot: canonical browser URLs, source-shaped Markdown recovery aliases, declared redirect aliases, and route diagnostics. Add `?path=` to either endpoint to probe a source path, public route, or app-relative docs URL and see whether it resolves directly, redirects through an alias, is hidden, is reserved, or is invalid input.
 
@@ -556,8 +625,18 @@ The mental model is:
 
 - `ShowChrome` controls whether the sidebar can advertise diagnostics.
 - `ExposeRoutes` and `ExposeRouteInspector` control whether HTTP endpoints respond.
+- `Diagnostics:OperatorReadPolicy` controls who may read exposed diagnostics.
+- `Diagnostics:OperatorWritePolicy` controls who may perform packaged diagnostics writes.
 - Chrome never creates a route.
-- Route exposure never implies sidebar discovery.
+- Route exposure never implies sidebar discovery or authorization.
+
+| Config key | Default | Protected or exposed surface | Environment behavior | Verify |
+| --- | --- | --- | --- | --- |
+| `AppSurfaceDocs:Harvest:Health:ExposeRoutes` | `DevelopmentOnly` | Exposes `_health`, `_health.json`, `_harvest`, and the harvest progress stream route family | `Always` exposes outside Development; `Never` returns `404` everywhere | `curl -i /docs/_health.json` and `curl -i /docs/_harvest` |
+| `AppSurfaceDocs:Harvest:Health:AuthorizationPolicy` | `null` | Protects `_health` and `_health.json` only | Applies only when health routes are exposed; wins over `OperatorReadPolicy` for health when set | `curl -i /docs/_health.json` with and without health credentials |
+| `AppSurfaceDocs:Diagnostics:ExposeRouteInspector` | `DevelopmentOnly` | Exposes `_routes` and `_routes.json` | `Always` exposes outside Development; `Never` returns `404` everywhere | `curl -i /docs/_routes.json` |
+| `AppSurfaceDocs:Diagnostics:OperatorReadPolicy` | `null` | Protects `_harvest`, `_routes`, `_routes.json`, harvest progress stream, and health when no health-only policy is set | Applies only to routes already exposed for the environment; blank preserves exposure-only compatibility | `curl -i /docs/_routes.json` anonymously and with read credentials |
+| `AppSurfaceDocs:Diagnostics:OperatorWritePolicy` | `null` | Protects `POST _harvest/rebuild` and packaged operator writes | Missing policy denies writes; independent from read exposure | `curl -i -X POST /docs/_harvest/rebuild` |
 
 The built-in sidebar renders a compact `Diagnostics` disclosure when at least one diagnostics row is available for the current host. Human pages are primary: `Harvest health` links to `_health`, and `Route inspector` links to `_routes`. JSON actions stay secondary as `Health JSON` and `Routes JSON`. Static exports and published reader artifacts must not contain the diagnostics disclosure or links to `_health`, `_health.json`, `_routes`, or `_routes.json`.
 
@@ -605,7 +684,8 @@ Production chrome plus routes for a protected operator host:
     },
     "Diagnostics": {
       "ExposeRouteInspector": "Always",
-      "ShowChrome": "Always"
+      "ShowChrome": "Always",
+      "OperatorReadPolicy": "DocsOperatorRead"
     }
   }
 }
@@ -645,17 +725,22 @@ Disable every built-in diagnostics surface explicitly:
 }
 ```
 
-Production exposure does not add authentication or authorization. Protect diagnostics routes at the host, reverse proxy, or network boundary before setting any Production exposure value to `Always`.
+Production exposure without `Diagnostics:OperatorReadPolicy` logs a startup warning when AppSurface Docs can see that `_harvest`, `_health`, `_health.json`, `_routes`, or `_routes.json` are exposed in a non-development host. That warning is compatibility-preserving: it does not fail startup because some hosts intentionally enforce access at the application, reverse proxy, or network boundary. Verify that boundary before setting any Production exposure value to `Always` without the shared read policy.
 
 Troubleshooting:
 
-| Symptom | Likely cause | Fix |
-| --- | --- | --- |
-| `Diagnostics` is absent in Production | Chrome defaults to `DevelopmentOnly` | Set the relevant `ShowChrome=Always` only in a protected host |
-| `_routes` returns `404` | Route inspector responses are hidden | Set `AppSurfaceDocs:Diagnostics:ExposeRouteInspector=Always` in a protected host |
-| Health row has no link | Health chrome is visible but health routes are hidden | Set `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always`, or keep status-only intentionally |
-| JSON action is absent | The corresponding route response is hidden | Expose the route or leave the JSON action hidden |
-| Static export contains diagnostics links | Reader artifact leakage | Treat this as a release blocker and fix rendering/export tests before publishing |
+| Symptom | Problem | Likely cause | Fix |
+| --- | --- | --- | --- |
+| `Diagnostics` is absent in Production | Operators cannot discover diagnostics from the sidebar | Chrome defaults to `DevelopmentOnly` | Set the relevant `ShowChrome=Always` only in a protected host |
+| `_routes` or `_harvest` returns `404` | The route is hidden before auth runs | Route exposure is `DevelopmentOnly` in Production or `Never` | Set `AppSurfaceDocs:Diagnostics:ExposeRouteInspector=Always` or `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` in a protected host |
+| Diagnostics read returns `401` | The caller was challenged | Request is anonymous or missing host credentials | Sign in or send the host credentials required by `Diagnostics:OperatorReadPolicy` |
+| Diagnostics read returns `403` | The caller was forbidden | The authenticated identity does not satisfy the configured read policy | Grant the required role/claim or use a maintainer identity |
+| Diagnostics read returns `500` | Host auth setup failed | Missing policy name, missing `AddAuthorization`, missing `UseAuthorization`, or missing authentication scheme/handler | Register the policy and middleware from [Protect diagnostics reads](#protect-diagnostics-reads) |
+| Live harvest progress falls back to manual continue | The stream subscription was denied | Routes are hidden, the read policy challenged/forbade, or a custom stream authorizer narrowed access | Verify `_harvest` exposure, `Diagnostics:OperatorReadPolicy`, and custom authorizer pass/fail cases |
+| Startup logs `AppSurfaceDocsDiagnosticsReadPolicyMissing` | Exposed diagnostics have no package read policy | Production exposure is `Always` without `Diagnostics:OperatorReadPolicy` | Configure the shared read policy or verify host/proxy/network protection |
+| Health row has no link | Health chrome is visible but health routes are hidden | `ExposeRoutes` hides responses for the environment | Set `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always`, or keep status-only intentionally |
+| JSON action is absent | The corresponding route response is hidden | The route exposure setting hides the JSON endpoint | Expose the route or leave the JSON action hidden |
+| Static export contains diagnostics links | Reader artifact leakage | Export rendered operator chrome into reader artifacts | Treat this as a release blocker and fix rendering/export tests before publishing |
 
 The JSON response uses the camelCase wire form of `AppSurfaceDocsRouteInspectorResponse`:
 
@@ -1236,6 +1321,7 @@ static web assets.
   - Blank values normalize to `null`, preserving existing behavior.
   - Requires the host to register authentication before authorization in `ConfigureEndpointAwareMiddleware`.
   - Does not apply to `_harvest`, `_harvest/rebuild`, route inspector, metrics, search refresh, operator writes, or public docs pages.
+  - When this is set together with `AppSurfaceDocs:Diagnostics:OperatorReadPolicy`, health routes use this health-only policy and broader diagnostics reads use `OperatorReadPolicy`.
 - `AppSurfaceDocs:Harvest:Health:ShowChrome`
   - Defaults to `DevelopmentOnly`.
   - Controls whether the built-in sidebar shows health status chrome.
@@ -1245,13 +1331,20 @@ static web assets.
   - Defaults to `DevelopmentOnly`.
   - Controls whether `{DocsRootPath}/_routes` and `{DocsRootPath}/_routes.json` return the route inspector and manifest responses.
   - AppSurface Docs always reserves the endpoint patterns before the docs catch-all route so route-inspector URLs do not fall through to document lookup.
+  - `Always` exposes route-manifest diagnostics in non-development environments; protect the endpoints with `OperatorReadPolicy` or verified host/proxy/network controls when they are publicly reachable.
+  - `Never` keeps the reserved endpoints returning `404`, including in development.
+- `AppSurfaceDocs:Diagnostics:OperatorReadPolicy`
+  - Defaults to `null`.
+  - Names the host-owned ASP.NET Core authorization policy required by exposed diagnostics read surfaces: `{DocsRootPath}/_harvest`, `{DocsRootPath}/_routes`, `{DocsRootPath}/_routes.json`, and the AppSurface Docs harvest progress stream.
+  - Also protects `{DocsRootPath}/_health` and `{DocsRootPath}/_health.json` when `AppSurfaceDocs:Harvest:Health:AuthorizationPolicy` is not configured.
+  - Blank values normalize to `null`, preserving existing exposure-only behavior for hosts that enforce access at the app, reverse proxy, or network boundary.
+  - Requires the host to register authentication before authorization in `ConfigureEndpointAwareMiddleware`; missing policies or missing auth services fail closed as host setup failures.
+  - Does not apply to `_harvest/rebuild`, `_search-index/refresh`, hosted metrics collection/review, public docs pages, static assets, or exported artifacts.
 - `AppSurfaceDocs:Diagnostics:OperatorWritePolicy`
   - Defaults to `null`.
   - Names the host-owned ASP.NET Core authorization policy required by mutating packaged docs operator routes such as `POST {DocsRootPath}/_harvest/rebuild`.
   - Blank values normalize to `null`. When unset, AppSurface Docs falls back to `SearchIndexRefreshPolicy` for source compatibility with older hosts.
   - Prefer this neutral maintainer policy for new hosts so harvest rebuild and search-index refresh share one explicit operator-write gate.
-  - `Always` exposes route-manifest diagnostics in non-development environments; protect the endpoints at the host boundary when they are publicly reachable.
-  - `Never` keeps the reserved endpoints returning `404`, including in development.
 - `AppSurfaceDocs:Diagnostics:ShowChrome`
   - Defaults to `DevelopmentOnly`.
   - Controls whether the built-in sidebar can show route-inspector discovery inside the `Diagnostics` disclosure.
@@ -1811,10 +1904,12 @@ builder.Services.AddAuthorization(options =>
 Production opt-in checklist:
 
 - Set `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` only in environments where trusted maintainers should access `_health` and `_harvest`.
-- Set `AppSurfaceDocs:Harvest:Health:AuthorizationPolicy` when `_health` and `_health.json` should require a host-owned read policy; register `UseAuthentication()` before `UseAuthorization()` in `ConfigureEndpointAwareMiddleware`.
+- Set `AppSurfaceDocs:Diagnostics:OperatorReadPolicy` when `_harvest`, `_routes`, `_routes.json`, or the harvest progress stream should require a shared host-owned read policy.
+- Set `AppSurfaceDocs:Harvest:Health:AuthorizationPolicy` only when `_health` and `_health.json` need a legacy or split-audience health-only policy; otherwise `OperatorReadPolicy` protects exposed health routes too.
+- Register `UseAuthentication()` before `UseAuthorization()` in `ConfigureEndpointAwareMiddleware`.
 - Configure `AppSurfaceDocs:Diagnostics:OperatorWritePolicy` to a host-owned policy that identifies docs maintainers explicitly. Do not rely on route exposure, network position, or development defaults as authorization.
 - Keep MVC anti-forgery enabled for browser forms. Host-owned automation should use a separate authenticated job/admin endpoint when anti-forgery is not appropriate.
-- Ensure the harvest-progress stream authorizer allows the same trusted operator audience when live progress should be visible outside Development.
+- Ensure any custom harvest-progress stream authorizer narrows the same trusted operator audience instead of widening it. With `OperatorReadPolicy` configured, the AppSurface Docs stream gate evaluates the read policy before custom stream authorization.
 - Audit and rate-limit host-owned automation paths. The packaged browser route queues one rebuild behind an active run, but external job endpoints still decide their own replay and audit model.
 
 A Razor/MVC operator surface can post to the packaged rebuild endpoint with the normal anti-forgery token:

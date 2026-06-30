@@ -473,6 +473,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Diagnostics);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ShowChrome);
+        Assert.Null(options.Diagnostics.OperatorReadPolicy);
     }
 
     [Fact]
@@ -1004,6 +1005,7 @@ public sealed class AppSurfaceDocsOptionsTests
                     {
                         ["AppSurfaceDocs:Diagnostics:ExposeRouteInspector"] = "Always",
                         ["AppSurfaceDocs:Diagnostics:ShowChrome"] = "Never",
+                        ["AppSurfaceDocs:Diagnostics:OperatorReadPolicy"] = " DocsRead ",
                         ["AppSurfaceDocs:Diagnostics:OperatorWritePolicy"] = " DocsWrite "
                     })
                 .Build());
@@ -1015,6 +1017,7 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Diagnostics.ShowChrome);
+        Assert.Equal("DocsRead", options.Diagnostics.OperatorReadPolicy);
         Assert.Equal("DocsWrite", options.Diagnostics.OperatorWritePolicy);
     }
 
@@ -1507,6 +1510,7 @@ public sealed class AppSurfaceDocsOptionsTests
         {
             ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always,
             ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never,
+            OperatorReadPolicy = " DocsRead ",
             OperatorWritePolicy = " DocsWrite ",
             SearchIndexRefreshPolicy = " DocsRefresh "
         };
@@ -1568,6 +1572,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Diagnostics.ShowChrome);
+        Assert.Equal("DocsRead", options.Diagnostics.OperatorReadPolicy);
         Assert.Equal("DocsWrite", options.Diagnostics.OperatorWritePolicy);
         Assert.Equal("DocsRefresh", options.Diagnostics.SearchIndexRefreshPolicy);
         Assert.Equal("/tmp/docs.bundle.json", options.Bundle.Path);
@@ -1638,6 +1643,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ShowChrome);
+        Assert.Null(options.Diagnostics.OperatorReadPolicy);
         Assert.Null(options.Diagnostics.SearchIndexRefreshPolicy);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
@@ -1645,6 +1651,27 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("en", options.Localization.DefaultLocale);
         Assert.NotNull(options.Localization.Locales);
         Assert.Empty(options.Localization.Locales);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldNormalizeBlankOperatorReadPolicyToNull()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Diagnostics:OperatorReadPolicy"] = "   "
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Null(options.Diagnostics.OperatorReadPolicy);
     }
 
     [Fact]

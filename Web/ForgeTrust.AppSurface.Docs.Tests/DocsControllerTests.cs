@@ -2200,7 +2200,7 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task Search_ShouldRenderHarvestingWithLiveProgress_WhenReplacementAuthorizerAllowsHiddenHarvestRoutes()
+    public async Task Search_ShouldRenderHarvestingWithoutLiveProgress_WhenReplacementAuthorizerAllowsHiddenHarvestRoutes()
     {
         await using var pending = CreatePendingHarvestController(
             "/docs/search",
@@ -2210,7 +2210,7 @@ public class DocsControllerTests : IDisposable
 
         var result = await pending.Controller.Search();
 
-        AssertHarvestingView(result, "/docs/search", canUseLiveProgress: true);
+        AssertHarvestingView(result, "/docs/search", canUseLiveProgress: false);
     }
 
     [Fact]
@@ -6068,6 +6068,8 @@ public class DocsControllerTests : IDisposable
             .AddLogging()
             .AddControllersWithViews()
             .Services;
+        requestServicesBuilder.AddSingleton<IRazorWireStreamAuthorizationFilter>(
+            new AppSurfaceDocsHarvestStreamAuthorizationFilter(options, environment));
 
         if (registerAuthorizer)
         {

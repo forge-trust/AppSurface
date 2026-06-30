@@ -1,11 +1,17 @@
+using System.Security.Claims;
+using System.Text.Encodings.Web;
 using ForgeTrust.AppSurface.Auth;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -224,12 +230,28 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
     [Theory]
     [InlineData(true, AppSurfaceAuthOutcome.Allowed)]
     [InlineData(false, AppSurfaceAuthOutcome.Forbid)]
-    public async Task StreamAuthorizeAsync_WhenReplacementChannelAuthorizerIsRegistered_UsesReplacementBeforeDocsPolicy(
+    public async Task StreamAuthorizeAsync_WhenReplacementChannelAuthorizerIsRegistered_UsesVisibleCompatibilityPath(
         bool allow,
         AppSurfaceAuthOutcome expectedOutcome)
     {
         await using var services = new ServiceCollection()
             .AddSingleton<IRazorWireChannelAuthorizer>(new TestChannelAuthorizer(allow))
+            .BuildServiceProvider();
+        var authorizer = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Always),
+            new TestHostEnvironment { EnvironmentName = Environments.Production });
+        var context = Context(AppSurfaceDocsStreamAuthorization.HarvestProgressChannel, services);
+
+        var result = await authorizer.AuthorizeAsync(context);
+
+        Assert.Equal(expectedOutcome, result.Outcome);
+    }
+
+    [Fact]
+    public async Task StreamAuthorizeAsync_WhenReplacementChannelAuthorizerIsRegistered_CannotBypassHiddenHarvestRoutes()
+    {
+        await using var services = new ServiceCollection()
+            .AddSingleton<IRazorWireChannelAuthorizer>(new TestChannelAuthorizer(allow: true))
             .BuildServiceProvider();
         var authorizer = new AppSurfaceDocsHarvestStreamAuthorizer(
             Options(AppSurfaceDocsHarvestHealthExposure.Never),
@@ -238,7 +260,65 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
 
         var result = await authorizer.AuthorizeAsync(context);
 
-        Assert.Equal(expectedOutcome, result.Outcome);
+        Assert.Equal(AppSurfaceAuthOutcome.Forbid, result.Outcome);
+    }
+
+    [Fact]
+    public async Task StreamAuthorizeAsync_WhenOperatorReadPolicyAllows_AllowsHarvestProgressWithoutCustomAuthorizer()
+    {
+        await using var services = CreateReadPolicyServices();
+        var authorizer = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Always, operatorReadPolicy: "DocsRead"),
+            new TestHostEnvironment { EnvironmentName = Environments.Production });
+        var context = Context(AppSurfaceDocsStreamAuthorization.HarvestProgressChannel, services, "alice", "docs.read");
+
+        var result = await authorizer.AuthorizeAsync(context);
+
+        Assert.True(result.IsAllowed);
+    }
+
+    [Fact]
+    public async Task StreamAuthorizeAsync_WhenOperatorReadPolicyChallenges_ReturnsChallengeBeforeCustomAuthorizer()
+    {
+        await using var services = CreateReadPolicyServices();
+        var authorizer = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Always, operatorReadPolicy: "DocsRead"),
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            new TestStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+        var context = Context(AppSurfaceDocsStreamAuthorization.HarvestProgressChannel, services);
+
+        var result = await authorizer.AuthorizeAsync(context);
+
+        Assert.Equal(AppSurfaceAuthOutcome.Challenge, result.Outcome);
+    }
+
+    [Fact]
+    public async Task StreamAuthorizeAsync_WhenOperatorReadPolicyAllows_CustomAuthorizerMayNarrow()
+    {
+        await using var services = CreateReadPolicyServices();
+        var authorizer = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Always, operatorReadPolicy: "DocsRead"),
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            new TestStreamAuthorizer(AppSurfaceAuthResult.Forbidden()));
+        var context = Context(AppSurfaceDocsStreamAuthorization.HarvestProgressChannel, services, "alice", "docs.read");
+
+        var result = await authorizer.AuthorizeAsync(context);
+
+        Assert.Equal(AppSurfaceAuthOutcome.Forbid, result.Outcome);
+    }
+
+    [Fact]
+    public async Task StreamAuthorizeAsync_WhenOperatorReadPolicyIsConfigured_ReplacementChannelAuthorizerCannotBypassPolicy()
+    {
+        await using var services = CreateReadPolicyServices(replacementAuthorizerAllows: true);
+        var authorizer = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Always, operatorReadPolicy: "DocsRead"),
+            new TestHostEnvironment { EnvironmentName = Environments.Production });
+        var context = Context(AppSurfaceDocsStreamAuthorization.HarvestProgressChannel, services);
+
+        var result = await authorizer.AuthorizeAsync(context);
+
+        Assert.Equal(AppSurfaceAuthOutcome.Challenge, result.Outcome);
     }
 
     [Fact]
@@ -270,10 +350,16 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         Assert.Equal(expected, AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel));
     }
 
-    private static AppSurfaceDocsOptions Options(AppSurfaceDocsHarvestHealthExposure exposure)
+    private static AppSurfaceDocsOptions Options(
+        AppSurfaceDocsHarvestHealthExposure exposure,
+        string? operatorReadPolicy = null)
     {
         return new AppSurfaceDocsOptions
         {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorReadPolicy = operatorReadPolicy
+            },
             Harvest = new AppSurfaceDocsHarvestOptions
             {
                 Health = new AppSurfaceDocsHarvestHealthOptions
@@ -282,6 +368,32 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
                 }
             }
         };
+    }
+
+    private static ServiceProvider CreateReadPolicyServices(bool replacementAuthorizerAllows = false)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddAuthentication(HeaderAuthenticationHandler.SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, HeaderAuthenticationHandler>(
+                HeaderAuthenticationHandler.SchemeName,
+                _ => { });
+        services.AddAuthorization(
+            options =>
+            {
+                options.AddPolicy(
+                    "DocsRead",
+                    policy => policy.AddAuthenticationSchemes(HeaderAuthenticationHandler.SchemeName)
+                        .RequireAuthenticatedUser()
+                        .RequireClaim("scope", "docs.read"));
+            });
+        if (replacementAuthorizerAllows)
+        {
+            services.AddSingleton<IRazorWireChannelAuthorizer>(new TestChannelAuthorizer(allow: true));
+        }
+
+        return services.BuildServiceProvider();
     }
 
     private sealed class TestHostEnvironment : IHostEnvironment
@@ -305,12 +417,24 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
 
     private static RazorWireStreamAuthorizationContext Context(
         string channel,
-        IServiceProvider? requestServices = null)
+        IServiceProvider? requestServices = null,
+        string? userName = null,
+        string? scope = null)
     {
         var httpContext = new DefaultHttpContext();
         if (requestServices is not null)
         {
             httpContext.RequestServices = requestServices;
+        }
+
+        if (!string.IsNullOrWhiteSpace(userName))
+        {
+            httpContext.Request.Headers[HeaderAuthenticationHandler.UserHeaderName] = userName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(scope))
+        {
+            httpContext.Request.Headers[HeaderAuthenticationHandler.ScopeHeaderName] = scope;
         }
 
         return new RazorWireStreamAuthorizationContext(
@@ -335,6 +459,50 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         {
             LastAuthorizationMode = context.ConfiguredAuthorizationMode;
             return new ValueTask<AppSurfaceAuthResult>(result);
+        }
+    }
+
+    private sealed class HeaderAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+    {
+        public const string SchemeName = "HeaderTest";
+        public const string UserHeaderName = "X-Test-User";
+        public const string ScopeHeaderName = "X-Test-Scope";
+
+        public HeaderAuthenticationHandler(
+            IOptionsMonitor<AuthenticationSchemeOptions> options,
+            ILoggerFactory logger,
+            UrlEncoder encoder)
+            : base(options, logger, encoder)
+        {
+        }
+
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        {
+            if (!Request.Headers.TryGetValue(UserHeaderName, out var userValues)
+                || string.IsNullOrWhiteSpace(userValues[0]))
+            {
+                return Task.FromResult(AuthenticateResult.NoResult());
+            }
+
+            var userName = userValues[0]!;
+            var claims = new List<Claim>
+            {
+                new(ClaimTypes.Name, userName),
+                new(ClaimTypes.NameIdentifier, userName)
+            };
+            if (Request.Headers.TryGetValue(ScopeHeaderName, out var scopeValues))
+            {
+                claims.AddRange(
+                    scopeValues
+                        .SelectMany(value => value?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [])
+                        .Select(scope => new Claim("scope", scope)));
+            }
+
+            var identity = new ClaimsIdentity(claims, SchemeName);
+            var principal = new ClaimsPrincipal(identity);
+            var ticket = new AuthenticationTicket(principal, SchemeName);
+
+            return Task.FromResult(AuthenticateResult.Success(ticket));
         }
     }
 }

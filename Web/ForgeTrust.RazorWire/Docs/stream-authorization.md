@@ -35,6 +35,11 @@ services.AddSingleton<IRazorWireStreamAuthorizer, TenantStreamAuthorizer>();
 services.AddRazorWire();
 ```
 
+Use `IRazorWireStreamAuthorizationFilter` only for package-owned or reserved channels that need a pre-authorizer before
+the host-selected stream authorizer. A filter should return `null` when it does not apply, a denial/setup-failure result
+when the subscription must stop before SSE, or `Allowed` when the request may continue to later filters and the active
+`IRazorWireStreamAuthorizer`.
+
 ## Result Mapping
 
 | Result outcome | HTTP status before SSE | Development body | Production body |
@@ -67,9 +72,10 @@ change authorization decisions while keeping non-leaky status mapping.
 | `IRazorWireChannelAuthorizer` before or after `AddRazorWire` | Legacy bool authorizer is adapted to `Allowed` or `Forbidden`. |
 | `IRazorWireStreamAuthorizer` before `AddRazorWire` | Result authorizer suppresses the bool adapter and wins. |
 | `IRazorWireStreamAuthorizer` after `AddRazorWire` | Result authorizer wins through last-registration behavior. |
+| `IRazorWireStreamAuthorizationFilter` | Runs before the active stream authorizer; denials stop the subscription, `null` abstains, and `Allowed` continues. |
 | Both result and bool authorizers | The result authorizer wins unless it explicitly delegates. |
 | `AddAppSurfaceDocs` | Docs installs a result-aware harvest wrapper and a legacy bool facade over the same decision. |
-| Custom result or bool authorizer after `AddAppSurfaceDocs` | Advanced replacement mode; the host owns harvest-channel safety. |
+| Custom result or bool authorizer after `AddAppSurfaceDocs` | Custom authorizer can narrow access, but the Docs harvest-stream filter still enforces hidden-route and shared read-policy gates first. |
 
 ## Host Policy Recipe
 

@@ -10,6 +10,7 @@ using ForgeTrust.AppSurface.Intelligence;
 using ForgeTrust.AppSurface.Web;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -117,6 +118,68 @@ public class RazorWireEndpointAuthorizationTests
         Assert.Contains("Docs: Web/ForgeTrust.RazorWire/Docs/stream-authorization.md", body, StringComparison.Ordinal);
         Assert.Contains(expectedOutcome, body, StringComparison.Ordinal);
         Assert.DoesNotContain("tenant-secret-42", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_FilterDenial_RunsBeforePermissiveAuthorizer()
+    {
+        var hub = new TrackingStreamHub();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireStreamAuthorizationFilter>(
+                    new FixedStreamAuthorizationFilter(AppSurfaceAuthResult.Forbidden()));
+                services.AddSingleton<IRazorWireStreamAuthorizer>(
+                    new FixedStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.NotEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains(nameof(AppSurfaceAuthOutcome.Forbid), body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_FilterDenial_RunsBeforeFallbackAuthorizationPolicy()
+    {
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            services =>
+            {
+                services
+                    .AddAuthentication(RazorWireHeaderAuthenticationHandler.SchemeName)
+                    .AddScheme<AuthenticationSchemeOptions, RazorWireHeaderAuthenticationHandler>(
+                        RazorWireHeaderAuthenticationHandler.SchemeName,
+                        _ => { });
+                services.AddAuthorization(
+                    options =>
+                    {
+                        options.FallbackPolicy = new AuthorizationPolicyBuilder(RazorWireHeaderAuthenticationHandler.SchemeName)
+                            .RequireAuthenticatedUser()
+                            .RequireClaim("scope", "app.fallback")
+                            .Build();
+                    });
+                services.AddSingleton<IRazorWireStreamAuthorizationFilter>(
+                    new FixedStreamAuthorizationFilter(AppSurfaceAuthResult.Forbidden()));
+                services.AddSingleton<IRazorWireStreamAuthorizer>(
+                    new FixedStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+            },
+            configureApp: app =>
+            {
+                app.UseAuthentication();
+                app.UseAuthorization();
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Contains(nameof(AppSurfaceAuthOutcome.Forbid), body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -958,6 +1021,14 @@ public class RazorWireEndpointAuthorizationTests
         public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
         {
             return new ValueTask<AppSurfaceAuthResult>(result);
+        }
+    }
+
+    private sealed class FixedStreamAuthorizationFilter(AppSurfaceAuthResult? result) : IRazorWireStreamAuthorizationFilter
+    {
+        public ValueTask<AppSurfaceAuthResult?> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            return new ValueTask<AppSurfaceAuthResult?>(result);
         }
     }
 
