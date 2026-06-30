@@ -27,6 +27,53 @@ public sealed class DurableTaskWorkerChainRunnerTests
     }
 
     [Fact]
+    public async Task TryClaimAsync_DefaultOutcomeCompletesWithoutExecutor()
+    {
+        var runner = CreateRunner();
+        var contract = new FakeProjectionContract
+        {
+            ClaimEnvelope = Envelope<string>(DurableWorkerProjectionOutcome.AlreadyCompleted, "work"),
+        };
+
+        var decision = await runner.TryClaimAsync(contract, "work", TestCorrelation());
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.Complete, decision.Kind);
+        Assert.Equal(DurableWorkerProjectionOutcome.AlreadyCompleted, decision.SourceOutcome);
+        Assert.Null(decision.Work);
+    }
+
+    [Fact]
+    public async Task TryClaimAsync_TerminalConflictFaults()
+    {
+        var runner = CreateRunner();
+        var contract = new FakeProjectionContract
+        {
+            ClaimEnvelope = Envelope<string>(
+                DurableWorkerProjectionOutcome.Conflict,
+                "work",
+                DurableWorkerRetryability.OperatorRequired),
+        };
+
+        var decision = await runner.TryClaimAsync(contract, "work", TestCorrelation());
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.Fault, decision.Kind);
+        Assert.Equal(DurableWorkerProjectionOutcome.Conflict, decision.SourceOutcome);
+    }
+
+    [Fact]
+    public async Task TryClaimAsync_RejectsNullInputsAndNullEnvelope()
+    {
+        var runner = CreateRunner();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await runner.TryClaimAsync(null!, "work", TestCorrelation()));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await runner.TryClaimAsync(new FakeProjectionContract(), "work", null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await runner.TryClaimAsync(new NullProjectionContract(), "work", TestCorrelation()));
+    }
+
+    [Fact]
     public async Task CompleteAsync_FreshCompletionSchedulesProjectionRepair()
     {
         var retry = new FlowRetryPolicy(4, TimeSpan.FromSeconds(1), backoffCoefficient: 2);
@@ -57,6 +104,54 @@ public sealed class DurableTaskWorkerChainRunnerTests
 
         Assert.Equal(DurableTaskWorkerDecisionKind.Complete, decision.Kind);
         Assert.Null(decision.RetryPolicy);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_StaleFenceIgnoresLateSignal()
+    {
+        var runner = CreateRunner();
+        var contract = new FakeProjectionContract
+        {
+            CompletionEnvelope = Envelope<string>(DurableWorkerProjectionOutcome.StaleFence, "result"),
+        };
+
+        var decision = await runner.CompleteAsync(contract, "work", "result", TestCorrelation());
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.IgnoreLateSignal, decision.Kind);
+        Assert.Equal(DurableWorkerProjectionOutcome.StaleFence, decision.SourceOutcome);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RetryableConflictWaitsForProjectionRetryPolicy()
+    {
+        var retry = new FlowRetryPolicy(3, TimeSpan.FromSeconds(5));
+        var runner = CreateRunner(projectionRetryPolicy: retry);
+        var contract = new FakeProjectionContract
+        {
+            CompletionEnvelope = Envelope<string>(
+                DurableWorkerProjectionOutcome.Conflict,
+                "result",
+                DurableWorkerRetryability.Retryable),
+        };
+
+        var decision = await runner.CompleteAsync(contract, "work", "result", TestCorrelation());
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.WaitForRetry, decision.Kind);
+        Assert.Same(retry, decision.RetryPolicy);
+        Assert.Equal(DurableWorkerProjectionOutcome.Conflict, decision.SourceOutcome);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RejectsNullInputsAndNullEnvelope()
+    {
+        var runner = CreateRunner();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await runner.CompleteAsync(null!, "work", "result", TestCorrelation()));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await runner.CompleteAsync(new FakeProjectionContract(), "work", "result", null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await runner.CompleteAsync(new NullProjectionContract(), "work", "result", TestCorrelation()));
     }
 
     [Fact]
@@ -95,6 +190,51 @@ public sealed class DurableTaskWorkerChainRunnerTests
         Assert.Equal(DurableTaskWorkerDecisionKind.WaitForRetry, decision.Kind);
         Assert.Same(retry, decision.RetryPolicy);
         Assert.Equal(DurableWorkerProjectionOutcome.Conflict, decision.SourceOutcome);
+    }
+
+    [Fact]
+    public async Task ReconcileProjectionAsync_StaleFenceIgnoresLateSignal()
+    {
+        var runner = CreateRunner();
+        var contract = new FakeProjectionContract
+        {
+            ProjectionEnvelope = Envelope<string>(DurableWorkerProjectionOutcome.StaleFence, "projection"),
+        };
+
+        var decision = await runner.ReconcileProjectionAsync(contract, "work", "result", TestCorrelation());
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.IgnoreLateSignal, decision.Kind);
+        Assert.Equal(DurableWorkerProjectionOutcome.StaleFence, decision.SourceOutcome);
+    }
+
+    [Theory]
+    [InlineData(DurableWorkerProjectionOutcome.Conflict)]
+    [InlineData(DurableWorkerProjectionOutcome.Unrecoverable)]
+    public async Task ReconcileProjectionAsync_TerminalFailureFaults(DurableWorkerProjectionOutcome outcome)
+    {
+        var runner = CreateRunner();
+        var contract = new FakeProjectionContract
+        {
+            ProjectionEnvelope = Envelope<string>(outcome, "projection", DurableWorkerRetryability.OperatorRequired),
+        };
+
+        var decision = await runner.ReconcileProjectionAsync(contract, "work", "result", TestCorrelation());
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.Fault, decision.Kind);
+        Assert.Equal(outcome, decision.SourceOutcome);
+    }
+
+    [Fact]
+    public async Task ReconcileProjectionAsync_RejectsNullInputsAndNullEnvelope()
+    {
+        var runner = CreateRunner();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await runner.ReconcileProjectionAsync(null!, "work", "result", TestCorrelation()));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await runner.ReconcileProjectionAsync(new FakeProjectionContract(), "work", "result", null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await runner.ReconcileProjectionAsync(new NullProjectionContract(), "work", "result", TestCorrelation()));
     }
 
     [Fact]
@@ -158,6 +298,32 @@ public sealed class DurableTaskWorkerChainRunnerTests
         Assert.Equal(DurableTaskWorkerDecisionKind.WaitForExternalEvent, decision.Kind);
         Assert.Equal("resume-approved", decision.EventName);
         Assert.Same(timeout, decision.Timeout);
+    }
+
+    [Fact]
+    public void IgnoreLateSignal_CreatesStaleFenceDecisionWithDiagnostic()
+    {
+        var runner = CreateRunner();
+        var diagnostic = new DurableWorkerDiagnostic(
+            "worker.signal-late",
+            "The signal arrived after completion.",
+            "The durable instance had already advanced.",
+            "Ignore the stale signal.",
+            DurableWorkerRetryability.Terminal);
+
+        var decision = runner.IgnoreLateSignal(TestCorrelation(), "resume-approved", diagnostic);
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.IgnoreLateSignal, decision.Kind);
+        Assert.Equal("resume-approved", decision.EventName);
+        Assert.Equal(DurableWorkerProjectionOutcome.StaleFence, decision.SourceOutcome);
+        Assert.Same(diagnostic, decision.Diagnostic);
+    }
+
+    [Fact]
+    public void Constructor_RejectsNullOptions()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new DurableTaskWorkerChainRunner<string, string, string>(null!));
     }
 
     [Fact]
@@ -250,6 +416,37 @@ public sealed class DurableTaskWorkerChainRunnerTests
         {
             await Task.Yield();
             yield return ProjectionEnvelope ?? Envelope(DurableWorkerProjectionOutcome.Reconciled, "projection");
+        }
+    }
+
+    private sealed class NullProjectionContract : IDurableWorkerProjectionContract<string, string, string>
+    {
+        public ValueTask<DurableWorkerEnvelope<string>> TryClaimAsync(
+            string work,
+            DurableWorkerCorrelation correlation,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<DurableWorkerEnvelope<string>>(null!);
+
+        public ValueTask<DurableWorkerEnvelope<string>> CompleteAsync(
+            string work,
+            string result,
+            DurableWorkerCorrelation correlation,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<DurableWorkerEnvelope<string>>(null!);
+
+        public ValueTask<DurableWorkerEnvelope<string>> ReconcileProjectionAsync(
+            string work,
+            string result,
+            DurableWorkerCorrelation correlation,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<DurableWorkerEnvelope<string>>(null!);
+
+        public async IAsyncEnumerable<DurableWorkerEnvelope<string>> ReconcilePendingProjectionsAsync(
+            DurableWorkerProjectionRepairRequest request,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            yield break;
         }
     }
 }
