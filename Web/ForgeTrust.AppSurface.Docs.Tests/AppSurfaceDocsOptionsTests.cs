@@ -86,6 +86,8 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.javascript.event_doclet_dispatch_missing", DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing);
         Assert.Equal("appsurfacedocs.javascript.event_dispatch_doclet_missing", DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing);
         Assert.Equal("appsurfacedocs.javascript.duplicate_anchor", DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor);
+        Assert.Equal("appsurfacedocs.javascript.typedef_reference_missing", DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceMissing);
+        Assert.Equal("appsurfacedocs.javascript.typedef_reference_ambiguous", DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceAmbiguous);
         Assert.Equal("appsurfacedocs.routes.reserved_collision", DocHarvestDiagnosticCodes.DocReservedRouteCollision);
         Assert.Equal("appsurfacedocs.routes.doc_collision", DocHarvestDiagnosticCodes.DocRouteCollision);
         Assert.Equal("appsurfacedocs.routes.redirect_alias_collision", DocHarvestDiagnosticCodes.DocRedirectAliasCollision);

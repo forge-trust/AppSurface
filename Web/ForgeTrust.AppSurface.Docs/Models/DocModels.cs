@@ -1069,6 +1069,16 @@ public static class DocHarvestDiagnosticCodes
     public const string JavaScriptDuplicateAnchor = "appsurfacedocs.javascript.duplicate_anchor";
 
     /// <summary>
+    /// A JavaScript type reference looked like a same-group typedef reference but no matching typedef was harvested.
+    /// </summary>
+    public const string JavaScriptTypedefReferenceMissing = "appsurfacedocs.javascript.typedef_reference_missing";
+
+    /// <summary>
+    /// A JavaScript type reference matched more than one same-group typedef and could not be linked deterministically.
+    /// </summary>
+    public const string JavaScriptTypedefReferenceAmbiguous = "appsurfacedocs.javascript.typedef_reference_ambiguous";
+
+    /// <summary>
     /// A documentation page resolved to a route owned by AppSurface Docs chrome, search, health, versions, sections, or assets.
     /// </summary>
     public const string DocReservedRouteCollision = "appsurfacedocs.routes.reserved_collision";

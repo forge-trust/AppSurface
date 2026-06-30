@@ -287,7 +287,7 @@ public sealed partial record AppSurfaceDocsHarvestDiagnosticResponse
             return string.Empty;
         }
 
-        var redacted = StackTraceFrameRegex().Replace(cause, " at [redacted stack frame]");
+        var redacted = StackTraceFrameRegex().Replace(cause, "${indent}at [redacted stack frame]${newline}");
         redacted = WindowsAbsolutePathRegex().Replace(redacted, "[redacted path]");
         redacted = UnixAbsolutePathRegex().Replace(redacted, "[redacted path]");
         redacted = UncPathRegex().Replace(redacted, "[redacted path]");
@@ -298,7 +298,7 @@ public sealed partial record AppSurfaceDocsHarvestDiagnosticResponse
         return redacted;
     }
 
-    [GeneratedRegex(@"(?m)^\s+at\s+.+(?:\r?\n|$)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?m)^(?<indent>[ \t]+)at[^\r\n]*(?<newline>\r?\n|$)", RegexOptions.CultureInvariant)]
     private static partial Regex StackTraceFrameRegex();
 
     [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s,;:""'<>)]*", RegexOptions.CultureInvariant)]

@@ -21,6 +21,13 @@
           "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
+      "forgetrust.appsurface.config": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "Microsoft.Extensions.Options": "[10.0.8, )"
+        }
+      },
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
@@ -36,6 +43,7 @@
       "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {
+          "ForgeTrust.AppSurface.Config": "[0.1.0, )",
           "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },

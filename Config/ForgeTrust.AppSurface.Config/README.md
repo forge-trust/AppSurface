@@ -396,6 +396,12 @@ if (!result.Succeeded)
 }
 ```
 
+Web hosts can use the opt-in authenticated HTTP mapper from `ForgeTrust.AppSurface.Web` to capture the same sanitized
+report from a deployed host:
+[Config Audit HTTP Diagnostics](../../Web/ForgeTrust.AppSurface.Web/README.md#config-audit-http-diagnostics). Treat those
+JSON files as support-sensitive operator evidence because provider names, configuration keys, source paths, diagnostics,
+and redaction metadata may still reveal deployment structure even when values are redacted.
+
 `ConfigAuditDiffCommandRunner` also supports same-host command wrappers:
 
 ```csharp

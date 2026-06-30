@@ -120,6 +120,11 @@ internal sealed record PublishOutputs(
 /// <param name="SubjectSha256">Stable subject digest for the evidence bundle.</param>
 /// <param name="DocsReleaseManifestSha256">Optional AppSurface Docs archive manifest digest referenced by the evidence bundle.</param>
 /// <param name="CatalogExactTreePath">Optional catalog exact tree path referenced by the evidence bundle.</param>
+/// <param name="DocsArchiveVerificationState">Stable docs archive verification state from the checked catalog/archive inputs.</param>
+/// <param name="DocsCatalogPath">Physical catalog input used to verify stable docs evidence.</param>
+/// <param name="DocsTrustedReleaseRootPath">Physical trusted release root used to resolve catalog exact-tree paths.</param>
+/// <param name="DocsPhysicalExactTreePath">Physical exact-tree path verified against the catalog pin.</param>
+/// <param name="DocsVerifiedFileCount">Number of archive files verified from the release manifest.</param>
 /// <param name="TagCommit">Optional tag commit validated at publish time.</param>
 /// <param name="Attestation">Attestation requirement state.</param>
 internal sealed record ReleaseEvidenceSummary(
@@ -129,5 +134,10 @@ internal sealed record ReleaseEvidenceSummary(
     string SubjectSha256,
     string? DocsReleaseManifestSha256,
     string? CatalogExactTreePath,
+    string? DocsArchiveVerificationState,
+    string? DocsCatalogPath,
+    string? DocsTrustedReleaseRootPath,
+    string? DocsPhysicalExactTreePath,
+    int? DocsVerifiedFileCount,
     string? TagCommit,
     string Attestation);

@@ -157,7 +157,9 @@ internal abstract class ReleaseCommandBase
             ResolveGitHubOutputPath(repoRoot),
             FailOnWarnings,
             AllowExistingTargets,
-            ResolveBaseRef());
+            ResolveBaseRef(),
+            ResolveDocsCatalogPath(repoRoot),
+            ResolveDocsTrustedReleaseRootPath(repoRoot));
     }
 
     /// <summary>
@@ -178,6 +180,32 @@ internal abstract class ReleaseCommandBase
     /// <param name="repoRoot">Resolved repository root.</param>
     /// <returns>The output path, or <see langword="null"/> for commands that do not write workflow outputs.</returns>
     protected virtual string? ResolveGitHubOutputPath(string repoRoot) => null;
+
+    /// <summary>
+    /// Resolves the AppSurface Docs version catalog path, when the command supports stable docs evidence verification.
+    /// </summary>
+    /// <param name="repoRoot">Resolved repository root.</param>
+    /// <returns>The catalog path, or <see langword="null"/> when the command does not accept docs catalog input.</returns>
+    /// <remarks>
+    /// Overrides should resolve relative option values from <paramref name="repoRoot"/> instead of the process working directory so local
+    /// shells, CI jobs, and generated reports all describe the same artifact. Return <see langword="null"/> for commands that do not verify
+    /// stable docs evidence, and for <c>check</c> when callers want the local <c>dist/docs/versions.json</c> fallback. Stable <c>publish</c>
+    /// callers should prefer an explicit staged catalog path because checkout-local docs may not be the artifact being published.
+    /// </remarks>
+    protected virtual string? ResolveDocsCatalogPath(string repoRoot) => null;
+
+    /// <summary>
+    /// Resolves the trusted release root path used to interpret docs catalog exact-tree paths.
+    /// </summary>
+    /// <param name="repoRoot">Resolved repository root.</param>
+    /// <returns>The trusted release root, or <see langword="null"/> to default to the catalog directory.</returns>
+    /// <remarks>
+    /// Overrides should resolve relative option values from <paramref name="repoRoot"/>. Returning <see langword="null"/> tells the verifier
+    /// to derive the trusted root from the catalog directory, which is the right default for colocated review artifacts. Pass an explicit
+    /// root when the catalog is staged beside, but not above, the exact release trees; otherwise catalog <c>exactTreePath</c> values may
+    /// resolve as missing or unsafe.
+    /// </remarks>
+    protected virtual string? ResolveDocsTrustedReleaseRootPath(string repoRoot) => null;
 
     /// <summary>
     /// Resolves the branch name used for publish-time reachability and source workflow checks.

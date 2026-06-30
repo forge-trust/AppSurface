@@ -50,6 +50,7 @@ public sealed class AppSurfaceDocsHarvestHealthResponseTests
             InvalidOperationException: boom at /Users/andrew/private/repo/secret.js; token=super-secret-value Bearer abc.def.ghi ghp_1234567890abcdef
             Sidecar path /Users/andrew/private/repo/.env and Windows path C:\repo\Secret.cs were observed.
                at ForgeTrust.Secret.Run() in C:\repo\Secret.cs:line 42
+            Follow-up diagnostic context remains separate.
             """;
         var harvesterDiagnostic = new DocHarvestDiagnostic(
             DocHarvestDiagnosticCodes.HarvesterFailed,
@@ -89,5 +90,9 @@ public sealed class AppSurfaceDocsHarvestHealthResponseTests
         Assert.Contains("Bearer [redacted]", combinedCause, StringComparison.Ordinal);
         Assert.Contains("[redacted token]", combinedCause, StringComparison.Ordinal);
         Assert.Contains("[redacted stack frame]", combinedCause, StringComparison.Ordinal);
+        Assert.Contains(
+            "[redacted stack frame]\nFollow-up diagnostic context remains separate.",
+            combinedCause,
+            StringComparison.Ordinal);
     }
 }
