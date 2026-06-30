@@ -3835,7 +3835,8 @@ public class DocsControllerTests : IDisposable
             Assert.Equal("Failed", response.Status);
             Assert.DoesNotContain("RepositoryRoot", serialized, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("/tmp/secret/root", serialized, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("Cause", serialized, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"cause\"", serialized, StringComparison.Ordinal);
+            Assert.DoesNotContain("InvalidOperationException", serialized, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("boom", serialized, StringComparison.OrdinalIgnoreCase);
         }
     }

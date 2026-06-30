@@ -113,6 +113,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             var includePatterns = NormalizeIncludePatterns(javaScriptOptions.IncludeGlobs ?? []).ToArray();
             var requirePublicTag = ShouldRequirePublicTag(javaScriptOptions, includePatterns);
             var harvestedItems = new List<JavaScriptApiItem>();
+            var eventDispatches = new List<JavaScriptEventDispatchEvidence>();
             foreach (var filePath in EnumerateJavaScriptFiles(rootPath, includePatterns, pathPolicy, diagnostics, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -138,12 +139,20 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                     }
 
                     var source = await File.ReadAllTextAsync(filePath, cancellationToken);
-                    if (requirePublicTag && !source.Contains("@public", StringComparison.OrdinalIgnoreCase))
+                    var hasPublicTag = source.Contains("@public", StringComparison.OrdinalIgnoreCase);
+                    if (requirePublicTag && !hasPublicTag)
                     {
+                        if (javaScriptOptions.VerifyEventDispatches)
+                        {
+                            eventDispatches.AddRange(CollectVerifierOnlyEventDispatchEvidence(source, relativePath));
+                        }
+
                         continue;
                     }
 
-                    harvestedItems.AddRange(ParseFile(source, relativePath, javaScriptOptions, requirePublicTag, diagnostics));
+                    var parseResult = ParseFile(source, relativePath, javaScriptOptions, requirePublicTag, diagnostics);
+                    harvestedItems.AddRange(parseResult.Items);
+                    eventDispatches.AddRange(parseResult.EventDispatches);
                 }
                 catch (ParseErrorException ex)
                 {
@@ -151,7 +160,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         DocHarvestDiagnosticCodes.JavaScriptParseFailed,
                         DocHarvestDiagnosticSeverity.Warning,
                         $"Skipped JavaScript file '{relativePath}' because the parser rejected it.",
-                        $"Acornima reported {ex.Message} at line {ex.LineNumber.ToString(CultureInfo.InvariantCulture)}, column {ex.Column.ToString(CultureInfo.InvariantCulture)}.",
+                        $"The parser rejected repository-relative JavaScript source at line {ex.LineNumber.ToString(CultureInfo.InvariantCulture)}, column {ex.Column.ToString(CultureInfo.InvariantCulture)}.",
                         "Fix the JavaScript syntax, remove the file from the JavaScript include set, or exclude generated syntax that the v1 harvester should not parse."));
                 }
                 catch (Exception ex) when (IsFileReadException(ex))
@@ -160,11 +169,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         DocHarvestDiagnosticCodes.JavaScriptParseFailed,
                         DocHarvestDiagnosticSeverity.Warning,
                         $"Skipped JavaScript file '{relativePath}' because it could not be read.",
-                        ex.Message,
+                        "The source file matched JavaScript harvest policy, but AppSurface Docs could not read its content before parsing.",
                         "Fix file permissions or locks, or exclude this file from JavaScript harvesting."));
                 }
             }
 
+            AddEventDispatchDiagnostics(harvestedItems, eventDispatches, javaScriptOptions.VerifyEventDispatches, diagnostics);
             AssignStableAnchors(harvestedItems, diagnostics);
             ResolveTypedefReferences(harvestedItems, diagnostics);
             foreach (var item in harvestedItems)
@@ -205,7 +215,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         return _lastDiagnostics;
     }
 
-    private static IReadOnlyList<JavaScriptApiItem> ParseFile(
+    private static JavaScriptParseResult ParseFile(
         string source,
         string relativePath,
         AppSurfaceDocsJavaScriptHarvestOptions options,
@@ -216,6 +226,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         var script = ParseJavaScriptProgram(source, comments);
         var attachedCommentStarts = new HashSet<int>();
         var items = new List<JavaScriptApiItem>();
+        var eventDispatches = options.VerifyEventDispatches
+            ? CollectEventDispatchEvidence(script, relativePath)
+            : [];
 
         foreach (var statement in EnumerateNodes(script))
         {
@@ -337,7 +350,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             AddStandaloneItem(comment, items, source, relativePath, options, requirePublicTag, diagnostics);
         }
 
-        return items;
+        return new JavaScriptParseResult(items, eventDispatches);
     }
 
     private static IEnumerable<Node> EnumerateNodes(Node root)
@@ -373,6 +386,166 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             EcmaVersion = EcmaVersion.Latest,
             OnComment = (in Comment comment) => comments.Add(comment)
         });
+    }
+
+    private static IReadOnlyList<JavaScriptEventDispatchEvidence> CollectEventDispatchEvidence(
+        Node script,
+        string relativePath)
+    {
+        return EnumerateNodes(script)
+            .Select(node => CreateEventDispatchEvidence(node, relativePath))
+            .Where(static dispatch => dispatch.HasValue)
+            .Select(static dispatch => dispatch.GetValueOrDefault())
+            .ToArray();
+    }
+
+    private static IReadOnlyList<JavaScriptEventDispatchEvidence> CollectVerifierOnlyEventDispatchEvidence(
+        string source,
+        string relativePath)
+    {
+        try
+        {
+            var comments = new List<Comment>();
+            var script = ParseJavaScriptProgram(source, comments);
+            return CollectEventDispatchEvidence(script, relativePath);
+        }
+        catch (ParseErrorException)
+        {
+            return [];
+        }
+    }
+
+    private static JavaScriptEventDispatchEvidence? CreateEventDispatchEvidence(Node node, string relativePath)
+    {
+        if (node is not CallExpression callExpression)
+        {
+            return null;
+        }
+
+        if (!IsDispatchEventCallee(callExpression.Callee))
+        {
+            return null;
+        }
+
+        if (!TryGetDirectCustomEventName(callExpression, out var eventName))
+        {
+            return null;
+        }
+
+        return new JavaScriptEventDispatchEvidence(eventName, relativePath, callExpression.Location.Start.Line);
+    }
+
+    private static bool IsDispatchEventCallee(Expression callee)
+    {
+        return callee switch
+        {
+            Identifier identifier => string.Equals(identifier.Name, "dispatchEvent", StringComparison.Ordinal),
+            MemberExpression memberExpression => TryGetMemberName(memberExpression) is "dispatchEvent",
+            _ => false
+        };
+    }
+
+    private static bool TryGetDirectCustomEventName(CallExpression callExpression, out string eventName)
+    {
+        eventName = string.Empty;
+        if (callExpression.Arguments.Count == 0
+            || callExpression.Arguments[0] is not NewExpression newExpression
+            || newExpression.Callee is not Identifier { Name: "CustomEvent" }
+            || newExpression.Arguments.Count == 0
+            || newExpression.Arguments[0] is not StringLiteral stringLiteral
+            || string.IsNullOrWhiteSpace(stringLiteral.Value))
+        {
+            return false;
+        }
+
+        eventName = stringLiteral.Value.Trim();
+        return true;
+    }
+
+    private static string? TryGetMemberName(MemberExpression memberExpression)
+    {
+        return memberExpression.Property switch
+        {
+            Identifier identifier when !memberExpression.Computed => identifier.Name,
+            StringLiteral stringLiteral when memberExpression.Computed => stringLiteral.Value,
+            _ => null
+        };
+    }
+
+    private static void AddEventDispatchDiagnostics(
+        IReadOnlyList<JavaScriptApiItem> items,
+        IReadOnlyList<JavaScriptEventDispatchEvidence> eventDispatches,
+        bool verifyEventDispatches,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        if (!verifyEventDispatches)
+        {
+            return;
+        }
+
+        var documentedEvents = items
+            .Where(static item => item.Kind == JavaScriptApiKind.Event && item.IsPublic)
+            .GroupBy(static item => item.Name, StringComparer.Ordinal)
+            .ToDictionary(static group => group.Key, static group => group.ToArray(), StringComparer.Ordinal);
+        var dispatchedEvents = eventDispatches
+            .GroupBy(static dispatch => dispatch.EventName, StringComparer.Ordinal)
+            .ToDictionary(static group => group.Key, static group => group.ToArray(), StringComparer.Ordinal);
+
+        foreach (var (eventName, doclets) in documentedEvents.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            if (dispatchedEvents.ContainsKey(eventName))
+            {
+                continue;
+            }
+
+            diagnostics.Add(CreateDiagnostic(
+                DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing,
+                DocHarvestDiagnosticSeverity.Warning,
+                $"Public JavaScript event doclet '{eventName}' has no matching literal CustomEvent dispatch.",
+                $"Verifier inputs include {FormatDocletEvidence(doclets)} but no direct dispatchEvent(new CustomEvent(\"{eventName}\", ...)) evidence.",
+                "Add a matching literal CustomEvent dispatch to the verified JavaScript inputs, keep helper-dispatched events documented as a v1 verifier limitation, or disable AppSurfaceDocs:Harvest:JavaScript:VerifyEventDispatches for this harvest boundary."));
+        }
+
+        foreach (var (eventName, dispatches) in dispatchedEvents.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            if (documentedEvents.ContainsKey(eventName))
+            {
+                continue;
+            }
+
+            diagnostics.Add(CreateDiagnostic(
+                DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing,
+                DocHarvestDiagnosticSeverity.Warning,
+                $"Literal JavaScript CustomEvent dispatch '{eventName}' has no matching public event doclet.",
+                $"Verifier inputs include {FormatDispatchEvidence(dispatches)} but no public @event doclet named '{eventName}'.",
+                "Add an intentional public @event doclet for this browser contract, or keep internal literal dispatches outside AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs."));
+        }
+    }
+
+    private static string FormatDocletEvidence(IReadOnlyList<JavaScriptApiItem> doclets)
+    {
+        var ordered = doclets
+            .OrderBy(static doclet => doclet.SourcePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static doclet => doclet.StartLine)
+            .ToArray();
+        var first = ordered[0];
+        var suffix = ordered.Length == 1
+            ? string.Empty
+            : $" and {(ordered.Length - 1).ToString(CultureInfo.InvariantCulture)} duplicate doclet(s)";
+        return $"doclet evidence at {first.SourcePath}:{first.StartLine.ToString(CultureInfo.InvariantCulture)}{suffix}";
+    }
+
+    private static string FormatDispatchEvidence(IReadOnlyList<JavaScriptEventDispatchEvidence> dispatches)
+    {
+        var ordered = dispatches
+            .OrderBy(static dispatch => dispatch.SourcePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static dispatch => dispatch.StartLine)
+            .ToArray();
+        var first = ordered[0];
+        var suffix = ordered.Length == 1
+            ? string.Empty
+            : $" and {(ordered.Length - 1).ToString(CultureInfo.InvariantCulture)} additional dispatch site(s)";
+        return $"literal dispatch evidence at {first.SourcePath}:{first.StartLine.ToString(CultureInfo.InvariantCulture)}{suffix}";
     }
 
     private static void AddAttachedItem(
@@ -2641,6 +2814,15 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string RelativePath,
         bool HasGlobTokens,
         bool CouldMatchJavaScriptFile);
+
+    private readonly record struct JavaScriptParseResult(
+        IReadOnlyList<JavaScriptApiItem> Items,
+        IReadOnlyList<JavaScriptEventDispatchEvidence> EventDispatches);
+
+    private readonly record struct JavaScriptEventDispatchEvidence(
+        string EventName,
+        string SourcePath,
+        int StartLine);
 
     /// <summary>
     /// Captures the normalized path and boundary decision for a JavaScript harvest file-system candidate.

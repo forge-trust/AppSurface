@@ -340,6 +340,432 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldNotVerifyEventDispatchesByDefault()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:doclet-only
+             * @target document
+             * @firesWhen the default verifier is disabled.
+             * @detail none
+             */
+            document.dispatchEvent(new CustomEvent("razorwire:dispatch-only"));
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        Assert.DoesNotContain(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code is DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing
+                or DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldNotWarn_WhenPublicEventDocletMatchesDirectLiteralDispatch()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Active page changed.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:page-nav:active-change
+             * @target document
+             * @firesWhen navigation activates a new page.
+             * @detail none
+             */
+            this.root.dispatchEvent(new CustomEvent("razorwire:page-nav:active-change", { bubbles: true }));
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldFilterVerifierDocletsToPublicEvents()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public helper.
+             * @public
+             */
+            export function wireHelper() {}
+
+            /**
+             * Internal event.
+             * @event razorwire:internal-status
+             * @target document
+             * @firesWhen internal status changes.
+             * @detail none
+             */
+
+            /**
+             * Public event.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:public-status
+             * @target document
+             * @firesWhen status changes.
+             * @detail none
+             */
+            document.dispatchEvent(new CustomEvent("razorwire:public-status"));
+            (function noop() {})();
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequirePublicTag = false;
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldNotWarn_WhenPublicEventDocletMatchesBareAndComputedLiteralDispatches()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Bare dispatch changed.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:bare-dispatch
+             * @target window
+             * @firesWhen a global dispatch occurs.
+             * @detail none
+             */
+            dispatchEvent(new CustomEvent("razorwire:bare-dispatch"));
+
+            /**
+             * Computed dispatch changed.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:computed-dispatch
+             * @target window
+             * @firesWhen a computed dispatch occurs.
+             * @detail none
+             */
+            window["dispatchEvent"](new CustomEvent("razorwire:computed-dispatch"));
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldWarn_WhenPublicEventDocletHasNoLiteralDispatch()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Documented event.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:doclet-only
+             * @target document
+             * @firesWhen docs drift away from source.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("razorwire:doclet-only", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("src/public-api.js:1", diagnostic.Cause, StringComparison.Ordinal);
+        Assert.Contains("VerifyEventDispatches", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldWarn_WhenLiteralDispatchHasNoPublicEventDoclet_EvenWithoutPublicFastPath()
+    {
+        await WriteAsync(
+            "src/runtime.js",
+            """
+            document.dispatchEvent(new CustomEvent("razorwire:dispatch-only", { bubbles: true }));
+            """);
+        var options = CreateEnabledOptions("src/runtime.js");
+        Assert.True(options.Harvest.JavaScript.RequirePublicTag);
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("razorwire:dispatch-only", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("src/runtime.js:1", diagnostic.Cause, StringComparison.Ordinal);
+        Assert.Contains("@event doclet", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldScanNonPublicVerifierInputsForDispatchEvidence()
+    {
+        await WriteAsync(
+            "src/runtime.js",
+            """
+            // This runtime helper is intentionally not public docs surface.
+            document.dispatchEvent(new CustomEvent("razorwire:verifier-only"));
+            """);
+        var options = CreateEnabledOptions("src/runtime.js");
+        Assert.True(options.Harvest.JavaScript.RequirePublicTag);
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing);
+        Assert.Contains("razorwire:verifier-only", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("src/runtime.js:2", diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldGroupDuplicateEventDocletsAndDispatchesByExactEventName()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * First duplicate event.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:duplicate-doclet
+             * @target document
+             * @firesWhen duplicates exist.
+             * @detail none
+             */
+
+            /**
+             * Second duplicate event.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:duplicate-doclet
+             * @target document
+             * @firesWhen duplicates exist.
+             * @detail none
+             */
+
+            document.dispatchEvent(new CustomEvent("razorwire:duplicate-dispatch"));
+            document.dispatchEvent(new CustomEvent("razorwire:duplicate-dispatch"));
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var docletDiagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing);
+        var dispatchDiagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing);
+        Assert.Contains("1 duplicate doclet(s)", docletDiagnostic.Cause, StringComparison.Ordinal);
+        Assert.Contains("1 additional dispatch site(s)", dispatchDiagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipUnsupportedDispatchShapes()
+    {
+        await WriteAsync(
+            "src/runtime.js",
+            """
+            const constantName = "razorwire:constant";
+            const dispatchName = "dispatchEvent";
+            const held = new CustomEvent("razorwire:held");
+            const eventName = `razorwire:${mode}`;
+            document.dispatchEvent();
+            document.dispatchEvent(new CustomEvent());
+            document.dispatchEvent(new CustomEvent("   "));
+            document.dispatchEvent(new CustomEvent(constantName));
+            document.dispatchEvent(new CustomEvent(`razorwire:template`));
+            document.dispatchEvent(held);
+            document.dispatchEvent(new Event("razorwire:event"));
+            window[dispatchName](new CustomEvent("razorwire:computed-variable"));
+            fire("razorwire:helper");
+            function fire(name) {
+              document.dispatchEvent(new CustomEvent(name));
+            }
+            """);
+        var options = CreateEnabledOptions("src/runtime.js");
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipPrivateAndInternalEventDoclets_WhenVerifyingDispatches()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Internal event.
+             * @public
+             * @internal
+             * @namespace RazorWire
+             * @event razorwire:internal-only
+             * @target document
+             * @firesWhen internal state changes.
+             * @detail none
+             */
+
+            /**
+             * Private event.
+             * @public
+             * @private
+             * @namespace RazorWire
+             * @event razorwire:private-only
+             * @target document
+             * @firesWhen private state changes.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipTypeScriptOnlySources_WhenVerifyingDispatches()
+    {
+        await WriteAsync(
+            "src/runtime.ts",
+            """
+            /**
+             * TypeScript-only event.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:typescript-only
+             * @target document
+             * @firesWhen TypeScript source dispatches.
+             * @detail none
+             */
+            document.dispatchEvent(new CustomEvent("razorwire:typescript-only"));
+            """);
+        var options = CreateEnabledOptions("src/runtime.ts");
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldKeepEventDispatchWarningsOutOfStrictHealth()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:doclet-only
+             * @target document
+             * @firesWhen strict health sees warning-only verifier drift.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Source.RepositoryRoot = _testRoot;
+        options.Harvest.JavaScript.StrictHealth = true;
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        var aggregator = new DocAggregator(
+            [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+        var response = AppSurfaceDocsHarvestHealthResponse.FromSnapshot(health);
+
+        Assert.Equal(DocHarvestHealthStatus.Healthy, health.Status);
+        Assert.True(response.Verification.Ok);
+        Assert.Contains(health.Harvesters, item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+            && item.Status == DocHarvesterHealthStatus.Succeeded);
+        Assert.Contains(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldKeepMalformedVerifierOnlyInputsOutOfStrictHealth()
+    {
+        await WriteAsync("src/runtime.js", "function broken( {");
+        var options = CreateEnabledOptions("src/runtime.js");
+        options.Source.RepositoryRoot = _testRoot;
+        options.Harvest.JavaScript.StrictHealth = true;
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        var aggregator = new DocAggregator(
+            [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Healthy, health.Status);
+        Assert.Contains(health.Harvesters, item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+            && item.Status == DocHarvesterHealthStatus.ReturnedEmpty);
+        Assert.DoesNotContain(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptParseFailed);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldRejectFixturePathsOutsideTestRoot()
     {
         var exception = await Assert.ThrowsAsync<ArgumentException>(
@@ -1872,7 +2298,11 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal(nameof(JavaScriptDocHarvester), fileTooLargeDiagnostic.HarvesterType);
         Assert.Equal(DocHarvestDiagnosticSeverity.Warning, fileTooLargeDiagnostic.Severity);
         Assert.Contains("AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes", fileTooLargeDiagnostic.Cause, StringComparison.Ordinal);
-        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptParseFailed);
+        var parseFailedDiagnostic = Assert.Single(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptParseFailed);
+        Assert.Contains("parser rejected repository-relative JavaScript source", parseFailedDiagnostic.Cause, StringComparison.Ordinal);
+        Assert.DoesNotContain("Acornima", parseFailedDiagnostic.Cause, StringComparison.Ordinal);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
         var duplicateAnchorDiagnostic = Assert.Single(
@@ -1966,6 +2396,9 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptParseFailed, diagnostic.Code);
             Assert.Contains("src/unreadable.js", diagnostic.Problem, StringComparison.Ordinal);
             Assert.Contains("could not be read", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("could not read its content before parsing", diagnostic.Cause, StringComparison.Ordinal);
+            Assert.DoesNotContain(_testRoot, diagnostic.Cause, StringComparison.Ordinal);
+            Assert.DoesNotContain(filePath, diagnostic.Cause, StringComparison.Ordinal);
         }
         finally
         {
