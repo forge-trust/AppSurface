@@ -523,6 +523,133 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldAcceptResolvedDetailTypedef_WhenStrictEventDocletsAreRequired()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * A RazorWire-enhanced form submission failed.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:form:failure
+             * @target form[data-rw-form="true"]
+             * @firesWhen a RazorWire-enhanced form receives an unhandled failure response.
+             * @property {FormFailureDetail} detail - Failure payload.
+             */
+
+            /**
+             * Failure payload passed through event.detail.
+             * @public
+             * @namespace RazorWire
+             * @typedef {Object} FormFailureDetail
+             * @property {HTMLFormElement} form - Submitted form.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var eventStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/razorwire#event-razorwire-form-failure",
+            StringComparison.Ordinal));
+        Assert.Contains("<a href=\"#typedef-formfailuredetail\">FormFailureDetail</a>", eventStub.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldFailStrictDetailTypedef_WhenReferenceIsMissing()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * A RazorWire-enhanced form submission failed.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:form:failure
+             * @target form[data-rw-form="true"]
+             * @firesWhen a RazorWire-enhanced form receives an unhandled failure response.
+             * @property {MissingFailureDetail} detail - Missing payload.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        await harvester.HarvestAsync(_testRoot);
+
+        var diagnostics = GetDiagnostics(harvester);
+        Assert.Contains(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceMissing
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning);
+        Assert.Contains(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldFailStrictDetailTypedef_WhenReferenceIsAmbiguous()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * A RazorWire-enhanced form submission failed.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:form:failure
+             * @target form[data-rw-form="true"]
+             * @firesWhen a RazorWire-enhanced form receives an unhandled failure response.
+             * @property {SharedFailureDetail} detail - Ambiguous payload.
+             */
+
+            /**
+             * First payload.
+             * @public
+             * @namespace RazorWire
+             * @typedef {Object} SharedFailureDetail
+             * @property {string} message - Message.
+             */
+
+            /**
+             * Second payload.
+             * @public
+             * @namespace RazorWire
+             * @typedef {Object} SharedFailureDetail
+             * @property {string} code - Code.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostics = GetDiagnostics(harvester);
+        Assert.Contains(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceAmbiguous
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning);
+        Assert.Contains(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Error);
+        var eventStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/razorwire#event-razorwire-form-failure",
+            StringComparison.Ordinal));
+        Assert.DoesNotContain("Type preview:", eventStub.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldRenderSparseTypedefPreviewWithoutProperties()
     {
         await WriteAsync(
@@ -553,6 +680,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             StringComparison.Ordinal));
         Assert.Contains("<a href=\"#typedef-emptypayload\">{EmptyPayload}</a>", attributeStub.Content, StringComparison.Ordinal);
         Assert.Contains("Type preview: <a href=\"#typedef-emptypayload\">EmptyPayload</a>", attributeStub.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("EmptyPayload</a> - EmptyPayload", attributeStub.Content, StringComparison.Ordinal);
         Assert.DoesNotContain("<div class=\"doc-javascript-typedef-preview\"><p>Type preview: <a href=\"#typedef-emptypayload\">EmptyPayload</a></p><ul>", attributeStub.Content, StringComparison.Ordinal);
         Assert.Empty(GetDiagnostics(harvester));
     }
@@ -761,6 +889,42 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
                 StringComparison.Ordinal));
         Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
         Assert.Contains("MissingFailureDetail", diagnostic.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldDeduplicateTypedefDiagnosticsAcrossCaseVariantGroupNames()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Creates a reusable failure payload.
+             * @public
+             * @namespace RazorWire
+             * @param {MissingFailureDetail} detail - Missing payload.
+             */
+            function createFailureDetail(detail) {}
+
+            /**
+             * A RazorWire-enhanced form submission failed.
+             * @public
+             * @namespace razorwire
+             * @event razorwire:form:failure
+             * @target form[data-rw-form="true"]
+             * @firesWhen a RazorWire-enhanced form receives an unhandled failure response.
+             * @property {MissingFailureDetail} detail - Missing payload.
+             * @bubbles true
+             * @cancelable true
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        await harvester.HarvestAsync(_testRoot);
+
+        Assert.Equal(
+            1,
+            GetDiagnostics(harvester).Count(diagnostic =>
+                diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceMissing));
     }
 
     [Fact]

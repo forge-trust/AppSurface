@@ -167,6 +167,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
             AssignStableAnchors(harvestedItems, diagnostics);
             ResolveTypedefReferences(harvestedItems, diagnostics);
+            foreach (var item in harvestedItems)
+            {
+                AddCompletenessDiagnostics(item, javaScriptOptions.RequireCompleteEventDoclets, diagnostics);
+            }
+
             return BuildDocNodes(harvestedItems);
         }
         finally
@@ -330,11 +335,6 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             }
 
             AddStandaloneItem(comment, items, source, relativePath, options, requirePublicTag, diagnostics);
-        }
-
-        foreach (var item in items)
-        {
-            AddCompletenessDiagnostics(item, options.RequireCompleteEventDoclets, diagnostics);
         }
 
         return items;
@@ -820,6 +820,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             .GroupBy(item => item.GroupIdentity, StringComparer.OrdinalIgnoreCase)
             .Select(static group => new
             {
+                GroupIdentity = group.Key,
                 GroupItems = group.ToArray(),
                 GroupDisplayName = group.First().GroupDisplayName
             }))
@@ -832,14 +833,14 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
             foreach (var item in group.GroupItems)
             {
-                ResolveMemberTypedefReferences(item.Parameters, item.GroupIdentity, group.GroupDisplayName, typedefIndex, emittedDiagnostics, diagnostics);
-                ResolveMemberTypedefReferences(item.Properties, item.GroupIdentity, group.GroupDisplayName, typedefIndex, emittedDiagnostics, diagnostics);
+                ResolveMemberTypedefReferences(item.Parameters, group.GroupIdentity, group.GroupDisplayName, typedefIndex, emittedDiagnostics, diagnostics);
+                ResolveMemberTypedefReferences(item.Properties, group.GroupIdentity, group.GroupDisplayName, typedefIndex, emittedDiagnostics, diagnostics);
 
                 if (item.Returns?.TypeReferenceName is { } returnsReferenceName)
                 {
                     item.Returns.TypeReference = ResolveTypedefReference(
                         returnsReferenceName,
-                        item.GroupIdentity,
+                        group.GroupIdentity,
                         group.GroupDisplayName,
                         typedefIndex,
                         emittedDiagnostics,
@@ -850,7 +851,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 {
                     item.TypeReference = ResolveTypedefReference(
                         itemTypeReferenceName,
-                        item.GroupIdentity,
+                        group.GroupIdentity,
                         group.GroupDisplayName,
                         typedefIndex,
                         emittedDiagnostics,
@@ -931,7 +932,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         ISet<JavaScriptTypedefDiagnosticKey> emittedDiagnostics,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
-        if (!emittedDiagnostics.Add(new JavaScriptTypedefDiagnosticKey(groupIdentity, referenceName, kind)))
+        if (!emittedDiagnostics.Add(new JavaScriptTypedefDiagnosticKey(groupIdentity.ToUpperInvariant(), referenceName, kind)))
         {
             return;
         }
@@ -1119,7 +1120,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         return string.Equals(StripOptionalPropertyWrapper(property.Name.Trim()), "detail", StringComparison.Ordinal)
-               && property.TypeReferenceName is not null;
+               && property.TypeReference is not null;
     }
 
     private static string StripOptionalPropertyWrapper(string value)
@@ -1618,8 +1619,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         builder.Append("\">");
         builder.Append(WebUtility.HtmlEncode(typedef.Name));
         builder.Append("</a>");
-        builder.Append(" - ");
-        builder.Append(WebUtility.HtmlEncode(typedef.Summary));
+        if (!string.IsNullOrWhiteSpace(typedef.Summary)
+            && !string.Equals(typedef.Summary, typedef.Name, StringComparison.Ordinal))
+        {
+            builder.Append(" - ");
+            builder.Append(WebUtility.HtmlEncode(typedef.Summary));
+        }
 
         builder.Append("</p>");
         if (typedef.Properties.Count > 0)
