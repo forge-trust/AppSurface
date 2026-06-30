@@ -87,6 +87,24 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldPreserveOriginalBytes_ForAuditedTextAsset()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-preserve-text-bytes-");
+        byte[] scriptBytes =
+        [
+            0x63, 0x6F, 0x6E, 0x73, 0x74, 0x20, 0x6C, 0x61, 0x62, 0x65, 0x6C, 0x20,
+            0x3D, 0x20, 0x22, 0x63, 0x61, 0x66, 0xE9, 0x22, 0x3B, 0x0A
+        ];
+        using var client = new HttpClient(new StaticAuthLegacyEncodedScriptHandler(scriptBytes)) { BaseAddress = new Uri("http://localhost:5000") };
+        A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+        var context = new ExportContext(outputPath, null, "http://localhost:5000");
+
+        await _sut.RunAsync(context);
+
+        Assert.Equal(scriptBytes, await File.ReadAllBytesAsync(Path.Join(outputPath, "legacy.js")));
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldFailBeforeCopying_ExtensionlessTextExtraWithAuthViolation()
     {
         var outputPath = CreateSafeTempDirectory("static-auth-extra-");
@@ -5379,10 +5397,13 @@ public class ExportEngineTests
         return Bytes(mediaType, [0x01, 0x02, 0x03]);
     }
 
-    private static Task<HttpResponseMessage> Bytes(string mediaType, byte[] bytes)
+    private static Task<HttpResponseMessage> Bytes(string mediaType, byte[] bytes, string? charSet = null)
     {
         var content = new ByteArrayContent(bytes);
-        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType)
+        {
+            CharSet = charSet
+        };
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
     }
 
@@ -5482,6 +5503,20 @@ public class ExportEngineTests
                 "/app.js" => Text(
                     """document.body.dataset.proof = '<div data-rw-auth-state="allowed"></div>';""",
                     "application/javascript"),
+                _ => NotFound(),
+            };
+        }
+    }
+
+    private sealed class StaticAuthLegacyEncodedScriptHandler(byte[] scriptBytes) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path switch
+            {
+                "/" => Html("""<html><body><script src="/legacy.js"></script></body></html>"""),
+                "/legacy.js" => Bytes("application/javascript", scriptBytes, "iso-8859-1"),
                 _ => NotFound(),
             };
         }

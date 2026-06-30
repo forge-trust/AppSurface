@@ -87,6 +87,24 @@ internal static class ExportAuthArtifactAuditor
             cancellationToken);
     }
 
+    internal static async Task WriteTextArtifactBytesAsync(
+        string outputPath,
+        string artifactPath,
+        string artifactKind,
+        string? route,
+        byte[] contents,
+        Encoding? declaredEncoding,
+        CancellationToken cancellationToken)
+    {
+        ValidateTextArtifactBytes(contents, artifactKind, route, artifactPath, declaredEncoding);
+        await using var fileStream = ExportOutputPathGuards.OpenWritableArtifactStream(
+            outputPath,
+            artifactPath,
+            artifactKind,
+            route);
+        await fileStream.WriteAsync(contents, cancellationToken);
+    }
+
     internal static void ValidateTextArtifact(
         string contents,
         string artifactKind,
@@ -126,6 +144,21 @@ internal static class ExportAuthArtifactAuditor
         }
     }
 
+    internal static void ValidateTextArtifactBytes(
+        byte[] contents,
+        string artifactKind,
+        string? route,
+        string? artifactPath = null,
+        Encoding? declaredEncoding = null)
+    {
+        ArgumentNullException.ThrowIfNull(contents);
+
+        foreach (var decoded in EnumerateByteAuditRepresentations(contents, declaredEncoding))
+        {
+            ValidateTextArtifact(decoded, artifactKind, route, artifactPath);
+        }
+    }
+
     internal static bool IsTextArtifact(string? contentType, string artifactPath)
     {
         if (!string.IsNullOrWhiteSpace(contentType))
@@ -148,6 +181,24 @@ internal static class ExportAuthArtifactAuditor
         }
 
         return string.IsNullOrEmpty(Path.GetExtension(artifactPath));
+    }
+
+    internal static Encoding? ResolveDeclaredEncoding(string? charset)
+    {
+        var normalized = charset?.Trim().Trim('"', '\'');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Encoding.GetEncoding(normalized);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     private static ExportValidationException CreateException(
@@ -259,6 +310,47 @@ internal static class ExportAuthArtifactAuditor
             yielded.Add(candidate);
             yield return candidate;
         }
+    }
+
+    private static IEnumerable<string> EnumerateByteAuditRepresentations(byte[] contents, Encoding? declaredEncoding)
+    {
+        var encodings = new List<Encoding>();
+        AddEncoding(encodings, declaredEncoding);
+        AddEncoding(encodings, Encoding.UTF8);
+        AddEncoding(encodings, Encoding.Unicode);
+        AddEncoding(encodings, Encoding.BigEndianUnicode);
+        AddEncoding(encodings, Encoding.UTF32);
+        AddEncoding(encodings, Encoding.Latin1);
+
+        var yielded = new List<string>(encodings.Count);
+        foreach (var encoding in encodings)
+        {
+            var decoded = DecodeBytes(contents, encoding);
+            if (yielded.Contains(decoded, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            yielded.Add(decoded);
+            yield return decoded;
+        }
+    }
+
+    private static void AddEncoding(List<Encoding> encodings, Encoding? encoding)
+    {
+        if (encoding is null || encodings.Any(existing => string.Equals(existing.WebName, encoding.WebName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        encodings.Add(encoding);
+    }
+
+    private static string DecodeBytes(byte[] contents, Encoding encoding)
+    {
+        using var stream = new MemoryStream(contents);
+        using var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
     }
 
     private static bool IsTextMediaType(string mediaType)

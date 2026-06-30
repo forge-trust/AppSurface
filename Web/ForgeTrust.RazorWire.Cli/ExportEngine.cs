@@ -251,14 +251,14 @@ public class ExportEngine
             {
                 if (ExportAuthArtifactAuditor.IsTextArtifact(contentType, filePath))
                 {
-                    var body = await response.Content.ReadAsStringAsync(cancellationToken);
-                    await ExportAuthArtifactAuditor.WriteTextArtifactAsync(
+                    var bodyBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+                    await ExportAuthArtifactAuditor.WriteTextArtifactBytesAsync(
                         context.OutputPath,
                         filePath,
                         "text route asset",
                         route,
-                        body,
-                        encoding: null,
+                        bodyBytes,
+                        ExportAuthArtifactAuditor.ResolveDeclaredEncoding(response.Content.Headers.ContentType?.CharSet),
                         cancellationToken);
                 }
                 else
