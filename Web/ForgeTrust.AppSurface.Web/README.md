@@ -162,6 +162,89 @@ application's own startup code.
 
 Modules can define their own endpoints, making it easy to slice features vertically ("Vertical Slice Architecture").
 
+### Config Audit HTTP Diagnostics
+
+`MapAppSurfaceConfigAuditDiagnostics` maps an authenticated `GET` endpoint that returns the active host's sanitized
+`ConfigAuditReport` JSON. The endpoint is support-sensitive operator evidence capture: it can expose provider names,
+configuration keys, source paths, diagnostics, and redaction metadata even though values are already sanitized by
+`ForgeTrust.AppSurface.Config`.
+
+The endpoint is never mapped automatically. The default route is
+`/_appsurface/config/audit` (`AppSurfaceConfigAuditDiagnosticsDefaults.DefaultRoute`), and hosts can pass a custom route
+when their operations model keeps diagnostics under a different path.
+
+#### Config Audit HTTP in 5 minutes
+
+Add the Config module, configure normal ASP.NET Core authentication and authorization, install the authorization
+middleware, then opt in to the endpoint:
+
+```csharp
+public sealed class MyRootModule : IAppSurfaceWebModule
+{
+    public void RegisterDependentModules(ModuleDependencyBuilder builder)
+    {
+        builder.AddModule<AppSurfaceConfigModule>();
+    }
+
+    public void ConfigureServices(StartupContext context, IServiceCollection services)
+    {
+        services.AddAuthentication(/* host scheme */);
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy("ConfigAuditRead", policy => policy.RequireAuthenticatedUser());
+        });
+    }
+
+    public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+    {
+    }
+
+    public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+    {
+    }
+
+    public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+    {
+        app.UseAuthentication();
+        app.UseAuthorization();
+    }
+
+    public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapAppSurfaceConfigAuditDiagnostics("ConfigAuditRead");
+    }
+}
+```
+
+Capture the report only under your support policy:
+
+```bash
+curl -H "Authorization: Bearer $SUPPORT_TOKEN" \
+  https://app.example.com/_appsurface/config/audit \
+  > production.config-audit.json
+```
+
+Compare captured host snapshots later with the Config package's captured-snapshot diff workflow:
+[Config diff in 10 minutes](../../Config/ForgeTrust.AppSurface.Config/README.md#config-diff-in-10-minutes).
+
+Important behavior:
+
+- Mapping validates a non-null endpoint builder plus non-blank route and policy names at startup.
+- The endpoint maps `GET` only, applies `RequireAuthorization(policyName)`, and is hidden from API Explorer/OpenAPI by
+  default with `ExcludeFromDescription()`.
+- Successful responses and AppSurface-owned setup/runtime failures set `Cache-Control: no-store` and `Pragma: no-cache`.
+- Missing Config services, missing environment services, blank environment names, reporter failures, and report JSON
+  failures return safe `500` ProblemDetails with `problem`, `cause`, `fix`, and `docsLink` extensions.
+- Native ASP.NET Core authorization still owns challenge and forbid behavior. Cookie hosts may redirect on unauthorized
+  requests unless the host's auth scheme is configured for API-style `401`/`403` responses.
+- Missing authorization policies or missing authorization middleware fail closed through ASP.NET Core's own runtime
+  behavior before the handler runs.
+- AppSurface Web does not add rate limiting. Put host-owned rate limiting, network controls, audit logging, or break-glass
+  workflow around this route when support access requires it.
+
+For custom JSON options, ProblemDetails shape, discovery behavior, rate limiting, or auth response formatting, write a
+host-owned `MapGet` endpoint over `IConfigAuditReporter` instead of using this package mapper.
+
 ### Browser Status Pages
 
 AppSurface Web includes conventional browser-facing pages for empty `401`, `403`, and `404` status responses. The feature is designed for human browser requests: it keeps the original HTTP status code, shows recovery-oriented HTML, and leaves JSON/API responses alone.
