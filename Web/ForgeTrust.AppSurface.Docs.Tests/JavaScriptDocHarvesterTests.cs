@@ -116,7 +116,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal(DocHarvestDiagnosticSeverity.Error, diagnostic.Severity);
         Assert.Contains("@target", diagnostic.Fix, StringComparison.Ordinal);
         Assert.Contains("@firesWhen", diagnostic.Fix, StringComparison.Ordinal);
-        Assert.Contains("@property detail.* or @detail none", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("@property detail.*, @property {PayloadType} detail, or @detail none", diagnostic.Fix, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -443,6 +443,227 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains(docs, doc => doc.Path.EndsWith("#typedef-formfailuredetail", StringComparison.Ordinal));
         Assert.Contains(docs, doc => doc.Path.EndsWith("#global-window-razorwire", StringComparison.Ordinal));
         Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldResolveSameGroupTypedefReferencesIntoLinkedPreviews()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Creates a reusable failure payload.
+             * @public
+             * @namespace RazorWire
+             * @returns {FormFailureDetail} Failure payload.
+             */
+            function createFailureDetail() {}
+
+            /**
+             * Selects the reusable failure payload shape.
+             * @public
+             * @namespace RazorWire
+             * @attribute data-rw-form-failure-payload
+             * @target form[data-rw-form="true"]
+             * @type {FormFailureDetail}
+             */
+
+            /**
+             * A RazorWire-enhanced form submission failed.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:form:failure
+             * @target form[data-rw-form="true"]
+             * @firesWhen a RazorWire-enhanced form receives an unhandled failure response.
+             * @property {FormFailureDetail} detail - Failure payload.
+             * @bubbles true
+             * @cancelable true
+             */
+
+            /**
+             * Failure payload passed through event.detail.
+             * @public
+             * @namespace RazorWire
+             * @typedef {Object} FormFailureDetail
+             * @property {HTMLFormElement} form - Submitted form.
+             * @property {number|null} statusCode - HTTP status code when available.
+             * @property {boolean} handled - Whether server UI handled the failure.
+             * @property {"turbo-stream"|"html"|"json"|"unknown"|"network"} responseKind - Failure category.
+             * @property {string} message - Reader-facing fallback message.
+             * @property {Object|null} developmentDiagnostic - Development diagnostic payload when enabled.
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var eventStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/razorwire#event-razorwire-form-failure",
+            StringComparison.Ordinal));
+        Assert.Contains("<a href=\"#typedef-formfailuredetail\">FormFailureDetail</a>", eventStub.Content, StringComparison.Ordinal);
+        Assert.Contains("Type preview: <a href=\"#typedef-formfailuredetail\">FormFailureDetail</a>", eventStub.Content, StringComparison.Ordinal);
+        Assert.Contains("<code>form</code> <span class=\"doc-kind\">HTMLFormElement</span> - Submitted form.", eventStub.Content, StringComparison.Ordinal);
+        Assert.Contains("<code>message</code> <span class=\"doc-kind\">string</span> - Reader-facing fallback message.", eventStub.Content, StringComparison.Ordinal);
+        Assert.Contains("View full FormFailureDetail contract", eventStub.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("developmentDiagnostic", eventStub.Content, StringComparison.Ordinal);
+
+        var attributeStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/razorwire#attribute-data-rw-form-failure-payload",
+            StringComparison.Ordinal));
+        Assert.Contains("<a href=\"#typedef-formfailuredetail\">{FormFailureDetail}</a>", attributeStub.Content, StringComparison.Ordinal);
+
+        var returnsStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/razorwire#function-createfailuredetail",
+            StringComparison.Ordinal));
+        Assert.Contains("Returns: <a href=\"#typedef-formfailuredetail\">FormFailureDetail</a> - Failure payload.", returnsStub.Content, StringComparison.Ordinal);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldWarnOnceForMissingTypedefReferences()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Creates a reusable failure payload.
+             * @public
+             * @namespace RazorWire
+             * @param {MissingFailureDetail} detail - Missing payload.
+             * @returns {MissingFailureDetail} Missing payload.
+             */
+            function createFailureDetail(detail) {}
+
+            /**
+             * A RazorWire-enhanced form submission failed.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:form:failure
+             * @target form[data-rw-form="true"]
+             * @firesWhen a RazorWire-enhanced form receives an unhandled failure response.
+             * @property {MissingFailureDetail} detail - Missing payload.
+             * @bubbles true
+             * @cancelable true
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => string.Equals(
+                diagnostic.Code,
+                DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceMissing,
+                StringComparison.Ordinal));
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("MissingFailureDetail", diagnostic.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldWarnForAmbiguousTypedefReferencesWithoutLinking()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * A RazorWire-enhanced form submission failed.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:form:failure
+             * @target form[data-rw-form="true"]
+             * @firesWhen a RazorWire-enhanced form receives an unhandled failure response.
+             * @property {SharedFailureDetail} detail - Ambiguous payload.
+             * @bubbles true
+             * @cancelable true
+             */
+
+            /**
+             * First payload.
+             * @public
+             * @namespace RazorWire
+             * @typedef {Object} SharedFailureDetail
+             * @property {string} message - Message.
+             */
+
+            /**
+             * Second payload.
+             * @public
+             * @namespace RazorWire
+             * @typedef {Object} SharedFailureDetail
+             * @property {string} code - Code.
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => string.Equals(
+                diagnostic.Code,
+                DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceAmbiguous,
+                StringComparison.Ordinal));
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("SharedFailureDetail", diagnostic.Problem, StringComparison.Ordinal);
+
+        var eventStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/razorwire#event-razorwire-form-failure",
+            StringComparison.Ordinal));
+        Assert.Contains("<span class=\"doc-kind\">SharedFailureDetail</span>", eventStub.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("Type preview:", eventStub.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldIgnoreUnsupportedAndNativeTypeReferences()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Inspects native JavaScript values without reusable payload contracts.
+             * @public
+             * @namespace RazorWire
+             * @param {Error} error - Native error.
+             * @param {Promise} pending - Pending native work.
+             * @returns {Date} Last update time.
+             */
+            function inspectNativePayload(error, pending) {}
+
+            /**
+             * A RazorWire-enhanced form submission failed.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:form:failure
+             * @target form[data-rw-form="true"]
+             * @firesWhen a RazorWire-enhanced form receives an unhandled failure response.
+             * @property {HTMLFormElement} detail.form - Submitted form.
+             * @property {HTMLSelectElement} detail.select - Native select control.
+             * @property {SubmitEvent} detail.submitEvent - Native submit event.
+             * @property {MouseEvent} detail.mouseEvent - Native mouse event.
+             * @property {URL} detail.action - Native URL value.
+             * @property {FormFailureDetail[]} detail.items - Array expression.
+             * @property {?FormFailureDetail} detail.optional - Nullable expression.
+             * @property {FormFailureDetail|ErrorDetail} detail.union - Union expression.
+             * @property {Record<string, FormFailureDetail>} detail.lookup - Generic expression.
+             * @property {RazorWire.FormFailureDetail} detail.qualified - Qualified expression.
+             * @property {import("./types").FormFailureDetail} detail.imported - Imported expression.
+             * @bubbles true
+             * @cancelable true
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        await harvester.HarvestAsync(_testRoot);
+
+        Assert.DoesNotContain(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code is DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceMissing
+                or DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceAmbiguous);
     }
 
     [Fact]
@@ -2171,9 +2392,18 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * @event razorwire:form:failure
              * @target form
              * @firesWhen a RazorWire-enhanced form receives an unhandled failure response.
-             * @property {number|null} detail.statusCode - HTTP status code when a response was received.
+             * @property {FormFailureDetail} detail - Failure payload.
              * @example
              * form.addEventListener('razorwire:form:failure', event => event.preventDefault());
+             */
+
+            /**
+             * Failure payload passed through event.detail.
+             * @public
+             * @namespace RazorWire
+             * @typedef {Object} FormFailureDetail
+             * @property {HTMLFormElement} form - Submitted form.
+             * @property {number|null} statusCode - HTTP status code when a response was received.
              */
             """);
         var options = CreateEnabledOptions("src/public-api.js");
@@ -2199,7 +2429,9 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal("javascript", document.Language);
         Assert.Equal("JavaScript", document.LanguageLabel);
         Assert.Equal(["API Reference", "JavaScript", "RazorWire"], document.Breadcrumbs);
-        Assert.Contains("detail.statusCode", document.BodyText, StringComparison.Ordinal);
+        Assert.Contains("FormFailureDetail", document.BodyText, StringComparison.Ordinal);
+        Assert.Contains("Submitted form", document.BodyText, StringComparison.Ordinal);
+        Assert.Contains("statusCode", document.BodyText, StringComparison.Ordinal);
         Assert.Contains("razorwire:form:failure", document.BodyText, StringComparison.OrdinalIgnoreCase);
     }
 
