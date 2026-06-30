@@ -523,6 +523,74 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldResolveTypedefReferencesOnlyWithinSameGroup()
+    {
+        await WriteAsync(
+            "src/alpha-api.js",
+            """
+            /**
+             * Alpha event using the shared payload name.
+             * @public
+             * @namespace Alpha Contracts
+             * @event alpha:ready
+             * @target document
+             * @firesWhen alpha starts.
+             * @property {SharedDetail} detail - Alpha payload.
+             */
+
+            /**
+             * Alpha payload with a shared typedef name.
+             * @public
+             * @namespace Alpha Contracts
+             * @typedef {Object} SharedDetail
+             * @property {string} alphaMessage - Alpha-only message.
+             */
+            """);
+        await WriteAsync(
+            "src/beta-api.js",
+            """
+            /**
+             * Beta event using the shared payload name.
+             * @public
+             * @namespace Beta Contracts
+             * @event beta:ready
+             * @target document
+             * @firesWhen beta starts.
+             * @property {SharedDetail} detail - Beta payload.
+             */
+
+            /**
+             * Beta payload with a shared typedef name.
+             * @public
+             * @namespace Beta Contracts
+             * @typedef {Object} SharedDetail
+             * @property {string} betaCode - Beta-only code.
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/*.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var alphaEventStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/alpha-contracts#event-alpha-ready",
+            StringComparison.Ordinal));
+        Assert.Contains("<a href=\"#typedef-shareddetail\">SharedDetail</a>", alphaEventStub.Content, StringComparison.Ordinal);
+        Assert.Contains("<code>alphaMessage</code> <span class=\"doc-kind\">string</span> - Alpha-only message.", alphaEventStub.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("betaCode", alphaEventStub.Content, StringComparison.Ordinal);
+
+        var betaEventStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/beta-contracts#event-beta-ready",
+            StringComparison.Ordinal));
+        Assert.Contains("<a href=\"#typedef-shareddetail\">SharedDetail</a>", betaEventStub.Content, StringComparison.Ordinal);
+        Assert.Contains("<code>betaCode</code> <span class=\"doc-kind\">string</span> - Beta-only code.", betaEventStub.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("alphaMessage", betaEventStub.Content, StringComparison.Ordinal);
+
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldWarnOnceForMissingTypedefReferences()
     {
         await WriteAsync(
