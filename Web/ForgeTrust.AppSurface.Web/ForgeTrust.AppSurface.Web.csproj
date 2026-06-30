@@ -10,6 +10,7 @@
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Web.Tests"/>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../../Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj"/>
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"/>
   </ItemGroup>
   <ItemGroup>
