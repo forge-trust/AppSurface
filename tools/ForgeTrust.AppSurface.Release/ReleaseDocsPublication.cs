@@ -270,13 +270,11 @@ internal sealed class ReleaseDocsPublication
 
         if (promotedStable)
         {
-            foreach (var version in versions)
+            foreach (var version in versions.Where(version =>
+                         version.TryGetPropertyValue("supportState", out var supportState)
+                         && string.Equals(supportState?.GetValue<string>(), "Current", StringComparison.Ordinal)))
             {
-                if (version.TryGetPropertyValue("supportState", out var supportState)
-                    && string.Equals(supportState?.GetValue<string>(), "Current", StringComparison.Ordinal))
-                {
-                    version["supportState"] = "Maintained";
-                }
+                version["supportState"] = "Maintained";
             }
         }
 

@@ -3779,7 +3779,7 @@ public sealed class ReleaseToolTests : IDisposable
     {
         await SeedRepositoryAsync();
         var docs = await SeedDocsArchiveAsync("0.1.0");
-        var exactTree = Path.Join(docs.TrustedReleaseRootPath, docs.ExactTreePath);
+        var exactTree = TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath);
         var archive = RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz");
         var archiveAgain = RepositoryPath("artifacts/appsurface-docs-v0.1.0-again.tar.gz");
         var staging = RepositoryPath("artifacts/pages");
@@ -3839,7 +3839,7 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.True(File.Exists(archive));
         Assert.True(File.Exists(archive + ".sha256"));
         Assert.Equal(await ComputeSha256Async(archive), await ComputeSha256Async(archiveAgain));
-        Assert.True(File.Exists(Path.Join(staging, docs.ExactTreePath, ".appsurface-docs-release-manifest.json")));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(staging, docs.ExactTreePath, ".appsurface-docs-release-manifest.json")));
         var catalog = await File.ReadAllTextAsync(Path.Join(staging, "versions.json"));
         Assert.Contains("\"recommendedVersion\": \"0.1.0\"", catalog, StringComparison.Ordinal);
         Assert.Contains("\"exactTreePath\": \"releases/0.1.0\"", catalog, StringComparison.Ordinal);
@@ -3900,7 +3900,7 @@ public sealed class ReleaseToolTests : IDisposable
                 "--tag",
                 "v0.1.0",
                 "--docs-exact-tree",
-                Path.Join(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+                TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
                 "--existing-pages-root",
                 existingPagesRoot,
                 "--archive-output",
@@ -3960,7 +3960,7 @@ public sealed class ReleaseToolTests : IDisposable
                 "--tag",
                 "v0.1.0",
                 "--docs-exact-tree",
-                Path.Join(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+                TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
                 "--existing-pages-root",
                 existingPagesRoot,
                 "--archive-output",
@@ -3998,7 +3998,7 @@ public sealed class ReleaseToolTests : IDisposable
                 "--tag",
                 "v0.1.0",
                 "--docs-exact-tree",
-                Path.Join(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+                TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
                 "--archive-output",
                 RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz"),
                 "--pages-staging-root",
@@ -4019,12 +4019,12 @@ public sealed class ReleaseToolTests : IDisposable
     {
         await SeedRepositoryAsync();
         var docs = await SeedDocsArchiveAsync("0.1.0");
-        var originalExactTree = Path.Join(docs.TrustedReleaseRootPath, docs.ExactTreePath);
+        var originalExactTree = TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath);
         var unsafeExactTree = RepositoryPath(".hidden/releases/0.1.0");
         Directory.CreateDirectory(unsafeExactTree);
         foreach (var file in Directory.EnumerateFiles(originalExactTree))
         {
-            File.Copy(file, Path.Join(unsafeExactTree, Path.GetFileName(file)));
+            File.Copy(file, TestPathUtils.PathUnder(unsafeExactTree, Path.GetFileName(file)));
         }
 
         var result = await RunAsync(
@@ -4082,7 +4082,7 @@ public sealed class ReleaseToolTests : IDisposable
                 "--tag",
                 "v0.1.0",
                 "--docs-exact-tree",
-                Path.Join(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+                TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
                 "--existing-pages-root",
                 existingPagesRoot,
                 "--archive-output",
