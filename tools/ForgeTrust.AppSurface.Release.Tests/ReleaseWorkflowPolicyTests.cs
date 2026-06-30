@@ -48,20 +48,57 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.DoesNotContain("find releases -maxdepth 1 -name 'v*.release.json'", prep, StringComparison.Ordinal);
         Assert.Contains("--github-output", publish, StringComparison.Ordinal);
         Assert.Contains("Validate tag-bound release evidence", publish, StringComparison.Ordinal);
-        Assert.Contains("docs-catalog:", publish, StringComparison.Ordinal);
-        Assert.Contains("docs-trusted-release-root:", publish, StringComparison.Ordinal);
-        Assert.Contains("DOCS_CATALOG: ${{ inputs.docs-catalog }}", publish, StringComparison.Ordinal);
-        Assert.Contains("DOCS_TRUSTED_RELEASE_ROOT: ${{ inputs.docs-trusted-release-root }}", publish, StringComparison.Ordinal);
-        Assert.Contains("docs_args+=(--docs-catalog \"${DOCS_CATALOG}\")", publish, StringComparison.Ordinal);
-        Assert.Contains("docs_args+=(--docs-trusted-release-root \"${DOCS_TRUSTED_RELEASE_ROOT}\")", publish, StringComparison.Ordinal);
-        Assert.Contains("\"${docs_args[@]}\"", publish, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs-catalog:", publish, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs-trusted-release-root:", publish, StringComparison.Ordinal);
+        Assert.Contains("promote-recommended:", publish, StringComparison.Ordinal);
+        Assert.Contains("validate-release:", publish, StringComparison.Ordinal);
+        Assert.Contains("publish-docs-archive:", publish, StringComparison.Ordinal);
+        Assert.Contains("deploy-docs-pages:", publish, StringComparison.Ordinal);
+        Assert.Contains("verify-public-docs:", publish, StringComparison.Ordinal);
+        Assert.Contains("publish-github-release:", publish, StringComparison.Ordinal);
+        Assert.Contains("--dry-run", publish, StringComparison.Ordinal);
+        Assert.Contains("docs-publication", publish, StringComparison.Ordinal);
+        Assert.Contains("ref: ${{ needs.validate-release.outputs.tag_commit }}", publish, StringComparison.Ordinal);
+        Assert.DoesNotContain("ref: ${{ needs.validate-release.outputs.tag }}", publish, StringComparison.Ordinal);
+        Assert.Contains("TAG_COMMIT: ${{ needs.validate-release.outputs.tag_commit }}", publish, StringComparison.Ordinal);
+        Assert.Contains("actual_tag_commit=\"$(git rev-parse \"refs/tags/${TAG}^{commit}\")\"", publish, StringComparison.Ordinal);
+        Assert.Contains("Expected ${TAG} to resolve to ${TAG_COMMIT}; got ${actual_tag_commit}.", publish, StringComparison.Ordinal);
+        Assert.Contains("git show \"${TAG_COMMIT}:releases/v${VERSION}.md\"", publish, StringComparison.Ordinal);
+        Assert.Contains("Export current docs root and exact docs tree", publish, StringComparison.Ordinal);
+        Assert.Contains("--output \"${EXISTING_PAGES_ROOT}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("cp -R \"${EXISTING_PAGES_ROOT}/.\" \"${exact_tree}/\"", publish, StringComparison.Ordinal);
+        Assert.Contains("Hydrate existing release docs archives", publish, StringComparison.Ordinal);
+        Assert.Contains("--existing-pages-root \"${EXISTING_PAGES_ROOT}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("curl -fsSL \"${root}/docs\"", publish, StringComparison.Ordinal);
+        var hydrateIndex = publish.IndexOf("Hydrate existing release docs archives", StringComparison.Ordinal);
+        var planIndex = publish.IndexOf("Create docs publication plan", StringComparison.Ordinal);
+        Assert.True(hydrateIndex >= 0, "Release publish must hydrate prior release archives.");
+        Assert.True(planIndex > hydrateIndex, "Prior release archive hydration must happen before the publication plan is created.");
+        Assert.Contains("--expected-release-manifest-sha256 \"${EXPECTED_MANIFEST_SHA256}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("docs verify-archive", publish, StringComparison.Ordinal);
+        Assert.Contains("gh release create \"${TAG}\" --verify-tag --draft", publish, StringComparison.Ordinal);
+        Assert.Contains("gh release upload \"${TAG}\" \"${ARCHIVE_PATH}\" \"${SHA256_PATH}\" --clobber", publish, StringComparison.Ordinal);
+        Assert.Contains("actions/upload-pages-artifact", publish, StringComparison.Ordinal);
+        Assert.Contains("actions/deploy-pages", publish, StringComparison.Ordinal);
+        Assert.Contains("curl -fsSL \"${root}/versions.json\"", publish, StringComparison.Ordinal);
+        Assert.Contains("PROMOTE_RECOMMENDED: ${{ inputs.promote-recommended }}", publish, StringComparison.Ordinal);
+        Assert.Contains("--arg promoteRecommended \"${PROMOTE_RECOMMENDED}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("$promoteRecommended != \"true\" or .recommendedVersion == $version", publish, StringComparison.Ordinal);
+        Assert.Contains("gh release download \"${TAG}\" --pattern \"${ARCHIVE_ASSET_NAME}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("gh release edit ${TAG} --draft=false", publish, StringComparison.Ordinal);
+        Assert.Contains("args=(release edit \"${TAG}\" --draft=false)", publish, StringComparison.Ordinal);
+        Assert.Contains("gh release delete ${TAG} --cleanup-tag=false", publish, StringComparison.Ordinal);
         Assert.Contains("base-ref:", publish, StringComparison.Ordinal);
         Assert.Contains("BASE_REF: ${{ inputs.base-ref }}", publish, StringComparison.Ordinal);
         Assert.Contains("--base-ref \"${BASE_REF}\"", publish, StringComparison.Ordinal);
         Assert.Contains("git fetch origin \"${BASE_REF}:refs/remotes/origin/${BASE_REF}\"", publish, StringComparison.Ordinal);
         Assert.Contains("evidence_path", await ReadRepositoryFileAsync("tools/ForgeTrust.AppSurface.Release/ReleasePublishing.cs"), StringComparison.Ordinal);
-        Assert.DoesNotContain("id-token: write", publish, StringComparison.Ordinal);
+        Assert.Contains("pages: write", publish, StringComparison.Ordinal);
+        Assert.Contains("id-token: write", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("attestations: write", publish, StringComparison.Ordinal);
+        Assert.DoesNotContain("supportState:\"Supported\"", publish, StringComparison.Ordinal);
+        Assert.Contains("supportState:\"Maintained\"", publish, StringComparison.Ordinal);
+        Assert.Contains("semver_key", publish, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -110,6 +147,26 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("package-manager-cache: false", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("cache: true", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("nuget-prerelease", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MainDocsDeployHydratesReleaseArchivesBeforePagesUpload()
+    {
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/build.yml");
+
+        var hydrateIndex = workflow.IndexOf("Hydrate release-pinned docs archives", StringComparison.Ordinal);
+        var uploadIndex = workflow.IndexOf("Upload Pages artifact", StringComparison.Ordinal);
+        Assert.True(hydrateIndex >= 0, "Main docs deploy must hydrate published release docs archives.");
+        Assert.True(uploadIndex > hydrateIndex, "Release archive hydration must happen before Pages artifact upload.");
+        Assert.Contains("gh release list --exclude-drafts", workflow, StringComparison.Ordinal);
+        Assert.Contains("gh release download \"${release_tag}\" --pattern \"${asset_name}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("tar -xzf \"${asset_dir}/${asset_name}\" -C \"${exact_tree}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("releaseManifestSha256", workflow, StringComparison.Ordinal);
+        Assert.Contains("\"${PAGES_ROOT}/versions.json\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("semver_key", workflow, StringComparison.Ordinal);
+        Assert.Contains("supportState:\"Maintained\"", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("supportState:\"Supported\"", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("sort | last", workflow, StringComparison.Ordinal);
     }
 
     [Fact]

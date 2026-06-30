@@ -35,6 +35,12 @@ This is the living release note for the next coordinated AppSurface version afte
   serveable file before stable GitHub Release publishing can continue. The protected stable NuGet workflow now repeats the
   export and archive verification against the checked-in release evidence before it can request the NuGet trusted publishing
   token.
+- Release publishing now owns the public AppSurface Docs publication lifecycle after protected package proof succeeds.
+  The release workflow exports docs from the annotated tag, creates a deterministic `appsurface-docs-vx.y.z.tar.gz`
+  plus `.sha256`, stages `versions.json` and `releases/x.y.z/`, deploys GitHub Pages, verifies the public catalog,
+  exact-tree manifest, and uploaded release asset digest, then publishes the draft GitHub Release. Main docs deploys
+  rehydrate published release archives from GitHub Release assets before uploading Pages so a later `main` push does not
+  erase catalog-pinned release docs.
 - AppSurface Auth now has a Start Here adoption ladder that helps package consumers choose between host-owned
   ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces
   without implying AppSurface owns production identity providers, policies, user stores, or enforcement.

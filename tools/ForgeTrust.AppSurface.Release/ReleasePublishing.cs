@@ -26,11 +26,11 @@ internal sealed class ReleasePublishing
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Structured workflow outputs for GitHub Release creation.</returns>
     /// <remarks>
-    /// <see cref="PublishAsync"/> is create-only: it verifies annotated tag shape, reachability from the configured base ref, package
-    /// publication, absence of an existing GitHub Release, and presence of <c>releases/v{version}.md</c> in the tag commit. The tag commit
-    /// must also contain the release sidecar, release manifest, and release evidence bundle; missing or invalid tag-bound artifacts fail fast
-    /// before a GitHub Release is created. The method writes the tag's release note to a temporary file so workflows can pass a stable notes
-    /// path to GitHub's release action.
+    /// <see cref="PublishAsync"/> verifies annotated tag shape, reachability from the configured base ref, package publication, draft-safe
+    /// GitHub Release state, and presence of <c>releases/v{version}.md</c> in the tag commit. The tag commit must also contain the release
+    /// sidecar, release manifest, and release evidence bundle; missing or invalid tag-bound artifacts fail fast before a GitHub Release is
+    /// created or promoted. The method writes the tag's release note to a temporary file so workflows can pass a stable notes path to GitHub's
+    /// release action.
     /// </remarks>
     internal async Task<PublishOutputs> PublishAsync(ReleaseOptions options, CancellationToken cancellationToken)
     {
@@ -39,7 +39,7 @@ internal sealed class ReleasePublishing
         var tagCommit = await RequireCommandOutputAsync("git", ["rev-parse", $"refs/tags/{tag}^{{commit}}"], "release-tag-commit-missing", cancellationToken);
         await ValidateReachableFromBaseAsync(tag, tagCommit, options.BaseRef, cancellationToken);
         await ValidatePackagePublishingSucceededAsync(options.Version, tag, tagCommit, cancellationToken);
-        await ValidateGitHubReleaseDoesNotExistAsync(tag, cancellationToken);
+        await ValidateGitHubReleaseDraftSafeAsync(tag, cancellationToken);
 
         var safeTagSegment = Path.GetFileName(tag);
         if (string.IsNullOrWhiteSpace(safeTagSegment))
@@ -85,7 +85,7 @@ internal sealed class ReleasePublishing
         }
 
         var evidenceSummary = evidence.Summary;
-        if (options.Version.IsStable && evidence.Bundle is not null)
+        if (options.Version.IsStable && evidence.Bundle is not null && options.DocsCatalogPath is not null)
         {
             var docsEvidence = await ReleaseDocsArchiveGate.ValidateStableAsync(
                 _workspace,
@@ -205,18 +205,36 @@ internal sealed class ReleasePublishing
         }
     }
 
-    private async Task ValidateGitHubReleaseDoesNotExistAsync(string tag, CancellationToken cancellationToken)
+    private async Task ValidateGitHubReleaseDraftSafeAsync(string tag, CancellationToken cancellationToken)
     {
         var result = await _commandRunner.RunAsync(
-            new CommandInvocation("gh", ["release", "view", tag, "--json", "url"], _workspace.RepositoryRoot),
+            new CommandInvocation("gh", ["release", "view", tag, "--json", "isDraft,url"], _workspace.RepositoryRoot),
             cancellationToken);
         if (result.ExitCode == 0)
         {
+            try
+            {
+                using var release = JsonDocument.Parse(result.StandardOutput);
+                if (release.RootElement.TryGetProperty("isDraft", out var isDraft) && isDraft.ValueKind == JsonValueKind.True)
+                {
+                    return;
+                }
+            }
+            catch (JsonException ex)
+            {
+                throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                    "release-github-release-state-invalid",
+                    $"GitHub Release '{tag}' state could not be parsed.",
+                    ex.Message,
+                    "Inspect the release manually before retrying automated publication.",
+                    "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+            }
+
             throw new ReleaseToolException(ReleaseDiagnostic.Error(
                 "release-github-release-exists",
                 $"GitHub Release '{tag}' already exists.",
-                "Release publishing is create-only in v1 to avoid changing already-public notes by accident.",
-                "Delete the incorrect draft/release manually or cut a new tag; this tool does not update existing releases.",
+                "Release publishing may only reuse unpublished draft releases; public release assets and notes are no-clobber by default.",
+                "Recover manually or cut a fix-forward release; this tool does not mutate already-public releases.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
         }
     }

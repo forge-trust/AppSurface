@@ -171,9 +171,9 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
     /// Gets the staged AppSurface Docs version catalog used to verify stable release evidence.
     /// </summary>
     /// <remarks>
-    /// Stable publish requires this explicit path because GitHub Release creation must verify the staged docs artifact selected by the
-    /// maintainer. Relative paths are resolved from the repository root. Prerelease publish accepts the option but does not require docs
-    /// archive proof.
+    /// Stable publish accepts this path for local diagnostics, but the public release workflow creates its staged docs artifact through
+    /// <c>docs-publication</c>. Relative paths are resolved from the repository root. Prerelease publish accepts the option but does not
+    /// require docs archive proof.
     /// </remarks>
     [CommandOption("docs-catalog", Description = "Staged AppSurface Docs versions.json used to verify stable release evidence.")]
     public string? DocsCatalogPath { get; set; }
@@ -353,5 +353,171 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
             await console.Output.WriteLineAsync(JsonSerializer.Serialize(publish, ReleaseJson.Options));
             return 0;
         });
+    }
+}
+
+/// <summary>
+/// Creates AppSurface Docs publication artifacts for the release publish workflow.
+/// </summary>
+[Command("docs-publication", Description = "Create release docs archive, catalog, Pages staging, digest ledger, and recovery summary.")]
+internal sealed partial class ReleaseDocsPublicationCommand : ReleaseCommandBase, ICommand
+{
+    /// <summary>
+    /// Creates the docs publication command.
+    /// </summary>
+    /// <param name="executionContext">Execution context supplied by the entry point.</param>
+    /// <param name="commandRunner">Unused command runner kept for shared command construction.</param>
+    /// <param name="clock">Clock used by shared command construction.</param>
+    public ReleaseDocsPublicationCommand(ReleaseExecutionContext executionContext, ICommandRunner commandRunner, IReleaseClock clock)
+        : base(executionContext, commandRunner, clock)
+    {
+    }
+
+    /// <summary>
+    /// Gets the annotated release tag that owns the docs publication.
+    /// </summary>
+    [CommandOption("tag", Description = "Annotated tag being published. Must match --version with a leading v.")]
+    public string? Tag { get; set; }
+
+    /// <summary>
+    /// Gets the exported docs exact tree for the tag.
+    /// </summary>
+    [CommandOption("docs-exact-tree", Description = "Exported AppSurface Docs exact tree for the tag.")]
+    public string? DocsExactTreePath { get; set; }
+
+    /// <summary>
+    /// Gets the optional current Pages payload to copy before adding the immutable release tree.
+    /// </summary>
+    [CommandOption("existing-pages-root", Description = "Optional existing Pages payload to preserve before adding releases/{version}.")]
+    public string? ExistingPagesRootPath { get; set; }
+
+    /// <summary>
+    /// Gets the tar.gz archive output path.
+    /// </summary>
+    [CommandOption("archive-output", Description = "Output path for appsurface-docs-v{version}.tar.gz.")]
+    public string? ArchiveOutputPath { get; set; }
+
+    /// <summary>
+    /// Gets the Pages staging root output path.
+    /// </summary>
+    [CommandOption("pages-staging-root", Description = "Output directory for the verified Pages payload.")]
+    public string? PagesStagingRootPath { get; set; }
+
+    /// <summary>
+    /// Gets the publication plan JSON output path.
+    /// </summary>
+    [CommandOption("plan-output", Description = "Output path for the docs publication plan JSON.")]
+    public string? PlanOutputPath { get; set; }
+
+    /// <summary>
+    /// Gets the optional recovery summary output path.
+    /// </summary>
+    [CommandOption("summary-output", Description = "Output path for the maintainer recovery summary.")]
+    public string? SummaryOutputPath { get; set; }
+
+    /// <summary>
+    /// Gets the optional release evidence docs manifest digest that the exact tree must match.
+    /// </summary>
+    [CommandOption("expected-release-manifest-sha256", Description = "Expected exact-tree release manifest SHA-256 from release evidence.")]
+    public string? ExpectedReleaseManifestSha256 { get; set; }
+
+    /// <summary>
+    /// Gets whether stable docs publication should promote the version to recommendedVersion.
+    /// </summary>
+    [CommandOption("promote-recommended", Description = "Promote a stable release to recommendedVersion. Defaults to true.")]
+    public string PromoteRecommendedText { get; set; } = "true";
+
+    /// <summary>
+    /// Gets an optional GitHub Actions output file.
+    /// </summary>
+    [CommandOption("github-output", Description = "Optional GITHUB_OUTPUT file for docs publication outputs.")]
+    public string? GitHubOutputPath { get; set; }
+
+    /// <inheritdoc />
+    protected override string CommandName => "docs-publication";
+
+    /// <inheritdoc />
+    protected override string? ResolveTag(SemVer version)
+    {
+        if (string.IsNullOrWhiteSpace(Tag))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-docs-publication-tag-required",
+                "Docs publication requires an explicit tag.",
+                "The publication plan must bind the docs archive and catalog to one annotated release tag.",
+                "Pass `--tag v<version>` using the same tag validated by release publish.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
+        }
+
+        return Tag;
+    }
+
+    /// <inheritdoc />
+    protected override string? ResolveGitHubOutputPath(string repoRoot)
+    {
+        return string.IsNullOrWhiteSpace(GitHubOutputPath)
+            ? null
+            : Path.GetFullPath(GitHubOutputPath, repoRoot);
+    }
+
+    /// <inheritdoc />
+    public ValueTask ExecuteAsync(IConsole console)
+    {
+        return ExecuteWithDiagnosticsAsync(console, async (options, cancellationToken) =>
+        {
+            var request = new DocsPublicationRequest(
+                options.Version,
+                options.Tag!,
+                ResolveRequiredPath(options.RepositoryRoot, DocsExactTreePath, "release-docs-publication-exact-tree-required", "--docs-exact-tree"),
+                ResolveOptionalPath(options.RepositoryRoot, ExistingPagesRootPath),
+                ResolveRequiredPath(options.RepositoryRoot, ArchiveOutputPath, "release-docs-publication-archive-output-required", "--archive-output"),
+                ResolveRequiredPath(options.RepositoryRoot, PagesStagingRootPath, "release-docs-publication-pages-staging-required", "--pages-staging-root"),
+                ResolveRequiredPath(options.RepositoryRoot, PlanOutputPath, "release-docs-publication-plan-output-required", "--plan-output"),
+                ResolveOptionalPath(options.RepositoryRoot, SummaryOutputPath),
+                ExpectedReleaseManifestSha256,
+                ResolvePromoteRecommended());
+            var publication = new ReleaseDocsPublication(new ReleaseWorkspace(options.RepositoryRoot));
+            var plan = await publication.CreateAsync(request, cancellationToken);
+            await ReleaseDocsPublication.WriteOutputsAsync(plan, options.GitHubOutputPath, cancellationToken);
+            await console.Output.WriteLineAsync(JsonSerializer.Serialize(plan, ReleaseJson.Options));
+            return 0;
+        });
+    }
+
+    private static string ResolveRequiredPath(string repoRoot, string? value, string code, string option)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                code,
+                $"Docs publication requires `{option}`.",
+                "The release workflow did not provide every artifact path needed to build the public docs trust path.",
+                $"Pass `{option} <path>` from the release workflow staging directory.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
+        }
+
+        return Path.GetFullPath(value, repoRoot);
+    }
+
+    private static string? ResolveOptionalPath(string repoRoot, string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : Path.GetFullPath(value, repoRoot);
+    }
+
+    private bool ResolvePromoteRecommended()
+    {
+        if (bool.TryParse(PromoteRecommendedText, out var promoteRecommended))
+        {
+            return promoteRecommended;
+        }
+
+        throw new ReleaseToolException(ReleaseDiagnostic.Error(
+            "release-docs-publication-promote-recommended-invalid",
+            "Docs publication received an invalid recommended-version promotion value.",
+            $"`--promote-recommended {PromoteRecommendedText}` is not `true` or `false`.",
+            "Pass `--promote-recommended true` for stable releases unless performing a documented manual recovery.",
+            "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
     }
 }
