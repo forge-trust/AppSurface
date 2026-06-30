@@ -260,8 +260,7 @@ internal sealed class ReleasePublishing
     private static bool IsGitHubReleaseNotFound(CommandResult result)
     {
         var output = string.Concat(result.StandardOutput, "\n", result.StandardError);
-        return output.Contains("not found", StringComparison.OrdinalIgnoreCase)
-            || output.Contains("release not found", StringComparison.OrdinalIgnoreCase)
+        return output.Contains("release not found", StringComparison.OrdinalIgnoreCase)
             || output.Contains("could not find a release", StringComparison.OrdinalIgnoreCase);
     }
 

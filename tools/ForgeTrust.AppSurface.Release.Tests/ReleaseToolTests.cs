@@ -3685,7 +3685,7 @@ public sealed class ReleaseToolTests : IDisposable
         runner.Add("git rev-parse refs/tags//^{commit}", new CommandResult(0, "abc123\n", ""));
         runner.Add("git merge-base --is-ancestor abc123 origin/main", new CommandResult(0, "", ""));
         runner.Add("gh run list --workflow nuget-prerelease-publish.yml --commit abc123 --json conclusion,headBranch,status,url --jq [.[] | select(.headBranch == \"/\" and .status == \"completed\" and .conclusion == \"success\")][0].url // \"\"", new CommandResult(0, "https://github.com/example/actions/runs/1\n", ""));
-        runner.Add("gh release view / --json isDraft,url", new CommandResult(1, "", "not found"));
+        runner.Add("gh release view / --json isDraft,url", new CommandResult(1, "", "release not found"));
         var publishing = new ReleasePublishing(new ReleaseWorkspace(_repositoryRoot), runner);
         var options = new ReleaseOptions(
             "publish",
@@ -4548,6 +4548,24 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("Bad credentials", result.Stderr, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("Repository not found")]
+    [InlineData("HTTP 404: Not Found")]
+    public async Task PublishRejectsGenericGithubNotFoundFailures(string stderr)
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulStablePublishRunner();
+        runner.Add("gh release view v0.1.0 --json isDraft,url", new CommandResult(1, "", stderr));
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-github-release-state-unavailable", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains(stderr, result.Stderr, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task PublishAllowsReplacingSameTagDraftRelease()
     {
@@ -4726,7 +4744,7 @@ public sealed class ReleaseToolTests : IDisposable
         runner.Add("git rev-parse refs/tags/v0.1.0-preview.1^{commit}", new CommandResult(0, "abc123\n", ""));
         runner.Add("git merge-base --is-ancestor abc123 origin/main", new CommandResult(0, "", ""));
         runner.Add("gh run list --workflow nuget-prerelease-publish.yml --commit abc123 --json conclusion,headBranch,status,url --jq [.[] | select(.headBranch == \"v0.1.0-preview.1\" and .status == \"completed\" and .conclusion == \"success\")][0].url // \"\"", new CommandResult(0, "https://github.com/example/actions/runs/1\n", ""));
-        runner.Add("gh release view v0.1.0-preview.1 --json isDraft,url", new CommandResult(1, "", "not found"));
+        runner.Add("gh release view v0.1.0-preview.1 --json isDraft,url", new CommandResult(1, "", "release not found"));
         runner.Add("git show v0.1.0-preview.1:releases/v0.1.0-preview.1.md", new CommandResult(0, TaggedReleaseNoteContent, ""));
         runner.Add("git show v0.1.0-preview.1:releases/v0.1.0-preview.1.md.yml", new CommandResult(0, TaggedReleaseSidecarContent, ""));
         runner.Add("git show v0.1.0-preview.1:releases/v0.1.0-preview.1.release.json", new CommandResult(0, releaseManifest, ""));
@@ -4752,7 +4770,7 @@ public sealed class ReleaseToolTests : IDisposable
         runner.Add("git rev-parse refs/tags/v0.1.0^{commit}", new CommandResult(0, "abc123\n", ""));
         runner.Add($"git merge-base --is-ancestor abc123 origin/{baseRef}", new CommandResult(0, "", ""));
         runner.Add("gh run list --workflow nuget-stable-publish.yml --commit abc123 --json conclusion,headBranch,status,url --jq [.[] | select(.headBranch == \"v0.1.0\" and .status == \"completed\" and .conclusion == \"success\")][0].url // \"\"", new CommandResult(0, "https://github.com/example/actions/runs/2\n", ""));
-        runner.Add("gh release view v0.1.0 --json isDraft,url", new CommandResult(1, "", "not found"));
+        runner.Add("gh release view v0.1.0 --json isDraft,url", new CommandResult(1, "", "release not found"));
         runner.Add("git show v0.1.0:releases/v0.1.0.md", new CommandResult(0, TaggedReleaseNoteContent, ""));
         runner.Add("git show v0.1.0:releases/v0.1.0.md.yml", new CommandResult(0, TaggedReleaseSidecarContent, ""));
         runner.Add("git show v0.1.0:releases/v0.1.0.release.json", new CommandResult(0, releaseManifest, ""));
