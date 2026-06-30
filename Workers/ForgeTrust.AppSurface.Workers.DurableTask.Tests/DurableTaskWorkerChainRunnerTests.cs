@@ -78,6 +78,26 @@ public sealed class DurableTaskWorkerChainRunnerTests
     }
 
     [Fact]
+    public async Task ReconcileProjectionAsync_RetryableConflictWaitsForProjectionRetryPolicy()
+    {
+        var retry = new FlowRetryPolicy(6, TimeSpan.FromSeconds(4));
+        var runner = CreateRunner(projectionRetryPolicy: retry);
+        var contract = new FakeProjectionContract
+        {
+            ProjectionEnvelope = Envelope<string>(
+                DurableWorkerProjectionOutcome.Conflict,
+                "projection",
+                DurableWorkerRetryability.Retryable),
+        };
+
+        var decision = await runner.ReconcileProjectionAsync(contract, "work", "result", TestCorrelation());
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.WaitForRetry, decision.Kind);
+        Assert.Same(retry, decision.RetryPolicy);
+        Assert.Equal(DurableWorkerProjectionOutcome.Conflict, decision.SourceOutcome);
+    }
+
+    [Fact]
     public async Task TryClaimAsync_StaleFenceIgnoresLateSignal()
     {
         var runner = CreateRunner();

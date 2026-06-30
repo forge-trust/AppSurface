@@ -25,6 +25,27 @@ public sealed class DurableTaskWorkerDecisionTests
             DurableTaskWorkerDecision<string, string, string>.WaitForExternalEvent(TestCorrelation(), " "));
     }
 
+    [Fact]
+    public void ScheduleExecutor_RejectsNonClaimedOutcome()
+    {
+        var stale = Envelope(DurableWorkerProjectionOutcome.StaleFence);
+
+        Assert.Throws<ArgumentException>(() =>
+            DurableTaskWorkerDecision<string, string, string>.ScheduleExecutor(stale));
+    }
+
+    [Fact]
+    public void RepairProjection_RejectsNonCompletedOutcome()
+    {
+        var duplicate = Envelope(DurableWorkerProjectionOutcome.AlreadyCompleted);
+
+        Assert.Throws<ArgumentException>(() =>
+            DurableTaskWorkerDecision<string, string, string>.RepairProjection(duplicate));
+    }
+
+    private static DurableWorkerEnvelope<string> Envelope(DurableWorkerProjectionOutcome outcome) =>
+        new(outcome, $"worker.{outcome.ToString().ToLowerInvariant()}", DurableWorkerRetryability.Terminal, TestCorrelation(), "payload");
+
     private static DurableWorkerCorrelation TestCorrelation() =>
         new("worker", "work", "instance", "attempt");
 }

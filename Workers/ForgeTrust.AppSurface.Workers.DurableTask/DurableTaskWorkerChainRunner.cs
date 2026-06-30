@@ -242,14 +242,16 @@ public sealed class DurableTaskWorkerChainRunner<TWork, TResult, TProjection>
             _ => DurableTaskWorkerDecision<TWork, TResult, TProjection>.Complete(envelope),
         };
 
-    private static DurableTaskWorkerDecision<TWork, TResult, TProjection> MapProjection(
+    private DurableTaskWorkerDecision<TWork, TResult, TProjection> MapProjection(
         DurableWorkerEnvelope<TProjection> envelope) =>
         envelope.Outcome switch
         {
             DurableWorkerProjectionOutcome.StaleFence =>
                 DurableTaskWorkerDecision<TWork, TResult, TProjection>.IgnoreLateSignal(envelope),
             DurableWorkerProjectionOutcome.Conflict when envelope.Retryability == DurableWorkerRetryability.Retryable =>
-                DurableTaskWorkerDecision<TWork, TResult, TProjection>.WaitForRetry(envelope, retryPolicy: null),
+                DurableTaskWorkerDecision<TWork, TResult, TProjection>.WaitForRetry(
+                    envelope,
+                    _options.Value.ProjectionRetryPolicy),
             DurableWorkerProjectionOutcome.Conflict or DurableWorkerProjectionOutcome.Unrecoverable =>
                 DurableTaskWorkerDecision<TWork, TResult, TProjection>.Fault(envelope),
             _ => DurableTaskWorkerDecision<TWork, TResult, TProjection>.Complete(envelope),

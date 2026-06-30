@@ -96,12 +96,17 @@ public sealed record DurableTaskWorkerDecision<TWork, TResult, TProjection>
     /// <param name="claim">Claim envelope that authorized executor scheduling.</param>
     /// <param name="retryPolicy">Optional retry policy for executor activity.</param>
     /// <returns>A schedule-executor decision.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="claim"/> is not a claimed outcome.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="claim"/> is null.</exception>
     public static DurableTaskWorkerDecision<TWork, TResult, TProjection> ScheduleExecutor(
         DurableWorkerEnvelope<TWork> claim,
         FlowRetryPolicy? retryPolicy = null)
     {
         ArgumentNullException.ThrowIfNull(claim);
+        if (claim.Outcome != DurableWorkerProjectionOutcome.Claimed)
+        {
+            throw new ArgumentException("Executor scheduling requires a claimed worker outcome.", nameof(claim));
+        }
 
         return new(
             DurableTaskWorkerDecisionKind.ScheduleExecutor,
@@ -151,12 +156,17 @@ public sealed record DurableTaskWorkerDecision<TWork, TResult, TProjection>
     /// <param name="completion">Completion envelope that recorded a terminal fact.</param>
     /// <param name="retryPolicy">Optional retry policy for projection repair activity.</param>
     /// <returns>A repair-projection decision.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="completion"/> is not a completed outcome.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="completion"/> is null.</exception>
     public static DurableTaskWorkerDecision<TWork, TResult, TProjection> RepairProjection(
         DurableWorkerEnvelope<TResult> completion,
         FlowRetryPolicy? retryPolicy = null)
     {
         ArgumentNullException.ThrowIfNull(completion);
+        if (completion.Outcome != DurableWorkerProjectionOutcome.Completed)
+        {
+            throw new ArgumentException("Projection repair requires a completed worker outcome.", nameof(completion));
+        }
 
         return new(
             DurableTaskWorkerDecisionKind.RepairProjection,
