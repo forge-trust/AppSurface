@@ -231,6 +231,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.validate-tag.outputs.tag-commit }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Setup .NET SDK
@@ -269,7 +270,7 @@ jobs:
 
           normalized_exact_tree_path="${docs_exact_tree_path#./}"
           case "${normalized_exact_tree_path}" in
-            ""|/*|../*|*/../*|*"/.."|"."|".."|.*|*/.*|*//*)
+            ""|/*|../*|*/../*|*/..|"."|".."|.*|*/.*|*//*)
               echo "Stable docs exactTreePath '${docs_exact_tree_path}' must be a trusted-root-relative path with no parent, hidden, or empty segments." >&2
               exit 1
               ;;

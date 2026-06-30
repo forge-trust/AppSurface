@@ -87,16 +87,21 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("Required for NuGet trusted publishing to request an OIDC token.", workflow, StringComparison.Ordinal);
         Assert.Contains("persist-credentials: false", workflow, StringComparison.Ordinal);
         Assert.Contains("prove-docs-archive:", workflow, StringComparison.Ordinal);
+        var proveDocsArchiveIndex = workflow.IndexOf("prove-docs-archive:", StringComparison.Ordinal);
+        var publishNugetIndex = workflow.IndexOf("publish-nuget:", StringComparison.Ordinal);
+        Assert.True(proveDocsArchiveIndex >= 0, "Stable docs proof job must be declared.");
+        Assert.True(publishNugetIndex > proveDocsArchiveIndex, "Stable docs proof must be declared before the irreversible publish-nuget job.");
+        var proveDocsArchiveJob = workflow[proveDocsArchiveIndex..publishNugetIndex];
+        Assert.Contains("fetch-depth: 0", proveDocsArchiveJob, StringComparison.Ordinal);
         Assert.Contains("Export and verify stable docs archive before NuGet publish", workflow, StringComparison.Ordinal);
         Assert.Contains("docs export", workflow, StringComparison.Ordinal);
         Assert.Contains("docs verify-archive", workflow, StringComparison.Ordinal);
         Assert.Contains("appsurface-stable-docs-proof", workflow, StringComparison.Ordinal);
         Assert.Contains("--docs-catalog \"${docs_release_root}/versions.json\"", workflow, StringComparison.Ordinal);
         Assert.Contains("--docs-trusted-release-root \"${docs_release_root}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("\"\"|/*|../*|*/../*|*/..|\".\"|\"..\"|.*|*/.*|*//*)", proveDocsArchiveJob, StringComparison.Ordinal);
+        Assert.DoesNotContain("*\"/..\"", proveDocsArchiveJob, StringComparison.Ordinal);
         Assert.Contains("- prove-docs-archive", workflow, StringComparison.Ordinal);
-        Assert.True(
-            workflow.IndexOf("prove-docs-archive:", StringComparison.Ordinal) < workflow.IndexOf("publish-nuget:", StringComparison.Ordinal),
-            "Stable docs proof must be declared before the irreversible publish-nuget job.");
         Assert.Contains("NuGet/login", workflow, StringComparison.Ordinal);
         Assert.Contains("publish-stable", workflow, StringComparison.Ordinal);
         Assert.Contains("appsurface-stable-packages", workflow, StringComparison.Ordinal);
