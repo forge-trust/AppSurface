@@ -416,7 +416,7 @@ internal sealed class ReleaseDocsPublication
         }
     }
 
-    private static void ValidateExactTreePath(string path)
+    private void ValidateExactTreePath(string path)
     {
         if (!Directory.Exists(path))
         {
@@ -426,6 +426,20 @@ internal sealed class ReleaseDocsPublication
                 $"`{path}` is not an ordinary directory.",
                 "Export docs from the tag commit before creating a publication plan.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
+        }
+
+        if (ReleaseWorkspace.IsUnderPath(_workspace.RepositoryRoot, path))
+        {
+            var relativePath = Path.GetRelativePath(_workspace.RepositoryRoot, path).Replace('\\', '/');
+            if (relativePath.Split("/", StringSplitOptions.RemoveEmptyEntries).Any(segment => segment is "." or ".." || segment.StartsWith(".", StringComparison.Ordinal)))
+            {
+                throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                    "release-docs-publication-path-unsafe",
+                    "Docs publication encountered an unsafe archive path.",
+                    $"`{relativePath}` is not a trusted release-root-relative path.",
+                    "Use ordinary relative paths without hidden or parent segments.",
+                    "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
+            }
         }
     }
 

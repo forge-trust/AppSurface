@@ -4015,6 +4015,42 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task DocsPublicationRejectsUnsafeExactTreePath()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var originalExactTree = Path.Join(docs.TrustedReleaseRootPath, docs.ExactTreePath);
+        var unsafeExactTree = RepositoryPath(".hidden/releases/0.1.0");
+        Directory.CreateDirectory(unsafeExactTree);
+        foreach (var file in Directory.EnumerateFiles(originalExactTree))
+        {
+            File.Copy(file, Path.Join(unsafeExactTree, Path.GetFileName(file)));
+        }
+
+        var result = await RunAsync(
+            [
+                "docs-publication",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--docs-exact-tree",
+                unsafeExactTree,
+                "--archive-output",
+                RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz"),
+                "--pages-staging-root",
+                RepositoryPath("artifacts/pages"),
+                "--plan-output",
+                RepositoryPath("artifacts/docs-publication-plan.json")
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-publication-path-unsafe", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains(".hidden/releases/0.1.0", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DocsPublicationRejectsRecommendedVersionDowngrade()
     {
         await SeedRepositoryAsync();
