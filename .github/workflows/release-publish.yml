@@ -110,7 +110,7 @@ jobs:
             10.0.x
 
       - name: Build AppSurface Docs exporter
-        run: dotnet build AppSurface.slnx -c Release
+        run: dotnet build ForgeTrust.AppSurface.slnx -c Release
 
       - name: Export current docs root and exact docs tree
         env:

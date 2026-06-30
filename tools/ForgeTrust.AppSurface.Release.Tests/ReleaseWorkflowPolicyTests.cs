@@ -58,6 +58,8 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("publish-github-release:", publish, StringComparison.Ordinal);
         Assert.Contains("--dry-run", publish, StringComparison.Ordinal);
         Assert.Contains("docs-publication", publish, StringComparison.Ordinal);
+        Assert.Contains("dotnet build ForgeTrust.AppSurface.slnx -c Release", publish, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet build AppSurface.slnx", publish, StringComparison.Ordinal);
         Assert.Contains("ref: ${{ needs.validate-release.outputs.tag_commit }}", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("ref: ${{ needs.validate-release.outputs.tag }}", publish, StringComparison.Ordinal);
         Assert.Contains("TAG_COMMIT: ${{ needs.validate-release.outputs.tag_commit }}", publish, StringComparison.Ordinal);
