@@ -441,6 +441,8 @@ internal sealed class ReleaseDocsPublication
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(
+        Justification = "The publication command generates catalog exact-tree paths from parsed versions; this guard is defense-in-depth.")]
     private static void ValidateCatalogExactTreePath(string path)
     {
         if (string.IsNullOrWhiteSpace(path)
@@ -456,6 +458,8 @@ internal sealed class ReleaseDocsPublication
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(
+        Justification = "Archive entry paths come from Directory.EnumerateFiles under the source tree; this guard is defense-in-depth.")]
     private static void ValidateArchiveEntryPath(string path)
     {
         if (string.IsNullOrWhiteSpace(path)
