@@ -316,7 +316,7 @@ public sealed partial record AppSurfaceDocsHarvestDiagnosticResponse
     [GeneratedRegex(@"\b(?<prefix>Bearer\s+)[A-Za-z0-9._~+/=-]+", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex BearerTokenRegex();
 
-    [GeneratedRegex(@"\b(?:ghp|github_pat|sk|xox[baprs])_[A-Za-z0-9_=-]{8,}\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(?:gh[opusr]|github_pat|sk|xox[baprs])[-_][A-Za-z0-9_=-]{8,}\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex CommonSecretTokenRegex();
 
     [GeneratedRegex(@"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Za-z_][A-Za-z0-9_]*Exception\b(?:: [^.\n\r;]+)?", RegexOptions.CultureInvariant)]

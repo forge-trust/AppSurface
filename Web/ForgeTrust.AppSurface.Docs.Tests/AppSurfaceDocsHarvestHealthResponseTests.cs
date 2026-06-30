@@ -47,7 +47,7 @@ public sealed class AppSurfaceDocsHarvestHealthResponseTests
     public void FromSnapshot_RedactsUnsafeDiagnosticCauseText()
     {
         const string dirtyCause = """
-            InvalidOperationException: boom at /Users/andrew/private/repo/secret.js; token=super-secret-value Bearer abc.def.ghi ghp_1234567890abcdef
+            InvalidOperationException: boom at /Users/andrew/private/repo/secret.js; token=super-secret-value Bearer abc.def.ghi ghp_1234567890abcdef sk-proj-1234567890abcdef xoxb-1234567890abcdef
             Sidecar path /Users/andrew/private/repo/.env and Windows path C:\repo\Secret.cs were observed.
                at ForgeTrust.Secret.Run() in C:\repo\Secret.cs:line 42
             Follow-up diagnostic context remains separate.
@@ -84,6 +84,8 @@ public sealed class AppSurfaceDocsHarvestHealthResponseTests
         Assert.DoesNotContain("super-secret-value", combinedCause, StringComparison.Ordinal);
         Assert.DoesNotContain("abc.def.ghi", combinedCause, StringComparison.Ordinal);
         Assert.DoesNotContain("ghp_1234567890abcdef", combinedCause, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk-proj-1234567890abcdef", combinedCause, StringComparison.Ordinal);
+        Assert.DoesNotContain("xoxb-1234567890abcdef", combinedCause, StringComparison.Ordinal);
         Assert.Contains("[redacted exception detail]", combinedCause, StringComparison.Ordinal);
         Assert.Contains("[redacted path]", combinedCause, StringComparison.Ordinal);
         Assert.Contains("token=[redacted]", combinedCause, StringComparison.Ordinal);
