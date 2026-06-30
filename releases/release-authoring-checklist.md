@@ -9,6 +9,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - regroup the story so the opening narrative explains what changed and why it matters
 - confirm every breaking or behavior-changing update has migration guidance
 - for stable releases, stage the AppSurface Docs exact archive and run `appsurface docs verify-archive --catalog <staging>/versions.json --version x.y.z --trusted-release-root <staging>` before asking the release tool to validate docs evidence
+- for stable releases, confirm the checked-in evidence fields describe the same staged docs archive that `nuget-stable-publish.yml` will export and verify before `publish-nuget`
 - use `./eng/release prepare --version x.y.z --dry-run` to inspect the generated tagged note, sidecar, release manifest, release evidence bundle, changelog rollover, package release-note path updates, and reset unreleased artifact before opening the release PR
 
 ## When cutting the tagged release note
@@ -27,6 +28,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 
 - create the annotated tag from the maintainer-reviewed merge commit outside the release tool; v1 never creates tags automatically
 - wait for the protected NuGet workflow for the tag classification to finish first: `nuget-prerelease-publish.yml` for prerelease tags, `nuget-stable-publish.yml` for stable tags
+- for stable tags, treat the workflow's `appsurface-stable-docs-proof-x.y.z` artifact as the pre-NuGet docs proof: it contains the staged catalog plus archive manifests verified before the trusted publishing token was requested
 - run `./eng/release publish --version x.y.z --tag vx.y.z --base-ref <release-base> --dry-run` before the publish workflow creates the GitHub Release; publish validation checks the release evidence bundle and protected package publish proof at the annotated tag commit, not the local worktree
 - for stable releases, include `--docs-catalog <staging>/versions.json --docs-trusted-release-root <staging>` when running publish validation or the workflow dispatch; publish does not use the local `dist/docs/versions.json` fallback
 - keep stable releases blocked until `nuget-stable` publish and `nuget-stable-smoke` install proof exists; `v0.1.0` must not become a GitHub-only release

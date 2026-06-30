@@ -32,7 +32,9 @@ This is the living release note for the next coordinated AppSurface version afte
 - Stable package release publishing now gates on verified AppSurface Docs archive evidence. Release authors pass the
   staged docs `versions.json` and trusted archive root into `appsurface-release check` or `publish`; the tool verifies the
   selected public catalog entry, exact tree path, pinned release-manifest digest, route manifest safety, and every
-  serveable file before stable GitHub Release publishing can continue.
+  serveable file before stable GitHub Release publishing can continue. The protected stable NuGet workflow now repeats the
+  export and archive verification against the checked-in release evidence before it can request the NuGet trusted publishing
+  token.
 - AppSurface Auth now has a Start Here adoption ladder that helps package consumers choose between host-owned
   ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces
   without implying AppSurface owns production identity providers, policies, user stores, or enforcement.
