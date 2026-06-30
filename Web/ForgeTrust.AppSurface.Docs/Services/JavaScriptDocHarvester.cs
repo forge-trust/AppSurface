@@ -818,11 +818,15 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     {
         foreach (var group in items
             .GroupBy(item => item.GroupIdentity, StringComparer.OrdinalIgnoreCase)
-            .Select(static group => new
+            .Select(static group =>
             {
-                GroupIdentity = group.Key,
-                GroupItems = group.ToArray(),
-                GroupDisplayName = group.First().GroupDisplayName
+                var groupItems = group.ToArray();
+                return new
+                {
+                    GroupIdentity = group.Key,
+                    GroupItems = groupItems,
+                    GroupDisplayName = groupItems[0].GroupDisplayName
+                };
             }))
         {
             var typedefIndex = group.GroupItems
