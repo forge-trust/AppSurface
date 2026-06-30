@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Web;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -229,6 +230,20 @@ public sealed class AppSurfaceWebOpenApiModuleTests
 
         Assert.DoesNotContain("ForgeTrust.AppSurface.Web", operationTags);
         Assert.Contains("PublicApi", operationTags);
+    }
+
+    [Fact]
+    public async Task AppSurfaceWebApp_ExcludesConfigAuditDiagnosticsEndpointFromOpenApiDocument()
+    {
+        using var document = await GetOpenApiDocumentAsync(endpoints =>
+        {
+            endpoints.MapAppSurfaceConfigAuditDiagnostics("ConfigAuditRead");
+        });
+
+        Assert.False(
+            document.RootElement.GetProperty("paths").TryGetProperty(
+                AppSurfaceConfigAuditDiagnosticsDefaults.DefaultRoute,
+                out _));
     }
 
     [Fact]
