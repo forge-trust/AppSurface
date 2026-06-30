@@ -1667,6 +1667,9 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptParseFailed, diagnostic.Code);
             Assert.Contains("src/unreadable.js", diagnostic.Problem, StringComparison.Ordinal);
             Assert.Contains("could not be read", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("could not read its content before parsing", diagnostic.Cause, StringComparison.Ordinal);
+            Assert.DoesNotContain(_testRoot, diagnostic.Cause, StringComparison.Ordinal);
+            Assert.DoesNotContain(filePath, diagnostic.Cause, StringComparison.Ordinal);
         }
         finally
         {

@@ -165,7 +165,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         DocHarvestDiagnosticCodes.JavaScriptParseFailed,
                         DocHarvestDiagnosticSeverity.Warning,
                         $"Skipped JavaScript file '{relativePath}' because it could not be read.",
-                        ex.Message,
+                        "The source file matched JavaScript harvest policy, but AppSurface Docs could not read its content before parsing.",
                         "Fix file permissions or locks, or exclude this file from JavaScript harvesting."));
                 }
             }
