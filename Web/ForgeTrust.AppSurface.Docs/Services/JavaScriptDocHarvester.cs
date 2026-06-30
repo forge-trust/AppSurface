@@ -816,27 +816,31 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         IReadOnlyList<JavaScriptApiItem> items,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
-        foreach (var group in items.GroupBy(item => item.GroupIdentity, StringComparer.OrdinalIgnoreCase))
+        foreach (var group in items
+            .GroupBy(item => item.GroupIdentity, StringComparer.OrdinalIgnoreCase)
+            .Select(static group => new
+            {
+                GroupItems = group.ToArray(),
+                GroupDisplayName = group.First().GroupDisplayName
+            }))
         {
-            var groupItems = group.ToArray();
-            var groupDisplayName = groupItems[0].GroupDisplayName;
-            var typedefIndex = groupItems
+            var typedefIndex = group.GroupItems
                 .Where(static item => item.Kind == JavaScriptApiKind.Typedef)
                 .GroupBy(static item => item.Name, StringComparer.Ordinal)
                 .ToDictionary(static group => group.Key, static group => group.ToArray(), StringComparer.Ordinal);
             var emittedDiagnostics = new HashSet<JavaScriptTypedefDiagnosticKey>();
 
-            foreach (var item in groupItems)
+            foreach (var item in group.GroupItems)
             {
-                ResolveMemberTypedefReferences(item.Parameters, item.GroupIdentity, groupDisplayName, typedefIndex, emittedDiagnostics, diagnostics);
-                ResolveMemberTypedefReferences(item.Properties, item.GroupIdentity, groupDisplayName, typedefIndex, emittedDiagnostics, diagnostics);
+                ResolveMemberTypedefReferences(item.Parameters, item.GroupIdentity, group.GroupDisplayName, typedefIndex, emittedDiagnostics, diagnostics);
+                ResolveMemberTypedefReferences(item.Properties, item.GroupIdentity, group.GroupDisplayName, typedefIndex, emittedDiagnostics, diagnostics);
 
                 if (item.Returns?.TypeReferenceName is { } returnsReferenceName)
                 {
                     item.Returns.TypeReference = ResolveTypedefReference(
                         returnsReferenceName,
                         item.GroupIdentity,
-                        groupDisplayName,
+                        group.GroupDisplayName,
                         typedefIndex,
                         emittedDiagnostics,
                         diagnostics);
@@ -847,7 +851,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                     item.TypeReference = ResolveTypedefReference(
                         itemTypeReferenceName,
                         item.GroupIdentity,
-                        groupDisplayName,
+                        group.GroupDisplayName,
                         typedefIndex,
                         emittedDiagnostics,
                         diagnostics);
@@ -1614,11 +1618,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         builder.Append("\">");
         builder.Append(WebUtility.HtmlEncode(typedef.Name));
         builder.Append("</a>");
-        if (!string.IsNullOrWhiteSpace(typedef.Summary))
-        {
-            builder.Append(" - ");
-            builder.Append(WebUtility.HtmlEncode(typedef.Summary));
-        }
+        builder.Append(" - ");
+        builder.Append(WebUtility.HtmlEncode(typedef.Summary));
 
         builder.Append("</p>");
         if (typedef.Properties.Count > 0)

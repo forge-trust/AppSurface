@@ -523,6 +523,138 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldRenderSparseTypedefPreviewWithoutProperties()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Selects an empty reusable payload shape.
+             * @public
+             * @namespace RazorWire
+             * @attribute data-rw-empty-payload
+             * @target form[data-rw-form="true"]
+             * @type {EmptyPayload}
+             */
+
+            /**
+             * @public
+             * @namespace RazorWire
+             * @typedef {Object} EmptyPayload
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var attributeStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/razorwire#attribute-data-rw-empty-payload",
+            StringComparison.Ordinal));
+        Assert.Contains("<a href=\"#typedef-emptypayload\">{EmptyPayload}</a>", attributeStub.Content, StringComparison.Ordinal);
+        Assert.Contains("Type preview: <a href=\"#typedef-emptypayload\">EmptyPayload</a>", attributeStub.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("<div class=\"doc-javascript-typedef-preview\"><p>Type preview: <a href=\"#typedef-emptypayload\">EmptyPayload</a></p><ul>", attributeStub.Content, StringComparison.Ordinal);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldRenderLinkedReturnWithoutDescription()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Creates a reusable payload.
+             * @public
+             * @namespace RazorWire
+             * @returns {FormFailureDetail}
+             */
+            function createFailureDetail() {}
+
+            /**
+             * Failure payload passed through event.detail.
+             * @public
+             * @namespace RazorWire
+             * @typedef {Object} FormFailureDetail
+             * @property {string} message - Reader-facing fallback message.
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var returnsStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/razorwire#function-createfailuredetail",
+            StringComparison.Ordinal));
+        Assert.Contains("<p>Returns: <a href=\"#typedef-formfailuredetail\">FormFailureDetail</a></p>", returnsStub.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("<p>Returns: <a href=\"#typedef-formfailuredetail\">FormFailureDetail</a> -", returnsStub.Content, StringComparison.Ordinal);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldRenderReturnExpressionsThatDoNotCreateTypedefLinks()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Returns reader-facing text without a braced type.
+             * @public
+             * @namespace RazorWire
+             * @returns Failure payload.
+             */
+            function createTextFailureDetail() {}
+
+            /**
+             * Returns an empty braced marker as plain text.
+             * @public
+             * @namespace RazorWire
+             * @returns {} - Empty payload marker.
+             */
+            function createEmptyFailureDetail() {}
+
+            /**
+             * Returns a reusable payload with a hyphenated description.
+             * @public
+             * @namespace RazorWire
+             * @returns {FormFailureDetail} - Failure payload.
+             */
+            function createHyphenatedFailureDetail() {}
+
+            /**
+             * Failure payload passed through event.detail.
+             * @public
+             * @namespace RazorWire
+             * @typedef {Object} FormFailureDetail
+             * @property {string} message - Reader-facing fallback message.
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var textReturnsStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/razorwire#function-createtextfailuredetail",
+            StringComparison.Ordinal));
+        Assert.Contains("<p>Returns: Failure payload.</p>", textReturnsStub.Content, StringComparison.Ordinal);
+
+        var emptyReturnsStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/razorwire#function-createemptyfailuredetail",
+            StringComparison.Ordinal));
+        Assert.Contains("<p>Returns: {} - Empty payload marker.</p>", emptyReturnsStub.Content, StringComparison.Ordinal);
+
+        var hyphenatedReturnsStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/razorwire#function-createhyphenatedfailuredetail",
+            StringComparison.Ordinal));
+        Assert.Contains("Returns: <a href=\"#typedef-formfailuredetail\">FormFailureDetail</a> - Failure payload.", hyphenatedReturnsStub.Content, StringComparison.Ordinal);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldResolveTypedefReferencesOnlyWithinSameGroup()
     {
         await WriteAsync(
@@ -696,8 +828,58 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * Inspects native JavaScript values without reusable payload contracts.
              * @public
              * @namespace RazorWire
+             * @param {*} wildcard - Wildcard value.
              * @param {Error} error - Native error.
+             * @param {EvalError} evalError - Native eval error.
+             * @param {RangeError} rangeError - Native range error.
+             * @param {ReferenceError} referenceError - Native reference error.
+             * @param {SyntaxError} syntaxError - Native syntax error.
+             * @param {TypeError} typeError - Native type error.
+             * @param {URIError} uriError - Native URI error.
+             * @param {AggregateError} aggregateError - Native aggregate error.
+             * @param {Function} callback - Native callback.
              * @param {Promise} pending - Pending native work.
+             * @param {RegExp} pattern - Native pattern.
+             * @param {Map} map - Native map.
+             * @param {Set} set - Native set.
+             * @param {WeakMap} weakMap - Native weak map.
+             * @param {WeakSet} weakSet - Native weak set.
+             * @param {Int8Array} int8Array - Native typed array.
+             * @param {Uint8Array} uint8Array - Native typed array.
+             * @param {Uint8ClampedArray} uint8ClampedArray - Native typed array.
+             * @param {Int16Array} int16Array - Native typed array.
+             * @param {Uint16Array} uint16Array - Native typed array.
+             * @param {Int32Array} int32Array - Native typed array.
+             * @param {Uint32Array} uint32Array - Native typed array.
+             * @param {Float32Array} float32Array - Native typed array.
+             * @param {Float64Array} float64Array - Native typed array.
+             * @param {BigInt64Array} bigInt64Array - Native typed array.
+             * @param {BigUint64Array} bigUint64Array - Native typed array.
+             * @param {void} voidValue - Native void value.
+             * @param {undefined} undefinedValue - Native undefined value.
+             * @param {null} nullValue - Native null value.
+             * @param {AbortController} abortController - Native abort controller.
+             * @param {AbortSignal} abortSignal - Native abort signal.
+             * @param {Blob} blob - Native blob.
+             * @param {DOMException} domException - Native DOM exception.
+             * @param {DOMParser} domParser - Native DOM parser.
+             * @param {File} file - Native file.
+             * @param {FileList} fileList - Native file list.
+             * @param {FormData} formData - Native form data.
+             * @param {Headers} headers - Native headers.
+             * @param {Request} request - Native request.
+             * @param {Response} response - Native response.
+             * @param {URLSearchParams} urlSearchParams - Native URL search params.
+             * @param {Element} element - Native element.
+             * @param {Node} node - Native node.
+             * @param {Document} document - Native document.
+             * @param {Window} window - Native window.
+             * @param {Event} event - Native event.
+             * @param {InputEvent} inputEvent - Native input event.
+             * @param {KeyboardEvent} keyboardEvent - Native keyboard event.
+             * @param {PointerEvent} pointerEvent - Native pointer event.
+             * @param {CustomEvent} customEvent - Native custom event.
+             * @param {Record} record - Native record.
              * @returns {Date} Last update time.
              */
             function inspectNativePayload(error, pending) {}
@@ -711,6 +893,9 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * @firesWhen a RazorWire-enhanced form receives an unhandled failure response.
              * @property {HTMLFormElement} detail.form - Submitted form.
              * @property {HTMLSelectElement} detail.select - Native select control.
+             * @property {SVGElement} detail.icon - Native SVG element.
+             * @property {MathMLElement} detail.math - Native MathML element.
+             * @property {HTMLCollection[]} detail.collections - Similar prefix inside an unsupported array expression.
              * @property {SubmitEvent} detail.submitEvent - Native submit event.
              * @property {MouseEvent} detail.mouseEvent - Native mouse event.
              * @property {URL} detail.action - Native URL value.
@@ -728,6 +913,40 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
         await harvester.HarvestAsync(_testRoot);
 
+        Assert.DoesNotContain(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code is DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceMissing
+                or DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceAmbiguous);
+    }
+
+    [Theory]
+    [InlineData("{FormFailureDetail} extra")]
+    [InlineData("{}")]
+    [InlineData("FormFailureDetail")]
+    public async Task HarvestAsync_ShouldIgnoreUnsupportedAttributeTypedefExpressions(string type)
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            $$"""
+            /**
+             * Selects a reusable payload shape with an unsupported expression.
+             * @public
+             * @namespace RazorWire
+             * @attribute data-rw-form-failure-payload
+             * @target form[data-rw-form="true"]
+             * @type {{type}}
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var attributeStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/razorwire#attribute-data-rw-form-failure-payload",
+            StringComparison.Ordinal));
+        Assert.Contains(type, attributeStub.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("Type preview:", attributeStub.Content, StringComparison.Ordinal);
         Assert.DoesNotContain(
             GetDiagnostics(harvester),
             diagnostic => diagnostic.Code is DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceMissing
