@@ -78,6 +78,8 @@ appsurface docs verify-archive --catalog ./dist/docs/versions.json --version 0.1
 
 `appsurface docs verify-archive` checks the same catalog-pinned exact tree used by runtime docs mounting. The release tool adds the release-specific gate: the selected stable catalog entry must be unique, public, available, pinned with `releaseManifestSha256`, equal to the release evidence docs fields, safely relative to the trusted release root, and byte-verified against `.appsurface-docs-release-manifest.json`. The release readiness report prints the authored catalog exact tree path and manifest digest separately from the resolved physical exact tree, catalog path, trusted root, verification state, and verified file count.
 
+The protected `nuget-stable-publish.yml` workflow repeats the stable docs proof before the irreversible NuGet publish job. It checks out the annotated tag commit, exports AppSurface Docs into the `docsArchive.exactTreePath` recorded by `releases/v{version}.evidence.json`, stages a minimal `versions.json` with the recorded `releaseManifestSha256`, runs `appsurface docs verify-archive`, and then runs `./eng/release check` with the staged catalog and trusted root. If export output, catalog fields, or release evidence disagree, the workflow stops before requesting the NuGet trusted publishing token. The later GitHub Release workflow still runs `./eng/release publish` with its own staged docs inputs before creating the public release.
+
 Repair loops are intentionally concrete:
 
 - `release-evidence-docs-archive-required`: regenerate stable release evidence from a completed docs export and catalog entry.
@@ -89,7 +91,7 @@ Repair loops are intentionally concrete:
 
 ## Stable Release Policy
 
-Stable GitHub Releases require the protected `nuget-stable-publish.yml` path. The workflow validates annotated `vX.Y.Z` tags, checks the configured release base branch, publishes through the `nuget-stable` environment, waits through `nuget-stable-smoke`, and uploads publish and smoke evidence. The release cockpit verifies a successful stable workflow run for the exact tag commit before creating the GitHub Release. Prerelease publishing remains on `nuget-prerelease-publish.yml` and the `nuget-prerelease` environments.
+Stable GitHub Releases require the protected `nuget-stable-publish.yml` path. The workflow validates annotated `vX.Y.Z` tags, checks the configured release base branch, proves stable docs archive evidence before NuGet publication, publishes through the `nuget-stable` environment, waits through `nuget-stable-smoke`, and uploads docs proof, publish, and smoke evidence. The release cockpit verifies a successful stable workflow run for the exact tag commit before creating the GitHub Release. Prerelease publishing remains on `nuget-prerelease-publish.yml` and the `nuget-prerelease` environments.
 
 ## Diagnostics
 
