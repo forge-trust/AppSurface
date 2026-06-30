@@ -3876,7 +3876,7 @@ public sealed class ReleaseToolTests : IDisposable
                 new
                 {
                     recommendedVersion = "0.0.9",
-                    versions = new[]
+                    versions = new object[]
                     {
                         new
                         {
@@ -3887,6 +3887,25 @@ public sealed class ReleaseToolTests : IDisposable
                             advisoryState = "None",
                             exactTreePath = "releases/0.0.9",
                             releaseManifestSha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+                        },
+                        new
+                        {
+                            version = "0.0.8",
+                            label = "0.0.8",
+                            supportState = "Maintained",
+                            visibility = "Public",
+                            advisoryState = "None",
+                            exactTreePath = "releases/0.0.8",
+                            releaseManifestSha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+                        },
+                        new
+                        {
+                            version = "0.0.7",
+                            label = "0.0.7",
+                            visibility = "Public",
+                            advisoryState = "None",
+                            exactTreePath = "releases/0.0.7",
+                            releaseManifestSha256 = "3333333333333333333333333333333333333333333333333333333333333333"
                         }
                     }
                 },
@@ -3917,6 +3936,8 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.True(File.Exists(RepositoryPath("artifacts/pages/releases/0.0.9/index.html")));
         var catalog = await File.ReadAllTextAsync(RepositoryPath("artifacts/pages/versions.json"));
         Assert.Contains("\"version\": \"0.0.9\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("\"version\": \"0.0.8\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("\"version\": \"0.0.7\"", catalog, StringComparison.Ordinal);
         Assert.Contains("\"supportState\": \"Maintained\"", catalog, StringComparison.Ordinal);
         Assert.Contains("\"version\": \"0.1.0\"", catalog, StringComparison.Ordinal);
         Assert.Contains("\"supportState\": \"Current\"", catalog, StringComparison.Ordinal);
