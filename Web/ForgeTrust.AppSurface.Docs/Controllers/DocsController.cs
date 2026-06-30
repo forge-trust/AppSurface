@@ -1083,18 +1083,24 @@ public class DocsController : Controller
 
     private async ValueTask<bool> CanUseLiveHarvestProgressAsync()
     {
+        var requestServices = HttpContext.RequestServices;
+        if (requestServices is null)
+        {
+            return false;
+        }
+
         // RazorWire stream filters and the Docs-installed result authorizer own the same harvest-progress decision as
         // the stream endpoint. The legacy bool authorizer remains a facade over that result path for existing callers
         // and tests.
         var streamAuthorizationContext = new RazorWireStreamAuthorizationContext(
             HttpContext,
             AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
-            HttpContext.RequestServices.GetService<RazorWireOptions>()?.Streams.AuthorizationMode
+            requestServices.GetService<RazorWireOptions>()?.Streams.AuthorizationMode
             ?? RazorWireStreamAuthorizationMode.DenyAll);
 
         try
         {
-            foreach (var filter in HttpContext.RequestServices.GetServices<IRazorWireStreamAuthorizationFilter>())
+            foreach (var filter in requestServices.GetServices<IRazorWireStreamAuthorizationFilter>())
             {
                 var filterResult = await filter.AuthorizeAsync(streamAuthorizationContext);
                 if (filterResult is not null && !filterResult.IsAllowed)
@@ -1103,7 +1109,7 @@ public class DocsController : Controller
                 }
             }
 
-            var authorizer = HttpContext.RequestServices.GetService<IRazorWireStreamAuthorizer>();
+            var authorizer = requestServices.GetService<IRazorWireStreamAuthorizer>();
             if (authorizer is not null)
             {
                 var result = await authorizer.AuthorizeAsync(streamAuthorizationContext);
@@ -1111,7 +1117,7 @@ public class DocsController : Controller
                 return result.IsAllowed;
             }
 
-            var channelAuthorizer = HttpContext.RequestServices.GetService<IRazorWireChannelAuthorizer>();
+            var channelAuthorizer = requestServices.GetService<IRazorWireChannelAuthorizer>();
             if (channelAuthorizer is not null)
             {
                 return await channelAuthorizer.CanSubscribeAsync(
