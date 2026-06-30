@@ -62,7 +62,7 @@ internal sealed class AppSurfaceDocsHarvestStreamAuthorizer : IRazorWireStreamAu
             return AppSurfaceAuthResult.Forbidden();
         }
 
-        var readPolicy = _options.Diagnostics?.OperatorReadPolicy;
+        var readPolicy = _options.Diagnostics.OperatorReadPolicy;
         if (!string.IsNullOrWhiteSpace(readPolicy))
         {
             var policyResult = await AppSurfaceDocsOperatorReadPolicyEvaluator.AuthorizeAsync(

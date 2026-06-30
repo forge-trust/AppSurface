@@ -39,7 +39,12 @@ internal sealed class AppSurfaceDocsOperatorReadPolicyWarningService : IHostedSe
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        if (_environment.IsDevelopment() || !string.IsNullOrWhiteSpace(_options.Diagnostics?.OperatorReadPolicy))
+        if (_environment.IsDevelopment())
+        {
+            return Task.CompletedTask;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_options.Diagnostics.OperatorReadPolicy))
         {
             return Task.CompletedTask;
         }
@@ -69,28 +74,24 @@ internal sealed class AppSurfaceDocsOperatorReadPolicyWarningService : IHostedSe
     private IReadOnlyList<string> ResolveExposedDiagnosticsSurfaces()
     {
         var surfaces = new List<string>();
-        if (IsAlways(_options.Harvest?.Health?.ExposeRoutes))
+        var health = _options.Harvest.Health;
+        if (health.ExposeRoutes == AppSurfaceDocsHarvestHealthExposure.Always)
         {
             surfaces.Add("_harvest");
             surfaces.Add(AppSurfaceDocsStreamAuthorization.HarvestProgressChannel);
-            if (string.IsNullOrWhiteSpace(_options.Harvest?.Health?.AuthorizationPolicy))
+            if (string.IsNullOrWhiteSpace(health.AuthorizationPolicy))
             {
                 surfaces.Add("_health");
                 surfaces.Add("_health.json");
             }
         }
 
-        if (IsAlways(_options.Diagnostics?.ExposeRouteInspector))
+        if (_options.Diagnostics.ExposeRouteInspector == AppSurfaceDocsHarvestHealthExposure.Always)
         {
             surfaces.Add("_routes");
             surfaces.Add("_routes.json");
         }
 
         return surfaces;
-    }
-
-    private static bool IsAlways(AppSurfaceDocsHarvestHealthExposure? exposure)
-    {
-        return exposure == AppSurfaceDocsHarvestHealthExposure.Always;
     }
 }

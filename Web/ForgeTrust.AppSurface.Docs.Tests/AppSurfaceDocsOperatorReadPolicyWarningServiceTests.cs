@@ -78,6 +78,35 @@ public sealed class AppSurfaceDocsOperatorReadPolicyWarningServiceTests
     }
 
     [Fact]
+    public async Task StartAsync_WhenOperatorReadPolicyIsWhitespace_TreatsDiagnosticsAsUnprotected()
+    {
+        var logger = new RecordingLogger<AppSurfaceDocsOperatorReadPolicyWarningService>();
+        var service = new AppSurfaceDocsOperatorReadPolicyWarningService(
+            new AppSurfaceDocsOptions
+            {
+                Harvest = new AppSurfaceDocsHarvestOptions
+                {
+                    Health = new AppSurfaceDocsHarvestHealthOptions
+                    {
+                        ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Always
+                    }
+                },
+                Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+                {
+                    OperatorReadPolicy = "   "
+                }
+            },
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            logger);
+
+        await service.StartAsync(CancellationToken.None);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Contains("_harvest", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("_health.json", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task StartAsync_WhenLegacyHealthPolicyIsConfigured_ExcludesHealthRoutesFromWarning()
     {
         var logger = new RecordingLogger<AppSurfaceDocsOperatorReadPolicyWarningService>();
@@ -103,6 +132,32 @@ public sealed class AppSurfaceDocsOperatorReadPolicyWarningServiceTests
         Assert.Contains("appsurfacedocs-harvest", entry.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("_health", entry.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("_health.json", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StartAsync_WhenLegacyHealthPolicyIsWhitespace_IncludesHealthRoutesInWarning()
+    {
+        var logger = new RecordingLogger<AppSurfaceDocsOperatorReadPolicyWarningService>();
+        var service = new AppSurfaceDocsOperatorReadPolicyWarningService(
+            new AppSurfaceDocsOptions
+            {
+                Harvest = new AppSurfaceDocsHarvestOptions
+                {
+                    Health = new AppSurfaceDocsHarvestHealthOptions
+                    {
+                        ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Always,
+                        AuthorizationPolicy = "   "
+                    }
+                }
+            },
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            logger);
+
+        await service.StartAsync(CancellationToken.None);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Contains("_health", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("_health.json", entry.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -134,6 +189,24 @@ public sealed class AppSurfaceDocsOperatorReadPolicyWarningServiceTests
         var logger = new RecordingLogger<AppSurfaceDocsOperatorReadPolicyWarningService>();
         var service = new AppSurfaceDocsOperatorReadPolicyWarningService(
             new AppSurfaceDocsOptions(),
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            logger);
+
+        await service.StartAsync(CancellationToken.None);
+
+        Assert.Empty(logger.Entries);
+    }
+
+    [Fact]
+    public async Task StartAsync_WhenNestedDiagnosticsOptionsArePresentButHidden_DoesNotWarn()
+    {
+        var logger = new RecordingLogger<AppSurfaceDocsOperatorReadPolicyWarningService>();
+        var service = new AppSurfaceDocsOperatorReadPolicyWarningService(
+            new AppSurfaceDocsOptions
+            {
+                Harvest = new AppSurfaceDocsHarvestOptions(),
+                Diagnostics = new AppSurfaceDocsDiagnosticsOptions()
+            },
             new TestHostEnvironment { EnvironmentName = Environments.Production },
             logger);
 
