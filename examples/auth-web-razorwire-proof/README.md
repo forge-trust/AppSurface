@@ -1,8 +1,10 @@
 # AppSurface Auth Web/RazorWire Proof
 
-This sample is the five-minute proof for `ForgeTrust.AppSurface.Auth.AspNetCore`: one host-owned ASP.NET Core policy flows through AppSurface into both a Minimal API response and a RazorWire-facing rendered state.
+This sample is the five-minute proof for `ForgeTrust.AppSurface.Auth.AspNetCore` plus `ForgeTrust.RazorWire.Auth.AspNetCore`: one host-owned ASP.NET Core policy flows through AppSurface into a Minimal API response and RazorWire auth projection markup.
 
 Your host owns auth. This sample only changes the local proof persona.
+
+Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.md) when deciding whether this ASP.NET Core adapter proof, DevAuth, OIDC, Auth.Testing, or raw ASP.NET Core authentication is the right next step.
 
 ## Run The Proof
 
@@ -16,14 +18,14 @@ Open <http://127.0.0.1:5058/> and use the persona switch:
 
 | Persona | API status | AppSurface outcome | AppSurface reason | RazorWire-facing state |
 | --- | ---: | --- | --- | --- |
-| `anonymous` | `401` | `Challenge` | `Unauthenticated` | unauthenticated |
+| `anonymous` | `401` | `Challenge` | `Unauthenticated` | anonymous |
 | `viewer` | `403` | `Forbid` | `Forbidden` | forbidden |
 | `operator` | `200` | `Allowed` | `None` | allowed |
 
 The two panels should agree for every persona:
 
 - `Minimal API` shows the JSON-facing status, outcome, reason, and subject.
-- `RazorWire-facing state` renders the same policy result as page state.
+- `RazorWire-facing state` shows the canonical state fields and renders `rw:auth-view` for the same policy result.
 
 ## Curl Parity
 
@@ -48,7 +50,8 @@ Unsupported proof users behave like anonymous requests.
 - The host registers the local proof authentication handler.
 - The host owns the `OperatorsOnly` authorization policy and registers it with `AddAppSurfacePolicy(...)`.
 - `AddAppSurfaceAspNetCoreAuth(...)` maps the evaluated ASP.NET Core policy result into `AppSurfaceAuthResult`.
-- The Minimal API endpoint and RazorWire-facing page use the same `IAppSurfaceAspNetCorePolicyEvaluator.AuthorizeAsync("OperatorsOnly")` decision path.
+- `AddRazorWireAspNetCoreAuth()` lets `rw:auth-view` project that result without owning auth enforcement.
+- The Minimal API endpoint and RazorWire-facing page use the same host policy decision path.
 
 For production Minimal API endpoints that only need to enforce a host policy and return API-safe auth failures, prefer `RequireSurfacePolicy(...)`. This sample calls the evaluator directly so `/api/auth-proof` can return the same canonical outcome matrix that the RazorWire-facing page renders.
 
@@ -58,7 +61,7 @@ For production Minimal API endpoints that only need to enforce a host policy and
 - Not OAuth, OIDC, JWT, cookies, ASP.NET Identity, login, or logout guidance.
 - Not challenge, forbid, redirect, sign-in, or sign-out execution.
 - Not a replacement for `RequireSurfacePolicy(...)` on production Minimal API endpoints.
-- Not an `AuthGate`, `AuthView`, `PermissionGate`, or result-bearing RazorWire auth adapter.
+- Not DevAuth, OIDC, or production identity-provider guidance.
 
 Keep the proof-only `ProofAuthenticationHandler`, URL-local proof state, and persona switch inside this sample. Real applications should keep their existing ASP.NET Core authentication handlers and policies, then let AppSurface observe the populated request principal and named host-policy result.
 

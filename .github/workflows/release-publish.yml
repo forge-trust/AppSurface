@@ -13,6 +13,12 @@ on:
         description: Branch or ref that must contain the tag commit.
         required: false
         default: main
+      docs-catalog:
+        description: Staged AppSurface Docs versions.json for stable docs evidence verification.
+        required: false
+      docs-trusted-release-root:
+        description: Trusted release root that contains staged docs exact trees.
+        required: false
 
 concurrency:
   group: release-publish-${{ inputs.tag }}
@@ -57,15 +63,25 @@ jobs:
           VERSION: ${{ inputs.version }}
           TAG: ${{ inputs.tag }}
           BASE_REF: ${{ inputs.base-ref }}
+          DOCS_CATALOG: ${{ inputs.docs-catalog }}
+          DOCS_TRUSTED_RELEASE_ROOT: ${{ inputs.docs-trusted-release-root }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          docs_args=()
+          if [[ -n "${DOCS_CATALOG}" ]]; then
+            docs_args+=(--docs-catalog "${DOCS_CATALOG}")
+          fi
+          if [[ -n "${DOCS_TRUSTED_RELEASE_ROOT}" ]]; then
+            docs_args+=(--docs-trusted-release-root "${DOCS_TRUSTED_RELEASE_ROOT}")
+          fi
           ./eng/release publish \
             --version "${VERSION}" \
             --tag "${TAG}" \
             --base-ref "${BASE_REF}" \
             --dry-run \
-            --github-output "${GITHUB_OUTPUT}"
+            --github-output "${GITHUB_OUTPUT}" \
+            "${docs_args[@]}"
 
       - name: Create GitHub Release
         env:

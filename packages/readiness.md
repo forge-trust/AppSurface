@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 32
-- Evidence status: manifest evidence complete: 22; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
-- Product families: AppSurface: 21; Forge Trust: 2; Internal support: 7; RazorWire: 2
+- Packages: 33
+- Evidence status: manifest evidence complete: 23; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
+- Product families: AppSurface: 21; Forge Trust: 2; Internal support: 7; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -31,10 +31,11 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Console` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Console/ForgeTrust.AppSurface.Console/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Dependency.Autofac` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Core` | `ForgeTrust.AppSurface.Core` | [README](../Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Aspire` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Console` | [README](../Aspire/ForgeTrust.AppSurface.Aspire/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
-| AppSurface | `ForgeTrust.AppSurface.Web` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Web/ForgeTrust.AppSurface.Web/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
+| AppSurface | `ForgeTrust.AppSurface.Web` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Config`<br />`ForgeTrust.AppSurface.Core` | [README](../Web/ForgeTrust.AppSurface.Web/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web.OpenApi` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Web` | [README](../Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web.Scalar` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web.OpenApi` | `ForgeTrust.AppSurface.Web.OpenApi` | [README](../Web/ForgeTrust.AppSurface.Web.Scalar/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | RazorWire | `ForgeTrust.RazorWire` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Auth`<br />`ForgeTrust.AppSurface.Intelligence`<br />`ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Auth`<br />`ForgeTrust.AppSurface.Intelligence`<br />`ForgeTrust.AppSurface.Web` | [README](../Web/ForgeTrust.RazorWire/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
+| RazorWire | `ForgeTrust.RazorWire.Auth.AspNetCore` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Auth.AspNetCore`<br />`ForgeTrust.RazorWire` | `ForgeTrust.AppSurface.Auth.AspNetCore`<br />`ForgeTrust.RazorWire` | [README](../Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web.Tailwind` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64` | [README](../Web/ForgeTrust.AppSurface.Web.Tailwind/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Tasks` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Cli` | public | publish | manifest evidence complete | None | None | None | [AppSurface CLI README](../Cli/ForgeTrust.AppSurface.Cli/README.md) | [notes](../releases/v0.2.0-preview.1.md) |

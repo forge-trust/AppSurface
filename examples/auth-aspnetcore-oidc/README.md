@@ -2,6 +2,8 @@
 
 This example proves `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` can register named cookie and OIDC schemes without owning host defaults or requiring a live identity provider for local diagnostics.
 
+Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.md) before copying this proof into an app. The ladder separates OIDC convenience registration from DevAuth local personas, Auth.Testing integration tests, and host-owned production authentication.
+
 Run it:
 
 ```bash

@@ -8,6 +8,8 @@ Use this package when an ASP.NET Core app already owns authentication and author
 
 AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
 
+Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.md) when deciding whether this adapter, DevAuth, OIDC, Auth.Testing, or raw ASP.NET Core authentication is the right rung.
+
 ## Quickstart: Protect A Minimal API Endpoint
 
 Install the package:

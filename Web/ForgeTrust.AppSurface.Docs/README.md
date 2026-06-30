@@ -1741,7 +1741,7 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
   - Missing route manifests are tolerated for older pinned archives, but archive alias recovery is unavailable for that release.
   - Verified archives parse this manifest from bytes covered by `.appsurface-docs-release-manifest.json`; malformed pinned route manifests keep the release unavailable because redirects are behavior-affecting archive content.
 - `.appsurface-docs-release-manifest.json` at the tree root for new exports
-  - The hidden release manifest lists the final exported files, byte lengths, content types when known, SHA-256 algorithm names, and lowercase SHA-256 digests.
+  - The hidden release manifest lists the final exported files, byte lengths, nonblank content types when known, SHA-256 algorithm names, and lowercase SHA-256 digests.
   - The manifest is deterministic and is written after final export materialization, so rewritten HTML, redirect artifacts, binary assets, and `.appsurface-docs-route-manifest.json` are covered.
   - Export refuses unsupported hidden paths such as `.nojekyll` or `.well-known/...` with `ASDOCSARCHIVE005` instead of printing a catalog pin the runtime cannot verify.
   - The manifest excludes itself. Its own SHA-256 digest is printed by export and should be copied into `versions[].releaseManifestSha256`.

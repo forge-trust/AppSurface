@@ -384,7 +384,8 @@
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Auth.AspNetCore": "[0.1.0, )",
-          "ForgeTrust.RazorWire": "[0.1.0, )"
+          "ForgeTrust.RazorWire": "[0.1.0, )",
+          "ForgeTrust.RazorWire.Auth.AspNetCore": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.auth": {
@@ -408,6 +409,13 @@
           "Microsoft.AspNetCore.Mvc.Testing": "[10.0.2, )"
         }
       },
+      "forgetrust.appsurface.config": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "Microsoft.Extensions.Options": "[10.0.8, )"
+        }
+      },
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
@@ -426,6 +434,7 @@
       "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {
+          "ForgeTrust.AppSurface.Config": "[0.1.0, )",
           "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
@@ -436,6 +445,13 @@
           "ForgeTrust.AppSurface.Intelligence": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
+        }
+      },
+      "forgetrust.razorwire.auth.aspnetcore": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Auth.AspNetCore": "[0.1.0, )",
+          "ForgeTrust.RazorWire": "[0.1.0, )"
         }
       },
       "Microsoft.AspNetCore.Mvc.Razor.Extensions": {
