@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -369,56 +370,35 @@ internal static class ExportAuthArtifactAuditor
         }
 
         var tag = contents[tagStart..tagEnd];
-        foreach (Match match in AttributeRegex.Matches(tag))
-        {
-            if (string.Equals(match.Groups["name"].Value, "data-rw-auth-helper", StringComparison.OrdinalIgnoreCase))
-            {
-                return AttributeValue(match);
-            }
-        }
+        var match = AttributeRegex.Matches(tag)
+            .Cast<Match>()
+            .Where(match => string.Equals(match.Groups["name"].Value, "data-rw-auth-helper", StringComparison.OrdinalIgnoreCase))
+            .FirstOrDefault();
 
-        return null;
+        return match is null ? null : AttributeValue(match);
     }
 
     private static bool ContainsAttribute(string contents, string attributeName)
     {
-        foreach (Match match in AttributeRegex.Matches(contents))
-        {
-            if (string.Equals(match.Groups["name"].Value, attributeName, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return AttributeRegex.Matches(contents)
+            .Cast<Match>()
+            .Any(match => string.Equals(match.Groups["name"].Value, attributeName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool ContainsAttributeValue(string contents, string attributeName, string value)
     {
-        foreach (Match match in AttributeRegex.Matches(contents))
-        {
-            if (string.Equals(match.Groups["name"].Value, attributeName, StringComparison.OrdinalIgnoreCase)
-                && AttributeValue(match).Contains(value, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return AttributeRegex.Matches(contents)
+            .Cast<Match>()
+            .Any(match => string.Equals(match.Groups["name"].Value, attributeName, StringComparison.OrdinalIgnoreCase)
+                          && AttributeValue(match).Contains(value, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool ContainsAllowedAuthState(string contents)
     {
-        foreach (Match match in AttributeRegex.Matches(contents))
-        {
-            if (string.Equals(match.Groups["name"].Value, "data-rw-auth-state", StringComparison.OrdinalIgnoreCase)
-                && string.Equals(AttributeValue(match), "allowed", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return AttributeRegex.Matches(contents)
+            .Cast<Match>()
+            .Any(match => string.Equals(match.Groups["name"].Value, "data-rw-auth-state", StringComparison.OrdinalIgnoreCase)
+                          && string.Equals(AttributeValue(match), "allowed", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool HasTextArtifactPath(string artifactPath)
@@ -434,17 +414,11 @@ internal static class ExportAuthArtifactAuditor
 
     private static string AttributeValue(Match match)
     {
-        string value;
-        if (match.Groups["double"].Success)
-        {
-            value = match.Groups["double"].Value;
-        }
-        else
-        {
-            value = match.Groups["single"].Success
+        var value = match.Groups["double"].Success
+            ? match.Groups["double"].Value
+            : match.Groups["single"].Success
                 ? match.Groups["single"].Value
                 : match.Groups["bare"].Value;
-        }
 
         return NormalizeEscapedAttributeValue(value);
     }
