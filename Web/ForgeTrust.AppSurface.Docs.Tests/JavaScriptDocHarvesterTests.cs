@@ -512,6 +512,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             document.dispatchEvent(new CustomEvent("razorwire:dispatch-only", { bubbles: true }));
             """);
         var options = CreateEnabledOptions("src/runtime.js");
+        Assert.True(options.Harvest.JavaScript.RequirePublicTag);
         options.Harvest.JavaScript.VerifyEventDispatches = true;
         var harvester = CreateHarvester(options);
 
@@ -525,6 +526,30 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains("razorwire:dispatch-only", diagnostic.Problem, StringComparison.Ordinal);
         Assert.Contains("src/runtime.js:1", diagnostic.Cause, StringComparison.Ordinal);
         Assert.Contains("@event doclet", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldScanNonPublicVerifierInputsForDispatchEvidence()
+    {
+        await WriteAsync(
+            "src/runtime.js",
+            """
+            // This runtime helper is intentionally not public docs surface.
+            document.dispatchEvent(new CustomEvent("razorwire:verifier-only"));
+            """);
+        var options = CreateEnabledOptions("src/runtime.js");
+        Assert.True(options.Harvest.JavaScript.RequirePublicTag);
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing);
+        Assert.Contains("razorwire:verifier-only", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("src/runtime.js:2", diagnostic.Cause, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -710,6 +735,34 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             health.Diagnostics,
             diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing
                           && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldKeepMalformedVerifierOnlyInputsOutOfStrictHealth()
+    {
+        await WriteAsync("src/runtime.js", "function broken( {");
+        var options = CreateEnabledOptions("src/runtime.js");
+        options.Source.RepositoryRoot = _testRoot;
+        options.Harvest.JavaScript.StrictHealth = true;
+        options.Harvest.JavaScript.VerifyEventDispatches = true;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        var aggregator = new DocAggregator(
+            [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Healthy, health.Status);
+        Assert.Contains(health.Harvesters, item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+            && item.Status == DocHarvesterHealthStatus.ReturnedEmpty);
+        Assert.DoesNotContain(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptParseFailed);
     }
 
     [Fact]
@@ -1573,7 +1626,11 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal(nameof(JavaScriptDocHarvester), fileTooLargeDiagnostic.HarvesterType);
         Assert.Equal(DocHarvestDiagnosticSeverity.Warning, fileTooLargeDiagnostic.Severity);
         Assert.Contains("AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes", fileTooLargeDiagnostic.Cause, StringComparison.Ordinal);
-        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptParseFailed);
+        var parseFailedDiagnostic = Assert.Single(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptParseFailed);
+        Assert.Contains("parser rejected repository-relative JavaScript source", parseFailedDiagnostic.Cause, StringComparison.Ordinal);
+        Assert.DoesNotContain("Acornima", parseFailedDiagnostic.Cause, StringComparison.Ordinal);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
         var duplicateAnchorDiagnostic = Assert.Single(

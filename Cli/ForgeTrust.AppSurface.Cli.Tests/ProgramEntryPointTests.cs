@@ -811,8 +811,10 @@ public sealed class ProgramEntryPointTests
         Assert.Contains(nameof(AppSurfaceDocsHarvestHealthExposure.Always), args.HostArgs.Args);
         Assert.Contains("--AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets", args.HostArgs.Args);
         Assert.Contains("true", args.HostArgs.Args);
-        Assert.Contains("--AppSurfaceDocs:Harvest:JavaScript:VerifyEventDispatches", args.HostArgs.Args);
-        Assert.Contains("true", args.HostArgs.Args);
+        AssertForwardedValue(
+            args.HostArgs.Args,
+            "--AppSurfaceDocs:Harvest:JavaScript:VerifyEventDispatches",
+            "true");
     }
 
     [Fact]
@@ -3064,6 +3066,14 @@ public sealed class ProgramEntryPointTests
     private static void RegisterRunner(ConsoleOptions options, CapturingAppSurfaceDocsHealthVerifyRunner runner)
     {
         options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceDocsHealthVerifyRunner>(runner));
+    }
+
+    private static void AssertForwardedValue(IReadOnlyList<string> args, string key, string expectedValue)
+    {
+        var index = Array.IndexOf(args.ToArray(), key);
+        Assert.True(index >= 0, $"Expected forwarded argument '{key}' to be present.");
+        Assert.True(index + 1 < args.Count, $"Expected forwarded argument '{key}' to have a value.");
+        Assert.Equal(expectedValue, args[index + 1]);
     }
 
     private static AppSurfaceDocsHealthVerificationResult CreateHealthVerifyResult(bool ok, bool includeWarning = false)

@@ -248,8 +248,12 @@ public sealed record AppSurfaceDocsHarvestDiagnosticResponse
     public string Problem { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the operator-facing explanation for why AppSurface Docs reported the diagnostic.
+    /// Gets the operator-facing, redacted explanation for why AppSurface Docs reported the diagnostic.
     /// </summary>
+    /// <remarks>
+    /// This field carries repository-relative evidence or general recovery context. It must not contain raw host-local
+    /// exception messages, absolute filesystem paths, stack traces, tokens, or other machine-local details.
+    /// </remarks>
     [JsonPropertyName("cause")]
     public string Cause { get; init; } = string.Empty;
 

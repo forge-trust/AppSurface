@@ -139,10 +139,14 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                     }
 
                     var source = await File.ReadAllTextAsync(filePath, cancellationToken);
-                    if (requirePublicTag
-                        && !javaScriptOptions.VerifyEventDispatches
-                        && !source.Contains("@public", StringComparison.OrdinalIgnoreCase))
+                    var hasPublicTag = source.Contains("@public", StringComparison.OrdinalIgnoreCase);
+                    if (requirePublicTag && !hasPublicTag)
                     {
+                        if (javaScriptOptions.VerifyEventDispatches)
+                        {
+                            eventDispatches.AddRange(CollectVerifierOnlyEventDispatchEvidence(source, relativePath));
+                        }
+
                         continue;
                     }
 
@@ -156,7 +160,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         DocHarvestDiagnosticCodes.JavaScriptParseFailed,
                         DocHarvestDiagnosticSeverity.Warning,
                         $"Skipped JavaScript file '{relativePath}' because the parser rejected it.",
-                        $"Acornima reported {ex.Message} at line {ex.LineNumber.ToString(CultureInfo.InvariantCulture)}, column {ex.Column.ToString(CultureInfo.InvariantCulture)}.",
+                        $"The parser rejected repository-relative JavaScript source at line {ex.LineNumber.ToString(CultureInfo.InvariantCulture)}, column {ex.Column.ToString(CultureInfo.InvariantCulture)}.",
                         "Fix the JavaScript syntax, remove the file from the JavaScript include set, or exclude generated syntax that the v1 harvester should not parse."));
                 }
                 catch (Exception ex) when (IsFileReadException(ex))
@@ -392,6 +396,22 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             .Where(static dispatch => dispatch.HasValue)
             .Select(static dispatch => dispatch.GetValueOrDefault())
             .ToArray();
+    }
+
+    private static IReadOnlyList<JavaScriptEventDispatchEvidence> CollectVerifierOnlyEventDispatchEvidence(
+        string source,
+        string relativePath)
+    {
+        try
+        {
+            var comments = new List<Comment>();
+            var script = ParseJavaScriptProgram(source, comments);
+            return CollectEventDispatchEvidence(script, relativePath);
+        }
+        catch (ParseErrorException)
+        {
+            return [];
+        }
     }
 
     private static JavaScriptEventDispatchEvidence? CreateEventDispatchEvidence(Node node, string relativePath)
