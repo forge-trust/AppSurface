@@ -219,11 +219,128 @@ jobs:
           path: ${{ runner.temp }}/package-artifacts
           if-no-files-found: error
 
+  prove-docs-archive:
+    needs:
+      - validate-tag
+      - validate-source-ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout tag commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag-commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Export and verify stable docs archive before NuGet publish
+        env:
+          PACKAGE_VERSION: ${{ needs.validate-tag.outputs.package-version }}
+          AppSurfaceDocs__Contributor__DefaultBranch: ${{ env.STABLE_BASE_REF }}
+          AppSurfaceDocs__Contributor__SourceRef: ${{ needs.validate-tag.outputs.tag-commit }}
+          AppSurfaceDocs__Contributor__SourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{branch}/{path}
+          AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{ref}/{path}#L{line}
+          AppSurfaceDocs__Contributor__EditUrlTemplate: https://github.com/${{ github.repository }}/edit/{branch}/{path}
+          AppSurfaceDocs__Contributor__LastUpdatedMode: Git
+          AppSurfaceDocs__Identity__DisplayName: AppSurface
+          AppSurfaceDocs__Identity__Wordmark__HighlightText: Surface
+          AppSurfaceDocs__Identity__Wordmark__HighlightColor: "#3b82f6"
+          AppSurfaceDocs__Identity__BrandingAssets__DirectoryPath: branding
+          AppSurfaceDocs__Identity__BrandingAssets__AllowSvgAssets: "true"
+          AppSurfaceDocs__Identity__Logo__Path: /branding/appsurface-site-icon.svg
+          AppSurfaceDocs__Identity__Favicon__SvgPath: /branding/appsurface-site-icon.svg
+          AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js
+        run: |
+          set -euo pipefail
+
+          evidence_path="releases/v${PACKAGE_VERSION}.evidence.json"
+          docs_exact_tree_path="$(jq -r '.docsArchive.exactTreePath // ""' "${evidence_path}")"
+          docs_release_manifest_sha256="$(jq -r '.docsArchive.releaseManifestSha256 // ""' "${evidence_path}")"
+          if [[ -z "${docs_exact_tree_path}" || -z "${docs_release_manifest_sha256}" ]]; then
+            echo "Stable release evidence must include docsArchive.exactTreePath and docsArchive.releaseManifestSha256 before NuGet publish." >&2
+            exit 1
+          fi
+
+          normalized_exact_tree_path="${docs_exact_tree_path#./}"
+          case "${normalized_exact_tree_path}" in
+            ""|/*|../*|*/../*|*/..|"."|".."|.*|*/.*|*//*)
+              echo "Stable docs exactTreePath '${docs_exact_tree_path}' must be a trusted-root-relative path with no parent, hidden, or empty segments." >&2
+              exit 1
+              ;;
+          esac
+
+          docs_release_root="${RUNNER_TEMP}/appsurface-stable-docs-${PACKAGE_VERSION}"
+          docs_exact_tree="${docs_release_root}/${normalized_exact_tree_path}"
+          mkdir -p "$(dirname "${docs_exact_tree}")"
+          printf '%s\n' '/' '/docs' > "${RUNNER_TEMP}/appsurface-docs-seeds.txt"
+
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+            docs export \
+            --repo . \
+            --mode cdn \
+            --seeds "${RUNNER_TEMP}/appsurface-docs-seeds.txt" \
+            --output "${docs_exact_tree}" \
+            --public-origin https://forge-trust.com \
+            --startup-timeout-seconds 30 \
+            --strict
+
+          jq -n \
+            --arg version "${PACKAGE_VERSION}" \
+            --arg exactTreePath "${docs_exact_tree_path}" \
+            --arg releaseManifestSha256 "${docs_release_manifest_sha256}" \
+            '{
+              recommendedVersion: $version,
+              versions: [
+                {
+                  version: $version,
+                  label: $version,
+                  summary: ("Stable AppSurface release " + $version),
+                  exactTreePath: $exactTreePath,
+                  releaseManifestSha256: $releaseManifestSha256,
+                  supportState: "Current",
+                  visibility: "Public",
+                  advisoryState: "None"
+                }
+              ]
+            }' > "${docs_release_root}/versions.json"
+
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+            docs verify-archive \
+            --catalog "${docs_release_root}/versions.json" \
+            --version "${PACKAGE_VERSION}" \
+            --trusted-release-root "${docs_release_root}"
+
+          ./eng/release check \
+            --version "${PACKAGE_VERSION}" \
+            --allow-existing-targets \
+            --fail-on-warnings \
+            --docs-catalog "${docs_release_root}/versions.json" \
+            --docs-trusted-release-root "${docs_release_root}"
+
+      - name: Upload stable docs proof diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appsurface-stable-docs-proof-${{ needs.validate-tag.outputs.package-version }}
+          path: |
+            ${{ runner.temp }}/appsurface-stable-docs-${{ needs.validate-tag.outputs.package-version }}/versions.json
+            ${{ runner.temp }}/appsurface-stable-docs-${{ needs.validate-tag.outputs.package-version }}/**/.appsurface-docs-release-manifest.json
+            ${{ runner.temp }}/appsurface-stable-docs-${{ needs.validate-tag.outputs.package-version }}/**/.appsurface-docs-route-manifest.json
+          if-no-files-found: warn
+
   publish-nuget:
     needs:
       - validate-tag
       - validate-release-environment
       - pack-and-verify
+      - prove-docs-archive
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

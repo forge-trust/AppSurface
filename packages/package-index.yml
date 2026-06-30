@@ -69,7 +69,7 @@ packages:
     includes: AppSurfaceAuthModule, AppSurfaceAuthOptions, neutral user/session/context contracts, auth outcome and reason results, durable external-subject to app-user-id mapping contracts, passive login/logout prompts, passive audit event descriptions, and reserved metadata keys.
     does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policies, middleware, endpoint filters, runtime auth context accessors, user stores, provisioning implementations, database schema, challenges, forbids, redirects, audit sinks, or UI.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Auth` when reusable modules need host-neutral auth results or app-owned identity mapping boundaries without taking a web or persistence dependency.
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth` when reusable modules need host-neutral auth results or app-owned identity mapping boundaries without taking a web or persistence dependency; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) when choosing among auth packages.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj
@@ -84,7 +84,7 @@ packages:
     includes: AppSurfaceAspNetCoreAuthModule, AddAppSurfaceAspNetCoreAuth registration, AddAppSurfacePolicy policy naming, RequireSurfacePolicy Minimal API endpoint filters with fallback-policy opt-out metadata, ASP.NET Core request auth context mapping, named host-policy evaluation, AppSurfaceAuthResult mapping, ProblemDetails auth failure responses, and safe setup diagnostics.
     does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policy definitions, middleware insertion, ASP.NET Core authorization middleware replacement, browser challenge or forbid execution, redirects, audit sinks, RazorWire UI, or MVC/controller auth helpers.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results or Minimal API ProblemDetails responses; run the [Auth Web/RazorWire proof](../examples/auth-web-razorwire-proof/README.md) for the browser-first Web/RazorWire proof.
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore` after `ForgeTrust.AppSurface.Auth` when ASP.NET Core host policies should flow into AppSurface auth results or Minimal API ProblemDetails responses; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) and run the [Auth Web/RazorWire proof](../examples/auth-web-razorwire-proof/README.md).
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth
   - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.csproj
@@ -97,9 +97,9 @@ packages:
     order: 37
     use_when: Add this in Development-only ASP.NET Core hosts when package consumers need selectable fake personas, a visible local control page, and AppSurface policy proof without configuring an external identity provider.
     includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, MapAppSurfaceDevAuth control endpoints, AppSurfaceDevAuthMarker embeddable state overlay, seeded personas, protected persona cookie, loopback-only status JSON, startup safety diagnostics, and ASDEV diagnostic codes.
-    does_not_include: Production authentication, OIDC, JWT validation, ASP.NET Identity, password handling, durable app-user mapping, user stores, tenant authority, audit sinks, deployment auth, automatic host HTML injection, RazorWire auth UI components, or the future automated test harness.
+    does_not_include: Production authentication, OIDC, JWT validation, ASP.NET Identity, password handling, durable app-user mapping, user stores, tenant authority, audit sinks, deployment auth, automatic host HTML injection, RazorWire auth UI components, or Auth.Testing integration-test assertions.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts that need fake local personas to prove AppSurface policy results.
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts that need fake local personas to prove AppSurface policy results; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep DevAuth separate from Auth.Testing.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
   - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj
@@ -114,7 +114,7 @@ packages:
     includes: AddAppSurfaceOidcAuth registration, AppSurfaceOidcAuthOptions, named cookie and OpenID Connect schemes, authorization-code defaults, SaveTokens false by default, local-only passive login/logout prompt helpers, OIDC subject mapping handoff, event chaining, and stable safe diagnostic codes.
     does_not_include: User stores, ASP.NET Identity replacement, identity-provider hosting, OAuth/OIDC server behavior, provider SDKs, EF Core, persistence, middleware insertion, active redirects, challenge execution, sign-in or sign-out execution, silent default-scheme takeover, token storage by default, Aspire Keycloak, Dev Auth, or app-user provisioning.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` after `ForgeTrust.AppSurface.Auth.AspNetCore` when a host wants AppSurface-named cookie/OIDC schemes while preserving ASP.NET Core ownership of middleware, defaults, and provider behavior.
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` after `ForgeTrust.AppSurface.Auth.AspNetCore` when a host wants AppSurface-named cookie/OIDC schemes while preserving ASP.NET Core ownership of middleware, defaults, and provider behavior; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) before copying OIDC proof code.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
       - ForgeTrust.AppSurface.Auth
@@ -130,7 +130,7 @@ packages:
     includes: AddAppSurfaceTestAuth registration, WebApplicationFactory WithAppSurfaceTestAuth setup, persona registry, CreateAppSurfaceClient persona clients, request-level persona selection, explicit scheme modes, production-environment guard, stable test diagnostics, and framework-neutral AppSurface auth result and ProblemDetails assertions.
     does_not_include: Production authentication, cookies, JWT/OIDC, ASP.NET Identity, identity providers, authorization policy ownership, middleware replacement, user stores, session freshness simulation, Dev Auth runtime personas, browser login flows, or policy bypasses.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.Testing/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Auth.Testing` to integration test projects when AppSurface Auth.AspNetCore policy results need deterministic personas and canonical assertions; use Dev Auth instead for local runtime personas.
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.Testing` to integration test projects when AppSurface Auth.AspNetCore policy results need deterministic personas and canonical assertions; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep Auth.Testing separate from local DevAuth runtime personas.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
       - ForgeTrust.AppSurface.Auth
@@ -262,12 +262,13 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.1.md
     order: 70
-    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, conventional browser affordances, and PWA install metadata before layering on optional UI or docs packages.
-    includes: Base ASP.NET Core hosting, pre-routing and endpoint-aware middleware composition, endpoint composition, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/service-worker endpoints, and the core AppSurface web module contract.
-    does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, AppSurface Docs host, browser-specific install prompt UI, or broad offline route/app-data caching.
+    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, conventional browser affordances, PWA install metadata, or authenticated config-audit diagnostics before layering on optional UI or docs packages.
+    includes: Base ASP.NET Core hosting, pre-routing and endpoint-aware middleware composition, endpoint composition, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/service-worker endpoints, opt-in authenticated config audit diagnostics endpoint mapping, and the core AppSurface web module contract.
+    does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, AppSurface Docs host, browser-specific install prompt UI, broad offline route/app-data caching, automatic diagnostics exposure, or authorization policy definitions.
     start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
-    recipe_summary: Start with `ForgeTrust.AppSurface.Web` for AppSurface ASP.NET Core hosting; enable `WebOptions.Pwa` in the same package when the app needs installable PWA metadata and diagnostics.
+    recipe_summary: Start with `ForgeTrust.AppSurface.Web` for AppSurface ASP.NET Core hosting; enable `WebOptions.Pwa` in the same package when the app needs installable PWA metadata and diagnostics, or map config audit diagnostics explicitly when support needs sanitized operator evidence.
     expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Core
   - project: Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj
     classification: public

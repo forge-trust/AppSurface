@@ -4,6 +4,8 @@ This sample is the five-minute proof for `ForgeTrust.AppSurface.Auth.AspNetCore`
 
 Your host owns auth. This sample only changes the local proof persona.
 
+Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.md) when deciding whether this ASP.NET Core adapter proof, DevAuth, OIDC, Auth.Testing, or raw ASP.NET Core authentication is the right next step.
+
 ## Run The Proof
 
 From the repository root:
