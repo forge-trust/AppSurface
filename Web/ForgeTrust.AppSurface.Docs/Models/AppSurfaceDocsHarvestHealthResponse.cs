@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Http;
 
@@ -9,9 +10,9 @@ namespace ForgeTrust.AppSurface.Docs.Models;
 /// </summary>
 /// <remarks>
 /// This contract intentionally omits repository roots, raw exception messages, stack traces, and other host-local
-/// details. Diagnostic cause text is included only after harvesters redact it to repository-relative, operator-safe
-/// evidence. Use <see cref="DocAggregator.GetHarvestHealthAsync(System.Threading.CancellationToken)"/> for server-side
-/// inspection when trusted code needs the full snapshot.
+/// details. Diagnostic cause text is centrally redacted to repository-relative, operator-safe evidence before it reaches
+/// this response. Use <see cref="DocAggregator.GetHarvestHealthAsync(System.Threading.CancellationToken)"/> for
+/// server-side inspection when trusted code needs the full snapshot.
 /// </remarks>
 public sealed record AppSurfaceDocsHarvestHealthResponse
 {
@@ -221,7 +222,7 @@ public sealed record AppSurfaceDocsHarvesterHealthResponse
 /// <summary>
 /// Redacted diagnostic entry in the operator-facing harvest health response.
 /// </summary>
-public sealed record AppSurfaceDocsHarvestDiagnosticResponse
+public sealed partial record AppSurfaceDocsHarvestDiagnosticResponse
 {
     /// <summary>
     /// Gets the stable diagnostic code.
@@ -251,8 +252,9 @@ public sealed record AppSurfaceDocsHarvestDiagnosticResponse
     /// Gets the operator-facing, redacted explanation for why AppSurface Docs reported the diagnostic.
     /// </summary>
     /// <remarks>
-    /// This field carries repository-relative evidence or general recovery context. It must not contain raw host-local
-    /// exception messages, absolute filesystem paths, stack traces, tokens, or other machine-local details.
+    /// This field carries repository-relative evidence or general recovery context. Response mapping centrally redacts
+    /// raw host-local exception messages, absolute filesystem paths, stack traces, tokens, and other machine-local
+    /// details before serialization.
     /// </remarks>
     [JsonPropertyName("cause")]
     public string Cause { get; init; } = string.Empty;
@@ -273,8 +275,50 @@ public sealed record AppSurfaceDocsHarvestDiagnosticResponse
             Severity = diagnostic.Severity.ToString(),
             HarvesterType = diagnostic.HarvesterType,
             Problem = diagnostic.Problem,
-            Cause = diagnostic.Cause,
+            Cause = RedactCause(diagnostic.Cause),
             Fix = diagnostic.Fix
         };
     }
+
+    internal static string RedactCause(string? cause)
+    {
+        if (string.IsNullOrWhiteSpace(cause))
+        {
+            return string.Empty;
+        }
+
+        var redacted = StackTraceFrameRegex().Replace(cause, " at [redacted stack frame]");
+        redacted = WindowsAbsolutePathRegex().Replace(redacted, "[redacted path]");
+        redacted = UnixAbsolutePathRegex().Replace(redacted, "[redacted path]");
+        redacted = UncPathRegex().Replace(redacted, "[redacted path]");
+        redacted = SecretAssignmentRegex().Replace(redacted, "${key}=[redacted]");
+        redacted = BearerTokenRegex().Replace(redacted, "${prefix}[redacted]");
+        redacted = CommonSecretTokenRegex().Replace(redacted, "[redacted token]");
+        redacted = ExceptionMessageRegex().Replace(redacted, "[redacted exception detail]");
+        return redacted;
+    }
+
+    [GeneratedRegex(@"(?m)^\s+at\s+.+(?:\r?\n|$)", RegexOptions.CultureInvariant)]
+    private static partial Regex StackTraceFrameRegex();
+
+    [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s,;:""'<>)]*", RegexOptions.CultureInvariant)]
+    private static partial Regex WindowsAbsolutePathRegex();
+
+    [GeneratedRegex(@"(?<![\w.-])/(?:Applications|Library|System|Users|Volumes|etc|home|mnt|opt|private|root|srv|tmp|usr|var)(?:/[^\s,;:""'<>)]*)*", RegexOptions.CultureInvariant)]
+    private static partial Regex UnixAbsolutePathRegex();
+
+    [GeneratedRegex(@"\\\\[^\s\\/:*?""<>|]+\\[^\s,;:""'<>)]*", RegexOptions.CultureInvariant)]
+    private static partial Regex UncPathRegex();
+
+    [GeneratedRegex(@"\b(?<key>access_token|api_key|apikey|client_secret|password|pwd|secret|token)=[^&\s,;]+", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex SecretAssignmentRegex();
+
+    [GeneratedRegex(@"\b(?<prefix>Bearer\s+)[A-Za-z0-9._~+/=-]+", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex BearerTokenRegex();
+
+    [GeneratedRegex(@"\b(?:ghp|github_pat|sk|xox[baprs])_[A-Za-z0-9_=-]{8,}\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex CommonSecretTokenRegex();
+
+    [GeneratedRegex(@"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Za-z_][A-Za-z0-9_]*Exception\b(?:: [^.\n\r;]+)?", RegexOptions.CultureInvariant)]
+    private static partial Regex ExceptionMessageRegex();
 }

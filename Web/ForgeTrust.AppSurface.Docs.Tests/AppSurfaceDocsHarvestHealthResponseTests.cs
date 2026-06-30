@@ -39,6 +39,55 @@ public sealed class AppSurfaceDocsHarvestHealthResponseTests
 
         Assert.DoesNotContain("legacy/bower_components", diagnostic.Problem, StringComparison.Ordinal);
         Assert.DoesNotContain("legacy/bower_components", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("legacy/bower_components", diagnostic.Cause, StringComparison.Ordinal);
         Assert.Equal(diagnosticCode, diagnostic.Code);
+    }
+
+    [Fact]
+    public void FromSnapshot_RedactsUnsafeDiagnosticCauseText()
+    {
+        const string dirtyCause = """
+            InvalidOperationException: boom at /Users/andrew/private/repo/secret.js; token=super-secret-value Bearer abc.def.ghi ghp_1234567890abcdef
+            Sidecar path /Users/andrew/private/repo/.env and Windows path C:\repo\Secret.cs were observed.
+               at ForgeTrust.Secret.Run() in C:\repo\Secret.cs:line 42
+            """;
+        var harvesterDiagnostic = new DocHarvestDiagnostic(
+            DocHarvestDiagnosticCodes.HarvesterFailed,
+            DocHarvestDiagnosticSeverity.Error,
+            "CustomHarvester",
+            "A custom harvester failed.",
+            dirtyCause,
+            "Inspect trusted server logs for the raw details.");
+        var health = new DocHarvestHealthSnapshot(
+            DocHarvestHealthStatus.Degraded,
+            DateTimeOffset.UnixEpoch,
+            "/Users/andrew/private/repo",
+            TotalHarvesters: 1,
+            SuccessfulHarvesters: 0,
+            FailedHarvesters: 1,
+            TotalDocs: 0,
+            [new DocHarvesterHealth("CustomHarvester", DocHarvesterHealthStatus.Failed, 0, harvesterDiagnostic)],
+            [harvesterDiagnostic]);
+
+        var response = AppSurfaceDocsHarvestHealthResponse.FromSnapshot(health);
+        var aggregateDiagnostic = Assert.Single(response.Diagnostics);
+        var harvesterDiagnosticResponse = Assert.Single(response.Harvesters).Diagnostic;
+        Assert.NotNull(harvesterDiagnosticResponse);
+        var harvesterCause = harvesterDiagnosticResponse.Cause;
+        var combinedCause = aggregateDiagnostic.Cause + "\n" + harvesterCause;
+
+        Assert.DoesNotContain("/Users/andrew", combinedCause, StringComparison.Ordinal);
+        Assert.DoesNotContain("C:\\repo", combinedCause, StringComparison.Ordinal);
+        Assert.DoesNotContain("InvalidOperationException", combinedCause, StringComparison.Ordinal);
+        Assert.DoesNotContain("boom", combinedCause, StringComparison.Ordinal);
+        Assert.DoesNotContain("super-secret-value", combinedCause, StringComparison.Ordinal);
+        Assert.DoesNotContain("abc.def.ghi", combinedCause, StringComparison.Ordinal);
+        Assert.DoesNotContain("ghp_1234567890abcdef", combinedCause, StringComparison.Ordinal);
+        Assert.Contains("[redacted exception detail]", combinedCause, StringComparison.Ordinal);
+        Assert.Contains("[redacted path]", combinedCause, StringComparison.Ordinal);
+        Assert.Contains("token=[redacted]", combinedCause, StringComparison.Ordinal);
+        Assert.Contains("Bearer [redacted]", combinedCause, StringComparison.Ordinal);
+        Assert.Contains("[redacted token]", combinedCause, StringComparison.Ordinal);
+        Assert.Contains("[redacted stack frame]", combinedCause, StringComparison.Ordinal);
     }
 }
