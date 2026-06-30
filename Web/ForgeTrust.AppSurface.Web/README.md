@@ -37,6 +37,96 @@ The base class for the application bootstrapping logic. While `WebApp` uses a ge
 
 ## Features
 
+### Health and Readiness Probes
+
+AppSurface Web maps public platform probe endpoints by default:
+
+- `/health` runs every registered ASP.NET Core health check.
+- `/ready` runs only checks tagged with `AppSurfaceHealthCheckTags.Ready`.
+
+Both endpoints return minimal plain-text aggregate status (`Healthy`, `Degraded`, or `Unhealthy`), set no-store headers,
+and return `200` only for `Healthy`. `Degraded` and `Unhealthy` return `503` so Kubernetes, Aspire, Docker, and similar
+platforms can remove an instance from traffic. The endpoints are excluded from API Explorer/OpenAPI by default because
+they are platform probes, not application API operations.
+
+If no checks are tagged with `AppSurfaceHealthCheckTags.Ready`, `/ready` reports `Healthy` once the web app has started.
+Add ready-tagged checks for dependencies that must be available before the app receives traffic.
+
+#### 3-minute health and readiness path
+
+Register normal ASP.NET Core health checks from your module or host. Tag startup-critical checks with
+`AppSurfaceHealthCheckTags.Ready`:
+
+```csharp
+using ForgeTrust.AppSurface.Web;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+
+public sealed class MyRootModule : IAppSurfaceWebModule
+{
+    public void ConfigureServices(StartupContext context, IServiceCollection services)
+    {
+        services.AddHealthChecks()
+            .AddCheck(
+                "database",
+                () => HealthCheckResult.Healthy("Database connection accepted."),
+                tags: [AppSurfaceHealthCheckTags.Ready]);
+    }
+}
+```
+
+Run the app and verify the default routes:
+
+```bash
+curl -i http://127.0.0.1:5000/health
+curl -i http://127.0.0.1:5000/ready
+curl -I http://127.0.0.1:5000/ready
+```
+
+Use the endpoints as platform probes:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 2
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: http
+  periodSeconds: 5
+  timeoutSeconds: 2
+```
+
+Customize or disable the routes through `WebOptions.Health`:
+
+```csharp
+await WebApp<MyRootModule>.RunAsync(
+    args,
+    options =>
+    {
+        options.Health.HealthPath = "/internal/live";
+        options.Health.ReadyPath = "/internal/ready";
+        // options.Health.Enabled = false; // Use this when the host owns probe endpoints directly.
+    });
+```
+
+Important behavior:
+
+- Probe paths must be app-root-relative paths without route parameters, query strings, fragments, whitespace, or
+  traversal segments.
+- `HealthPath` and `ReadyPath` must be distinct after normalization.
+- AppSurface fails startup if a module or `WebOptions.MapEndpoints` already mapped the configured probe path. Move the
+  existing endpoint, change `WebOptions.Health` paths, or disable AppSurface health endpoints.
+- The endpoints are intentionally public and unauthenticated so infrastructure probes can reach them. Keep them behind
+  normal platform controls such as cluster-local networking, ingress allowlists, or rate limiting when they are exposed
+  beyond private service traffic.
+- Public probes expose only aggregate status. Use authenticated support surfaces, such as Config audit diagnostics, for
+  detailed operator evidence.
+- The product-readiness lab's `/readiness` endpoint is an example-local report endpoint. It is separate from the reusable
+  AppSurface Web `/ready` platform probe contract.
+
 ### PWA Install Metadata
 
 AppSurface Web can serve the baseline Progressive Web App install contract from `WebOptions.Pwa`: a manifest endpoint, MVC/Razor head tags, development diagnostics, and an explicit starter offline service worker. PWA support is disabled by default, and offline caching stays off until the app configures an offline strategy.

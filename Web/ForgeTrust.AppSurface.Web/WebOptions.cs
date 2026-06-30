@@ -53,6 +53,16 @@ public record WebOptions
     public PwaOptions Pwa { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets platform health and readiness probe endpoint configuration.
+    /// </summary>
+    /// <remarks>
+    /// Health endpoints are enabled by default. AppSurface maps public, minimal <c>/health</c> and <c>/ready</c>
+    /// endpoints for container and service-platform probes. Set <see cref="HealthOptions.Enabled"/> to
+    /// <see langword="false"/> when a host owns probe endpoints directly.
+    /// </remarks>
+    public HealthOptions Health { get; set; } = new();
+
+    /// <summary>
     /// Gets or sets the amount of time AppSurface waits for the web host to complete startup before failing fast.
     /// </summary>
     /// <remarks>
