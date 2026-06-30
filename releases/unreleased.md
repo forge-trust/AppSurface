@@ -40,6 +40,9 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Auth now has a Start Here adoption ladder that helps package consumers choose between host-owned
   ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces
   without implying AppSurface owns production identity providers, policies, user stores, or enforcement.
+- AppSurface Docs now enriches exact same-group JavaScript typedef references across params, properties, returns, and
+  `@type` metadata. Rendered pages, item stubs, and search payloads link the reference to the canonical typedef and show
+  a bounded preview, while missing or ambiguous simple references emit warning diagnostics instead of breaking harvests.
 - Document the Config audit HTTP workflow, OpenAPI-hidden default behavior, native ASP.NET Core auth response ownership,
   host-owned rate limiting, and the Config captured-snapshot diff path.
 
