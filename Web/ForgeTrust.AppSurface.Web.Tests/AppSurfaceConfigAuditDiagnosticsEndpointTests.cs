@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Xml.Linq;
 using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.AspNetCore.Authentication;
@@ -165,6 +166,23 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
 
         Assert.DoesNotContain(references, name => name!.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal));
         Assert.DoesNotContain(references, name => name == "ForgeTrust.AppSurface.Web");
+
+        var repositoryRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        var projectPath = Path.Combine(
+            repositoryRoot,
+            "Config",
+            "ForgeTrust.AppSurface.Config",
+            "ForgeTrust.AppSurface.Config.csproj");
+        var project = XDocument.Load(projectPath);
+        var declaredReferences = project
+            .Descendants()
+            .Where(element => element.Name.LocalName is "ProjectReference" or "PackageReference")
+            .Select(element => (string?)element.Attribute("Include"))
+            .Where(include => !string.IsNullOrWhiteSpace(include))
+            .ToList();
+
+        Assert.DoesNotContain(declaredReferences, include => include!.Contains("AspNetCore", StringComparison.Ordinal));
+        Assert.DoesNotContain(declaredReferences, include => include!.Contains("AppSurface.Web", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -276,6 +294,44 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
         AssertProblem(problem, "AppSurface config audit JSON failed.", "could not serialize");
         Assert.DoesNotContain("raw-secret", json, StringComparison.Ordinal);
         Assert.DoesNotContain("NotSupportedException", json, StringComparison.Ordinal);
+        Assert.Equal("application/problem+json", httpContext.Response.ContentType);
+        Assert.Equal("no-store", httpContext.Response.Headers.CacheControl);
+        Assert.Equal("no-cache", httpContext.Response.Headers.Pragma);
+    }
+
+    [Fact]
+    public async Task MapAppSurfaceConfigAuditDiagnostics_ReturnsSafeProblemWhenJsonSerializationThrowsJsonException()
+    {
+        var services = new ServiceCollection();
+        ConfigureServices(
+            services,
+            registerPolicy: true,
+            registerReporter: true,
+            registerEnvironmentProvider: true,
+            reporterThrows: false,
+            environmentProviderThrows: false,
+            environmentName: "Production");
+        using var serviceProvider = services.BuildServiceProvider();
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = serviceProvider,
+            Response =
+            {
+                Body = new MemoryStream()
+            }
+        };
+
+        var result = AppSurfaceConfigAuditDiagnosticsEndpointRouteBuilderExtensions.CreateReportResult(
+            httpContext,
+            _ => throw new JsonException("raw-secret should never leak"));
+        await result.ExecuteAsync(httpContext);
+        var json = await ReadResponseBodyAsync(httpContext.Response);
+        using var problem = JsonDocument.Parse(json);
+
+        Assert.Equal(StatusCodes.Status500InternalServerError, httpContext.Response.StatusCode);
+        AssertProblem(problem, "AppSurface config audit JSON failed.", "could not serialize");
+        Assert.DoesNotContain("raw-secret", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("JsonException", json, StringComparison.Ordinal);
         Assert.Equal("application/problem+json", httpContext.Response.ContentType);
         Assert.Equal("no-store", httpContext.Response.Headers.CacheControl);
         Assert.Equal("no-cache", httpContext.Response.Headers.Pragma);

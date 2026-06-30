@@ -68,6 +68,18 @@ public static class AppSurfaceConfigAuditDiagnosticsEndpointRouteBuilderExtensio
     private static IResult CreateReportResult(HttpContext httpContext) =>
         CreateReportResult(httpContext, SerializeReport);
 
+    /// <summary>
+    /// Creates the diagnostics response for the current request.
+    /// </summary>
+    /// <param name="httpContext">The current request context, including a request service provider and writable response.</param>
+    /// <param name="serializeReport">The serializer used to render the sanitized <see cref="ConfigAuditReport"/>.</param>
+    /// <returns>An <see cref="IResult"/> containing either the report JSON or a safe problem response.</returns>
+    /// <remarks>
+    /// This internal overload exists as a test seam for serialization and failure-path verification. Production code
+    /// should expose the endpoint through
+    /// <see cref="MapAppSurfaceConfigAuditDiagnostics(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder, string, string)"/>
+    /// instead of calling this helper directly.
+    /// </remarks>
     internal static IResult CreateReportResult(
         HttpContext httpContext,
         Func<ConfigAuditReport, string> serializeReport)
