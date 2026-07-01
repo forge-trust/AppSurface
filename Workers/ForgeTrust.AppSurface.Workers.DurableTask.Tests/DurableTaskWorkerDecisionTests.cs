@@ -152,7 +152,7 @@ public sealed class DurableTaskWorkerDecisionTests
     public void WaitForRetry_CarriesRetryPolicyAndRejectsNullEnvelope()
     {
         var retry = new FlowRetryPolicy(2, TimeSpan.FromSeconds(1));
-        var envelope = Envelope(DurableWorkerProjectionOutcome.Conflict);
+        var envelope = Envelope(DurableWorkerProjectionOutcome.Conflict, DurableWorkerRetryability.Retryable);
 
         var decision = DurableTaskWorkerDecision<string, string, string>.WaitForRetry(envelope, retry);
         var defaultDecision = DurableTaskWorkerDecision<string, string, string>.WaitForRetry(envelope);
@@ -162,6 +162,17 @@ public sealed class DurableTaskWorkerDecisionTests
         Assert.Null(defaultDecision.RetryPolicy);
         Assert.Throws<ArgumentNullException>(() =>
             DurableTaskWorkerDecision<string, string, string>.WaitForRetry<string>(null!, retry));
+    }
+
+    [Theory]
+    [InlineData(DurableWorkerRetryability.Terminal)]
+    [InlineData(DurableWorkerRetryability.OperatorRequired)]
+    public void WaitForRetry_RejectsNonRetryableEnvelope(DurableWorkerRetryability retryability)
+    {
+        var envelope = Envelope(DurableWorkerProjectionOutcome.Conflict, retryability);
+
+        Assert.Throws<ArgumentException>(() =>
+            DurableTaskWorkerDecision<string, string, string>.WaitForRetry(envelope));
     }
 
     [Theory]
@@ -180,8 +191,10 @@ public sealed class DurableTaskWorkerDecisionTests
             DurableTaskWorkerDecision<string, string, string>.TimedOut(null!, "resume-approved"));
     }
 
-    private static DurableWorkerEnvelope<string> Envelope(DurableWorkerProjectionOutcome outcome) =>
-        new(outcome, $"worker.{outcome.ToString().ToLowerInvariant()}", DurableWorkerRetryability.Terminal, TestCorrelation(), "payload");
+    private static DurableWorkerEnvelope<string> Envelope(
+        DurableWorkerProjectionOutcome outcome,
+        DurableWorkerRetryability retryability = DurableWorkerRetryability.Terminal) =>
+        new(outcome, $"worker.{outcome.ToString().ToLowerInvariant()}", retryability, TestCorrelation(), "payload");
 
     private static DurableWorkerCorrelation TestCorrelation() =>
         new("worker", "work", "instance", "attempt");

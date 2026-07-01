@@ -388,6 +388,18 @@ public sealed class DurableTaskWorkerChainRunnerTests
         Assert.Same(diagnostic, decision.Diagnostic);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void IgnoreLateSignal_RejectsBlankEventName(string? eventName)
+    {
+        var runner = CreateRunner();
+
+        Assert.ThrowsAny<ArgumentException>(() =>
+            runner.IgnoreLateSignal(TestCorrelation(), eventName!));
+    }
+
     [Fact]
     public void Constructor_RejectsNullOptions()
     {

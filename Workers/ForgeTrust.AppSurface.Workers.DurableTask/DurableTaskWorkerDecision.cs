@@ -294,12 +294,17 @@ public sealed record DurableTaskWorkerDecision<TWork, TResult, TProjection>
     /// <param name="envelope">Retryable envelope that should wait before retry.</param>
     /// <param name="retryPolicy">Optional retry policy that explains host retry intent. When null, the host chooses its default retry or timer behavior.</param>
     /// <returns>A wait-for-retry decision.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="envelope"/> is not retryable.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="envelope"/> is null.</exception>
     public static DurableTaskWorkerDecision<TWork, TResult, TProjection> WaitForRetry<TPayload>(
         DurableWorkerEnvelope<TPayload> envelope,
         FlowRetryPolicy? retryPolicy = null)
     {
         ArgumentNullException.ThrowIfNull(envelope);
+        if (envelope.Retryability != DurableWorkerRetryability.Retryable)
+        {
+            throw new ArgumentException("Retry wait requires a retryable worker outcome.", nameof(envelope));
+        }
 
         return new(
             DurableTaskWorkerDecisionKind.WaitForRetry,

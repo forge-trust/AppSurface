@@ -110,6 +110,8 @@ public interface IDurableTaskWorkerChainRunner<TWork, TResult, TProjection>
     /// <param name="eventName">External event name associated with the stale signal.</param>
     /// <param name="diagnostic">Optional safe diagnostic details.</param>
     /// <returns>An ignore-late-signal decision.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="eventName"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="correlation"/> is null.</exception>
     DurableTaskWorkerDecision<TWork, TResult, TProjection> IgnoreLateSignal(
         DurableWorkerCorrelation correlation,
         string eventName,
@@ -209,6 +211,7 @@ public sealed class DurableTaskWorkerChainRunner<TWork, TResult, TProjection>
         DurableWorkerDiagnostic? diagnostic = null)
     {
         ArgumentNullException.ThrowIfNull(correlation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventName);
 
         var envelope = new DurableWorkerEnvelope<object>(
             DurableWorkerProjectionOutcome.StaleFence,
