@@ -2,6 +2,7 @@ using System.Text;
 using ForgeTrust.AppSurface.Config;
 using Google.Api.Gax.Grpc;
 using Google.Cloud.SecretManager.V1;
+using Google.Protobuf;
 using Grpc.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -357,6 +358,17 @@ public sealed class GoogleSecretManagerConfigProviderTests
         Assert.Contains("without a payload", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Adapter_Should_ReturnSecretManagerPayload()
+    {
+        var adapter = new GoogleSecretManagerClientAdapter(() => new PayloadSecretManagerServiceClient("from-gcp"));
+
+        var payload = adapter.AccessSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1));
+
+        Assert.Equal("from-gcp", Encoding.UTF8.GetString(payload.Data));
+        Assert.Equal("projects/project/secrets/api-key/versions/5", payload.ResolvedResourceName);
+    }
+
     [Theory]
     [InlineData(StatusCode.NotFound, GoogleSecretManagerResultStatus.Missing, "google-secret-manager-secret-missing")]
     [InlineData(StatusCode.Unauthenticated, GoogleSecretManagerResultStatus.AccessDenied, "google-secret-manager-access-denied")]
@@ -654,6 +666,21 @@ public sealed class GoogleSecretManagerConfigProviderTests
             AccessSecretVersionRequest request,
             CallSettings? callSettings = null) =>
             new() { Name = request.Name };
+    }
+
+    private sealed class PayloadSecretManagerServiceClient(string payload) : SecretManagerServiceClient
+    {
+        public override AccessSecretVersionResponse AccessSecretVersion(
+            AccessSecretVersionRequest request,
+            CallSettings? callSettings = null) =>
+            new()
+            {
+                Name = request.Name,
+                Payload = new Google.Cloud.SecretManager.V1.SecretPayload
+                {
+                    Data = ByteString.CopyFromUtf8(payload)
+                }
+            };
     }
 
     private sealed record SecretPayload(string Name, int Retries);
