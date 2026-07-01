@@ -686,6 +686,11 @@ public class ExportEngineTests
         {
             var docsRoot = Directory.CreateDirectory(Path.Join(tempDir, "docs")).FullName;
             await File.WriteAllTextAsync(Path.Join(docsRoot, "search.html"), "<html>Search</html>");
+            await File.WriteAllTextAsync(
+                Path.Join(docsRoot, "search-index.json"),
+                """
+                {"metadata":{"generatedAtUtc":"2026-07-01T04:10:32.9205150+00:00","version":"1","engine":"minisearch"},"documents":[]}
+                """);
 
             using var handler = new TestHttpMessageHandler();
             using var client = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
@@ -699,9 +704,14 @@ public class ExportEngineTests
             var rootSearchPath = TestPathUtils.PathUnder(tempDir, "search.html");
             Assert.True(File.Exists(rootSearchPath));
             Assert.Equal("<html>Search</html>", await File.ReadAllTextAsync(rootSearchPath));
+            var docsSearchIndex = await File.ReadAllTextAsync(TestPathUtils.PathUnder(tempDir, "docs", "search-index.json"));
+            var rootSearchIndex = await File.ReadAllTextAsync(TestPathUtils.PathUnder(tempDir, "search-index.json"));
+            Assert.Contains("\"generatedAtUtc\":\"1970-01-01T00:00:00.0000000Z\"", docsSearchIndex, StringComparison.Ordinal);
+            Assert.Equal(docsSearchIndex, rootSearchIndex);
 
             var manifest = await File.ReadAllTextAsync(TestPathUtils.PathUnder(tempDir, ".appsurface-docs-release-manifest.json"));
             Assert.Contains("\"path\": \"search.html\"", manifest, StringComparison.Ordinal);
+            Assert.Contains("\"path\": \"search-index.json\"", manifest, StringComparison.Ordinal);
         }
         finally
         {

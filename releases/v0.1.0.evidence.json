@@ -105,12 +105,12 @@
   "docsArchive": {
     "status": "configured",
     "exactTreePath": "releases/0.1.0",
-    "releaseManifestSha256": "e03cdacb869b002bd460fc3f5687ba2b7bc63671a775cc58c4d13d73bdcac634",
+    "releaseManifestSha256": "da4a81a120c6325c4ee0015ddf5d29b3f4382a115915a9fd406923f31b2384e7",
     "releaseManifestSchema": "appsurface-docs-release-manifest-v1",
     "fileCount": 403,
     "catalogEntry": {
       "exactTreePath": "releases/0.1.0",
-      "releaseManifestSha256": "e03cdacb869b002bd460fc3f5687ba2b7bc63671a775cc58c4d13d73bdcac634"
+      "releaseManifestSha256": "da4a81a120c6325c4ee0015ddf5d29b3f4382a115915a9fd406923f31b2384e7"
     }
   },
   "commits": {
@@ -125,7 +125,7 @@
   "generatedAtUtc": "2026-06-27T06:25:07.6524320Z",
   "subject": {
     "name": "releases/v0.1.0.evidence.json",
-    "sha256": "7005b987c4f162369f03930d8c36f745a6739101a8868e03ba6d436fbb4342cc"
+    "sha256": "0910b9e9defb5ff7ba520569f22cddbcdb037cbbe0708ce9c03db980b9d55122"
   },
   "attestation": null
 }
