@@ -18,6 +18,9 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
   the public docs catalog, exact tree, release manifest, and serveable files match before GitHub Releases receive a
   stable package. The protected stable NuGet workflow also replays that docs export and archive verification before it requests
   the NuGet trusted publishing token.
+- Release publishing now creates the durable public docs archive, `.sha256` digest, Pages catalog entry, recovery summary,
+  and public verification gate before a draft GitHub Release can become public. Later main docs deploys hydrate existing
+  release archives first, so published release docs stay available after ordinary docs updates.
 - RazorWire now renders passive AppSurface auth-result UI states with `rw:auth-view`, gate, login-link, and logout-button helpers, plus an ASP.NET Core adapter package that delegates to host-owned AppSurface policy evaluation.
 - AppSurface Docs can now verify public JavaScript `@event` doclets against direct literal `CustomEvent` dispatch evidence with default-off health warnings and a `docs verify-health --verify-event-dispatches` CLI switch.
 - AppSurface LocalSecrets startup failures before platform commands run now report `local-secret-store-unavailable` with exception type, `HResult`, and synthetic exit code only; run `appsurface secrets doctor` for the same namespace to diagnose missing tools or headless sessions without leaking raw OS exception messages.
