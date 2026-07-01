@@ -1,14 +1,10 @@
 # Unreleased
 
-This is the living release note for the next coordinated AppSurface version after `0.1.0-rc.4`. It stays provisional until the next tag is cut.
+This is the living release note for the next coordinated AppSurface version after `0.1.0`. It stays provisional until the next tag is cut.
 
 ## What is taking shape
 
-- LocalSecrets Linux `secret-tool` resolution now uses trusted system candidates or an explicit absolute override instead
-  of executing the first `secret-tool` discovered on `PATH`.
-- `ForgeTrust.AppSurface.Web` now rejects the literal CORS origin wildcard `*` outside Development when AppSurface owns
-  the CORS policy, so permissive production APIs must either name explicit browser origins or register host-owned
-  ASP.NET Core CORS.
+- Add merged public changes here as they land.
 
 ## Included in the next coordinated version
 
@@ -42,10 +38,4 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## Migration watch
 
-- Production AppSurface-managed CORS no longer accepts `AllowedOrigins = ["*"]`. Replace the literal wildcard with
-  explicit origins such as `["https://app.example.com"]`; keep local permissive behavior behind
-  `EnableAllOriginsInDevelopment`; use wildcard subdomains such as `["https://*.example.com"]` only when matching
-  subdomains; and register/apply host-owned ASP.NET Core CORS when an API is intentionally public to every browser
-  origin.
 - Record breaking or behavior-changing guidance here before it moves into the tagged release note.
-- RazorWire no longer treats `data:text/javascript,...` values in `window.RazorWireIslandModules` as importable modules. Use a relative, root-relative, same-origin, explicit HTTPS, or bare import-map module specifier instead.
