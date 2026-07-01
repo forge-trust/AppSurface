@@ -83,6 +83,8 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.javascript.malformed_public_doclet", DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
         Assert.Equal("appsurfacedocs.javascript.incomplete_public_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
         Assert.Equal("appsurfacedocs.javascript.incomplete_public_event_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Equal("appsurfacedocs.javascript.event_doclet_dispatch_missing", DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing);
+        Assert.Equal("appsurfacedocs.javascript.event_dispatch_doclet_missing", DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing);
         Assert.Equal("appsurfacedocs.javascript.duplicate_anchor", DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor);
         Assert.Equal("appsurfacedocs.javascript.typedef_reference_missing", DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceMissing);
         Assert.Equal("appsurfacedocs.javascript.typedef_reference_ambiguous", DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceAmbiguous);
@@ -130,10 +132,11 @@ public sealed class AppSurfaceDocsOptionsTests
         var options = new AppSurfaceDocsOptions();
 
         Assert.False(options.Harvest.JavaScript.RequireCompleteEventDoclets);
+        Assert.False(options.Harvest.JavaScript.VerifyEventDispatches);
     }
 
     [Fact]
-    public void AddAppSurfaceDocs_ShouldBindStrictJavaScriptEventDoclets()
+    public void AddAppSurfaceDocs_ShouldBindStrictJavaScriptEventDocletsAndDispatchVerification()
     {
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(
@@ -141,7 +144,8 @@ public sealed class AppSurfaceDocsOptionsTests
                 .AddInMemoryCollection(
                     new Dictionary<string, string?>
                     {
-                        ["AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets"] = "true"
+                        ["AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets"] = "true",
+                        ["AppSurfaceDocs:Harvest:JavaScript:VerifyEventDispatches"] = "true"
                     })
                 .Build());
 
@@ -151,6 +155,7 @@ public sealed class AppSurfaceDocsOptionsTests
         var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
 
         Assert.True(options.Harvest.JavaScript.RequireCompleteEventDoclets);
+        Assert.True(options.Harvest.JavaScript.VerifyEventDispatches);
     }
 
     [Fact]

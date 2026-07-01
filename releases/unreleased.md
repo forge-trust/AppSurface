@@ -8,6 +8,10 @@ This is the living release note for the next coordinated AppSurface version afte
 - `ForgeTrust.AppSurface.Web` now owns the baseline PWA install contract in the existing Web package: app-owned
   `WebOptions.Pwa` metadata maps a manifest endpoint, MVC/Razor head tags, development diagnostics, and an explicit
   opt-in offline fallback, with `appsurface pwa verify` providing a copy-paste CLI proof for the running origin.
+- `ForgeTrust.AppSurface.Web` now maps default public `/health` and `/ready` platform probes backed by ASP.NET Core
+  health checks. `/health` runs all registered checks, `/ready` runs checks tagged with
+  `AppSurfaceHealthCheckTags.Ready`, and both return minimal plain-text aggregate status with `503` for degraded or
+  unhealthy results.
 - Add an explicit AppSurface Web mapper for an authenticated `GET /_appsurface/config/audit` endpoint that returns the
   active host's sanitized Config audit JSON for support-sensitive operator evidence capture.
 - Add `ForgeTrust.AppSurface.Config.GoogleSecretManager`, a read-only Google Cloud Secret Manager provider for
@@ -19,6 +23,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ### Release and docs surface
 
 - `ForgeTrust.RazorWire` documents auth projection helpers, including `rw:auth-view`, `rw:auth-gate`, `rw:permission-gate`, `rw:login-link`, and `rw:logout-button`, with a paired endpoint-enforcement example and DevAuth marker guidance that keeps local fake personas separate from reusable UI projection.
+- AppSurface Docs adds a default-off JavaScript event-dispatch verifier that compares public `@event` doclets with direct literal `dispatchEvent(new CustomEvent("event:name", ...))` evidence from the same policy-approved JavaScript harvest inputs. `docs verify-health --verify-event-dispatches` now surfaces non-fatal warning diagnostics, including `Cause`, for doclet-only and dispatch-only drift while leaving strict health blockers unchanged.
 - AppSurface LocalSecrets startup failures that happen before the platform command can run now report `Unavailable` with
   `local-secret-store-unavailable` instead of being classified by words in raw OS exception messages. Real locked-store
   process output still maps to `Locked`; startup diagnostics include exception type, `HResult`, and synthetic exit code
@@ -32,6 +37,11 @@ This is the living release note for the next coordinated AppSurface version afte
   an offline fallback strategy. MVC and Razor apps can add `<appsurface:pwa-head />`; custom layouts can copy equivalent
   tags from diagnostics; `appsurface pwa verify --url <origin>` checks the live metadata, icons, secure-origin posture,
   diagnostics, and opt-in service worker.
+- AppSurface Web maps default health and readiness endpoints for service platforms. `WebOptions.Health` is enabled by
+  default, exposes `/health` and `/ready`, allows custom paths or disabling when the host owns probes directly, validates
+  unsafe or duplicate paths at startup, fails fast on route collisions, hides probes from API Explorer/OpenAPI, and keeps
+  public responses to aggregate status text only. Hosts tag startup-critical checks with
+  `AppSurfaceHealthCheckTags.Ready`; if no checks use that tag, `/ready` is healthy once startup completes.
 - The generated starter PWA service worker now scopes cache cleanup to the current AppSurface service-worker owner and
   reaps the earlier global AppSurface cache name without pruning unrelated origin caches or another path-mounted app.
 - Stable package release publishing now gates on verified AppSurface Docs archive evidence. Release authors pass the
