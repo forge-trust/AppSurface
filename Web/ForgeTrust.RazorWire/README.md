@@ -760,6 +760,13 @@ hand-authored and demo-only. For build commands, diagnostics, the pack-time
 freshness guard, and the emergency bypass property, see the
 [Runtime Contract Pipeline](Docs/runtime-contract-pipeline.md).
 
+Maintainer note: AppSurface Docs `VerifyEventDispatches` checks only direct
+literal `dispatchEvent(new CustomEvent("event:name", ...))` calls in configured
+`.js` harvest inputs. The docs-only contract manifest contains public doclet
+evidence, not runtime dispatch evidence, and authored RazorWire runtime source
+under `assets/src/*.ts` plus helper-dispatched events are outside that v1
+verifier boundary.
+
 ## Static Export
 
 RazorWire can generate CDN-ready static output with the installable `razorwire`

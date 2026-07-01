@@ -339,6 +339,8 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet` (`appsurfacedocs.javascript.malformed_public_doclet`)
 - `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet` (`appsurfacedocs.javascript.incomplete_public_doclet`)
 - `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`)
+- `DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing` (`appsurfacedocs.javascript.event_doclet_dispatch_missing`)
+- `DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing` (`appsurfacedocs.javascript.event_dispatch_doclet_missing`)
 - `DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor` (`appsurfacedocs.javascript.duplicate_anchor`)
 
 ### Oversized source diagnostics
@@ -472,7 +474,7 @@ The JSON response uses the camelCase wire form of `AppSurfaceDocsHarvestHealthRe
 - `verification.httpStatusCode`: `200` for `Healthy` and `Empty`; `503` for `Degraded` and `Failed`.
 - `generatedUtc`, harvester counts, total docs, per-harvester status, and redacted diagnostics.
 
-The response omits `RepositoryRoot`, diagnostic `Cause`, raw exception messages, stack traces, and absolute filesystem paths. Health routes set `Cache-Control: no-store, no-cache` so local and CI checks do not pass or fail on stale operator data.
+The response omits `RepositoryRoot`, raw exception messages, stack traces, and absolute filesystem paths. Diagnostic `Cause` is included only after harvesters redact it to repository-relative, operator-safe evidence. Health routes set `Cache-Control: no-store, no-cache` so local and CI checks do not pass or fail on stale operator data.
 
 The sidebar health entry follows `AppSurfaceDocs:Harvest:Health:ShowChrome`, which is independent from route exposure. This lets a host expose `_health.json` for a script without advertising the health page in the docs chrome, or show status-only chrome while the reserved health endpoints still return `404`. When chrome is visible but `ExposeRoutes` hides responses for the current environment, AppSurface Docs renders a non-clickable status chip instead of a link.
 
@@ -1423,6 +1425,12 @@ static web assets.
   - When `true`, incomplete public JavaScript event doclets emit `appsurfacedocs.javascript.incomplete_public_event_doclet` with error severity and fail harvest health.
   - `DocAggregator` treats `appsurfacedocs.javascript.incomplete_public_event_doclet` as a strict blocking diagnostic: when `RequireCompleteEventDoclets` emits it, the JavaScript harvester is treated as though `ParticipatesInStrictHealth=true` and that diagnostic becomes the harvester health result, regardless of whether JavaScript would otherwise participate in `StrictHealth`.
   - This applies only to public `@event` doclets. Parse failures, oversized files, unsupported shapes, and malformed doclets stay governed by `StrictHealth` or explicit JavaScript include globs.
+- `AppSurfaceDocs:Harvest:JavaScript:VerifyEventDispatches`
+  - Defaults to `false`.
+  - When `true`, public `@event` doclets are compared with direct literal `dispatchEvent(new CustomEvent("event:name", ...))` calls found in the same policy-approved JavaScript harvest inputs.
+  - Missing literal dispatch evidence emits `appsurfacedocs.javascript.event_doclet_dispatch_missing`; missing public doclet evidence emits `appsurfacedocs.javascript.event_dispatch_doclet_missing`.
+  - These verifier diagnostics are warnings only. They remain visible in harvest health and `docs verify-health` output, but they do not fail strict health even when `StrictHealth=true` or JavaScript include globs make the harvester participate in aggregate health.
+  - The verifier does not infer docs, parse TypeScript, evaluate constants, follow helper calls, compare payloads, or treat `@fires` as source truth.
 - `AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes`
   - Defaults to `262144`.
   - Files above this limit are skipped with a structured harvest diagnostic so generated bundles do not dominate docs snapshot time.
@@ -1600,9 +1608,23 @@ Supported public shapes:
 - standalone `@cssCustomProperty --name` doclets for public CSS variables
 - standalone `@cssHook selector` doclets for stable styling hooks paired with `@hookKind`
 
-Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, and detail payload fields through `@property detail.name`. Use `@detail none` only when the event deliberately carries no payload. Add `@example` when the event needs consumption guidance beyond the contract fields.
+Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, and detail payload fields through `@property detail.name` or an exact payload reference such as `@property {FormFailureDetail} detail`. Use `@detail none` only when the event deliberately carries no payload. Add `@example` when the event needs consumption guidance beyond the contract fields.
 
-Set `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets=true` when public browser events must be release-blocking. In that mode, each public `@event` must include `@target`, `@firesWhen`, and either at least one valid `detail.*` property or `@detail none`. `@bubbles`, `@cancelable`, and `@example` remain recommended authoring fields, but they are intentionally excluded from the blocking strict-event contract. Valid detail property names are exactly `detail.` plus dot-separated segments. Segments may contain letters, digits, `_`, `$`, `-`, and a trailing `[]`. Optional JSDoc brackets and defaults are accepted, so `detail.message`, `[detail.message]`, `[detail.message="fallback"]`, `detail.items[]`, and `detail.items[].id` are valid. Values such as `detail`, `[detail]`, `detail.`, `detail..message`, `detail. message`, `detail.[x]`, `Detail.message`, `form`, and `message` are invalid. `@detail none` is contradictory when any `detail.*` property is present.
+Set `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets=true` when public browser events must be release-blocking. In that mode, each public `@event` must include `@target`, `@firesWhen`, and either at least one valid `detail.*` property, an exact `detail` property with a resolved simple same-group typedef reference, or `@detail none`. `@bubbles`, `@cancelable`, and `@example` remain recommended authoring fields, but they are intentionally excluded from the blocking strict-event contract. Valid direct detail property names are exactly `detail.` plus dot-separated segments. Segments may contain letters, digits, `_`, `$`, `-`, and a trailing `[]`. Optional JSDoc brackets and defaults are accepted, so `detail.message`, `[detail.message]`, `[detail.message="fallback"]`, `detail.items[]`, and `detail.items[].id` are valid. Values such as `detail`, `[detail]`, `detail.`, `detail..message`, `detail. message`, `detail.[x]`, `Detail.message`, `form`, and `message` are invalid unless the exact `detail` property resolves to a simple typedef payload reference. `@detail none` is contradictory when any event detail `@property` tag is present.
+
+Set `AppSurfaceDocs:Harvest:JavaScript:VerifyEventDispatches=true` when release review should warn about drift between public event doclets and literal dispatch evidence. The verifier is intentionally evidence-only: it never creates docs from runtime source, and it compares only event names that appear in the same policy-approved JavaScript harvest inputs. Keep public doclets and direct literal dispatch evidence in the configured `.js` inputs, or treat helper-dispatched and TypeScript-only events as documented v1 limitations.
+
+| Dispatch source shape | Verifier behavior |
+| --- | --- |
+| `target.dispatchEvent(new CustomEvent("event:name", ...))` | Recognized as literal dispatch evidence. |
+| `dispatchEvent(new CustomEvent("event:name", ...))` | Recognized as global literal dispatch evidence. |
+| `this.root.dispatchEvent(new CustomEvent("event:name", ...))` | Recognized because the direct callee is `dispatchEvent`. |
+| `target.dispatchEvent(new CustomEvent(EVENT_NAME, ...))` | Skipped; constants are follow-up scope. |
+| ``target.dispatchEvent(new CustomEvent(`event:${name}`, ...))`` | Skipped; composed or template names are follow-up scope. |
+| `const event = new CustomEvent("event:name"); target.dispatchEvent(event);` | Skipped; variable-held events are follow-up scope. |
+| `fire("event:name")` where a helper later dispatches `new CustomEvent(name)` | Skipped; helper/data-flow analysis is follow-up scope. |
+| `target.dispatchEvent(new Event("event:name"))` | Skipped; v1 verifies `CustomEvent` public contracts only. |
+| `assets/src/*.ts` source | Skipped by the JavaScript harvester; v1 parses policy-approved `.js` inputs only. |
 
 ```js
 /**
@@ -1623,6 +1645,60 @@ Set `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets=true` when pu
  */
 ```
 
+#### Reusing same-group typedef payloads
+
+Use a same-group typedef when several browser contracts share the same payload or when an event detail object is too large to repeat in every doclet.
+
+Five-minute recipe:
+
+1. Put a public `@typedef` in the same JavaScript API group by giving it the same `@namespace`, `@module`, or group-rule match as the consuming doclet.
+2. Give the typedef a single stable name such as `FormFailureDetail`; duplicate names in the same group are ambiguous and will not link.
+3. Reference that name as the entire type expression: `@property {FormFailureDetail} detail`, `@param {FormFailureDetail} payload`, `@returns {FormFailureDetail} ...`, or `@type {FormFailureDetail}`.
+4. Keep direct `detail.*` fields when they are useful for quick scanning. AppSurface Docs renders both the authored direct fields and the typedef preview; it does not merge or deduplicate them.
+5. Run `docs verify-health --require-complete-event-doclets` in CI when missing or ambiguous exact `detail` payload typedefs should fail release checks instead of staying warning-only.
+
+```js
+/**
+ * Failure payload passed through event.detail.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} FormFailureDetail
+ * @property {HTMLFormElement} form - Submitted form.
+ * @property {number|null} statusCode - HTTP status code when available.
+ * @property {string} message - Reader-facing fallback message.
+ */
+
+/**
+ * A RazorWire-enhanced form submission failed.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form:failure
+ * @target form[data-rw-form="true"]
+ * @firesWhen a RazorWire-enhanced form receives an unhandled failure response.
+ * @property {FormFailureDetail} detail - Failure payload.
+ * @bubbles true
+ * @cancelable true
+ */
+```
+
+Reader output links the type name to the canonical typedef section and adds a bounded preview with the typedef summary plus the first five first-level properties in source order. If the typedef has more properties, the preview ends with a link to the full contract. The preview is intentionally non-recursive so a large payload cannot expand every consuming event, parameter, return value, or attribute into a wall of nested detail.
+
+Supported and intentionally unsupported type expressions:
+
+| Type expression | Typedef enrichment behavior |
+| --- | --- |
+| `{FormFailureDetail}` | Links only when exactly one public same-group `@typedef FormFailureDetail` is harvested. |
+| `FormFailureDetail` in parsed `@param`, `@property`, or `@returns` type slots | Links under the same exact-name rule. |
+| Native and primitive names such as `{string}`, `{number}`, `{boolean}`, `{object}`, `{Error}`, `{Promise}`, `{Date}`, `{HTMLElement}`, `{HTMLFormElement}`, `{SubmitEvent}`, `{MouseEvent}`, `{URL}`, `{Event}`, `{CustomEvent}`, and `{Record}` | Render as authored and do not emit typedef-reference diagnostics. |
+| Arrays, nullable types, unions, generics, qualified names, imported names, and wrapper expressions such as `{FormFailureDetail[]}`, `{?FormFailureDetail}`, `{FormFailureDetail|ErrorDetail}`, `{Record<string, FormFailureDetail>}`, `{RazorWire.FormFailureDetail}`, and `{import("./types").FormFailureDetail}` | Render as authored and do not emit typedef-reference diagnostics. Use an exact single typedef name when you want an automatic link and preview. |
+
+Typedef reference diagnostics are warnings so existing JavaScript docs keep rendering:
+
+- `DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceMissing` (`appsurfacedocs.javascript.typedef_reference_missing`) means an exact simple type name looked like a typedef reference, but no public same-group `@typedef` with that name was harvested.
+- `DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceAmbiguous` (`appsurfacedocs.javascript.typedef_reference_ambiguous`) means more than one same-group typedef has the referenced name, so AppSurface Docs left the type text unlinked.
+
+Migration path: start by extracting the repeated payload into a public same-group `@typedef`, then add one exact `@property {PayloadType} detail` reference to the event. Keep the existing direct `detail.*` tags until readers no longer need the inline fields, or keep both permanently when the quick scan and canonical contract are both valuable.
+
 Browser-contract doclets should carry enough fields for readers to use them without reading source. Attributes need `@target` and `@type`; config fields need `@type` and `@source`; module contracts need `@signature` and `@target`; CSS custom properties need `@target` and `@syntax`; CSS hooks need `@hookKind`, `@target`, and `@stability`.
 
 ```js
@@ -1637,7 +1713,9 @@ Browser-contract doclets should carry enough fields for readers to use them with
  */
 ```
 
-Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, missing exact includes, configured reparse-point includes, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`). The configured-link diagnostic is `DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped` (`appsurfacedocs.javascript.reparse_point_skipped`); its problem, cause, and fix are redacted to repository-relative include paths and do not reveal the symlink target.
+Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, missing or ambiguous exact typedef references, oversized files, parse failures, missing exact includes, configured reparse-point includes, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`). The configured-link diagnostic is `DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped` (`appsurfacedocs.javascript.reparse_point_skipped`); its problem, cause, and fix are redacted to repository-relative include paths and do not reveal the symlink target.
+
+The event-dispatch verifier emits `DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing` (`appsurfacedocs.javascript.event_doclet_dispatch_missing`) when a public `@event` doclet has no matching literal dispatch evidence, and `DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing` (`appsurfacedocs.javascript.event_dispatch_doclet_missing`) when a literal `CustomEvent` dispatch has no matching public doclet. Both are warning diagnostics. They appear in health responses and successful `docs verify-health` warning output, but they are intentionally not strict blocking diagnostics.
 
 Use the CLI health verifier in CI when degraded docs health should block release output:
 
@@ -1646,11 +1724,12 @@ dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csp
   docs verify-health \
   --repo . \
   --require-complete-event-doclets \
+  --verify-event-dispatches \
   --environment Production \
   --startup-timeout-seconds 30
 ```
 
-The verifier starts the standalone docs host on loopback, reads the same redacted response shape as `{DocsRootPath}/_health.json`, and exits nonzero when `verification.ok=false`. The reported status code matches the health endpoint contract: `200` for `Healthy` or `Empty`, `503` for `Degraded` or `Failed`; `docs verify-health` also fails when the HTTP response status and `verification.httpStatusCode` disagree. `docs verify-health --startup-timeout-seconds` defaults to 10 seconds when omitted; pass `0` to disable the startup watchdog instead of waiting indefinitely. `AppSurfaceDocs:Harvest:FailOnFailure` still fails startup only for aggregate `Failed` snapshots; use `docs verify-health` when a `Degraded` snapshot, such as incomplete strict event docs with Markdown still available, should block publication.
+The verifier starts the standalone docs host on loopback, reads the same redacted response shape as `{DocsRootPath}/_health.json`, and exits nonzero when `verification.ok=false`. Warning-only diagnostics, including event-dispatch verifier warnings, are printed on successful runs with `Problem`, `Cause`, and `Fix` while preserving exit code `0`. The reported status code matches the health endpoint contract: `200` for `Healthy` or `Empty`, `503` for `Degraded` or `Failed`; `docs verify-health` also fails when the HTTP response status and `verification.httpStatusCode` disagree. `docs verify-health --startup-timeout-seconds` defaults to 10 seconds when omitted; pass `0` to disable the startup watchdog instead of waiting indefinitely. `AppSurfaceDocs:Harvest:FailOnFailure` still fails startup only for aggregate `Failed` snapshots; use `docs verify-health` when a `Degraded` snapshot, such as incomplete strict event docs with Markdown still available, should block publication.
 
 Pitfalls:
 
@@ -1661,6 +1740,7 @@ Pitfalls:
 - Do not document minified, generated, `node_modules`, `bin`, `obj`, or test assets. The default JavaScript and shared path policy excludes minified, build-output, and test paths; add explicit excludes for host-specific generated source.
 - Do not point JavaScript includes at symlinks, junctions, or other reparse points, even when the target stays inside the repository. Built-in JavaScript harvesting treats links as a trust-boundary crossing and skips them before reading. Replace the link with a real source file, include the real non-link path, disable JavaScript harvesting, or publish that source through a custom harvester.
 - When documenting package browser contracts, prefer a small docs-only contract manifest such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js` over generated runtime outputs.
+- Do not expect `VerifyEventDispatches` to prove helper-heavy TypeScript runtime source. It verifies direct literal `CustomEvent` dispatches in the configured JavaScript harvest inputs only.
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
 - Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
 - Do not pair `@detail none` with `@property detail.*`; either the event has no payload or its payload shape is documented.

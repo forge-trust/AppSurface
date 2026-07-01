@@ -88,12 +88,28 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
+ * Failure payload passed through event.detail for a failed RazorWire-enhanced form submission.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} FormFailureDetail
+ * @property {HTMLFormElement} form - Submitted form.
+ * @property {HTMLElement|null} submitter - Button or submit control that initiated the submission.
+ * @property {number|null} statusCode - HTTP status code when available.
+ * @property {boolean} handled - Whether the server response already handled the failure.
+ * @property {"turbo-stream"|"html"|"json"|"unknown"|"network"} responseKind - Failure category.
+ * @property {Element} target - Stream target or form that should own the failure UI.
+ * @property {string} message - Reader-facing fallback message.
+ * @property {Object|null} developmentDiagnostic - Development diagnostic payload when enabled.
+ */
+
+/**
  * A RazorWire-enhanced form submission failed and custom UI may handle the failure.
  * @public
  * @namespace RazorWire
  * @event razorwire:form:failure
  * @target form[data-rw-form="true"]
  * @firesWhen Turbo reports a failed form submission or RazorWire catches a network failure.
+ * @property {FormFailureDetail} detail - Failure payload.
  * @property {HTMLFormElement} detail.form - Submitted form.
  * @property {HTMLElement|null} detail.submitter - Button or submit control that initiated the submission.
  * @property {number|null} detail.statusCode - HTTP status code when available.

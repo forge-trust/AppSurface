@@ -16,6 +16,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ### Release and docs surface
 
 - `ForgeTrust.RazorWire` documents auth projection helpers, including `rw:auth-view`, `rw:auth-gate`, `rw:permission-gate`, `rw:login-link`, and `rw:logout-button`, with a paired endpoint-enforcement example and DevAuth marker guidance that keeps local fake personas separate from reusable UI projection.
+- AppSurface Docs adds a default-off JavaScript event-dispatch verifier that compares public `@event` doclets with direct literal `dispatchEvent(new CustomEvent("event:name", ...))` evidence from the same policy-approved JavaScript harvest inputs. `docs verify-health --verify-event-dispatches` now surfaces non-fatal warning diagnostics, including `Cause`, for doclet-only and dispatch-only drift while leaving strict health blockers unchanged.
 - AppSurface LocalSecrets startup failures that happen before the platform command can run now report `Unavailable` with
   `local-secret-store-unavailable` instead of being classified by words in raw OS exception messages. Real locked-store
   process output still maps to `Locked`; startup diagnostics include exception type, `HResult`, and synthetic exit code
@@ -46,6 +47,9 @@ This is the living release note for the next coordinated AppSurface version afte
   still return `404` before auth evaluation, custom stream/channel authorizers can narrow the operator audience
   without bypassing the package gate, and non-development exposure without the shared read policy logs a structured
   startup warning with troubleshooting guidance.
+- AppSurface Docs now enriches exact same-group JavaScript typedef references across params, properties, returns, and
+  `@type` metadata. Rendered pages, item stubs, and search payloads link the reference to the canonical typedef and show
+  a bounded preview, while missing or ambiguous simple references emit warning diagnostics instead of breaking harvests.
 - Document the Config audit HTTP workflow, OpenAPI-hidden default behavior, native ASP.NET Core auth response ownership,
   host-owned rate limiting, and the Config captured-snapshot diff path.
 
