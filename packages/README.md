@@ -41,7 +41,7 @@ Release and readiness:
 - Add `ForgeTrust.AppSurface.Flow` when you want generated-case typed process graphs, inferred port mapping, and local runner tests.
 - Add `ForgeTrust.AppSurface.Flow.DurableTask` after `ForgeTrust.AppSurface.Flow` when a typed process needs durable execution.
 - Add `ForgeTrust.AppSurface.Workers` when worker chains need durable claim, completion, and projection-repair contracts without taking a runtime or persistence dependency.
-- Add `ForgeTrust.AppSurface.Workers.DurableTask` after `ForgeTrust.AppSurface.Workers` when worker contracts should be driven by Durable Task orchestration decisions.
+- Add `ForgeTrust.AppSurface.Workers.DurableTask` after `ForgeTrust.AppSurface.Workers` and `ForgeTrust.AppSurface.Flow.DurableTask` when worker contracts should be driven by Durable Task orchestration decisions.
 - Start with `ForgeTrust.AppSurface.Console` for CLI commands or worker-style processes that should share AppSurface module composition.
 - Add `ForgeTrust.AppSurface.Dependency.Autofac` when your app already uses Autofac and your modules need Autofac-specific registrations.
 - Start with `ForgeTrust.AppSurface.Aspire` for distributed app-model projects and service-default composition.

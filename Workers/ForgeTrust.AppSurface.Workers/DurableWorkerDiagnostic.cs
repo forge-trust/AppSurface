@@ -21,7 +21,9 @@ public sealed record DurableWorkerDiagnostic
     /// <param name="metadata">Optional safe metadata values.</param>
     /// <exception cref="ArgumentException">Thrown when required text or metadata is invalid.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="retryability"/> is not defined.</exception>
-    /// <exception cref="DurableWorkerUnsafeMetadataException">Thrown when metadata appears unsafe.</exception>
+    /// <exception cref="DurableWorkerUnsafeMetadataException">
+    /// Thrown when diagnostic text or metadata appears unsafe.
+    /// </exception>
     public DurableWorkerDiagnostic(
         string code,
         string problem,
