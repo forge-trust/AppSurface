@@ -323,9 +323,8 @@ internal static class ExportAuthArtifactAuditor
         AddEncoding(encodings, Encoding.Latin1);
 
         var yielded = new List<string>(encodings.Count);
-        foreach (var encoding in encodings)
+        foreach (var decoded in encodings.Select(encoding => DecodeBytes(contents, encoding)))
         {
-            var decoded = DecodeBytes(contents, encoding);
             if (yielded.Contains(decoded, StringComparer.Ordinal))
             {
                 continue;
