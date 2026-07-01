@@ -309,7 +309,11 @@ public sealed class AppSurfaceWebOpenApiModuleTests
     private static async Task<JsonDocument> GetOpenApiDocumentAsync(Action<IEndpointRouteBuilder> mapEndpoints)
     {
         var startup = new TestOpenApiStartup();
-        startup.WithOptions(options => options.MapEndpoints = mapEndpoints);
+        startup.WithOptions(options =>
+        {
+            options.Health.Enabled = false;
+            options.MapEndpoints = mapEndpoints;
+        });
 
         var module = new AppSurfaceWebOpenApiModule();
         var context = CreateContext(module, Environments.Development);
