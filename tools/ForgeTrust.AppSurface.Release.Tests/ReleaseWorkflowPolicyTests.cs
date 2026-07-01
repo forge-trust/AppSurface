@@ -104,6 +104,9 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("gh release edit ${TAG} --draft=false", publish, StringComparison.Ordinal);
         Assert.Contains("args=(release edit \"${TAG}\" --draft=false)", publish, StringComparison.Ordinal);
         Assert.Contains("gh release delete ${TAG} --cleanup-tag=false", publish, StringComparison.Ordinal);
+        Assert.Contains("tar -tzf \"${asset_dir}/${asset_name}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("unsafe absolute or parent-relative entry", publish, StringComparison.Ordinal);
+        Assert.Contains("tar -xzf \"${asset_dir}/${asset_name}\" -C \"${exact_tree}\"", publish, StringComparison.Ordinal);
         Assert.Contains("base-ref:", publish, StringComparison.Ordinal);
         Assert.Contains("BASE_REF: ${{ inputs.base-ref }}", publish, StringComparison.Ordinal);
         Assert.Contains("--base-ref \"${BASE_REF}\"", publish, StringComparison.Ordinal);
@@ -185,6 +188,8 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("[.tagName, .isPrerelease] | @tsv", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("select(.isPrerelease == false)", workflow, StringComparison.Ordinal);
         Assert.Contains("gh release download \"${release_tag}\" --pattern \"${asset_name}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("tar -tzf \"${asset_dir}/${asset_name}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("unsafe absolute or parent-relative entry", workflow, StringComparison.Ordinal);
         Assert.Contains("tar -xzf \"${asset_dir}/${asset_name}\" -C \"${exact_tree}\"", workflow, StringComparison.Ordinal);
         Assert.Contains("releaseManifestSha256", workflow, StringComparison.Ordinal);
         Assert.Contains("\"${PAGES_ROOT}/versions.json\"", workflow, StringComparison.Ordinal);

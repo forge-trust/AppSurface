@@ -279,6 +279,10 @@ jobs:
               echo "No release docs archive asset found for ${release_tag}; skipping." >&2
               continue
             fi
+            if tar -tzf "${asset_dir}/${asset_name}" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+              echo "Release docs archive ${asset_name} contains an unsafe absolute or parent-relative entry." >&2
+              exit 1
+            fi
             rm -rf "${exact_tree}"
             mkdir -p "${exact_tree}"
             tar -xzf "${asset_dir}/${asset_name}" -C "${exact_tree}"
