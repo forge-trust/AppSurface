@@ -58,8 +58,10 @@ public sealed class AppSurfaceGoogleSecretManagerOptionsValidator : IValidateOpt
             {
                 var left = options.Conventions[i].LogicalKeyPrefix;
                 var right = options.Conventions[j].LogicalKeyPrefix;
-                if (left.StartsWith(right, StringComparison.Ordinal)
-                    || right.StartsWith(left, StringComparison.Ordinal))
+                if (!string.IsNullOrWhiteSpace(left)
+                    && !string.IsNullOrWhiteSpace(right)
+                    && (left.StartsWith(right, StringComparison.Ordinal)
+                        || right.StartsWith(left, StringComparison.Ordinal)))
                 {
                     errors.Add($"Convention prefixes '{left}' and '{right}' overlap and could claim the same key.");
                 }

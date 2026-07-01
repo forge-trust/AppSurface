@@ -291,6 +291,23 @@ public sealed class GoogleSecretManagerConfigProviderTests
     }
 
     [Fact]
+    public void OptionsValidator_Should_ReportNullConventionPrefixWithoutThrowing()
+    {
+        var options = new AppSurfaceGoogleSecretManagerOptions
+        {
+            ProjectId = "project",
+            DefaultVersion = "5"
+        };
+        options.EnableConventionResolver(null!, version: "5");
+        options.EnableConventionResolver("Billing:", version: "5");
+
+        var result = new AppSurfaceGoogleSecretManagerOptionsValidator().Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("convention prefix must not be empty", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void OptionsValidator_Should_ReportAllInvalidOptionBranches()
     {
         var options = new AppSurfaceGoogleSecretManagerOptions

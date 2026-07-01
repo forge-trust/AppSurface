@@ -24,6 +24,30 @@ public class ConfigAuditModelsTests
     }
 
     [Fact]
+    public void ConfigProviderAuditDiscoveredKey_RejectsInvalidInitAssignments()
+    {
+        var valid = new ConfigProviderAuditDiscoveredKey(
+            "Valid.Key",
+            "value",
+            ConfigAuditDiscoveredValueKind.Scalar,
+            [],
+            []);
+
+        Assert.Throws<ArgumentException>(() => valid with { Key = "" });
+        Assert.Throws<ArgumentNullException>(() => valid with { Sources = null! });
+        Assert.Throws<ArgumentNullException>(() => valid with { Diagnostics = null! });
+        Assert.Throws<ArgumentException>(() => new ConfigProviderAuditDiscoveredKey(
+            "Valid.Key",
+            "value",
+            ConfigAuditDiscoveredValueKind.Scalar,
+            [],
+            [])
+        {
+            Key = " "
+        });
+    }
+
+    [Fact]
     public void ConfigAuditSourceLocation_RejectsInvalidConstructorArguments()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigAuditSourceLocation(0, 1));
