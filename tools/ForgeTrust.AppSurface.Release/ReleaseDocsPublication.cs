@@ -101,16 +101,6 @@ internal sealed class ReleaseDocsPublication
         ResetDirectory(request.PagesStagingRoot);
         if (!string.IsNullOrWhiteSpace(request.ExistingPagesRoot))
         {
-            if (!Directory.Exists(request.ExistingPagesRoot))
-            {
-                throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                    "release-docs-publication-existing-pages-missing",
-                    "Docs publication could not hydrate the existing Pages payload.",
-                    $"`--existing-pages-root {_workspace.DisplayPath(request.ExistingPagesRoot)}` does not exist or is not an ordinary directory.",
-                    "Export or download the current Pages payload before creating the publication plan, or omit the option only when intentionally publishing the first docs catalog.",
-                    "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
-            }
-
             CopyDirectory(request.ExistingPagesRoot, request.PagesStagingRoot);
         }
 
