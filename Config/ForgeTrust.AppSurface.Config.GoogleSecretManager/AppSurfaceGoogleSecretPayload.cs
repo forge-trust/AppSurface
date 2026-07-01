@@ -1,0 +1,10 @@
+namespace ForgeTrust.AppSurface.Config.GoogleSecretManager;
+
+/// <summary>
+/// Carries one Google Secret Manager version payload.
+/// </summary>
+/// <param name="Data">The raw payload bytes.</param>
+/// <param name="ResolvedResourceName">The resolved Secret Manager version resource name, if available.</param>
+public sealed record AppSurfaceGoogleSecretPayload(
+    byte[] Data,
+    string? ResolvedResourceName);

@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
 using ForgeTrust.AppSurface.Config;
 using Microsoft.Extensions.Options;
 
@@ -123,14 +122,14 @@ public sealed class AppSurfaceLocalSecretProvider : IConfigProvider, IConfigProv
             return resolution;
         }
 
-        if (TryConvert<T>(result.Value ?? string.Empty, out var converted, out var diagnostic))
+        if (ConfigValueConverter.TryConvert<T>(result.Value ?? string.Empty, out var converted))
         {
             return AppSurfaceLocalSecretResolution<T>.Found(converted, result.Source);
         }
 
         var conversionResolution = AppSurfaceLocalSecretResolution<T>.NotFound(
             LocalSecretResultStatus.ConversionFailed,
-            diagnostic,
+            CreateConversionDiagnostic<T>(),
             result.Source);
         RememberTerminalIfNeeded(environment, key, conversionResolution);
         return conversionResolution;
@@ -182,55 +181,13 @@ public sealed class AppSurfaceLocalSecretProvider : IConfigProvider, IConfigProv
         return true;
     }
 
-    private static bool TryConvert<T>(string raw, out T? value, out AppSurfaceLocalSecretDiagnostic diagnostic)
-    {
-        try
-        {
-            if (typeof(T) == typeof(string))
-            {
-                value = (T)(object)raw;
-                diagnostic = null!;
-                return true;
-            }
-
-            var targetType = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
-            if (targetType.IsEnum)
-            {
-                value = (T)Enum.Parse(targetType, raw, ignoreCase: true);
-                diagnostic = null!;
-                return true;
-            }
-
-            if (targetType == typeof(Guid))
-            {
-                value = (T)(object)Guid.Parse(raw);
-                diagnostic = null!;
-                return true;
-            }
-
-            if (targetType.IsPrimitive || targetType == typeof(decimal))
-            {
-                value = (T)Convert.ChangeType(raw, targetType, System.Globalization.CultureInfo.InvariantCulture);
-                diagnostic = null!;
-                return true;
-            }
-
-            value = JsonSerializer.Deserialize<T>(raw);
-            diagnostic = null!;
-            return true;
-        }
-        catch (Exception ex) when (ex is ArgumentException or FormatException or InvalidCastException or OverflowException or JsonException)
-        {
-            value = default;
-            diagnostic = new AppSurfaceLocalSecretDiagnostic(
-                "local-secret-conversion-failed",
-                "Local secret value could not be converted.",
-                $"The local secret text could not bind to {typeof(T).Name}.",
-                "Replace the secret with the expected scalar text or JSON object shape.",
-                "local-secrets-troubleshooting");
-            return false;
-        }
-    }
+    private static AppSurfaceLocalSecretDiagnostic CreateConversionDiagnostic<T>() =>
+        new(
+            "local-secret-conversion-failed",
+            "Local secret value could not be converted.",
+            $"The local secret text could not bind to {typeof(T).Name}.",
+            "Replace the secret with the expected scalar text or JSON object shape.",
+            "local-secrets-troubleshooting");
 
     private void RememberTerminal(string environment, string key, AppSurfaceLocalSecretDiagnostic diagnostic) =>
         _terminalDiagnostics[CacheKey(environment, key)] = diagnostic;
