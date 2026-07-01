@@ -24,6 +24,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - `ForgeTrust.AppSurface.Web` now owns first-class PWA install metadata: enable `WebOptions.Pwa` to serve a manifest, emit Razor head metadata, expose development diagnostics, and opt into a starter offline fallback, then prove the running app with `appsurface pwa verify`.
 - `ForgeTrust.AppSurface.Web` now maps default public `/health` and `/ready` platform probes backed by ASP.NET Core health checks, with readiness scoped to checks tagged `AppSurfaceHealthCheckTags.Ready` and minimal aggregate status responses for service platforms.
 - AppSurface Auth adds a Start Here adoption ladder for choosing between host-owned ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces while keeping production identity providers, policies, user stores, and enforcement host-owned.
+- AppSurface Docs can now protect exposed diagnostics reads with `AppSurfaceDocs:Diagnostics:OperatorReadPolicy`, covering the harvest observatory, route inspector, route manifest JSON, harvest progress stream, and health routes when no health-only policy is configured.
 - AppSurface Docs now links exact same-group JavaScript typedef references from params, properties, returns, and `@type` metadata, adds bounded payload previews, and warns when a simple typedef reference is missing or ambiguous.
 
 ## 0.2.0-preview.1 - 2026-06-28

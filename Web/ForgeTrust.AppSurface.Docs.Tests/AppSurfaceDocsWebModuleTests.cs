@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Auth;
@@ -11,6 +13,7 @@ using ForgeTrust.AppSurface.Docs.Standalone;
 using ForgeTrust.AppSurface.Web.Tailwind;
 using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics;
@@ -25,6 +28,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -104,6 +108,10 @@ public class AppSurfaceDocsWebModuleTests
             services,
             s => s.ServiceType == typeof(IRazorWireStreamAuthorizer)
                  && s.ImplementationFactory is not null);
+        Assert.Contains(
+            services,
+            s => s.ServiceType == typeof(IRazorWireStreamAuthorizationFilter)
+                 && s.ImplementationType == typeof(AppSurfaceDocsHarvestStreamAuthorizationFilter));
         Assert.Contains(services, s => s.ServiceType == typeof(AppSurfaceDocsHarvestPathPolicy));
         Assert.Contains(
             services,
@@ -112,6 +120,9 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains(
             services,
             s => s.ServiceType == typeof(IHostedService) && s.ImplementationType == typeof(AppSurfaceDocsHarvestFailurePreflightService));
+        Assert.Contains(
+            services,
+            s => s.ServiceType == typeof(IHostedService) && s.ImplementationType == typeof(AppSurfaceDocsOperatorReadPolicyWarningService));
         Assert.DoesNotContain(services, s => s.ServiceType == typeof(TailwindCliManager));
         Assert.DoesNotContain(
             services,
@@ -622,7 +633,7 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
-    public async Task AddAppSurfaceDocs_WhenCustomAuthorizerIsRegisteredAfterDocs_ReplacesDocsWrapper()
+    public async Task AddAppSurfaceDocs_WhenCustomAuthorizerIsRegisteredAfterDocs_DoesNotBypassHiddenHarvestStream()
     {
         var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
         var services = new ServiceCollection();
@@ -648,11 +659,11 @@ public class AppSurfaceDocsWebModuleTests
 
         Assert.IsType<AllowAllChannelAuthorizer>(authorizer);
         Assert.True(await authorizer.CanSubscribeAsync(context, AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
-        Assert.True((await streamAuthorizer.AuthorizeAsync(
+        Assert.Equal(AppSurfaceAuthOutcome.Forbid, (await streamAuthorizer.AuthorizeAsync(
             new RazorWireStreamAuthorizationContext(
                 context,
                 AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
-                RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed);
+                RazorWireStreamAuthorizationMode.DenyAll))).Outcome);
     }
 
     [Fact]
@@ -789,35 +800,63 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
-    public async Task AddAppSurfaceDocs_WhenCustomResultAuthorizerIsRegisteredAfterDocs_ReplacesDocsWrapper()
+    public async Task HarvestProgressStreamEndpoint_WhenPostDocsResultAuthorizerReplacesWrapper_DoesNotBypassHiddenRoutes()
     {
-        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
-        var services = new ServiceCollection();
-        services.AddSingleton<IConfiguration>(
-            new ConfigurationBuilder()
-                .AddInMemoryCollection(
-                    new Dictionary<string, string?>
-                    {
-                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Never"
-                    })
-                .Build());
-        services.AddSingleton<IWebHostEnvironment>(environment);
-        services.AddSingleton<IHostEnvironment>(environment);
-        services.AddLogging();
+        await using var fixture = await AppSurfaceDocsRazorWireFixture.StartAsync(
+            Environments.Production,
+            configureServices: services =>
+            {
+                services.AddSingleton<IConfiguration>(
+                    new ConfigurationBuilder()
+                        .AddInMemoryCollection(
+                            new Dictionary<string, string?>
+                            {
+                                ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Never"
+                            })
+                        .Build());
+            },
+            configureServicesAfterDocs: services =>
+                services.AddSingleton<IRazorWireStreamAuthorizer, AllowAllStreamAuthorizer>());
 
-        services.AddAppSurfaceDocs();
-        services.AddSingleton<IRazorWireStreamAuthorizer, AllowAllStreamAuthorizer>();
+        using var response = await fixture.Client.GetAsync(HarvestProgressStreamPath);
 
-        await using var serviceProvider = services.BuildServiceProvider();
-        var streamAuthorizer = serviceProvider.GetRequiredService<IRazorWireStreamAuthorizer>();
-        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.NotEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+    }
 
-        Assert.IsType<AllowAllStreamAuthorizer>(streamAuthorizer);
-        Assert.True((await streamAuthorizer.AuthorizeAsync(
-            new RazorWireStreamAuthorizationContext(
-                context,
-                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
-                RazorWireStreamAuthorizationMode.DenyAll))).IsAllowed);
+    [Fact]
+    public async Task HarvestProgressStreamEndpoint_WhenPostDocsResultAuthorizerReplacesWrapper_DoesNotBypassOperatorReadPolicy()
+    {
+        await using var fixture = await AppSurfaceDocsRazorWireFixture.StartAsync(
+            Environments.Production,
+            configureServices: services =>
+            {
+                services.AddSingleton<IConfiguration>(
+                    new ConfigurationBuilder()
+                        .AddInMemoryCollection(
+                            new Dictionary<string, string?>
+                            {
+                                ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always",
+                                ["AppSurfaceDocs:Diagnostics:OperatorReadPolicy"] = "DocsRead"
+                            })
+                        .Build());
+                AddDocsReadPolicy(services);
+            },
+            configureServicesAfterDocs: services =>
+                services.AddSingleton<IRazorWireStreamAuthorizer, AllowAllStreamAuthorizer>());
+
+        using var anonymous = await fixture.Client.GetAsync(HarvestProgressStreamPath);
+        using var forbiddenRequest = CreateDocsReadRequest("docs.other");
+        using var forbidden = await fixture.Client.SendAsync(forbiddenRequest);
+        using var authorizedRequest = CreateDocsReadRequest("docs.read");
+        using var authorized = await fixture.Client.SendAsync(
+            authorizedRequest,
+            HttpCompletionOption.ResponseHeadersRead);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, authorized.StatusCode);
+        Assert.Equal("text/event-stream", authorized.Content.Headers.ContentType?.MediaType);
     }
 
     [Fact]
@@ -1664,6 +1703,116 @@ public class AppSurfaceDocsWebModuleTests
         AssertNoAuthorizationPolicy(routeBuilder, "docs/_routes");
         AssertNoAuthorizationPolicy(routeBuilder, "docs/_routes.json");
         AssertNoAuthorizationPolicy(routeBuilder, "docs/_search-index/refresh");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldApplyOperatorReadPolicyToExposedDiagnosticsReadRoutes()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorReadPolicy = "DocsRead",
+                ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always
+            },
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Always
+                }
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<AppSurfaceDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertAuthorizationPolicy(routeBuilder, "docs/_health", "DocsRead");
+        AssertAuthorizationPolicy(routeBuilder, "docs/_health.json", "DocsRead");
+        AssertAuthorizationPolicy(routeBuilder, "docs/_harvest", "DocsRead");
+        AssertAuthorizationPolicy(routeBuilder, "docs/_routes", "DocsRead");
+        AssertAuthorizationPolicy(routeBuilder, "docs/_routes.json", "DocsRead");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_harvest/rebuild");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_search-index/refresh");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldPreferHealthAuthorizationPolicyForHealthRoutes()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorReadPolicy = "DocsRead",
+                ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always
+            },
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    AuthorizationPolicy = "DocsHealthRead",
+                    ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Always
+                }
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<AppSurfaceDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertAuthorizationPolicy(routeBuilder, "docs/_health", "DocsHealthRead");
+        AssertAuthorizationPolicy(routeBuilder, "docs/_health.json", "DocsHealthRead");
+        AssertAuthorizationPolicy(routeBuilder, "docs/_harvest", "DocsRead");
+        AssertAuthorizationPolicy(routeBuilder, "docs/_routes", "DocsRead");
+        AssertAuthorizationPolicy(routeBuilder, "docs/_routes.json", "DocsRead");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotApplyOperatorReadPolicyToHiddenDiagnosticsRoutes()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(
+            new TestWebHostEnvironment
+            {
+                EnvironmentName = Environments.Production
+            });
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                OperatorReadPolicy = "DocsRead"
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<AppSurfaceDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_health.json");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_harvest");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_routes");
+        AssertNoAuthorizationPolicy(routeBuilder, "docs/_routes.json");
     }
 
     [Fact]
@@ -2547,6 +2696,14 @@ public class AppSurfaceDocsWebModuleTests
         string routePattern,
         string expectedPolicy)
     {
+        AssertAuthorizationPolicy(routeBuilder, routePattern, expectedPolicy);
+    }
+
+    private static void AssertAuthorizationPolicy(
+        IEndpointRouteBuilder routeBuilder,
+        string routePattern,
+        string expectedPolicy)
+    {
         var endpoints = GetRouteEndpoints(routeBuilder, routePattern);
 
         Assert.NotEmpty(endpoints);
@@ -2554,8 +2711,12 @@ public class AppSurfaceDocsWebModuleTests
             endpoints,
             endpoint =>
             {
-                var authorizeData = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>();
-                Assert.Contains(authorizeData, metadata => string.Equals(metadata.Policy, expectedPolicy, StringComparison.Ordinal));
+                var policies = endpoint.Metadata
+                    .GetOrderedMetadata<IAuthorizeData>()
+                    .Select(metadata => metadata.Policy)
+                    .ToArray();
+
+                Assert.Equal(expectedPolicy, Assert.Single(policies));
             });
     }
 
@@ -2608,6 +2769,33 @@ public class AppSurfaceDocsWebModuleTests
     private static string ComputeFileSha256(string path)
     {
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
+    }
+
+    private static void AddDocsReadPolicy(IServiceCollection services)
+    {
+        services
+            .AddAuthentication(HeaderAuthenticationHandler.SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, HeaderAuthenticationHandler>(
+                HeaderAuthenticationHandler.SchemeName,
+                _ => { });
+        services.AddAuthorization(
+            options =>
+            {
+                options.AddPolicy(
+                    "DocsRead",
+                    policy => policy.AddAuthenticationSchemes(HeaderAuthenticationHandler.SchemeName)
+                        .RequireAuthenticatedUser()
+                        .RequireClaim("scope", "docs.read"));
+            });
+    }
+
+    private static HttpRequestMessage CreateDocsReadRequest(string scope)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, HarvestProgressStreamPath);
+        request.Headers.Add(HeaderAuthenticationHandler.UserHeaderName, "alice");
+        request.Headers.Add(HeaderAuthenticationHandler.ScopeHeaderName, scope);
+
+        return request;
     }
 
     private sealed class TestWebHostEnvironment : IWebHostEnvironment
@@ -2742,7 +2930,8 @@ public class AppSurfaceDocsWebModuleTests
 
         public static async Task<AppSurfaceDocsRazorWireFixture> StartAsync(
             string environmentName,
-            Action<IServiceCollection> configureServices)
+            Action<IServiceCollection> configureServices,
+            Action<IServiceCollection>? configureServicesAfterDocs = null)
         {
             var builder = WebApplication.CreateBuilder(
                 new WebApplicationOptions
@@ -2754,6 +2943,7 @@ public class AppSurfaceDocsWebModuleTests
             builder.Services.AddLogging();
             builder.Services.AddControllersWithViews();
             builder.Services.AddAppSurfaceDocs();
+            configureServicesAfterDocs?.Invoke(builder.Services);
 
             var app = builder.Build();
             app.MapRazorWire();
@@ -2775,6 +2965,48 @@ public class AppSurfaceDocsWebModuleTests
         {
             Client.Dispose();
             await App.DisposeAsync();
+        }
+    }
+
+    private sealed class HeaderAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+    {
+        public const string SchemeName = "DocsHeaderTest";
+        public const string UserHeaderName = "X-Test-User";
+        public const string ScopeHeaderName = "X-Test-Scope";
+
+        public HeaderAuthenticationHandler(
+            IOptionsMonitor<AuthenticationSchemeOptions> options,
+            ILoggerFactory logger,
+            UrlEncoder encoder)
+            : base(options, logger, encoder)
+        {
+        }
+
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        {
+            if (!Request.Headers.TryGetValue(UserHeaderName, out var userValues)
+                || string.IsNullOrWhiteSpace(userValues[0]))
+            {
+                return Task.FromResult(AuthenticateResult.NoResult());
+            }
+
+            var claims = new List<Claim>
+            {
+                new(ClaimTypes.Name, userValues[0]!),
+                new(ClaimTypes.NameIdentifier, userValues[0]!)
+            };
+            if (Request.Headers.TryGetValue(ScopeHeaderName, out var scopeValues))
+            {
+                claims.AddRange(
+                    scopeValues
+                        .Where(scope => !string.IsNullOrWhiteSpace(scope))
+                        .Select(scope => new Claim("scope", scope!)));
+            }
+
+            var identity = new ClaimsIdentity(claims, Scheme.Name);
+            var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name);
+
+            return Task.FromResult(AuthenticateResult.Success(ticket));
         }
     }
 

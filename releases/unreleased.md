@@ -50,6 +50,12 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Auth now has a Start Here adoption ladder that helps package consumers choose between host-owned
   ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces
   without implying AppSurface owns production identity providers, policies, user stores, or enforcement.
+- AppSurface Docs adds a shared diagnostics read policy for trusted operators. Hosts can configure
+  `AppSurfaceDocs:Diagnostics:OperatorReadPolicy` to protect `_harvest`, `_routes`, `_routes.json`, the docs-owned
+  harvest progress stream, and health reads when the legacy health-only policy is absent. Hidden diagnostics routes
+  still return `404` before auth evaluation, custom stream/channel authorizers can narrow the operator audience
+  without bypassing the package gate, and non-development exposure without the shared read policy logs a structured
+  startup warning with troubleshooting guidance.
 - AppSurface Docs now enriches exact same-group JavaScript typedef references across params, properties, returns, and
   `@type` metadata. Rendered pages, item stubs, and search payloads link the reference to the canonical typedef and show
   a bounded preview, while missing or ambiguous simple references emit warning diagnostics instead of breaking harvests.
