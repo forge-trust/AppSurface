@@ -12,6 +12,9 @@ namespace ForgeTrust.AppSurface.Workers;
 /// </remarks>
 public static class DurableWorkerMetadataSafety
 {
+    private static readonly IReadOnlyDictionary<string, string> EmptyMetadata =
+        new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(StringComparer.Ordinal));
+
     private static readonly string[] UnsafeNameFragments =
     [
         "authorization",
@@ -57,7 +60,7 @@ public static class DurableWorkerMetadataSafety
     {
         if (metadata is null || metadata.Count == 0)
         {
-            return ReadOnlyDictionary<string, string>.Empty;
+            return EmptyMetadata;
         }
 
         var copy = new Dictionary<string, string>(metadata.Count, StringComparer.Ordinal);
