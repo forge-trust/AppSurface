@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -785,7 +786,12 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             {
                 return diagnosticProvider.Resolve(environment, knownEntry.Key, knownEntry.ValueType, role);
             }
-            catch (Exception ex)
+            catch (TargetInvocationException ex) when (ex.InnerException != null && !IsRecoverableProviderException(ex.InnerException))
+            {
+                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                throw;
+            }
+            catch (Exception ex) when (IsRecoverableProviderException(ex))
             {
                 return CreateProviderExceptionResolution(
                     provider,
@@ -813,7 +819,12 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                     resolution.Sources,
                     resolution.Diagnostics);
             }
-            catch (Exception ex)
+            catch (TargetInvocationException ex) when (ex.InnerException != null && !IsRecoverableProviderException(ex.InnerException))
+            {
+                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                throw;
+            }
+            catch (Exception ex) when (IsRecoverableProviderException(ex))
             {
                 return CreateProviderExceptionResolution(
                     provider,

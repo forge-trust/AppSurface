@@ -391,6 +391,36 @@ public sealed class GoogleSecretManagerConfigProviderTests
     }
 
     [Fact]
+    public void ResolveValue_Should_NotConvertCriticalProviderExceptions()
+    {
+        var provider = CreateProvider(
+            new ThrowingSecretManagerClient(new AccessViolationException("critical provider failure")),
+            options =>
+            {
+                options.ProjectId = "project";
+                options.MapSecret("Stripe:ApiKey", "api-key", version: "5");
+            });
+
+        Assert.Throws<AccessViolationException>(() =>
+            provider.ResolveValue<string>("Production", "Stripe:ApiKey"));
+    }
+
+    [Fact]
+    public void ResolveForAudit_Should_NotWrapCriticalProviderExceptions()
+    {
+        var provider = CreateProvider(
+            new ThrowingSecretManagerClient(new AccessViolationException("critical provider failure")),
+            options =>
+            {
+                options.ProjectId = "project";
+                options.MapSecret("Stripe:ApiKey", "api-key", version: "5");
+            });
+
+        Assert.Throws<AccessViolationException>(() =>
+            provider.ResolveForAudit("Production", "Stripe:ApiKey", typeof(string), ConfigAuditSourceRole.Base));
+    }
+
+    [Fact]
     public void ResolveValue_Should_CacheSuccessfulPayloadWithinConfiguredTtl()
     {
         var client = new CountingSecretManagerClient("projects/project/secrets/api-key/versions/5", "from-gcp");

@@ -1,5 +1,6 @@
 using System.Collections;
 using System.ComponentModel.DataAnnotations;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using FakeItEasy;
@@ -2672,6 +2673,40 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_DoesNotConvertCriticalPublicProviderAuditResolutionExceptions()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new ThrowingPublicAuditResolutionProvider(
+            "Public.Throws",
+            new AccessViolationException("critical public resolve failed")));
+        services.AddConfigAuditKey<string>("Public.Throws");
+
+        var reporter = services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
+
+        Assert.Throws<AccessViolationException>(() => reporter.GetReport("Production"));
+    }
+
+    [Fact]
+    public void GetReport_UnwrapsCriticalPublicProviderAuditResolutionTargetInvocationExceptions()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new ThrowingPublicAuditResolutionProvider(
+            "Public.Throws",
+            new TargetInvocationException(new AccessViolationException("critical public resolve failed"))));
+        services.AddConfigAuditKey<string>("Public.Throws");
+
+        var reporter = services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
+
+        Assert.Throws<AccessViolationException>(() => reporter.GetReport("Production"));
+    }
+
+    [Fact]
     public void GetReport_DoesNotConvertCriticalProviderDiagnosticExceptions()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -4197,7 +4232,7 @@ public class ConfigAuditReporterTests
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
     }
 
-    private sealed class ThrowingPublicAuditResolutionProvider(string key) : IConfigProvider, IConfigProviderAuditDiagnostics
+    private sealed class ThrowingPublicAuditResolutionProvider(string key, Exception? exception = null) : IConfigProvider, IConfigProviderAuditDiagnostics
     {
         public int Priority => 24;
 
@@ -4213,7 +4248,7 @@ public class ConfigAuditReporterTests
         {
             if (string.Equals(key, requestedKey, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("public provider resolve failed with super-secret");
+                throw exception ?? new InvalidOperationException("public provider resolve failed with super-secret");
             }
 
             return ConfigProviderAuditResolution.Missing(requestedKey);

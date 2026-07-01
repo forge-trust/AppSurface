@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using ForgeTrust.AppSurface.Config;
 using Grpc.Core;
@@ -161,7 +163,17 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
         var method = typeof(GoogleSecretManagerConfigProvider)
             .GetMethod(nameof(ResolveValue))!
             .MakeGenericMethod(valueType);
-        var resolution = method.Invoke(this, [environment, key])!;
+        object resolution;
+        try
+        {
+            resolution = method.Invoke(this, [environment, key])!;
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException != null)
+        {
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
+        }
+
         var status = (GoogleSecretManagerResultStatus)resolution.GetType().GetProperty(nameof(GoogleSecretManagerConfigResolution<object>.Status))!.GetValue(resolution)!;
         var diagnostic = (ConfigProviderTerminalDiagnostic?)resolution.GetType().GetProperty(nameof(GoogleSecretManagerConfigResolution<object>.Diagnostic))!.GetValue(resolution);
         if (status != GoogleSecretManagerResultStatus.Found)
@@ -245,7 +257,7 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
                     "Check Google Cloud connectivity and increase LookupTimeout only after verifying the provider is healthy.",
                     retryable: true));
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
         {
             return PayloadResult.Failed(
                 GoogleSecretManagerResultStatus.ProviderFailed,
