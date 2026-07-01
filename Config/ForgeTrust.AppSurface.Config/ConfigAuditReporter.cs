@@ -345,7 +345,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 {
                     diagnostics.AddRange(diagnosticProvider.GetReportDiagnostics(environment));
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (IsRecoverableProviderException(ex))
                 {
                     diagnostics.Add(CreateProviderExceptionDiagnostic(
                         provider,
@@ -367,7 +367,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             {
                 diagnostics.AddRange(publicDiagnosticProvider.GetReportDiagnostics(environment));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (IsRecoverableProviderException(ex))
             {
                 diagnostics.Add(CreateProviderExceptionDiagnostic(
                     provider,
@@ -405,6 +405,11 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
         return providers;
     }
+
+    private static bool IsRecoverableProviderException(Exception exception) =>
+        exception is not OutOfMemoryException
+        and not StackOverflowException
+        and not AccessViolationException;
 
     private ConfigAuditEntry BuildEntry(string environment, ConfigAuditKnownEntry knownEntry)
     {

@@ -285,6 +285,101 @@ public sealed class GoogleSecretManagerConfigProviderTests
     }
 
     [Fact]
+    public void OptionsValidator_Should_ReportAllInvalidOptionBranches()
+    {
+        var options = new AppSurfaceGoogleSecretManagerOptions
+        {
+            LookupTimeout = TimeSpan.Zero,
+            CacheTtl = TimeSpan.Zero
+        };
+        options.MapSecret("Stripe:ApiKey", "stripe-api-key", version: "5");
+        options.MapSecret("Stripe:ApiKey", "stripe-api-key-duplicate", version: "5");
+        options.MapSecret("", "", version: "5");
+        options.MapSecret("Full:WithVersion", "projects/prod/secrets/full/versions/5", version: "6");
+        options.EnableConventionResolver("", version: null);
+
+        var result = new AppSurfaceGoogleSecretManagerOptionsValidator().Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("LookupTimeout", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("CacheTtl", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("mapped more than once", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("logical key must not be empty", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("must specify a secret id", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("requires ProjectId", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("must not also specify Version", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("convention prefix must not be empty", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("must specify a secret version", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(StatusCode.NotFound, GoogleSecretManagerResultStatus.Missing, "google-secret-manager-secret-missing")]
+    [InlineData(StatusCode.Unauthenticated, GoogleSecretManagerResultStatus.AccessDenied, "google-secret-manager-access-denied")]
+    [InlineData(StatusCode.InvalidArgument, GoogleSecretManagerResultStatus.InvalidResource, "google-secret-manager-invalid-secret-resource")]
+    [InlineData(StatusCode.Cancelled, GoogleSecretManagerResultStatus.Cancelled, "google-secret-manager-cancelled")]
+    [InlineData(StatusCode.DeadlineExceeded, GoogleSecretManagerResultStatus.Unavailable, "google-secret-manager-unavailable")]
+    [InlineData(StatusCode.Unknown, GoogleSecretManagerResultStatus.ProviderFailed, "google-secret-manager-unavailable")]
+    public void ResolveValue_Should_MapRpcStatusToDisplaySafeDiagnostics(
+        StatusCode statusCode,
+        GoogleSecretManagerResultStatus expectedStatus,
+        string expectedCode)
+    {
+        var provider = CreateProvider(
+            new ThrowingSecretManagerClient(new RpcException(new Status(statusCode, "raw-secret should not leak"))),
+            options =>
+            {
+                options.ProjectId = "project";
+                options.MapSecret("Stripe:ApiKey", "api-key", version: "5");
+            });
+
+        var resolution = provider.ResolveValue<string>("Production", "Stripe:ApiKey");
+
+        Assert.Equal(expectedStatus, resolution.Status);
+        Assert.Equal(expectedCode, resolution.Diagnostic?.Code);
+        Assert.DoesNotContain("raw-secret", resolution.Diagnostic?.ToDisplayString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveValue_Should_MapTimeoutToRetryableUnavailableDiagnostic()
+    {
+        var provider = CreateProvider(
+            new ThrowingSecretManagerClient(new TimeoutException("raw-secret should not leak")),
+            options =>
+            {
+                options.ProjectId = "project";
+                options.MapSecret("Stripe:ApiKey", "api-key", version: "5");
+            });
+
+        var resolution = provider.ResolveValue<string>("Production", "Stripe:ApiKey");
+
+        Assert.Equal(GoogleSecretManagerResultStatus.Unavailable, resolution.Status);
+        Assert.Equal("google-secret-manager-unavailable", resolution.Diagnostic?.Code);
+        Assert.True(resolution.Diagnostic?.Retryable);
+        Assert.DoesNotContain("raw-secret", resolution.Diagnostic?.ToDisplayString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveValue_Should_CacheSuccessfulPayloadWithinConfiguredTtl()
+    {
+        var client = new CountingSecretManagerClient("projects/project/secrets/api-key/versions/5", "from-gcp");
+        var provider = CreateProvider(
+            client,
+            options =>
+            {
+                options.ProjectId = "project";
+                options.CacheTtl = TimeSpan.FromMinutes(5);
+                options.MapSecret("Stripe:ApiKey", "api-key", version: "5");
+            });
+
+        var first = provider.ResolveValue<string>("Production", "Stripe:ApiKey");
+        var second = provider.ResolveValue<string>("Production", "Stripe:ApiKey");
+
+        Assert.Equal("from-gcp", first.Value);
+        Assert.Equal("from-gcp", second.Value);
+        Assert.Equal(1, client.Calls);
+    }
+
+    [Fact]
     public void ResolveForAudit_Should_ReturnProviderSourceWithoutPayloadInDiagnostics()
     {
         var provider = CreateProvider(
@@ -303,6 +398,43 @@ public sealed class GoogleSecretManagerConfigProviderTests
         Assert.Equal(ConfigAuditSourceKind.Provider, source.Kind);
         Assert.Equal(nameof(GoogleSecretManagerConfigProvider), source.ProviderName);
         Assert.Equal(ConfigAuditSensitivity.Sensitive, source.Sensitivity);
+    }
+
+    [Fact]
+    public void ResolveForAudit_Should_ReturnMissingWhenKeyIsUnclaimed()
+    {
+        var provider = CreateProvider(
+            new FakeSecretManagerClient(("projects/project/secrets/api-key/versions/5", "from-gcp")),
+            options =>
+            {
+                options.ProjectId = "project";
+                options.MapSecret("Stripe:ApiKey", "api-key", version: "5");
+            });
+
+        var resolution = provider.ResolveForAudit("Production", "Other:Key", typeof(string), ConfigAuditSourceRole.Base);
+
+        Assert.Equal(ConfigAuditEntryState.Missing, resolution.State);
+        Assert.Empty(resolution.Sources);
+        Assert.Empty(resolution.Diagnostics);
+    }
+
+    [Fact]
+    public void ResolveForAudit_Should_ReturnInvalidDiagnosticForClaimedFailure()
+    {
+        var provider = CreateProvider(
+            new ThrowingSecretManagerClient(new RpcException(new Status(StatusCode.NotFound, "raw-secret should not leak"))),
+            options =>
+            {
+                options.ProjectId = "project";
+                options.MapSecret("Stripe:ApiKey", "api-key", version: "5");
+            });
+
+        var resolution = provider.ResolveForAudit("Production", "Stripe:ApiKey", typeof(string), ConfigAuditSourceRole.Base);
+
+        Assert.Equal(ConfigAuditEntryState.Invalid, resolution.State);
+        var diagnostic = Assert.Single(resolution.Diagnostics);
+        Assert.Equal("google-secret-manager-secret-missing", diagnostic.Code);
+        Assert.DoesNotContain("raw-secret", diagnostic.Message, StringComparison.Ordinal);
     }
 
     private static GoogleSecretManagerConfigProvider CreateProvider(
@@ -343,6 +475,20 @@ public sealed class GoogleSecretManagerConfigProviderTests
     private sealed class ThrowingSecretManagerClient(Exception exception) : IAppSurfaceGoogleSecretManagerClient
     {
         public AppSurfaceGoogleSecretPayload AccessSecretVersion(string resourceName, TimeSpan timeout) => throw exception;
+    }
+
+    private sealed class CountingSecretManagerClient(string resourceName, string payload) : IAppSurfaceGoogleSecretManagerClient
+    {
+        private readonly byte[] _payload = Encoding.UTF8.GetBytes(payload);
+
+        public int Calls { get; private set; }
+
+        public AppSurfaceGoogleSecretPayload AccessSecretVersion(string requestedResourceName, TimeSpan timeout)
+        {
+            Calls++;
+            Assert.Equal(resourceName, requestedResourceName);
+            return new AppSurfaceGoogleSecretPayload(_payload, requestedResourceName);
+        }
     }
 
     private sealed record SecretPayload(string Name, int Retries);
