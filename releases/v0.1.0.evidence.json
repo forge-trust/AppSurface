@@ -9,23 +9,23 @@
   "evidencePath": "releases/v0.1.0.evidence.json",
   "releaseManifestDigest": {
     "algorithm": "sha256",
-    "value": "66179c87c956a104dd0a39451adc259dd7f6177913cf161c6df796353e787b1b"
+    "value": "1312e715f54de8c3275b42f3086946935c4a20e2ada2ff45214cfa9105e2d9bc"
   },
   "releaseArtifactDigests": [
     {
       "path": "releases/v0.1.0.md",
       "algorithm": "sha256",
-      "value": "65d1afca6c13b1e9e7190f0138bec7da05eaae93e5e064cc050ad3420bd360fd"
+      "value": "d9cf6f7f7259ced02de8a11b37f0a3cfa84ac5b9668cc9c9f462ade5a08fd3c3"
     },
     {
       "path": "releases/v0.1.0.md.yml",
       "algorithm": "sha256",
-      "value": "f874f7b343445b01dd51a071c8f1f805bde7634440a5fa8f02495e01e4ca994d"
+      "value": "01f51d0d5e17925520e72670bb397ab3df75412b2b5b203d69eddd491086195d"
     },
     {
       "path": "releases/v0.1.0.release.json",
       "algorithm": "sha256",
-      "value": "66179c87c956a104dd0a39451adc259dd7f6177913cf161c6df796353e787b1b"
+      "value": "1312e715f54de8c3275b42f3086946935c4a20e2ada2ff45214cfa9105e2d9bc"
     }
   ],
   "packageReleaseNotePaths": [
@@ -105,16 +105,16 @@
   "docsArchive": {
     "status": "configured",
     "exactTreePath": "releases/0.1.0",
-    "releaseManifestSha256": "80fa80449f04b0b0265f4113bf4edaf9cc1d42c4a01dc33084e9bbc2c168fd9e",
+    "releaseManifestSha256": "5f92f12e1f284e7025e5013ce1f3fff7cc55ef11ca5cd24f048664c3b3b3217a",
     "releaseManifestSchema": "appsurface-docs-release-manifest-v1",
     "fileCount": 403,
     "catalogEntry": {
       "exactTreePath": "releases/0.1.0",
-      "releaseManifestSha256": "80fa80449f04b0b0265f4113bf4edaf9cc1d42c4a01dc33084e9bbc2c168fd9e"
+      "releaseManifestSha256": "5f92f12e1f284e7025e5013ce1f3fff7cc55ef11ca5cd24f048664c3b3b3217a"
     }
   },
   "commits": {
-    "contentSourceCommit": "896c2eb3be75603286214e6e6565ddcafa199ffe",
+    "contentSourceCommit": "052e30cf530551b82270c3da33e6035abff5cf6b",
     "releasePreparationCommit": null,
     "tagCommit": null,
     "workflowRunId": null
@@ -125,7 +125,7 @@
   "generatedAtUtc": "2026-06-27T06:25:07.6524320Z",
   "subject": {
     "name": "releases/v0.1.0.evidence.json",
-    "sha256": "6a94097147bbe43a3fd7f868200277dbca9555b7e93b7f9cf450e9ccdedc33e2"
+    "sha256": "b6163fd72372fb00095b02a3e1c6f8e63313de4bb8d5d4f3edeab69ac07cbc00"
   },
   "attestation": null
 }
