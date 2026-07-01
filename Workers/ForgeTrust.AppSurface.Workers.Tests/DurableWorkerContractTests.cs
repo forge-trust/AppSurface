@@ -229,6 +229,17 @@ public sealed class DurableWorkerContractTests
             DurableWorkerRetryability.OperatorRequired));
     }
 
+    [Fact]
+    public void Diagnostic_RejectsUndefinedRetryability()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkerDiagnostic(
+            "worker.invalid-retryability",
+            "Retryability was invalid.",
+            "The caller supplied an undefined retryability value.",
+            "Use a defined durable worker retryability value.",
+            (DurableWorkerRetryability)999));
+    }
+
     [Theory]
     [InlineData("Bearer abc", "Safe problem.", "Safe cause.", "Safe fix.")]
     [InlineData("worker.unsafe", "Authorization: Bearer abc", "Safe cause.", "Safe fix.")]

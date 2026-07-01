@@ -20,6 +20,7 @@ public sealed record DurableWorkerDiagnostic
     /// <param name="retryability">Retry classification for this diagnostic.</param>
     /// <param name="metadata">Optional safe metadata values.</param>
     /// <exception cref="ArgumentException">Thrown when required text or metadata is invalid.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="retryability"/> is not defined.</exception>
     /// <exception cref="DurableWorkerUnsafeMetadataException">Thrown when metadata appears unsafe.</exception>
     public DurableWorkerDiagnostic(
         string code,
@@ -29,6 +30,11 @@ public sealed record DurableWorkerDiagnostic
         DurableWorkerRetryability retryability,
         IReadOnlyDictionary<string, string>? metadata = null)
     {
+        if (!Enum.IsDefined(retryability))
+        {
+            throw new ArgumentOutOfRangeException(nameof(retryability), "Durable worker retryability must be defined.");
+        }
+
         Code = DurableWorkerMetadataSafety.CopySafeDiagnosticText(code, "diagnostic code", nameof(code));
         Problem = DurableWorkerMetadataSafety.CopySafeDiagnosticText(problem, "diagnostic problem", nameof(problem));
         Cause = DurableWorkerMetadataSafety.CopySafeDiagnosticText(cause, "diagnostic cause", nameof(cause));
