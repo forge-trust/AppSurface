@@ -124,6 +124,16 @@ public sealed class AppSurfaceLocalSecretProvider : IConfigProvider, IConfigProv
 
         if (ConfigValueConverter.TryConvert<T>(result.Value ?? string.Empty, out var converted))
         {
+            if (converted == null)
+            {
+                var nullResolution = AppSurfaceLocalSecretResolution<T>.NotFound(
+                    LocalSecretResultStatus.ConversionFailed,
+                    CreateConversionDiagnostic<T>(),
+                    result.Source);
+                RememberTerminalIfNeeded(environment, key, nullResolution);
+                return nullResolution;
+            }
+
             return AppSurfaceLocalSecretResolution<T>.Found(converted, result.Source);
         }
 

@@ -56,6 +56,8 @@ internal partial class DefaultConfigManager : IConfigManager
 
         T? providerValue = default;
         string? providerName = null;
+        ConfigProviderTerminalDiagnostic? terminalDiagnostic = null;
+        string? terminalProviderName = null;
         foreach (var provider in _otherProviders)
         {
             var value = provider.GetValue<T>(environment, key);
@@ -70,7 +72,9 @@ internal partial class DefaultConfigManager : IConfigManager
             if (provider is IConfigProviderTerminalDiagnosticProvider terminalProvider
                 && terminalProvider.TryGetTerminalDiagnostic(environment, key, out var diagnostic))
             {
-                throw new ConfigurationResolutionException(environment, key, provider.Name, diagnostic);
+                terminalDiagnostic = diagnostic;
+                terminalProviderName = provider.Name;
+                break;
             }
         }
 
@@ -80,6 +84,11 @@ internal partial class DefaultConfigManager : IConfigManager
             LogRetrievedFromEnvironment(key, environment, "Environment");
 
             return patchedValue;
+        }
+
+        if (terminalDiagnostic != null)
+        {
+            throw new ConfigurationResolutionException(environment, key, terminalProviderName!, terminalDiagnostic);
         }
 
         if (providerValue != null)
