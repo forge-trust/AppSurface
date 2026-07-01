@@ -607,7 +607,8 @@ public enum AppSurfaceDocsHarvestHealthExposure
 /// keep route-inspector responses and sidebar discovery available in Development only. Setting
 /// <see cref="ExposeRouteInspector"/> or <see cref="ShowChrome"/> to
 /// <see cref="AppSurfaceDocsHarvestHealthExposure.Always"/> exposes the route only; production hosts should also set
-/// <see cref="OperatorReadPolicy"/> unless access is enforced by the host application, reverse proxy, or network layer.
+/// <see cref="AppSurfaceDocsDiagnosticsOptions.OperatorReadPolicy"/> unless access is enforced by the host application,
+/// reverse proxy, or network layer.
 /// </remarks>
 public sealed class AppSurfaceDocsDiagnosticsOptions
 {

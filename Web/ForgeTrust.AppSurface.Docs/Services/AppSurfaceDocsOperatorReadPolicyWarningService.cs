@@ -36,7 +36,18 @@ internal sealed class AppSurfaceDocsOperatorReadPolicyWarningService : IHostedSe
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Logs the advisory startup warning when non-development diagnostics reads are exposed without a configured
+    /// <c>Diagnostics.OperatorReadPolicy</c>.
+    /// </summary>
+    /// <remarks>
+    /// Startup is never failed by this check. The method returns without logging in Development, when the shared read
+    /// policy is configured, or when <see cref="ResolveExposedDiagnosticsSurfaces"/> finds no exposed diagnostics
+    /// surfaces. Otherwise, it logs the exposed surface names so operators can either configure the read policy or
+    /// verify that host, reverse-proxy, or network authorization already protects those reads.
+    /// </remarks>
+    /// <param name="cancellationToken">Unused; the startup warning performs no cancellable I/O.</param>
+    /// <returns>A completed task after the advisory check has run.</returns>
     public Task StartAsync(CancellationToken cancellationToken)
     {
         if (_environment.IsDevelopment())
@@ -65,7 +76,15 @@ internal sealed class AppSurfaceDocsOperatorReadPolicyWarningService : IHostedSe
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Stops the advisory startup warning service.
+    /// </summary>
+    /// <remarks>
+    /// The service does not hold background work or subscriptions after <see cref="StartAsync"/> returns, so stopping is
+    /// a no-op and always completes synchronously.
+    /// </remarks>
+    /// <param name="cancellationToken">Unused; there is no shutdown work to cancel.</param>
+    /// <returns>A completed task.</returns>
     public Task StopAsync(CancellationToken cancellationToken)
     {
         return Task.CompletedTask;

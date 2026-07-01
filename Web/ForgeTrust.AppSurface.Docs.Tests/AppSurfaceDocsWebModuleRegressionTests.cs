@@ -290,6 +290,46 @@ public class AppSurfaceDocsWebModuleRegressionTests
         Assert.Equal(HttpStatusCode.OK, authorized.StatusCode);
     }
 
+    [Theory]
+    [InlineData("/docs/_harvest")]
+    [InlineData("/docs/_routes")]
+    [InlineData("/docs/_routes.json")]
+    public async Task OperatorReadPolicy_ShouldFailClosed_WhenNamedPolicyIsNotRegistered(string requestPath)
+    {
+        await using var host = await StartHealthAuthorizationHostAsync(
+            Environments.Development,
+            exposeHealthRoutes: true,
+            exposeRouteInspector: true,
+            configureHealthPolicy: false,
+            configureOperatorReadPolicy: true,
+            registerPolicy: false);
+
+        using var authorizedRequest = CreateHealthRequest(requestPath, "alice", "docs.read");
+        using var response = await host.Client.SendAsync(authorizedRequest);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("/docs/_harvest")]
+    [InlineData("/docs/_routes")]
+    [InlineData("/docs/_routes.json")]
+    public async Task OperatorReadPolicy_ShouldFailClosed_WhenAuthorizationMiddlewareIsMissing(string requestPath)
+    {
+        await using var host = await StartHealthAuthorizationHostAsync(
+            Environments.Development,
+            exposeHealthRoutes: true,
+            exposeRouteInspector: true,
+            configureHealthPolicy: false,
+            configureOperatorReadPolicy: true,
+            registerAuthorizationMiddleware: false);
+
+        using var authorizedRequest = CreateHealthRequest(requestPath, "alice", "docs.read");
+        using var response = await host.Client.SendAsync(authorizedRequest);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+    }
+
     [Fact]
     public async Task OperatorReadPolicy_ShouldPreserveHealthOnlyPolicy_WhenBothPoliciesAreConfigured()
     {

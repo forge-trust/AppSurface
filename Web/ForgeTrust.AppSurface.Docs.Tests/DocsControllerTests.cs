@@ -2199,6 +2199,38 @@ public class DocsControllerTests : IDisposable
         AssertHarvestingView(result, "/docs/search", canUseLiveProgress: true);
     }
 
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("docs.other", false)]
+    [InlineData("docs.read", true)]
+    public async Task Search_ShouldRenderHarvestingLiveProgress_ByOperatorReadPolicyScope(
+        string? scope,
+        bool expectedCanUseLiveProgress)
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/search",
+            Environments.Production,
+            AppSurfaceDocsHarvestHealthExposure.Always,
+            new HarvestProgressAllowAuthorizer(),
+            configureOptions: options => options.Diagnostics.OperatorReadPolicy = "DocsRead",
+            configureRequestServices: services => services.AddAuthorization(
+                options => options.AddPolicy("DocsRead", policy => policy.RequireClaim("scope", "docs.read"))));
+        if (scope is not null)
+        {
+            pending.Controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(
+                new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, "reader"),
+                        new Claim("scope", scope)
+                    ],
+                    "test-auth"));
+        }
+
+        var result = await pending.Controller.Search();
+
+        AssertHarvestingView(result, "/docs/search", expectedCanUseLiveProgress);
+    }
+
     [Fact]
     public async Task Search_ShouldRenderHarvestingWithoutLiveProgress_WhenReplacementAuthorizerAllowsHiddenHarvestRoutes()
     {
@@ -6031,7 +6063,8 @@ public class DocsControllerTests : IDisposable
         IRazorWireChannelAuthorizer? authorizer = null,
         IRazorWireStreamAuthorizer? streamAuthorizer = null,
         bool registerAuthorizer = true,
-        Action<AppSurfaceDocsOptions>? configureOptions = null)
+        Action<AppSurfaceDocsOptions>? configureOptions = null,
+        Action<IServiceCollection>? configureRequestServices = null)
     {
         var release = new TaskCompletionSource<IReadOnlyList<DocNode>>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -6069,6 +6102,7 @@ public class DocsControllerTests : IDisposable
             .AddLogging()
             .AddControllersWithViews()
             .Services;
+        configureRequestServices?.Invoke(requestServicesBuilder);
         requestServicesBuilder.AddSingleton<IRazorWireStreamAuthorizationFilter>(
             new AppSurfaceDocsHarvestStreamAuthorizationFilter(options, environment));
 

@@ -2711,8 +2711,12 @@ public class AppSurfaceDocsWebModuleTests
             endpoints,
             endpoint =>
             {
-                var authorizeData = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>();
-                Assert.Contains(authorizeData, metadata => string.Equals(metadata.Policy, expectedPolicy, StringComparison.Ordinal));
+                var policies = endpoint.Metadata
+                    .GetOrderedMetadata<IAuthorizeData>()
+                    .Select(metadata => metadata.Policy)
+                    .ToArray();
+
+                Assert.Equal(expectedPolicy, Assert.Single(policies));
             });
     }
 

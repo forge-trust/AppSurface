@@ -144,6 +144,33 @@ public class RazorWireEndpointAuthorizationTests
         Assert.Contains(nameof(AppSurfaceAuthOutcome.Forbid), body, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData(true)]
+    public async Task StreamEndpoint_NonDenyingFilterResults_ContinueToActiveAuthorizer(bool? filterAllows)
+    {
+        var hub = new TrackingStreamHub();
+        var authorizer = new CountingStreamAuthorizer(AppSurfaceAuthResult.Forbidden());
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireStreamAuthorizationFilter>(
+                    new FixedStreamAuthorizationFilter(filterAllows is null ? null : AppSurfaceAuthResult.Allowed()));
+                services.AddSingleton<IRazorWireStreamAuthorizer>(authorizer);
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.NotEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(1, authorizer.CallCount);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains(nameof(AppSurfaceAuthOutcome.Forbid), body, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task StreamEndpoint_FallbackAuthorizationPolicy_RunsBeforeStreamFiltersForAnonymousCaller()
     {
@@ -294,6 +321,39 @@ public class RazorWireEndpointAuthorizationTests
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         Assert.Equal(0, hub.SubscribeCount);
         Assert.Contains("NullResult", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_FilterException_FailsClosedAndLogsFilterType()
+    {
+        var hub = new TrackingStreamHub();
+        var loggerProvider = new CapturingLoggerProvider();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            configureServices: services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireStreamAuthorizationFilter, ThrowingStreamAuthorizationFilter>();
+                services.AddSingleton<IRazorWireStreamAuthorizer>(
+                    new FixedStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+            },
+            configureLogging: logging =>
+            {
+                logging.ClearProviders();
+                logging.AddProvider(loggerProvider);
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/public");
+        var body = await response.Content.ReadAsStringAsync();
+        var entry = Assert.Single(loggerProvider.Entries, log => log.EventId.Id == 13700);
+        var renderedState = string.Join(" ", entry.State.Select(pair => $"{pair.Key}={pair.Value}"));
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains("Exception", body, StringComparison.Ordinal);
+        Assert.Contains(nameof(ThrowingStreamAuthorizationFilter), renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain(nameof(FixedStreamAuthorizer), renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain("filter secret", entry.Message + renderedState + body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1074,11 +1134,32 @@ public class RazorWireEndpointAuthorizationTests
         }
     }
 
+    private sealed class CountingStreamAuthorizer(AppSurfaceAuthResult result) : IRazorWireStreamAuthorizer
+    {
+        private int _callCount;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            Interlocked.Increment(ref _callCount);
+            return new ValueTask<AppSurfaceAuthResult>(result);
+        }
+    }
+
     private sealed class FixedStreamAuthorizationFilter(AppSurfaceAuthResult? result) : IRazorWireStreamAuthorizationFilter
     {
         public ValueTask<AppSurfaceAuthResult?> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
         {
             return new ValueTask<AppSurfaceAuthResult?>(result);
+        }
+    }
+
+    private sealed class ThrowingStreamAuthorizationFilter : IRazorWireStreamAuthorizationFilter
+    {
+        public ValueTask<AppSurfaceAuthResult?> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            throw new InvalidOperationException("filter secret");
         }
     }
 

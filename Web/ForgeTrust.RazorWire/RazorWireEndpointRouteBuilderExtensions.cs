@@ -236,6 +236,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
             foreach (var filter in authorizationFilters)
             {
                 var filterType = filter.GetType().FullName ?? filter.GetType().Name;
+                authorizerType = filterType;
                 var filterResult = await filter.AuthorizeAsync(authorizationContext);
                 if (filterResult is not null && !filterResult.IsAllowed)
                 {
@@ -243,6 +244,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
                 }
             }
 
+            authorizerType = authorizer.GetType().FullName ?? authorizer.GetType().Name;
             if (authorizer is RazorWireBoolChannelAuthorizerAdapter boolAdapter)
             {
                 var channelAuthorizer = boolAdapter.ResolveChannelAuthorizer(authorizationContext);

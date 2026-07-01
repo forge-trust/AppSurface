@@ -248,7 +248,13 @@ public sealed class AppSurfaceDocsOperatorReadPolicyWarningServiceTests
     {
         var logger = new RecordingLogger<AppSurfaceDocsOperatorReadPolicyWarningService>();
         var service = new AppSurfaceDocsOperatorReadPolicyWarningService(
-            new AppSurfaceDocsOptions(),
+            new AppSurfaceDocsOptions
+            {
+                Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+                {
+                    ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always
+                }
+            },
             new TestHostEnvironment { EnvironmentName = Environments.Development },
             logger);
 
