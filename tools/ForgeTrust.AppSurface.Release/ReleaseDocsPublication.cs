@@ -341,9 +341,12 @@ internal sealed class ReleaseDocsPublication
 
     private static (int Major, int Minor, int Patch) StableSortKey(string? version)
     {
-        return TryParseStable(version, out var parsed)
-            ? (parsed.Major, parsed.Minor, parsed.Patch)
-            : (-1, -1, -1);
+        if (!TryParseStable(version, out var parsed))
+        {
+            return (-1, -1, -1);
+        }
+
+        return (parsed.Major, parsed.Minor, parsed.Patch);
     }
 
     private static bool TryParseStable(string? value, [NotNullWhen(true)] out SemVer? version)

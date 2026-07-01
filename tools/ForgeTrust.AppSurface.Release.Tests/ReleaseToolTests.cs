@@ -3994,6 +3994,14 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("\"version\": \"0.1.0\"", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("\"label\": \"duplicate current\"", catalog, StringComparison.Ordinal);
         Assert.Contains("\"supportState\": \"Current\"", catalog, StringComparison.Ordinal);
+        using var catalogDocument = JsonDocument.Parse(catalog);
+        var catalogVersions = catalogDocument.RootElement.GetProperty("versions")
+            .EnumerateArray()
+            .Select(version => version.GetProperty("version").GetString()!)
+            .ToArray();
+        Assert.Equal(
+            ["0.1.0", "0.0.9", "0.0.8", "0.0.7", "", "0.2.0-preview.1", "not-a-version"],
+            catalogVersions);
     }
 
     [Fact]
