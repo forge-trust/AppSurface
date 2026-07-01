@@ -471,6 +471,15 @@ memory, and request-slot pressure in the current process; it does not create dis
 - See [Stream Authorization](Docs/stream-authorization.md) for the full status matrix, DI precedence, logging caveats,
   and host-policy recipe.
 
+### `IRazorWireStreamAuthorizationFilter`
+
+- `AuthorizeAsync(RazorWireStreamAuthorizationContext)` runs before the active stream authorizer.
+- Return `null` when the filter does not apply to the requested channel.
+- Return a denial or setup-failure result to stop the subscription before SSE; return `Allowed` to let later filters and
+  the active `IRazorWireStreamAuthorizer` continue.
+- Use filters for package-owned or reserved channels that need a non-bypassable gate while still allowing the host
+  stream authorizer to narrow access.
+
 ### `IRazorWireChannelAuthorizer`
 
 - `CanSubscribeAsync(HttpContext, channel)` decides whether the current request may subscribe to a stream channel.
