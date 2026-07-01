@@ -136,16 +136,22 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin "${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
+          mapfile -t release_artifact_changes < <(git diff --no-renames --name-status "origin/${GITHUB_BASE_REF}...HEAD" -- \
+            ':(glob)releases/v*.md' \
+            ':(glob)releases/v*.md.yml' \
+            ':(glob)releases/v*.release.json' \
+            ':(glob)releases/v*.evidence.json')
+          if [[ "${#release_artifact_changes[@]}" -eq 0 ]]; then
+            echo "No versioned release artifacts changed; validating release tooling instead."
+            dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
+            exit 0
+          fi
+          mapfile -t release_artifact_deletions < <(printf '%s\n' "${release_artifact_changes[@]}" | awk '$1 == "D" { print $2 }')
           mapfile -t release_artifacts < <(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- \
             ':(glob)releases/v*.md' \
             ':(glob)releases/v*.md.yml' \
             ':(glob)releases/v*.release.json' \
             ':(glob)releases/v*.evidence.json')
-          if [[ "${#release_artifacts[@]}" -eq 0 ]]; then
-            echo "No versioned release artifacts changed; validating release tooling instead."
-            dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
-            exit 0
-          fi
 
           mapfile -t manifests < <(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')
           if [[ "${#manifests[@]}" -ne 1 ]]; then
@@ -170,6 +176,34 @@ jobs:
             "releases/v${version}.release.json"
             "releases/v${version}.evidence.json"
           )
+          if [[ "${#release_artifact_deletions[@]}" -ne 0 ]]; then
+            allowed_release_artifact_deletions=()
+            if [[ "${version}" == "0.1.0" ]]; then
+              allowed_release_artifact_deletions=(
+                "releases/v0.1.0-rc.1.md"
+                "releases/v0.1.0-rc.1.md.yml"
+                "releases/v0.1.0-rc.1.release.json"
+                "releases/v0.1.0-rc.2.md"
+                "releases/v0.1.0-rc.2.md.yml"
+                "releases/v0.1.0-rc.2.release.json"
+                "releases/v0.1.0-rc.3.evidence.json"
+                "releases/v0.1.0-rc.3.md"
+                "releases/v0.1.0-rc.3.md.yml"
+                "releases/v0.1.0-rc.3.release.json"
+                "releases/v0.1.0-rc.4.evidence.json"
+                "releases/v0.1.0-rc.4.md"
+                "releases/v0.1.0-rc.4.md.yml"
+                "releases/v0.1.0-rc.4.release.json"
+              )
+            fi
+            for deleted_release_artifact in "${release_artifact_deletions[@]}"; do
+              if printf '%s\n' "${allowed_release_artifact_deletions[@]}" | grep -Fxq "${deleted_release_artifact}"; then
+                continue
+              fi
+              echo "Unexpected versioned release artifact deletion ${deleted_release_artifact}; release preparation pull requests may only delete explicitly allowed superseded artifacts." >&2
+              exit 1
+            done
+          fi
           mapfile -t sorted_release_artifacts < <(printf '%s\n' "${release_artifacts[@]}" | sort)
           mapfile -t sorted_expected_artifacts < <(printf '%s\n' "${expected_artifacts[@]}" | sort)
           for expected_artifact in "${sorted_expected_artifacts[@]}"; do

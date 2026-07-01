@@ -38,11 +38,15 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.DoesNotContain("merge-base --is-ancestor HEAD origin/main", prep, StringComparison.Ordinal);
         Assert.Contains("No versioned release artifacts changed; validating release tooling instead.", prep, StringComparison.Ordinal);
         Assert.Contains("dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj", prep, StringComparison.Ordinal);
+        Assert.Contains("git diff --no-renames --name-status", prep, StringComparison.Ordinal);
+        Assert.Contains("release_artifact_deletions", prep, StringComparison.Ordinal);
         Assert.Contains("git diff --no-renames --name-only --diff-filter=AM", prep, StringComparison.Ordinal);
         Assert.Contains("releases/v*.release.json", prep, StringComparison.Ordinal);
         Assert.Contains("releases/v*.evidence.json", prep, StringComparison.Ordinal);
         Assert.Contains("Expected exactly one added or modified release manifest", prep, StringComparison.Ordinal);
         Assert.Contains("Expected exactly one added or modified release evidence bundle", prep, StringComparison.Ordinal);
+        Assert.Contains("Unexpected versioned release artifact deletion", prep, StringComparison.Ordinal);
+        Assert.Contains("releases/v0.1.0-rc.4.release.json", prep, StringComparison.Ordinal);
         Assert.Contains("Release preparation pull requests must change exactly the four generated artifacts", prep, StringComparison.Ordinal);
         Assert.Contains("docs export", prep, StringComparison.Ordinal);
         Assert.Contains("docs verify-archive", prep, StringComparison.Ordinal);
