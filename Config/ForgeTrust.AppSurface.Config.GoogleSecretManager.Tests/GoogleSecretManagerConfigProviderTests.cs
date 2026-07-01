@@ -25,6 +25,30 @@ public sealed class GoogleSecretManagerConfigProviderTests
     }
 
     [Fact]
+    public void OptionsValidator_Should_RejectLatestInFullResourceUnlessExplicitlyAllowed()
+    {
+        var options = new AppSurfaceGoogleSecretManagerOptions();
+        options.MapSecret("Stripe:ApiKey", "projects/prod/secrets/stripe-api-key/versions/latest");
+
+        var result = new AppSurfaceGoogleSecretManagerOptionsValidator().Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("AllowLatest", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void OptionsValidator_Should_AllowLatestInFullResourceWhenExplicitlyAllowed()
+    {
+        var options = new AppSurfaceGoogleSecretManagerOptions();
+        options.AllowLatest();
+        options.MapSecret("Stripe:ApiKey", "projects/prod/secrets/stripe-api-key/versions/latest");
+
+        var result = new AppSurfaceGoogleSecretManagerOptionsValidator().Validate(null, options);
+
+        Assert.False(result.Failed);
+    }
+
+    [Fact]
     public void OptionsValidator_Should_AllowFullResourceWithoutProjectId()
     {
         var options = new AppSurfaceGoogleSecretManagerOptions();

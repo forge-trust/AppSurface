@@ -151,8 +151,8 @@ Use `UseAppSurfaceGoogleSecretManagerClient(...)` to replace the Google client s
 services.UseAppSurfaceGoogleSecretManagerClient(new FakeGoogleSecretManagerClient());
 ```
 
-The seam returns structured statuses rather than Google exceptions, which keeps provider tests deterministic and avoids
-network access.
+The seam returns payload bytes from a resource name and timeout. Test fakes can return deterministic bytes or throw
+Google `RpcException` instances so the provider's status mapping remains deterministic without network access.
 
 ## Migration
 

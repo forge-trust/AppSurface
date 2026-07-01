@@ -41,4 +41,3 @@ services.ConfigureAppSurfaceGoogleSecretManager(options =>
 - Do not leave a production fallback secret in `appsettings.*.json`. Claimed remote failures fail closed by default so
   a missing IAM grant or outage does not silently read a stale file value.
 - Keep environment variables for emergency overrides, CI injection, and short-lived operational recovery.
-

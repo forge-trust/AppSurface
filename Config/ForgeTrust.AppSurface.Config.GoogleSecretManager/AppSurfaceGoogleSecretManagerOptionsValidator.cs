@@ -108,6 +108,11 @@ public sealed class AppSurfaceGoogleSecretManagerOptionsValidator : IValidateOpt
                 errors.Add($"{context} uses a full version resource name and must not also specify Version.");
             }
 
+            ValidateVersion(
+                options,
+                GoogleSecretManagerSecretReference.GetVersionFromFullVersionResourceName(secretIdOrResourceName),
+                context,
+                errors);
             return;
         }
 
