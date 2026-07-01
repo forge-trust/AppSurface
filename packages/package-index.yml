@@ -225,6 +225,41 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
       - ForgeTrust.AppSurface.Flow
+  - project: Workers/ForgeTrust.AppSurface.Workers/ForgeTrust.AppSurface.Workers.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 44
+    use_when: Add this when an app or reusable module needs host-neutral durable worker contracts, explicit claim/completion/projection-repair outcomes, and privacy-safe repair diagnostics before choosing a runtime adapter.
+    includes: AppSurfaceWorkersModule, durable worker projection contract, executor contract, typed envelopes, outcome and retryability enums, correlation identifiers, privacy-safe diagnostics, safe metadata validation, and bounded projection repair requests.
+    does_not_include: Durable Task worker/client hosting, EF Core, Postgres, storage schemas, queue or scheduler runtimes, ASP.NET endpoints, authentication handlers, UI, Semantic Kernel, or hosted background services.
+    start_here_path: Workers/ForgeTrust.AppSurface.Workers/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Workers` when worker chains need durable claim, completion, and projection-repair contracts without taking a runtime or persistence dependency.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Core
+  - project: Workers/ForgeTrust.AppSurface.Workers.DurableTask/ForgeTrust.AppSurface.Workers.DurableTask.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 45
+    use_when: Add this after Workers and Flow.DurableTask when durable worker chains should map claim, completion, retry, wait, timeout, stale-signal, and projection-repair outcomes to Durable Task-facing decisions.
+    includes: AppSurfaceWorkersDurableTaskModule, durable worker chain runner, worker decision kinds, typed Durable Task-facing decisions, wait/timeout/late-signal helpers, and executor/projection retry policy metadata.
+    does_not_include: Durable Task worker/client hosting, storage providers, EF Core, Postgres, queue runners, scheduler runtimes, ASP.NET endpoints, authentication handlers, UI, Semantic Kernel, or hosted background services.
+    start_here_path: Workers/ForgeTrust.AppSurface.Workers.DurableTask/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Workers.DurableTask` after `ForgeTrust.AppSurface.Workers` and `ForgeTrust.AppSurface.Flow.DurableTask` when worker contracts should be driven by Durable Task orchestration decisions.
+    depends_on:
+      - ForgeTrust.AppSurface.Workers
+      - ForgeTrust.AppSurface.Flow.DurableTask
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Core
+      - ForgeTrust.AppSurface.Workers
+      - ForgeTrust.AppSurface.Flow.DurableTask
   - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
     classification: public
     publish_decision: publish
@@ -232,7 +267,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.1.md
-    order: 44
+    order: 46
     use_when: Start here for CLI apps and worker-style entry points that should run through the AppSurface startup pipeline with CliFx.
     includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx source-generated command discovery through AppSurface modules.
     does_not_include: ASP.NET Core hosting, OpenAPI surfaces, or Razor-based UI composition.

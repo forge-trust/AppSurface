@@ -7,6 +7,7 @@ using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Web;
 using ForgeTrust.RazorWire;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -530,7 +531,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 })
             .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
 
-        endpoints.MapControllerRoute(
+        var harvest = endpoints.MapControllerRoute(
             name: "appsurfacedocs_harvest",
             pattern: currentHarvestPattern,
             defaults: new
@@ -538,28 +539,37 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "Harvest"
             });
+        ApplyHarvestReadAuthorizationPolicy(harvest, docsOptions, endpoints.ServiceProvider);
 
-        endpoints.MapMethods(
-            currentHarvestRebuildPattern,
-            [
-                HttpMethods.Delete,
-                HttpMethods.Get,
-                HttpMethods.Head,
-                HttpMethods.Options,
-                HttpMethods.Patch,
-                HttpMethods.Put
-            ],
-            RejectHarvestRebuildUnsupportedMethodAsync);
+        if (AreHarvestRoutesHidden(docsOptions, endpoints.ServiceProvider))
+        {
+            endpoints.Map(currentHarvestRebuildPattern, ReturnNotFoundAsync)
+                .WithMetadata(new AllowAnonymousAttribute());
+        }
+        else
+        {
+            endpoints.MapMethods(
+                currentHarvestRebuildPattern,
+                [
+                    HttpMethods.Delete,
+                    HttpMethods.Get,
+                    HttpMethods.Head,
+                    HttpMethods.Options,
+                    HttpMethods.Patch,
+                    HttpMethods.Put
+                ],
+                RejectHarvestRebuildUnsupportedMethodAsync);
 
-        endpoints.MapControllerRoute(
-                name: "appsurfacedocs_harvest_rebuild",
-                pattern: currentHarvestRebuildPattern,
-                defaults: new
-                {
-                    controller = "Docs",
-                    action = "RebuildHarvest"
-                })
-            .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
+            endpoints.MapControllerRoute(
+                    name: "appsurfacedocs_harvest_rebuild",
+                    pattern: currentHarvestRebuildPattern,
+                    defaults: new
+                    {
+                        controller = "Docs",
+                        action = "RebuildHarvest"
+                    })
+                .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
+        }
 
         var health = endpoints.MapControllerRoute(
             name: "appsurfacedocs_harvest_health",
@@ -580,7 +590,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             });
         ApplyHealthAuthorizationPolicy(health, healthJson, docsOptions, endpoints.ServiceProvider);
 
-        endpoints.MapControllerRoute(
+        var routeInspector = endpoints.MapControllerRoute(
             name: "appsurfacedocs_route_inspector",
             pattern: currentRouteInspectorPattern,
             defaults: new
@@ -589,7 +599,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 action = "RouteInspector"
             });
 
-        endpoints.MapControllerRoute(
+        var routeInspectorJson = endpoints.MapControllerRoute(
             name: "appsurfacedocs_route_inspector_json",
             pattern: currentRouteInspectorJsonPattern,
             defaults: new
@@ -597,6 +607,11 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "RouteInspectorJson"
             });
+        ApplyRouteInspectorReadAuthorizationPolicy(
+            routeInspector,
+            routeInspectorJson,
+            docsOptions,
+            endpoints.ServiceProvider);
 
         if (ShouldMapHostedMetricsCollection(docsOptions))
         {
@@ -663,6 +678,12 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var policyName = ResolveHealthAuthorizationPolicyName(docsOptions, services);
         if (policyName is null)
         {
+            if (AreHarvestRoutesHidden(docsOptions, services))
+            {
+                AllowAnonymousFallbackBypass(health);
+                AllowAnonymousFallbackBypass(healthJson);
+            }
+
             return;
         }
 
@@ -670,20 +691,78 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         healthJson.RequireAuthorization(policyName);
     }
 
+    private static void ApplyHarvestReadAuthorizationPolicy(
+        IEndpointConventionBuilder harvest,
+        AppSurfaceDocsOptions docsOptions,
+        IServiceProvider services)
+    {
+        var policyName = ResolveHarvestReadAuthorizationPolicyName(docsOptions, services);
+        if (policyName is null)
+        {
+            if (AreHarvestRoutesHidden(docsOptions, services))
+            {
+                AllowAnonymousFallbackBypass(harvest);
+            }
+
+            return;
+        }
+
+        harvest.RequireAuthorization(policyName);
+    }
+
+    private static void ApplyRouteInspectorReadAuthorizationPolicy(
+        IEndpointConventionBuilder routeInspector,
+        IEndpointConventionBuilder routeInspectorJson,
+        AppSurfaceDocsOptions docsOptions,
+        IServiceProvider services)
+    {
+        var policyName = ResolveRouteInspectorAuthorizationPolicyName(docsOptions, services);
+        if (policyName is null)
+        {
+            if (AreRouteInspectorRoutesHidden(docsOptions, services))
+            {
+                AllowAnonymousFallbackBypass(routeInspector);
+                AllowAnonymousFallbackBypass(routeInspectorJson);
+            }
+
+            return;
+        }
+
+        routeInspector.RequireAuthorization(policyName);
+        routeInspectorJson.RequireAuthorization(policyName);
+    }
+
     /// <summary>
     /// Resolves the effective health-route authorization policy name, or <see langword="null"/> when no policy should be
     /// applied.
     /// </summary>
     /// <remarks>
-    /// Returns <see langword="null"/> when <see cref="AppSurfaceDocsHarvestHealthOptions.AuthorizationPolicy"/> is blank,
-    /// when no <see cref="IWebHostEnvironment"/> is available, or when the health routes are not exposed for the current
+    /// Returns <see langword="null"/> when no health or shared read policy should be applied, when no
+    /// <see cref="IWebHostEnvironment"/> is available, or when the health routes are not exposed for the current
     /// environment. <see cref="ApplyHealthAuthorizationPolicy"/> depends on this ordering so hidden health routes keep
-    /// returning <c>404</c> before authorization metadata is added.
+    /// returning <c>404</c> before authorization metadata is added. The legacy health policy takes precedence when it is
+    /// configured; otherwise the shared diagnostics read policy protects exposed health routes.
     /// </remarks>
     internal static string? ResolveHealthAuthorizationPolicyName(AppSurfaceDocsOptions docsOptions, IServiceProvider services)
     {
-        var policyName = docsOptions.Harvest?.Health?.AuthorizationPolicy;
-        if (string.IsNullOrWhiteSpace(policyName))
+        var environment = services.GetService(typeof(IWebHostEnvironment)) as IWebHostEnvironment;
+        if (environment is null || !AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(docsOptions, environment))
+        {
+            return null;
+        }
+
+        var healthPolicyName = docsOptions.Harvest?.Health?.AuthorizationPolicy;
+        return !string.IsNullOrWhiteSpace(healthPolicyName)
+            ? healthPolicyName
+            : NormalizeReadPolicyName(docsOptions);
+    }
+
+    internal static string? ResolveHarvestReadAuthorizationPolicyName(
+        AppSurfaceDocsOptions docsOptions,
+        IServiceProvider services)
+    {
+        var policyName = NormalizeReadPolicyName(docsOptions);
+        if (policyName is null)
         {
             return null;
         }
@@ -695,6 +774,48 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         }
 
         return policyName;
+    }
+
+    internal static string? ResolveRouteInspectorAuthorizationPolicyName(
+        AppSurfaceDocsOptions docsOptions,
+        IServiceProvider services)
+    {
+        var policyName = NormalizeReadPolicyName(docsOptions);
+        if (policyName is null)
+        {
+            return null;
+        }
+
+        var environment = services.GetService(typeof(IWebHostEnvironment)) as IWebHostEnvironment;
+        if (environment is null || !AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(docsOptions, environment))
+        {
+            return null;
+        }
+
+        return policyName;
+    }
+
+    private static string? NormalizeReadPolicyName(AppSurfaceDocsOptions docsOptions)
+    {
+        var policyName = docsOptions.Diagnostics?.OperatorReadPolicy;
+        return string.IsNullOrWhiteSpace(policyName) ? null : policyName;
+    }
+
+    private static bool AreHarvestRoutesHidden(AppSurfaceDocsOptions docsOptions, IServiceProvider services)
+    {
+        var environment = services.GetService(typeof(IWebHostEnvironment)) as IWebHostEnvironment;
+        return environment is not null && !AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(docsOptions, environment);
+    }
+
+    private static bool AreRouteInspectorRoutesHidden(AppSurfaceDocsOptions docsOptions, IServiceProvider services)
+    {
+        var environment = services.GetService(typeof(IWebHostEnvironment)) as IWebHostEnvironment;
+        return environment is not null && !AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(docsOptions, environment);
+    }
+
+    private static void AllowAnonymousFallbackBypass(IEndpointConventionBuilder endpoint)
+    {
+        endpoint.WithMetadata(new AllowAnonymousAttribute());
     }
 
     private static void MapLegacyAssetRedirect(IEndpointRouteBuilder endpoints, string route, string targetPath)
@@ -811,6 +932,12 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             context);
         context.Response.Headers["Allow"] = DocsUrlBuilder.SearchIndexRefreshMethod;
         context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+        return Task.CompletedTask;
+    }
+
+    private static Task ReturnNotFoundAsync(HttpContext context)
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
         return Task.CompletedTask;
     }
 

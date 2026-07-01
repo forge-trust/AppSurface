@@ -10,6 +10,7 @@ using ForgeTrust.AppSurface.Intelligence;
 using ForgeTrust.AppSurface.Web;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -120,6 +121,134 @@ public class RazorWireEndpointAuthorizationTests
     }
 
     [Fact]
+    public async Task StreamEndpoint_FilterDenial_RunsBeforePermissiveAuthorizer()
+    {
+        var hub = new TrackingStreamHub();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireStreamAuthorizationFilter>(
+                    new FixedStreamAuthorizationFilter(AppSurfaceAuthResult.Forbidden()));
+                services.AddSingleton<IRazorWireStreamAuthorizer>(
+                    new FixedStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.NotEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains(nameof(AppSurfaceAuthOutcome.Forbid), body, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(true)]
+    public async Task StreamEndpoint_NonDenyingFilterResults_ContinueToActiveAuthorizer(bool? filterAllows)
+    {
+        var hub = new TrackingStreamHub();
+        var authorizer = new CountingStreamAuthorizer(AppSurfaceAuthResult.Forbidden());
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireStreamAuthorizationFilter>(
+                    new FixedStreamAuthorizationFilter(filterAllows is null ? null : AppSurfaceAuthResult.Allowed()));
+                services.AddSingleton<IRazorWireStreamAuthorizer>(authorizer);
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.NotEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(1, authorizer.CallCount);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains(nameof(AppSurfaceAuthOutcome.Forbid), body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_FallbackAuthorizationPolicy_RunsBeforeStreamFiltersForAnonymousCaller()
+    {
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            services =>
+            {
+                services
+                    .AddAuthentication(RazorWireHeaderAuthenticationHandler.SchemeName)
+                    .AddScheme<AuthenticationSchemeOptions, RazorWireHeaderAuthenticationHandler>(
+                        RazorWireHeaderAuthenticationHandler.SchemeName,
+                        _ => { });
+                services.AddAuthorization(
+                    options =>
+                    {
+                        options.FallbackPolicy = new AuthorizationPolicyBuilder(RazorWireHeaderAuthenticationHandler.SchemeName)
+                            .RequireAuthenticatedUser()
+                            .RequireClaim("scope", "app.fallback")
+                            .Build();
+                    });
+                services.AddSingleton<IRazorWireStreamAuthorizationFilter>(
+                    new FixedStreamAuthorizationFilter(AppSurfaceAuthResult.Forbidden()));
+                services.AddSingleton<IRazorWireStreamAuthorizer>(
+                    new FixedStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+            },
+            configureApp: app =>
+            {
+                app.UseAuthentication();
+                app.UseAuthorization();
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/tenant-secret-42");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_FilterDenial_RunsAfterFallbackAuthorizationPolicyForAuthorizedCaller()
+    {
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            services =>
+            {
+                services
+                    .AddAuthentication(RazorWireHeaderAuthenticationHandler.SchemeName)
+                    .AddScheme<AuthenticationSchemeOptions, RazorWireHeaderAuthenticationHandler>(
+                        RazorWireHeaderAuthenticationHandler.SchemeName,
+                        _ => { });
+                services.AddAuthorization(
+                    options =>
+                    {
+                        options.FallbackPolicy = new AuthorizationPolicyBuilder(RazorWireHeaderAuthenticationHandler.SchemeName)
+                            .RequireAuthenticatedUser()
+                            .RequireClaim("scope", "app.fallback")
+                            .Build();
+                    });
+                services.AddSingleton<IRazorWireStreamAuthorizationFilter>(
+                    new FixedStreamAuthorizationFilter(AppSurfaceAuthResult.Forbidden()));
+                services.AddSingleton<IRazorWireStreamAuthorizer>(
+                    new FixedStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+            },
+            configureApp: app =>
+            {
+                app.UseAuthentication();
+                app.UseAuthorization();
+            });
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/_rw/streams/tenant-secret-42");
+        request.Headers.Add(RazorWireHeaderAuthenticationHandler.UserHeaderName, "razorwire-user");
+        request.Headers.Add(RazorWireHeaderAuthenticationHandler.ScopeHeaderName, "app.fallback");
+        using var response = await fixture.Client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Contains(nameof(AppSurfaceAuthOutcome.Forbid), body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task StreamEndpoint_ResultAuthorizerPrivacy_OmitsAppMessageMetadataExceptionChannelAndClaims()
     {
         var hub = new TrackingStreamHub();
@@ -192,6 +321,39 @@ public class RazorWireEndpointAuthorizationTests
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         Assert.Equal(0, hub.SubscribeCount);
         Assert.Contains("NullResult", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_FilterException_FailsClosedAndLogsFilterType()
+    {
+        var hub = new TrackingStreamHub();
+        var loggerProvider = new CapturingLoggerProvider();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            configureServices: services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireStreamAuthorizationFilter, ThrowingStreamAuthorizationFilter>();
+                services.AddSingleton<IRazorWireStreamAuthorizer>(
+                    new FixedStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+            },
+            configureLogging: logging =>
+            {
+                logging.ClearProviders();
+                logging.AddProvider(loggerProvider);
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/public");
+        var body = await response.Content.ReadAsStringAsync();
+        var entry = Assert.Single(loggerProvider.Entries, log => log.EventId.Id == 13700);
+        var renderedState = string.Join(" ", entry.State.Select(pair => $"{pair.Key}={pair.Value}"));
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains("Exception", body, StringComparison.Ordinal);
+        Assert.Contains(nameof(ThrowingStreamAuthorizationFilter), renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain(nameof(FixedStreamAuthorizer), renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain("filter secret", entry.Message + renderedState + body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -843,6 +1005,7 @@ public class RazorWireEndpointAuthorizationTests
     {
         public const string SchemeName = "RazorWireHeaderTest";
         public const string UserHeaderName = "X-Test-User";
+        public const string ScopeHeaderName = "X-Test-Scope";
 
         public RazorWireHeaderAuthenticationHandler(
             IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -861,11 +1024,21 @@ public class RazorWireEndpointAuthorizationTests
             }
 
             var userName = userValues[0]!;
+            var claims = new List<Claim>
+            {
+                new(ClaimTypes.Name, userName),
+                new(ClaimTypes.NameIdentifier, userName)
+            };
+            if (Request.Headers.TryGetValue(ScopeHeaderName, out var scopeValues))
+            {
+                claims.AddRange(
+                    scopeValues
+                        .SelectMany(value => value?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [])
+                        .Select(scope => new Claim("scope", scope)));
+            }
+
             var identity = new ClaimsIdentity(
-                [
-                    new Claim(ClaimTypes.Name, userName),
-                    new Claim(ClaimTypes.NameIdentifier, userName)
-                ],
+                claims,
                 SchemeName);
             var principal = new ClaimsPrincipal(identity);
             var ticket = new AuthenticationTicket(principal, SchemeName);
@@ -958,6 +1131,35 @@ public class RazorWireEndpointAuthorizationTests
         public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
         {
             return new ValueTask<AppSurfaceAuthResult>(result);
+        }
+    }
+
+    private sealed class CountingStreamAuthorizer(AppSurfaceAuthResult result) : IRazorWireStreamAuthorizer
+    {
+        private int _callCount;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public ValueTask<AppSurfaceAuthResult> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            Interlocked.Increment(ref _callCount);
+            return new ValueTask<AppSurfaceAuthResult>(result);
+        }
+    }
+
+    private sealed class FixedStreamAuthorizationFilter(AppSurfaceAuthResult? result) : IRazorWireStreamAuthorizationFilter
+    {
+        public ValueTask<AppSurfaceAuthResult?> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            return new ValueTask<AppSurfaceAuthResult?>(result);
+        }
+    }
+
+    private sealed class ThrowingStreamAuthorizationFilter : IRazorWireStreamAuthorizationFilter
+    {
+        public ValueTask<AppSurfaceAuthResult?> AuthorizeAsync(RazorWireStreamAuthorizationContext context)
+        {
+            throw new InvalidOperationException("filter secret");
         }
     }
 
