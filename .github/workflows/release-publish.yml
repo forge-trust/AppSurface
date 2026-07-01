@@ -17,13 +17,17 @@ on:
         description: Promote this stable docs archive to recommendedVersion.
         required: false
         default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
 
 concurrency:
   group: release-publish-${{ inputs.tag }}
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: read # Required so jobs can checkout the release tooling unless a narrower job override applies.
 
 jobs:
   validate-release:
@@ -31,8 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      actions: read
-      contents: read
+      actions: read # Required so release validation can verify the protected NuGet workflow run for the tag.
+      contents: read # Required to checkout the repository and inspect tag-bound release artifacts.
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
@@ -84,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write
+      contents: write # Required to create or reuse the draft GitHub Release and upload docs archive assets.
     outputs:
       archive_asset_name: ${{ steps.docs.outputs.archive_asset_name }}
       archive_sha256: ${{ steps.docs.outputs.archive_sha256 }}
@@ -155,13 +159,14 @@ jobs:
           set -euo pipefail
           assets_root="${RUNNER_TEMP}/appsurface-release-docs-assets"
           mkdir -p "${assets_root}" "${EXISTING_PAGES_ROOT}/releases"
-          mapfile -t release_tags < <(gh release list --exclude-drafts --limit 100 --json tagName,isPrerelease --jq '.[] | select(.isPrerelease == false) | .tagName')
-          if [[ "${#release_tags[@]}" -eq 0 ]]; then
+          mapfile -t release_rows < <(gh release list --exclude-drafts --limit 100 --json tagName,isPrerelease --jq '.[] | [.tagName, .isPrerelease] | @tsv')
+          if [[ "${#release_rows[@]}" -eq 0 ]]; then
             exit 0
           fi
           catalog_entries="${RUNNER_TEMP}/appsurface-existing-release-docs-catalog.jsonl"
           : > "${catalog_entries}"
-          for release_tag in "${release_tags[@]}"; do
+          for release_row in "${release_rows[@]}"; do
+            IFS=$'\t' read -r release_tag _is_prerelease <<< "${release_row}"
             release_version="${release_tag#v}"
             if [[ "${release_version}" == "${VERSION}" ]]; then
               continue
@@ -193,8 +198,10 @@ jobs:
           if [[ -s "${catalog_entries}" ]]; then
             jq -s \
               'def semver_key: (.version | capture("^(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)") | [.major,.minor,.patch] | map(tonumber));
+               def stable_version: (.version | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"));
                (sort_by(semver_key) | reverse) as $versions |
-               {schema:"appsurface-docs-version-catalog-v1",recommendedVersion:($versions[0].version),versions:($versions | map(. + {supportState:(if .version == $versions[0].version then "Current" else "Maintained" end)}))}' \
+               ($versions | map(select(stable_version)) | sort_by(semver_key) | reverse | first | .version // null) as $recommended |
+               {schema:"appsurface-docs-version-catalog-v1",recommendedVersion:$recommended,versions:($versions | map(. + {supportState:(if .version == $recommended then "Current" else "Maintained" end)}))}' \
               "${catalog_entries}" > "${EXISTING_PAGES_ROOT}/versions.json"
           fi
 
@@ -213,6 +220,13 @@ jobs:
           pages_staging="${RUNNER_TEMP}/appsurface-docs-pages"
           plan="${RUNNER_TEMP}/docs-publication-plan.json"
           summary="${RUNNER_TEMP}/docs-publication-summary.md"
+          case "${PROMOTE_RECOMMENDED}" in
+            true|false) ;;
+            *)
+              echo "promote-recommended must be true or false; got ${PROMOTE_RECOMMENDED}." >&2
+              exit 1
+              ;;
+          esac
           promote_arg=()
           if [[ "${PROMOTE_RECOMMENDED}" != "true" ]]; then
             promote_arg+=(--promote-recommended false)
@@ -264,6 +278,7 @@ jobs:
           git show "${TAG_COMMIT}:releases/v${VERSION}.md" > "${notes_file}"
           if gh release view "${TAG}" --json isDraft --jq '.isDraft' | grep -qx true; then
             echo "Reusing draft release ${TAG}."
+            gh release edit "${TAG}" --title "${TITLE}" --notes-file "${notes_file}"
           else
             gh release create "${TAG}" --verify-tag --draft --title "${TITLE}" --notes-file "${notes_file}"
           fi
@@ -292,8 +307,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      pages: write
-      id-token: write
+      pages: write # Required to publish the verified Pages artifact.
+      id-token: write # Required by deploy-pages to mint the GitHub Pages deployment token.
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -314,7 +329,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
+      contents: read # Required to download the draft release asset for public digest verification.
 
     steps:
       - name: Verify deployed docs and uploaded release assets
@@ -336,6 +351,13 @@ jobs:
           manifest="${RUNNER_TEMP}/release-manifest.json"
           asset_dir="${RUNNER_TEMP}/release-assets"
           mkdir -p "${asset_dir}"
+          case "${PROMOTE_RECOMMENDED}" in
+            true|false) ;;
+            *)
+              echo "promote-recommended must be true or false; got ${PROMOTE_RECOMMENDED}." >&2
+              exit 1
+              ;;
+          esac
           curl -fsSL "${root}/versions.json" -o "${catalog}"
           curl -fsSL "${root}/docs" -o "${RUNNER_TEMP}/docs-root.html"
           curl -fsSL "${root}/${EXACT_TREE_PATH}/.appsurface-docs-release-manifest.json" -o "${manifest}"
@@ -384,7 +406,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: write # Required to promote the verified draft GitHub Release to public.
 
     steps:
       - name: Checkout repository at validated tag commit

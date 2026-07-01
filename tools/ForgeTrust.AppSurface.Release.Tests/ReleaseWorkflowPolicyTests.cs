@@ -51,6 +51,8 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.DoesNotContain("docs-catalog:", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("docs-trusted-release-root:", publish, StringComparison.Ordinal);
         Assert.Contains("promote-recommended:", publish, StringComparison.Ordinal);
+        Assert.Contains("type: choice", publish, StringComparison.Ordinal);
+        Assert.Contains("promote-recommended must be true or false", publish, StringComparison.Ordinal);
         Assert.Contains("validate-release:", publish, StringComparison.Ordinal);
         Assert.Contains("publish-docs-archive:", publish, StringComparison.Ordinal);
         Assert.Contains("deploy-docs-pages:", publish, StringComparison.Ordinal);
@@ -78,6 +80,9 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("--output \"${EXISTING_PAGES_ROOT}\"", publish, StringComparison.Ordinal);
         Assert.Contains("cp -R \"${EXISTING_PAGES_ROOT}/.\" \"${exact_tree}/\"", publish, StringComparison.Ordinal);
         Assert.Contains("Hydrate existing release docs archives", publish, StringComparison.Ordinal);
+        Assert.Contains("mapfile -t release_rows", publish, StringComparison.Ordinal);
+        Assert.Contains("[.tagName, .isPrerelease] | @tsv", publish, StringComparison.Ordinal);
+        Assert.DoesNotContain("select(.isPrerelease == false)", publish, StringComparison.Ordinal);
         Assert.Contains("--existing-pages-root \"${EXISTING_PAGES_ROOT}\"", publish, StringComparison.Ordinal);
         Assert.Contains("curl -fsSL \"${root}/docs\"", publish, StringComparison.Ordinal);
         var hydrateIndex = publish.IndexOf("Hydrate existing release docs archives", StringComparison.Ordinal);
@@ -87,6 +92,7 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("--expected-release-manifest-sha256 \"${EXPECTED_MANIFEST_SHA256}\"", publish, StringComparison.Ordinal);
         Assert.Contains("docs verify-archive", publish, StringComparison.Ordinal);
         Assert.Contains("gh release create \"${TAG}\" --verify-tag --draft", publish, StringComparison.Ordinal);
+        Assert.Contains("gh release edit \"${TAG}\" --title \"${TITLE}\" --notes-file \"${notes_file}\"", publish, StringComparison.Ordinal);
         Assert.Contains("gh release upload \"${TAG}\" \"${ARCHIVE_PATH}\" \"${SHA256_PATH}\" --clobber", publish, StringComparison.Ordinal);
         Assert.Contains("actions/upload-pages-artifact", publish, StringComparison.Ordinal);
         Assert.Contains("actions/deploy-pages", publish, StringComparison.Ordinal);
@@ -104,10 +110,16 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("git fetch origin \"${BASE_REF}:refs/remotes/origin/${BASE_REF}\"", publish, StringComparison.Ordinal);
         Assert.Contains("evidence_path", await ReadRepositoryFileAsync("tools/ForgeTrust.AppSurface.Release/ReleasePublishing.cs"), StringComparison.Ordinal);
         Assert.Contains("pages: write", publish, StringComparison.Ordinal);
+        Assert.Contains("Required to publish the verified Pages artifact.", publish, StringComparison.Ordinal);
         Assert.Contains("id-token: write", publish, StringComparison.Ordinal);
+        Assert.Contains("Required by deploy-pages to mint the GitHub Pages deployment token.", publish, StringComparison.Ordinal);
+        Assert.Contains("Required so release validation can verify the protected NuGet workflow run for the tag.", publish, StringComparison.Ordinal);
+        Assert.Contains("Required to create or reuse the draft GitHub Release and upload docs archive assets.", publish, StringComparison.Ordinal);
+        Assert.Contains("Required to promote the verified draft GitHub Release to public.", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("attestations: write", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("supportState:\"Supported\"", publish, StringComparison.Ordinal);
         Assert.Contains("supportState:\"Maintained\"", publish, StringComparison.Ordinal);
+        Assert.Contains("stable_version", publish, StringComparison.Ordinal);
         Assert.Contains("semver_key", publish, StringComparison.Ordinal);
     }
 
@@ -169,11 +181,15 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.True(hydrateIndex >= 0, "Main docs deploy must hydrate published release docs archives.");
         Assert.True(uploadIndex > hydrateIndex, "Release archive hydration must happen before Pages artifact upload.");
         Assert.Contains("gh release list --exclude-drafts", workflow, StringComparison.Ordinal);
+        Assert.Contains("mapfile -t release_rows", workflow, StringComparison.Ordinal);
+        Assert.Contains("[.tagName, .isPrerelease] | @tsv", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("select(.isPrerelease == false)", workflow, StringComparison.Ordinal);
         Assert.Contains("gh release download \"${release_tag}\" --pattern \"${asset_name}\"", workflow, StringComparison.Ordinal);
         Assert.Contains("tar -xzf \"${asset_dir}/${asset_name}\" -C \"${exact_tree}\"", workflow, StringComparison.Ordinal);
         Assert.Contains("releaseManifestSha256", workflow, StringComparison.Ordinal);
         Assert.Contains("\"${PAGES_ROOT}/versions.json\"", workflow, StringComparison.Ordinal);
         Assert.Contains("semver_key", workflow, StringComparison.Ordinal);
+        Assert.Contains("stable_version", workflow, StringComparison.Ordinal);
         Assert.Contains("supportState:\"Maintained\"", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("supportState:\"Supported\"", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("sort | last", workflow, StringComparison.Ordinal);

@@ -4322,6 +4322,162 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task DocsPublicationRejectsMissingExistingPagesRootBeforeWritingOutputs()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var archive = RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz");
+        var plan = RepositoryPath("artifacts/docs-publication-plan.json");
+
+        var result = await RunAsync(
+            [
+                "docs-publication",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--docs-exact-tree",
+                TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+                "--existing-pages-root",
+                ExternalPath("missing-pages"),
+                "--archive-output",
+                archive,
+                "--pages-staging-root",
+                ExternalPath("pages"),
+                "--plan-output",
+                plan
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-publication-existing-pages-missing", result.Stderr, StringComparison.Ordinal);
+        Assert.False(File.Exists(archive));
+        Assert.False(File.Exists(plan));
+    }
+
+    [Theory]
+    [InlineData("archive")]
+    [InlineData("plan")]
+    [InlineData("summary")]
+    public async Task DocsPublicationRejectsGeneratedOutputPathsUnderExactTree(string outputKind)
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var exactTree = TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath);
+        var archive = string.Equals(outputKind, "archive", StringComparison.Ordinal)
+            ? Path.Join(exactTree, "appsurface-docs-v0.1.0.tar.gz")
+            : RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz");
+        var plan = string.Equals(outputKind, "plan", StringComparison.Ordinal)
+            ? Path.Join(exactTree, "docs-publication-plan.json")
+            : RepositoryPath("artifacts/docs-publication-plan.json");
+        var summary = string.Equals(outputKind, "summary", StringComparison.Ordinal)
+            ? Path.Join(exactTree, "docs-publication-summary.md")
+            : RepositoryPath("artifacts/docs-publication-summary.md");
+
+        var result = await RunAsync(
+            [
+                "docs-publication",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--docs-exact-tree",
+                exactTree,
+                "--archive-output",
+                archive,
+                "--pages-staging-root",
+                ExternalPath("pages"),
+                "--plan-output",
+                plan,
+                "--summary-output",
+                summary
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-publication-output-path-unsafe", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("inside the docs exact tree", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DocsPublicationRejectsReparsePointArchiveEntries()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var exactTree = TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath);
+        if (!TryCreateSymbolicLink(
+                Path.Join(exactTree, "linked-index.html"),
+                Path.Join(exactTree, "index.html"),
+                isDirectory: false))
+        {
+            return;
+        }
+
+        var result = await RunAsync(
+            [
+                "docs-publication",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--docs-exact-tree",
+                exactTree,
+                "--archive-output",
+                RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz"),
+                "--pages-staging-root",
+                ExternalPath("pages"),
+                "--plan-output",
+                RepositoryPath("artifacts/docs-publication-plan.json")
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-publication-reparse-entry", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("linked-index.html", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DocsPublicationRejectsReparsePointPagesEntries()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var existingPagesRoot = RepositoryPath("artifacts/existing-pages");
+        Directory.CreateDirectory(existingPagesRoot);
+        await File.WriteAllTextAsync(Path.Join(existingPagesRoot, "index.html"), "current docs");
+        if (!TryCreateSymbolicLink(
+                Path.Join(existingPagesRoot, "linked-index.html"),
+                Path.Join(existingPagesRoot, "index.html"),
+                isDirectory: false))
+        {
+            return;
+        }
+
+        var result = await RunAsync(
+            [
+                "docs-publication",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--docs-exact-tree",
+                TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+                "--existing-pages-root",
+                existingPagesRoot,
+                "--archive-output",
+                RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz"),
+                "--pages-staging-root",
+                ExternalPath("pages"),
+                "--plan-output",
+                RepositoryPath("artifacts/docs-publication-plan.json")
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-publication-reparse-entry", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("linked-index.html", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DocsPublicationRejectsGithubOutputRootPath()
     {
         await SeedRepositoryAsync();
@@ -4703,6 +4859,35 @@ public sealed class ReleaseToolTests : IDisposable
     private string ExternalPath(string relativePath)
     {
         return TestPathUtils.PathUnder(_externalRoot, relativePath);
+    }
+
+    private static bool TryCreateSymbolicLink(string linkPath, string targetPath, bool isDirectory)
+    {
+        try
+        {
+            if (isDirectory)
+            {
+                Directory.CreateSymbolicLink(linkPath, targetPath);
+            }
+            else
+            {
+                File.CreateSymbolicLink(linkPath, targetPath);
+            }
+
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
     }
 
     private async Task<CliResult> RunAsync(string[] args, FakeCommandRunner runner)

@@ -262,13 +262,14 @@ jobs:
           set -euo pipefail
           assets_root="${RUNNER_TEMP}/appsurface-release-docs-assets"
           mkdir -p "${assets_root}" "${PAGES_ROOT}/releases"
-          mapfile -t release_tags < <(gh release list --exclude-drafts --limit 100 --json tagName,isPrerelease --jq '.[] | select(.isPrerelease == false) | .tagName')
-          if [[ "${#release_tags[@]}" -eq 0 ]]; then
+          mapfile -t release_rows < <(gh release list --exclude-drafts --limit 100 --json tagName,isPrerelease --jq '.[] | [.tagName, .isPrerelease] | @tsv')
+          if [[ "${#release_rows[@]}" -eq 0 ]]; then
             exit 0
           fi
           catalog_entries="${RUNNER_TEMP}/appsurface-release-docs-catalog.jsonl"
           : > "${catalog_entries}"
-          for release_tag in "${release_tags[@]}"; do
+          for release_row in "${release_rows[@]}"; do
+            IFS=$'\t' read -r release_tag _is_prerelease <<< "${release_row}"
             version="${release_tag#v}"
             asset_name="appsurface-docs-v${version}.tar.gz"
             asset_dir="${assets_root}/${version}"
@@ -297,8 +298,10 @@ jobs:
           if [[ -s "${catalog_entries}" ]]; then
             jq -s \
               'def semver_key: (.version | capture("^(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)") | [.major,.minor,.patch] | map(tonumber));
+               def stable_version: (.version | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"));
                (sort_by(semver_key) | reverse) as $versions |
-               {schema:"appsurface-docs-version-catalog-v1",recommendedVersion:($versions[0].version),versions:($versions | map(. + {supportState:(if .version == $versions[0].version then "Current" else "Maintained" end)}))}' \
+               ($versions | map(select(stable_version)) | sort_by(semver_key) | reverse | first | .version // null) as $recommended |
+               {schema:"appsurface-docs-version-catalog-v1",recommendedVersion:$recommended,versions:($versions | map(. + {supportState:(if .version == $recommended then "Current" else "Maintained" end)}))}' \
               "${catalog_entries}" > "${PAGES_ROOT}/versions.json"
           fi
 

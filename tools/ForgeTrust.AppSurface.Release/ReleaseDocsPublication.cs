@@ -9,6 +9,15 @@ namespace ForgeTrust.AppSurface.Release;
 /// <summary>
 /// Creates deterministic AppSurface Docs release archives, version catalogs, Pages staging payloads, and maintainer recovery summaries.
 /// </summary>
+/// <remarks>
+/// This planner is the release-tool owned boundary between a tag-local AppSurface Docs export and the public publication workflow.
+/// It does not deploy Pages or mutate GitHub Releases directly; instead it emits deterministic local artifacts that GitHub Actions
+/// uploads, deploys, verifies, and promotes in separate jobs. Callers must provide an already-exported exact tree for the tag, a
+/// disposable Pages staging root, and output paths that do not overlap the exact tree. Supplying <see cref="DocsPublicationRequest.ExistingPagesRoot"/>
+/// means prior Pages content is required and will be copied before the new immutable <c>releases/{version}/</c> tree is staged.
+/// The staging root is deleted and recreated during planning, so it must never point at the repository, an exact tree, or any
+/// durable artifact directory.
+/// </remarks>
 internal sealed class ReleaseDocsPublication
 {
     private const string ReleaseManifestFileName = ".appsurface-docs-release-manifest.json";
@@ -17,7 +26,11 @@ internal sealed class ReleaseDocsPublication
     /// <summary>
     /// Creates a docs publication planner for a repository workspace.
     /// </summary>
-    /// <param name="workspace">Repository workspace paths.</param>
+    /// <param name="workspace">Repository workspace paths used to format diagnostics and enforce repository-relative path policy.</param>
+    /// <remarks>
+    /// The workspace is not used as an output root. Release publication artifacts may be staged in runner temporary directories,
+    /// but diagnostics should still report paths relative to the repository whenever that is possible.
+    /// </remarks>
     internal ReleaseDocsPublication(ReleaseWorkspace workspace)
     {
         _workspace = workspace;
@@ -26,9 +39,16 @@ internal sealed class ReleaseDocsPublication
     /// <summary>
     /// Produces the release docs publication plan and all local artifacts the publish workflow transports.
     /// </summary>
-    /// <param name="request">Publication request from the release workflow.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The completed publication plan.</returns>
+    /// <param name="request">Publication request from the release workflow, including exact-tree input, output paths, optional existing Pages content, and promotion policy.</param>
+    /// <param name="cancellationToken">Cancellation token for file reads, writes, and hash computation.</param>
+    /// <returns>The completed publication plan that names every generated artifact and the recovery summary path.</returns>
+    /// <remarks>
+    /// The method validates the tag/version pairing, verifies the exact-tree release manifest digest against release evidence when
+    /// supplied, writes a deterministic <c>.tar.gz</c> plus <c>.sha256</c>, resets the Pages staging directory, copies existing Pages
+    /// content when requested, writes the merged catalog, and emits a recovery summary. It rejects missing existing Pages roots,
+    /// output paths under the exact tree, and reparse-point entries so a release archive cannot accidentally include generated output
+    /// or follow a symlink outside the trusted tree.
+    /// </remarks>
     internal async Task<DocsPublicationPlan> CreateAsync(DocsPublicationRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -79,8 +99,18 @@ internal sealed class ReleaseDocsPublication
         await File.WriteAllTextAsync(sha256Path, $"{archiveSha256}  {Path.GetFileName(request.ArchivePath)}{Environment.NewLine}", cancellationToken);
 
         ResetDirectory(request.PagesStagingRoot);
-        if (!string.IsNullOrWhiteSpace(request.ExistingPagesRoot) && Directory.Exists(request.ExistingPagesRoot))
+        if (!string.IsNullOrWhiteSpace(request.ExistingPagesRoot))
         {
+            if (!Directory.Exists(request.ExistingPagesRoot))
+            {
+                throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                    "release-docs-publication-existing-pages-missing",
+                    "Docs publication could not hydrate the existing Pages payload.",
+                    $"`--existing-pages-root {_workspace.DisplayPath(request.ExistingPagesRoot)}` does not exist or is not an ordinary directory.",
+                    "Export or download the current Pages payload before creating the publication plan, or omit the option only when intentionally publishing the first docs catalog.",
+                    "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
+            }
+
             CopyDirectory(request.ExistingPagesRoot, request.PagesStagingRoot);
         }
 
@@ -169,7 +199,7 @@ internal sealed class ReleaseDocsPublication
         await using (var tarStream = File.Create(tempTarPath))
         await using (var writer = new TarWriter(tarStream, TarEntryFormat.Pax, leaveOpen: false))
         {
-            foreach (var file in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories)
+            foreach (var file in EnumerateTrustedFiles(sourceDirectory)
                          .OrderBy(path => Path.GetRelativePath(sourceDirectory, path).Replace(Path.DirectorySeparatorChar, '/'), StringComparer.Ordinal))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -404,12 +434,14 @@ internal sealed class ReleaseDocsPublication
 
     private static void CopyDirectory(string source, string destination)
     {
-        foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+        foreach (var directory in EnumerateTrustedDirectories(source)
+                     .OrderBy(path => Path.GetRelativePath(source, path).Replace(Path.DirectorySeparatorChar, '/'), StringComparer.Ordinal))
         {
             Directory.CreateDirectory(Path.Join(destination, Path.GetRelativePath(source, directory)));
         }
 
-        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        foreach (var file in EnumerateTrustedFiles(source)
+                     .OrderBy(path => Path.GetRelativePath(source, path).Replace(Path.DirectorySeparatorChar, '/'), StringComparer.Ordinal))
         {
             var target = Path.Join(destination, Path.GetRelativePath(source, file));
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
@@ -428,6 +460,8 @@ internal sealed class ReleaseDocsPublication
                 "Export docs from the tag commit before creating a publication plan.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
         }
+
+        ThrowIfReparsePoint(path, path);
 
         if (ReleaseWorkspace.IsUnderPath(_workspace.RepositoryRoot, path))
         {
@@ -450,14 +484,45 @@ internal sealed class ReleaseDocsPublication
         ValidatePagesStagingRoot(request.PagesStagingRoot, "docs exact tree", request.ExactTreePath);
         ValidatePagesStagingRoot(request.PagesStagingRoot, "archive output", request.ArchivePath);
         ValidatePagesStagingRoot(request.PagesStagingRoot, "publication plan output", request.PlanPath);
+        ValidateGeneratedOutputOutsideExactTree(request.ExactTreePath, "archive output", request.ArchivePath);
+        ValidateGeneratedOutputOutsideExactTree(request.ExactTreePath, "temporary archive output", request.ArchivePath + ".tar");
+        ValidateGeneratedOutputOutsideExactTree(request.ExactTreePath, "publication plan output", request.PlanPath);
         if (!string.IsNullOrWhiteSpace(request.SummaryPath))
         {
             ValidatePagesStagingRoot(request.PagesStagingRoot, "recovery summary output", request.SummaryPath);
+            ValidateGeneratedOutputOutsideExactTree(request.ExactTreePath, "recovery summary output", request.SummaryPath);
         }
 
         if (!string.IsNullOrWhiteSpace(request.ExistingPagesRoot))
         {
             ValidatePagesStagingRoot(request.PagesStagingRoot, "existing Pages root", request.ExistingPagesRoot);
+            if (!Directory.Exists(request.ExistingPagesRoot))
+            {
+                throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                    "release-docs-publication-existing-pages-missing",
+                    "Docs publication could not hydrate the existing Pages payload.",
+                    $"`--existing-pages-root {_workspace.DisplayPath(request.ExistingPagesRoot)}` does not exist or is not an ordinary directory.",
+                    "Export or download the current Pages payload before creating the publication plan, or omit the option only when intentionally publishing the first docs catalog.",
+                    "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
+            }
+
+            ThrowIfReparsePoint(request.ExistingPagesRoot, request.ExistingPagesRoot);
+        }
+    }
+
+    private void ValidateGeneratedOutputOutsideExactTree(string exactTreePath, string outputDescription, string outputPath)
+    {
+        var fullExactTreePath = NormalizePath(exactTreePath);
+        var fullOutputPath = NormalizePath(outputPath);
+        if (string.Equals(fullExactTreePath, fullOutputPath, StringComparison.Ordinal)
+            || ReleaseWorkspace.IsUnderPath(fullExactTreePath, fullOutputPath))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-docs-publication-output-path-unsafe",
+                "Docs publication received an unsafe generated output path.",
+                $"The {outputDescription} `{_workspace.DisplayPath(fullOutputPath)}` is inside the docs exact tree `{_workspace.DisplayPath(fullExactTreePath)}`.",
+                "Write archives, temporary tar files, plans, and summaries outside the exact tree so deterministic archive creation cannot include its own generated outputs.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
         }
     }
 
@@ -525,6 +590,66 @@ internal sealed class ReleaseDocsPublication
         }
     }
 
+    private static IEnumerable<string> EnumerateTrustedDirectories(string root)
+    {
+        var stack = new Stack<string>();
+        stack.Push(root);
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            foreach (var entry in Directory.EnumerateFileSystemEntries(current))
+            {
+                ThrowIfReparsePoint(root, entry);
+                if (!Directory.Exists(entry))
+                {
+                    continue;
+                }
+
+                yield return entry;
+                stack.Push(entry);
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateTrustedFiles(string root)
+    {
+        var stack = new Stack<string>();
+        stack.Push(root);
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            foreach (var entry in Directory.EnumerateFileSystemEntries(current))
+            {
+                ThrowIfReparsePoint(root, entry);
+                if (Directory.Exists(entry))
+                {
+                    stack.Push(entry);
+                    continue;
+                }
+
+                yield return entry;
+            }
+        }
+    }
+
+    private static void ThrowIfReparsePoint(string root, string path)
+    {
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0)
+        {
+            return;
+        }
+
+        var relativePath = Path.GetRelativePath(root, path).Replace('\\', '/');
+        throw new ReleaseToolException(ReleaseDiagnostic.Error(
+            "release-docs-publication-reparse-entry",
+            "Docs publication encountered a reparse-point entry.",
+            $"`{relativePath}` is a symlink, junction, or other reparse point.",
+            "Export docs into an ordinary directory tree before creating release archives or Pages payloads.",
+            "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
+    }
+
     private static void AppendOutput(StringBuilder builder, string name, string value)
     {
         builder.AppendLine($"{name}={value}");
@@ -534,6 +659,16 @@ internal sealed class ReleaseDocsPublication
 /// <summary>
 /// Request for creating docs publication artifacts.
 /// </summary>
+/// <param name="Version">Release version without a leading <c>v</c>. Stable versions may become <c>recommendedVersion</c>.</param>
+/// <param name="Tag">Annotated tag name that must equal <c>v{Version}</c>.</param>
+/// <param name="ExactTreePath">Exported AppSurface Docs exact tree for this tag. It must already contain the release manifest.</param>
+/// <param name="ExistingPagesRoot">Optional existing Pages payload to preserve. When supplied, the directory must exist.</param>
+/// <param name="ArchivePath">Output path for the deterministic docs archive. The sibling temporary <c>.tar</c> path must also be outside the exact tree.</param>
+/// <param name="PagesStagingRoot">Disposable output directory for the merged Pages payload. It is deleted and recreated.</param>
+/// <param name="PlanPath">Output path for the machine-readable publication plan.</param>
+/// <param name="SummaryPath">Optional output path for the maintainer recovery summary.</param>
+/// <param name="ExpectedReleaseManifestSha256">Optional release evidence digest that the exact-tree manifest must match.</param>
+/// <param name="PromoteRecommended">Whether stable publication should update the public recommended docs pointer.</param>
 internal sealed record DocsPublicationRequest(
     SemVer Version,
     string Tag,
@@ -549,6 +684,22 @@ internal sealed record DocsPublicationRequest(
 /// <summary>
 /// Machine-readable release docs publication plan.
 /// </summary>
+/// <param name="Schema">Plan schema identifier.</param>
+/// <param name="Version">Release version described by the plan.</param>
+/// <param name="Tag">Annotated release tag.</param>
+/// <param name="PlanPath">Path where this plan was written.</param>
+/// <param name="ArchiveAssetName">GitHub Release asset name for the docs archive.</param>
+/// <param name="ArchivePath">Local docs archive path.</param>
+/// <param name="ArchiveSha256">SHA-256 digest of the archive bytes.</param>
+/// <param name="Sha256Path">Local path of the paired digest ledger file.</param>
+/// <param name="ExactTreePath">Catalog exact-tree path, relative to the Pages release root.</param>
+/// <param name="ReleaseManifestSha256">SHA-256 digest of the exact-tree release manifest.</param>
+/// <param name="PagesStagingRoot">Local staged Pages payload root.</param>
+/// <param name="CatalogPath">Local staged <c>versions.json</c> path.</param>
+/// <param name="RecommendedVersion">Recommended public docs version after catalog generation, if any.</param>
+/// <param name="CatalogEntry">Catalog entry generated for this release.</param>
+/// <param name="RetryPolicy">Policy for draft/public asset replacement during recovery.</param>
+/// <param name="Recovery">Recovery summary metadata.</param>
 internal sealed record DocsPublicationPlan(
     string Schema,
     string Version,
@@ -570,6 +721,14 @@ internal sealed record DocsPublicationPlan(
 /// <summary>
 /// Version catalog entry produced for the released docs tree.
 /// </summary>
+/// <param name="Version">Catalog version value.</param>
+/// <param name="Label">Human-readable catalog label.</param>
+/// <param name="Summary">Short release summary for docs navigation.</param>
+/// <param name="SupportState">Support state, usually <c>Current</c> for promoted stable releases or <c>Maintained</c>.</param>
+/// <param name="Visibility">Catalog visibility. Release publication emits public entries.</param>
+/// <param name="AdvisoryState">Advisory state for the docs version.</param>
+/// <param name="ExactTreePath">Release-root-relative exact tree path.</param>
+/// <param name="ReleaseManifestSha256">Pinned release manifest digest for the exact tree.</param>
 internal sealed record DocsPublicationCatalogEntry(
     string Version,
     string Label,
@@ -583,6 +742,8 @@ internal sealed record DocsPublicationCatalogEntry(
 /// <summary>
 /// Draft/public asset retry policy emitted with the publication plan.
 /// </summary>
+/// <param name="DraftAssetReplaceAllowed">Whether recovery may replace assets while the GitHub Release is still a draft.</param>
+/// <param name="PublicAssetReplaceAllowed">Whether recovery may replace assets after the GitHub Release is public.</param>
 internal sealed record DocsPublicationRetryPolicy(
     [property: JsonPropertyName("draftAssetReplaceAllowed")] bool DraftAssetReplaceAllowed,
     [property: JsonPropertyName("publicAssetReplaceAllowed")] bool PublicAssetReplaceAllowed);
@@ -590,4 +751,5 @@ internal sealed record DocsPublicationRetryPolicy(
 /// <summary>
 /// Maintainer recovery summary metadata.
 /// </summary>
+/// <param name="SummaryPath">Path to the human-readable recovery summary with resume, publish, and abort commands.</param>
 internal sealed record DocsPublicationRecovery(string SummaryPath);
