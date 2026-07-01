@@ -33,6 +33,11 @@ DOTNET_ENVIRONMENT=Development dotnet run --project examples/product-readiness-l
 curl http://127.0.0.1:5061/readiness.md
 ```
 
+The lab-local `/readiness` and `/readiness.md` routes return the evaluator report. They are not the reusable AppSurface
+Web platform probes. Normal AppSurface web apps get default `/health` and `/ready` probes from
+`ForgeTrust.AppSurface.Web`; use ready-tagged ASP.NET Core health checks when deployment traffic must wait for a
+startup-critical dependency.
+
 Run the Aspire AppHost with local Postgres:
 
 ```bash
