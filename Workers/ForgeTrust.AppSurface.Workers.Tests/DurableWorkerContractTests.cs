@@ -36,12 +36,32 @@ public sealed class DurableWorkerContractTests
         Assert.Equal("attempt-1", correlation.AttemptId);
     }
 
-    [Theory]
-    [InlineData("")]
-    [InlineData(" ")]
-    public void Correlation_RejectsBlankIdentifiers(string value)
+    public static TheoryData<string?, string?, string?, string?> InvalidCorrelationValues { get; } = new()
     {
-        Assert.Throws<ArgumentException>(() => new DurableWorkerCorrelation(value, "work", "instance", "attempt"));
+        { null, "work", "instance", "attempt" },
+        { "", "work", "instance", "attempt" },
+        { " ", "work", "instance", "attempt" },
+        { "worker", null, "instance", "attempt" },
+        { "worker", "", "instance", "attempt" },
+        { "worker", " ", "instance", "attempt" },
+        { "worker", "work", null, "attempt" },
+        { "worker", "work", "", "attempt" },
+        { "worker", "work", " ", "attempt" },
+        { "worker", "work", "instance", null },
+        { "worker", "work", "instance", "" },
+        { "worker", "work", "instance", " " },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidCorrelationValues))]
+    public void Correlation_RejectsInvalidIdentifiers(
+        string? workerName,
+        string? workId,
+        string? instanceId,
+        string? attemptId)
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new DurableWorkerCorrelation(workerName!, workId!, instanceId!, attemptId!));
     }
 
     [Fact]
@@ -104,6 +124,31 @@ public sealed class DurableWorkerContractTests
             "worker.claimed",
             DurableWorkerRetryability.Terminal,
             null!));
+    }
+
+    [Fact]
+    public void Envelope_RejectsUnsafeReasonCode()
+    {
+        Assert.Throws<DurableWorkerUnsafeMetadataException>(() => new DurableWorkerEnvelope<string>(
+            DurableWorkerProjectionOutcome.Claimed,
+            "Authorization: Bearer token",
+            DurableWorkerRetryability.Terminal,
+            TestCorrelation()));
+    }
+
+    [Fact]
+    public void Envelope_RejectsUndefinedEnumValues()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkerEnvelope<string>(
+            (DurableWorkerProjectionOutcome)999,
+            "worker.invalid",
+            DurableWorkerRetryability.Terminal,
+            TestCorrelation()));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkerEnvelope<string>(
+            DurableWorkerProjectionOutcome.Claimed,
+            "worker.invalid",
+            (DurableWorkerRetryability)999,
+            TestCorrelation()));
     }
 
     [Theory]
@@ -232,6 +277,8 @@ public sealed class DurableWorkerContractTests
     [InlineData("safe", " ")]
     [InlineData("raw-payload", "safe")]
     [InlineData("provider.url", "safe")]
+    [InlineData("safe", "https://provider.example/messages/1")]
+    [InlineData("safe", "http://provider.example/messages/1")]
     [InlineData("safe", "password=value")]
     [InlineData("safe", "-----BEGIN PRIVATE KEY-----")]
     public void MetadataSafety_RejectsUnsafeKeysAndValues(string key, string value)
@@ -242,6 +289,20 @@ public sealed class DurableWorkerContractTests
         };
 
         Assert.ThrowsAny<ArgumentException>(() => DurableWorkerMetadataSafety.CopySafe(metadata));
+    }
+
+    [Fact]
+    public void MetadataSafety_RejectsTrimmedKeyCollisions()
+    {
+        var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["id"] = "one",
+            [" id "] = "two",
+        };
+
+        var exception = Assert.Throws<ArgumentException>(() => DurableWorkerMetadataSafety.CopySafe(metadata));
+        Assert.Contains("appears more than once", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("metadata", exception.ParamName);
     }
 
     [Fact]

@@ -211,11 +211,16 @@ public sealed record DurableTaskWorkerDecision<TWork, TResult, TProjection>
     /// </summary>
     /// <param name="envelope">Projection envelope produced by projection repair.</param>
     /// <returns>A complete decision that carries the repaired projection.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="envelope"/> is not a reconciled outcome.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="envelope"/> is null.</exception>
     public static DurableTaskWorkerDecision<TWork, TResult, TProjection> CompleteProjection(
         DurableWorkerEnvelope<TProjection> envelope)
     {
         ArgumentNullException.ThrowIfNull(envelope);
+        if (envelope.Outcome != DurableWorkerProjectionOutcome.Reconciled)
+        {
+            throw new ArgumentException("Projection completion requires a reconciled worker outcome.", nameof(envelope));
+        }
 
         return new(
             DurableTaskWorkerDecisionKind.Complete,
@@ -287,12 +292,12 @@ public sealed record DurableTaskWorkerDecision<TWork, TResult, TProjection>
     /// </summary>
     /// <typeparam name="TPayload">Envelope payload type.</typeparam>
     /// <param name="envelope">Retryable envelope that should wait before retry.</param>
-    /// <param name="retryPolicy">Optional retry policy that explains host retry intent.</param>
+    /// <param name="retryPolicy">Optional retry policy that explains host retry intent. When null, the host chooses its default retry or timer behavior.</param>
     /// <returns>A wait-for-retry decision.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="envelope"/> is null.</exception>
     public static DurableTaskWorkerDecision<TWork, TResult, TProjection> WaitForRetry<TPayload>(
         DurableWorkerEnvelope<TPayload> envelope,
-        FlowRetryPolicy? retryPolicy)
+        FlowRetryPolicy? retryPolicy = null)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 

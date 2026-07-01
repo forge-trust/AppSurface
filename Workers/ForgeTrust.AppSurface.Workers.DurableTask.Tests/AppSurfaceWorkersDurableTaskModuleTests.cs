@@ -40,6 +40,37 @@ public sealed class AppSurfaceWorkersDurableTaskModuleTests
         Assert.Contains(builder.Modules, module => module is AppSurfaceFlowDurableTaskModule);
     }
 
+    [Fact]
+    public void ConfigureServices_RejectsNullInputs()
+    {
+        var module = new AppSurfaceWorkersDurableTaskModule();
+        var context = new StartupContext([], new TestHostModule());
+        var services = new ServiceCollection();
+
+        Assert.Throws<ArgumentNullException>(() => module.ConfigureServices(null!, services));
+        Assert.Throws<ArgumentNullException>(() => module.ConfigureServices(context, null!));
+    }
+
+    [Fact]
+    public void ConfigureServices_DoesNotOverwriteExistingRunnerRegistration()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IDurableTaskWorkerChainRunner<string, string, string>, ExistingRunner>();
+
+        new AppSurfaceWorkersDurableTaskModule().ConfigureServices(new StartupContext([], new TestHostModule()), services);
+
+        using var provider = services.BuildServiceProvider();
+        Assert.IsType<ExistingRunner>(
+            provider.GetRequiredService<IDurableTaskWorkerChainRunner<string, string, string>>());
+    }
+
+    [Fact]
+    public void RegisterDependentModules_RejectsNullBuilder()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new AppSurfaceWorkersDurableTaskModule().RegisterDependentModules(null!));
+    }
+
     private sealed class TestHostModule : IAppSurfaceHostModule
     {
         public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
@@ -57,5 +88,49 @@ public sealed class AppSurfaceWorkersDurableTaskModuleTests
         public void RegisterDependentModules(ModuleDependencyBuilder builder)
         {
         }
+    }
+
+    private sealed class ExistingRunner : IDurableTaskWorkerChainRunner<string, string, string>
+    {
+        public ValueTask<DurableTaskWorkerDecision<string, string, string>> TryClaimAsync(
+            IDurableWorkerProjectionContract<string, string, string> contract,
+            string work,
+            DurableWorkerCorrelation correlation,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask<DurableTaskWorkerDecision<string, string, string>> CompleteAsync(
+            IDurableWorkerProjectionContract<string, string, string> contract,
+            string work,
+            string result,
+            DurableWorkerCorrelation correlation,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask<DurableTaskWorkerDecision<string, string, string>> ReconcileProjectionAsync(
+            IDurableWorkerProjectionContract<string, string, string> contract,
+            string work,
+            string result,
+            DurableWorkerCorrelation correlation,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public DurableTaskWorkerDecision<string, string, string> WaitForExternalEvent(
+            DurableWorkerCorrelation correlation,
+            string eventName,
+            FlowTimeout? timeout = null) =>
+            throw new NotSupportedException();
+
+        public DurableTaskWorkerDecision<string, string, string> TimedOut(
+            DurableWorkerCorrelation correlation,
+            string eventName,
+            DurableWorkerDiagnostic? diagnostic = null) =>
+            throw new NotSupportedException();
+
+        public DurableTaskWorkerDecision<string, string, string> IgnoreLateSignal(
+            DurableWorkerCorrelation correlation,
+            string eventName,
+            DurableWorkerDiagnostic? diagnostic = null) =>
+            throw new NotSupportedException();
     }
 }

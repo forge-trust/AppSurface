@@ -37,8 +37,8 @@ public interface IDurableWorkerProjectionContract<TWork, TResult, TProjection>
     /// <param name="correlation">Correlation identifiers for the completion fact.</param>
     /// <param name="cancellationToken">Token that cancels completion recording.</param>
     /// <returns>
-    /// A completion envelope. Successful completion should lead to projection repair; duplicate completions should not
-    /// schedule executor activity.
+    /// A completion envelope. Successful completion should lead to projection repair; duplicate completions must not
+    /// trigger projection repair.
     /// </returns>
     ValueTask<DurableWorkerEnvelope<TResult>> CompleteAsync(
         TWork work,

@@ -60,6 +60,23 @@ public sealed class DurableTaskWorkerChainRunnerTests
         Assert.Equal(DurableWorkerProjectionOutcome.Conflict, decision.SourceOutcome);
     }
 
+    [Theory]
+    [InlineData(DurableWorkerProjectionOutcome.Completed)]
+    [InlineData(DurableWorkerProjectionOutcome.Reconciled)]
+    public async Task TryClaimAsync_InvalidStageOutcomeFaults(DurableWorkerProjectionOutcome outcome)
+    {
+        var runner = CreateRunner();
+        var contract = new FakeProjectionContract
+        {
+            ClaimEnvelope = Envelope<string>(outcome, "work"),
+        };
+
+        var decision = await runner.TryClaimAsync(contract, "work", TestCorrelation());
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.Fault, decision.Kind);
+        Assert.Equal(outcome, decision.SourceOutcome);
+    }
+
     [Fact]
     public async Task TryClaimAsync_RejectsNullInputsAndNullEnvelope()
     {
@@ -120,6 +137,23 @@ public sealed class DurableTaskWorkerChainRunnerTests
 
         Assert.Equal(DurableTaskWorkerDecisionKind.IgnoreLateSignal, decision.Kind);
         Assert.Equal(DurableWorkerProjectionOutcome.StaleFence, decision.SourceOutcome);
+    }
+
+    [Theory]
+    [InlineData(DurableWorkerProjectionOutcome.Claimed)]
+    [InlineData(DurableWorkerProjectionOutcome.Reconciled)]
+    public async Task CompleteAsync_InvalidStageOutcomeFaults(DurableWorkerProjectionOutcome outcome)
+    {
+        var runner = CreateRunner();
+        var contract = new FakeProjectionContract
+        {
+            CompletionEnvelope = Envelope<string>(outcome, "result"),
+        };
+
+        var decision = await runner.CompleteAsync(contract, "work", "result", TestCorrelation());
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.Fault, decision.Kind);
+        Assert.Equal(outcome, decision.SourceOutcome);
     }
 
     [Fact]
@@ -206,6 +240,40 @@ public sealed class DurableTaskWorkerChainRunnerTests
 
         Assert.Equal(DurableTaskWorkerDecisionKind.IgnoreLateSignal, decision.Kind);
         Assert.Equal(DurableWorkerProjectionOutcome.StaleFence, decision.SourceOutcome);
+    }
+
+    [Fact]
+    public async Task ReconcileProjectionAsync_NoopCompletesWithoutProjectionPayload()
+    {
+        var runner = CreateRunner();
+        var contract = new FakeProjectionContract
+        {
+            ProjectionEnvelope = Envelope<string>(DurableWorkerProjectionOutcome.Noop, "projection"),
+        };
+
+        var decision = await runner.ReconcileProjectionAsync(contract, "work", "result", TestCorrelation());
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.Complete, decision.Kind);
+        Assert.Null(decision.Projection);
+        Assert.Equal(DurableWorkerProjectionOutcome.Noop, decision.SourceOutcome);
+    }
+
+    [Theory]
+    [InlineData(DurableWorkerProjectionOutcome.Claimed)]
+    [InlineData(DurableWorkerProjectionOutcome.Completed)]
+    [InlineData(DurableWorkerProjectionOutcome.AlreadyCompleted)]
+    public async Task ReconcileProjectionAsync_InvalidStageOutcomeFaults(DurableWorkerProjectionOutcome outcome)
+    {
+        var runner = CreateRunner();
+        var contract = new FakeProjectionContract
+        {
+            ProjectionEnvelope = Envelope<string>(outcome, "projection"),
+        };
+
+        var decision = await runner.ReconcileProjectionAsync(contract, "work", "result", TestCorrelation());
+
+        Assert.Equal(DurableTaskWorkerDecisionKind.Fault, decision.Kind);
+        Assert.Equal(outcome, decision.SourceOutcome);
     }
 
     [Theory]

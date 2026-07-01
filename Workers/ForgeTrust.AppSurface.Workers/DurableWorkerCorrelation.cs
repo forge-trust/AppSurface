@@ -45,6 +45,13 @@ public sealed record DurableWorkerCorrelation
     /// </summary>
     public string AttemptId { get; }
 
+    /// <summary>
+    /// Validates and trims a durable worker identifier.
+    /// </summary>
+    /// <param name="value">Identifier value to validate.</param>
+    /// <param name="paramName">Caller parameter name used in thrown validation exceptions.</param>
+    /// <returns>The trimmed identifier value.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="value"/> is null, empty, or whitespace.</exception>
     internal static string RequireText(string value, string paramName)
     {
         if (string.IsNullOrWhiteSpace(value))

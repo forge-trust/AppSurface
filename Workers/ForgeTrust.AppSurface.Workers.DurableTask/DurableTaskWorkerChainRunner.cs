@@ -14,7 +14,12 @@ namespace ForgeTrust.AppSurface.Workers.DurableTask;
 /// <remarks>
 /// The runner is an adapter, not a hosted runtime. It calls the app-owned projection contract and returns decisions for
 /// host-owned Durable Task orchestration code to interpret. It never invokes
-/// <see cref="IDurableWorkerExecutor{TWork,TResult}"/> from projection repair methods.
+/// <see cref="IDurableWorkerExecutor{TWork,TResult}"/> from projection repair methods. The expected stage order is
+/// <see cref="IDurableTaskWorkerChainRunner{TWork,TResult,TProjection}.TryClaimAsync"/> before executor activity,
+/// <see cref="IDurableTaskWorkerChainRunner{TWork,TResult,TProjection}.CompleteAsync"/> after terminal executor
+/// activity, then <see cref="IDurableTaskWorkerChainRunner{TWork,TResult,TProjection}.ReconcileProjectionAsync"/> for
+/// visible-state repair. Retry policies carried by decisions are advisory metadata; hosts translate them into Durable
+/// Task retry options, timers, or activity scheduling behavior.
 /// </remarks>
 public interface IDurableTaskWorkerChainRunner<TWork, TResult, TProjection>
 {
@@ -25,7 +30,10 @@ public interface IDurableTaskWorkerChainRunner<TWork, TResult, TProjection>
     /// <param name="work">Typed work payload.</param>
     /// <param name="correlation">Correlation identifiers for the claim.</param>
     /// <param name="cancellationToken">Token that cancels the claim.</param>
-    /// <returns>A durable decision. A claimed outcome schedules executor activity; duplicates and stale outcomes do not.</returns>
+    /// <returns>
+    /// A durable decision. Valid claim outcomes are claimed, already-completed, noop, stale-fence, conflict, and
+    /// unrecoverable. Claimed schedules executor activity; duplicate, noop, stale, and failure outcomes do not.
+    /// </returns>
     ValueTask<DurableTaskWorkerDecision<TWork, TResult, TProjection>> TryClaimAsync(
         IDurableWorkerProjectionContract<TWork, TResult, TProjection> contract,
         TWork work,
@@ -40,7 +48,10 @@ public interface IDurableTaskWorkerChainRunner<TWork, TResult, TProjection>
     /// <param name="result">Terminal result produced by executor activity.</param>
     /// <param name="correlation">Correlation identifiers for the completion fact.</param>
     /// <param name="cancellationToken">Token that cancels completion recording.</param>
-    /// <returns>A durable decision. Fresh completion schedules projection repair; duplicate completion does not.</returns>
+    /// <returns>
+    /// A durable decision. Valid completion outcomes are completed, already-completed, noop, stale-fence, conflict, and
+    /// unrecoverable. Fresh completion schedules projection repair; duplicate and noop completion do not.
+    /// </returns>
     ValueTask<DurableTaskWorkerDecision<TWork, TResult, TProjection>> CompleteAsync(
         IDurableWorkerProjectionContract<TWork, TResult, TProjection> contract,
         TWork work,
@@ -56,7 +67,11 @@ public interface IDurableTaskWorkerChainRunner<TWork, TResult, TProjection>
     /// <param name="result">Terminal result used to repair projection state.</param>
     /// <param name="correlation">Correlation identifiers for the repair attempt.</param>
     /// <param name="cancellationToken">Token that cancels projection repair.</param>
-    /// <returns>A durable decision. Projection repair never maps to executor scheduling.</returns>
+    /// <returns>
+    /// A durable decision. Valid projection outcomes are reconciled, noop, stale-fence, conflict, and unrecoverable.
+    /// Reconciled carries a projection payload; noop completes without a projection payload; projection repair never maps
+    /// to executor scheduling.
+    /// </returns>
     ValueTask<DurableTaskWorkerDecision<TWork, TResult, TProjection>> ReconcileProjectionAsync(
         IDurableWorkerProjectionContract<TWork, TResult, TProjection> contract,
         TWork work,
@@ -220,7 +235,11 @@ public sealed class DurableTaskWorkerChainRunner<TWork, TResult, TProjection>
                     _options.Value.ExecutorRetryPolicy),
             DurableWorkerProjectionOutcome.Conflict or DurableWorkerProjectionOutcome.Unrecoverable =>
                 DurableTaskWorkerDecision<TWork, TResult, TProjection>.Fault(envelope),
-            _ => DurableTaskWorkerDecision<TWork, TResult, TProjection>.Complete(envelope),
+            DurableWorkerProjectionOutcome.AlreadyCompleted or DurableWorkerProjectionOutcome.Noop =>
+                DurableTaskWorkerDecision<TWork, TResult, TProjection>.Complete(envelope),
+            DurableWorkerProjectionOutcome.Completed or DurableWorkerProjectionOutcome.Reconciled =>
+                DurableTaskWorkerDecision<TWork, TResult, TProjection>.Fault(envelope),
+            _ => DurableTaskWorkerDecision<TWork, TResult, TProjection>.Fault(envelope),
         };
 
     private DurableTaskWorkerDecision<TWork, TResult, TProjection> MapCompletion(
@@ -239,7 +258,11 @@ public sealed class DurableTaskWorkerChainRunner<TWork, TResult, TProjection>
                     _options.Value.ProjectionRetryPolicy),
             DurableWorkerProjectionOutcome.Conflict or DurableWorkerProjectionOutcome.Unrecoverable =>
                 DurableTaskWorkerDecision<TWork, TResult, TProjection>.Fault(envelope),
-            _ => DurableTaskWorkerDecision<TWork, TResult, TProjection>.Complete(envelope),
+            DurableWorkerProjectionOutcome.AlreadyCompleted or DurableWorkerProjectionOutcome.Noop =>
+                DurableTaskWorkerDecision<TWork, TResult, TProjection>.Complete(envelope),
+            DurableWorkerProjectionOutcome.Claimed or DurableWorkerProjectionOutcome.Reconciled =>
+                DurableTaskWorkerDecision<TWork, TResult, TProjection>.Fault(envelope),
+            _ => DurableTaskWorkerDecision<TWork, TResult, TProjection>.Fault(envelope),
         };
 
     private DurableTaskWorkerDecision<TWork, TResult, TProjection> MapProjection(
@@ -254,6 +277,14 @@ public sealed class DurableTaskWorkerChainRunner<TWork, TResult, TProjection>
                     _options.Value.ProjectionRetryPolicy),
             DurableWorkerProjectionOutcome.Conflict or DurableWorkerProjectionOutcome.Unrecoverable =>
                 DurableTaskWorkerDecision<TWork, TResult, TProjection>.Fault(envelope),
-            _ => DurableTaskWorkerDecision<TWork, TResult, TProjection>.CompleteProjection(envelope),
+            DurableWorkerProjectionOutcome.Reconciled =>
+                DurableTaskWorkerDecision<TWork, TResult, TProjection>.CompleteProjection(envelope),
+            DurableWorkerProjectionOutcome.Noop =>
+                DurableTaskWorkerDecision<TWork, TResult, TProjection>.Complete(envelope),
+            DurableWorkerProjectionOutcome.Claimed
+                or DurableWorkerProjectionOutcome.Completed
+                or DurableWorkerProjectionOutcome.AlreadyCompleted =>
+                DurableTaskWorkerDecision<TWork, TResult, TProjection>.Fault(envelope),
+            _ => DurableTaskWorkerDecision<TWork, TResult, TProjection>.Fault(envelope),
         };
 }

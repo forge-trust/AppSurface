@@ -38,6 +38,8 @@ public static class DurableWorkerMetadataSafety
         "password=",
         "provider://",
         "refresh_token",
+        "http://",
+        "https://",
         "-----begin",
     ];
 
@@ -66,7 +68,12 @@ public static class DurableWorkerMetadataSafety
 
             EnsureSafeKey(safeKey, paramName);
             EnsureSafeValue(safeValue, safeKey, paramName);
-            copy.Add(safeKey, safeValue);
+            if (!copy.TryAdd(safeKey, safeValue))
+            {
+                throw new ArgumentException(
+                    $"Durable worker metadata key '{safeKey}' appears more than once after trimming.",
+                    paramName);
+            }
         }
 
         return new ReadOnlyDictionary<string, string>(copy);

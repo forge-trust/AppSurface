@@ -90,6 +90,15 @@ public sealed class DurableTaskWorkerDecisionTests
     }
 
     [Fact]
+    public void CompleteProjection_RejectsNonReconciledOutcome()
+    {
+        var stale = Envelope(DurableWorkerProjectionOutcome.StaleFence);
+
+        Assert.Throws<ArgumentException>(() =>
+            DurableTaskWorkerDecision<string, string, string>.CompleteProjection(stale));
+    }
+
+    [Fact]
     public void CompleteProjection_RejectsNullEnvelope()
     {
         Assert.Throws<ArgumentNullException>(() =>
@@ -146,9 +155,11 @@ public sealed class DurableTaskWorkerDecisionTests
         var envelope = Envelope(DurableWorkerProjectionOutcome.Conflict);
 
         var decision = DurableTaskWorkerDecision<string, string, string>.WaitForRetry(envelope, retry);
+        var defaultDecision = DurableTaskWorkerDecision<string, string, string>.WaitForRetry(envelope);
 
         Assert.Equal(DurableTaskWorkerDecisionKind.WaitForRetry, decision.Kind);
         Assert.Same(retry, decision.RetryPolicy);
+        Assert.Null(defaultDecision.RetryPolicy);
         Assert.Throws<ArgumentNullException>(() =>
             DurableTaskWorkerDecision<string, string, string>.WaitForRetry<string>(null!, retry));
     }

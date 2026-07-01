@@ -26,6 +26,24 @@ public sealed class AppSurfaceWorkersModuleTests
         Assert.Empty(builder.Modules);
     }
 
+    [Fact]
+    public void ConfigureServices_RejectsNullInputs()
+    {
+        var module = new AppSurfaceWorkersModule();
+        var context = new StartupContext([], new TestHostModule());
+        var services = new ServiceCollection();
+
+        Assert.Throws<ArgumentNullException>(() => module.ConfigureServices(null!, services));
+        Assert.Throws<ArgumentNullException>(() => module.ConfigureServices(context, null!));
+    }
+
+    [Fact]
+    public void RegisterDependentModules_RejectsNullBuilder()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new AppSurfaceWorkersModule().RegisterDependentModules(null!));
+    }
+
     private sealed class TestHostModule : IAppSurfaceHostModule
     {
         public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)

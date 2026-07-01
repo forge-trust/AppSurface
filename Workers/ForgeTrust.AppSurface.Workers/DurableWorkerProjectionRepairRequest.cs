@@ -14,7 +14,11 @@ public sealed record DurableWorkerProjectionRepairRequest
     /// </summary>
     /// <param name="now">Clock value used to evaluate stale projections.</param>
     /// <param name="maxStaleness">Maximum acceptable projection staleness before repair is attempted.</param>
-    /// <param name="maxItems">Maximum number of pending projection repairs to inspect or return.</param>
+    /// <param name="maxItems">
+    /// Maximum number of pending projection repairs to inspect or return. Defaults to 100 when omitted, which is the
+    /// default bounded batch size for ordinary repair sweeps; callers with tighter latency or larger backfill workloads
+    /// can override it.
+    /// </param>
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown when <paramref name="maxStaleness"/> is not positive or <paramref name="maxItems"/> is not positive.
     /// </exception>

@@ -32,8 +32,18 @@ public sealed record DurableWorkerEnvelope<TPayload>
         IReadOnlyDictionary<string, string>? metadata = null,
         DurableWorkerDiagnostic? diagnostic = null)
     {
+        if (!Enum.IsDefined(outcome))
+        {
+            throw new ArgumentOutOfRangeException(nameof(outcome), "Durable worker outcome must be defined.");
+        }
+
+        if (!Enum.IsDefined(retryability))
+        {
+            throw new ArgumentOutOfRangeException(nameof(retryability), "Durable worker retryability must be defined.");
+        }
+
         Outcome = outcome;
-        ReasonCode = DurableWorkerCorrelation.RequireText(reasonCode, nameof(reasonCode));
+        ReasonCode = DurableWorkerMetadataSafety.CopySafeDiagnosticText(reasonCode, "reason code", nameof(reasonCode));
         Retryability = retryability;
         Correlation = correlation ?? throw new ArgumentNullException(nameof(correlation));
         Payload = payload;
