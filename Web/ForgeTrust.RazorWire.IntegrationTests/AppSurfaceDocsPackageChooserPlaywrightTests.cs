@@ -6,8 +6,8 @@ namespace ForgeTrust.RazorWire.IntegrationTests;
 [Trait("Category", "Integration")]
 public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
 {
-    private const string CurrentPackageReleaseNotePath = "/docs/releases/v0.1.0-rc.4";
-    private const string CurrentPackageReleaseNoteHeading = "Release 0.1.0-rc.4";
+    private const string CurrentPackageReleaseNotePath = "/docs/releases/v0.1.0";
+    private const string CurrentPackageReleaseNoteHeading = "Release 0.1.0";
     private const string WebPackageQuickstartPath = "/docs/start-here/first-success-path#package-first-path";
 
     private readonly AppSurfaceDocsPlaywrightFixture _fixture;
@@ -116,7 +116,7 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
     }
 
     [Fact]
-    public async Task PublicPackageReadmes_LinkToCurrentReleaseCandidate()
+    public async Task PublicPackageReadmes_LinkToCurrentRelease()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
