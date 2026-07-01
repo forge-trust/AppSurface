@@ -6,6 +6,19 @@ namespace ForgeTrust.AppSurface.Release;
 /// <summary>
 /// Parsed release CLI options shared by every command.
 /// </summary>
+/// <param name="Command">Release command name controlling command-specific validation.</param>
+/// <param name="RepositoryRoot">Canonical repository root used to resolve relative paths.</param>
+/// <param name="Version">SemVer release identity without a leading <c>v</c>.</param>
+/// <param name="Tag">Optional annotated tag used by publish.</param>
+/// <param name="Date">Optional release date used by prepare.</param>
+/// <param name="DryRun">Whether the command should validate without mutating repository or GitHub state.</param>
+/// <param name="ReportPath">Optional Markdown report output path.</param>
+/// <param name="GitHubOutputPath">Optional GitHub Actions output file used by publish.</param>
+/// <param name="FailOnWarnings">Whether check should fail when warning diagnostics are present.</param>
+/// <param name="AllowExistingTargets">Whether check may review already-generated release artifacts.</param>
+/// <param name="BaseRef">Publish branch that must contain the release tag commit.</param>
+/// <param name="DocsCatalogPath">Optional staged AppSurface Docs <c>versions.json</c> used for stable docs evidence verification. <c>check</c> may leave this null to use the local <c>dist/docs/versions.json</c> fallback; release publication should use the <c>docs-publication</c> command for the public archive/catalog path.</param>
+/// <param name="DocsTrustedReleaseRootPath">Optional trusted release root for catalog exact-tree paths. When null, verification defaults to the catalog directory; callers should pass it when the staged exact trees live elsewhere.</param>
 internal sealed record ReleaseOptions(
     string Command,
     string RepositoryRoot,
@@ -17,7 +30,9 @@ internal sealed record ReleaseOptions(
     string? GitHubOutputPath,
     bool FailOnWarnings,
     bool AllowExistingTargets,
-    string BaseRef = "main");
+    string BaseRef = "main",
+    string? DocsCatalogPath = null,
+    string? DocsTrustedReleaseRootPath = null);
 
 /// <summary>
 /// Minimal SemVer 2.0 model used by release automation.

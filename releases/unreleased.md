@@ -15,6 +15,18 @@ This is the living release note for the next coordinated AppSurface version afte
 ### Release and docs surface
 
 - Stable package release automation now has a protected NuGet publish gate for annotated `vX.Y.Z` tags, including stable-only package-version validation, trusted-publishing environment checks, fresh smoke-install proof, publish-ledger evidence, and `./eng/release publish --base-ref` support so GitHub Release creation can be tied to the intended source branch after NuGet proof is complete.
+- Stable package release publishing now gates on verified AppSurface Docs archive evidence. Release authors pass the
+  staged docs `versions.json` and trusted archive root into `appsurface-release check` or `publish`; the tool verifies the
+  selected public catalog entry, exact tree path, pinned release-manifest digest, route manifest safety, and every
+  serveable file before stable GitHub Release publishing can continue. The protected stable NuGet workflow now repeats the
+  export and archive verification against the checked-in release evidence before it can request the NuGet trusted publishing
+  token.
+- Release publishing now owns the public AppSurface Docs publication lifecycle after protected package proof succeeds.
+  The release workflow exports docs from the annotated tag, creates a deterministic `appsurface-docs-vx.y.z.tar.gz`
+  plus `.sha256`, stages `versions.json` and `releases/x.y.z/`, deploys GitHub Pages, verifies the public catalog,
+  exact-tree manifest, and uploaded release asset digest, then publishes the draft GitHub Release. Main docs deploys
+  rehydrate published release archives from GitHub Release assets before uploading Pages so a later `main` push does not
+  erase catalog-pinned release docs.
 - `ForgeTrust.AppSurface.Config.LocalSecrets` hardens the explicit file fallback path. Unix fallback directories are created with `0700` mode bits when missing, existing loose parent directories fail closed instead of being modified in place, and JSON files are written or repaired with `0600` mode bits during `set`, `delete`, and `doctor`; reads reject symbolic-link paths and non-canonical mode bits before returning a secret value. `appsurface secrets doctor --store-file` now treats `ready`, `repaired`, and `degraded` posture diagnostics as doctor-style success while keeping `unsupported` path shapes terminal. This is Unix mode-bit hardening, not Windows ACL hardening or a universal POSIX ACL proof; OS-backed LocalSecrets stores remain the recommended local-development path.
 - RazorWire hybrid islands now reject inline `data:` module specifiers from both `client-module`/`data-rw-module` and `window.RazorWireIslandModules`, and also reject protocol-relative `//...` module URLs. Move any prototype inline module such as `data:text/javascript,...` into a served module like `/js/my-island.js` that exports `mount(root, props)`.
 - RazorWire export now owns HTTP redirect handling for artifact-producing fetches, including crawled routes and conventional `404.html` staging. Same-origin redirects remain supported, while redirects outside the configured export origin and base path fail with `RWEXPORT008` before response content is read or written; routes that intentionally point to a different host or app path should be modeled as external references instead of exporter-managed artifacts.
