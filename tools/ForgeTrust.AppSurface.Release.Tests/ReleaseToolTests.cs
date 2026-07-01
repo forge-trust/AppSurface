@@ -4329,6 +4329,53 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("docs exact tree", result.Stderr, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("archive")]
+    [InlineData("plan")]
+    [InlineData("summary")]
+    public async Task DocsPublicationRejectsGeneratedOutputPathsUnderExistingPagesRoot(string outputKind)
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var existingPagesRoot = RepositoryPath("artifacts/existing-pages");
+        Directory.CreateDirectory(existingPagesRoot);
+        var archive = string.Equals(outputKind, "archive", StringComparison.Ordinal)
+            ? Path.Join(existingPagesRoot, "appsurface-docs-v0.1.0.tar.gz")
+            : RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz");
+        var plan = string.Equals(outputKind, "plan", StringComparison.Ordinal)
+            ? Path.Join(existingPagesRoot, "docs-publication-plan.json")
+            : RepositoryPath("artifacts/docs-publication-plan.json");
+        var summary = string.Equals(outputKind, "summary", StringComparison.Ordinal)
+            ? Path.Join(existingPagesRoot, "docs-publication-summary.md")
+            : RepositoryPath("artifacts/docs-publication-summary.md");
+
+        var result = await RunAsync(
+            [
+                "docs-publication",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--docs-exact-tree",
+                TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+                "--existing-pages-root",
+                existingPagesRoot,
+                "--archive-output",
+                archive,
+                "--pages-staging-root",
+                ExternalPath("pages"),
+                "--plan-output",
+                plan,
+                "--summary-output",
+                summary
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-publication-output-path-unsafe", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("existing Pages payload", result.Stderr, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task DocsPublicationRejectsMissingExistingPagesRootBeforeWritingOutputs()
     {

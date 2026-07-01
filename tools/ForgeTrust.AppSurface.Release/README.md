@@ -67,7 +67,7 @@ Stable release docs publication is handled by the `docs-publication` command and
 
 Stable publication rejects release-manifest digest mismatches and recommended-version downgrades. GitHub Release assets are policy-immutable rather than platform-immutable: draft assets may be replaced during recovery for the same tag, but public release assets are no-clobber and require manual recovery or a fix-forward release.
 
-`--pages-staging-root` is reset before the verified Pages payload is copied into it. Use a disposable directory outside the repository and outside the exported exact tree, existing Pages root, archive output, plan output, and recovery summary output. The command rejects root paths and overlapping staging paths before deleting anything.
+`--pages-staging-root` is reset before the verified Pages payload is copied into it. Use a disposable directory outside the repository and outside the exported exact tree, existing Pages root, archive output, plan output, and recovery summary output. Generated outputs must also stay outside `--existing-pages-root`, because that root is copied into the public Pages payload before the new release tree is staged. The command rejects root paths and overlapping staging or generated-output paths before deleting or copying anything.
 
 ## Release Evidence Bundle
 
@@ -104,7 +104,7 @@ Repair loops are intentionally concrete:
 - `release-evidence-docs-exacttreepath-unsafe`: make `exactTreePath` trusted-root-relative with no parent or hidden segments.
 - `release-docs-archive-verification-failed` or `release-evidence-docs-manifest-digest-mismatch`: rerun docs export, restore the exact tree, or copy the matching manifest digest printed by export.
 - `release-docs-publication-manifest-digest-mismatch`: re-export docs from the annotated tag commit; the exact-tree manifest does not match release evidence.
-- `release-docs-publication-output-path-unsafe`: move `--pages-staging-root` to a disposable directory that cannot delete the repository, exact tree, existing Pages root, or generated artifact outputs.
+- `release-docs-publication-output-path-unsafe`: move `--pages-staging-root` to a disposable directory that cannot delete the repository, exact tree, existing Pages root, or generated artifact outputs; keep archives, plans, and summaries outside `--existing-pages-root` so they cannot be copied into public Pages.
 - `release-docs-publication-recommended-downgrade`: publish a newer stable release or perform documented manual recovery before changing `recommendedVersion`.
 
 ## Stable Release Policy

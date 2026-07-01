@@ -262,7 +262,10 @@ jobs:
           set -euo pipefail
           assets_root="${RUNNER_TEMP}/appsurface-release-docs-assets"
           mkdir -p "${assets_root}" "${PAGES_ROOT}/releases"
-          mapfile -t release_rows < <(gh release list --exclude-drafts --limit 100 --json tagName,isPrerelease --jq '.[] | [.tagName, .isPrerelease] | @tsv')
+          mapfile -t release_rows < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+              --jq '.[] | select(.draft | not) | [.tag_name, .prerelease] | @tsv'
+          )
           if [[ "${#release_rows[@]}" -eq 0 ]]; then
             exit 0
           fi
@@ -281,6 +284,10 @@ jobs:
             fi
             if tar -tzf "${asset_dir}/${asset_name}" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
               echo "Release docs archive ${asset_name} contains an unsafe absolute or parent-relative entry." >&2
+              exit 1
+            fi
+            if ! tar -tzvf "${asset_dir}/${asset_name}" | awk '{ kind = substr($1, 1, 1); if (kind != "-" && kind != "d") exit 1 }'; then
+              echo "Release docs archive ${asset_name} contains a non-regular tar entry." >&2
               exit 1
             fi
             rm -rf "${exact_tree}"

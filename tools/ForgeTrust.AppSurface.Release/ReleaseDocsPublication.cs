@@ -489,6 +489,15 @@ internal sealed class ReleaseDocsPublication
         if (!string.IsNullOrWhiteSpace(request.ExistingPagesRoot))
         {
             ValidatePagesStagingRoot(request.PagesStagingRoot, "existing Pages root", request.ExistingPagesRoot);
+            ValidateGeneratedOutputOutsideExistingPagesRoot(request.ExistingPagesRoot, "archive output", request.ArchivePath);
+            ValidateGeneratedOutputOutsideExistingPagesRoot(request.ExistingPagesRoot, "archive digest output", request.ArchivePath + ".sha256");
+            ValidateGeneratedOutputOutsideExistingPagesRoot(request.ExistingPagesRoot, "temporary archive output", request.ArchivePath + ".tar");
+            ValidateGeneratedOutputOutsideExistingPagesRoot(request.ExistingPagesRoot, "publication plan output", request.PlanPath);
+            if (!string.IsNullOrWhiteSpace(request.SummaryPath))
+            {
+                ValidateGeneratedOutputOutsideExistingPagesRoot(request.ExistingPagesRoot, "recovery summary output", request.SummaryPath);
+            }
+
             if (!Directory.Exists(request.ExistingPagesRoot))
             {
                 throw new ReleaseToolException(ReleaseDiagnostic.Error(
@@ -500,6 +509,22 @@ internal sealed class ReleaseDocsPublication
             }
 
             ThrowIfReparsePoint(request.ExistingPagesRoot, request.ExistingPagesRoot);
+        }
+    }
+
+    private void ValidateGeneratedOutputOutsideExistingPagesRoot(string existingPagesRoot, string outputDescription, string outputPath)
+    {
+        var fullExistingPagesRoot = NormalizePath(existingPagesRoot);
+        var fullOutputPath = NormalizePath(outputPath);
+        if (string.Equals(fullExistingPagesRoot, fullOutputPath, StringComparison.Ordinal)
+            || ReleaseWorkspace.IsUnderPath(fullExistingPagesRoot, fullOutputPath))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-docs-publication-output-path-unsafe",
+                "Docs publication received an unsafe generated output path.",
+                $"The {outputDescription} `{_workspace.DisplayPath(fullOutputPath)}` is inside the existing Pages payload `{_workspace.DisplayPath(fullExistingPagesRoot)}`.",
+                "Write generated archives, plans, and summaries outside the existing Pages payload so they cannot be copied into the public deployment.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
         }
     }
 
