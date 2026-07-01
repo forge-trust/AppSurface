@@ -104,6 +104,20 @@ public sealed class AppSurfaceDocsJavaScriptHarvestOptions
     public bool RequireCompleteEventDoclets { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether public JavaScript event doclets should be compared to literal dispatch evidence.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="false" />. When enabled, the built-in JavaScript harvester compares intentional
+    /// public <c>@event</c> doclets with direct literal <c>dispatchEvent(new CustomEvent("event:name", ...))</c> calls
+    /// found in the same policy-approved JavaScript harvest inputs. Mismatches emit warning diagnostics only; they do not
+    /// publish inferred docs and do not make strict harvest health fail. The v1 verifier matches literal <c>.js</c>
+    /// <c>CustomEvent</c> dispatches only; helper-dispatched calls, dynamic or constant event names, variable-held events,
+    /// <c>new Event(...)</c>, and TypeScript-only sources are intentionally skipped and should be treated as documented
+    /// verifier limitations instead of release regressions.
+    /// </remarks>
+    public bool VerifyEventDispatches { get; set; }
+
+    /// <summary>
     /// Gets or sets the largest JavaScript file, in bytes, that the harvester will parse.
     /// </summary>
     /// <remarks>

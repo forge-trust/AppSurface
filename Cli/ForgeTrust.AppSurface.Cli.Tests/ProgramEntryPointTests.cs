@@ -763,6 +763,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Verify AppSurface Docs harvest health for CI and release gates.", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--require-complete-event-doclets", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--verify-event-dispatches", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--repo", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--startup-timeout-seconds", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--strict", result.AllText, StringComparison.Ordinal);
@@ -787,6 +788,7 @@ public sealed class ProgramEntryPointTests
                 "docs", "verify-health",
                 "--repo", repository.Path,
                 "--require-complete-event-doclets",
+                "--verify-event-dispatches",
                 "--route-root", "/reference",
                 "--docs-root", "/reference/next",
                 "--environment", "Production",
@@ -809,6 +811,30 @@ public sealed class ProgramEntryPointTests
         Assert.Contains(nameof(AppSurfaceDocsHarvestHealthExposure.Always), args.HostArgs.Args);
         Assert.Contains("--AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets", args.HostArgs.Args);
         Assert.Contains("true", args.HostArgs.Args);
+        AssertForwardedValue(
+            args.HostArgs.Args,
+            "--AppSurfaceDocs:Harvest:JavaScript:VerifyEventDispatches",
+            "true");
+    }
+
+    [Fact]
+    public async Task DocsVerifyHealthCommand_Should_PrintWarningDiagnostics_WhenHealthIsOk()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Result = CreateHealthVerifyResult(ok: true, includeWarning: true)
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "verify-health", "--repo", repository.Path, "--verify-event-dispatches"],
+            options => RegisterRunner(options, runner));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("verified with 1 warning diagnostic", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("appsurfacedocs.javascript.event_doclet_dispatch_missing", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Cause: Verifier inputs include doclet evidence", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Fix: Add a matching literal CustomEvent dispatch", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -827,6 +853,7 @@ public sealed class ProgramEntryPointTests
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("AppSurface Docs harvest health verification failed", result.AllText, StringComparison.Ordinal);
         Assert.Contains("appsurfacedocs.javascript.incomplete_public_event_doclet", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Cause: The item will render", result.AllText, StringComparison.Ordinal);
         Assert.Contains("Add @target", result.AllText, StringComparison.Ordinal);
         Assert.NotNull(runner.Args);
     }
@@ -3041,7 +3068,15 @@ public sealed class ProgramEntryPointTests
         options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceDocsHealthVerifyRunner>(runner));
     }
 
-    private static AppSurfaceDocsHealthVerificationResult CreateHealthVerifyResult(bool ok)
+    private static void AssertForwardedValue(IReadOnlyList<string> args, string key, string expectedValue)
+    {
+        var index = Array.IndexOf(args.ToArray(), key);
+        Assert.True(index >= 0, $"Expected forwarded argument '{key}' to be present.");
+        Assert.True(index + 1 < args.Count, $"Expected forwarded argument '{key}' to have a value.");
+        Assert.Equal(expectedValue, args[index + 1]);
+    }
+
+    private static AppSurfaceDocsHealthVerificationResult CreateHealthVerifyResult(bool ok, bool includeWarning = false)
     {
         return new AppSurfaceDocsHealthVerificationResult(
             new AppSurfaceDocsHarvestHealthResponse
@@ -3053,7 +3088,20 @@ public sealed class ProgramEntryPointTests
                     HttpStatusCode = ok ? 200 : 503
                 },
                 Diagnostics = ok
-                    ? []
+                    ? includeWarning
+                        ?
+                        [
+                            new AppSurfaceDocsHarvestDiagnosticResponse
+                            {
+                                Code = DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing,
+                                Severity = nameof(DocHarvestDiagnosticSeverity.Warning),
+                                HarvesterType = nameof(JavaScriptDocHarvester),
+                                Problem = "Public JavaScript event doclet 'razorwire:missing-dispatch' has no matching literal CustomEvent dispatch.",
+                                Cause = "Verifier inputs include doclet evidence at src/public-api.js:1 but no direct dispatch evidence.",
+                                Fix = "Add a matching literal CustomEvent dispatch to the verified JavaScript inputs."
+                            }
+                        ]
+                        : []
                     :
                     [
                         new AppSurfaceDocsHarvestDiagnosticResponse
@@ -3062,6 +3110,7 @@ public sealed class ProgramEntryPointTests
                             Severity = nameof(DocHarvestDiagnosticSeverity.Error),
                             HarvesterType = nameof(JavaScriptDocHarvester),
                             Problem = "JavaScript Event 'razorwire:missing' is missing public contract fields.",
+                            Cause = "The item will render, but readers may not know enough about the public browser contract to consume it confidently.",
                             Fix = "Add @target, @firesWhen, @property detail.* or @detail none to the public JavaScript doclet."
                         }
                     ]

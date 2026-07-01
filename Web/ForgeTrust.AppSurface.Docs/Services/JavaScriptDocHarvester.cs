@@ -113,6 +113,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             var includePatterns = NormalizeIncludePatterns(javaScriptOptions.IncludeGlobs ?? []).ToArray();
             var requirePublicTag = ShouldRequirePublicTag(javaScriptOptions, includePatterns);
             var harvestedItems = new List<JavaScriptApiItem>();
+            var eventDispatches = new List<JavaScriptEventDispatchEvidence>();
             foreach (var filePath in EnumerateJavaScriptFiles(rootPath, includePatterns, pathPolicy, diagnostics, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -138,12 +139,20 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                     }
 
                     var source = await File.ReadAllTextAsync(filePath, cancellationToken);
-                    if (requirePublicTag && !source.Contains("@public", StringComparison.OrdinalIgnoreCase))
+                    var hasPublicTag = source.Contains("@public", StringComparison.OrdinalIgnoreCase);
+                    if (requirePublicTag && !hasPublicTag)
                     {
+                        if (javaScriptOptions.VerifyEventDispatches)
+                        {
+                            eventDispatches.AddRange(CollectVerifierOnlyEventDispatchEvidence(source, relativePath));
+                        }
+
                         continue;
                     }
 
-                    harvestedItems.AddRange(ParseFile(source, relativePath, javaScriptOptions, requirePublicTag, diagnostics));
+                    var parseResult = ParseFile(source, relativePath, javaScriptOptions, requirePublicTag, diagnostics);
+                    harvestedItems.AddRange(parseResult.Items);
+                    eventDispatches.AddRange(parseResult.EventDispatches);
                 }
                 catch (ParseErrorException ex)
                 {
@@ -151,7 +160,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         DocHarvestDiagnosticCodes.JavaScriptParseFailed,
                         DocHarvestDiagnosticSeverity.Warning,
                         $"Skipped JavaScript file '{relativePath}' because the parser rejected it.",
-                        $"Acornima reported {ex.Message} at line {ex.LineNumber.ToString(CultureInfo.InvariantCulture)}, column {ex.Column.ToString(CultureInfo.InvariantCulture)}.",
+                        $"The parser rejected repository-relative JavaScript source at line {ex.LineNumber.ToString(CultureInfo.InvariantCulture)}, column {ex.Column.ToString(CultureInfo.InvariantCulture)}.",
                         "Fix the JavaScript syntax, remove the file from the JavaScript include set, or exclude generated syntax that the v1 harvester should not parse."));
                 }
                 catch (Exception ex) when (IsFileReadException(ex))
@@ -160,12 +169,19 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         DocHarvestDiagnosticCodes.JavaScriptParseFailed,
                         DocHarvestDiagnosticSeverity.Warning,
                         $"Skipped JavaScript file '{relativePath}' because it could not be read.",
-                        ex.Message,
+                        "The source file matched JavaScript harvest policy, but AppSurface Docs could not read its content before parsing.",
                         "Fix file permissions or locks, or exclude this file from JavaScript harvesting."));
                 }
             }
 
+            AddEventDispatchDiagnostics(harvestedItems, eventDispatches, javaScriptOptions.VerifyEventDispatches, diagnostics);
             AssignStableAnchors(harvestedItems, diagnostics);
+            ResolveTypedefReferences(harvestedItems, diagnostics);
+            foreach (var item in harvestedItems)
+            {
+                AddCompletenessDiagnostics(item, javaScriptOptions.RequireCompleteEventDoclets, diagnostics);
+            }
+
             return BuildDocNodes(harvestedItems);
         }
         finally
@@ -199,7 +215,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         return _lastDiagnostics;
     }
 
-    private static IReadOnlyList<JavaScriptApiItem> ParseFile(
+    private static JavaScriptParseResult ParseFile(
         string source,
         string relativePath,
         AppSurfaceDocsJavaScriptHarvestOptions options,
@@ -210,6 +226,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         var script = ParseJavaScriptProgram(source, comments);
         var attachedCommentStarts = new HashSet<int>();
         var items = new List<JavaScriptApiItem>();
+        var eventDispatches = options.VerifyEventDispatches
+            ? CollectEventDispatchEvidence(script, relativePath)
+            : [];
 
         foreach (var statement in EnumerateNodes(script))
         {
@@ -331,12 +350,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             AddStandaloneItem(comment, items, source, relativePath, options, requirePublicTag, diagnostics);
         }
 
-        foreach (var item in items)
-        {
-            AddCompletenessDiagnostics(item, options.RequireCompleteEventDoclets, diagnostics);
-        }
-
-        return items;
+        return new JavaScriptParseResult(items, eventDispatches);
     }
 
     private static IEnumerable<Node> EnumerateNodes(Node root)
@@ -372,6 +386,166 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             EcmaVersion = EcmaVersion.Latest,
             OnComment = (in Comment comment) => comments.Add(comment)
         });
+    }
+
+    private static IReadOnlyList<JavaScriptEventDispatchEvidence> CollectEventDispatchEvidence(
+        Node script,
+        string relativePath)
+    {
+        return EnumerateNodes(script)
+            .Select(node => CreateEventDispatchEvidence(node, relativePath))
+            .Where(static dispatch => dispatch.HasValue)
+            .Select(static dispatch => dispatch.GetValueOrDefault())
+            .ToArray();
+    }
+
+    private static IReadOnlyList<JavaScriptEventDispatchEvidence> CollectVerifierOnlyEventDispatchEvidence(
+        string source,
+        string relativePath)
+    {
+        try
+        {
+            var comments = new List<Comment>();
+            var script = ParseJavaScriptProgram(source, comments);
+            return CollectEventDispatchEvidence(script, relativePath);
+        }
+        catch (ParseErrorException)
+        {
+            return [];
+        }
+    }
+
+    private static JavaScriptEventDispatchEvidence? CreateEventDispatchEvidence(Node node, string relativePath)
+    {
+        if (node is not CallExpression callExpression)
+        {
+            return null;
+        }
+
+        if (!IsDispatchEventCallee(callExpression.Callee))
+        {
+            return null;
+        }
+
+        if (!TryGetDirectCustomEventName(callExpression, out var eventName))
+        {
+            return null;
+        }
+
+        return new JavaScriptEventDispatchEvidence(eventName, relativePath, callExpression.Location.Start.Line);
+    }
+
+    private static bool IsDispatchEventCallee(Expression callee)
+    {
+        return callee switch
+        {
+            Identifier identifier => string.Equals(identifier.Name, "dispatchEvent", StringComparison.Ordinal),
+            MemberExpression memberExpression => TryGetMemberName(memberExpression) is "dispatchEvent",
+            _ => false
+        };
+    }
+
+    private static bool TryGetDirectCustomEventName(CallExpression callExpression, out string eventName)
+    {
+        eventName = string.Empty;
+        if (callExpression.Arguments.Count == 0
+            || callExpression.Arguments[0] is not NewExpression newExpression
+            || newExpression.Callee is not Identifier { Name: "CustomEvent" }
+            || newExpression.Arguments.Count == 0
+            || newExpression.Arguments[0] is not StringLiteral stringLiteral
+            || string.IsNullOrWhiteSpace(stringLiteral.Value))
+        {
+            return false;
+        }
+
+        eventName = stringLiteral.Value.Trim();
+        return true;
+    }
+
+    private static string? TryGetMemberName(MemberExpression memberExpression)
+    {
+        return memberExpression.Property switch
+        {
+            Identifier identifier when !memberExpression.Computed => identifier.Name,
+            StringLiteral stringLiteral when memberExpression.Computed => stringLiteral.Value,
+            _ => null
+        };
+    }
+
+    private static void AddEventDispatchDiagnostics(
+        IReadOnlyList<JavaScriptApiItem> items,
+        IReadOnlyList<JavaScriptEventDispatchEvidence> eventDispatches,
+        bool verifyEventDispatches,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        if (!verifyEventDispatches)
+        {
+            return;
+        }
+
+        var documentedEvents = items
+            .Where(static item => item.Kind == JavaScriptApiKind.Event && item.IsPublic)
+            .GroupBy(static item => item.Name, StringComparer.Ordinal)
+            .ToDictionary(static group => group.Key, static group => group.ToArray(), StringComparer.Ordinal);
+        var dispatchedEvents = eventDispatches
+            .GroupBy(static dispatch => dispatch.EventName, StringComparer.Ordinal)
+            .ToDictionary(static group => group.Key, static group => group.ToArray(), StringComparer.Ordinal);
+
+        foreach (var (eventName, doclets) in documentedEvents.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            if (dispatchedEvents.ContainsKey(eventName))
+            {
+                continue;
+            }
+
+            diagnostics.Add(CreateDiagnostic(
+                DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing,
+                DocHarvestDiagnosticSeverity.Warning,
+                $"Public JavaScript event doclet '{eventName}' has no matching literal CustomEvent dispatch.",
+                $"Verifier inputs include {FormatDocletEvidence(doclets)} but no direct dispatchEvent(new CustomEvent(\"{eventName}\", ...)) evidence.",
+                "Add a matching literal CustomEvent dispatch to the verified JavaScript inputs, keep helper-dispatched events documented as a v1 verifier limitation, or disable AppSurfaceDocs:Harvest:JavaScript:VerifyEventDispatches for this harvest boundary."));
+        }
+
+        foreach (var (eventName, dispatches) in dispatchedEvents.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            if (documentedEvents.ContainsKey(eventName))
+            {
+                continue;
+            }
+
+            diagnostics.Add(CreateDiagnostic(
+                DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing,
+                DocHarvestDiagnosticSeverity.Warning,
+                $"Literal JavaScript CustomEvent dispatch '{eventName}' has no matching public event doclet.",
+                $"Verifier inputs include {FormatDispatchEvidence(dispatches)} but no public @event doclet named '{eventName}'.",
+                "Add an intentional public @event doclet for this browser contract, or keep internal literal dispatches outside AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs."));
+        }
+    }
+
+    private static string FormatDocletEvidence(IReadOnlyList<JavaScriptApiItem> doclets)
+    {
+        var ordered = doclets
+            .OrderBy(static doclet => doclet.SourcePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static doclet => doclet.StartLine)
+            .ToArray();
+        var first = ordered[0];
+        var suffix = ordered.Length == 1
+            ? string.Empty
+            : $" and {(ordered.Length - 1).ToString(CultureInfo.InvariantCulture)} duplicate doclet(s)";
+        return $"doclet evidence at {first.SourcePath}:{first.StartLine.ToString(CultureInfo.InvariantCulture)}{suffix}";
+    }
+
+    private static string FormatDispatchEvidence(IReadOnlyList<JavaScriptEventDispatchEvidence> dispatches)
+    {
+        var ordered = dispatches
+            .OrderBy(static dispatch => dispatch.SourcePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static dispatch => dispatch.StartLine)
+            .ToArray();
+        var first = ordered[0];
+        var suffix = ordered.Length == 1
+            ? string.Empty
+            : $" and {(ordered.Length - 1).ToString(CultureInfo.InvariantCulture)} additional dispatch site(s)";
+        return $"literal dispatch evidence at {first.SourcePath}:{first.StartLine.ToString(CultureInfo.InvariantCulture)}{suffix}";
     }
 
     private static void AddAttachedItem(
@@ -567,10 +741,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             doclet.Description,
             doclet.GetTagValues("param").Select(ParseTypedMember).Where(static value => value is not null).Select(static value => value!).ToArray(),
             properties,
-            doclet.TryGetTagValue("returns") ?? doclet.TryGetTagValue("return"),
+            ParseReturnValue(doclet.TryGetTagValue("returns") ?? doclet.TryGetTagValue("return")),
             doclet.TryGetTagValue("target"),
             doclet.TryGetTagValue("firesWhen"),
             doclet.TryGetTagValue("type"),
+            TryCreateTypedefReferenceNameFromBracedExpression(doclet.TryGetTagValue("type")),
             doclet.TryGetTagValue("default"),
             doclet.TryGetTagValue("values"),
             doclet.TryGetTagValue("source"),
@@ -810,6 +985,150 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
+    private static void ResolveTypedefReferences(
+        IReadOnlyList<JavaScriptApiItem> items,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        foreach (var group in items
+            .GroupBy(item => item.GroupIdentity, StringComparer.OrdinalIgnoreCase)
+            .Select(static group =>
+            {
+                var groupItems = group.ToArray();
+                return new
+                {
+                    GroupIdentity = group.Key,
+                    GroupItems = groupItems,
+                    GroupDisplayName = groupItems[0].GroupDisplayName
+                };
+            }))
+        {
+            var typedefIndex = group.GroupItems
+                .Where(static item => item.Kind == JavaScriptApiKind.Typedef)
+                .GroupBy(static item => item.Name, StringComparer.Ordinal)
+                .ToDictionary(static group => group.Key, static group => group.ToArray(), StringComparer.Ordinal);
+            var emittedDiagnostics = new HashSet<JavaScriptTypedefDiagnosticKey>();
+
+            foreach (var item in group.GroupItems)
+            {
+                ResolveMemberTypedefReferences(item.Parameters, group.GroupIdentity, group.GroupDisplayName, typedefIndex, emittedDiagnostics, diagnostics);
+                ResolveMemberTypedefReferences(item.Properties, group.GroupIdentity, group.GroupDisplayName, typedefIndex, emittedDiagnostics, diagnostics);
+
+                if (item.Returns?.TypeReferenceName is { } returnsReferenceName)
+                {
+                    item.Returns.TypeReference = ResolveTypedefReference(
+                        returnsReferenceName,
+                        group.GroupIdentity,
+                        group.GroupDisplayName,
+                        typedefIndex,
+                        emittedDiagnostics,
+                        diagnostics);
+                }
+
+                if (item.TypeReferenceName is { } itemTypeReferenceName)
+                {
+                    item.TypeReference = ResolveTypedefReference(
+                        itemTypeReferenceName,
+                        group.GroupIdentity,
+                        group.GroupDisplayName,
+                        typedefIndex,
+                        emittedDiagnostics,
+                        diagnostics);
+                }
+            }
+        }
+    }
+
+    private static void ResolveMemberTypedefReferences(
+        IEnumerable<JavaScriptMember> members,
+        string groupIdentity,
+        string groupDisplayName,
+        IReadOnlyDictionary<string, JavaScriptApiItem[]> typedefIndex,
+        ISet<JavaScriptTypedefDiagnosticKey> emittedDiagnostics,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        foreach (var member in members)
+        {
+            if (member.TypeReferenceName is not { } referenceName)
+            {
+                continue;
+            }
+
+            member.TypeReference = ResolveTypedefReference(
+                referenceName,
+                groupIdentity,
+                groupDisplayName,
+                typedefIndex,
+                emittedDiagnostics,
+                diagnostics);
+        }
+    }
+
+    private static JavaScriptTypedefReference? ResolveTypedefReference(
+        string referenceName,
+        string groupIdentity,
+        string groupDisplayName,
+        IReadOnlyDictionary<string, JavaScriptApiItem[]> typedefIndex,
+        ISet<JavaScriptTypedefDiagnosticKey> emittedDiagnostics,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        if (!typedefIndex.TryGetValue(referenceName, out var matches))
+        {
+            AddTypedefReferenceDiagnostic(
+                DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceMissing,
+                JavaScriptTypedefDiagnosticKind.Missing,
+                referenceName,
+                groupIdentity,
+                groupDisplayName,
+                emittedDiagnostics,
+                diagnostics);
+            return null;
+        }
+
+        if (matches.Length > 1)
+        {
+            AddTypedefReferenceDiagnostic(
+                DocHarvestDiagnosticCodes.JavaScriptTypedefReferenceAmbiguous,
+                JavaScriptTypedefDiagnosticKind.Ambiguous,
+                referenceName,
+                groupIdentity,
+                groupDisplayName,
+                emittedDiagnostics,
+                diagnostics);
+            return null;
+        }
+
+        return new JavaScriptTypedefReference(referenceName, matches[0]);
+    }
+
+    private static void AddTypedefReferenceDiagnostic(
+        string code,
+        JavaScriptTypedefDiagnosticKind kind,
+        string referenceName,
+        string groupIdentity,
+        string groupDisplayName,
+        ISet<JavaScriptTypedefDiagnosticKey> emittedDiagnostics,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        if (!emittedDiagnostics.Add(new JavaScriptTypedefDiagnosticKey(groupIdentity.ToUpperInvariant(), referenceName, kind)))
+        {
+            return;
+        }
+
+        var isMissing = kind == JavaScriptTypedefDiagnosticKind.Missing;
+        diagnostics.Add(CreateDiagnostic(
+            code,
+            DocHarvestDiagnosticSeverity.Warning,
+            isMissing
+                ? $"JavaScript typedef reference '{referenceName}' in group '{groupDisplayName}' could not be resolved."
+                : $"JavaScript typedef reference '{referenceName}' in group '{groupDisplayName}' is ambiguous.",
+            isMissing
+                ? $"A public JavaScript member uses {{{referenceName}}}, but no same-group @typedef named '{referenceName}' was harvested."
+                : $"Multiple same-group @typedef doclets have the harvested name '{referenceName}'.",
+            isMissing
+                ? $"Add a same-group public @typedef named {referenceName}, correct the type name, or leave the type expression unsupported if it should not link."
+                : "Rename one typedef or split the docs into distinct JavaScript API groups before referencing it."));
+    }
+
     private static void AddCompletenessDiagnostics(
         JavaScriptApiItem item,
         bool requireCompleteEventDoclets,
@@ -825,10 +1144,10 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 AddMissing(missing, item.FiresWhen, "@firesWhen");
                 if (!item.DetailNone && item.Properties.Count == 0)
                 {
-                    missing.Add("@property detail.* or @detail none");
+                    missing.Add("@property detail.*, @property {PayloadType} detail, or @detail none");
                 }
 
-                if (item.Properties.Any(property => !IsValidEventDetailPropertyName(property.Name)))
+                if (item.Properties.Any(static property => !IsValidEventDetailProperty(property)))
                 {
                     hasInvalidDetailProperties = true;
                 }
@@ -927,7 +1246,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
         if (hasInvalidDetailProperties)
         {
-            clauses.Add("Fix @property names to use valid detail.* paths, or remove invalid event detail properties.");
+            clauses.Add("Fix @property names to use valid detail.* paths or an exact detail payload typedef reference, or remove invalid event detail properties.");
         }
 
         if (hasDetailNoneConflict)
@@ -968,6 +1287,17 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
         var segments = name["detail.".Length..].Split('.');
         return segments.All(IsValidEventDetailPropertySegment);
+    }
+
+    private static bool IsValidEventDetailProperty(JavaScriptMember property)
+    {
+        if (IsValidEventDetailPropertyName(property.Name))
+        {
+            return true;
+        }
+
+        return string.Equals(StripOptionalPropertyWrapper(property.Name.Trim()), "detail", StringComparison.Ordinal)
+               && property.TypeReference is not null;
     }
 
     private static string StripOptionalPropertyWrapper(string value)
@@ -1234,13 +1564,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         AppendSignature(builder, item);
-        AppendContractMetadata(builder, item);
-        AppendMembers(builder, "Parameters", item.Parameters);
-        AppendMembers(builder, item.Kind == JavaScriptApiKind.Event ? "Detail fields" : "Properties", item.Properties);
-        if (!string.IsNullOrWhiteSpace(item.Returns))
-        {
-            AppendParagraph(builder, "Returns: " + item.Returns);
-        }
+        var renderedPreviews = new HashSet<string>(StringComparer.Ordinal);
+        AppendContractMetadata(builder, item, renderedPreviews);
+        AppendMembers(builder, "Parameters", item.Parameters, renderedPreviews);
+        AppendMembers(builder, item.Kind == JavaScriptApiKind.Event ? "Detail fields" : "Properties", item.Properties, renderedPreviews);
+        AppendReturns(builder, item.Returns, renderedPreviews);
 
         if (!string.IsNullOrWhiteSpace(item.Example))
         {
@@ -1267,7 +1595,10 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         builder.Append("</code></pre>");
     }
 
-    private static void AppendContractMetadata(StringBuilder builder, JavaScriptApiItem item)
+    private static void AppendContractMetadata(
+        StringBuilder builder,
+        JavaScriptApiItem item,
+        ISet<string> renderedPreviews)
     {
         if (!HasContractMetadata(item))
         {
@@ -1276,7 +1607,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
         builder.Append("<ul>");
         AppendListItem(builder, "Target", item.Target);
-        AppendListItem(builder, "Type", item.Type);
+        AppendTypeListItem(builder, "Type", item.Type, item.TypeReference);
         AppendListItem(builder, "Default", item.DefaultValue);
         AppendListItem(builder, "Values", item.Values);
         AppendListItem(builder, "Source", item.Source);
@@ -1298,6 +1629,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         builder.Append("</ul>");
+        AppendTypedefPreview(builder, item.TypeReference, renderedPreviews);
     }
 
     private static bool HasContractMetadata(JavaScriptApiItem item)
@@ -1318,7 +1650,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                || item.DetailNone;
     }
 
-    private static void AppendMembers(StringBuilder builder, string heading, IReadOnlyList<JavaScriptMember> members)
+    private static void AppendMembers(
+        StringBuilder builder,
+        string heading,
+        IReadOnlyList<JavaScriptMember> members,
+        ISet<string> renderedPreviews)
     {
         if (members.Count == 0)
         {
@@ -1336,7 +1672,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             if (!string.IsNullOrWhiteSpace(member.Type))
             {
                 builder.Append(" <span class=\"doc-kind\">");
-                builder.Append(WebUtility.HtmlEncode(member.Type));
+                AppendTypeValue(builder, member.Type, member.TypeReference);
                 builder.Append("</span>");
             }
 
@@ -1346,10 +1682,39 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 builder.Append(WebUtility.HtmlEncode(member.Description));
             }
 
+            AppendTypedefPreview(builder, member.TypeReference, renderedPreviews);
             builder.Append("</li>");
         }
 
         builder.Append("</ul>");
+    }
+
+    private static void AppendReturns(
+        StringBuilder builder,
+        JavaScriptReturnValue? returns,
+        ISet<string> renderedPreviews)
+    {
+        if (returns is null || string.IsNullOrWhiteSpace(returns.OriginalText))
+        {
+            return;
+        }
+
+        if (returns.TypeReference is null || string.IsNullOrWhiteSpace(returns.Type))
+        {
+            AppendParagraph(builder, "Returns: " + returns.OriginalText);
+            return;
+        }
+
+        builder.Append("<p>Returns: ");
+        AppendTypeValue(builder, returns.Type, returns.TypeReference);
+        if (!string.IsNullOrWhiteSpace(returns.Description))
+        {
+            builder.Append(" - ");
+            builder.Append(WebUtility.HtmlEncode(returns.Description));
+        }
+
+        builder.Append("</p>");
+        AppendTypedefPreview(builder, returns.TypeReference, renderedPreviews);
     }
 
     private static void AppendParagraph(StringBuilder builder, string? text)
@@ -1376,6 +1741,106 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         builder.Append(":</strong> ");
         builder.Append(WebUtility.HtmlEncode(value));
         builder.Append("</li>");
+    }
+
+    private static void AppendTypeListItem(
+        StringBuilder builder,
+        string label,
+        string? value,
+        JavaScriptTypedefReference? reference)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        builder.Append("<li><strong>");
+        builder.Append(WebUtility.HtmlEncode(label));
+        builder.Append(":</strong> ");
+        AppendTypeValue(builder, value, reference);
+        builder.Append("</li>");
+    }
+
+    private static void AppendTypeValue(
+        StringBuilder builder,
+        string value,
+        JavaScriptTypedefReference? reference)
+    {
+        if (reference is null)
+        {
+            builder.Append(WebUtility.HtmlEncode(value));
+            return;
+        }
+
+        builder.Append("<a href=\"#");
+        builder.Append(WebUtility.HtmlEncode(reference.Target.AnchorId));
+        builder.Append("\">");
+        builder.Append(WebUtility.HtmlEncode(value));
+        builder.Append("</a>");
+    }
+
+    private static void AppendTypedefPreview(
+        StringBuilder builder,
+        JavaScriptTypedefReference? reference,
+        ISet<string> renderedPreviews)
+    {
+        if (reference is null || !renderedPreviews.Add(reference.Target.AnchorId))
+        {
+            return;
+        }
+
+        var typedef = reference.Target;
+        builder.Append("<div class=\"doc-javascript-typedef-preview\"><p>Type preview: ");
+        builder.Append("<a href=\"#");
+        builder.Append(WebUtility.HtmlEncode(typedef.AnchorId));
+        builder.Append("\">");
+        builder.Append(WebUtility.HtmlEncode(typedef.Name));
+        builder.Append("</a>");
+        if (!string.IsNullOrWhiteSpace(typedef.Summary)
+            && !string.Equals(typedef.Summary, typedef.Name, StringComparison.Ordinal))
+        {
+            builder.Append(" - ");
+            builder.Append(WebUtility.HtmlEncode(typedef.Summary));
+        }
+
+        builder.Append("</p>");
+        if (typedef.Properties.Count > 0)
+        {
+            builder.Append("<ul>");
+            foreach (var property in typedef.Properties.Take(5))
+            {
+                builder.Append("<li><code>");
+                builder.Append(WebUtility.HtmlEncode(property.Name));
+                builder.Append("</code>");
+                if (!string.IsNullOrWhiteSpace(property.Type))
+                {
+                    builder.Append(" <span class=\"doc-kind\">");
+                    builder.Append(WebUtility.HtmlEncode(property.Type));
+                    builder.Append("</span>");
+                }
+
+                if (!string.IsNullOrWhiteSpace(property.Description))
+                {
+                    builder.Append(" - ");
+                    builder.Append(WebUtility.HtmlEncode(property.Description));
+                }
+
+                builder.Append("</li>");
+            }
+
+            if (typedef.Properties.Count > 5)
+            {
+                builder.Append("<li><a href=\"#");
+                builder.Append(WebUtility.HtmlEncode(typedef.AnchorId));
+                builder.Append("\">View full ");
+                builder.Append(WebUtility.HtmlEncode(typedef.Name));
+                builder.Append(" contract</a></li>");
+            }
+
+            builder.Append("</ul>");
+        }
+
+        builder.Append("</div>");
     }
 
     private static string CreateSymbolSourcePlaceholder(string anchorId)
@@ -1948,7 +2413,159 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
         return string.IsNullOrWhiteSpace(name)
             ? null
-            : new JavaScriptMember(name, type, description);
+            : new JavaScriptMember(name, type, TryCreateTypedefReferenceName(type), description);
+    }
+
+    private static JavaScriptReturnValue? ParseReturnValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var originalText = value.Trim();
+        var remaining = originalText;
+        string? type = null;
+        if (remaining.StartsWith("{", StringComparison.Ordinal))
+        {
+            var typeEnd = remaining.IndexOf('}', StringComparison.Ordinal);
+            if (typeEnd > 0)
+            {
+                type = remaining[1..typeEnd].Trim();
+                remaining = remaining[(typeEnd + 1)..].Trim();
+            }
+        }
+
+        if (remaining.StartsWith("-", StringComparison.Ordinal))
+        {
+            remaining = remaining[1..].Trim();
+        }
+
+        return new JavaScriptReturnValue(
+            originalText,
+            type,
+            TryCreateTypedefReferenceName(type),
+            remaining);
+    }
+
+    private static string? TryCreateTypedefReferenceNameFromBracedExpression(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        if (!trimmed.StartsWith("{", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var typeEnd = trimmed.IndexOf('}', StringComparison.Ordinal);
+        if (typeEnd != trimmed.Length - 1 || typeEnd <= 0)
+        {
+            return null;
+        }
+
+        return TryCreateTypedefReferenceName(trimmed[1..typeEnd].Trim());
+    }
+
+    private static string? TryCreateTypedefReferenceName(string? type)
+    {
+        if (string.IsNullOrWhiteSpace(type) || IsKnownNonTypedefTypeName(type))
+        {
+            return null;
+        }
+
+        return Regex.IsMatch(type, @"^[A-Za-z_$][A-Za-z0-9_$]*$", RegexOptions.CultureInvariant)
+            ? type
+            : null;
+    }
+
+    private static bool IsKnownNonTypedefTypeName(string type)
+    {
+        if ((type.StartsWith("HTML", StringComparison.Ordinal)
+             || type.StartsWith("SVG", StringComparison.Ordinal)
+             || type.StartsWith("MathML", StringComparison.Ordinal))
+            && type.EndsWith("Element", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return type is "*"
+            or "any"
+            or "unknown"
+            or "string"
+            or "String"
+            or "boolean"
+            or "Boolean"
+            or "number"
+            or "Number"
+            or "bigint"
+            or "BigInt"
+            or "symbol"
+            or "Symbol"
+            or "object"
+            or "Object"
+            or "Array"
+            or "ArrayBuffer"
+            or "DataView"
+            or "Date"
+            or "Error"
+            or "EvalError"
+            or "RangeError"
+            or "ReferenceError"
+            or "SyntaxError"
+            or "TypeError"
+            or "URIError"
+            or "AggregateError"
+            or "Function"
+            or "Promise"
+            or "RegExp"
+            or "Map"
+            or "Set"
+            or "WeakMap"
+            or "WeakSet"
+            or "Int8Array"
+            or "Uint8Array"
+            or "Uint8ClampedArray"
+            or "Int16Array"
+            or "Uint16Array"
+            or "Int32Array"
+            or "Uint32Array"
+            or "Float32Array"
+            or "Float64Array"
+            or "BigInt64Array"
+            or "BigUint64Array"
+            or "void"
+            or "undefined"
+            or "null"
+            or "AbortController"
+            or "AbortSignal"
+            or "Blob"
+            or "DOMException"
+            or "DOMParser"
+            or "File"
+            or "FileList"
+            or "FormData"
+            or "Headers"
+            or "Request"
+            or "Response"
+            or "URL"
+            or "URLSearchParams"
+            or "HTMLElement"
+            or "Element"
+            or "Node"
+            or "Document"
+            or "Window"
+            or "Event"
+            or "InputEvent"
+            or "KeyboardEvent"
+            or "MouseEvent"
+            or "PointerEvent"
+            or "SubmitEvent"
+            or "CustomEvent"
+            or "Record";
     }
 
     private static string? TryGetTypedefName(JavaScriptDoclet doclet)
@@ -2198,6 +2815,15 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         bool HasGlobTokens,
         bool CouldMatchJavaScriptFile);
 
+    private readonly record struct JavaScriptParseResult(
+        IReadOnlyList<JavaScriptApiItem> Items,
+        IReadOnlyList<JavaScriptEventDispatchEvidence> EventDispatches);
+
+    private readonly record struct JavaScriptEventDispatchEvidence(
+        string EventName,
+        string SourcePath,
+        int StartLine);
+
     /// <summary>
     /// Captures the normalized path and boundary decision for a JavaScript harvest file-system candidate.
     /// </summary>
@@ -2314,7 +2940,32 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
-    private sealed record JavaScriptMember(string Name, string? Type, string Description);
+    private enum JavaScriptTypedefDiagnosticKind
+    {
+        Missing,
+        Ambiguous
+    }
+
+    private sealed record JavaScriptTypedefDiagnosticKey(
+        string GroupIdentity,
+        string ReferenceName,
+        JavaScriptTypedefDiagnosticKind Kind);
+
+    private sealed record JavaScriptTypedefReference(string ReferenceName, JavaScriptApiItem Target);
+
+    private sealed record JavaScriptMember(string Name, string? Type, string? TypeReferenceName, string Description)
+    {
+        public JavaScriptTypedefReference? TypeReference { get; set; }
+    }
+
+    private sealed record JavaScriptReturnValue(
+        string OriginalText,
+        string? Type,
+        string? TypeReferenceName,
+        string Description)
+    {
+        public JavaScriptTypedefReference? TypeReference { get; set; }
+    }
 
     private sealed record JavaScriptApiGroupReference(string Identity, string DisplayName, bool IsPathFallback);
 
@@ -2336,10 +2987,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string Description,
         IReadOnlyList<JavaScriptMember> Parameters,
         IReadOnlyList<JavaScriptMember> Properties,
-        string? Returns,
+        JavaScriptReturnValue? Returns,
         string? Target,
         string? FiresWhen,
         string? Type,
+        string? TypeReferenceName,
         string? DefaultValue,
         string? Values,
         string? Source,
@@ -2358,6 +3010,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         int StartLine)
     {
         public string AnchorId { get; set; } = string.Empty;
+
+        public JavaScriptTypedefReference? TypeReference { get; set; }
     }
 
 }

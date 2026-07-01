@@ -454,6 +454,16 @@ internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepository
     public bool RequireCompleteEventDoclets { get; set; }
 
     /// <summary>
+    /// Gets a value indicating whether public JavaScript event doclets should be compared with literal CustomEvent dispatch evidence.
+    /// </summary>
+    /// <remarks>
+    /// This forwards <c>AppSurfaceDocs:Harvest:JavaScript:VerifyEventDispatches=true</c> into the verification host.
+    /// Mismatches remain warning-only diagnostics; the command prints them on successful verification runs.
+    /// </remarks>
+    [CommandOption("verify-event-dispatches", Description = "Warn when public JavaScript @event doclets and literal CustomEvent dispatches drift.")]
+    public bool VerifyEventDispatches { get; set; }
+
+    /// <summary>
     /// Executes the command through the CliFx console integration.
     /// </summary>
     /// <param name="console">Console abstraction used to register cancellation handling.</param>
@@ -488,6 +498,12 @@ internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepository
             if (!result.Health.Verification.Ok)
             {
                 throw new CommandException(BuildFailureMessage(result));
+            }
+
+            var warningMessage = BuildWarningMessage(result);
+            if (warningMessage is not null)
+            {
+                _logger.LogWarning("{WarningMessage}", warningMessage);
             }
 
             _logger.LogInformation(
@@ -533,6 +549,12 @@ internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepository
             forwardedArgs.Add("true");
         }
 
+        if (VerifyEventDispatches)
+        {
+            forwardedArgs.Add("--AppSurfaceDocs:Harvest:JavaScript:VerifyEventDispatches");
+            forwardedArgs.Add("true");
+        }
+
         var docsUrlBuilder = new DocsUrlBuilder(new AppSurfaceDocsOptions
         {
             Routing = new AppSurfaceDocsRoutingOptions
@@ -559,7 +581,31 @@ internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepository
     {
         var builder = new StringBuilder();
         builder.Append(CultureInfo.InvariantCulture, $"AppSurface Docs harvest health verification failed: status {result.Health.Status}, HTTP {(int)result.HttpStatusCode}.");
-        foreach (var diagnostic in result.Health.Diagnostics)
+        AppendDiagnostics(builder, result.Health.Diagnostics);
+
+        return builder.ToString();
+    }
+
+    private static string? BuildWarningMessage(AppSurfaceDocsHealthVerificationResult result)
+    {
+        var warnings = result.Health.Diagnostics
+            .Where(static diagnostic => string.Equals(diagnostic.Severity, nameof(DocHarvestDiagnosticSeverity.Warning), StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (warnings.Length == 0)
+        {
+            return null;
+        }
+
+        var builder = new StringBuilder();
+        builder.Append(CultureInfo.InvariantCulture, $"AppSurface Docs harvest health verified with {warnings.Length.ToString(CultureInfo.InvariantCulture)} warning diagnostic(s): status {result.Health.Status}, HTTP {(int)result.HttpStatusCode}.");
+        AppendDiagnostics(builder, warnings);
+
+        return builder.ToString();
+    }
+
+    private static void AppendDiagnostics(StringBuilder builder, IEnumerable<AppSurfaceDocsHarvestDiagnosticResponse> diagnostics)
+    {
+        foreach (var diagnostic in diagnostics)
         {
             builder.AppendLine();
             builder.Append("- ");
@@ -576,14 +622,18 @@ internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepository
 
             builder.Append(": ");
             builder.Append(diagnostic.Problem);
+            if (!string.IsNullOrWhiteSpace(diagnostic.Cause))
+            {
+                builder.Append(" Cause: ");
+                builder.Append(diagnostic.Cause);
+            }
+
             if (!string.IsNullOrWhiteSpace(diagnostic.Fix))
             {
                 builder.Append(" Fix: ");
                 builder.Append(diagnostic.Fix);
             }
         }
-
-        return builder.ToString();
     }
 
     private static string BuildHttpStatusMismatchMessage(AppSurfaceDocsHealthVerificationResult result)

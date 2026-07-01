@@ -18,6 +18,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 - `ForgeTrust.RazorWire` documents auth projection helpers, including `rw:auth-view`, `rw:auth-gate`, `rw:permission-gate`, `rw:login-link`, and `rw:logout-button`, with a paired endpoint-enforcement example and DevAuth marker guidance that keeps local fake personas separate from reusable UI projection.
 - `ForgeTrust.RazorWire.Cli` now audits HTML, partials, route/search JSON, JavaScript, manifests, redirects, deployment text extras, release manifests, and the final materialized inventory so static and hybrid exports fail closed instead of publishing private auth UI.
+- AppSurface Docs adds a default-off JavaScript event-dispatch verifier that compares public `@event` doclets with direct literal `dispatchEvent(new CustomEvent("event:name", ...))` evidence from the same policy-approved JavaScript harvest inputs. `docs verify-health --verify-event-dispatches` now surfaces non-fatal warning diagnostics, including `Cause`, for doclet-only and dispatch-only drift while leaving strict health blockers unchanged.
 - AppSurface LocalSecrets startup failures that happen before the platform command can run now report `Unavailable` with
   `local-secret-store-unavailable` instead of being classified by words in raw OS exception messages. Real locked-store
   process output still maps to `Locked`; startup diagnostics include exception type, `HResult`, and synthetic exit code
@@ -42,6 +43,9 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Auth now has a Start Here adoption ladder that helps package consumers choose between host-owned
   ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces
   without implying AppSurface owns production identity providers, policies, user stores, or enforcement.
+- AppSurface Docs now enriches exact same-group JavaScript typedef references across params, properties, returns, and
+  `@type` metadata. Rendered pages, item stubs, and search payloads link the reference to the canonical typedef and show
+  a bounded preview, while missing or ambiguous simple references emit warning diagnostics instead of breaking harvests.
 - Document the Config audit HTTP workflow, OpenAPI-hidden default behavior, native ASP.NET Core auth response ownership,
   host-owned rate limiting, and the Config captured-snapshot diff path.
 
