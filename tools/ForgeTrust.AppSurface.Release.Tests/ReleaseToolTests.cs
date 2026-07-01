@@ -4005,6 +4005,40 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task DocsPublicationRejectsInvalidExistingPagesCatalogWithDiagnostic()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var existingPagesRoot = RepositoryPath("artifacts/existing-pages");
+        Directory.CreateDirectory(existingPagesRoot);
+        await File.WriteAllTextAsync(Path.Join(existingPagesRoot, "versions.json"), "{");
+
+        var result = await RunAsync(
+            [
+                "docs-publication",
+                "--version",
+                "0.1.0",
+                "--tag",
+                "v0.1.0",
+                "--docs-exact-tree",
+                TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+                "--existing-pages-root",
+                existingPagesRoot,
+                "--archive-output",
+                RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz"),
+                "--pages-staging-root",
+                ExternalPath("pages"),
+                "--plan-output",
+                RepositoryPath("artifacts/docs-publication-plan.json")
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-publication-catalog-invalid", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("versions.json", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DocsPublicationCreatesMaintainedPrereleaseCatalogEntry()
     {
         await SeedRepositoryAsync();

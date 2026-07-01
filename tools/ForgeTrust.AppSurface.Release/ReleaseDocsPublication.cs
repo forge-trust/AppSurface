@@ -227,7 +227,7 @@ internal sealed class ReleaseDocsPublication
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private static async Task<string?> WriteCatalogAsync(
+    private async Task<string?> WriteCatalogAsync(
         DocsPublicationRequest request,
         string catalogPath,
         string exactTreePath,
@@ -241,7 +241,7 @@ internal sealed class ReleaseDocsPublication
             : catalogPath;
         if (File.Exists(existingCatalogPath))
         {
-            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(existingCatalogPath, cancellationToken));
+            using var document = await ReadExistingCatalogAsync(existingCatalogPath, cancellationToken);
             if (document.RootElement.TryGetProperty("recommendedVersion", out var recommendedVersionProperty)
                 && recommendedVersionProperty.ValueKind == JsonValueKind.String
                 && !string.IsNullOrWhiteSpace(recommendedVersionProperty.GetString()))
@@ -327,6 +327,23 @@ internal sealed class ReleaseDocsPublication
         };
         await File.WriteAllTextAsync(catalogPath, catalog.ToJsonString(ReleaseJson.Options) + Environment.NewLine, cancellationToken);
         return recommendedVersion;
+    }
+
+    private async Task<JsonDocument> ReadExistingCatalogAsync(string existingCatalogPath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return JsonDocument.Parse(await File.ReadAllTextAsync(existingCatalogPath, cancellationToken));
+        }
+        catch (JsonException ex)
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-docs-publication-catalog-invalid",
+                "The existing Pages version catalog is invalid.",
+                $"`{_workspace.DisplayPath(existingCatalogPath)}` could not be parsed as JSON: {ex.Message}",
+                "Repair or remove the existing `versions.json` before creating a release docs publication plan.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
+        }
     }
 
     private static (int Major, int Minor, int Patch) StableSortKey(string? version)
