@@ -12,7 +12,7 @@ The `AppSurfaceWebOpenApiModule` simplifies the configuration of OpenAPI by:
 
 ## Release Guidance
 
-AppSurface publishes coordinated `v0.1.0` release candidates. Before installing this package from a prerelease feed, read the [v0.1.0 RC 4 release note](../../releases/v0.1.0-rc.4.md) for current release risk, migration guidance, and package readiness.
+AppSurface publishes the coordinated `v0.1.0` release as one package-facing story. Before installing this package from a package feed, read the [v0.1.0 release note](../../releases/v0.1.0.md) for current release risk, migration guidance, and package readiness.
 
 ## Usage
 
