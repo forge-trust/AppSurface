@@ -17,7 +17,7 @@ namespace ForgeTrust.AppSurface.Release;
 /// <param name="FailOnWarnings">Whether check should fail when warning diagnostics are present.</param>
 /// <param name="AllowExistingTargets">Whether check may review already-generated release artifacts.</param>
 /// <param name="BaseRef">Publish branch that must contain the release tag commit.</param>
-/// <param name="DocsCatalogPath">Optional staged AppSurface Docs <c>versions.json</c> used for stable docs evidence verification. <c>check</c> may leave this null to use the local <c>dist/docs/versions.json</c> fallback; stable <c>publish</c> requires an explicit path.</param>
+/// <param name="DocsCatalogPath">Optional staged AppSurface Docs <c>versions.json</c> used for stable docs evidence verification. <c>check</c> may leave this null to use the local <c>dist/docs/versions.json</c> fallback; release publication should use the <c>docs-publication</c> command for the public archive/catalog path.</param>
 /// <param name="DocsTrustedReleaseRootPath">Optional trusted release root for catalog exact-tree paths. When null, verification defaults to the catalog directory; callers should pass it when the staged exact trees live elsewhere.</param>
 internal sealed record ReleaseOptions(
     string Command,

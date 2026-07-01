@@ -9,6 +9,10 @@ This is the living release note for the next coordinated AppSurface version afte
 - `ForgeTrust.AppSurface.Web` now owns the baseline PWA install contract in the existing Web package: app-owned
   `WebOptions.Pwa` metadata maps a manifest endpoint, MVC/Razor head tags, development diagnostics, and an explicit
   opt-in offline fallback, with `appsurface pwa verify` providing a copy-paste CLI proof for the running origin.
+- `ForgeTrust.AppSurface.Workers` and `ForgeTrust.AppSurface.Workers.DurableTask` introduce a DurableTask-first worker
+  path: host-neutral claim/completion/projection-repair contracts, privacy-safe repair diagnostics, bounded projection
+  repair requests, and passive Durable Task-facing schedule/wait/repair/complete/fault/retry/timeout decisions without
+  adding an EF/Postgres queue or scheduler runtime.
 - `ForgeTrust.AppSurface.Web` now maps default public `/health` and `/ready` platform probes backed by ASP.NET Core
   health checks. `/health` runs all registered checks, `/ready` runs checks tagged with
   `AppSurfaceHealthCheckTags.Ready`, and both return minimal plain-text aggregate status with `503` for degraded or
@@ -49,9 +53,19 @@ This is the living release note for the next coordinated AppSurface version afte
   serveable file before stable GitHub Release publishing can continue. The protected stable NuGet workflow now repeats the
   export and archive verification against the checked-in release evidence before it can request the NuGet trusted publishing
   token.
+- Release publishing now owns the public AppSurface Docs publication lifecycle after protected package proof succeeds.
+  The release workflow exports docs from the annotated tag, creates a deterministic `appsurface-docs-vx.y.z.tar.gz`
+  plus `.sha256`, stages `versions.json` and `releases/x.y.z/`, deploys GitHub Pages, verifies the public catalog,
+  exact-tree manifest, and uploaded release asset digest, then publishes the draft GitHub Release. Main docs deploys
+  rehydrate published release archives from GitHub Release assets before uploading Pages so a later `main` push does not
+  erase catalog-pinned release docs.
 - AppSurface Auth now has a Start Here adoption ladder that helps package consumers choose between host-owned
   ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces
   without implying AppSurface owns production identity providers, policies, user stores, or enforcement.
+- AppSurface Workers adds a durable worker contract layer and DurableTask adapter. Worker chains separate executor
+  claims, terminal completion facts, and projection repair so stale projections can be reconciled without re-running
+  side effects. Durable Task remains the preferred runtime boundary; EF/Postgres is left to app-owned product state or a
+  future optional adapter, not the v1 AppSurface runtime.
 - AppSurface Docs adds a shared diagnostics read policy for trusted operators. Hosts can configure
   `AppSurfaceDocs:Diagnostics:OperatorReadPolicy` to protect `_harvest`, `_routes`, `_routes.json`, the docs-owned
   harvest progress stream, and health reads when the legacy health-only policy is absent. Hidden diagnostics routes

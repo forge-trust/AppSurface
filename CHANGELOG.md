@@ -18,6 +18,9 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
   the public docs catalog, exact tree, release manifest, and serveable files match before GitHub Releases receive a
   stable package. The protected stable NuGet workflow also replays that docs export and archive verification before it requests
   the NuGet trusted publishing token.
+- Release publishing now creates the durable public docs archive, `.sha256` digest, Pages catalog entry, recovery summary,
+  and public verification gate before a draft GitHub Release can become public. Later main docs deploys hydrate existing
+  release archives first, so published release docs stay available after ordinary docs updates.
 - RazorWire now renders passive AppSurface auth-result UI states with `rw:auth-view`, gate, login-link, and logout-button helpers, plus an ASP.NET Core adapter package that delegates to host-owned AppSurface policy evaluation.
 - RazorWire static and hybrid export now force auth helpers into a static-safe anonymous projection and fail with `RWEXPORT010` before writing protected auth content, auth diagnostics, DevAuth markers, or unsafe auth metadata to generated text artifacts.
 - AppSurface Docs can now verify public JavaScript `@event` doclets against direct literal `CustomEvent` dispatch evidence with default-off health warnings and a `docs verify-health --verify-event-dispatches` CLI switch.
@@ -25,6 +28,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - `ForgeTrust.AppSurface.Web` now owns first-class PWA install metadata: enable `WebOptions.Pwa` to serve a manifest, emit Razor head metadata, expose development diagnostics, and opt into a starter offline fallback, then prove the running app with `appsurface pwa verify`.
 - `ForgeTrust.AppSurface.Web` now maps default public `/health` and `/ready` platform probes backed by ASP.NET Core health checks, with readiness scoped to checks tagged `AppSurfaceHealthCheckTags.Ready` and minimal aggregate status responses for service platforms.
 - AppSurface Auth adds a Start Here adoption ladder for choosing between host-owned ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces while keeping production identity providers, policies, user stores, and enforcement host-owned.
+- AppSurface Workers adds DurableTask-first worker contracts and adapter packages for claim, completion, retry, wait, timeout, stale-signal, and projection-repair decisions without introducing an EF/Postgres worker runtime.
 - AppSurface Docs can now protect exposed diagnostics reads with `AppSurfaceDocs:Diagnostics:OperatorReadPolicy`, covering the harvest observatory, route inspector, route manifest JSON, harvest progress stream, and health routes when no health-only policy is configured.
 - AppSurface Docs now links exact same-group JavaScript typedef references from params, properties, returns, and `@type` metadata, adds bounded payload previews, and warns when a simple typedef reference is missing or ambiguous.
 

@@ -72,6 +72,12 @@
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj" />
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.DurableTask.Tests/ForgeTrust.AppSurface.Flow.DurableTask.Tests.csproj" />
   </Folder>
+  <Folder Name="/Workers/">
+    <Project Path="Workers/ForgeTrust.AppSurface.Workers/ForgeTrust.AppSurface.Workers.csproj" />
+    <Project Path="Workers/ForgeTrust.AppSurface.Workers.Tests/ForgeTrust.AppSurface.Workers.Tests.csproj" />
+    <Project Path="Workers/ForgeTrust.AppSurface.Workers.DurableTask/ForgeTrust.AppSurface.Workers.DurableTask.csproj" />
+    <Project Path="Workers/ForgeTrust.AppSurface.Workers.DurableTask.Tests/ForgeTrust.AppSurface.Workers.DurableTask.Tests.csproj" />
+  </Folder>
   <Folder Name="/Intelligence/">
     <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj" />
     <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence.Tests/ForgeTrust.AppSurface.Intelligence.Tests.csproj" />
