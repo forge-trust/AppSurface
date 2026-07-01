@@ -156,7 +156,7 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.DoesNotContain("pull_request", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("workflow_dispatch", workflow, StringComparison.Ordinal);
         Assert.Contains("tag_pattern='^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$'", workflow, StringComparison.Ordinal);
-        Assert.Contains("STABLE_BASE_REF: main", workflow, StringComparison.Ordinal);
+        Assert.Contains("STABLE_BASE_REF: release/0.1.0", workflow, StringComparison.Ordinal);
         Assert.Contains("origin/${STABLE_BASE_REF}", workflow, StringComparison.Ordinal);
         Assert.Contains("--branch \"${STABLE_BASE_REF}\"", workflow, StringComparison.Ordinal);
         Assert.Contains("nuget-stable", workflow, StringComparison.Ordinal);

@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 env:
-  STABLE_BASE_REF: main
+  STABLE_BASE_REF: release/0.1.0
 
 jobs:
   validate-tag:
