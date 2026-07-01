@@ -191,13 +191,13 @@ public sealed class AppSurfaceLocalSecretProvider : IConfigProvider, IConfigProv
         return true;
     }
 
-    private static AppSurfaceLocalSecretDiagnostic CreateConversionDiagnostic<T>() =>
+    private AppSurfaceLocalSecretDiagnostic CreateConversionDiagnostic<T>() =>
         new(
             "local-secret-conversion-failed",
             "Local secret value could not be converted.",
             $"The local secret text could not bind to {typeof(T).Name}.",
             "Replace the secret with the expected scalar text or JSON object shape.",
-            "local-secrets-troubleshooting");
+            _options.DocsHint);
 
     private void RememberTerminal(string environment, string key, AppSurfaceLocalSecretDiagnostic diagnostic) =>
         _terminalDiagnostics[CacheKey(environment, key)] = diagnostic;

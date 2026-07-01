@@ -2654,6 +2654,25 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_RejectsMismatchedPublicProviderAuditResolutionKey()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new MismatchedPublicAuditDiagnosticsProvider());
+        services.AddConfigAuditKey<string>("Public.Requested");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var diagnostic = Assert.Single(AssertEntry(report, "Public.Requested", ConfigAuditEntryState.Invalid, null).Diagnostics);
+        Assert.Equal("config-provider-resolve-threw", diagnostic.Code);
+        Assert.DoesNotContain("wrong-secret", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GetReport_ConvertsPublicProviderAuditResolutionExceptionsToDiagnostics()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -3277,6 +3296,27 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_ConvertsPublicDiscoveredEnumerationExceptionsToDiagnostics()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddConfigAuditKey<string>("Public.Known");
+        services.AddSingleton<IConfigProvider>(new ThrowingPublicKeyEnumeratorProvider());
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        Assert.Empty(report.DiscoveredKeys);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "config-provider-enumerate-keys-threw");
+        Assert.DoesNotContain(
+            report.Diagnostics,
+            diagnostic => diagnostic.Message.Contains("super-secret", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void FileProviderEnumeration_ReportsOriginFallbackForMissingOriginMetadata()
     {
         var environmentConfig = new JsonObject
@@ -3791,6 +3831,18 @@ public class ConfigAuditReporterTests
         ];
     }
 
+    private sealed class ThrowingPublicKeyEnumeratorProvider : IConfigProvider, IConfigProviderAuditKeyEnumerator
+    {
+        public int Priority => 10;
+
+        public string Name => nameof(ThrowingPublicKeyEnumeratorProvider);
+
+        public T? GetValue<T>(string environment, string requestedKey) => default;
+
+        public IReadOnlyList<ConfigProviderAuditDiscoveredKey> EnumerateKeys(string environment) =>
+            throw new InvalidOperationException("super-secret public enumeration failure");
+    }
+
     private sealed class DictionaryConfigProvider : IConfigProvider, IConfigDiagnosticProvider
     {
         private readonly IReadOnlyDictionary<string, object?> _values;
@@ -4228,6 +4280,39 @@ public class ConfigAuditReporterTests
                 ],
                 []);
         }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+    }
+
+    private sealed class MismatchedPublicAuditDiagnosticsProvider : IConfigProvider, IConfigProviderAuditDiagnostics
+    {
+        public int Priority => 24;
+
+        public string Name => nameof(MismatchedPublicAuditDiagnosticsProvider);
+
+        public T? GetValue<T>(string environment, string requestedKey) => default;
+
+        public ConfigProviderAuditResolution ResolveForAudit(
+            string environment,
+            string requestedKey,
+            Type valueType,
+            ConfigAuditSourceRole role) =>
+            new(
+                "Public.Other",
+                ConfigAuditEntryState.Resolved,
+                "wrong-secret",
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.Provider,
+                        ProviderName = Name,
+                        ProviderPriority = Priority,
+                        ConfigPath = "Public.Other",
+                        AppliedToPath = "Public.Other",
+                        Role = role
+                    }
+                ],
+                []);
 
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
     }

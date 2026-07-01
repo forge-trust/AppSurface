@@ -59,6 +59,9 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     /// <inheritdoc />
     public T? GetValue<T>(string environment, string key)
     {
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(key);
+
         var resolution = ResolveValue<T>(environment, key);
         return resolution.Status == GoogleSecretManagerResultStatus.Found ? resolution.Value : default;
     }
@@ -72,6 +75,9 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     /// <returns>The typed Google Secret Manager resolution.</returns>
     public GoogleSecretManagerConfigResolution<T> ResolveValue<T>(string environment, string key)
     {
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(key);
+
         _terminalDiagnostics.TryRemove(CacheKey(environment, key), out _);
 
         if (!TryResolveReference(key, out var secretReference))
@@ -138,6 +144,9 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
         string key,
         out ConfigProviderTerminalDiagnostic diagnostic)
     {
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(key);
+
         if (_options.FailClosedOnProviderFailure
             && _terminalDiagnostics.TryGetValue(CacheKey(environment, key), out diagnostic!))
         {
@@ -155,6 +164,10 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
         Type valueType,
         ConfigAuditSourceRole role)
     {
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(valueType);
+
         if (!TryResolveReference(key, out _))
         {
             return ConfigProviderAuditResolution.Missing(key);
@@ -226,10 +239,14 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     {
         var cacheKey = CacheKey(environment, key);
         if (_options.CacheTtl is { } cacheTtl
-            && _cache.TryGetValue(cacheKey, out var cached)
-            && DateTimeOffset.UtcNow - cached.CachedAt <= cacheTtl)
+            && _cache.TryGetValue(cacheKey, out var cached))
         {
-            return PayloadResult.Found(cached.Payload);
+            if (DateTimeOffset.UtcNow - cached.CachedAt <= cacheTtl)
+            {
+                return PayloadResult.Found(cached.Payload);
+            }
+
+            _cache.TryRemove(cacheKey, out _);
         }
 
         try

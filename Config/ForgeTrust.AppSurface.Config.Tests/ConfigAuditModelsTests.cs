@@ -13,6 +13,17 @@ public class ConfigAuditModelsTests
     }
 
     [Fact]
+    public void ConfigProviderAuditDiscoveredKey_RejectsInvalidConstructorArguments()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new ConfigProviderAuditDiscoveredKey("", "value", ConfigAuditDiscoveredValueKind.Scalar, [], []));
+        Assert.Throws<ArgumentNullException>(() =>
+            new ConfigProviderAuditDiscoveredKey("Valid.Key", "value", ConfigAuditDiscoveredValueKind.Scalar, null!, []));
+        Assert.Throws<ArgumentNullException>(() =>
+            new ConfigProviderAuditDiscoveredKey("Valid.Key", "value", ConfigAuditDiscoveredValueKind.Scalar, [], null!));
+    }
+
+    [Fact]
     public void ConfigAuditSourceLocation_RejectsInvalidConstructorArguments()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigAuditSourceLocation(0, 1));
@@ -681,6 +692,10 @@ public class ConfigAuditModelsTests
         Assert.Equal(4, (int)ConfigAuditDiffValueEvidence.Omitted);
         Assert.Equal(5, (int)ConfigAuditDiffValueEvidence.RedactionPolicyMismatch);
         Assert.Equal(6, (int)ConfigAuditDiffValueEvidence.Unspecified);
+
+        Assert.Equal(0, (int)ConfigAuditDiscoveredValueKind.Scalar);
+        Assert.Equal(1, (int)ConfigAuditDiscoveredValueKind.Object);
+        Assert.Equal(2, (int)ConfigAuditDiscoveredValueKind.Array);
 
         Assert.Equal(0, (int)ConfigAuditDiffFailureStage.Baseline);
         Assert.Equal(1, (int)ConfigAuditDiffFailureStage.Target);

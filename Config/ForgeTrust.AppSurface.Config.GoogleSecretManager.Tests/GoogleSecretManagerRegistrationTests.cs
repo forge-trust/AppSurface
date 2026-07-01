@@ -63,6 +63,23 @@ public sealed class GoogleSecretManagerRegistrationTests
     }
 
     [Fact]
+    public void UseAppSurfaceGoogleSecretManagerClient_Should_RejectNullArguments()
+    {
+        var services = new ServiceCollection();
+
+        var nullServicesForType = Assert.Throws<ArgumentNullException>(() =>
+            ServiceCollectionGoogleSecretManagerExtensions.UseAppSurfaceGoogleSecretManagerClient<FakeSecretManagerClient>(null!));
+        var nullServicesForInstance = Assert.Throws<ArgumentNullException>(() =>
+            ServiceCollectionGoogleSecretManagerExtensions.UseAppSurfaceGoogleSecretManagerClient(null!, new FakeSecretManagerClient()));
+        var nullClient = Assert.Throws<ArgumentNullException>(() =>
+            services.UseAppSurfaceGoogleSecretManagerClient(null!));
+
+        Assert.Equal("services", nullServicesForType.ParamName);
+        Assert.Equal("services", nullServicesForInstance.ParamName);
+        Assert.Equal("client", nullClient.ParamName);
+    }
+
+    [Fact]
     public void RegisterDependentModules_Should_AddConfigModuleDependency()
     {
         var module = new AppSurfaceGoogleSecretManagerModule();

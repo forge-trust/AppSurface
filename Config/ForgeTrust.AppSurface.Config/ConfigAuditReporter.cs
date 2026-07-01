@@ -812,6 +812,16 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                     knownEntry.ValueType,
                     role);
 
+                if (!string.Equals(resolution.Key, knownEntry.Key, StringComparison.OrdinalIgnoreCase))
+                {
+                    return CreateProviderExceptionResolution(
+                        provider,
+                        knownEntry.Key,
+                        role,
+                        "config-provider-resolve-threw",
+                        new InvalidOperationException("ResolveForAudit returned a mismatched key."));
+                }
+
                 return new ConfigValueResolution(
                     resolution.Key,
                     resolution.State,

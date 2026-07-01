@@ -81,7 +81,7 @@ public static class ConfigValueConverter
             value = JsonSerializer.Deserialize(raw, effectiveTarget);
             return true;
         }
-        catch (Exception ex) when (ex is ArgumentException or FormatException or InvalidCastException or OverflowException or JsonException)
+        catch (Exception ex) when (ex is ArgumentException or FormatException or InvalidCastException or InvalidOperationException or OverflowException or JsonException or NotSupportedException)
         {
             value = null;
             return false;

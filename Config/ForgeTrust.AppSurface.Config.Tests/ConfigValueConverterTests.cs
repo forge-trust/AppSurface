@@ -26,6 +26,15 @@ public sealed class ConfigValueConverterTests
     }
 
     [Fact]
+    public void TryConvert_Should_ReturnFalseWithoutThrowingForUnsupportedJsonTargets()
+    {
+        var converted = ConfigValueConverter.TryConvert("""{"value":"secret"}""", typeof(UnsupportedPayload), out var value);
+
+        Assert.False(converted);
+        Assert.Null(value);
+    }
+
+    [Fact]
     public void TryConvert_Should_ReturnNullForEmptyNullableValue()
     {
         var converted = ConfigValueConverter.TryConvert(string.Empty, typeof(int?), out var value);
@@ -40,4 +49,9 @@ public sealed class ConfigValueConverterTests
     }
 
     private sealed record SecretPayload(string Name, int Retries);
+
+    private sealed class UnsupportedPayload
+    {
+        public ReadOnlySpan<char> Value => [];
+    }
 }

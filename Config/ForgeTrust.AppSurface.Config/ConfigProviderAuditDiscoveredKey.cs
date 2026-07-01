@@ -13,4 +13,28 @@ public sealed record ConfigProviderAuditDiscoveredKey(
     object? RawValue,
     ConfigAuditDiscoveredValueKind ValueKind,
     IReadOnlyList<ConfigAuditSourceRecord> Sources,
-    IReadOnlyList<ConfigAuditDiagnostic> Diagnostics);
+    IReadOnlyList<ConfigAuditDiagnostic> Diagnostics)
+{
+    /// <summary>
+    /// Gets the discovered configuration key.
+    /// </summary>
+    public string Key { get; init; } = ValidateKey(Key);
+
+    /// <summary>
+    /// Gets source records associated with the key.
+    /// </summary>
+    public IReadOnlyList<ConfigAuditSourceRecord> Sources { get; init; } =
+        Sources ?? throw new ArgumentNullException(nameof(Sources));
+
+    /// <summary>
+    /// Gets display-safe diagnostics specific to this key.
+    /// </summary>
+    public IReadOnlyList<ConfigAuditDiagnostic> Diagnostics { get; init; } =
+        Diagnostics ?? throw new ArgumentNullException(nameof(Diagnostics));
+
+    private static string ValidateKey(string key)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        return key;
+    }
+}

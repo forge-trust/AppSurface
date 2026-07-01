@@ -1,5 +1,7 @@
 using System.Text;
 using ForgeTrust.AppSurface.Config;
+using Google.Api.Gax.Grpc;
+using Google.Cloud.SecretManager.V1;
 using Grpc.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -344,6 +346,17 @@ public sealed class GoogleSecretManagerConfigProviderTests
             nullClientAdapter.AccessSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1)));
     }
 
+    [Fact]
+    public void Adapter_Should_RejectSecretManagerResponsesWithoutPayload()
+    {
+        var adapter = new GoogleSecretManagerClientAdapter(() => new MissingPayloadSecretManagerServiceClient());
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            adapter.AccessSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1)));
+
+        Assert.Contains("without a payload", exception.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(StatusCode.NotFound, GoogleSecretManagerResultStatus.Missing, "google-secret-manager-secret-missing")]
     [InlineData(StatusCode.Unauthenticated, GoogleSecretManagerResultStatus.AccessDenied, "google-secret-manager-access-denied")]
@@ -439,6 +452,58 @@ public sealed class GoogleSecretManagerConfigProviderTests
         Assert.Equal("from-gcp", first.Value);
         Assert.Equal("from-gcp", second.Value);
         Assert.Equal(1, client.Calls);
+    }
+
+    [Fact]
+    public void ResolveValue_Should_EvictExpiredPayloadsFromCache()
+    {
+        var client = new RollingSecretManagerClient("projects/project/secrets/api-key/versions/5", "first", "second");
+        var provider = CreateProvider(
+            client,
+            options =>
+            {
+                options.ProjectId = "project";
+                options.CacheTtl = TimeSpan.FromTicks(1);
+                options.MapSecret("Stripe:ApiKey", "api-key", version: "5");
+            });
+
+        var first = provider.ResolveValue<string>("Production", "Stripe:ApiKey");
+        var second = provider.ResolveValue<string>("Production", "Stripe:ApiKey");
+
+        Assert.Equal("first", first.Value);
+        Assert.Equal("second", second.Value);
+        Assert.Equal(2, client.Calls);
+    }
+
+    [Fact]
+    public void PublicEntryPoints_Should_RejectNullArguments()
+    {
+        var provider = CreateProvider(
+            new FakeSecretManagerClient(("projects/project/secrets/api-key/versions/5", "from-gcp")),
+            options =>
+            {
+                options.ProjectId = "project";
+                options.MapSecret("Stripe:ApiKey", "api-key", version: "5");
+            });
+
+        Assert.Equal("environment", Assert.Throws<ArgumentNullException>(() =>
+            provider.GetValue<string>(null!, "Stripe:ApiKey")).ParamName);
+        Assert.Equal("key", Assert.Throws<ArgumentNullException>(() =>
+            provider.GetValue<string>("Production", null!)).ParamName);
+        Assert.Equal("environment", Assert.Throws<ArgumentNullException>(() =>
+            provider.ResolveValue<string>(null!, "Stripe:ApiKey")).ParamName);
+        Assert.Equal("key", Assert.Throws<ArgumentNullException>(() =>
+            provider.ResolveValue<string>("Production", null!)).ParamName);
+        Assert.Equal("environment", Assert.Throws<ArgumentNullException>(() =>
+            provider.TryGetTerminalDiagnostic(null!, "Stripe:ApiKey", out _)).ParamName);
+        Assert.Equal("key", Assert.Throws<ArgumentNullException>(() =>
+            provider.TryGetTerminalDiagnostic("Production", null!, out _)).ParamName);
+        Assert.Equal("environment", Assert.Throws<ArgumentNullException>(() =>
+            provider.ResolveForAudit(null!, "Stripe:ApiKey", typeof(string), ConfigAuditSourceRole.Base)).ParamName);
+        Assert.Equal("key", Assert.Throws<ArgumentNullException>(() =>
+            provider.ResolveForAudit("Production", null!, typeof(string), ConfigAuditSourceRole.Base)).ParamName);
+        Assert.Equal("valueType", Assert.Throws<ArgumentNullException>(() =>
+            provider.ResolveForAudit("Production", "Stripe:ApiKey", null!, ConfigAuditSourceRole.Base)).ParamName);
     }
 
     [Fact]
@@ -568,6 +633,27 @@ public sealed class GoogleSecretManagerConfigProviderTests
             Assert.Equal(resourceName, requestedResourceName);
             return new AppSurfaceGoogleSecretPayload(_payload, requestedResourceName);
         }
+    }
+
+    private sealed class RollingSecretManagerClient(string resourceName, params string[] payloads) : IAppSurfaceGoogleSecretManagerClient
+    {
+        public int Calls { get; private set; }
+
+        public AppSurfaceGoogleSecretPayload AccessSecretVersion(string requestedResourceName, TimeSpan timeout)
+        {
+            Assert.Equal(resourceName, requestedResourceName);
+            var payload = payloads[Math.Min(Calls, payloads.Length - 1)];
+            Calls++;
+            return new AppSurfaceGoogleSecretPayload(Encoding.UTF8.GetBytes(payload), requestedResourceName);
+        }
+    }
+
+    private sealed class MissingPayloadSecretManagerServiceClient : SecretManagerServiceClient
+    {
+        public override AccessSecretVersionResponse AccessSecretVersion(
+            AccessSecretVersionRequest request,
+            CallSettings? callSettings = null) =>
+            new() { Name = request.Name };
     }
 
     private sealed record SecretPayload(string Name, int Retries);
