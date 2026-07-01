@@ -25,6 +25,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - `ForgeTrust.AppSurface.Web` now maps default public `/health` and `/ready` platform probes backed by ASP.NET Core health checks, with readiness scoped to checks tagged `AppSurfaceHealthCheckTags.Ready` and minimal aggregate status responses for service platforms.
 - AppSurface Auth adds a Start Here adoption ladder for choosing between host-owned ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces while keeping production identity providers, policies, user stores, and enforcement host-owned.
 - AppSurface Docs now links exact same-group JavaScript typedef references from params, properties, returns, and `@type` metadata, adds bounded payload previews, and warns when a simple typedef reference is missing or ambiguous.
+- `ForgeTrust.AppSurface.Config.GoogleSecretManager` adds read-only Google Cloud Secret Manager storage for AppSurface Config, with explicit mappings, opt-in conventions, fail-closed diagnostics, audit evidence, and environment variable emergency overrides.
 
 ## 0.2.0-preview.1 - 2026-06-28
 
