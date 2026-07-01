@@ -94,9 +94,11 @@ internal static class HealthEndpointMapper
         IEndpointRouteBuilder endpoints,
         HashSet<string> reservedPaths)
     {
-        foreach (var endpoint in endpoints.DataSources.SelectMany(dataSource => dataSource.Endpoints).OfType<RouteEndpoint>())
+        foreach (var rawText in endpoints.DataSources
+            .SelectMany(dataSource => dataSource.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText))
         {
-            var rawText = endpoint.RoutePattern.RawText;
             if (string.IsNullOrWhiteSpace(rawText))
             {
                 continue;

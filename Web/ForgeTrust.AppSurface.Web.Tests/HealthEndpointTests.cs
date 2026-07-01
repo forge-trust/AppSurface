@@ -27,6 +27,7 @@ public sealed class HealthEndpointTests
     {
         var options = new HealthOptions();
 
+        Assert.True(HealthOptions.Default.Enabled);
         Assert.True(options.Enabled);
         Assert.Equal(AppSurfaceHealthEndpointDefaults.HealthPath, options.HealthPath);
         Assert.Equal(AppSurfaceHealthEndpointDefaults.ReadyPath, options.ReadyPath);
@@ -48,6 +49,23 @@ public sealed class HealthEndpointTests
         var diagnostics = HealthOptionsValidator.Validate(options);
 
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "ASPHEALTH001");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("ready")]
+    [InlineData("//ready")]
+    [InlineData("/ready?verbose=true")]
+    [InlineData("/ready#status")]
+    [InlineData("/../ready")]
+    [InlineData("/ready/{id}")]
+    public void HealthOptionsValidator_RejectsUnsafeReadyPaths(string path)
+    {
+        var options = new HealthOptions { ReadyPath = path };
+
+        var diagnostics = HealthOptionsValidator.Validate(options);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "ASPHEALTH002");
     }
 
     [Fact]
@@ -91,8 +109,10 @@ public sealed class HealthEndpointTests
     {
         await using var app = await StartHostAsync();
 
-        using var health = await app.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, AppSurfaceHealthEndpointDefaults.HealthPath));
-        using var ready = await app.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, AppSurfaceHealthEndpointDefaults.ReadyPath));
+        using var healthRequest = new HttpRequestMessage(HttpMethod.Head, AppSurfaceHealthEndpointDefaults.HealthPath);
+        using var readyRequest = new HttpRequestMessage(HttpMethod.Head, AppSurfaceHealthEndpointDefaults.ReadyPath);
+        using var health = await app.Client.SendAsync(healthRequest);
+        using var ready = await app.Client.SendAsync(readyRequest);
 
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
         Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
@@ -138,6 +158,25 @@ public sealed class HealthEndpointTests
         await AssertProbeResponseAsync(response, HttpStatusCode.OK, "Healthy");
         Assert.Equal(0, untagged.Count);
         Assert.Equal(1, ready.Count);
+    }
+
+    [Fact]
+    public async Task Ready_UsesConfiguredReadyTag()
+    {
+        var defaultTagged = new ProbeCounter();
+        var customTagged = new ProbeCounter();
+        await using var app = await StartHostAsync(
+            options => options.Health.ReadyTag = "startup",
+            services => RegisterChecks(
+                services,
+                new ProbeRegistration("default-ready", HealthStatus.Healthy, defaultTagged, AppSurfaceHealthCheckTags.Ready),
+                new ProbeRegistration("startup", HealthStatus.Healthy, customTagged, "startup")));
+
+        using var response = await app.Client.GetAsync(AppSurfaceHealthEndpointDefaults.ReadyPath);
+
+        await AssertProbeResponseAsync(response, HttpStatusCode.OK, "Healthy");
+        Assert.Equal(0, defaultTagged.Count);
+        Assert.Equal(1, customTagged.Count);
     }
 
     [Fact]
@@ -274,6 +313,15 @@ public sealed class HealthEndpointTests
             () => StartHostAsync(configureEndpoints: endpoints => endpoints.MapGet(AppSurfaceHealthEndpointDefaults.HealthPath, () => "host")));
 
         AssertHealthPathConflict(exception, AppSurfaceHealthEndpointDefaults.HealthPath);
+    }
+
+    [Fact]
+    public async Task ReadyRouteCollision_FailsStartup()
+    {
+        var exception = await Record.ExceptionAsync(
+            () => StartHostAsync(configureEndpoints: endpoints => endpoints.MapGet(AppSurfaceHealthEndpointDefaults.ReadyPath, () => "host")));
+
+        AssertHealthPathConflict(exception, AppSurfaceHealthEndpointDefaults.ReadyPath);
     }
 
     [Fact]
