@@ -485,8 +485,8 @@ public class ExportEngine
         ExportDeploymentExtras.ValidateTargetParentPath(outputPath, targetPath, extra.PublishPath);
         if (ExportAuthArtifactAuditor.ShouldAuditLocalTextArtifact(targetPath))
         {
-            ExportAuthArtifactAuditor.ValidateTextArtifact(
-                await File.ReadAllTextAsync(extra.SourcePath, cancellationToken),
+            ExportAuthArtifactAuditor.ValidateTextArtifactBytes(
+                await File.ReadAllBytesAsync(extra.SourcePath, cancellationToken),
                 "publish-root deployment extra",
                 extra.PublishPath,
                 targetPath);
@@ -558,8 +558,8 @@ public class ExportEngine
 
             var relativePath = Path.GetRelativePath(context.OutputPath, filePath)
                 .Replace(Path.DirectorySeparatorChar, '/');
-            ExportAuthArtifactAuditor.ValidateTextArtifact(
-                await File.ReadAllTextAsync(filePath, cancellationToken),
+            ExportAuthArtifactAuditor.ValidateTextArtifactBytes(
+                await File.ReadAllBytesAsync(filePath, cancellationToken),
                 "final export artifact",
                 "/" + relativePath,
                 filePath);

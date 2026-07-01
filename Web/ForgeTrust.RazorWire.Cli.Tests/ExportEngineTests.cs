@@ -141,12 +141,77 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldFailBeforeCopying_BomlessUnicodeTextExtraWithAuthViolation()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-extra-unicode-");
+        var sourceRoot = CreateSafeTempDirectory("static-auth-extra-unicode-source-");
+        try
+        {
+            var sourcePath = Path.Join(sourceRoot, "CNAME");
+            await File.WriteAllBytesAsync(
+                sourcePath,
+                Encoding.Unicode.GetBytes("""<div data-rw-auth-state="allowed"></div>"""));
+            using var client = new HttpClient(new TestHttpMessageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(outputPath, null, "http://localhost:5000");
+            context.AddDeploymentExtra(sourcePath, "/CNAME");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/CNAME", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(outputPath, "CNAME")));
+        }
+        finally
+        {
+            if (Directory.Exists(outputPath))
+            {
+                Directory.Delete(outputPath, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldFailFinalInventory_ForExtensionlessTextArtifactWithoutTextContentType()
     {
         var outputPath = CreateSafeTempDirectory("static-auth-final-inventory-");
         try
         {
             using var client = new HttpClient(new StaticAuthUnsafeExtensionlessAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(outputPath, null, "http://localhost:5000");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/leak", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(outputPath))
+            {
+                Directory.Delete(outputPath, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailFinalInventory_ForBomlessUnicodeExtensionlessTextArtifact()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-final-inventory-unicode-");
+        try
+        {
+            var leakBytes = Encoding.Unicode.GetBytes("""<div data-rw-auth-state="allowed"></div>""");
+            using var client = new HttpClient(new StaticAuthUnsafeExtensionlessAssetHandler(leakBytes)) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
             var context = new ExportContext(outputPath, null, "http://localhost:5000");
 
@@ -5522,7 +5587,7 @@ public class ExportEngineTests
         }
     }
 
-    private sealed class StaticAuthUnsafeExtensionlessAssetHandler : HttpMessageHandler
+    private sealed class StaticAuthUnsafeExtensionlessAssetHandler(byte[]? leakBytes = null) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -5532,7 +5597,7 @@ public class ExportEngineTests
                 "/" => Html("""<html><body><a href="/leak">Leak</a></body></html>"""),
                 "/leak" => Bytes(
                     "application/octet-stream",
-                    Encoding.UTF8.GetBytes("""<div data-rw-auth-state="allowed"></div>""")),
+                    leakBytes ?? Encoding.UTF8.GetBytes("""<div data-rw-auth-state="allowed"></div>""")),
                 _ => NotFound(),
             };
         }
