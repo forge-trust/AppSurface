@@ -606,8 +606,9 @@ public enum AppSurfaceDocsHarvestHealthExposure
 /// Diagnostics surfaces expose route and harvest state intended for local development and trusted operators. The defaults
 /// keep route-inspector responses and sidebar discovery available in Development only. Setting
 /// <see cref="ExposeRouteInspector"/> or <see cref="ShowChrome"/> to
-/// <see cref="AppSurfaceDocsHarvestHealthExposure.Always"/> does not add authentication or authorization; production
-/// hosts must protect the route at the host, reverse proxy, or network layer when route identity is sensitive.
+/// <see cref="AppSurfaceDocsHarvestHealthExposure.Always"/> exposes the route only; production hosts should also set
+/// <see cref="AppSurfaceDocsDiagnosticsOptions.OperatorReadPolicy"/> unless access is enforced by the host application,
+/// reverse proxy, or network layer.
 /// </remarks>
 public sealed class AppSurfaceDocsDiagnosticsOptions
 {
@@ -628,6 +629,20 @@ public sealed class AppSurfaceDocsDiagnosticsOptions
     /// route; route exposure still follows <see cref="ExposeRouteInspector"/>.
     /// </remarks>
     public AppSurfaceDocsHarvestHealthExposure ShowChrome { get; set; } = AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly;
+
+    /// <summary>
+    /// Gets or sets the host-owned authorization policy required for exposed AppSurface Docs diagnostics read surfaces.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="null"/>, which preserves the existing route-exposure behavior without adding
+    /// authorization metadata. Set this to the name of an ASP.NET Core authorization policy registered by the host when
+    /// trusted operators should read diagnostics from <c>{DocsRootPath}/_harvest</c>,
+    /// <c>{DocsRootPath}/_routes</c>, <c>{DocsRootPath}/_routes.json</c>, or the AppSurface Docs harvest progress
+    /// stream. The policy also protects <c>{DocsRootPath}/_health</c> and <c>{DocsRootPath}/_health.json</c> when
+    /// <see cref="AppSurfaceDocsHarvestHealthOptions.AuthorizationPolicy"/> is not configured. It does not authorize
+    /// packaged operator writes, hosted metrics collection, public docs pages, static assets, or exported artifacts.
+    /// </remarks>
+    public string? OperatorReadPolicy { get; set; }
 
     /// <summary>
     /// Gets or sets the host-owned authorization policy required for mutating AppSurface Docs operator actions.

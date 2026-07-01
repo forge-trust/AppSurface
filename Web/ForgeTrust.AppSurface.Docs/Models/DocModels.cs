@@ -1042,6 +1042,28 @@ public static class DocHarvestDiagnosticCodes
     public const string JavaScriptIncompletePublicEventDoclet = "appsurfacedocs.javascript.incomplete_public_event_doclet";
 
     /// <summary>
+    /// Warning diagnostic emitted by the JavaScript event-dispatch verifier when a public <c>@event</c> doclet has no
+    /// matching direct literal <c>dispatchEvent(new CustomEvent("event:name", ...))</c> evidence in verifier inputs.
+    /// </summary>
+    /// <remarks>
+    /// Use this code to guide docs authors toward matching runtime evidence, or to document helper-dispatched,
+    /// dynamic-name, or TypeScript-only events as v1 verifier limitations when no direct literal <c>.js</c>
+    /// <c>CustomEvent</c> dispatch should exist.
+    /// </remarks>
+    public const string JavaScriptEventDocletDispatchMissing = "appsurfacedocs.javascript.event_doclet_dispatch_missing";
+
+    /// <summary>
+    /// Warning diagnostic emitted by the JavaScript event-dispatch verifier when a direct literal <c>CustomEvent</c>
+    /// dispatch has no matching public <c>@event</c> doclet in verifier inputs.
+    /// </summary>
+    /// <remarks>
+    /// Use this code to identify dispatch-only public browser contracts that may need intentional docs, or internal
+    /// literal dispatches that should move outside the configured JavaScript harvest boundary. The v1 verifier does not
+    /// infer docs and does not follow helper calls, dynamic event names, or TypeScript-only sources.
+    /// </remarks>
+    public const string JavaScriptEventDispatchDocletMissing = "appsurfacedocs.javascript.event_dispatch_doclet_missing";
+
+    /// <summary>
     /// Multiple JavaScript API items normalized to the same anchor and required deterministic suffixes.
     /// </summary>
     public const string JavaScriptDuplicateAnchor = "appsurfacedocs.javascript.duplicate_anchor";

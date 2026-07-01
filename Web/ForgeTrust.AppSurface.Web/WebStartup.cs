@@ -353,6 +353,8 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
             _options.StaticFiles.EnableStaticFiles = true;
         }
 
+        HealthOptionsValidator.ThrowIfInvalid(_options.Health);
+
         _optionsBuilt = true;
     }
 
@@ -368,6 +370,12 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
         BuildWebOptions(context);
 
         services.AddSingleton(_options.Pwa);
+        services.AddSingleton(_options.Health);
+
+        if (_options.Health.Enabled)
+        {
+            services.AddHealthChecks();
+        }
 
         var mvcOpts = _options.Mvc;
 
@@ -648,6 +656,8 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
 
                 endpoints.MapControllers();
             }
+
+            HealthEndpointMapper.Map(endpoints, _options.Health);
         });
     }
 

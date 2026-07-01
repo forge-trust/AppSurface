@@ -208,6 +208,7 @@ public sealed class AppSurfaceWebScalarModuleTests
         var startup = new TestScalarStartup();
         startup.WithOptions(options =>
         {
+            options.Health.Enabled = false;
             options.MapEndpoints = endpoints =>
             {
                 endpoints

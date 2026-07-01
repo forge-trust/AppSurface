@@ -33,6 +33,13 @@ entry_points:
     keywords:
       - stream authorization
       - AppSurfaceAuthResult
+  - label: IRazorWireStreamAuthorizationFilter
+    summary: Add package-owned pre-authorization gates for reserved stream channels before the active stream authorizer runs.
+    href: /docs/web/forgetrust.razorwire/docs/stream-authorization
+    keywords:
+      - stream authorization filter
+      - reserved channels
+      - pre-authorization
   - label: RazorWireWebModule
     summary: Use the AppSurface module when you want package registration and endpoint mapping through module conventions.
     target: ForgeTrust-RazorWire-RazorWireWebModule

@@ -74,23 +74,27 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// </para>
     /// <para>
     /// If an <see cref="IRazorWireStreamAuthorizer"/> is already registered, AppSurface Docs wraps that result-bearing
-    /// authorizer so its harvest-progress channel rules run before delegating to the existing authorizer. Existing
-    /// <see cref="IRazorWireChannelAuthorizer"/> registrations still work through the legacy bool facade when plain
-    /// allow/deny compatibility is sufficient. Register a custom authorizer before calling this method to participate in
-    /// that wrapper. Registering an authorizer after this method is an advanced replacement mode: the application
-    /// replaces the AppSurface Docs wrapper and must apply any AppSurface Docs harvest-progress checks itself, typically
-    /// with <see cref="AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(string?)"/>. In non-development
-    /// environments, <c>AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always</c> exposes the health routes but does not
-    /// authorize the live harvest stream unless a custom authorizer allows it. Built-in RazorWire allow-all/deny-all
-    /// authorizers are not considered custom authorization for that docs-owned stream. Call this method once during
-    /// startup; repeated registration can nest authorizer wrappers and obscure the
-    /// intended channel policy.
+    /// authorizer so hidden harvest routes deny first and <c>AppSurfaceDocs:Diagnostics:OperatorReadPolicy</c>, when
+    /// configured, authorizes the docs-owned harvest-progress channel before custom authorizers may narrow access.
+    /// Existing <see cref="IRazorWireChannelAuthorizer"/> registrations still work through the legacy bool facade when
+    /// plain allow/deny compatibility is sufficient and no shared read policy is configured. Register a custom
+    /// authorizer before calling this method to participate in that wrapper. Registering an
+    /// <see cref="IRazorWireStreamAuthorizer"/> after this method replaces the AppSurface Docs wrapper for normal stream
+    /// authorization, but the docs-owned harvest stream still passes through the hidden-route and shared read-policy gate
+    /// before that replacement authorizer can narrow access. Use
+    /// <see cref="AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(string?)"/> in host authorizers that need to
+    /// distinguish the package stream from application streams. Built-in RazorWire allow-all/deny-all authorizers are not
+    /// considered custom authorization for that docs-owned stream. Call this method once during startup; repeated
+    /// registration can nest authorizer wrappers and obscure the intended channel policy.
     /// </para>
     /// <para>
-    /// <c>AppSurfaceDocs:Harvest:Health:AuthorizationPolicy</c> names an optional host-owned ASP.NET Core
-    /// authorization policy for the package health read routes. When set, AppSurface Docs attaches endpoint
-    /// authorization metadata to <c>{DocsRootPath}/_health</c> and <c>{DocsRootPath}/_health.json</c> only. Hosts that
-    /// configure it must register authentication before authorization in the endpoint-aware middleware phase.
+    /// <c>AppSurfaceDocs:Diagnostics:OperatorReadPolicy</c> names an optional host-owned ASP.NET Core authorization
+    /// policy for exposed diagnostics read routes such as <c>{DocsRootPath}/_harvest</c>,
+    /// <c>{DocsRootPath}/_routes</c>, and <c>{DocsRootPath}/_routes.json</c>. It also protects
+    /// <c>{DocsRootPath}/_health</c> and <c>{DocsRootPath}/_health.json</c> when
+    /// <c>AppSurfaceDocs:Harvest:Health:AuthorizationPolicy</c> is absent. The health policy remains a health-only
+    /// compatibility policy and wins for health routes when both are configured. Hosts that configure either policy must
+    /// register authentication before authorization in the endpoint-aware middleware phase.
     /// Consumers that resolve <see cref="AppSurfaceDocsOptions"/> directly should expect the normalized values rather than
     /// raw configuration text, and applications that need custom routing or catalog paths should provide those values
     /// before this method runs so the normalized singleton graph stays consistent.
@@ -156,6 +160,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                         NormalizeDefaultExclusions(options.Harvest.Paths.DefaultExclusions);
                     options.Harvest.Paths.VcsIgnore.AllowGlobs = NormalizeGlobArray(options.Harvest.Paths.VcsIgnore.AllowGlobs);
                     options.Harvest.Health.AuthorizationPolicy = NormalizeOrNull(options.Harvest.Health.AuthorizationPolicy);
+                    options.Diagnostics.OperatorReadPolicy = NormalizeOrNull(options.Diagnostics.OperatorReadPolicy);
                     options.Diagnostics.OperatorWritePolicy = NormalizeOrNull(options.Diagnostics.OperatorWritePolicy);
                     options.Diagnostics.SearchIndexRefreshPolicy = NormalizeOrNull(options.Diagnostics.SearchIndexRefreshPolicy);
                     options.Metrics.BrowserCollector.EndpointUrl =
@@ -255,6 +260,8 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.AddMemoryCache();
         services.TryAddSingleton<IMemo, Memo>();
         TryAddHarvestChannelAuthorizer(services);
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IRazorWireStreamAuthorizationFilter, AppSurfaceDocsHarvestStreamAuthorizationFilter>());
         services.AddRazorWire();
         services.TryAddSingleton<IAppSurfaceDocsHtmlSanitizer, AppSurfaceDocsHtmlSanitizer>();
         services.TryAddSingleton<AppSurfaceDocsHarvestPathPolicy>();
@@ -267,6 +274,8 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.TryAddSingleton<AppSurfaceDocsHarvestCoordinator>();
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, AppSurfaceDocsHarvestFailurePreflightService>());
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, AppSurfaceDocsOperatorReadPolicyWarningService>());
 
         return services;
     }

@@ -61,6 +61,26 @@ Point the host at the repository you want to harvest:
 
 If `AppSurfaceDocs:Source:RepositoryRoot` is omitted, AppSurface Docs falls back to repository discovery from the app content root. That is convenient for local dogfooding, but production hosts should make the repository root explicit so the docs source is not guessed from deployment layout.
 
+For production or preview hosts that expose diagnostics, configure a host-owned read policy before opting in:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Health": {
+        "ExposeRoutes": "Always"
+      }
+    },
+    "Diagnostics": {
+      "ExposeRouteInspector": "Always",
+      "OperatorReadPolicy": "DocsOperatorRead"
+    }
+  }
+}
+```
+
+`Diagnostics:OperatorReadPolicy` protects `_harvest`, `_routes`, `_routes.json`, and the harvest progress stream; it also protects `_health` and `_health.json` unless the legacy `Harvest:Health:AuthorizationPolicy` is set for a split health-only audience. Register the named ASP.NET Core policy and call `UseAuthentication()` before `UseAuthorization()` in endpoint-aware middleware. Exposed non-development diagnostics without `OperatorReadPolicy` log a startup warning so proxy- or network-protected hosts can verify that boundary intentionally.
+
 Add identity settings when the consuming repository should own the visible docs brand:
 
 ```json
