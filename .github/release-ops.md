@@ -41,7 +41,10 @@ Release preparation pull requests must include the four generated artifacts for
 the prepared version: release note, sidecar, release manifest, and release
 evidence bundle. The release-prep review counts those artifacts with Git rename
 detection disabled so deleting superseded release-candidate artifacts cannot
-hide the newly generated stable sidecar behind a rename.
+hide the newly generated stable sidecar behind a rename. Stable release-prep
+review also re-exports AppSurface Docs into the evidence bundle's exact tree,
+builds a temporary catalog from the checked-in digest, verifies the archive, and
+passes that catalog to `./eng/release check`.
 
 ## Package artifact dry run
 

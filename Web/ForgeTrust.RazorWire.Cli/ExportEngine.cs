@@ -57,6 +57,17 @@ public class ExportEngine
     private const int MaxArtifactRedirects = 10;
     private const string RedirectProvenanceDiagnosticCode = "RWEXPORT008";
 
+    private static readonly string[] AppSurfaceDocsArchiveRootAssetNames =
+    [
+        "minisearch.min.js",
+        "outline-client.js",
+        "search-client.js",
+        "search-index.json",
+        "search.css",
+        "search.html",
+        "search.partial.html"
+    ];
+
     private static readonly Regex TurboFrameOpenTagRegex = new(
         @"<turbo-frame\b[^>]*>",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -146,6 +157,7 @@ public class ExportEngine
         await MaterializeDeploymentExtrasAsync(context, cancellationToken);
         if (context.ReleaseArchiveManifestEnabled)
         {
+            await MaterializeAppSurfaceDocsArchiveRootAssetsAsync(context.OutputPath, cancellationToken);
             context.ReleaseArchiveManifest = await ReleaseArchiveManifestWriter.WriteAsync(context.OutputPath, cancellationToken);
             _logger.LogInformation(
                 """
@@ -167,6 +179,34 @@ public class ExportEngine
 
         sw.Stop();
         _logger.LogInformation("Export completed in {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
+    }
+
+    private static async Task MaterializeAppSurfaceDocsArchiveRootAssetsAsync(
+        string outputPath,
+        CancellationToken cancellationToken)
+    {
+        var docsRoot = Path.Join(outputPath, "docs");
+        if (!Directory.Exists(docsRoot))
+        {
+            return;
+        }
+
+        foreach (var fileName in AppSurfaceDocsArchiveRootAssetNames)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var sourcePath = Path.Join(docsRoot, fileName);
+            var targetPath = Path.Join(outputPath, fileName);
+            if (!File.Exists(sourcePath) || File.Exists(targetPath))
+            {
+                continue;
+            }
+
+            ExportOutputPathGuards.ValidateArchiveEntryPath(outputPath, sourcePath, "archive-root-asset-read");
+            ExportOutputPathGuards.ValidateArchiveEntryPath(outputPath, targetPath, "archive-root-asset-write");
+            await using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            await using var target = new FileStream(targetPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            await source.CopyToAsync(target, cancellationToken);
+        }
     }
 
     private static void ValidateDeploymentExtrasReleaseArchivePreflight(ExportContext context)

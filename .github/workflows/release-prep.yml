@@ -185,4 +185,68 @@ jobs:
             echo "Release preparation pull requests must change exactly the four generated artifacts for v${version}; found: ${sorted_release_artifacts[*]}." >&2
             exit 1
           done
-          ./eng/release check --version "${version}" --fail-on-warnings --allow-existing-targets
+          if [[ "${version}" != *-* ]]; then
+            evidence_path="releases/v${version}.evidence.json"
+            docs_exact_tree_path="$(jq -r '.docsArchive.exactTreePath // ""' "${evidence_path}")"
+            docs_release_manifest_sha256="$(jq -r '.docsArchive.releaseManifestSha256 // ""' "${evidence_path}")"
+            if [[ -z "${docs_exact_tree_path}" || -z "${docs_release_manifest_sha256}" ]]; then
+              echo "Stable release evidence must include docsArchive.exactTreePath and docsArchive.releaseManifestSha256 before release-prep review." >&2
+              exit 1
+            fi
+
+            normalized_exact_tree_path="${docs_exact_tree_path#./}"
+            case "${normalized_exact_tree_path}" in
+              ""|/*|../*|*/../*|*/..|"."|".."|.*|*/.*|*//*)
+                echo "Stable docs exactTreePath '${docs_exact_tree_path}' must be a trusted-root-relative path with no parent, hidden, or empty segments." >&2
+                exit 1
+                ;;
+            esac
+
+            docs_release_root="${RUNNER_TEMP}/appsurface-release-prep-docs-${version}"
+            docs_exact_tree="${docs_release_root}/${normalized_exact_tree_path}"
+            mkdir -p "$(dirname "${docs_exact_tree}")"
+
+            dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+              docs export \
+              --repo . \
+              --mode cdn \
+              --output "${docs_exact_tree}" \
+              --public-origin https://forge-trust.com \
+              --startup-timeout-seconds 30 \
+              --strict
+
+            jq -n \
+              --arg version "${version}" \
+              --arg exactTreePath "${docs_exact_tree_path}" \
+              --arg releaseManifestSha256 "${docs_release_manifest_sha256}" \
+              '{
+                recommendedVersion: $version,
+                versions: [
+                  {
+                    version: $version,
+                    label: $version,
+                    summary: ("Stable AppSurface release " + $version),
+                    exactTreePath: $exactTreePath,
+                    releaseManifestSha256: $releaseManifestSha256,
+                    supportState: "Current",
+                    visibility: "Public",
+                    advisoryState: "None"
+                  }
+                ]
+              }' > "${docs_release_root}/versions.json"
+
+            dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+              docs verify-archive \
+              --catalog "${docs_release_root}/versions.json" \
+              --version "${version}" \
+              --trusted-release-root "${docs_release_root}"
+
+            ./eng/release check \
+              --version "${version}" \
+              --fail-on-warnings \
+              --allow-existing-targets \
+              --docs-catalog "${docs_release_root}/versions.json" \
+              --docs-trusted-release-root "${docs_release_root}"
+          else
+            ./eng/release check --version "${version}" --fail-on-warnings --allow-existing-targets
+          fi

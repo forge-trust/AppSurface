@@ -677,6 +677,42 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldMirrorAppSurfaceDocsArchiveRootAssets_BeforeReleaseManifest()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
+        var baseUrl = "http://localhost:5000";
+
+        try
+        {
+            var docsRoot = Directory.CreateDirectory(Path.Join(tempDir, "docs")).FullName;
+            await File.WriteAllTextAsync(Path.Join(docsRoot, "search.html"), "<html>Search</html>");
+
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, baseUrl);
+            context.EnableReleaseArchiveManifest();
+
+            await _sut.RunAsync(context);
+
+            var rootSearchPath = TestPathUtils.PathUnder(tempDir, "search.html");
+            Assert.True(File.Exists(rootSearchPath));
+            Assert.Equal("<html>Search</html>", await File.ReadAllTextAsync(rootSearchPath));
+
+            var manifest = await File.ReadAllTextAsync(TestPathUtils.PathUnder(tempDir, ".appsurface-docs-release-manifest.json"));
+            Assert.Contains("\"path\": \"search.html\"", manifest, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Copy_Deployment_Extra_After_Export()
     {
         var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
