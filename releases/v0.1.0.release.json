@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "tag": "v0.1.0",
   "date": "2026-06-27",
-  "sourceCommit": "052e30cf530551b82270c3da33e6035abff5cf6b",
+  "sourceCommit": "bc2ee375659ca972db3a95c82b961dcb5b2f650e",
   "releaseClassification": "stable",
   "generatedFiles": [
     "releases/v0.1.0.md",

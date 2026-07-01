@@ -244,7 +244,6 @@ jobs:
         env:
           PACKAGE_VERSION: ${{ needs.validate-tag.outputs.package-version }}
           AppSurfaceDocs__Contributor__DefaultBranch: ${{ env.STABLE_BASE_REF }}
-          AppSurfaceDocs__Contributor__SourceRef: ${{ needs.validate-tag.outputs.tag-commit }}
           AppSurfaceDocs__Contributor__SourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{branch}/{path}
           AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{ref}/{path}#L{line}
           AppSurfaceDocs__Contributor__EditUrlTemplate: https://github.com/${{ github.repository }}/edit/{branch}/{path}
@@ -261,6 +260,12 @@ jobs:
           set -euo pipefail
 
           evidence_path="releases/v${PACKAGE_VERSION}.evidence.json"
+          release_manifest_path="releases/v${PACKAGE_VERSION}.release.json"
+          docs_source_ref="$(jq -r '.sourceCommit // ""' "${release_manifest_path}")"
+          if [[ -z "${docs_source_ref}" ]]; then
+            docs_source_ref="${{ needs.validate-tag.outputs.tag-commit }}"
+          fi
+          export AppSurfaceDocs__Contributor__SourceRef="${docs_source_ref}"
           docs_exact_tree_path="$(jq -r '.docsArchive.exactTreePath // ""' "${evidence_path}")"
           docs_release_manifest_sha256="$(jq -r '.docsArchive.releaseManifestSha256 // ""' "${evidence_path}")"
           if [[ -z "${docs_exact_tree_path}" || -z "${docs_release_manifest_sha256}" ]]; then
@@ -291,10 +296,15 @@ jobs:
             --startup-timeout-seconds 30 \
             --strict
 
+          catalog_release_manifest_sha256="${docs_release_manifest_sha256}"
+          if [[ "${catalog_release_manifest_sha256}" == "generated" ]]; then
+            catalog_release_manifest_sha256="$(sha256sum "${docs_exact_tree}/.appsurface-docs-release-manifest.json" | awk '{print $1}')"
+          fi
+
           jq -n \
             --arg version "${PACKAGE_VERSION}" \
             --arg exactTreePath "${docs_exact_tree_path}" \
-            --arg releaseManifestSha256 "${docs_release_manifest_sha256}" \
+            --arg releaseManifestSha256 "${catalog_release_manifest_sha256}" \
             '{
               recommendedVersion: $version,
               versions: [
