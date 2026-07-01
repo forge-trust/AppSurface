@@ -125,7 +125,7 @@
   "generatedAtUtc": "2026-06-27T06:25:07.6524320Z",
   "subject": {
     "name": "releases/v0.1.0.evidence.json",
-    "sha256": "a9b23c9efb151bd0a01ccf66d626df4e1d59c564fab271b26a849963e7d185ba"
+    "sha256": "6a94097147bbe43a3fd7f868200277dbca9555b7e93b7f9cf450e9ccdedc33e2"
   },
   "attestation": null
 }
