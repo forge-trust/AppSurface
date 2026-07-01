@@ -71,8 +71,11 @@ public sealed class GoogleSecretManagerConfigProviderTests
             });
 
         var value = provider.GetValue<int>("Production", "Port");
+        var resolution = provider.ResolveValue<int>("Production", "Port");
 
         Assert.Equal(443, value);
+        Assert.Equal(443, resolution.Value);
+        Assert.Equal(nameof(GoogleSecretManagerConfigProvider), resolution.Source);
         Assert.False(provider.TryGetTerminalDiagnostic("Production", "Port", out _));
     }
 
@@ -297,6 +300,8 @@ public sealed class GoogleSecretManagerConfigProviderTests
         options.MapSecret("", "", version: "5");
         options.MapSecret("Full:WithVersion", "projects/prod/secrets/full/versions/5", version: "6");
         options.EnableConventionResolver("", version: null);
+        options.EnableConventionResolver("Duplicate:", version: "5");
+        options.EnableConventionResolver("Duplicate:", version: "5");
 
         var result = new AppSurfaceGoogleSecretManagerOptionsValidator().Validate(null, options);
 
@@ -309,7 +314,34 @@ public sealed class GoogleSecretManagerConfigProviderTests
         Assert.Contains(result.Failures, failure => failure.Contains("requires ProjectId", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("must not also specify Version", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("convention prefix must not be empty", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("configured more than once", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("must specify a secret version", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Constructor_Should_ThrowOptionsValidationExceptionForInvalidOptions()
+    {
+        var options = Options.Create(new AppSurfaceGoogleSecretManagerOptions
+        {
+            LookupTimeout = TimeSpan.Zero
+        });
+
+        var exception = Assert.Throws<OptionsValidationException>(() =>
+            new GoogleSecretManagerConfigProvider(options, new ThrowingSecretManagerClient(new InvalidOperationException())));
+
+        Assert.Contains(exception.Failures, failure => failure.Contains("LookupTimeout", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AdapterConstructors_Should_BeLazyAndValidateExplicitClient()
+    {
+        var adapter = new GoogleSecretManagerClientAdapter();
+        var nullClientAdapter = new GoogleSecretManagerClientAdapter(
+            (Google.Cloud.SecretManager.V1.SecretManagerServiceClient)null!);
+
+        Assert.NotNull(adapter);
+        Assert.Throws<ArgumentNullException>(() =>
+            nullClientAdapter.AccessSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1)));
     }
 
     [Theory]
@@ -416,6 +448,23 @@ public sealed class GoogleSecretManagerConfigProviderTests
         Assert.Equal(ConfigAuditEntryState.Missing, resolution.State);
         Assert.Empty(resolution.Sources);
         Assert.Empty(resolution.Diagnostics);
+        Assert.Empty(provider.GetReportDiagnostics("Production"));
+    }
+
+    [Fact]
+    public void SecretReference_Should_PreserveFullResourceNameWithoutRequestedVersion()
+    {
+        var options = new AppSurfaceGoogleSecretManagerOptions();
+        var mapping = new AppSurfaceGoogleSecretMapping(
+            "Stripe:ApiKey",
+            "projects/prod/secrets/stripe-api-key/versions/5",
+            null);
+
+        var reference = GoogleSecretManagerSecretReference.FromMapping(options, mapping);
+
+        Assert.Equal("Stripe:ApiKey", reference.LogicalKey);
+        Assert.Equal("projects/prod/secrets/stripe-api-key/versions/5", reference.ResourceName);
+        Assert.Null(reference.RequestedVersion);
     }
 
     [Fact]
