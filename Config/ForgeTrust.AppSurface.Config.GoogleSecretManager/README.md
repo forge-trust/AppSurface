@@ -6,6 +6,12 @@ Use this package when an AppSurface app running on Google Cloud needs production
 logical config keys used by `ForgeTrust.AppSurface.Config`. The provider is read-only, source-aware, fail-closed for
 claimed keys by default, and keeps environment variables as the top emergency override.
 
+## Release Guidance
+
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the
+[package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk,
+migration guidance, and readiness.
+
 ## Install
 
 ```bash
