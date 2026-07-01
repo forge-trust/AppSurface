@@ -31,6 +31,58 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
+ * Behavior definition registered with the native RazorWire behavior kit.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} RazorWireBehaviorDefinition
+ * @property {string} name - Stable behavior name. Names are immutable for the page lifetime; repeated registrations with the same selector are idempotent.
+ * @property {string} selector - CSS selector for roots that should receive one connected behavior controller.
+ * @property {Function} connect - Callback invoked once per matching connected root. It receives `(root, context)` and may return a cleanup function.
+ */
+
+/**
+ * Context passed to a RazorWire behavior `connect` callback.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} RazorWireBehaviorContext
+ * @property {AbortSignal} signal - Abort signal that fires before optional cleanup when the root disconnects or stops matching.
+ * @property {Function} query - Root-scoped `querySelector` helper.
+ * @property {Function} queryAll - Root-scoped `querySelectorAll` helper that returns an array.
+ * @property {string} behaviorName - Stable name of the behavior being connected.
+ * @property {string} rootId - Runtime-generated behavior/root identity for diagnostics.
+ * @property {Function} diagnostic - Records a lifecycle-scoped behavior diagnostic with message, impact, fix, and docs fields.
+ */
+
+/**
+ * Diagnostic emitted by the native RazorWire behavior kit.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} RazorWireBehaviorDiagnostic
+ * @property {string} code - Stable diagnostic code such as `BehaviorSelectorInvalid`, `BehaviorRegistrationConflict`, `BehaviorConnectFailed`, `BehaviorCleanupFailed`, or `BehaviorAbortUnsupported`.
+ * @property {string} message - Required problem statement for the invalid registration or lifecycle failure.
+ * @property {string} impact - Required explanation of the behavior RazorWire skipped, changed, or could not guarantee.
+ * @property {string} fix - Required remediation guidance suitable for docs, tests, and development diagnostics.
+ * @property {string} docs - Required repository documentation path for troubleshooting guidance.
+ * @property {string} [behaviorName] - Behavior name associated with the diagnostic when available.
+ * @property {string} [selector] - Behavior root selector associated with the diagnostic when available.
+ * @property {string} [rootId] - Runtime-generated behavior/root identity when available.
+ */
+
+/**
+ * Native behavior kit manager for lifecycle-safe app-authored progressive enhancement on replaceable server-rendered DOM.
+ * @public
+ * @namespace RazorWire
+ * @config window.RazorWire.behaviors
+ * @type {object}
+ * @source <rw:scripts behavior-kit="true" /> plus app-authored behavior registration
+ * @property {Function} register - Registers a `RazorWireBehaviorDefinition`; repeated same-name/same-selector registrations are idempotent.
+ * @property {Function} scan - Re-scans `document` or a supplied `Document | Element`, including the supplied element itself when it matches.
+ * @property {Function} prune - Disconnects controllers whose roots left the document or stopped matching their registered selector.
+ * @property {Function} getDiagnostics - Returns behavior-kit diagnostics recorded since startup.
+ * @property {Function} clearDiagnostics - Clears recorded behavior-kit diagnostics.
+ */
+
+/**
  * Page navigation manager for same-page section links, active state, optional collapsible panels, and lifecycle-safe rebinding.
  * @public
  * @namespace RazorWire

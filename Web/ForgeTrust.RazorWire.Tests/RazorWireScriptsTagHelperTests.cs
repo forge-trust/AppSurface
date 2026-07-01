@@ -72,6 +72,10 @@ public class RazorWireScriptsTagHelperTests
                 "/my-app",
                 "/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js"))
             .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js?v=form");
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js?v=behavior");
 
         // Act
         _helper.Process(_context, _output);
@@ -96,6 +100,7 @@ public class RazorWireScriptsTagHelperTests
         Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789\"", content);
         Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc\"", content);
         Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js?v=form\"", content);
+        Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js?v=behavior\"", content);
         Assert.Contains("const selectors = [\"rw-page-nav\", \"[data-rw-page-nav]\"];", content);
         Assert.Contains("data-rw-page-navigation-runtime", content);
         Assert.Contains("RazorWirePageNavigationInitialized", content);
@@ -105,6 +110,8 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("data-rw-form-interactions-runtime", content);
         Assert.Contains("RazorWireFormInteractionsInitialized", content);
         Assert.Contains("\"[data-rw-form-toggle]\", \"[data-rw-form-collection]\"", content);
+        Assert.DoesNotContain("data-rw-behavior-kit-runtime", content);
+        Assert.DoesNotContain("data-rw-behavior", content);
         Assert.Contains("turbo:frame-load", content);
     }
 
@@ -202,6 +209,39 @@ public class RazorWireScriptsTagHelperTests
     }
 
     [Fact]
+    public void Process_WhenBehaviorKitEnabled_RendersEagerScriptWithoutLazyDetector()
+    {
+        // Arrange
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider)
+        {
+            ViewContext = _viewContext,
+            BehaviorKit = true
+        };
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js?v=behavior");
+
+        // Act
+        helper.Process(_context, _output);
+
+        // Assert
+        var content = _output.Content.GetContent();
+        Assert.Contains(
+            "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js?v=behavior\"",
+            content);
+        Assert.Contains("data-rw-behavior-kit-runtime=\"eager\"", content);
+        Assert.DoesNotContain("RazorWireBehaviorKitInitialized\",", content);
+        Assert.DoesNotContain("data-rw-behavior\",", content);
+        Assert.Contains("data-rw-page-navigation-runtime", content);
+        Assert.Contains("data-rw-section-copy-runtime", content);
+        Assert.Contains("data-rw-form-interactions-runtime", content);
+    }
+
+    [Fact]
     public void RazorWireProject_DefinesPackOnlyGeneratedAssetGuardWithEmergencyBypass()
     {
         var repoRoot = FindRepositoryRoot();
@@ -218,6 +258,7 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("RWPACK001", project, StringComparison.Ordinal);
         Assert.Contains("razorwire\\section-copy.js", project, StringComparison.Ordinal);
         Assert.Contains("razorwire\\form-interactions.js", project, StringComparison.Ordinal);
+        Assert.Contains("razorwire\\behavior-kit.js", project, StringComparison.Ordinal);
         Assert.Contains("""<Content Remove="assets\**\*" />""", project, StringComparison.Ordinal);
         Assert.Contains("""<None Remove="assets\**\*" />""", project, StringComparison.Ordinal);
     }

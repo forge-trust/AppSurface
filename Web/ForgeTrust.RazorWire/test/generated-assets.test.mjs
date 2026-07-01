@@ -10,6 +10,7 @@ const islandsPath = new URL('../wwwroot/razorwire/razorwire.islands.js', import.
 const pageNavigationPath = new URL('../wwwroot/razorwire/page-navigation.js', import.meta.url);
 const sectionCopyPath = new URL('../wwwroot/razorwire/section-copy.js', import.meta.url);
 const formInteractionsPath = new URL('../wwwroot/razorwire/form-interactions.js', import.meta.url);
+const behaviorKitPath = new URL('../wwwroot/razorwire/behavior-kit.js', import.meta.url);
 const packageRoot = new URL('../', import.meta.url);
 const packageRootPath = fileURLToPath(packageRoot);
 
@@ -19,19 +20,23 @@ test('generated runtime outputs keep provenance banners and public package paths
   const pageNavigation = readFileSync(pageNavigationPath, 'utf8');
   const sectionCopy = readFileSync(sectionCopyPath, 'utf8');
   const formInteractions = readFileSync(formInteractionsPath, 'utf8');
+  const behaviorKit = readFileSync(behaviorKitPath, 'utf8');
 
   assert.match(runtime, /^\/\/ Generated from assets\/src\/razorwire\.ts\./);
   assert.match(islands, /^\/\/ Generated from assets\/src\/razorwire\.islands\.ts\./);
   assert.match(pageNavigation, /^\/\/ Generated from assets\/src\/page-navigation\.ts\./);
   assert.match(sectionCopy, /^\/\/ Generated from assets\/src\/section-copy\.ts\./);
   assert.match(formInteractions, /^\/\/ Generated from assets\/src\/form-interactions\.ts\./);
+  assert.match(behaviorKit, /^\/\/ Generated from assets\/src\/behavior-kit\.ts\./);
   assert.equal(runtime.includes('sourceMappingURL'), false);
   assert.equal(islands.includes('sourceMappingURL'), false);
   assert.equal(pageNavigation.includes('sourceMappingURL'), false);
   assert.equal(sectionCopy.includes('sourceMappingURL'), false);
   assert.equal(formInteractions.includes('sourceMappingURL'), false);
+  assert.equal(behaviorKit.includes('sourceMappingURL'), false);
   assert.match(runtime, /RazorWireInitialized/);
   assert.match(runtime, /formFailureManager/);
+  assert.match(runtime, /__queuedDefinitions/);
   assert.match(islands, /RazorWireIslandsInitialized/);
   assert.match(islands, /data-rw-hydrated/);
   assert.match(pageNavigation, /pageNavigationManager/);
@@ -40,6 +45,9 @@ test('generated runtime outputs keep provenance banners and public package paths
   assert.match(sectionCopy, /data-rw-section-copy/);
   assert.match(formInteractions, /formInteractionsManager/);
   assert.match(formInteractions, /data-rw-form-collection/);
+  assert.match(behaviorKit, /RazorWireBehaviorKitInitialized/);
+  assert.match(behaviorKit, /BehaviorConnectFailed/);
+  assert.match(behaviorKit, /BehaviorAbortUnsupported/);
 });
 
 test('authored form failure product event keeps failure mode separate from response kind', () => {
@@ -55,6 +63,9 @@ test('public contract manifest includes page navigation, section copy, and form 
   assert.match(contracts, /window\.RazorWire\.pageNavigationManager/);
   assert.match(contracts, /window\.RazorWire\.sectionCopyManager/);
   assert.match(contracts, /window\.RazorWire\.formInteractionsManager/);
+  assert.match(contracts, /window\.RazorWire\.behaviors/);
+  assert.match(contracts, /RazorWireBehaviorDefinition/);
+  assert.match(contracts, /BehaviorConnectFailed/);
   assert.doesNotMatch(contracts, /@manager/);
   assert.match(contracts, /razorwire:page-nav:active-change/);
   assert.match(contracts, /data-rw-page-nav/);
@@ -78,6 +89,7 @@ test('generated verifier emits actionable stale-output diagnostics', () => {
   assert.match(verifier, /page-navigation\.js/);
   assert.match(verifier, /section-copy\.js/);
   assert.match(verifier, /form-interactions\.js/);
+  assert.match(verifier, /behavior-kit\.js/);
   assert.match(verifier, /Problem:/);
   assert.match(verifier, /Cause:/);
   assert.match(verifier, /Fix: run `pnpm --dir Web run assets:razorwire:build`/);

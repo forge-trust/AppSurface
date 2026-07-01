@@ -171,6 +171,7 @@ public class RazorWireWebModule : IAppSurfaceWebModule
     {
         MapEmbeddedAssetFallback(endpoints, "background.png");
         MapEmbeddedAssetFallback(endpoints, "exampleJsInterop.js");
+        MapEmbeddedAssetFallback(endpoints, "razorwire/behavior-kit.js");
         MapEmbeddedAssetFallback(endpoints, "razorwire/form-interactions.js");
         MapEmbeddedAssetFallback(endpoints, "razorwire/page-navigation.js");
         MapEmbeddedAssetFallback(endpoints, "razorwire/razorwire.js");
