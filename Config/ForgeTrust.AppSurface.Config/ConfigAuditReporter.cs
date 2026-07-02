@@ -348,8 +348,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 }
                 catch (TargetInvocationException ex) when (ex.InnerException != null && !IsRecoverableProviderException(ex.InnerException))
                 {
-                    ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
-                    throw;
+                    ExceptionDispatchInfo.Throw(ex.InnerException);
                 }
                 catch (Exception ex) when (IsRecoverableProviderException(ex))
                 {
@@ -375,8 +374,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             }
             catch (TargetInvocationException ex) when (ex.InnerException != null && !IsRecoverableProviderException(ex.InnerException))
             {
-                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
-                throw;
+                ExceptionDispatchInfo.Throw(ex.InnerException);
             }
             catch (Exception ex) when (IsRecoverableProviderException(ex))
             {
