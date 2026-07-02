@@ -237,6 +237,26 @@ public sealed class AuthProjectionTests
     }
 
     [Fact]
+    public async Task AuthGate_ProcessAsync_WhenStaticExportAnonymousGate_RendersWithoutProvider()
+    {
+        var output = CreateOutput("rw:auth-gate", "Sign in", "state", "anonymous");
+        var provider = new StubAuthResultProvider(AppSurfaceAuthResult.Allowed());
+
+        await new AuthGateTagHelper
+        {
+            State = "anonymous",
+            ViewContext = CreateViewContext(provider, staticExport: true),
+        }.ProcessAsync(CreateContext("rw:auth-gate"), output);
+
+        Assert.Equal(0, provider.CallCount);
+        Assert.Equal("div", output.TagName);
+        Assert.Equal("auth-gate", output.Attributes["data-rw-auth-helper"].Value);
+        Assert.Equal("anonymous", output.Attributes["data-rw-auth-state"].Value);
+        Assert.Equal("true", output.Attributes[AuthViewTagHelper.StaticAttributeName].Value);
+        Assert.False(output.Attributes.ContainsName(AuthViewTagHelper.StaticViolationAttributeName));
+    }
+
+    [Fact]
     public async Task AuthGate_ProcessAsync_WhenStateDiffers_Suppresses()
     {
         var output = CreateOutput("rw:auth-gate", "Publish", "policy", "docs.publish");
@@ -431,10 +451,30 @@ public sealed class AuthProjectionTests
         Assert.Equal("<strong>Sign in</strong>", output.Content.GetContent());
     }
 
+    [Fact]
+    public async Task LoginLink_ProcessAsync_WhenStaticExportSafeHref_RendersAnchor()
+    {
+        var output = CreateOutput("rw:login-link", "Sign in", "href", "/login");
+
+        await new LoginLinkTagHelper
+        {
+            Href = "/login",
+            ViewContext = CreateViewContext(provider: null, staticExport: true),
+        }.ProcessAsync(CreateContext("rw:login-link"), output);
+
+        Assert.Equal("a", output.TagName);
+        Assert.Equal("/login", output.Attributes["href"].Value);
+        Assert.Equal("login-link", output.Attributes["data-rw-auth-helper"].Value);
+        Assert.False(output.Attributes.ContainsName(AuthViewTagHelper.StaticViolationAttributeName));
+        Assert.Equal("Sign in", output.Content.GetContent());
+    }
+
     [Theory]
     [InlineData("https://idp.example/login")]
     [InlineData(" //idp.example/login")]
     [InlineData(" \\idp.example\\login")]
+    [InlineData("/\\idp.example/login")]
+    [InlineData("\\/idp.example/login")]
     public async Task LoginLink_ProcessAsync_WhenStaticExportUnsafeHref_EmitsViolation(string href)
     {
         var output = CreateOutput("rw:login-link", "Sign in", "href", href);
@@ -526,6 +566,8 @@ public sealed class AuthProjectionTests
     [Theory]
     [InlineData("//idp.example/logout")]
     [InlineData("\\logout")]
+    [InlineData("/\\idp.example/logout")]
+    [InlineData("\\/idp.example/logout")]
     [InlineData("/logout\u0001")]
     public async Task LogoutButton_ProcessAsync_WhenActionIsUnsafeRelative_DoesNotRenderRequestToken(string action)
     {

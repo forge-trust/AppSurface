@@ -21,7 +21,7 @@ public sealed class AppSurfaceDevAuthReadmeContractTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            if (Directory.Exists(Path.Join(directory.FullName, ".git")))
+            if (File.Exists(Path.Join(directory.FullName, "ForgeTrust.AppSurface.slnx")))
             {
                 return directory.FullName;
             }

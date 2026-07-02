@@ -2,6 +2,7 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
+using ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 using ForgeTrust.RazorWire.TagHelpers;
 
 namespace ForgeTrust.RazorWire.Cli;
@@ -11,12 +12,33 @@ namespace ForgeTrust.RazorWire.Cli;
 /// </summary>
 internal static class ExportAuthArtifactAuditor
 {
+    /// <summary>
+    /// Diagnostic code emitted when static auth projection auditing blocks an unsafe text artifact.
+    /// </summary>
     internal const string DiagnosticCode = "RWEXPORT010";
+    /// <summary>
+    /// Repository-relative documentation path for the static auth projection contract and remediation anchors.
+    /// </summary>
     internal const string DocsPath = "Web/ForgeTrust.RazorWire/Docs/static-auth-projection.md";
+    /// <summary>
+    /// Reason label used when a protected auth view has no explicit anonymous fallback for static export.
+    /// </summary>
     internal const string MissingFallback = "auth-missing-fallback";
+    /// <summary>
+    /// Reason label used when protected allowed auth UI would be written to a public static artifact.
+    /// </summary>
     internal const string PrivateContent = "auth-private-content";
+    /// <summary>
+    /// Reason label used when evaluated auth outcome or provider metadata appears in static output.
+    /// </summary>
     internal const string UnsafeMetadata = "auth-unsafe-metadata";
+    /// <summary>
+    /// Reason label used when live auth diagnostics, policy names, or reason attributes appear in static output.
+    /// </summary>
     internal const string Diagnostics = "auth-diagnostics";
+    /// <summary>
+    /// Reason label used when DevAuth, persona, subject, or similar test-auth markers appear in static output.
+    /// </summary>
     internal const string ArtifactLeak = "auth-artifact-leak";
 
     private static readonly Regex AttributeRegex = new(
@@ -61,12 +83,20 @@ internal static class ExportAuthArtifactAuditor
 
     private static readonly string[] ArtifactLeakMarkers =
     [
-        "appsurface-dev-auth-marker",
-        "data-appsurface-dev-auth",
+        AppSurfaceDevAuthStaticExportMarkers.MarkerCssClass,
+        AppSurfaceDevAuthStaticExportMarkers.MarkerAttributeName,
         "data-appsurface-persona",
         "data-appsurface-subject"
     ];
 
+    /// <summary>
+    /// Validates and writes a generated text artifact, failing before opening the destination when auth content is unsafe.
+    /// </summary>
+    /// <remarks>
+    /// Use this for string materialization paths such as route manifests, redirects, and release manifests. The route and
+    /// artifact path are diagnostic context only; the output path boundary is still enforced by
+    /// <see cref="ExportOutputPathGuards"/> after the auth audit passes.
+    /// </remarks>
     internal static async Task WriteTextArtifactAsync(
         string outputPath,
         string artifactPath,
@@ -87,6 +117,14 @@ internal static class ExportAuthArtifactAuditor
             cancellationToken);
     }
 
+    /// <summary>
+    /// Validates and writes generated text bytes without changing their original encoding.
+    /// </summary>
+    /// <remarks>
+    /// The byte payload is decoded for audit using the declared charset when available, then UTF-8 and Windows-1252
+    /// fallbacks. The exact input bytes are written only after all decoded representations pass, which keeps legacy
+    /// encoded text stable while preserving fail-closed auth leak detection.
+    /// </remarks>
     internal static async Task WriteTextArtifactBytesAsync(
         string outputPath,
         string artifactPath,
@@ -105,6 +143,14 @@ internal static class ExportAuthArtifactAuditor
         await fileStream.WriteAsync(contents, cancellationToken);
     }
 
+    /// <summary>
+    /// Validates rendered text for forbidden static auth projection markers.
+    /// </summary>
+    /// <remarks>
+    /// The audit checks raw text plus HTML-decoded and JSON-unescaped forms so escaped private auth markers cannot hide
+    /// in search payloads, manifests, JavaScript strings, or copied text extras. Diagnostics intentionally name the
+    /// reason label and artifact kind without echoing sensitive policy, subject, claim, or persona values.
+    /// </remarks>
     internal static void ValidateTextArtifact(
         string contents,
         string artifactKind,
@@ -144,6 +190,13 @@ internal static class ExportAuthArtifactAuditor
         }
     }
 
+    /// <summary>
+    /// Validates text bytes for forbidden static auth projection markers.
+    /// </summary>
+    /// <remarks>
+    /// Pass a declared encoding from the HTTP charset when known. Unknown or unsupported charsets are ignored by
+    /// <see cref="ResolveDeclaredEncoding(string?)"/> so the UTF-8 and Windows-1252 audit fallbacks still run.
+    /// </remarks>
     internal static void ValidateTextArtifactBytes(
         byte[] contents,
         string artifactKind,
@@ -159,6 +212,13 @@ internal static class ExportAuthArtifactAuditor
         }
     }
 
+    /// <summary>
+    /// Classifies response artifacts that are known text from content type or filename.
+    /// </summary>
+    /// <remarks>
+    /// This method follows explicit HTTP and extension signals. Use <see cref="ShouldAuditLocalTextArtifact(string)"/>
+    /// for final inventory or local-copy scans where extensionless artifacts are also text candidates.
+    /// </remarks>
     internal static bool IsTextArtifact(string? contentType, string artifactPath)
     {
         if (!string.IsNullOrWhiteSpace(contentType))
@@ -173,6 +233,13 @@ internal static class ExportAuthArtifactAuditor
         return HasTextArtifactPath(artifactPath);
     }
 
+    /// <summary>
+    /// Determines whether a local artifact path should be audited as generated text.
+    /// </summary>
+    /// <remarks>
+    /// Final inventory treats extensionless files as auditable because static routes commonly materialize without file
+    /// extensions. Callers must pass the concrete output path that will be written or scanned.
+    /// </remarks>
     internal static bool ShouldAuditLocalTextArtifact(string artifactPath)
     {
         if (HasTextArtifactPath(artifactPath))
@@ -183,6 +250,13 @@ internal static class ExportAuthArtifactAuditor
         return string.IsNullOrEmpty(Path.GetExtension(artifactPath));
     }
 
+    /// <summary>
+    /// Resolves an optional HTTP charset for byte-preserving artifact audits.
+    /// </summary>
+    /// <remarks>
+    /// Returns <see langword="null"/> for missing, invalid, or unsupported charsets so audit callers can continue with
+    /// default decoding fallbacks instead of treating a bad charset as permission to skip validation.
+    /// </remarks>
     internal static Encoding? ResolveDeclaredEncoding(string? charset)
     {
         var normalized = charset?.Trim().Trim('"', '\'');
@@ -196,6 +270,10 @@ internal static class ExportAuthArtifactAuditor
             return Encoding.GetEncoding(normalized);
         }
         catch (ArgumentException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
         {
             return null;
         }
@@ -219,7 +297,7 @@ internal static class ExportAuthArtifactAuditor
                       + (string.IsNullOrWhiteSpace(artifactPath) ? string.Empty : $" Path: {Path.GetFileName(artifactPath)}.")
                       + $" See: {DocsPath}#{normalizedReason}.";
 
-        return new ExportValidationException([new ExportDiagnostic(DiagnosticCode, message, effectiveRoute)]);
+        return new ExportValidationException([new ExportDiagnostic(DiagnosticCode, message, effectiveRoute, reference: null)]);
     }
 
     private static string NormalizeReason(string? reason)

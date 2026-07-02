@@ -37,12 +37,19 @@ public class ExportEngineTests
         A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
         var context = new ExportContext(outputPath, null, "http://localhost:5000");
 
-        await _sut.RunAsync(context);
+        try
+        {
+            await _sut.RunAsync(context);
 
-        Assert.NotEmpty(handler.HeaderValues);
-        Assert.All(
-            handler.HeaderValues,
-            value => Assert.Equal(RazorWireStaticExportRequest.HeaderValue, value));
+            Assert.NotEmpty(handler.HeaderValues);
+            Assert.All(
+                handler.HeaderValues,
+                value => Assert.Equal(RazorWireStaticExportRequest.HeaderValue, value));
+        }
+        finally
+        {
+            Directory.Delete(outputPath, true);
+        }
     }
 
     [Fact]
@@ -53,13 +60,20 @@ public class ExportEngineTests
         A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
         var context = new ExportContext(outputPath, null, "http://localhost:5000");
 
-        var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
 
-        var diagnostic = Assert.Single(exception.Diagnostics);
-        Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
-        Assert.Equal("/app.js", diagnostic.Route);
-        Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Join(outputPath, "app.js")));
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/app.js", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(outputPath, "app.js")));
+        }
+        finally
+        {
+            Directory.Delete(outputPath, true);
+        }
     }
 
     [Fact]
@@ -77,13 +91,51 @@ public class ExportEngineTests
         A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
         var context = new ExportContext(outputPath, null, ["/problem"], "http://localhost:5000");
 
-        var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
 
-        var diagnostic = Assert.Single(exception.Diagnostics);
-        Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
-        Assert.Equal("/problem", diagnostic.Route);
-        Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Join(outputPath, "problem")));
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/problem", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(outputPath, "problem")));
+        }
+        finally
+        {
+            Directory.Delete(outputPath, true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailBeforeWriting_ExtensionlessOctetStreamRouteWithAuthViolation()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-extensionless-route-");
+        using var client = new HttpClient(
+            new SingleRouteHandler(
+                "/leak",
+                "application/octet-stream",
+                """<div data-rw-auth-state="allowed"></div>"""))
+        {
+            BaseAddress = new Uri("http://localhost:5000")
+        };
+        A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+        var context = new ExportContext(outputPath, null, ["/leak"], "http://localhost:5000");
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/leak", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(outputPath, "leak")));
+        }
+        finally
+        {
+            Directory.Delete(outputPath, true);
+        }
     }
 
     [Fact]
@@ -99,9 +151,16 @@ public class ExportEngineTests
         A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
         var context = new ExportContext(outputPath, null, "http://localhost:5000");
 
-        await _sut.RunAsync(context);
+        try
+        {
+            await _sut.RunAsync(context);
 
-        Assert.Equal(scriptBytes, await File.ReadAllBytesAsync(Path.Join(outputPath, "legacy.js")));
+            Assert.Equal(scriptBytes, await File.ReadAllBytesAsync(Path.Join(outputPath, "legacy.js")));
+        }
+        finally
+        {
+            Directory.Delete(outputPath, true);
+        }
     }
 
     [Fact]

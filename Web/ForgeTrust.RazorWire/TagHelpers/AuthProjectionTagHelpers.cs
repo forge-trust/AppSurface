@@ -208,15 +208,37 @@ public sealed class AuthViewTagHelper : TagHelper
         };
     }
 
+    /// <summary>
+    /// Carries per-render slot resolution state for an <c>rw:auth-view</c>.
+    /// </summary>
+    /// <remarks>
+    /// Slot helpers mutate <see cref="MatchedExplicitSlot"/> during child-content execution. Static export reads that flag
+    /// after slot resolution to decide whether a protected view supplied an explicit anonymous fallback before any artifact
+    /// is written.
+    /// </remarks>
     internal sealed class AuthSlotContext
     {
+        /// <summary>
+        /// Creates a slot context for the projected auth state.
+        /// </summary>
+        /// <param name="state">Projected RazorWire auth state for the current render.</param>
         public AuthSlotContext(RazorWireAuthProjectionState state)
         {
             State = state;
         }
 
+        /// <summary>
+        /// Gets the projected RazorWire auth state that slot helpers compare against.
+        /// </summary>
         public RazorWireAuthProjectionState State { get; }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether an explicit slot matching <see cref="State"/> rendered.
+        /// </summary>
+        /// <remarks>
+        /// Only the slot resolution path should set this flag. It must be set before <c>rw:auth-view</c> evaluates the
+        /// static-export missing-fallback check.
+        /// </remarks>
         public bool MatchedExplicitSlot { get; set; }
     }
 }
@@ -518,14 +540,26 @@ public sealed class LoginLinkTagHelper : TagHelper
 
         if (!uri.IsAbsoluteUri)
         {
-            return !target.StartsWith("//", StringComparison.Ordinal)
-                   && !target.StartsWith("\\", StringComparison.Ordinal)
+            return !target.StartsWith("\\", StringComparison.Ordinal)
+                   && !HasNetworkPathPrefix(target)
                    && !target.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase);
         }
 
         return (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
                && string.Equals(uri.Scheme, httpContext.Request.Scheme, StringComparison.OrdinalIgnoreCase)
                && string.Equals(uri.Authority, httpContext.Request.Host.Value, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasNetworkPathPrefix(string value)
+    {
+        return value.Length >= 2
+               && IsSlashOrBackslash(value[0])
+               && IsSlashOrBackslash(value[1]);
+    }
+
+    private static bool IsSlashOrBackslash(char value)
+    {
+        return value is '/' or '\\';
     }
 }
 
@@ -633,13 +667,25 @@ public sealed class LogoutButtonTagHelper : TagHelper
 
         if (!uri.IsAbsoluteUri)
         {
-            return !action.StartsWith("//", StringComparison.Ordinal)
-                   && !action.StartsWith("\\", StringComparison.Ordinal);
+            return !action.StartsWith("\\", StringComparison.Ordinal)
+                   && !HasNetworkPathPrefix(action);
         }
 
         return (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
                && string.Equals(uri.Scheme, httpContext.Request.Scheme, StringComparison.OrdinalIgnoreCase)
                && string.Equals(uri.Authority, httpContext.Request.Host.Value, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasNetworkPathPrefix(string value)
+    {
+        return value.Length >= 2
+               && IsSlashOrBackslash(value[0])
+               && IsSlashOrBackslash(value[1]);
+    }
+
+    private static bool IsSlashOrBackslash(char value)
+    {
+        return value is '/' or '\\';
     }
 }
 

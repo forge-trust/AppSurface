@@ -249,7 +249,8 @@ public class ExportEngine
             }
             else
             {
-                if (ExportAuthArtifactAuditor.IsTextArtifact(contentType, filePath))
+                if (ExportAuthArtifactAuditor.IsTextArtifact(contentType, filePath)
+                    || ExportAuthArtifactAuditor.ShouldAuditLocalTextArtifact(filePath))
                 {
                     var bodyBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
                     await ExportAuthArtifactAuditor.WriteTextArtifactBytesAsync(
@@ -483,10 +484,12 @@ public class ExportEngine
         var targetPath = ExportDeploymentExtras.MapPublishPathToFilePath(outputPath, extra.PublishPath);
         // Keep the copy helper defensive if future call paths bypass the batch preflight.
         ExportDeploymentExtras.ValidateTargetParentPath(outputPath, targetPath, extra.PublishPath);
+        byte[]? auditedBytes = null;
         if (ExportAuthArtifactAuditor.ShouldAuditLocalTextArtifact(targetPath))
         {
+            auditedBytes = await File.ReadAllBytesAsync(extra.SourcePath, cancellationToken);
             ExportAuthArtifactAuditor.ValidateTextArtifactBytes(
-                await File.ReadAllBytesAsync(extra.SourcePath, cancellationToken),
+                auditedBytes,
                 "publish-root deployment extra",
                 extra.PublishPath,
                 targetPath);
@@ -503,22 +506,29 @@ public class ExportEngine
             $".{Path.GetFileName(targetPath)}.{Guid.NewGuid():N}.tmp");
         try
         {
-            await using (var source = new FileStream(
-                             extra.SourcePath,
-                             FileMode.Open,
-                             FileAccess.Read,
-                             FileShare.Read,
-                             bufferSize: 128 * 1024,
-                             useAsync: true))
-            await using (var destination = new FileStream(
-                             tempPath,
-                             FileMode.CreateNew,
-                             FileAccess.Write,
-                             FileShare.None,
-                             bufferSize: 128 * 1024,
-                             useAsync: true))
+            if (auditedBytes is not null)
             {
-                await source.CopyToAsync(destination, cancellationToken);
+                await File.WriteAllBytesAsync(tempPath, auditedBytes, cancellationToken);
+            }
+            else
+            {
+                await using (var source = new FileStream(
+                                 extra.SourcePath,
+                                 FileMode.Open,
+                                 FileAccess.Read,
+                                 FileShare.Read,
+                                 bufferSize: 128 * 1024,
+                                 useAsync: true))
+                await using (var destination = new FileStream(
+                                 tempPath,
+                                 FileMode.CreateNew,
+                                 FileAccess.Write,
+                                 FileShare.None,
+                                 bufferSize: 128 * 1024,
+                                 useAsync: true))
+                {
+                    await source.CopyToAsync(destination, cancellationToken);
+                }
             }
 
             File.Move(tempPath, targetPath, overwrite: false);
@@ -550,7 +560,11 @@ public class ExportEngine
         foreach (var filePath in Directory.EnumerateFiles(context.OutputPath, "*", SearchOption.AllDirectories))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ExportOutputPathGuards.ValidateArchiveEntryPath(context.OutputPath, filePath, "auth-inventory");
+            ExportOutputPathGuards.ValidateExistingArtifactPath(
+                context.OutputPath,
+                filePath,
+                "final export artifact",
+                "auth-inventory");
             if (!ExportAuthArtifactAuditor.ShouldAuditLocalTextArtifact(filePath))
             {
                 continue;
