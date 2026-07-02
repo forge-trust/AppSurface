@@ -237,6 +237,8 @@ public sealed class AppSurfaceDocsOptionsTests
         var resolved = new AppSurfaceDocsThemeResolver(options).Theme;
 
         Assert.Equal(AppSurfaceDocsThemePreset.GraphiteDark, resolved.Preset);
+        Assert.Equal(AppSurfaceDocsThemeDensity.Compact, resolved.Density);
+        Assert.Equal(AppSurfaceDocsThemeChrome.Compact, resolved.Chrome);
         Assert.Equal("graphite-dark", resolved.PresetAttribute);
         Assert.Equal("compact", resolved.DensityAttribute);
         Assert.Equal("compact", resolved.ChromeAttribute);
@@ -248,6 +250,34 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("#c4b5fd", resolved.CssVariables["--docs-color-link-visited"]);
         Assert.Contains("--docs-color-accent:#38bdf8;", resolved.CssVariableStyle);
         Assert.Contains("--docs-focus-ring-inset:0 0 0 1px #a5b4fc inset;", resolved.CssVariableStyle);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsThemeResolver_ShouldResolveShortHexOverrides()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Theme = new AppSurfaceDocsThemeOptions
+            {
+                Colors = new AppSurfaceDocsThemeColorOptions
+                {
+                    AccentColor = "#0af",
+                    AccentStrongColor = "#88f",
+                    LinkColor = "#9cf",
+                    VisitedLinkColor = "#fbf"
+                }
+            }
+        };
+
+        var resolved = new AppSurfaceDocsThemeResolver(options).Theme;
+
+        Assert.Equal("#0af", resolved.CssVariables["--docs-color-accent"]);
+        Assert.Equal("#88f", resolved.CssVariables["--docs-color-accent-strong"]);
+        Assert.Equal("#9cf", resolved.CssVariables["--docs-color-link"]);
+        Assert.Equal("#fbf", resolved.CssVariables["--docs-color-link-visited"]);
+        Assert.Equal("rgba(0, 170, 255, 0.56)", resolved.CssVariables["--docs-color-border-accent-hover"]);
+        Assert.Equal("rgba(136, 136, 255, 0.14)", resolved.CssVariables["--docs-color-accent-fill-soft"]);
+        Assert.Equal("0 0 0 1px #88f inset", resolved.CssVariables["--docs-focus-ring-inset"]);
     }
 
     [Fact]

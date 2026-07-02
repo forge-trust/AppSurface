@@ -171,11 +171,6 @@ internal static class AppSurfaceDocsThemePolicy
     private static void ValidateConfiguredContrast(AppSurfaceDocsThemeOptions theme, List<string> failures)
     {
         var colors = theme.Colors;
-        if (colors is null)
-        {
-            return;
-        }
-
         var preset = BuildPreset(theme.Preset);
         var canvas = preset["--docs-color-surface-canvas"];
         var raised = preset["--docs-color-surface-raised"];
