@@ -102,7 +102,10 @@ public sealed class ReleaseWorkflowPolicyTests
         var planIndex = publish.IndexOf("Create docs publication plan", StringComparison.Ordinal);
         Assert.True(hydrateIndex >= 0, "Release publish must hydrate prior release archives.");
         Assert.True(planIndex > hydrateIndex, "Prior release archive hydration must happen before the publication plan is created.");
-        Assert.Contains("--expected-release-manifest-sha256 \"${EXPECTED_MANIFEST_SHA256}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("expected_release_manifest_sha256=\"${EXPECTED_MANIFEST_SHA256}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("if [[ \"${expected_release_manifest_sha256}\" == \"generated\" ]]; then", publish, StringComparison.Ordinal);
+        Assert.Contains("expected_release_manifest_sha256=\"$(sha256sum \"${exact_tree}/.appsurface-docs-release-manifest.json\" | awk '{print $1}')\"", publish, StringComparison.Ordinal);
+        Assert.Contains("--expected-release-manifest-sha256 \"${expected_release_manifest_sha256}\"", publish, StringComparison.Ordinal);
         Assert.Contains("docs verify-archive", publish, StringComparison.Ordinal);
         Assert.Contains("gh release create \"${TAG}\" --verify-tag --draft", publish, StringComparison.Ordinal);
         Assert.Contains("gh release edit \"${TAG}\" --title \"${TITLE}\" --notes-file \"${notes_file}\"", publish, StringComparison.Ordinal);
