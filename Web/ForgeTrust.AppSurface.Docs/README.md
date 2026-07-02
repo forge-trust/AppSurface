@@ -144,7 +144,7 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 
 `wwwroot/css/app.css` declares AppSurface Docs' shared dark-slate style tokens on `:root` with `--docs-*` custom properties. These tokens describe the current flagship visual system: slate surfaces, muted borders, readable text, cyan accents, focus rings, active fills, code chrome, table chrome, and skeleton treatments.
 
-The tokens are internal package implementation details. They ship in browser CSS because AppSurface Docs CSS ships to the browser, but hosts should not treat them as a supported override API yet. Future theming work can promote a documented public contract once the host customization model is designed.
+The tokens are internal package implementation details. They ship in browser CSS because AppSurface Docs CSS ships to the browser, but hosts should customize the supported theme roles through `AppSurfaceDocs:Theme` instead of overriding the full token set. Token names can change when package-owned CSS changes; the public contract is the strongly typed theme options, validation behavior, and resolved output across live docs, search, static export, and published archives.
 
 Use tokens when a value is either:
 
@@ -1304,6 +1304,76 @@ application keeps control of its app-wide favicon. If you configure any custom f
 only the configured entries, and the host is responsible for serving those files. Use `Identity:BrandingAssets` when those
 files should come from a repository-owned or deployment-mounted directory instead of the owning application's normal
 static web assets.
+
+- `AppSurfaceDocs:Theme:Preset`
+  - Optional dark-family theme preset for package-owned docs chrome.
+  - Defaults to `AppSurfaceDark`.
+  - Supported values are `AppSurfaceDark` and `GraphiteDark`.
+  - Unknown enum values fail startup validation and list the supported values.
+- `AppSurfaceDocs:Theme:Colors:AccentColor`
+  - Optional CSS hex color for primary accent text, active states, and highlights.
+  - Blank values use the selected preset default.
+  - Must meet text contrast checks against the selected preset's dark shell backgrounds.
+- `AppSurfaceDocs:Theme:Colors:AccentStrongColor`
+  - Optional CSS hex color for focus rings, selected-state fills, and high-emphasis borders.
+  - Blank values use the selected preset default.
+  - Must meet UI contrast checks against the selected preset's dark shell backgrounds.
+- `AppSurfaceDocs:Theme:Colors:LinkColor`
+  - Optional CSS hex color for standard prose and chrome links.
+  - Blank values use the selected preset default.
+  - Must meet text contrast checks against the selected preset's dark shell backgrounds.
+- `AppSurfaceDocs:Theme:Colors:VisitedLinkColor`
+  - Optional CSS hex color for visited prose links.
+  - Blank values use the selected preset default.
+  - Must meet text contrast checks against the selected preset's dark shell backgrounds.
+- `AppSurfaceDocs:Theme:Layout:Density`
+  - Optional repeated-chrome density.
+  - Defaults to `Comfortable`.
+  - `Compact` reduces repeated sidebar, search, metadata, and adjacent chrome spacing without reducing Markdown prose line height or mobile touch-target floors.
+- `AppSurfaceDocs:Theme:Layout:Chrome`
+  - Optional brand/sidebar/header chrome compactness.
+  - Defaults to `Standard`.
+  - `Compact` reduces package-owned brand, sidebar, and header spacing while preserving search visibility, keyboard order, and mobile navigation hierarchy.
+
+Minimal theme configuration:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Theme": {
+      "Preset": "GraphiteDark"
+    }
+  }
+}
+```
+
+Full v1 theme configuration:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Theme": {
+      "Preset": "GraphiteDark",
+      "Colors": {
+        "AccentColor": "#38bdf8",
+        "AccentStrongColor": "#a5b4fc",
+        "LinkColor": "#93c5fd",
+        "VisitedLinkColor": "#c4b5fd"
+      },
+      "Layout": {
+        "Density": "Compact",
+        "Chrome": "Compact"
+      }
+    }
+  }
+}
+```
+
+Environment variable spelling follows the normal double-underscore configuration convention, such as `AppSurfaceDocs__Theme__Preset=GraphiteDark`, `AppSurfaceDocs__Theme__Colors__AccentColor=#38bdf8`, and `AppSurfaceDocs__Theme__Layout__Density=Compact`.
+
+Theme validation is part of the public contract. `Theme`, `Theme:Colors`, and `Theme:Layout` must not be null. Color values must be CSS hex colors, not CSS functions, variables, color names, or style declarations. Contrast failures name the config path, configured value, required ratio, tested preset background, and a fix hint so maintainers can correct the value without inspecting generated CSS.
+
+Use theme options when the host wants branded docs without owning views. Do not use them when the goal is a light/system theme, arbitrary text or surface overrides, syntax-highlighting replacement, selector-level CSS compatibility, external theme packages, or a bespoke documentation template. Static exports and published release archives freeze the resolved theme variables in exported HTML, so host config changes do not rewrite already-exported archives.
 
 - `AppSurfaceDocs:Harvest:FailOnFailure`
   - Defaults to `false`.

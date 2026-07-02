@@ -43,6 +43,37 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
     }
 
     [Fact]
+    public void RewriteHtml_ShouldPreserveFrozenThemeAttributesAndVariables()
+    {
+        const string html =
+            """
+            <!DOCTYPE html>
+            <html data-docs-theme-preset="graphite-dark"
+                  data-docs-density="compact"
+                  data-docs-chrome="compact"
+                  style="scrollbar-gutter: stable; --docs-color-surface-canvas:#080a0d;--docs-color-accent:#38bdf8;">
+            <head>
+              <link rel="stylesheet" href="/docs/search.css" />
+              <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","miniSearchUrl":"/docs/minisearch.min.js?v=abc","docsVersionsUrl":"/docs/versions"};</script>
+            </head>
+            <body>
+              <a href="/docs/search">Search</a>
+            </body>
+            </html>
+            """;
+
+        var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs/v/1.2.3");
+
+        Assert.Contains("data-docs-theme-preset=\"graphite-dark\"", rewritten);
+        Assert.Contains("data-docs-density=\"compact\"", rewritten);
+        Assert.Contains("data-docs-chrome=\"compact\"", rewritten);
+        Assert.Contains("--docs-color-surface-canvas:#080a0d;", rewritten);
+        Assert.Contains("--docs-color-accent:#38bdf8;", rewritten);
+        Assert.Contains("href=\"/docs/v/1.2.3/search.css\"", rewritten);
+        Assert.Contains("\"docsSearchUrl\":\"/docs/v/1.2.3/search\"", rewritten);
+    }
+
+    [Fact]
     public void RewriteHtml_ShouldRebaseSearchRecoveryAnchors()
     {
         const string html =

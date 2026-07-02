@@ -436,7 +436,7 @@ packages:
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 200
-    note: Reusable docs package for harvesting repository docs into an AppSurface Docs UI. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps.
+    note: Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and the dark-family Theme Contract v1 for branded docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps.
     start_here_path: Web/ForgeTrust.AppSurface.Docs/README.md
     start_here_label: AppSurface Docs README
     expected_dependency_package_ids:
