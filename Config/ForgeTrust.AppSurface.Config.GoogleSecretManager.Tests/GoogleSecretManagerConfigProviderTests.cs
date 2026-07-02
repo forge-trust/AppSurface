@@ -356,10 +356,16 @@ public sealed class GoogleSecretManagerConfigProviderTests
     public void AdapterConstructors_Should_BeLazyAndValidateExplicitClient()
     {
         var adapter = new GoogleSecretManagerClientAdapter();
+        var explicitClientAdapter = new GoogleSecretManagerClientAdapter(
+            new PayloadSecretManagerServiceClient("explicit-client"));
         var exception = Assert.Throws<ArgumentNullException>(() =>
             new GoogleSecretManagerClientAdapter((SecretManagerServiceClient)null!));
+        var payload = explicitClientAdapter.AccessSecretVersion(
+            "projects/project/secrets/api-key/versions/5",
+            TimeSpan.FromSeconds(1));
 
         Assert.NotNull(adapter);
+        Assert.Equal("explicit-client", Encoding.UTF8.GetString(payload.Data));
         Assert.Equal("client", exception.ParamName);
     }
 
