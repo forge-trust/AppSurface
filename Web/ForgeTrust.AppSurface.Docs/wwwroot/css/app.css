@@ -110,6 +110,11 @@
     color-scheme: dark;
 }
 
+.docs-shell-root {
+    background: var(--docs-color-surface-canvas);
+    border-color: var(--docs-color-border-muted);
+}
+
 body {
     background:
         linear-gradient(180deg, var(--docs-color-page-wash), transparent 22rem),
@@ -117,6 +122,119 @@ body {
     font-family: var(--font-inter);
     scrollbar-width: thin;
     scrollbar-color: var(--docs-color-border-default) var(--docs-color-surface-raised);
+}
+
+.docs-shell-body {
+    color: var(--docs-color-text-default);
+}
+
+.docs-skip-link:focus {
+    background: var(--docs-color-surface-raised);
+    color: var(--docs-color-text-strong);
+}
+
+.docs-sidebar-overlay {
+    background: var(--docs-color-surface-overlay);
+}
+
+.docs-sidebar-panel {
+    border-color: var(--docs-color-border-muted);
+    background: var(--docs-color-surface-overlay-strong);
+}
+
+.docs-sidebar-header,
+.docs-mobile-header {
+    border-color: var(--docs-color-border-muted);
+    background: var(--docs-color-surface-overlay-strong);
+}
+
+.docs-sidebar-close,
+.docs-sidebar-open {
+    border-color: var(--docs-color-border-default);
+    color: var(--docs-color-text-default);
+}
+
+.docs-sidebar-close:hover,
+.docs-sidebar-close:focus-visible,
+.docs-sidebar-open:hover,
+.docs-sidebar-open:focus-visible {
+    border-color: var(--docs-color-border-accent-hover);
+    color: var(--docs-color-accent);
+}
+
+.docs-search-status,
+.docs-sidebar-footer {
+    color: var(--docs-color-text-faint);
+}
+
+.docs-sidebar-footer {
+    border-color: var(--docs-color-border-muted);
+}
+
+.docs-sidebar-empty {
+    border-color: var(--docs-color-border-muted);
+    background: var(--docs-color-surface-panel-soft);
+    color: var(--docs-color-text-subtle);
+}
+
+.docs-search-workspace-link {
+    border-color: var(--docs-color-border-accent-muted);
+    background: linear-gradient(180deg, var(--docs-color-surface-raised), var(--docs-color-surface-code));
+    color: var(--docs-color-text-default);
+}
+
+.docs-search-workspace-link:hover,
+.docs-search-workspace-link:focus-visible {
+    border-color: var(--docs-color-border-accent-hover);
+    background: linear-gradient(180deg, var(--docs-color-surface-panel-hover), var(--docs-color-surface-code));
+}
+
+.docs-search-workspace-link:focus-visible {
+    box-shadow: var(--docs-focus-ring-inset);
+}
+
+.docs-search-workspace-kbd {
+    color: var(--docs-color-accent);
+}
+
+.docs-mobile-search-link {
+    border-color: var(--docs-color-border-accent-muted);
+    background: var(--docs-color-state-active-fill);
+    color: var(--docs-color-text-info);
+}
+
+.docs-mobile-search-link:hover,
+.docs-mobile-search-link:focus-visible {
+    border-color: var(--docs-color-border-accent-hover);
+    background: var(--docs-color-accent-mark-fill);
+    color: var(--docs-color-accent-soft);
+}
+
+[data-docs-chrome="compact"] .docs-sidebar-brand-desktop {
+    padding: 1rem;
+}
+
+[data-docs-chrome="compact"] .docs-sidebar-header,
+[data-docs-chrome="compact"] .docs-mobile-header {
+    padding-top: 0.65rem;
+    padding-bottom: 0.65rem;
+}
+
+[data-docs-chrome="compact"] #docs-sidebar-footer {
+    padding: 0.75rem 1rem;
+}
+
+[data-docs-density="compact"] .docs-search-shell {
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.25rem;
+}
+
+[data-docs-density="compact"] .docs-search-workspace-link {
+    padding: 0.55rem 0.75rem;
+}
+
+[data-docs-density="compact"] .docs-sidebar-nav {
+    padding-bottom: 0.75rem;
 }
 
 #main-content {
@@ -1456,7 +1574,7 @@ body {
 }
 
 .docs-content .doc-namespace-groups a:hover {
-    color: var(--docs-color-accent-strong);
+    color: var(--docs-color-accent);
 }
 
 .docs-content .doc-namespace-entry-points {
@@ -1502,7 +1620,7 @@ body {
 }
 
 .docs-content .doc-namespace-entry-point > a:hover .doc-namespace-entry-point-label code {
-    color: var(--docs-color-accent-strong);
+    color: var(--docs-color-accent);
 }
 
 .docs-content .doc-namespace-entry-point-label,
@@ -1719,7 +1837,7 @@ body {
 }
 
 .docs-content td a:hover {
-    color: var(--docs-color-accent-strong);
+    color: var(--docs-color-accent);
 }
 
 .docs-content pre {

@@ -49,6 +49,10 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("rel=\"icon\" type=\"image/svg+xml\" href=\"@docsBrandIconUrl\"", layout);
         Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"search-client.js\")", layout);
         Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"minisearch.min.js\")", layout);
+        Assert.Contains("ThemeResolver.Theme", layout);
+        Assert.Contains("data-docs-theme-preset", layout);
+        Assert.Contains("data-docs-density", layout);
+        Assert.Contains("data-docs-chrome", layout);
     }
 
     [Fact]
@@ -94,6 +98,41 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("\"metrics\":{\"enabled\":false", html);
         Assert.Contains("\"feedbackEnabled\":false", html);
         Assert.DoesNotContain("\"endpointUrl\":\"/some-base/docs/_metrics/collect\"", html);
+    }
+
+    [Fact]
+    public async Task Layout_ShouldRenderResolvedThemeAttributesAndVariables()
+    {
+        using var services = CreateServiceProvider(
+            CreateDocs(),
+            new Dictionary<string, string?>
+            {
+                ["AppSurfaceDocs:Theme:Preset"] = "GraphiteDark",
+                ["AppSurfaceDocs:Theme:Colors:AccentColor"] = "#38BDF8",
+                ["AppSurfaceDocs:Theme:Colors:AccentStrongColor"] = "#A5B4FC",
+                ["AppSurfaceDocs:Theme:Colors:LinkColor"] = "#93C5FD",
+                ["AppSurfaceDocs:Theme:Colors:VisitedLinkColor"] = "#C4B5FD",
+                ["AppSurfaceDocs:Theme:Layout:Density"] = "Compact",
+                ["AppSurfaceDocs:Theme:Layout:Chrome"] = "Compact"
+            });
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Search",
+            c => c.Search(),
+            pathBase: "/some-base");
+
+        Assert.Contains("data-docs-theme-preset=\"graphite-dark\"", html);
+        Assert.Contains("data-docs-density=\"compact\"", html);
+        Assert.Contains("data-docs-chrome=\"compact\"", html);
+        Assert.Contains("docs-theme-preset-graphite-dark docs-density-compact docs-chrome-compact", html);
+        Assert.Contains("--docs-color-surface-canvas:#080a0d;", html);
+        Assert.Contains("--docs-color-accent:#38bdf8;", html);
+        Assert.Contains("--docs-color-accent-strong:#a5b4fc;", html);
+        Assert.Contains("--docs-color-link:#93c5fd;", html);
+        Assert.Contains("--docs-color-link-visited:#c4b5fd;", html);
+        Assert.Contains("--docs-focus-ring-inset:0 0 0 1px #a5b4fc inset;", html);
+        Assert.Matches("href=\"/some-base/docs/search\\.css\\?v=[^\"]+\"", html);
     }
 
     [Fact]
@@ -558,9 +597,14 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("--docs-color-accent-strong: #2563eb;", tailwindEntryStylesheet);
         Assert.Contains("--docs-color-wordmark-edge-shadow: rgba(0, 0, 0, 0.45);", tailwindEntryStylesheet);
         Assert.Contains("--docs-focus-ring-inset:", tailwindEntryStylesheet);
+        Assert.Contains(".docs-shell-root", tailwindEntryStylesheet);
+        Assert.Contains(".docs-search-workspace-link", tailwindEntryStylesheet);
+        Assert.Contains("[data-docs-density=\"compact\"] .docs-search-shell", tailwindEntryStylesheet);
+        Assert.Contains("[data-docs-chrome=\"compact\"] .docs-sidebar-brand-desktop", tailwindEntryStylesheet);
 
         Assert.Contains("border: 1px solid var(--docs-color-border-default);", tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-color-accent);", tailwindEntryStylesheet);
+        Assert.DoesNotContain("color: var(--docs-color-accent-strong);", tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-brand-wordmark-highlight-color, currentColor);", tailwindEntryStylesheet);
         Assert.Contains(".docs-brand .docs-wordmark", tailwindEntryStylesheet);
         Assert.Contains("max-width: 100%;", tailwindEntryStylesheet);
@@ -569,7 +613,10 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("outline: var(--docs-focus-outline);", tailwindEntryStylesheet);
 
         Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #050b17);", searchStylesheet);
+        Assert.Contains("--docs-search-color-accent-glow: var(--docs-color-accent-glow,", searchStylesheet);
         Assert.Contains("--docs-search-focus-ring-inset: var(--docs-focus-ring-inset,", searchStylesheet);
+        Assert.Contains(":root[data-docs-density=\"compact\"] #docs-search-input", searchStylesheet);
+        Assert.Contains(":root[data-docs-density=\"compact\"] .docs-search-result-link", searchStylesheet);
         Assert.Contains("background: var(--docs-search-color-surface-canvas);", searchStylesheet);
         Assert.Contains("border: 1px solid var(--docs-search-color-border-default);", searchStylesheet);
         Assert.Contains("box-shadow: var(--docs-search-focus-ring-inset);", searchStylesheet);

@@ -154,6 +154,10 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Identity.BrandingAssets.RequestPath =
                         AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.BrandingAssets.RequestPath)
                         ?? AppSurfaceDocsBrandingAssetsOptions.DefaultRequestPath;
+                    if (options.Theme?.Colors is not null && options.Theme.Layout is not null)
+                    {
+                        AppSurfaceDocsThemePolicy.Normalize(options.Theme);
+                    }
                     options.Harvest.Paths.IncludeGlobs = NormalizeGlobArray(options.Harvest.Paths.IncludeGlobs);
                     options.Harvest.Paths.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Paths.ExcludeGlobs);
                     options.Harvest.Paths.DefaultExclusions =
@@ -250,11 +254,15 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.TryAddSingleton(sp => sp.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
         services.AddConfigAuditKey<AppSurfaceDocsOptions>(AppSurfaceDocsOptions.SectionName);
         services.AddConfigAuditKey<AppSurfaceDocsIdentityOptions>($"{AppSurfaceDocsOptions.SectionName}.Identity");
+        services.AddConfigAuditKey<AppSurfaceDocsThemeOptions>($"{AppSurfaceDocsOptions.SectionName}.Theme");
+        services.AddConfigAuditKey<AppSurfaceDocsThemeColorOptions>($"{AppSurfaceDocsOptions.SectionName}.Theme.Colors");
+        services.AddConfigAuditKey<AppSurfaceDocsThemeLayoutOptions>($"{AppSurfaceDocsOptions.SectionName}.Theme.Layout");
         services.TryAddSingleton(AppSurfaceDocsAssetPathResolver.CreateDefault());
         services.TryAddSingleton<AppSurfaceDocsAssetVersioner>();
         services.TryAddSingleton<DocsUrlBuilder>();
         services.TryAddSingleton<DocsRecoveryLinkBuilder>();
         services.TryAddSingleton<AppSurfaceDocsIdentityResolver>();
+        services.TryAddSingleton<AppSurfaceDocsThemeResolver>();
         services.TryAddSingleton<AppSurfaceDocsVersionCatalogService>();
         services.TryAddSingleton<AppSurfaceDocsSearchQualityReadModel>();
         services.AddMemoryCache();

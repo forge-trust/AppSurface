@@ -48,6 +48,12 @@
     outline: none;
 }
 
+:root[data-docs-density="compact"] #docs-search-input,
+:root[data-docs-density="compact"] #docs-search-page-input,
+:root[data-docs-density="compact"] .docs-search-page-select {
+    padding: 0.5rem 0.7rem;
+}
+
 #docs-search-input:focus,
 #docs-search-page-input:focus,
 .docs-search-page-select:focus,
@@ -369,6 +375,11 @@
     padding: 0.05rem 0.35rem 1rem;
     color: var(--docs-search-color-text-default);
     text-decoration: none;
+}
+
+:root[data-docs-density="compact"] .docs-search-result-link {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
 }
 
 .docs-search-result-link:hover,

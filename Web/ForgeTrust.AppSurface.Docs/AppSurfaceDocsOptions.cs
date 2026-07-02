@@ -64,6 +64,16 @@ public sealed class AppSurfaceDocsOptions
     public AppSurfaceDocsIdentityOptions Identity { get; set; } = new();
 
     /// <summary>
+    /// Gets theme and layout settings used by the built-in docs chrome.
+    /// </summary>
+    /// <remarks>
+    /// Theme settings are the supported customization contract for AppSurface Docs visual branding. They intentionally expose
+    /// presets, accent/link roles, density, and chrome compactness instead of the full internal <c>--docs-*</c> CSS variable
+    /// layer. Leave these settings unset to use the default AppSurface dark theme.
+    /// </remarks>
+    public AppSurfaceDocsThemeOptions Theme { get; set; } = new();
+
+    /// <summary>
     /// Gets source-mode settings used when docs are harvested from a repository checkout.
     /// </summary>
     public AppSurfaceDocsSourceOptions Source { get; set; } = new();
@@ -127,13 +137,146 @@ public sealed class AppSurfaceDocsOptions
 }
 
 /// <summary>
+/// Theme configuration for AppSurface Docs browser chrome and package-owned docs surfaces.
+/// </summary>
+/// <remarks>
+/// Use this object when a consuming repository needs branded docs without replacing Razor views or depending on internal CSS
+/// selectors. AppSurface Docs resolves these settings into a package-owned CSS variable set at render time so live docs,
+/// search, static export, and published archives share the same visual contract.
+/// </remarks>
+public sealed class AppSurfaceDocsThemeOptions
+{
+    /// <summary>
+    /// Gets or sets the preset palette used before applying supported color overrides.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see cref="AppSurfaceDocsThemePreset.AppSurfaceDark"/>. V1 presets are dark-only so code
+    /// highlighting, search states, and existing docs chrome keep their contrast guarantees.
+    /// </remarks>
+    public AppSurfaceDocsThemePreset Preset { get; set; } = AppSurfaceDocsThemePreset.AppSurfaceDark;
+
+    /// <summary>
+    /// Gets color role overrides for the selected preset.
+    /// </summary>
+    public AppSurfaceDocsThemeColorOptions Colors { get; set; } = new();
+
+    /// <summary>
+    /// Gets layout density and chrome compactness settings for package-owned docs UI.
+    /// </summary>
+    public AppSurfaceDocsThemeLayoutOptions Layout { get; set; } = new();
+}
+
+/// <summary>
+/// Dark-family AppSurface Docs theme presets.
+/// </summary>
+public enum AppSurfaceDocsThemePreset
+{
+    /// <summary>
+    /// The default AppSurface dark palette.
+    /// </summary>
+    AppSurfaceDark = 0,
+
+    /// <summary>
+    /// A lower-saturation dark palette with graphite surfaces and cooler accents.
+    /// </summary>
+    GraphiteDark = 1
+}
+
+/// <summary>
+/// Supported color-role overrides for AppSurface Docs themes.
+/// </summary>
+/// <remarks>
+/// Values must be CSS hex colors such as <c>#14b8a6</c> or <c>#93c5fd</c>. Blank values use the selected preset default.
+/// These roles are intentionally narrow: surface, text, border, syntax, and semantic-status colors remain preset-owned in
+/// v1 so maintainers do not inherit a large CSS-token compatibility burden.
+/// </remarks>
+public sealed class AppSurfaceDocsThemeColorOptions
+{
+    /// <summary>
+    /// Gets or sets the primary accent color used by links, active states, highlights, and related affordances.
+    /// </summary>
+    public string? AccentColor { get; set; }
+
+    /// <summary>
+    /// Gets or sets the stronger accent color used by focus rings, selected-state fills, and high-emphasis borders.
+    /// </summary>
+    public string? AccentStrongColor { get; set; }
+
+    /// <summary>
+    /// Gets or sets the standard prose and chrome link color.
+    /// </summary>
+    public string? LinkColor { get; set; }
+
+    /// <summary>
+    /// Gets or sets the visited prose link color.
+    /// </summary>
+    public string? VisitedLinkColor { get; set; }
+}
+
+/// <summary>
+/// Layout controls for package-owned AppSurface Docs chrome.
+/// </summary>
+public sealed class AppSurfaceDocsThemeLayoutOptions
+{
+    /// <summary>
+    /// Gets or sets the repeated-chrome density.
+    /// </summary>
+    /// <remarks>
+    /// Compact density reduces repeated sidebar, metadata, search-result, and adjacent chrome spacing. It does not reduce
+    /// Markdown prose line height or mobile touch-target floors.
+    /// </remarks>
+    public AppSurfaceDocsThemeDensity Density { get; set; } = AppSurfaceDocsThemeDensity.Comfortable;
+
+    /// <summary>
+    /// Gets or sets the amount of brand, sidebar, and header chrome.
+    /// </summary>
+    /// <remarks>
+    /// Compact chrome shortens package-owned shell spacing while preserving search visibility, keyboard order, and mobile
+    /// navigation hierarchy.
+    /// </remarks>
+    public AppSurfaceDocsThemeChrome Chrome { get; set; } = AppSurfaceDocsThemeChrome.Standard;
+}
+
+/// <summary>
+/// Density options for package-owned AppSurface Docs chrome.
+/// </summary>
+public enum AppSurfaceDocsThemeDensity
+{
+    /// <summary>
+    /// Default comfortable docs rhythm.
+    /// </summary>
+    Comfortable = 0,
+
+    /// <summary>
+    /// Reduced repeated-chrome spacing that keeps readable content and touch affordance floors.
+    /// </summary>
+    Compact = 1
+}
+
+/// <summary>
+/// Chrome compactness options for the built-in docs shell.
+/// </summary>
+public enum AppSurfaceDocsThemeChrome
+{
+    /// <summary>
+    /// Default brand, sidebar, and mobile-header chrome.
+    /// </summary>
+    Standard = 0,
+
+    /// <summary>
+    /// Reduced brand, sidebar, and mobile-header spacing.
+    /// </summary>
+    Compact = 1
+}
+
+/// <summary>
 /// Identity configuration for AppSurface Docs browser chrome.
 /// </summary>
 /// <remarks>
 /// Identity settings intentionally cover the low-level brand assets every consuming repository expects to own:
 /// display name, logo, favicon variants, optional branding-asset directory serving, and the brand home link. Theme,
-/// layout, color, typography, and template customization are separate future work so identity remains safe to configure
-/// from appsettings, config_*.json, command-line arguments, and environment variables.
+/// layout, color, typography, and template customization stay separate so identity remains safe to configure from
+/// appsettings, config_*.json, command-line arguments, and environment variables.
 /// </remarks>
 public sealed class AppSurfaceDocsIdentityOptions
 {
@@ -1202,6 +1345,7 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         List<string> failures = [];
         var source = options.Source;
         var identity = options.Identity;
+        var theme = options.Theme;
         var harvest = options.Harvest;
         var diagnostics = options.Diagnostics;
         var metrics = options.Metrics;
@@ -1324,6 +1468,8 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
                 identity.HomeHref,
                 allowDocsHomeDefault: true);
         }
+
+        AppSurfaceDocsThemePolicy.Validate(theme, failures);
 
         if (source is null)
         {

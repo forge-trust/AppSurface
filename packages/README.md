@@ -95,7 +95,7 @@ Swipe to compare package details on narrow screens.
 
 ### Docs and proof hosts
 
-- `ForgeTrust.AppSurface.Docs`: Reusable docs package for harvesting repository docs into an AppSurface Docs UI. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps. Release: proof host; not applicable; [notes](../releases/unreleased.md). Start here: [AppSurface Docs README](../Web/ForgeTrust.AppSurface.Docs/README.md)
+- `ForgeTrust.AppSurface.Docs`: Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and the dark-family Theme Contract v1 for branded docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps. Release: proof host; not applicable; [notes](../releases/unreleased.md). Start here: [AppSurface Docs README](../Web/ForgeTrust.AppSurface.Docs/README.md)
 - `ForgeTrust.AppSurface.Docs.Standalone`: Thin export host for serving or exporting AppSurface Docs. Treat it as a proof host and example app, not a package you install into another project. Release: proof host; not applicable; [notes](../releases/unreleased.md). Start here: [Standalone host README](../Web/ForgeTrust.AppSurface.Docs.Standalone/README.md)
 
 ### Not in the direct-install matrix

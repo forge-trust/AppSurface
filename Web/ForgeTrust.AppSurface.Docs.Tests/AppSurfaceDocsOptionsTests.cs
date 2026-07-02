@@ -44,6 +44,12 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(0, (int)AppSurfaceDocsLocaleSearchMode.ActiveLocale);
         Assert.Equal(0, (int)AppSurfaceDocsTextDirection.Ltr);
         Assert.Equal(1, (int)AppSurfaceDocsTextDirection.Rtl);
+        Assert.Equal(0, (int)AppSurfaceDocsThemePreset.AppSurfaceDark);
+        Assert.Equal(1, (int)AppSurfaceDocsThemePreset.GraphiteDark);
+        Assert.Equal(0, (int)AppSurfaceDocsThemeDensity.Comfortable);
+        Assert.Equal(1, (int)AppSurfaceDocsThemeDensity.Compact);
+        Assert.Equal(0, (int)AppSurfaceDocsThemeChrome.Standard);
+        Assert.Equal(1, (int)AppSurfaceDocsThemeChrome.Compact);
         Assert.Equal(0, (int)DocHarvesterHealthStatus.Succeeded);
         Assert.Equal(1, (int)DocHarvesterHealthStatus.ReturnedEmpty);
         Assert.Equal(2, (int)DocHarvesterHealthStatus.Failed);
@@ -105,6 +111,20 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AppSurfaceDocsOptions_ShouldDefaultThemeOptions()
+    {
+        var options = new AppSurfaceDocsOptions();
+
+        Assert.Equal(AppSurfaceDocsThemePreset.AppSurfaceDark, options.Theme.Preset);
+        Assert.Equal(AppSurfaceDocsThemeDensity.Comfortable, options.Theme.Layout.Density);
+        Assert.Equal(AppSurfaceDocsThemeChrome.Standard, options.Theme.Layout.Chrome);
+        Assert.Null(options.Theme.Colors.AccentColor);
+        Assert.Null(options.Theme.Colors.AccentStrongColor);
+        Assert.Null(options.Theme.Colors.LinkColor);
+        Assert.Null(options.Theme.Colors.VisitedLinkColor);
+    }
+
+    [Fact]
     public void AppSurfaceDocsOptions_ShouldEnableVcsIgnoreByDefault()
     {
         var options = new AppSurfaceDocsOptions();
@@ -156,6 +176,78 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.True(options.Harvest.JavaScript.RequireCompleteEventDoclets);
         Assert.True(options.Harvest.JavaScript.VerifyEventDispatches);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldBindAndNormalizeThemeOptions()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Theme:Preset"] = "GraphiteDark",
+                        ["AppSurfaceDocs:Theme:Colors:AccentColor"] = "  #38BDF8  ",
+                        ["AppSurfaceDocs:Theme:Colors:AccentStrongColor"] = "  #818CF8  ",
+                        ["AppSurfaceDocs:Theme:Colors:LinkColor"] = "  #93C5FD  ",
+                        ["AppSurfaceDocs:Theme:Colors:VisitedLinkColor"] = "  #C4B5FD  ",
+                        ["AppSurfaceDocs:Theme:Layout:Density"] = "Compact",
+                        ["AppSurfaceDocs:Theme:Layout:Chrome"] = "Compact"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Equal(AppSurfaceDocsThemePreset.GraphiteDark, options.Theme.Preset);
+        Assert.Equal("#38bdf8", options.Theme.Colors.AccentColor);
+        Assert.Equal("#818cf8", options.Theme.Colors.AccentStrongColor);
+        Assert.Equal("#93c5fd", options.Theme.Colors.LinkColor);
+        Assert.Equal("#c4b5fd", options.Theme.Colors.VisitedLinkColor);
+        Assert.Equal(AppSurfaceDocsThemeDensity.Compact, options.Theme.Layout.Density);
+        Assert.Equal(AppSurfaceDocsThemeChrome.Compact, options.Theme.Layout.Chrome);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsThemeResolver_ShouldResolveGraphiteOverridesDeterministically()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Theme = new AppSurfaceDocsThemeOptions
+            {
+                Preset = AppSurfaceDocsThemePreset.GraphiteDark,
+                Colors = new AppSurfaceDocsThemeColorOptions
+                {
+                    AccentColor = "#38bdf8",
+                    AccentStrongColor = "#a5b4fc",
+                    LinkColor = "#93c5fd",
+                    VisitedLinkColor = "#c4b5fd"
+                },
+                Layout = new AppSurfaceDocsThemeLayoutOptions
+                {
+                    Density = AppSurfaceDocsThemeDensity.Compact,
+                    Chrome = AppSurfaceDocsThemeChrome.Compact
+                }
+            }
+        };
+
+        var resolved = new AppSurfaceDocsThemeResolver(options).Theme;
+
+        Assert.Equal(AppSurfaceDocsThemePreset.GraphiteDark, resolved.Preset);
+        Assert.Equal("graphite-dark", resolved.PresetAttribute);
+        Assert.Equal("compact", resolved.DensityAttribute);
+        Assert.Equal("compact", resolved.ChromeAttribute);
+        Assert.Contains("docs-theme-preset-graphite-dark", resolved.RootCssClass);
+        Assert.Equal("#080a0d", resolved.CssVariables["--docs-color-surface-canvas"]);
+        Assert.Equal("#38bdf8", resolved.CssVariables["--docs-color-accent"]);
+        Assert.Equal("#a5b4fc", resolved.CssVariables["--docs-color-accent-strong"]);
+        Assert.Equal("#93c5fd", resolved.CssVariables["--docs-color-link"]);
+        Assert.Equal("#c4b5fd", resolved.CssVariables["--docs-color-link-visited"]);
+        Assert.Contains("--docs-color-accent:#38bdf8;", resolved.CssVariableStyle);
+        Assert.Contains("--docs-focus-ring-inset:0 0 0 1px #a5b4fc inset;", resolved.CssVariableStyle);
     }
 
     [Fact]
@@ -330,6 +422,118 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(ex.Failures, failure => failure.Contains(expectedFailureFragment, StringComparison.OrdinalIgnoreCase));
     }
 
+    [Theory]
+    [InlineData("AppSurfaceDocs:Theme:Colors:AccentColor", "blue")]
+    [InlineData("AppSurfaceDocs:Theme:Colors:AccentStrongColor", "var(--brand)")]
+    [InlineData("AppSurfaceDocs:Theme:Colors:LinkColor", "#12345g")]
+    [InlineData("AppSurfaceDocs:Theme:Colors:VisitedLinkColor", "rgb(255, 255, 255)")]
+    public void AddAppSurfaceDocs_ShouldRejectInvalidThemeColors(string key, string value)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { [key] = value })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
+
+        Assert.Contains(ex.Failures, failure => failure.Contains(key, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(ex.Failures, failure => failure.Contains("CSS hex color", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("AppSurfaceDocs:Theme:Preset", "99", "Allowed values are AppSurfaceDark and GraphiteDark")]
+    [InlineData("AppSurfaceDocs:Theme:Layout:Density", "99", "Allowed values are Comfortable and Compact")]
+    [InlineData("AppSurfaceDocs:Theme:Layout:Chrome", "99", "Allowed values are Standard and Compact")]
+    public void AddAppSurfaceDocs_ShouldRejectUnsupportedThemeEnums(
+        string key,
+        string value,
+        string expectedFailureFragment)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { [key] = value })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
+
+        Assert.Contains(ex.Failures, failure => failure.Contains(key, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(ex.Failures, failure => failure.Contains(expectedFailureFragment, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("Theme", "AppSurfaceDocs:Theme must not be null.")]
+    [InlineData("Colors", "AppSurfaceDocs:Theme:Colors must not be null.")]
+    [InlineData("Layout", "AppSurfaceDocs:Theme:Layout must not be null.")]
+    public void AddAppSurfaceDocs_ShouldRejectNullThemeSections(string section, string expectedFailure)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+
+        services.AddAppSurfaceDocs();
+        services.Configure<AppSurfaceDocsOptions>(
+            options =>
+            {
+                if (section == "Theme")
+                {
+                    options.Theme = null!;
+                }
+                else if (section == "Colors")
+                {
+                    options.Theme.Colors = null!;
+                }
+                else
+                {
+                    options.Theme.Layout = null!;
+                }
+            });
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
+
+        Assert.Contains(ex.Failures, failure => string.Equals(failure, expectedFailure, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("AppSurfaceDocs:Theme:Colors:AccentColor", "#1b2a43", "4.5:1 contrast for text accent")]
+    [InlineData("AppSurfaceDocs:Theme:Colors:AccentStrongColor", "#111111", "3:1 contrast for focus and selected-state accent")]
+    [InlineData("AppSurfaceDocs:Theme:Colors:LinkColor", "#0d182a", "4.5:1 contrast for link text")]
+    [InlineData("AppSurfaceDocs:Theme:Colors:VisitedLinkColor", "#0d182a", "4.5:1 contrast for visited link text")]
+    public void AddAppSurfaceDocs_ShouldRejectThemeColorsThatFailContrast(
+        string key,
+        string value,
+        string expectedFailureFragment)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { [key] = value })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
+
+        Assert.Contains(ex.Failures, failure => failure.Contains(key, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(ex.Failures, failure => failure.Contains(expectedFailureFragment, StringComparison.OrdinalIgnoreCase));
+    }
+
     [Fact]
     public void AddAppSurfaceDocs_ShouldRejectWordmarkHighlightColorWithoutHighlightText()
     {
@@ -430,6 +634,9 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.Contains(entries, entry => entry.Key == "AppSurfaceDocs" && entry.ValueType == typeof(AppSurfaceDocsOptions));
         Assert.Contains(entries, entry => entry.Key == "AppSurfaceDocs.Identity" && entry.ValueType == typeof(AppSurfaceDocsIdentityOptions));
+        Assert.Contains(entries, entry => entry.Key == "AppSurfaceDocs.Theme" && entry.ValueType == typeof(AppSurfaceDocsThemeOptions));
+        Assert.Contains(entries, entry => entry.Key == "AppSurfaceDocs.Theme.Colors" && entry.ValueType == typeof(AppSurfaceDocsThemeColorOptions));
+        Assert.Contains(entries, entry => entry.Key == "AppSurfaceDocs.Theme.Layout" && entry.ValueType == typeof(AppSurfaceDocsThemeLayoutOptions));
     }
 
     [Fact]
