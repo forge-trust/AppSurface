@@ -43,6 +43,24 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
       - ForgeTrust.AppSurface.Config
+  - project: Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/ForgeTrust.AppSurface.Config.GoogleSecretManager.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/v0.2.0-preview.1.md
+    order: 26
+    use_when: Add this after Config when an AppSurface app running on Google Cloud should resolve explicitly mapped configuration secrets from Google Secret Manager while keeping environment variables as the emergency override.
+    includes: AppSurfaceGoogleSecretManagerModule, explicit logical-key to Secret Manager mappings, optional scoped convention resolver, fail-closed terminal diagnostics for claimed keys, Google client test seam, source-aware config audit integration, and UTF-8 text conversion through AppSurface Config.
+    does_not_include: Secret creation, writes, deletion, rotation, IAM provisioning, Terraform or gcloud workflows, generic multi-cloud vault abstraction, mutation CLI commands, background refresh, or runtime credential minting.
+    start_here_path: Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Config.GoogleSecretManager` after Config when production-like Google Cloud hosts should read mapped AppSurface config secrets from Secret Manager with fail-closed diagnostics.
+    depends_on:
+      - ForgeTrust.AppSurface.Config
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Core
+      - ForgeTrust.AppSurface.Config
   - project: Caching/ForgeTrust.AppSurface.Caching/ForgeTrust.AppSurface.Caching.csproj
     classification: public
     publish_decision: publish

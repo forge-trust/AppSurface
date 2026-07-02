@@ -113,7 +113,10 @@ public sealed partial class RepositoryReadmePolicyTests
             .Select(entry => entry.StartHerePath!)
             .ToArray();
 
-        Assert.Equal(25, requiredReadmes.Length);
+        Assert.Equal(26, requiredReadmes.Length);
+        Assert.Contains(
+            "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md",
+            requiredReadmes);
         Assert.Contains(
             "Workers/ForgeTrust.AppSurface.Workers/README.md",
             requiredReadmes);

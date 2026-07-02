@@ -886,6 +886,11 @@ body {
     position: relative;
 }
 
+.docs-breadcrumb-current,
+.docs-detail-title {
+    overflow-wrap: anywhere;
+}
+
 [data-rw-section-copy-fallback="true"] {
     position: absolute;
     right: 0;
@@ -1865,6 +1870,11 @@ body {
 
     .docs-content--markdown h3 {
         font-size: 1.18rem;
+    }
+
+    .docs-detail-title {
+        font-size: clamp(1.4rem, 6.4vw, 1.55rem);
+        line-height: 1.18;
     }
 
     .docs-content .doc-method-group {

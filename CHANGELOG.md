@@ -30,6 +30,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Workers adds DurableTask-first worker contracts and adapter packages for claim, completion, retry, wait, timeout, stale-signal, and projection-repair decisions without introducing an EF/Postgres worker runtime.
 - AppSurface Docs can now protect exposed diagnostics reads with `AppSurfaceDocs:Diagnostics:OperatorReadPolicy`, covering the harvest observatory, route inspector, route manifest JSON, harvest progress stream, and health routes when no health-only policy is configured.
 - AppSurface Docs now links exact same-group JavaScript typedef references from params, properties, returns, and `@type` metadata, adds bounded payload previews, and warns when a simple typedef reference is missing or ambiguous.
+- `ForgeTrust.AppSurface.Config.GoogleSecretManager` adds read-only Google Cloud Secret Manager storage for AppSurface Config, with explicit mappings, opt-in conventions, fail-closed diagnostics, audit evidence, and environment variable emergency overrides.
 - `ForgeTrust.RazorWire` now includes an eager native behavior kit for app-authored progressive enhancement with queued registration, lifecycle-safe scan/prune cleanup, abort-backed disconnect handling, diagnostics, explicit `<rw:scripts behavior-kit="true" />` loading, and static export/package documentation.
 
 ## 0.2.0-preview.1 - 2026-06-28

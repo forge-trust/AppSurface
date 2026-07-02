@@ -19,6 +19,9 @@ This is the living release note for the next coordinated AppSurface version afte
   unhealthy results.
 - Add an explicit AppSurface Web mapper for an authenticated `GET /_appsurface/config/audit` endpoint that returns the
   active host's sanitized Config audit JSON for support-sensitive operator evidence capture.
+- Add `ForgeTrust.AppSurface.Config.GoogleSecretManager`, a read-only Google Cloud Secret Manager provider for
+  AppSurface Config with explicit logical-key mappings, opt-in scoped conventions, fail-closed diagnostics for claimed
+  keys, config audit source evidence, and environment variables preserved as the top emergency override.
 
 ## Included in the next coordinated version
 
@@ -76,6 +79,10 @@ This is the living release note for the next coordinated AppSurface version afte
   a bounded preview, while missing or ambiguous simple references emit warning diagnostics instead of breaking harvests.
 - Document the Config audit HTTP workflow, OpenAPI-hidden default behavior, native ASP.NET Core auth response ownership,
   host-owned rate limiting, and the Config captured-snapshot diff path.
+- `ForgeTrust.AppSurface.Config.GoogleSecretManager` adds a package-grade remote secret provider for Google Cloud hosts.
+  It supports short secret ids or full version resource names, requires explicit opt-in for the mutable `latest` alias,
+  exposes a deterministic client seam for tests, marks audit values sensitive, and intentionally excludes writes,
+  rotation, IAM provisioning, `gcloud`, Terraform, and generic multi-cloud vault behavior.
 
 ## Migration watch
 

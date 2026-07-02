@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 35
-- Evidence status: manifest evidence complete: 25; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
-- Product families: AppSurface: 23; Forge Trust: 2; Internal support: 7; RazorWire: 3
+- Packages: 36
+- Evidence status: manifest evidence complete: 26; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
+- Product families: AppSurface: 24; Forge Trust: 2; Internal support: 7; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -17,6 +17,7 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Core` | public | publish | manifest evidence complete | None | None | None | [README](../ForgeTrust.AppSurface.Core/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Config` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Config/ForgeTrust.AppSurface.Config/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Config.LocalSecrets` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Config` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Config` | [README](../Config/ForgeTrust.AppSurface.Config.LocalSecrets/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
+| AppSurface | `ForgeTrust.AppSurface.Config.GoogleSecretManager` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Config` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Config` | [README](../Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Caching` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Caching/ForgeTrust.AppSurface.Caching/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Auth/ForgeTrust.AppSurface.Auth/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth.AspNetCore` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth` | [README](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) | [notes](../releases/v0.2.0-preview.1.md) |

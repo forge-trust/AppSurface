@@ -20,6 +20,7 @@
     <PackageVersion Include="coverlet.msbuild" Version="10.0.1" />
     <PackageVersion Include="FakeItEasy" Version="9.0.1" />
     <PackageVersion Include="GitHubActionsTestLogger" Version="3.0.4" />
+    <PackageVersion Include="Google.Cloud.SecretManager.V1" Version="2.7.0" />
     <PackageVersion Include="HtmlSanitizer" Version="9.0.892" />
     <PackageVersion Include="JunitXml.TestLogger" Version="8.0.0" />
     <PackageVersion Include="KubernetesClient" Version="19.0.2" />
