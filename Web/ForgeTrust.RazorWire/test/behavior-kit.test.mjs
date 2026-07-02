@@ -145,6 +145,44 @@ test('behavior kit scopes turbo frame load scans to the event target frame', () 
   assert.deepEqual(connected, ['inside']);
 });
 
+test('behavior kit scans once for each Turbo lifecycle update', () => {
+  const { context, document } = loadBehaviorKit();
+  const connected = [];
+
+  context.window.RazorWire.behaviors.register({
+    name: 'demo.turbo-events',
+    selector: '[data-turbo-event-root]',
+    connect(element) {
+      connected.push(element.id);
+    }
+  });
+
+  const renderRoot = document.createElement('section');
+  renderRoot.id = 'render';
+  renderRoot.setAttribute('data-turbo-event-root', 'true');
+  document.body.appendChild(renderRoot);
+  document.dispatchEvent({ type: 'turbo:render' });
+  document.dispatchEvent({ type: 'turbo:render' });
+
+  const loadRoot = document.createElement('section');
+  loadRoot.id = 'load';
+  loadRoot.setAttribute('data-turbo-event-root', 'true');
+  document.body.appendChild(loadRoot);
+  document.dispatchEvent({ type: 'turbo:load' });
+  document.dispatchEvent({ type: 'turbo:load' });
+
+  const frame = document.createElement('turbo-frame');
+  document.body.appendChild(frame);
+  const frameRoot = document.createElement('section');
+  frameRoot.id = 'frame';
+  frameRoot.setAttribute('data-turbo-event-root', 'true');
+  frame.appendChild(frameRoot);
+  document.dispatchEvent({ type: 'turbo:frame-load', target: frame });
+  document.dispatchEvent({ type: 'turbo:frame-load', target: frame });
+
+  assert.deepEqual(connected, ['render', 'load', 'frame']);
+});
+
 test('behavior kit second evaluation keeps existing manager and scans for new roots once', () => {
   const { context, document } = loadBehaviorKit();
   const connected = [];
@@ -170,6 +208,7 @@ test('behavior kit second evaluation keeps existing manager and scans for new ro
   vm.runInContext(readFileSync(behaviorKitPath, 'utf8'), context);
 
   assert.deepEqual(connected, ['first', 'second']);
+  assert.equal(context.window.RazorWire.behaviors.getDiagnostics().length, 0);
 });
 
 test('behavior kit aborts partial connect failures and permits retry after the callback is fixed', () => {
