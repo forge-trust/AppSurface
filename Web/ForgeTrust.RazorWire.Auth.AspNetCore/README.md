@@ -6,6 +6,10 @@ Use this package when an ASP.NET Core host already configured authentication, au
 
 This package is not authentication, sign-in UI, sign-out UI, OIDC, cookies, ASP.NET Identity, policy creation, middleware insertion, redirects, challenges, forbids, or DevAuth. It only registers an `IRazorWireAuthResultProvider` that delegates to `IAppSurfaceAspNetCorePolicyEvaluator`.
 
+When these helpers appear on routes exported by RazorWire, static export forces a public anonymous/fallback projection and
+fails with `RWEXPORT010` before protected allowed content or auth diagnostics are written. See
+[Static Auth Projection](../ForgeTrust.RazorWire/Docs/static-auth-projection.md).
+
 ## Release Guidance
 
 AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.

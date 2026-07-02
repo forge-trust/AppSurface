@@ -5,6 +5,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ## What is taking shape
 
 - `ForgeTrust.RazorWire` now includes passive auth projection TagHelpers over `AppSurfaceAuthResult`, and `ForgeTrust.RazorWire.Auth.AspNetCore` connects those helpers to host-owned ASP.NET Core policies without making RazorWire own authentication or endpoint enforcement.
+- RazorWire static export now sends `X-RazorWire-Static-Export: auth-anonymous-v1`, renders only explicit anonymous fallback auth content, and rejects protected auth output, auth diagnostics, DevAuth markers, and unsafe auth metadata with `RWEXPORT010` before generated text artifacts are written.
 - `ForgeTrust.RazorWire` now includes an eager native behavior kit for app-authored progressive enhancement: `window.RazorWire.behaviors.register(...)` connects roots once, prunes removed roots, aborts listeners on disconnect, records diagnostics, and stays separate from islands and built-in managers.
 - `ForgeTrust.AppSurface.Web` now owns the baseline PWA install contract in the existing Web package: app-owned
   `WebOptions.Pwa` metadata maps a manifest endpoint, MVC/Razor head tags, development diagnostics, and an explicit
@@ -28,6 +29,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ### Release and docs surface
 
 - `ForgeTrust.RazorWire` documents auth projection helpers, including `rw:auth-view`, `rw:auth-gate`, `rw:permission-gate`, `rw:login-link`, and `rw:logout-button`, with a paired endpoint-enforcement example and DevAuth marker guidance that keeps local fake personas separate from reusable UI projection.
+- `ForgeTrust.RazorWire.Cli` now audits HTML, partials, route/search JSON, JavaScript, manifests, redirects, deployment text extras, release manifests, and the final materialized inventory so static and hybrid exports fail closed instead of publishing private auth UI.
 - AppSurface Docs adds a default-off JavaScript event-dispatch verifier that compares public `@event` doclets with direct literal `dispatchEvent(new CustomEvent("event:name", ...))` evidence from the same policy-approved JavaScript harvest inputs. `docs verify-health --verify-event-dispatches` now surfaces non-fatal warning diagnostics, including `Cause`, for doclet-only and dispatch-only drift while leaving strict health blockers unchanged.
 - AppSurface LocalSecrets startup failures that happen before the platform command can run now report `Unavailable` with
   `local-secret-store-unavailable` instead of being classified by words in raw OS exception messages. Real locked-store

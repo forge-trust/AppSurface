@@ -85,7 +85,7 @@ internal static class ReleaseArchiveManifestWriter
                 .ToArray());
 
         var payload = JsonSerializer.Serialize(document, SerializerOptions) + "\n";
-        await ExportOutputPathGuards.WriteTextArtifactAsync(
+        await ExportAuthArtifactAuditor.WriteTextArtifactAsync(
             fullOutputPath,
             manifestPath,
             "release archive manifest",

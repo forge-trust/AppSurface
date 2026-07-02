@@ -2600,7 +2600,7 @@ internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsE
         var manifestPath = AppSurfaceDocsFrozenRouteManifest.BuildManifestPath(
             context.OutputPath,
             AppSurfaceDocsFrozenRouteManifest.FileName);
-        await ExportOutputPathGuards.WriteTextArtifactAsync(
+        await ExportAuthArtifactAuditor.WriteTextArtifactAsync(
             context.OutputPath,
             manifestPath,
             "AppSurface Docs frozen route manifest",
