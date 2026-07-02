@@ -28,7 +28,7 @@ public sealed class GoogleSecretManagerClientAdapter : IAppSurfaceGoogleSecretMa
     /// </summary>
     /// <param name="client">The Google Secret Manager client.</param>
     public GoogleSecretManagerClientAdapter(SecretManagerServiceClient client)
-        : this(() => client ?? throw new ArgumentNullException(nameof(client)))
+        : this(CreateExplicitClientFactory(client))
     {
     }
 
@@ -63,5 +63,11 @@ public sealed class GoogleSecretManagerClientAdapter : IAppSurfaceGoogleSecretMa
         return new AppSurfaceGoogleSecretPayload(
             payload,
             response.Name);
+    }
+
+    private static Func<SecretManagerServiceClient> CreateExplicitClientFactory(SecretManagerServiceClient client)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        return () => client;
     }
 }
