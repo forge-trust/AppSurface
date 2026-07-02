@@ -2741,6 +2741,21 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_UnwrapsCriticalProviderDiagnosticTargetInvocationExceptions()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new CriticalDiagnosticProvider(
+            new TargetInvocationException(new AccessViolationException("critical diagnostics failed"))));
+
+        var reporter = services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
+
+        Assert.Throws<AccessViolationException>(() => reporter.GetReport("Production"));
+    }
+
+    [Fact]
     public void GetReport_DoesNotConvertCriticalPublicProviderDiagnosticExceptions()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -2749,6 +2764,21 @@ public class ConfigAuditReporterTests
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(new ThrowingPublicAuditDiagnosticsProvider(
             new AccessViolationException("critical public diagnostics failed")));
+
+        var reporter = services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
+
+        Assert.Throws<AccessViolationException>(() => reporter.GetReport("Production"));
+    }
+
+    [Fact]
+    public void GetReport_UnwrapsCriticalPublicProviderDiagnosticTargetInvocationExceptions()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new ThrowingPublicAuditDiagnosticsProvider(
+            new TargetInvocationException(new AccessViolationException("critical public diagnostics failed"))));
 
         var reporter = services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
 

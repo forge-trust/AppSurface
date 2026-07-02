@@ -346,6 +346,11 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 {
                     diagnostics.AddRange(diagnosticProvider.GetReportDiagnostics(environment));
                 }
+                catch (TargetInvocationException ex) when (ex.InnerException != null && !IsRecoverableProviderException(ex.InnerException))
+                {
+                    ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                    throw;
+                }
                 catch (Exception ex) when (IsRecoverableProviderException(ex))
                 {
                     diagnostics.Add(CreateProviderExceptionDiagnostic(
@@ -367,6 +372,11 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             try
             {
                 diagnostics.AddRange(publicDiagnosticProvider.GetReportDiagnostics(environment));
+            }
+            catch (TargetInvocationException ex) when (ex.InnerException != null && !IsRecoverableProviderException(ex.InnerException))
+            {
+                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                throw;
             }
             catch (Exception ex) when (IsRecoverableProviderException(ex))
             {
