@@ -84,6 +84,17 @@ public class RazorWireScriptsTagHelper : TagHelper
     public bool FormInteractions { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the native behavior-kit runtime should be eagerly rendered after the core runtime.
+    /// </summary>
+    /// <remarks>
+    /// Behavior kit is an app-authored progressive-enhancement API. It is eager-only in v1 because RazorWire cannot infer
+    /// app behavior registration from markup alone. Set this attribute to <c>true</c> before app bundles call
+    /// <c>window.RazorWire.behaviors.register(...)</c>.
+    /// </remarks>
+    [HtmlAttributeName("behavior-kit")]
+    public bool BehaviorKit { get; set; }
+
+    /// <summary>
     /// Renders the client-side script tags required by RazorWire and removes the wrapper element so no enclosing tag is emitted.
     /// </summary>
     /// <param name="context">The current tag helper context.</param>
@@ -123,6 +134,9 @@ public class RazorWireScriptsTagHelper : TagHelper
         var formInteractionsJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js");
+        var behaviorKitJs = _fileVersionProvider.AddFileVersionToPath(
+            pathBase,
+            "/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js");
 
         var diagnosticsEnabled = _options.Forms.EnableFailureUx
                                  && _options.Forms.EnableDevelopmentDiagnostics
@@ -194,6 +208,12 @@ public class RazorWireScriptsTagHelper : TagHelper
                 "data-rw-form-interactions-runtime",
                 "RazorWireFormInteractionsInitialized",
                 ["[data-rw-form-toggle]", "[data-rw-form-collection]"]);
+        }
+
+        if (BehaviorKit)
+        {
+            scripts += $@"<script src=""{behaviorKitJs}"" data-rw-behavior-kit-runtime=""eager""></script>
+";
         }
 
         output.Content.SetHtmlContent(scripts);
