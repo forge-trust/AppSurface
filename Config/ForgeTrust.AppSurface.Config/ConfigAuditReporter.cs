@@ -346,10 +346,6 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 {
                     diagnostics.AddRange(diagnosticProvider.GetReportDiagnostics(environment));
                 }
-                catch (TargetInvocationException ex) when (ex.InnerException != null && !IsRecoverableProviderException(ex.InnerException))
-                {
-                    ExceptionDispatchInfo.Throw(ex.InnerException);
-                }
                 catch (Exception ex) when (IsRecoverableProviderException(ex))
                 {
                     diagnostics.Add(CreateProviderExceptionDiagnostic(
@@ -371,10 +367,6 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             try
             {
                 diagnostics.AddRange(publicDiagnosticProvider.GetReportDiagnostics(environment));
-            }
-            catch (TargetInvocationException ex) when (ex.InnerException != null && !IsRecoverableProviderException(ex.InnerException))
-            {
-                ExceptionDispatchInfo.Throw(ex.InnerException);
             }
             catch (Exception ex) when (IsRecoverableProviderException(ex))
             {
@@ -416,9 +408,11 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     }
 
     private static bool IsRecoverableProviderException(Exception exception) =>
-        exception is not OutOfMemoryException
-        and not StackOverflowException
-        and not AccessViolationException;
+        exception is TargetInvocationException { InnerException: { } innerException }
+            ? IsRecoverableProviderException(innerException)
+            : exception is not OutOfMemoryException
+                and not StackOverflowException
+                and not AccessViolationException;
 
     private ConfigAuditEntry BuildEntry(string environment, ConfigAuditKnownEntry knownEntry)
     {

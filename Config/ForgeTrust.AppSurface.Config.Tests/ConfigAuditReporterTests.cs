@@ -2616,6 +2616,26 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_ConvertsProviderTargetInvocationDiagnosticExceptionsToDiagnostics()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new CriticalDiagnosticProvider(
+            new TargetInvocationException(new InvalidOperationException("provider diagnostics failed with super-secret"))));
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "config-provider-diagnostics-threw");
+        Assert.DoesNotContain(
+            report.Diagnostics.Concat(report.Entries.SelectMany(entry => entry.Diagnostics)),
+            diagnostic => diagnostic.Message.Contains("super-secret", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void GetReport_ConvertsPublicProviderDiagnosticExceptionsToDiagnostics()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -2624,6 +2644,26 @@ public class ConfigAuditReporterTests
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(new ThrowingPublicAuditDiagnosticsProvider(
             new InvalidOperationException("public diagnostics failed with super-secret")));
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "config-provider-diagnostics-threw");
+        Assert.DoesNotContain(
+            report.Diagnostics.Concat(report.Entries.SelectMany(entry => entry.Diagnostics)),
+            diagnostic => diagnostic.Message.Contains("super-secret", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetReport_ConvertsPublicProviderTargetInvocationDiagnosticExceptionsToDiagnostics()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new ThrowingPublicAuditDiagnosticsProvider(
+            new TargetInvocationException(new InvalidOperationException("public diagnostics failed with super-secret"))));
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
@@ -2752,7 +2792,8 @@ public class ConfigAuditReporterTests
 
         var reporter = services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
 
-        Assert.Throws<AccessViolationException>(() => reporter.GetReport("Production"));
+        var exception = Assert.Throws<TargetInvocationException>(() => reporter.GetReport("Production"));
+        Assert.IsType<AccessViolationException>(exception.InnerException);
     }
 
     [Fact]
@@ -2782,7 +2823,8 @@ public class ConfigAuditReporterTests
 
         var reporter = services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
 
-        Assert.Throws<AccessViolationException>(() => reporter.GetReport("Production"));
+        var exception = Assert.Throws<TargetInvocationException>(() => reporter.GetReport("Production"));
+        Assert.IsType<AccessViolationException>(exception.InnerException);
     }
 
     [Fact]
