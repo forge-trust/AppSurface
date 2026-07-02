@@ -70,6 +70,10 @@ This is the living release note for the next coordinated AppSurface version afte
   still return `404` before auth evaluation, custom stream/channel authorizers can narrow the operator audience
   without bypassing the package gate, and non-development exposure without the shared read policy logs a structured
   startup warning with troubleshooting guidance.
+- Add `ForgeTrust.AppSurface.Auth.Aspire.Keycloak`, an AppHost-only real local OIDC proof package that builds on
+  the official Aspire Keycloak hosting integration, generates deterministic realm/client/user import JSON, projects
+  only safe OIDC settings into a paired `Auth.AspNetCore.Oidc` web proof, adds fixed-port/readiness diagnostics, and
+  keeps Keycloak/Aspire hosting dependencies out of runtime web packages.
 - AppSurface Docs now enriches exact same-group JavaScript typedef references across params, properties, returns, and
   `@type` metadata. Rendered pages, item stubs, and search payloads link the reference to the canonical typedef and show
   a bounded preview, while missing or ambiguous simple references emit warning diagnostics instead of breaking harvests.

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.3" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NuGetLockFilePath>packages.$(NETCoreSdkRuntimeIdentifier).lock.json</NuGetLockFilePath>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" />
+    <ProjectReference Include="../../Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="../auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" AspireProjectMetadataTypeName="AuthAspireKeycloakVerifier" />
+    <ProjectReference Include="../auth-aspire-keycloak-web/AuthAspireKeycloakWeb.csproj" AspireProjectMetadataTypeName="AuthAspireKeycloakWeb" />
+  </ItemGroup>
+</Project>

@@ -66,6 +66,7 @@ This approach aims to:
 - [**ForgeTrust.AppSurface.Auth.AspNetCore**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) – ASP.NET Core adapter that maps existing host request auth context and named policies into AppSurface auth results without owning schemes, middleware, challenges, forbids, redirects, or identity-provider setup. Run the [Auth Web/RazorWire proof](./examples/auth-web-razorwire-proof/README.md) to see one host policy drive both API and rendered UI state.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) – Development-only selectable persona auth for local AppSurface policy proofs, with a visible control page, embeddable state overlay, named fake scheme, startup guard, and no production identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore.Oidc**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) – ASP.NET Core cookie + OIDC convenience registration with explicit AppSurface scheme names, conservative token defaults, passive prompt helpers, and safe diagnostics without silent default-scheme takeover or identity-provider ownership.
+- [**ForgeTrust.AppSurface.Auth.Aspire.Keycloak**](./Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) – AppHost-only local Keycloak proof for real AppSurface OIDC sign-in, with deterministic realm import, secret-safe web projection, readiness probes, fixed-port diagnostics, and no runtime web dependency on Keycloak packages.
 - [**ForgeTrust.AppSurface.Auth.Testing**](./Auth/ForgeTrust.AppSurface.Auth.Testing/README.md) – Test-only ASP.NET Core harness for deterministic AppSurface auth personas, WebApplicationFactory integration tests, canonical auth result assertions, and ProblemDetails checks without becoming production authentication or Dev Auth.
 
 ### [Intelligence](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md)
@@ -263,6 +264,7 @@ how to use this project.
   descriptors.
 - [Aspire AppHost example](examples/aspire-apphost/README.md) – shows local Aspire AppHost
   composition with AppSurface profiles and reusable Aspire components.
+- [Auth Aspire Keycloak AppHost proof](examples/auth-aspire-keycloak-apphost/README.md) – starts local Keycloak, imports a deterministic AppSurface realm, runs the OIDC web proof, and provides a noninteractive verifier for the real-provider flow.
 - [Web app example](examples/web-app/README.md) – shows a minimal ASP.NET Core app that
   composes middleware and endpoints from modules.
 - [Web error-page proof](examples/web-error-pages/README.md) – runs a one-command verifier
