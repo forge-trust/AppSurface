@@ -100,6 +100,7 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("gh release edit \"${TAG}\" --title \"${TITLE}\" --notes-file \"${notes_file}\"", publish, StringComparison.Ordinal);
         Assert.Contains("gh release upload \"${TAG}\" \"${ARCHIVE_PATH}\" \"${SHA256_PATH}\" --clobber", publish, StringComparison.Ordinal);
         Assert.Contains("actions/upload-pages-artifact", publish, StringComparison.Ordinal);
+        Assert.Contains("include-hidden-files: true", publish, StringComparison.Ordinal);
         Assert.Contains("actions/deploy-pages", publish, StringComparison.Ordinal);
         Assert.Contains("curl -fsSL \"${root}/versions.json\"", publish, StringComparison.Ordinal);
         Assert.Contains("PROMOTE_RECOMMENDED: ${{ inputs.promote-recommended }}", publish, StringComparison.Ordinal);
@@ -190,6 +191,7 @@ public sealed class ReleaseWorkflowPolicyTests
         var uploadIndex = workflow.IndexOf("Upload Pages artifact", StringComparison.Ordinal);
         Assert.True(hydrateIndex >= 0, "Main docs deploy must hydrate published release docs archives.");
         Assert.True(uploadIndex > hydrateIndex, "Release archive hydration must happen before Pages artifact upload.");
+        Assert.Contains("include-hidden-files: true", workflow, StringComparison.Ordinal);
         Assert.Contains("gh api --paginate \"repos/${GITHUB_REPOSITORY}/releases\"", workflow, StringComparison.Ordinal);
         Assert.Contains("select(.draft | not)", workflow, StringComparison.Ordinal);
         Assert.Contains("mapfile -t release_rows", workflow, StringComparison.Ordinal);
