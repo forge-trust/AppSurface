@@ -242,6 +242,10 @@ jobs:
           if [[ "${PROMOTE_RECOMMENDED}" != "true" ]]; then
             promote_arg+=(--promote-recommended false)
           fi
+          expected_release_manifest_sha256="${EXPECTED_MANIFEST_SHA256}"
+          if [[ "${expected_release_manifest_sha256}" == "generated" ]]; then
+            expected_release_manifest_sha256="$(sha256sum "${exact_tree}/.appsurface-docs-release-manifest.json" | awk '{print $1}')"
+          fi
           ./eng/release docs-publication \
             --version "${VERSION}" \
             --tag "${TAG}" \
@@ -251,7 +255,7 @@ jobs:
             --pages-staging-root "${pages_staging}" \
             --plan-output "${plan}" \
             --summary-output "${summary}" \
-            --expected-release-manifest-sha256 "${EXPECTED_MANIFEST_SHA256}" \
+            --expected-release-manifest-sha256 "${expected_release_manifest_sha256}" \
             --github-output "${GITHUB_OUTPUT}" \
             "${promote_arg[@]}"
 
