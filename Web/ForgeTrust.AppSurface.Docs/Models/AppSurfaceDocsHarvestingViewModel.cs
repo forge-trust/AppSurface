@@ -34,8 +34,9 @@ public sealed record AppSurfaceDocsHarvestingViewModel
     /// <remarks>
     /// When this value is <see langword="false"/>, the harvesting view renders the current redacted progress snapshot
     /// and a manual continuation path without emitting a RazorWire stream source. Controllers should compute this from
-    /// the effective runtime <c>IRazorWireStreamAuthorizer</c>, with legacy bool authorizer fallback when needed, so the
-    /// view matches the stream endpoint's authorization decision.
+    /// the effective runtime <c>IRazorWireStreamAuthorizationFilter</c> and <c>IRazorWireStreamAuthorizer</c> chain,
+    /// with legacy bool authorizer fallback when needed, so the view matches the stream endpoint's authorization
+    /// decision.
     /// </remarks>
     public bool CanUseLiveProgress { get; init; } = true;
 

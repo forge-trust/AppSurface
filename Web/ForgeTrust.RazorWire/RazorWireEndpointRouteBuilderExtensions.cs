@@ -75,7 +75,14 @@ public static class RazorWireEndpointRouteBuilderExtensions
                     }
 
                     var streamAuthorizer = context.RequestServices.GetRequiredService<IRazorWireStreamAuthorizer>();
-                    var authorization = await TryAuthorizeStreamAsync(context, options, streamAuthorizer, channel);
+                    var authorizationFilters =
+                        context.RequestServices.GetServices<IRazorWireStreamAuthorizationFilter>();
+                    var authorization = await TryAuthorizeStreamAsync(
+                        context,
+                        options,
+                        streamAuthorizer,
+                        authorizationFilters,
+                        channel);
                     if (authorization is null)
                     {
                         return;
@@ -215,6 +222,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
         HttpContext context,
         RazorWireOptions options,
         IRazorWireStreamAuthorizer authorizer,
+        IEnumerable<IRazorWireStreamAuthorizationFilter> authorizationFilters,
         string channel)
     {
         var authorizerType = authorizer.GetType().FullName ?? authorizer.GetType().Name;
@@ -225,6 +233,18 @@ public static class RazorWireEndpointRouteBuilderExtensions
 
         try
         {
+            foreach (var filter in authorizationFilters)
+            {
+                var filterType = filter.GetType().FullName ?? filter.GetType().Name;
+                authorizerType = filterType;
+                var filterResult = await filter.AuthorizeAsync(authorizationContext);
+                if (filterResult is not null && !filterResult.IsAllowed)
+                {
+                    return new RazorWireStreamAuthorizationDecision(filterResult, filterType);
+                }
+            }
+
+            authorizerType = authorizer.GetType().FullName ?? authorizer.GetType().Name;
             if (authorizer is RazorWireBoolChannelAuthorizerAdapter boolAdapter)
             {
                 var channelAuthorizer = boolAdapter.ResolveChannelAuthorizer(authorizationContext);
