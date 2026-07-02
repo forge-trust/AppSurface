@@ -1404,6 +1404,24 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PublishAllowsStableReleaseWithGeneratedDocsManifestDigestBeforeDocsPublicationPlanExists()
+    {
+        await SeedRepositoryAsync();
+        var docs = (await SeedDocsArchiveAsync("0.1.0")) with
+        {
+            ReleaseManifestSha256 = ReleaseEvidence.DocsArchiveGeneratedDigest
+        };
+        var runner = CreateSuccessfulStablePublishRunner(docs: docs);
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0", "--tag", "v0.1.0", "--dry-run"],
+            runner);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains($"\"docsReleaseManifestSha256\": \"{ReleaseEvidence.DocsArchiveGeneratedDigest}\"", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublishRejectsStableReleaseWithoutDocsArchiveEvidence()
     {
         await SeedRepositoryAsync();
@@ -3433,6 +3451,23 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PublishRejectsPrereleaseWithGeneratedDocsManifestDigest()
+    {
+        await SeedRepositoryAsync();
+        var docs = (await SeedDocsArchiveAsync("0.1.0-preview.1")) with
+        {
+            ReleaseManifestSha256 = ReleaseEvidence.DocsArchiveGeneratedDigest
+        };
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--dry-run"],
+            CreateSuccessfulPublishRunner(docs));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-evidence-docs-manifest-digest-mismatch", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublishEmitsStructuredOutputsForAnnotatedPrereleaseTag()
     {
         await SeedRepositoryAsync();
@@ -5010,7 +5045,7 @@ public sealed class ReleaseToolTests : IDisposable
             TimeSpan.FromMilliseconds(50));
     }
 
-    private static FakeCommandRunner CreateSuccessfulPublishRunner()
+    private static FakeCommandRunner CreateSuccessfulPublishRunner(DocsArchiveFixture? docs = null)
     {
         var runner = new FakeCommandRunner();
         var releaseManifest = CreateReleaseManifestJson();
@@ -5022,7 +5057,17 @@ public sealed class ReleaseToolTests : IDisposable
         runner.Add("git show v0.1.0-preview.1:releases/v0.1.0-preview.1.md", new CommandResult(0, TaggedReleaseNoteContent, ""));
         runner.Add("git show v0.1.0-preview.1:releases/v0.1.0-preview.1.md.yml", new CommandResult(0, TaggedReleaseSidecarContent, ""));
         runner.Add("git show v0.1.0-preview.1:releases/v0.1.0-preview.1.release.json", new CommandResult(0, releaseManifest, ""));
-        runner.Add("git show v0.1.0-preview.1:releases/v0.1.0-preview.1.evidence.json", new CommandResult(0, CreateReleaseEvidenceJson(releaseManifest), ""));
+        runner.Add(
+            "git show v0.1.0-preview.1:releases/v0.1.0-preview.1.evidence.json",
+            new CommandResult(
+                0,
+                CreateReleaseEvidenceJson(
+                    releaseManifest,
+                    "0.1.0-preview.1",
+                    docs?.ExactTreePath,
+                    docs?.ReleaseManifestSha256,
+                    docs?.FileCount),
+                ""));
         return runner;
     }
 

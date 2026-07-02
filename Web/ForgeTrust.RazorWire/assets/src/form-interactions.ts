@@ -8,6 +8,7 @@ interface Window {
         pageNavigationManager?: unknown;
         sectionCopyManager?: unknown;
         formInteractionsManager?: unknown;
+        behaviors?: unknown;
     };
 }
 

@@ -5,6 +5,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ## What is taking shape
 
 - `ForgeTrust.RazorWire` now includes passive auth projection TagHelpers over `AppSurfaceAuthResult`, and `ForgeTrust.RazorWire.Auth.AspNetCore` connects those helpers to host-owned ASP.NET Core policies without making RazorWire own authentication or endpoint enforcement.
+- `ForgeTrust.RazorWire` now includes an eager native behavior kit for app-authored progressive enhancement: `window.RazorWire.behaviors.register(...)` connects roots once, prunes removed roots, aborts listeners on disconnect, records diagnostics, and stays separate from islands and built-in managers.
 - `ForgeTrust.AppSurface.Web` now owns the baseline PWA install contract in the existing Web package: app-owned
   `WebOptions.Pwa` metadata maps a manifest endpoint, MVC/Razor head tags, development diagnostics, and an explicit
   opt-in offline fallback, with `appsurface pwa verify` providing a copy-paste CLI proof for the running origin.

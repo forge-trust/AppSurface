@@ -1440,6 +1440,68 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_Should_Export_BehaviorKit_Runtime_When_Explicit_Eager_Script_Is_Present()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new BehaviorKitRuntimeHandler(explicitScript: true)) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var scriptPath = Path.Join(
+                tempDir,
+                "_content",
+                "ForgeTrust.RazorWire",
+                "razorwire",
+                "behavior-kit.js");
+            Assert.True(File.Exists(scriptPath), "RazorWire behavior-kit runtime should be exported for explicit eager script references.");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Not_Export_BehaviorKit_Runtime_For_Marker_Only_Markup()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new BehaviorKitRuntimeHandler(explicitScript: false)) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var scriptPath = Path.Join(
+                tempDir,
+                "_content",
+                "ForgeTrust.RazorWire",
+                "razorwire",
+                "behavior-kit.js");
+            Assert.False(File.Exists(scriptPath), "RazorWire behavior-kit runtime must not be synthesized from marker-only markup in v1.");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Export_Redirected_Stylesheet_To_Original_Route_Path()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
@@ -5480,6 +5542,43 @@ public class ExportEngineTests
             }
 
             if (path == "/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js")
+            {
+                return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class BehaviorKitRuntimeHandler : HttpMessageHandler
+    {
+        private readonly bool _explicitScript;
+
+        public BehaviorKitRuntimeHandler(bool explicitScript)
+        {
+            _explicitScript = explicitScript;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                var script = _explicitScript
+                    ? """<script src="/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js" data-rw-behavior-kit-runtime="eager"></script>"""
+                    : string.Empty;
+
+                return Text($"""
+                    <html>
+                      <body>
+                        {script}
+                        <section data-rw-behavior="demo.preview"></section>
+                      </body>
+                    </html>
+                    """, "text/html");
+            }
+
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js")
             {
                 return Text("window.RazorWire = window.RazorWire || {};", "text/javascript");
             }
