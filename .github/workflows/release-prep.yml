@@ -239,20 +239,45 @@ jobs:
             docs_release_root="${RUNNER_TEMP}/appsurface-release-prep-docs-${version}"
             docs_exact_tree="${docs_release_root}/${normalized_exact_tree_path}"
             mkdir -p "$(dirname "${docs_exact_tree}")"
+            docs_source_ref="$(jq -r '.sourceCommit // ""' "releases/v${version}.release.json")"
+            if [[ -z "${docs_source_ref}" ]]; then
+              docs_source_ref="$(git rev-parse HEAD)"
+            fi
+            export AppSurfaceDocs__Contributor__DefaultBranch="${GITHUB_BASE_REF}"
+            export AppSurfaceDocs__Contributor__SourceRef="${docs_source_ref}"
+            export AppSurfaceDocs__Contributor__SourceUrlTemplate="https://github.com/${GITHUB_REPOSITORY}/blob/{branch}/{path}"
+            export AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate="https://github.com/${GITHUB_REPOSITORY}/blob/{ref}/{path}#L{line}"
+            export AppSurfaceDocs__Contributor__EditUrlTemplate="https://github.com/${GITHUB_REPOSITORY}/edit/{branch}/{path}"
+            export AppSurfaceDocs__Contributor__LastUpdatedMode="Git"
+            export AppSurfaceDocs__Identity__DisplayName="AppSurface"
+            export AppSurfaceDocs__Identity__Wordmark__HighlightText="Surface"
+            export AppSurfaceDocs__Identity__Wordmark__HighlightColor="#3b82f6"
+            export AppSurfaceDocs__Identity__BrandingAssets__DirectoryPath="branding"
+            export AppSurfaceDocs__Identity__BrandingAssets__AllowSvgAssets="true"
+            export AppSurfaceDocs__Identity__Logo__Path="/branding/appsurface-site-icon.svg"
+            export AppSurfaceDocs__Identity__Favicon__SvgPath="/branding/appsurface-site-icon.svg"
+            export AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0="Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"
+            printf '%s\n' '/' '/docs' > "${RUNNER_TEMP}/appsurface-docs-seeds.txt"
 
             dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
               docs export \
               --repo . \
               --mode cdn \
+              --seeds "${RUNNER_TEMP}/appsurface-docs-seeds.txt" \
               --output "${docs_exact_tree}" \
               --public-origin https://forge-trust.com \
               --startup-timeout-seconds 30 \
               --strict
 
+            catalog_release_manifest_sha256="${docs_release_manifest_sha256}"
+            if [[ "${catalog_release_manifest_sha256}" == "generated" ]]; then
+              catalog_release_manifest_sha256="$(sha256sum "${docs_exact_tree}/.appsurface-docs-release-manifest.json" | awk '{print $1}')"
+            fi
+
             jq -n \
               --arg version "${version}" \
               --arg exactTreePath "${docs_exact_tree_path}" \
-              --arg releaseManifestSha256 "${docs_release_manifest_sha256}" \
+              --arg releaseManifestSha256 "${catalog_release_manifest_sha256}" \
               '{
                 recommendedVersion: $version,
                 versions: [

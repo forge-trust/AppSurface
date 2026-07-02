@@ -9,23 +9,23 @@
   "evidencePath": "releases/v0.1.0.evidence.json",
   "releaseManifestDigest": {
     "algorithm": "sha256",
-    "value": "1312e715f54de8c3275b42f3086946935c4a20e2ada2ff45214cfa9105e2d9bc"
+    "value": "61f8942baf0de85eee799cb72d217f5d9027a084e1840c1e5d92a81a9b4393dd"
   },
   "releaseArtifactDigests": [
     {
       "path": "releases/v0.1.0.md",
       "algorithm": "sha256",
-      "value": "d9cf6f7f7259ced02de8a11b37f0a3cfa84ac5b9668cc9c9f462ade5a08fd3c3"
+      "value": "9cc6e324a8cbd24c8b1b68e99d9d5025195631331b718414b2f2c2413b6ed08b"
     },
     {
       "path": "releases/v0.1.0.md.yml",
       "algorithm": "sha256",
-      "value": "01f51d0d5e17925520e72670bb397ab3df75412b2b5b203d69eddd491086195d"
+      "value": "ab23ab71917a6a1045c66aff30b9f3f150238b67c13f045c4a93cb4955c06c0a"
     },
     {
       "path": "releases/v0.1.0.release.json",
       "algorithm": "sha256",
-      "value": "1312e715f54de8c3275b42f3086946935c4a20e2ada2ff45214cfa9105e2d9bc"
+      "value": "61f8942baf0de85eee799cb72d217f5d9027a084e1840c1e5d92a81a9b4393dd"
     }
   ],
   "packageReleaseNotePaths": [
@@ -105,16 +105,16 @@
   "docsArchive": {
     "status": "configured",
     "exactTreePath": "releases/0.1.0",
-    "releaseManifestSha256": "5f92f12e1f284e7025e5013ce1f3fff7cc55ef11ca5cd24f048664c3b3b3217a",
+    "releaseManifestSha256": "generated",
     "releaseManifestSchema": "appsurface-docs-release-manifest-v1",
     "fileCount": 403,
     "catalogEntry": {
       "exactTreePath": "releases/0.1.0",
-      "releaseManifestSha256": "5f92f12e1f284e7025e5013ce1f3fff7cc55ef11ca5cd24f048664c3b3b3217a"
+      "releaseManifestSha256": "generated"
     }
   },
   "commits": {
-    "contentSourceCommit": "052e30cf530551b82270c3da33e6035abff5cf6b",
+    "contentSourceCommit": "bc2ee375659ca972db3a95c82b961dcb5b2f650e",
     "releasePreparationCommit": null,
     "tagCommit": null,
     "workflowRunId": null
@@ -125,7 +125,7 @@
   "generatedAtUtc": "2026-06-27T06:25:07.6524320Z",
   "subject": {
     "name": "releases/v0.1.0.evidence.json",
-    "sha256": "b6163fd72372fb00095b02a3e1c6f8e63313de4bb8d5d4f3edeab69ac07cbc00"
+    "sha256": "57c9b3c215b88b5e876325449630c258acf0f26cd99661bcbf4c6f22c10986ea"
   },
   "attestation": null
 }

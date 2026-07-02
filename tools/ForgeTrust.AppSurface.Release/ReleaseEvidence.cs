@@ -16,6 +16,7 @@ internal static class ReleaseEvidence
 {
     internal const string Schema = "appsurface-release-evidence-bundle-v1";
     private const string DocsArchiveNotConfigured = "notConfigured";
+    internal const string DocsArchiveGeneratedDigest = "generated";
 
     /// <summary>
     /// Builds a draft release evidence bundle for release preparation.
@@ -646,13 +647,14 @@ internal static class ReleaseEvidence
                 docsPath));
         }
 
-        if (!IsSha256Hex(docs.ReleaseManifestSha256!))
+        if (!string.Equals(docs.ReleaseManifestSha256, DocsArchiveGeneratedDigest, StringComparison.Ordinal)
+            && !IsSha256Hex(docs.ReleaseManifestSha256!))
         {
             diagnostics.Add(ReleaseDiagnostic.Error(
                 "release-evidence-docs-manifest-digest-mismatch",
                 "Release evidence docs archive manifest digest is invalid.",
-                "`releaseManifestSha256` must be a 64-character SHA-256 hex digest printed by AppSurface Docs export.",
-                "Copy the digest from the matching export or regenerate release evidence.",
+                "`releaseManifestSha256` must be a 64-character SHA-256 hex digest printed by AppSurface Docs export, or `generated` when the release archive includes self-referential release evidence.",
+                "Copy the digest from the matching export, use `generated` for self-referential stable archives, or regenerate release evidence.",
                 docsPath));
         }
     }

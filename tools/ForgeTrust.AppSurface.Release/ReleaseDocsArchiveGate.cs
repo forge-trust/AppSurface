@@ -396,7 +396,8 @@ internal static class ReleaseDocsArchiveGate
     private static bool CatalogMatchesEvidence(ReleaseEvidenceDocsArchive docsArchive, ReleaseDocsCatalogEntry catalogEntry)
     {
         return string.Equals(docsArchive.ExactTreePath, catalogEntry.ExactTreePath, StringComparison.Ordinal)
-            && string.Equals(docsArchive.ReleaseManifestSha256, catalogEntry.ReleaseManifestSha256, StringComparison.Ordinal);
+            && (string.Equals(docsArchive.ReleaseManifestSha256, catalogEntry.ReleaseManifestSha256, StringComparison.Ordinal)
+                || string.Equals(docsArchive.ReleaseManifestSha256, ReleaseEvidence.DocsArchiveGeneratedDigest, StringComparison.Ordinal));
     }
 
     /// <summary>
