@@ -73,6 +73,18 @@ test('behavior kit rejects invalid selectors and conflicting duplicate registrat
   let connected = false;
 
   context.window.RazorWire.behaviors.register({
+    selector: '[data-good]',
+    connect() {
+      throw new Error('invalid behavior must not connect');
+    }
+  });
+  context.window.RazorWire.behaviors.register({
+    name: 'demo.missing-selector',
+    connect() {
+      throw new Error('invalid behavior must not connect');
+    }
+  });
+  context.window.RazorWire.behaviors.register({
     name: 'demo.bad-selector',
     selector: '[',
     connect() {
@@ -98,6 +110,66 @@ test('behavior kit rejects invalid selectors and conflicting duplicate registrat
   const diagnostics = context.window.RazorWire.behaviors.getDiagnostics();
   assert.equal(diagnostics.some(diagnostic => diagnostic.code === 'BehaviorSelectorInvalid'), true);
   assert.equal(diagnostics.some(diagnostic => diagnostic.code === 'BehaviorRegistrationConflict'), true);
+  const invalidRegistrations = diagnostics.filter(diagnostic => diagnostic.code === 'BehaviorRegistrationInvalid');
+  assert.equal(invalidRegistrations.length, 2);
+  assert.equal(invalidRegistrations.some(diagnostic => diagnostic.selector === '[data-good]'), true);
+  assert.equal(invalidRegistrations.some(diagnostic => diagnostic.behaviorName === 'demo.missing-selector'), true);
+});
+
+test('behavior kit scopes turbo frame load scans to the event target frame', () => {
+  const { context, document } = loadBehaviorKit();
+  const connected = [];
+
+  context.window.RazorWire.behaviors.register({
+    name: 'demo.frame-scope',
+    selector: '[data-frame-scope]',
+    connect(element) {
+      connected.push(element.id);
+    }
+  });
+
+  const outside = document.createElement('section');
+  outside.id = 'outside';
+  outside.setAttribute('data-frame-scope', 'true');
+  document.body.appendChild(outside);
+
+  const frame = document.createElement('turbo-frame');
+  document.body.appendChild(frame);
+  const inside = document.createElement('section');
+  inside.id = 'inside';
+  inside.setAttribute('data-frame-scope', 'true');
+  frame.appendChild(inside);
+
+  document.dispatchEvent({ type: 'turbo:frame-load', target: frame });
+
+  assert.deepEqual(connected, ['inside']);
+});
+
+test('behavior kit second evaluation keeps existing manager and scans for new roots once', () => {
+  const { context, document } = loadBehaviorKit();
+  const connected = [];
+
+  context.window.RazorWire.behaviors.register({
+    name: 'demo.second-load',
+    selector: '[data-second-load]',
+    connect(element) {
+      connected.push(element.id);
+    }
+  });
+
+  const first = document.createElement('section');
+  first.id = 'first';
+  first.setAttribute('data-second-load', 'true');
+  document.body.appendChild(first);
+  context.window.RazorWire.behaviors.scan();
+
+  const second = document.createElement('section');
+  second.id = 'second';
+  second.setAttribute('data-second-load', 'true');
+  document.body.appendChild(second);
+  vm.runInContext(readFileSync(behaviorKitPath, 'utf8'), context);
+
+  assert.deepEqual(connected, ['first', 'second']);
 });
 
 test('behavior kit aborts partial connect failures and permits retry after the callback is fixed', () => {

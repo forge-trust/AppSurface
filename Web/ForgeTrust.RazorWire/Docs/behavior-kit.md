@@ -56,19 +56,20 @@ RazorWire listens for `turbo:render`, `turbo:load`, and `turbo:frame-load`. Call
 
 ## Diagnostics
 
-`getDiagnostics()` returns objects with `code`, `message`, `impact`, `fix`, `docs`, and optional `behaviorName`, `selector`, and `rootId`.
+`getDiagnostics()` returns objects with `code`, `message`, `impact`, `fix`, `docs`, and optional `behaviorName`, `selector`, and `rootId`. `clearDiagnostics()` empties the current diagnostics buffer, so later `getDiagnostics()` calls only include diagnostics recorded after the clear.
 
 | Code | Meaning | Fix |
 | --- | --- | --- |
 | `BehaviorSelectorInvalid` | A behavior selector could not be queried. | Use a valid CSS selector for the behavior root. |
-| `BehaviorRegistrationConflict` | The same behavior name was registered with an incompatible selector, or a definition was malformed. | Keep names immutable, or use a unique behavior name for a different selector. |
+| `BehaviorRegistrationInvalid` | A behavior definition was malformed. | Pass `{ name, selector, connect }` to `window.RazorWire.behaviors.register(...)`. |
+| `BehaviorRegistrationConflict` | The same behavior name was registered with an incompatible selector. | Keep names immutable, or use a unique behavior name for a different selector. |
 | `BehaviorConnectFailed` | `connect()` threw while enhancing a root. | Fix the callback and use `context.signal` for event listeners so partial setup can be aborted. |
 | `BehaviorCleanupFailed` | The optional cleanup callback threw during disconnect. | Make cleanup no-throw and prefer `context.signal` for listener cleanup. |
 | `BehaviorAbortUnsupported` | `AbortController` / `AbortSignal` is unavailable. | Use a supported browser or load a compatible polyfill before `behavior-kit.js`. |
 
 ## Troubleshooting
 
-- If `window.RazorWire.behaviors.register(...)` queues but nothing connects, make sure `<rw:scripts behavior-kit="true" />` appears before the app bundle or that `behavior-kit.js` is otherwise loaded explicitly.
+- If `window.RazorWire.behaviors.register(...)` queues but nothing connects, make sure `behavior-kit.js` is loaded explicitly, for example with `<rw:scripts behavior-kit="true" />`.
 - Do not attach unmanaged document-level listeners from repeated page bundles. Bind listeners to roots and pass `{ signal: context.signal }`.
 - Do not use behavior kit to replace RazorWire form interactions, section copy, page navigation, or islands. Those surfaces already have package-owned lifecycle contracts.
 - Static export copies explicit eager behavior-kit scripts. It does not synthesize behavior-kit assets from generic markup markers in v1.

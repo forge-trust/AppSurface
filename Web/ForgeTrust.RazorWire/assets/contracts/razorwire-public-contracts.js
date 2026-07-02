@@ -50,7 +50,7 @@ window.RazorWire = window.RazorWire || {};
  * @property {Function} queryAll - Root-scoped `querySelectorAll` helper that returns an array.
  * @property {string} behaviorName - Stable name of the behavior being connected.
  * @property {string} rootId - Runtime-generated behavior/root identity for diagnostics.
- * @property {Function} diagnostic - Records a lifecycle-scoped behavior diagnostic with message, impact, fix, and docs fields.
+ * @property {Function} diagnostic - Records a lifecycle-scoped behavior diagnostic. Call as `diagnostic(message, fix, impact, docs)`.
  */
 
 /**
@@ -58,7 +58,7 @@ window.RazorWire = window.RazorWire || {};
  * @public
  * @namespace RazorWire
  * @typedef {Object} RazorWireBehaviorDiagnostic
- * @property {string} code - Stable diagnostic code such as `BehaviorSelectorInvalid`, `BehaviorRegistrationConflict`, `BehaviorConnectFailed`, `BehaviorCleanupFailed`, or `BehaviorAbortUnsupported`.
+ * @property {string} code - Stable diagnostic code such as `BehaviorSelectorInvalid`, `BehaviorRegistrationInvalid`, `BehaviorRegistrationConflict`, `BehaviorConnectFailed`, `BehaviorCleanupFailed`, or `BehaviorAbortUnsupported`.
  * @property {string} message - Required problem statement for the invalid registration or lifecycle failure.
  * @property {string} impact - Required explanation of the behavior RazorWire skipped, changed, or could not guarantee.
  * @property {string} fix - Required remediation guidance suitable for docs, tests, and development diagnostics.

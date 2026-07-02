@@ -45,15 +45,6 @@ interface RazorWireBehaviorController {
     cleanup: (() => void) | null;
 }
 
-interface RazorWireBehaviorRegistrationStub {
-    __queuedDefinitions?: unknown[];
-    register(definition: unknown): void;
-    scan(root?: Document | Element): void;
-    prune(): void;
-    getDiagnostics(): unknown[];
-    clearDiagnostics(): void;
-}
-
 interface RazorWireBehaviorManager {
     __isRazorWireBehaviorManager: true;
     register(definition: RazorWireBehaviorDefinition): void;
@@ -94,17 +85,23 @@ interface RazorWireBehaviorManager {
             this.scan();
             document.addEventListener('turbo:render', () => this.scan());
             document.addEventListener('turbo:load', () => this.scan());
-            document.addEventListener('turbo:frame-load', () => this.scan());
+            document.addEventListener('turbo:frame-load', event => {
+                const frame = event.target instanceof Element ? event.target : document;
+                this.scan(frame);
+            });
         }
 
-        register(definition: RazorWireBehaviorDefinition) {
+        register(definition: unknown) {
             if (!this.isDefinitionShapeValid(definition)) {
+                const invalidContext = this.getInvalidDefinitionContext(definition);
                 this.recordDiagnostic({
-                    code: 'BehaviorRegistrationConflict',
+                    code: 'BehaviorRegistrationInvalid',
                     message: 'RazorWire behavior definitions require a non-empty name, a non-empty selector, and a connect callback.',
                     impact: 'RazorWire skipped the invalid behavior definition so it cannot attach unmanaged page behavior.',
                     fix: 'Pass { name, selector, connect } to window.RazorWire.behaviors.register(...).',
-                    docs: docsPath
+                    docs: docsPath,
+                    behaviorName: invalidContext.behaviorName,
+                    selector: invalidContext.selector
                 });
                 return;
             }
@@ -282,14 +279,29 @@ interface RazorWireBehaviorManager {
             return matches;
         }
 
-        private isDefinitionShapeValid(definition: RazorWireBehaviorDefinition | null | undefined) {
-            return typeof definition === 'object'
-                && definition !== null
-                && typeof definition.name === 'string'
-                && definition.name.trim().length > 0
-                && typeof definition.selector === 'string'
-                && definition.selector.trim().length > 0
-                && typeof definition.connect === 'function';
+        private isDefinitionShapeValid(definition: unknown): definition is RazorWireBehaviorDefinition {
+            if (typeof definition !== 'object' || definition === null) {
+                return false;
+            }
+
+            const candidate = definition as { name?: unknown; selector?: unknown; connect?: unknown };
+            return typeof candidate.name === 'string'
+                && candidate.name.trim().length > 0
+                && typeof candidate.selector === 'string'
+                && candidate.selector.trim().length > 0
+                && typeof candidate.connect === 'function';
+        }
+
+        private getInvalidDefinitionContext(definition: unknown) {
+            if (typeof definition !== 'object' || definition === null) {
+                return {};
+            }
+
+            const candidate = definition as { name?: unknown; selector?: unknown };
+            return {
+                behaviorName: typeof candidate.name === 'string' ? candidate.name : undefined,
+                selector: typeof candidate.selector === 'string' ? candidate.selector : undefined
+            };
         }
 
         private isSelectorValid(selector: string, behaviorName: string) {
@@ -342,6 +354,7 @@ interface RazorWireBehaviorManager {
                 && existing.message === normalized.message
                 && existing.fix === normalized.fix
                 && existing.behaviorName === normalized.behaviorName
+                && existing.selector === normalized.selector
                 && existing.rootId === normalized.rootId)) {
                 return;
             }
