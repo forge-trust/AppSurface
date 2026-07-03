@@ -11,6 +11,8 @@ This is the living release note for the next coordinated AppSurface version afte
 ### Release and docs surface
 
 - Split stable and prerelease NuGet publish tag triggers so prerelease tags no longer start the stable publish workflow before the prerelease gate.
+- AppSurface DevAuth marker overlays now start collapsed by default while keeping the active fake persona visible, and
+  `AppSurfaceDevAuthMarkerOptions.StartExpanded` lets local proof pages opt back into immediate persona controls.
 
 ## Migration watch
 
