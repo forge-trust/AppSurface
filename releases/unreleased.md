@@ -10,7 +10,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
-- Add release-facing changes here.
+- Split stable and prerelease NuGet publish tag triggers so prerelease tags no longer start the stable publish workflow before the prerelease gate.
 
 ## Migration watch
 

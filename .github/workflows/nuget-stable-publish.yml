@@ -3,7 +3,9 @@ name: NuGet Stable Publish
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
+      - '!v*.*.*-*'
+      - '!v*.*.*.*'
 
 concurrency:
   group: nuget-stable-${{ github.ref_name }}
