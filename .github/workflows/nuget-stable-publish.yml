@@ -5,6 +5,7 @@ on:
     tags:
       - 'v*.*.*'
       - '!v*.*.*-*'
+      - '!v*.*.*.*'
 
 concurrency:
   group: nuget-stable-${{ github.ref_name }}
