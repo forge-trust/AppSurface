@@ -95,11 +95,11 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.1.md
     order: 37
-    use_when: Add this in Development-only ASP.NET Core hosts when package consumers need selectable fake personas, a visible local control page, and AppSurface policy proof without configuring an external identity provider.
-    includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, MapAppSurfaceDevAuth control endpoints, AppSurfaceDevAuthMarker embeddable state overlay, seeded personas, protected persona cookie, loopback-only status JSON, startup safety diagnostics, and ASDEV diagnostic codes.
+    use_when: Add this in Development-by-default ASP.NET Core hosts or explicit local/proof environments when package consumers need selectable fake personas, a visible local control page, and AppSurface policy proof without configuring an external identity provider.
+    includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, explicit allowed environment names, MapAppSurfaceDevAuth control endpoints, AppSurfaceDevAuthMarker embeddable state overlay, seeded personas, protected persona cookie, loopback-only status JSON, startup safety diagnostics, and ASDEV diagnostic codes.
     does_not_include: Production authentication, OIDC, JWT validation, ASP.NET Identity, password handling, durable app-user mapping, user stores, tenant authority, audit sinks, deployment auth, automatic host HTML injection, RazorWire auth UI components, or Auth.Testing integration-test assertions.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts that need fake local personas to prove AppSurface policy results; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep DevAuth separate from Auth.Testing.
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts or explicit local/proof environments that need fake local personas to prove AppSurface policy results; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep DevAuth separate from Auth.Testing.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
   - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj

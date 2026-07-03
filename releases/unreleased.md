@@ -60,6 +60,9 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Auth now has a Start Here adoption ladder that helps package consumers choose between host-owned
   ASP.NET Core auth, Auth core, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces
   without implying AppSurface owns production identity providers, policies, user stores, or enforcement.
+- AppSurface DevAuth now centralizes its environment activation policy. DevAuth remains Development-by-default, but
+  package consumers can explicitly add local/proof environment names through `AllowedEnvironmentNames`; the marker
+  self-suppresses outside allowed environments and mapped control/mutation endpoints stay fail-closed.
 - AppSurface Workers adds a durable worker contract layer and DurableTask adapter. Worker chains separate executor
   claims, terminal completion facts, and projection repair so stale projections can be reconciled without re-running
   side effects. Durable Task remains the preferred runtime boundary; EF/Postgres is left to app-owned product state or a

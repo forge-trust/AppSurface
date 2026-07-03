@@ -86,19 +86,31 @@ Run in Development:
 DOTNET_ENVIRONMENT=Development dotnet run
 ```
 
+DevAuth activates only in `Development` by default. For a host-owned proof environment, add the exact environment name explicitly:
+
+```csharp
+builder.Services.AddAppSurfaceDevAuth(builder.Environment, dev =>
+{
+    dev.AllowedEnvironmentNames.Add("Staging");
+    // personas...
+});
+```
+
+Only add local or proof environments that may safely expose fake personas. `AllowedEnvironmentNames` is a DevAuth activation allow-list, not a production security boundary.
+
 Open the persona lab:
 
 ```text
 /_appsurface/dev-auth
 ```
 
-The control page lets you select a seeded persona, clear the persona cookie, inspect safe local claims, and copy a visible marker such as `DEV AUTH: Local Admin (AppSurface.DevAuth)`. For a persistent in-app indicator, render `AppSurfaceDevAuthMarker` from your local layout or proof page. The default marker is a bottom overlay with POST-only persona controls that returns to the current page after selection.
+The control page lets you select a seeded persona, clear the persona cookie, inspect safe local claims, and copy a visible marker such as `DEV AUTH: Local Admin (AppSurface.DevAuth)`. For a persistent in-app indicator, render `AppSurfaceDevAuthMarker` from your local layout or proof page. The renderer returns an empty string when the current environment is not in `AllowedEnvironmentNames`, so layouts do not need their own `environment.IsDevelopment()` guard. The default marker is a bottom overlay with POST-only persona controls that returns to the current page after selection.
 
 ## API Reference
 
 - `AddAppSurfaceDevAuth(IHostEnvironment environment, Action<AppSurfaceDevAuthOptions> configure)` registers the named DevAuth authentication scheme and startup safety validation. The `configure` callback is evaluated once during registration, and the same validated options are used for both scheme registration and runtime DevAuth behavior.
-- `MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)` maps the local-only control page, status JSON, select persona endpoint, and clear persona endpoint.
-- `AppSurfaceDevAuthMarker.Render(HttpContext, IHostEnvironment, IOptions<AppSurfaceDevAuthOptions>, IDataProtectionProvider, Action<AppSurfaceDevAuthMarkerOptions>?)` returns safe HTML for an explicit in-app DevAuth state marker. Render it only in Development pages where fake auth should remain visible.
+- `MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)` maps the local-only control page, status JSON, select persona endpoint, and clear persona endpoint. Control and mutation endpoints return not found when the active environment is not allowed; status remains read-only and reports `enabled: false`.
+- `AppSurfaceDevAuthMarker.Render(HttpContext, IHostEnvironment, IOptions<AppSurfaceDevAuthOptions>, IDataProtectionProvider, Action<AppSurfaceDevAuthMarkerOptions>?)` returns safe HTML for an explicit in-app DevAuth state marker. It returns `string.Empty` when the active environment is not allowed.
 - `AppSurfaceDevAuthDefaults.AuthenticationScheme` is `AppSurface.DevAuth`.
 - `AppSurfaceDevAuthDefaults.PathPrefix` is `/_appsurface/dev-auth`.
 - `AppSurfaceDevAuthDefaults.CookieName` is `.AppSurface.DevAuth.Persona`.
@@ -107,6 +119,7 @@ The control page lets you select a seeded persona, clear the persona cookie, ins
 - `AppSurfaceDevAuthOptions.SchemeName` overrides the registered authentication scheme. It defaults to `AppSurfaceDevAuthDefaults.AuthenticationScheme`.
 - `AppSurfaceDevAuthOptions.PathPrefix` overrides the local control-page and status endpoint path prefix. It defaults to `AppSurfaceDevAuthDefaults.PathPrefix`.
 - `AppSurfaceDevAuthOptions.CookieName` overrides the selected-persona cookie name. It defaults to `AppSurfaceDevAuthDefaults.CookieName`.
+- `AppSurfaceDevAuthOptions.AllowedEnvironmentNames` controls where DevAuth may activate. It defaults to `Development`; names are compared case-insensitively after trimming for comparison. The set must contain at least one non-blank value.
 - `AppSurfaceDevAuthOptions.UseAsDefaultSchemeForLocalProof` is off by default. Enable it only for throwaway local proof hosts where DevAuth intentionally owns the whole auth stack.
 - `AppSurfaceDevAuthOptions.AllowDevAuthOverrideForLocalProof` is off by default. Enable it only when a local proof intentionally composes DevAuth with other registered auth schemes.
 - `AppSurfaceDevAuthOptions.RequireLoopbackControlRequests` is on by default.
@@ -133,7 +146,7 @@ Use `ForgeTrust.AppSurface.Auth` when reusable modules need surface-neutral auth
 
 Use `ForgeTrust.AppSurface.Auth.AspNetCore` when an ASP.NET Core host already owns authentication and authorization, but AppSurface modules need mapped request context or named host-policy results.
 
-Use DevAuth only when you need fake local personas in Development so a package consumer can try AppSurface auth-aware endpoints without an identity provider.
+Use DevAuth only when you need fake local personas in Development, or in an explicitly opted-in local/proof environment, so a package consumer can try AppSurface auth-aware endpoints without an identity provider.
 
 Use OIDC or native ASP.NET Core authentication packages for real sign-in, cookies, external identity providers, redirects, token validation, and production auth flows.
 
@@ -141,7 +154,7 @@ Use `ForgeTrust.AppSurface.Auth.Testing` for deterministic automated auth scenar
 
 ## What Not To Copy To Production
 
-- Do not enable DevAuth outside Development.
+- Do not enable DevAuth outside configured allowed environments, and add only local/proof environment names that keep fake personas visible.
 - Do not treat persona claims as production identity, tenant authority, or permission truth.
 - Do not put tokens, passwords, secrets, raw emails, or production identity payloads into seeded personas.
 - Do not add sensitive claim types to `DisplayClaimTypes`; the control page still refuses common secret/token/email shapes.
@@ -154,7 +167,7 @@ DevAuth diagnostics use `Problem:`, `Cause:`, `Fix:`, and `Docs:` wording and th
 
 | Code | Meaning |
 | --- | --- |
-| `ASDEV001` | DevAuth was enabled outside Development. |
+| `ASDEV001` | DevAuth was enabled in an environment that is not in `AllowedEnvironmentNames`. |
 | `ASDEV002` | DevAuth detected an existing real authentication scheme or default. |
 | `ASDEV003` | DevAuth was enabled without seeded personas. |
 | `ASDEV004` | A selected persona did not contain the configured subject claim. |
@@ -173,7 +186,7 @@ Diagnostics, HTML, and status JSON do not include raw tokens, secrets, passwords
 - Call `Subject(...)` for every persona and keep it aligned with `AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim(...))`.
 - Keep the DevAuth marker visible in local sample pages so fake auth is impossible to miss.
 - Prefer `AppSurfaceDevAuthMarker.Render(...)` over copying the generated control-page HTML. Use `IncludeDefaultStyles = false`, `CssClassPrefix`, and `AdditionalCssClass` when the marker needs to match a consumer app.
-- DevAuth does not automatically inject an overlay into arbitrary responses. Add the marker explicitly to the pages or local layout where the fake-auth state should be visible.
+- DevAuth does not automatically inject an overlay into arbitrary responses. Add the marker explicitly to the pages or local layout where the fake-auth state should be visible; the renderer self-suppresses outside allowed environments.
 - If persona selection returns a same-origin 403, make sure custom local UI posts from the same scheme, host, and port as the mapped DevAuth endpoints.
 
 ## Upgrade And Removal

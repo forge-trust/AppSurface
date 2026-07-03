@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Hosting;
+
 namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 
 /// <summary>
@@ -47,6 +49,18 @@ public sealed class AppSurfaceDevAuthOptions
     /// Gets or sets a value indicating whether control endpoints reject non-loopback requests.
     /// </summary>
     public bool RequireLoopbackControlRequests { get; set; } = true;
+
+    /// <summary>
+    /// Gets environment names where DevAuth is allowed to activate.
+    /// </summary>
+    /// <remarks>
+    /// DevAuth is fake local/proof authentication, not a production safety boundary. The set defaults to
+    /// <see cref="Environments.Development"/>. Add only local or proof environments that should expose fake personas.
+    /// </remarks>
+    public ISet<string> AllowedEnvironmentNames { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        Environments.Development,
+    };
 
     /// <summary>
     /// Gets claim types that may appear in the local-only control page claims preview.

@@ -1,11 +1,12 @@
 namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 
 /// <summary>
-/// Controls how the AppSurface DevAuth marker renders inside a local development host page.
+/// Controls how the AppSurface DevAuth marker renders inside a local or proof host page.
 /// </summary>
 /// <remarks>
-/// The marker is an explicit opt-in snippet for Development pages. It never injects itself into host HTML. Consumers can
-/// disable the default inline styles and provide their own classes when the marker needs to match a local design system.
+/// The marker is an explicit opt-in snippet for pages where fake auth state should be visible. It never injects itself
+/// into host HTML. Consumers can disable the default inline styles and provide their own classes when the marker needs to
+/// match a local design system.
 /// </remarks>
 public sealed class AppSurfaceDevAuthMarkerOptions
 {

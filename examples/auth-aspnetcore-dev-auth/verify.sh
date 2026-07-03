@@ -80,7 +80,7 @@ curl -sS "$base_url/" | grep -Fq "AppSurface DevAuth proof is running." \
 
 request "control" "GET" "/_appsurface/dev-auth/"
 assert_status "control" "200"
-assert_body_contains "control" "AppSurface Dev Auth [DEVELOPMENT ONLY]"
+assert_body_contains "control" "AppSurface Dev Auth [FAKE LOCAL AUTH]"
 
 request "select-admin" "POST" "/_appsurface/dev-auth/select/admin"
 assert_status "select-admin" "200"
