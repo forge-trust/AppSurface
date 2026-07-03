@@ -80,7 +80,7 @@ public static class AppSurfaceDevAuthMarker
             builder.AppendLine("</style>");
         }
 
-        builder.AppendLine($"<aside class=\"{rootClasses}\" aria-label=\"AppSurface development authentication state\">");
+        builder.AppendLine($"<aside class=\"{rootClasses}\" {AppSurfaceDevAuthStaticExportMarkers.MarkerAttributeName}=\"marker\" aria-label=\"AppSurface development authentication state\">");
         builder.AppendLine($"<div class=\"{classPrefix}__head\"><span class=\"{classPrefix}__badge\">DEV AUTH</span><span class=\"{classPrefix}__name\">{html.Encode(AppSurfaceDevAuthEndpointRouteBuilderExtensions.DisplayStatusPersonaName(status))}</span></div>");
         builder.AppendLine($"<dl class=\"{classPrefix}__meta\">");
         builder.AppendLine($"<dt>Scheme</dt><dd><code>{html.Encode(status.Scheme)}</code></dd>");
@@ -108,7 +108,7 @@ public static class AppSurfaceDevAuthMarker
     private static string NormalizeCssClassPrefix(string value)
     {
         var token = NormalizeCssClassToken(value);
-        return string.IsNullOrWhiteSpace(token) ? "appsurface-dev-auth-marker" : token;
+        return string.IsNullOrWhiteSpace(token) ? AppSurfaceDevAuthStaticExportMarkers.MarkerCssClass : token;
     }
 
     private static string NormalizeCssClassList(string? value)

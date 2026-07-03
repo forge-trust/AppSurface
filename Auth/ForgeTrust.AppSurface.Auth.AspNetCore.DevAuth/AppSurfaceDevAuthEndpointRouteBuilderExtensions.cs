@@ -334,7 +334,7 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         builder.AppendLine("body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#f8fafc;color:#111827}main{max-width:920px;margin:0 auto;padding:24px}.danger{border:2px solid #b91c1c;background:#fee2e2;padding:12px;margin-bottom:16px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.panel{border:1px solid #cbd5e1;background:#fff;padding:12px}.actions{display:flex;flex-wrap:wrap;gap:8px}button{padding:8px 12px;border:1px solid #334155;background:#fff}button:focus{outline:3px solid #2563eb;outline-offset:2px}.selected{font-weight:700;border-color:#166534}.warning{color:#991b1b;font-weight:700}code{white-space:normal;word-break:break-word}@media(max-width:640px){main{padding:12px}.actions{display:grid}}");
         builder.AppendLine("</style>");
         builder.AppendLine("</head>");
-        builder.AppendLine("<body><main>");
+        builder.AppendLine($"<body><main {AppSurfaceDevAuthStaticExportMarkers.MarkerAttributeName}=\"control-page\">");
         builder.AppendLine("<section class=\"danger\" aria-label=\"Fake local auth warning\">");
         builder.AppendLine("<h1>AppSurface Dev Auth [FAKE LOCAL AUTH]</h1>");
         builder.AppendLine("<p>This page is local/proof tooling. Do not use it as production authentication.</p>");

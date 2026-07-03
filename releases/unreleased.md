@@ -1,23 +1,10 @@
 # Unreleased
 
-This is the living release note for the next coordinated AppSurface version after `0.2.0-preview.1`. It stays provisional until the next tag is cut.
+This is the living release note for the next coordinated AppSurface version after `0.2.0-preview.2`. It stays provisional until the next tag is cut.
 
 ## What is taking shape
 
-- `ForgeTrust.RazorWire` now includes passive auth projection TagHelpers over `AppSurfaceAuthResult`, and `ForgeTrust.RazorWire.Auth.AspNetCore` connects those helpers to host-owned ASP.NET Core policies without making RazorWire own authentication or endpoint enforcement.
-- `ForgeTrust.AppSurface.Web` now owns the baseline PWA install contract in the existing Web package: app-owned
-  `WebOptions.Pwa` metadata maps a manifest endpoint, MVC/Razor head tags, development diagnostics, and an explicit
-  opt-in offline fallback, with `appsurface pwa verify` providing a copy-paste CLI proof for the running origin.
-- `ForgeTrust.AppSurface.Workers` and `ForgeTrust.AppSurface.Workers.DurableTask` introduce a DurableTask-first worker
-  path: host-neutral claim/completion/projection-repair contracts, privacy-safe repair diagnostics, bounded projection
-  repair requests, and passive Durable Task-facing schedule/wait/repair/complete/fault/retry/timeout decisions without
-  adding an EF/Postgres queue or scheduler runtime.
-- `ForgeTrust.AppSurface.Web` now maps default public `/health` and `/ready` platform probes backed by ASP.NET Core
-  health checks. `/health` runs all registered checks, `/ready` runs checks tagged with
-  `AppSurfaceHealthCheckTags.Ready`, and both return minimal plain-text aggregate status with `503` for degraded or
-  unhealthy results.
-- Add an explicit AppSurface Web mapper for an authenticated `GET /_appsurface/config/audit` endpoint that returns the
-  active host's sanitized Config audit JSON for support-sensitive operator evidence capture.
+- Add merged public changes here as they land.
 
 ## Included in the next coordinated version
 
@@ -78,6 +65,7 @@ This is the living release note for the next coordinated AppSurface version afte
   a bounded preview, while missing or ambiguous simple references emit warning diagnostics instead of breaking harvests.
 - Document the Config audit HTTP workflow, OpenAPI-hidden default behavior, native ASP.NET Core auth response ownership,
   host-owned rate limiting, and the Config captured-snapshot diff path.
+- Split stable and prerelease NuGet publish tag triggers so prerelease tags no longer start the stable publish workflow before the prerelease gate.
 
 ## Migration watch
 

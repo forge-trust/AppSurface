@@ -13,7 +13,7 @@ public sealed class AppSurfaceDevAuthMarkerOptions
     /// <summary>
     /// Gets or sets the CSS class prefix used for every marker element.
     /// </summary>
-    public string CssClassPrefix { get; set; } = "appsurface-dev-auth-marker";
+    public string CssClassPrefix { get; set; } = AppSurfaceDevAuthStaticExportMarkers.MarkerCssClass;
 
     /// <summary>
     /// Gets or sets an extra CSS class appended to the marker root element.

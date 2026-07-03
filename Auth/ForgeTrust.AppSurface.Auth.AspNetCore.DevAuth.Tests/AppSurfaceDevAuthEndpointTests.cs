@@ -59,6 +59,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
         var html = await ReadBodyAsync(context);
 
         Assert.Contains("AppSurface Dev Auth [FAKE LOCAL AUTH]", html, StringComparison.Ordinal);
+        Assert.Contains("data-appsurface-dev-auth=\"control-page\"", html, StringComparison.Ordinal);
         Assert.Contains("Select persona", html, StringComparison.Ordinal);
         Assert.Contains("Clear persona", html, StringComparison.Ordinal);
         Assert.Contains("DEV AUTH: Anonymous (AppSurface.DevAuth)", html, StringComparison.Ordinal);
@@ -81,6 +82,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
             app.Services.GetRequiredService<IDataProtectionProvider>());
 
         Assert.Contains("appsurface-dev-auth-marker", html, StringComparison.Ordinal);
+        Assert.Contains("data-appsurface-dev-auth=\"marker\"", html, StringComparison.Ordinal);
         Assert.Contains("DEV AUTH", html, StringComparison.Ordinal);
         Assert.Contains("Anonymous", html, StringComparison.Ordinal);
         Assert.Contains("/_appsurface/dev-auth/select/admin?returnUrl=%2Fdashboard%3Ftab%3Dauth", html, StringComparison.Ordinal);

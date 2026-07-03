@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -115,15 +116,37 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         var discoveredKeys = new List<ConfigAuditDiscoveredKey>();
         foreach (var provider in new IConfigProvider[] { _environmentProvider }.Concat(_otherProviders))
         {
-            if (provider is not IConfigAuditKeyEnumerator keyEnumerator)
+            if (provider is IConfigAuditKeyEnumerator keyEnumerator)
+            {
+                IReadOnlyList<ConfigAuditProviderDiscoveredKey> providerKeys;
+                try
+                {
+                    providerKeys = keyEnumerator.EnumerateKeys(environment);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or System.IO.IOException)
+                {
+                    reportDiagnostics.Add(CreateProviderExceptionDiagnostic(
+                        provider,
+                        "config-provider-enumerate-keys-threw",
+                        key: null,
+                        configPath: null,
+                        ex));
+                    continue;
+                }
+
+                AddDiscoveredKeys(providerKeys);
+                continue;
+            }
+
+            if (provider is not IConfigProviderAuditKeyEnumerator publicKeyEnumerator)
             {
                 continue;
             }
 
-            IReadOnlyList<ConfigAuditProviderDiscoveredKey> providerKeys;
+            IReadOnlyList<ConfigProviderAuditDiscoveredKey> publicProviderKeys;
             try
             {
-                providerKeys = keyEnumerator.EnumerateKeys(environment);
+                publicProviderKeys = publicKeyEnumerator.EnumerateKeys(environment);
             }
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or System.IO.IOException)
             {
@@ -136,6 +159,16 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 continue;
             }
 
+            AddDiscoveredKeys(publicProviderKeys.Select(providerKey => new ConfigAuditProviderDiscoveredKey(
+                providerKey.Key,
+                providerKey.RawValue,
+                providerKey.ValueKind,
+                providerKey.Sources,
+                providerKey.Diagnostics)).ToList());
+        }
+
+        void AddDiscoveredKeys(IReadOnlyList<ConfigAuditProviderDiscoveredKey> providerKeys)
+        {
             foreach (var providerKey in providerKeys)
             {
                 var classification = ClassifyDiscoveredKey(providerKey.Key);
@@ -307,16 +340,35 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         var diagnostics = new List<ConfigAuditDiagnostic>();
         foreach (var provider in new IConfigProvider[] { _environmentProvider }.Concat(_otherProviders))
         {
-            if (provider is not IConfigDiagnosticProvider diagnosticProvider)
+            if (provider is IConfigDiagnosticProvider diagnosticProvider)
+            {
+                try
+                {
+                    diagnostics.AddRange(diagnosticProvider.GetReportDiagnostics(environment));
+                }
+                catch (Exception ex) when (IsRecoverableProviderException(ex))
+                {
+                    diagnostics.Add(CreateProviderExceptionDiagnostic(
+                        provider,
+                        "config-provider-diagnostics-threw",
+                        key: null,
+                        configPath: null,
+                        ex));
+                }
+
+                continue;
+            }
+
+            if (provider is not IConfigProviderAuditDiagnostics publicDiagnosticProvider)
             {
                 continue;
             }
 
             try
             {
-                diagnostics.AddRange(diagnosticProvider.GetReportDiagnostics(environment));
+                diagnostics.AddRange(publicDiagnosticProvider.GetReportDiagnostics(environment));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (IsRecoverableProviderException(ex))
             {
                 diagnostics.Add(CreateProviderExceptionDiagnostic(
                     provider,
@@ -354,6 +406,13 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
         return providers;
     }
+
+    private static bool IsRecoverableProviderException(Exception exception) =>
+        exception is TargetInvocationException { InnerException: { } innerException }
+            ? IsRecoverableProviderException(innerException)
+            : exception is not OutOfMemoryException
+                and not StackOverflowException
+                and not AccessViolationException;
 
     private ConfigAuditEntry BuildEntry(string environment, ConfigAuditKnownEntry knownEntry)
     {
@@ -729,7 +788,55 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             {
                 return diagnosticProvider.Resolve(environment, knownEntry.Key, knownEntry.ValueType, role);
             }
-            catch (Exception ex)
+            catch (TargetInvocationException ex) when (ex.InnerException != null && !IsRecoverableProviderException(ex.InnerException))
+            {
+                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                throw;
+            }
+            catch (Exception ex) when (IsRecoverableProviderException(ex))
+            {
+                return CreateProviderExceptionResolution(
+                    provider,
+                    knownEntry.Key,
+                    role,
+                    "config-provider-resolve-threw",
+                ex);
+            }
+        }
+
+        if (provider is IConfigProviderAuditDiagnostics publicDiagnosticProvider)
+        {
+            try
+            {
+                var resolution = publicDiagnosticProvider.ResolveForAudit(
+                    environment,
+                    knownEntry.Key,
+                    knownEntry.ValueType,
+                    role);
+
+                if (!string.Equals(resolution.Key, knownEntry.Key, StringComparison.OrdinalIgnoreCase))
+                {
+                    return CreateProviderExceptionResolution(
+                        provider,
+                        knownEntry.Key,
+                        role,
+                        "config-provider-resolve-threw",
+                        new InvalidOperationException("ResolveForAudit returned a mismatched key."));
+                }
+
+                return new ConfigValueResolution(
+                    resolution.Key,
+                    resolution.State,
+                    resolution.Value,
+                    resolution.Sources,
+                    resolution.Diagnostics);
+            }
+            catch (TargetInvocationException ex) when (ex.InnerException != null && !IsRecoverableProviderException(ex.InnerException))
+            {
+                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                throw;
+            }
+            catch (Exception ex) when (IsRecoverableProviderException(ex))
             {
                 return CreateProviderExceptionResolution(
                     provider,
@@ -1139,7 +1246,11 @@ internal sealed record DiscoveredValueDisplay(
 /// <summary>
 /// Identifies the provider value shape used while building discovered-key reports.
 /// </summary>
-internal enum ConfigAuditDiscoveredValueKind
+/// <remarks>
+/// Values are explicit and append-only so external provider audit enumerators can report inventory shape without exposing
+/// provider-private parser details.
+/// </remarks>
+public enum ConfigAuditDiscoveredValueKind
 {
     /// <summary>A scalar JSON value.</summary>
     Scalar = 0,

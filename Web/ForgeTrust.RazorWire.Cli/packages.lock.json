@@ -280,6 +280,18 @@
           "Microsoft.Extensions.Options": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.auth.aspnetcore": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Auth": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.auth.aspnetcore.devauth": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Auth.AspNetCore": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.config": {
         "type": "Project",
         "dependencies": {

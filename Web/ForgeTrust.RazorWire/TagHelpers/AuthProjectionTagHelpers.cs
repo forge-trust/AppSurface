@@ -31,6 +31,31 @@ public sealed class AuthViewTagHelper : TagHelper
     internal static readonly object SlotContextKey = new();
 
     /// <summary>
+    /// Attribute emitted on static-export auth projection output.
+    /// </summary>
+    public const string StaticAttributeName = "data-rw-auth-static";
+
+    /// <summary>
+    /// Attribute emitted with a safe reason label when static export must fail before writing the artifact.
+    /// </summary>
+    public const string StaticViolationAttributeName = "data-rw-auth-export-violation";
+
+    /// <summary>
+    /// Reason label for an auth view that lacks an explicit static anonymous fallback.
+    /// </summary>
+    public const string StaticMissingFallbackReason = "auth-missing-fallback";
+
+    /// <summary>
+    /// Reason label for protected auth UI that has no v0 static export contract.
+    /// </summary>
+    public const string StaticPrivateContentReason = "auth-private-content";
+
+    /// <summary>
+    /// Reason label for login/auth metadata that is unsafe for static output.
+    /// </summary>
+    public const string StaticUnsafeMetadataReason = "auth-unsafe-metadata";
+
+    /// <summary>
     /// Gets or sets the host-owned policy name to project.
     /// </summary>
     [HtmlAttributeName("policy")]
@@ -62,18 +87,35 @@ public sealed class AuthViewTagHelper : TagHelper
     /// <inheritdoc />
     public override async Task ProcessAsync(TagHelperContext context, TagHelperOutput output)
     {
-        var result = await ResolveResultAsync(ViewContext.HttpContext, Policy, Resource);
-        var projection = RazorWireAuthProjection.FromResult(result);
+        var staticExportContext = RazorWireStaticExportContext.Resolve(ViewContext.HttpContext);
+        var projection = staticExportContext.IsStaticAuthProjection
+            ? RazorWireAuthProjection.StaticAnonymous()
+            : RazorWireAuthProjection.FromResult(await ResolveResultAsync(ViewContext.HttpContext, Policy, Resource));
         var policy = string.IsNullOrWhiteSpace(Policy) ? null : Policy.Trim();
+        var slotContext = new AuthSlotContext(projection.State);
 
-        context.Items[SlotContextKey] = new AuthSlotContext(projection.State);
+        context.Items[SlotContextKey] = slotContext;
 
         var childContent = await output.GetChildContentAsync();
         output.TagName = "div";
         output.Attributes.RemoveAll("policy");
         output.Attributes.RemoveAll("resource");
         output.Attributes.RemoveAll("include-diagnostics");
-        ApplyProjectionAttributes(output, projection, "auth-view", policy, IncludeDiagnostics);
+        ApplyProjectionAttributes(
+            output,
+            projection,
+            "auth-view",
+            policy,
+            IncludeDiagnostics && !staticExportContext.IsStaticAuthProjection,
+            staticExportContext.IsStaticAuthProjection);
+
+        if (staticExportContext.IsStaticAuthProjection
+            && (!slotContext.MatchedExplicitSlot || string.IsNullOrWhiteSpace(childContent.GetContent())))
+        {
+            output.Attributes.SetAttribute(StaticViolationAttributeName, StaticMissingFallbackReason);
+            output.Content.Clear();
+            return;
+        }
 
         if (string.IsNullOrWhiteSpace(childContent.GetContent()))
         {
@@ -123,11 +165,17 @@ public sealed class AuthViewTagHelper : TagHelper
         RazorWireAuthProjection projection,
         string helper,
         string? policy,
-        bool includeDiagnostics)
+        bool includeDiagnostics,
+        bool staticExport = false)
     {
         output.Attributes.SetAttribute("data-rw-auth-state", projection.StateToken);
         output.Attributes.SetAttribute("data-rw-auth-helper", helper);
-        if (projection.Outcome is not null)
+        if (staticExport)
+        {
+            output.Attributes.SetAttribute(StaticAttributeName, "true");
+        }
+
+        if (!staticExport && projection.Outcome is not null)
         {
             output.Attributes.SetAttribute("data-rw-auth-outcome", projection.Outcome.Value.ToString());
         }
@@ -160,7 +208,39 @@ public sealed class AuthViewTagHelper : TagHelper
         };
     }
 
-    internal sealed record AuthSlotContext(RazorWireAuthProjectionState State);
+    /// <summary>
+    /// Carries per-render slot resolution state for an <c>rw:auth-view</c>.
+    /// </summary>
+    /// <remarks>
+    /// Slot helpers mutate <see cref="MatchedExplicitSlot"/> during child-content execution. Static export reads that flag
+    /// after slot resolution to decide whether a protected view supplied an explicit anonymous fallback before any artifact
+    /// is written.
+    /// </remarks>
+    internal sealed class AuthSlotContext
+    {
+        /// <summary>
+        /// Creates a slot context for the projected auth state.
+        /// </summary>
+        /// <param name="state">Projected RazorWire auth state for the current render.</param>
+        public AuthSlotContext(RazorWireAuthProjectionState state)
+        {
+            State = state;
+        }
+
+        /// <summary>
+        /// Gets the projected RazorWire auth state that slot helpers compare against.
+        /// </summary>
+        public RazorWireAuthProjectionState State { get; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether an explicit slot matching <see cref="State"/> rendered.
+        /// </summary>
+        /// <remarks>
+        /// Only the slot resolution path should set this flag. It must be set before <c>rw:auth-view</c> evaluates the
+        /// static-export missing-fallback check.
+        /// </remarks>
+        public bool MatchedExplicitSlot { get; set; }
+    }
 }
 
 /// <summary>
@@ -273,8 +353,31 @@ public class AuthGateTagHelper : TagHelper
     /// <inheritdoc />
     public override async Task ProcessAsync(TagHelperContext context, TagHelperOutput output)
     {
-        var result = await AuthViewTagHelper.ResolveResultAsync(ViewContext.HttpContext, Policy, Resource);
-        var projection = RazorWireAuthProjection.FromResult(result);
+        var staticExportContext = RazorWireStaticExportContext.Resolve(ViewContext.HttpContext);
+        var projection = staticExportContext.IsStaticAuthProjection
+            ? RazorWireAuthProjection.StaticAnonymous()
+            : RazorWireAuthProjection.FromResult(await AuthViewTagHelper.ResolveResultAsync(ViewContext.HttpContext, Policy, Resource));
+        if (staticExportContext.IsStaticAuthProjection && TargetState == RazorWireAuthProjectionState.Allowed)
+        {
+            output.TagName = "div";
+            output.Attributes.RemoveAll("policy");
+            output.Attributes.RemoveAll("resource");
+            output.Attributes.RemoveAll("state");
+            output.Attributes.RemoveAll("include-diagnostics");
+            AuthViewTagHelper.ApplyProjectionAttributes(
+                output,
+                projection,
+                HelperName,
+                policy: null,
+                includeDiagnostics: false,
+                staticExport: true);
+            output.Attributes.SetAttribute(
+                AuthViewTagHelper.StaticViolationAttributeName,
+                AuthViewTagHelper.StaticPrivateContentReason);
+            output.Content.Clear();
+            return;
+        }
+
         if (projection.State != TargetState)
         {
             output.SuppressOutput();
@@ -291,7 +394,8 @@ public class AuthGateTagHelper : TagHelper
             projection,
             HelperName,
             string.IsNullOrWhiteSpace(Policy) ? null : Policy.Trim(),
-            IncludeDiagnostics);
+            IncludeDiagnostics && !staticExportContext.IsStaticAuthProjection,
+            staticExportContext.IsStaticAuthProjection);
     }
 
     /// <summary>
@@ -374,6 +478,21 @@ public sealed class LoginLinkTagHelper : TagHelper
     {
         var childContent = await output.GetChildContentAsync();
         var childHtml = childContent.GetContent();
+        var staticExportContext = RazorWireStaticExportContext.Resolve(ViewContext.HttpContext);
+
+        if (staticExportContext.IsStaticAuthProjection && !IsSafeStaticHref(ViewContext.HttpContext, Href))
+        {
+            output.TagName = "span";
+            output.Attributes.RemoveAll("href");
+            output.Attributes.RemoveAll("return-url-policy");
+            output.Attributes.SetAttribute("data-rw-auth-helper", "login-link");
+            output.Attributes.SetAttribute(AuthViewTagHelper.StaticAttributeName, "true");
+            output.Attributes.SetAttribute(
+                AuthViewTagHelper.StaticViolationAttributeName,
+                AuthViewTagHelper.StaticUnsafeMetadataReason);
+            output.Content.Clear();
+            return;
+        }
 
         output.TagName = "a";
         output.Attributes.RemoveAll("return-url-policy");
@@ -404,6 +523,43 @@ public sealed class LoginLinkTagHelper : TagHelper
         var fragment = fragmentStart < 0 ? string.Empty : target[fragmentStart..];
         var separator = targetWithoutFragment.Contains('?', StringComparison.Ordinal) ? "&" : "?";
         return targetWithoutFragment + separator + "returnUrl=" + Uri.EscapeDataString(returnUrl) + fragment;
+    }
+
+    private static bool IsSafeStaticHref(HttpContext httpContext, string? href)
+    {
+        if (string.IsNullOrWhiteSpace(href) || href.Any(char.IsControl))
+        {
+            return false;
+        }
+
+        var target = href.Trim();
+        if (!Uri.TryCreate(target, UriKind.RelativeOrAbsolute, out var uri))
+        {
+            return false;
+        }
+
+        if (!uri.IsAbsoluteUri)
+        {
+            return !target.StartsWith("\\", StringComparison.Ordinal)
+                   && !HasNetworkPathPrefix(target)
+                   && !target.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+               && string.Equals(uri.Scheme, httpContext.Request.Scheme, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(uri.Authority, httpContext.Request.Host.Value, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasNetworkPathPrefix(string value)
+    {
+        return value.Length >= 2
+               && IsSlashOrBackslash(value[0])
+               && IsSlashOrBackslash(value[1]);
+    }
+
+    private static bool IsSlashOrBackslash(char value)
+    {
+        return value is '/' or '\\';
     }
 }
 
@@ -448,6 +604,20 @@ public sealed class LogoutButtonTagHelper : TagHelper
     public override async Task ProcessAsync(TagHelperContext context, TagHelperOutput output)
     {
         var childContent = await output.GetChildContentAsync();
+        if (RazorWireStaticExportContext.Resolve(ViewContext.HttpContext).IsStaticAuthProjection)
+        {
+            output.TagName = "div";
+            output.Attributes.RemoveAll("action");
+            output.Attributes.RemoveAll("return-url-policy");
+            output.Attributes.SetAttribute("data-rw-auth-helper", "logout-button");
+            output.Attributes.SetAttribute(AuthViewTagHelper.StaticAttributeName, "true");
+            output.Attributes.SetAttribute(
+                AuthViewTagHelper.StaticViolationAttributeName,
+                AuthViewTagHelper.StaticPrivateContentReason);
+            output.Content.Clear();
+            return;
+        }
+
         var buttonText = string.IsNullOrWhiteSpace(childContent.GetContent()) ? "Sign out" : childContent.GetContent();
 
         var action = string.IsNullOrWhiteSpace(Action) ? "#" : Action.Trim();
@@ -497,13 +667,25 @@ public sealed class LogoutButtonTagHelper : TagHelper
 
         if (!uri.IsAbsoluteUri)
         {
-            return !action.StartsWith("//", StringComparison.Ordinal)
-                   && !action.StartsWith("\\", StringComparison.Ordinal);
+            return !action.StartsWith("\\", StringComparison.Ordinal)
+                   && !HasNetworkPathPrefix(action);
         }
 
         return (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
                && string.Equals(uri.Scheme, httpContext.Request.Scheme, StringComparison.OrdinalIgnoreCase)
                && string.Equals(uri.Authority, httpContext.Request.Host.Value, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasNetworkPathPrefix(string value)
+    {
+        return value.Length >= 2
+               && IsSlashOrBackslash(value[0])
+               && IsSlashOrBackslash(value[1]);
+    }
+
+    private static bool IsSlashOrBackslash(char value)
+    {
+        return value is '/' or '\\';
     }
 }
 
@@ -524,6 +706,7 @@ public abstract class AuthSlotTagHelper : TagHelper
             && value is AuthViewTagHelper.AuthSlotContext slotContext
             && slotContext.State == State)
         {
+            slotContext.MatchedExplicitSlot = true;
             output.TagName = null;
             output.Attributes.Clear();
             return;

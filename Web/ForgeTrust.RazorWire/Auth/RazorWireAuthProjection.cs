@@ -118,4 +118,13 @@ public sealed class RazorWireAuthProjection
     {
         return new RazorWireAuthProjection(RazorWireAuthProjectionState.Unknown, null, null);
     }
+
+    /// <summary>
+    /// Creates the safe static-export anonymous projection without host auth outcome details.
+    /// </summary>
+    /// <returns>An anonymous-state projection without auth outcome details.</returns>
+    public static RazorWireAuthProjection StaticAnonymous()
+    {
+        return new RazorWireAuthProjection(RazorWireAuthProjectionState.Anonymous, null, null);
+    }
 }
