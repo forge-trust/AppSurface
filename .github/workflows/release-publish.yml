@@ -345,7 +345,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read # Required to download the draft release asset for public digest verification.
+      contents: write # Required because draft release assets are not downloadable with the workflow token under contents: read.
 
     steps:
       - name: Verify deployed docs and uploaded release assets

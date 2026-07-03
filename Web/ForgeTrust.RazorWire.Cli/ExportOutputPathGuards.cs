@@ -220,8 +220,25 @@ internal static class ExportOutputPathGuards
         string entryPath,
         string operation)
     {
+        ValidateExistingArtifactPath(outputPath, entryPath, "release archive entry", operation);
+    }
+
+    /// <summary>
+    /// Validates an existing exported artifact before traversal, metadata reads, hashing, or inventory scanning.
+    /// </summary>
+    /// <param name="outputPath">Export output root.</param>
+    /// <param name="entryPath">Existing artifact path.</param>
+    /// <param name="artifactKind">Human-readable artifact kind for diagnostics.</param>
+    /// <param name="operation">Filesystem operation being guarded.</param>
+    internal static void ValidateExistingArtifactPath(
+        string outputPath,
+        string entryPath,
+        string artifactKind,
+        string operation)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(entryPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(artifactKind);
 
         var outputRoot = NormalizePath(outputPath);
         var fullEntryPath = NormalizePath(entryPath);
@@ -230,7 +247,7 @@ internal static class ExportOutputPathGuards
         {
             throw CreateException(
                 ArtifactOutsideRoot,
-                "release archive entry",
+                artifactKind,
                 route: null,
                 relativePath,
                 fullEntryPath,
@@ -241,7 +258,7 @@ internal static class ExportOutputPathGuards
         {
             throw CreateException(
                 ArchiveEntryReparse,
-                "release archive entry",
+                artifactKind,
                 route: null,
                 relativePath,
                 fullEntryPath,

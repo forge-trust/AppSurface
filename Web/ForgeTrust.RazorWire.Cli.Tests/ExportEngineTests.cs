@@ -28,6 +28,268 @@ public class ExportEngineTests
         Assert.Throws<ArgumentNullException>(() => new ExportEngine(_logger, null!));
     }
 
+    [Fact]
+    public async Task RunAsync_ShouldSendStaticAuthProjectionHeader_OnArtifactRequests()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-header-");
+        using var handler = new StaticAuthHeaderCaptureHandler();
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+        A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+        var context = new ExportContext(outputPath, null, "http://localhost:5000");
+
+        try
+        {
+            await _sut.RunAsync(context);
+
+            Assert.NotEmpty(handler.HeaderValues);
+            Assert.All(
+                handler.HeaderValues,
+                value => Assert.Equal(RazorWireStaticExportRequest.HeaderValue, value));
+        }
+        finally
+        {
+            Directory.Delete(outputPath, true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailBeforeWriting_TextAssetWithAuthViolation()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-js-");
+        using var client = new HttpClient(new StaticAuthUnsafeScriptHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+        A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+        var context = new ExportContext(outputPath, null, "http://localhost:5000");
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/app.js", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(outputPath, "app.js")));
+        }
+        finally
+        {
+            Directory.Delete(outputPath, true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailBeforeWriting_StructuredJsonTextAssetWithAuthViolation()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-problem-json-");
+        using var client = new HttpClient(
+            new SingleRouteHandler(
+                "/problem",
+                "application/problem+json",
+                """{"html":"\u003Cdiv data-rw-auth-state=\u0022allowed\u0022\u003E\u003C/div\u003E"}"""))
+        {
+            BaseAddress = new Uri("http://localhost:5000")
+        };
+        A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+        var context = new ExportContext(outputPath, null, ["/problem"], "http://localhost:5000");
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/problem", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(outputPath, "problem")));
+        }
+        finally
+        {
+            Directory.Delete(outputPath, true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailBeforeWriting_ExtensionlessOctetStreamRouteWithAuthViolation()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-extensionless-route-");
+        using var client = new HttpClient(
+            new SingleRouteHandler(
+                "/leak",
+                "application/octet-stream",
+                """<div data-rw-auth-state="allowed"></div>"""))
+        {
+            BaseAddress = new Uri("http://localhost:5000")
+        };
+        A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+        var context = new ExportContext(outputPath, null, ["/leak"], "http://localhost:5000");
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/leak", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(outputPath, "leak")));
+        }
+        finally
+        {
+            Directory.Delete(outputPath, true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldPreserveOriginalBytes_ForAuditedTextAsset()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-preserve-text-bytes-");
+        byte[] scriptBytes =
+        [
+            0x63, 0x6F, 0x6E, 0x73, 0x74, 0x20, 0x6C, 0x61, 0x62, 0x65, 0x6C, 0x20,
+            0x3D, 0x20, 0x22, 0x63, 0x61, 0x66, 0xE9, 0x22, 0x3B, 0x0A
+        ];
+        using var client = new HttpClient(new StaticAuthLegacyEncodedScriptHandler(scriptBytes)) { BaseAddress = new Uri("http://localhost:5000") };
+        A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+        var context = new ExportContext(outputPath, null, "http://localhost:5000");
+
+        try
+        {
+            await _sut.RunAsync(context);
+
+            Assert.Equal(scriptBytes, await File.ReadAllBytesAsync(Path.Join(outputPath, "legacy.js")));
+        }
+        finally
+        {
+            Directory.Delete(outputPath, true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailBeforeCopying_ExtensionlessTextExtraWithAuthViolation()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-extra-");
+        var sourceRoot = CreateSafeTempDirectory("static-auth-extra-source-");
+        try
+        {
+            var sourcePath = Path.Join(sourceRoot, "CNAME");
+            await File.WriteAllTextAsync(sourcePath, """<div data-rw-auth-state="allowed"></div>""");
+            using var client = new HttpClient(new TestHttpMessageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(outputPath, null, "http://localhost:5000");
+            context.AddDeploymentExtra(sourcePath, "/CNAME");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/CNAME", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(outputPath, "CNAME")));
+        }
+        finally
+        {
+            if (Directory.Exists(outputPath))
+            {
+                Directory.Delete(outputPath, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailBeforeCopying_BomlessUnicodeTextExtraWithAuthViolation()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-extra-unicode-");
+        var sourceRoot = CreateSafeTempDirectory("static-auth-extra-unicode-source-");
+        try
+        {
+            var sourcePath = Path.Join(sourceRoot, "CNAME");
+            await File.WriteAllBytesAsync(
+                sourcePath,
+                Encoding.Unicode.GetBytes("""<div data-rw-auth-state="allowed"></div>"""));
+            using var client = new HttpClient(new TestHttpMessageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(outputPath, null, "http://localhost:5000");
+            context.AddDeploymentExtra(sourcePath, "/CNAME");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/CNAME", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(outputPath, "CNAME")));
+        }
+        finally
+        {
+            if (Directory.Exists(outputPath))
+            {
+                Directory.Delete(outputPath, true);
+            }
+
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailFinalInventory_ForExtensionlessTextArtifactWithoutTextContentType()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-final-inventory-");
+        try
+        {
+            using var client = new HttpClient(new StaticAuthUnsafeExtensionlessAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(outputPath, null, "http://localhost:5000");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/leak", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(outputPath))
+            {
+                Directory.Delete(outputPath, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldFailFinalInventory_ForBomlessUnicodeExtensionlessTextArtifact()
+    {
+        var outputPath = CreateSafeTempDirectory("static-auth-final-inventory-unicode-");
+        try
+        {
+            var leakBytes = Encoding.Unicode.GetBytes("""<div data-rw-auth-state="allowed"></div>""");
+            using var client = new HttpClient(new StaticAuthUnsafeExtensionlessAssetHandler(leakBytes)) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+            var context = new ExportContext(outputPath, null, "http://localhost:5000");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal(ExportAuthArtifactAuditor.DiagnosticCode, diagnostic.Code);
+            Assert.Equal("/leak", diagnostic.Route);
+            Assert.Contains("[auth-private-content]", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(outputPath))
+            {
+                Directory.Delete(outputPath, true);
+            }
+        }
+    }
+
     [Theory]
     [InlineData("/css/style.css", "background.png", "/css/background.png")]
     [InlineData("/css/style.css", "../images/bg.png", "/images/bg.png")]
@@ -5321,10 +5583,13 @@ public class ExportEngineTests
         return Bytes(mediaType, [0x01, 0x02, 0x03]);
     }
 
-    private static Task<HttpResponseMessage> Bytes(string mediaType, byte[] bytes)
+    private static Task<HttpResponseMessage> Bytes(string mediaType, byte[] bytes, string? charSet = null)
     {
         var content = new ByteArrayContent(bytes);
-        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType)
+        {
+            CharSet = charSet
+        };
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
     }
 
@@ -5392,6 +5657,70 @@ public class ExportEngineTests
             }
 
             return NotFound();
+        }
+    }
+
+    private sealed class StaticAuthHeaderCaptureHandler : HttpMessageHandler
+    {
+        public List<string?> HeaderValues { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            HeaderValues.Add(
+                request.Headers.TryGetValues(RazorWireStaticExportRequest.HeaderName, out var values)
+                    ? values.SingleOrDefault()
+                    : null);
+
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path == "/"
+                ? Html("<html><body><h1>Home</h1></body></html>")
+                : NotFound();
+        }
+    }
+
+    private sealed class StaticAuthUnsafeScriptHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path switch
+            {
+                "/" => Html("""<html><body><script src="/app.js"></script></body></html>"""),
+                "/app.js" => Text(
+                    """document.body.dataset.proof = '<div data-rw-auth-state="allowed"></div>';""",
+                    "application/javascript"),
+                _ => NotFound(),
+            };
+        }
+    }
+
+    private sealed class StaticAuthLegacyEncodedScriptHandler(byte[] scriptBytes) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path switch
+            {
+                "/" => Html("""<html><body><script src="/legacy.js"></script></body></html>"""),
+                "/legacy.js" => Bytes("application/javascript", scriptBytes, "iso-8859-1"),
+                _ => NotFound(),
+            };
+        }
+    }
+
+    private sealed class StaticAuthUnsafeExtensionlessAssetHandler(byte[]? leakBytes = null) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path switch
+            {
+                "/" => Html("""<html><body><a href="/leak">Leak</a></body></html>"""),
+                "/leak" => Bytes(
+                    "application/octet-stream",
+                    leakBytes ?? Encoding.UTF8.GetBytes("""<div data-rw-auth-state="allowed"></div>""")),
+                _ => NotFound(),
+            };
         }
     }
 

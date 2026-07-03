@@ -107,7 +107,7 @@
 
                 if (isLast || string.IsNullOrWhiteSpace(crumb.Href))
                 {
-                    <span class="inline-flex max-w-full overflow-x-auto whitespace-nowrap rounded border border-slate-700 bg-slate-800 px-2 py-0.5">@crumb.Label</span>
+                    <span class="docs-breadcrumb-current inline-flex max-w-full rounded border border-slate-700 bg-slate-800 px-2 py-0.5">@crumb.Label</span>
                 }
                 else
                 {
@@ -151,7 +151,7 @@
 
     @if (!Model.IsCSharpApiDoc)
     {
-        <h1 class="max-w-full break-words text-3xl font-bold leading-tight tracking-tight text-white">@Model.Title</h1>
+        <h1 class="docs-detail-title max-w-full break-words text-3xl font-bold leading-tight tracking-tight text-white">@Model.Title</h1>
         @if (Model.ShowSummary && !string.IsNullOrWhiteSpace(Model.Summary))
         {
             <p class="mt-3 max-w-3xl text-base text-slate-400">@Model.Summary</p>

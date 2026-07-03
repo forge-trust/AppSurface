@@ -256,6 +256,33 @@ public class DefaultConfigManagerTests
     }
 
     [Fact]
+    public void GetValue_AppliesNestedEnvironmentPatchBeforeThrowingTerminalProviderDiagnostic()
+    {
+        var innerEnvironment = A.Fake<ForgeTrust.AppSurface.Core.IEnvironmentProvider>();
+        var lowerProvider = A.Fake<IConfigProvider>();
+        var logger = A.Fake<ILogger<DefaultConfigManager>>();
+        var terminalProvider = new TerminalProvider();
+
+        A.CallTo(() => innerEnvironment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerEnvironment.GetEnvironmentVariable("MYAPP__SETTINGS__MODE", A<string?>._))
+            .Returns("environment");
+        A.CallTo(() => lowerProvider.Priority).Returns(1);
+        A.CallTo(() => lowerProvider.GetValue<AppSettings>(A<string>._, A<string>._))
+            .Returns(new AppSettings { Mode = "lower" });
+
+        var environmentProvider = new EnvironmentConfigProvider(innerEnvironment);
+        var manager = new DefaultConfigManager(environmentProvider, [lowerProvider, terminalProvider], logger);
+
+        var value = manager.GetValue<AppSettings>("Production", "MyApp.Settings");
+
+        Assert.NotNull(value);
+        Assert.Equal("environment", value.Mode);
+        Assert.True(terminalProvider.WasCalled);
+        A.CallTo(() => lowerProvider.GetValue<AppSettings>(A<string>._, A<string>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
     public void GetValue_PatchesProviderObjectWithGetterOnlyNestedObject()
     {
         var innerEnvironment = A.Fake<ForgeTrust.AppSurface.Core.IEnvironmentProvider>();
@@ -336,5 +363,37 @@ public class DefaultConfigManagerTests
         public string? Host { get; set; }
 
         public int Port { get; set; }
+    }
+
+    private sealed class TerminalProvider : IConfigProvider, IConfigProviderTerminalDiagnosticProvider
+    {
+        private readonly ConfigProviderTerminalDiagnostic _diagnostic = new(
+            "provider-terminal",
+            "Remote provider failed.",
+            "The remote provider could not return a claimed value.",
+            "Set an environment override or repair the provider.",
+            docs: null,
+            retryable: true);
+
+        public int Priority => 10;
+
+        public string Name => nameof(TerminalProvider);
+
+        public bool WasCalled { get; private set; }
+
+        public T? GetValue<T>(string environment, string key)
+        {
+            WasCalled = true;
+            return default;
+        }
+
+        public bool TryGetTerminalDiagnostic(
+            string environment,
+            string key,
+            out ConfigProviderTerminalDiagnostic diagnostic)
+        {
+            diagnostic = _diagnostic;
+            return true;
+        }
     }
 }

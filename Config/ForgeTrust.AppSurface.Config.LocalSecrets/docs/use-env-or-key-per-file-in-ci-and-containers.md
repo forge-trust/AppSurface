@@ -13,4 +13,4 @@ Use key-per-file when container orchestration mounts secrets as files. Keep Loca
 DBus, Keychain, or user-profile failures do not block non-interactive builds.
 
 LocalSecrets remains useful before CI: it lets a developer run the same logical config key locally, then move that key to
-environment variables or a future remote vault without changing app code.
+environment variables or Google Secret Manager without changing app code.

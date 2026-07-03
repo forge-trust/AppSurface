@@ -97,8 +97,8 @@ The control page lets you select a seeded persona, clear the persona cookie, ins
 ## API Reference
 
 - `AddAppSurfaceDevAuth(IHostEnvironment environment, Action<AppSurfaceDevAuthOptions> configure)` registers the named DevAuth authentication scheme and startup safety validation. The `configure` callback is evaluated once during registration, and the same validated options are used for both scheme registration and runtime DevAuth behavior.
-- `MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)` maps the local-only control page, status JSON, select persona endpoint, and clear persona endpoint.
-- `AppSurfaceDevAuthMarker.Render(HttpContext, IHostEnvironment, IOptions<AppSurfaceDevAuthOptions>, IDataProtectionProvider, Action<AppSurfaceDevAuthMarkerOptions>?)` returns safe HTML for an explicit in-app DevAuth state marker. Render it only in Development pages where fake auth should remain visible.
+- `MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)` maps the local-only control page, status JSON, select persona endpoint, and clear persona endpoint. The control page root always includes a static-auditable DevAuth control-page marker attribute so static export audits can reject DevAuth UI before it is written to disk.
+- `AppSurfaceDevAuthMarker.Render(HttpContext, IHostEnvironment, IOptions<AppSurfaceDevAuthOptions>, IDataProtectionProvider, Action<AppSurfaceDevAuthMarkerOptions>?)` returns safe HTML for an explicit in-app DevAuth state marker. Render it only in Development pages where fake auth should remain visible. The marker root always includes a static-auditable DevAuth marker attribute so static export audits can reject DevAuth UI even when the CSS class prefix is customized.
 - `AppSurfaceDevAuthDefaults.AuthenticationScheme` is `AppSurface.DevAuth`.
 - `AppSurfaceDevAuthDefaults.PathPrefix` is `/_appsurface/dev-auth`.
 - `AppSurfaceDevAuthDefaults.CookieName` is `.AppSurface.DevAuth.Persona`.
@@ -111,7 +111,7 @@ The control page lets you select a seeded persona, clear the persona cookie, ins
 - `AppSurfaceDevAuthOptions.AllowDevAuthOverrideForLocalProof` is off by default. Enable it only when a local proof intentionally composes DevAuth with other registered auth schemes.
 - `AppSurfaceDevAuthOptions.RequireLoopbackControlRequests` is on by default.
 - `AppSurfaceDevAuthOptions.DisplayClaimTypes` controls which issued claims may appear in the local HTML preview. It defaults to `sub`, `role`, and `tenant`.
-- `AppSurfaceDevAuthMarkerOptions.CssClassPrefix` changes the CSS class prefix for marker elements. The default is `appsurface-dev-auth-marker`.
+- `AppSurfaceDevAuthMarkerOptions.CssClassPrefix` changes the CSS class prefix for marker elements. The default is the package-owned DevAuth marker prefix.
 - `AppSurfaceDevAuthMarkerOptions.AdditionalCssClass` appends host-owned classes to the marker root.
 - `AppSurfaceDevAuthMarkerOptions.IncludeDefaultStyles` is on by default. Disable it to skin the marker entirely with host CSS.
 - `AppSurfaceDevAuthMarkerOptions.ShowPersonaControls` is on by default. Disable it when a page should show state but send persona changes through the full control page.

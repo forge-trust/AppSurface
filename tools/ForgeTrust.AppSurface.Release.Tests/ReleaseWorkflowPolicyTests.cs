@@ -127,6 +127,7 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("Required by deploy-pages to mint the GitHub Pages deployment token.", publish, StringComparison.Ordinal);
         Assert.Contains("Required so release validation can verify the protected NuGet workflow run for the tag.", publish, StringComparison.Ordinal);
         Assert.Contains("Required to create or reuse the draft GitHub Release and upload docs archive assets.", publish, StringComparison.Ordinal);
+        Assert.Contains("contents: write # Required because draft release assets are not downloadable with the workflow token under contents: read.", publish, StringComparison.Ordinal);
         Assert.Contains("Required to promote the verified draft GitHub Release to public.", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("attestations: write", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("supportState:\"Supported\"", publish, StringComparison.Ordinal);
