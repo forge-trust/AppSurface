@@ -9,7 +9,7 @@
 
 <div class="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
     <header class="max-w-3xl">
-        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#14b8a6]">AppSurface Docs</p>
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] docs-token-text-accent">AppSurface Docs</p>
         <div class="mt-3 flex flex-wrap items-center gap-3">
             <h1 class="docs-gradient-title text-3xl font-semibold tracking-tight sm:text-4xl">Harvest Health</h1>
             <span class="rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] @statusClass">
@@ -24,7 +24,7 @@
 
     @if (Model.RebuildForm is not null)
     {
-        <section class="mt-8 rounded-lg border border-[#1b2a43] bg-[#050b17]/55 p-4" aria-labelledby="harvest-rebuild-heading">
+        <section class="mt-8 rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4" aria-labelledby="harvest-rebuild-heading">
             <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 id="harvest-rebuild-heading" class="text-lg font-semibold text-white">Source harvest</h2>
@@ -51,7 +51,7 @@
                     <form method="@Model.RebuildForm.Method" action="@Model.RebuildForm.Action" class="shrink-0">
                         @Html.AntiForgeryToken()
                         <input type="hidden" name="returnUrl" value="@Model.RebuildForm.ReturnUrl" />
-                        <button type="submit" class="inline-flex items-center justify-center rounded-md border border-[#14b8a6]/50 bg-[#14b8a6] px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm transition hover:bg-[#2dd4bf] focus:outline-none focus:ring-2 focus:ring-[#5eead4] focus:ring-offset-2 focus:ring-offset-slate-950">
+                        <button type="submit" class="inline-flex items-center justify-center rounded-md border docs-token-border-accent docs-token-bg-accent px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm transition docs-token-hover-bg-accent-muted focus:outline-none focus:ring-2 docs-token-focus-ring-accent focus:ring-offset-2 focus:ring-offset-slate-950">
                             Rebuild docs
                         </button>
                     </form>
@@ -67,19 +67,19 @@
     }
 
     <section class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Harvest summary">
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Docs</p>
             <p class="mt-2 text-3xl font-semibold text-white">@Model.TotalDocs</p>
         </div>
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Harvesters</p>
             <p class="mt-2 text-3xl font-semibold text-white">@Model.TotalHarvesters</p>
         </div>
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Successful</p>
             <p class="mt-2 text-3xl font-semibold text-emerald-200">@Model.SuccessfulHarvesters</p>
         </div>
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Failed</p>
             <p class="mt-2 text-3xl font-semibold @(Model.FailedHarvesters == 0 ? "text-slate-200" : "text-rose-200")">@Model.FailedHarvesters</p>
         </div>
@@ -87,7 +87,7 @@
 
     <section class="mt-8" aria-labelledby="harvesters-heading">
         <h2 id="harvesters-heading" class="text-xl font-semibold text-white">Harvesters</h2>
-        <div class="mt-4 overflow-hidden rounded-lg border border-[#1b2a43]">
+        <div class="mt-4 overflow-hidden rounded-lg border docs-token-border-muted">
             <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
                 <thead class="bg-slate-950/70 text-xs uppercase tracking-[0.16em] text-slate-500">
                     <tr>
@@ -117,7 +117,7 @@
             <ul class="mt-4 space-y-3">
                 @foreach (var diagnostic in Model.Diagnostics)
                 {
-                    <li class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+                    <li class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
                         <div class="flex flex-wrap items-center gap-2">
                             <span class="text-sm font-semibold text-white">@diagnostic.Code</span>
                             <span class="rounded-full border border-slate-700 px-2 py-0.5 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-slate-400">@diagnostic.Severity</span>

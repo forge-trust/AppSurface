@@ -14,7 +14,7 @@
 
 <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
     <header class="max-w-3xl">
-        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#14b8a6]">AppSurface Docs</p>
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] docs-token-text-accent">AppSurface Docs</p>
         <h1 class="docs-gradient-title mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Route Inspector</h1>
         <p class="mt-4 text-base leading-7 text-slate-300">
             Inspect the current route manifest and probe how one docs path resolves without exposing host-local filesystem paths.
@@ -26,13 +26,13 @@
         <form method="get" class="mt-4 flex flex-col gap-3 sm:flex-row">
             <label class="sr-only" for="route-inspector-path">Route path</label>
             <input id="route-inspector-path"
-                   class="min-h-11 flex-1 rounded-md border border-[#263650] bg-[#050b17] px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-[#14b8a6] focus:ring-2 focus:ring-[#14b8a6]/30"
+                   class="min-h-11 flex-1 rounded-md border docs-token-border-default docs-token-bg-panel-faint px-3 py-2 text-sm text-slate-100 outline-none transition docs-token-focus-border-accent focus:ring-2 docs-token-focus-ring-accent"
                    name="path"
                    value="@Model.Probe?.InputPath"
                    placeholder="packages/README.md or /docs/packages"
                    autocomplete="off" />
             <button type="submit"
-                    class="min-h-11 rounded-md border border-[#2563eb] bg-[#2563eb] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1d4ed8] focus:outline-none focus:ring-2 focus:ring-[#14b8a6]/40">
+                    class="min-h-11 rounded-md border docs-token-border-accent docs-token-bg-accent px-4 py-2 text-sm font-semibold text-white transition docs-token-hover-bg-accent-strong focus:outline-none focus:ring-2 docs-token-focus-ring-accent">
                 Probe
             </button>
         </form>
@@ -73,7 +73,7 @@
                 <p class="mt-1 text-sm text-slate-400">@Model.Entries.Count @routeEntryLabel in this snapshot.</p>
             </div>
         </div>
-        <div class="mt-4 overflow-x-auto rounded-lg border border-[#1b2a43]">
+        <div class="mt-4 overflow-x-auto rounded-lg border docs-token-border-muted">
             <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
                 <thead class="bg-slate-950/70 text-xs uppercase tracking-[0.16em] text-slate-500">
                     <tr>
@@ -88,7 +88,7 @@
                     {
                         <tr>
                             <td class="min-w-56 px-4 py-3 align-top">
-                                <a class="font-semibold text-slate-100 underline decoration-slate-600 underline-offset-4 hover:decoration-[#14b8a6]"
+                                <a class="font-semibold text-slate-100 underline decoration-slate-600 underline-offset-4 docs-token-hover-decoration-accent"
                                    href="@Url.PathBaseAware(entry.CanonicalLiveUrl)">
                                     @(string.IsNullOrWhiteSpace(entry.CanonicalRoutePath) ? "/" : entry.CanonicalRoutePath)
                                 </a>
@@ -107,7 +107,7 @@
                                         @foreach (var alias in entry.RecoveryAliases)
                                         {
                                             <li>
-                                                <a class="text-slate-300 underline decoration-slate-700 underline-offset-4 hover:decoration-[#14b8a6]"
+                                                <a class="text-slate-300 underline decoration-slate-700 underline-offset-4 docs-token-hover-decoration-accent"
                                                    href="@Url.PathBaseAware(alias.LiveUrl)">
                                                     @alias.RoutePath
                                                 </a>
@@ -128,7 +128,7 @@
                                         @foreach (var alias in entry.DeclaredAliases)
                                         {
                                             <li>
-                                                <a class="text-slate-300 underline decoration-slate-700 underline-offset-4 hover:decoration-[#14b8a6]"
+                                                <a class="text-slate-300 underline decoration-slate-700 underline-offset-4 docs-token-hover-decoration-accent"
                                                    href="@Url.PathBaseAware(alias.LiveUrl)">
                                                     @alias.RoutePath
                                                 </a>
@@ -152,7 +152,7 @@
             <ul class="mt-4 space-y-3">
                 @foreach (var diagnostic in Model.Diagnostics)
                 {
-                    <li class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+                    <li class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
                         <div class="flex flex-wrap items-center gap-2">
                             <span class="text-sm font-semibold text-white">@diagnostic.Code</span>
                             <span class="rounded-full border border-slate-700 px-2 py-0.5 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-slate-400">@diagnostic.Severity</span>

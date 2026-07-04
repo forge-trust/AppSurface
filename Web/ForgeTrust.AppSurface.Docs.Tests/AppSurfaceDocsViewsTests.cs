@@ -32,6 +32,9 @@ public class AppSurfaceDocsViewsTests
     private static readonly Regex RawCssColorLiteralRegex = new(
         @"#[0-9a-fA-F]{3,8}\b|rgba?\(",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex ThemePaletteHexClassRegex = new(
+        @"(?:^|\s)(?:group-hover:|hover:|focus:)?(?:text|bg|border|decoration|ring|outline|shadow)-\[#(?:050b17|07111f|08101e|0d182a|14b8a6|1b2a43|1d4ed8|2563eb|263650|2dd4bf|314461|5eead4|99f6e4|bfdbfe|ccfbf1)\](?:/[0-9]+)?",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     [Fact]
     public void Layout_ShouldContain_SearchShellMarkers()
@@ -611,6 +614,13 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("text-overflow: ellipsis;", tailwindEntryStylesheet);
         Assert.Contains("text-shadow: 0 1px 2px var(--docs-color-wordmark-edge-shadow);", tailwindEntryStylesheet);
         Assert.Contains("outline: var(--docs-focus-outline);", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-text-accent", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-border-accent", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-hover-border-accent:hover", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-hover-bg-panel:hover", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-group-hover-text-accent-soft", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown a:visited", tailwindEntryStylesheet);
+        Assert.Contains("color: var(--docs-color-link-visited);", tailwindEntryStylesheet);
 
         Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #050b17);", searchStylesheet);
         Assert.Contains("--docs-search-color-accent-glow: var(--docs-color-accent-glow,", searchStylesheet);
@@ -637,6 +647,27 @@ public class AppSurfaceDocsViewsTests
 
         Assert.Empty(FindUnclassifiedRawColorLiterals(tailwindEntryStylesheet));
         Assert.Empty(FindUnclassifiedRawColorLiterals(searchStylesheet));
+    }
+
+    [Fact]
+    public void RazorViews_ShouldConsumeDocsChromeTokenHooksInsteadOfThemePaletteHexClasses()
+    {
+        var viewRoot = Path.Combine(GetDocsProjectRoot(), "Views");
+        var violations = Directory
+            .EnumerateFiles(viewRoot, "*.cshtml", SearchOption.AllDirectories)
+            .SelectMany(path => File
+                .ReadLines(path)
+                .Select((line, index) => new
+                {
+                    Path = path,
+                    Line = line,
+                    LineNumber = index + 1
+                }))
+            .Where(entry => ThemePaletteHexClassRegex.IsMatch(entry.Line))
+            .Select(entry => $"{Path.GetRelativePath(viewRoot, entry.Path)}:{entry.LineNumber}: {entry.Line.Trim()}")
+            .ToArray();
+
+        Assert.Empty(violations);
     }
 
     [Fact]
@@ -4776,11 +4807,8 @@ public class AppSurfaceDocsViewsTests
 
     private static string ReadTailwindEntryStylesheetMarkup()
     {
-        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var stylesheetPath = Path.Combine(
-            repoRoot,
-            "Web",
-            "ForgeTrust.AppSurface.Docs",
+            GetDocsProjectRoot(),
             "wwwroot",
             "css",
             "app.css");
@@ -4790,16 +4818,20 @@ public class AppSurfaceDocsViewsTests
 
     private static string ReadSearchStylesheetMarkup()
     {
-        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var stylesheetPath = Path.Combine(
-            repoRoot,
-            "Web",
-            "ForgeTrust.AppSurface.Docs",
+            GetDocsProjectRoot(),
             "wwwroot",
             "docs",
             "search.css");
 
         return File.ReadAllText(stylesheetPath);
+    }
+
+    private static string GetDocsProjectRoot()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+
+        return Path.Combine(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
     }
 
     private static string RemoveRootTokenBlock(string stylesheet)

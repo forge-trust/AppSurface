@@ -210,6 +210,116 @@ body {
     color: var(--docs-color-accent-soft);
 }
 
+.docs-token-text-accent {
+    color: var(--docs-color-accent);
+}
+
+.docs-token-text-accent-muted {
+    color: var(--docs-color-accent-muted);
+}
+
+.docs-token-text-accent-soft {
+    color: var(--docs-color-accent-soft);
+}
+
+.docs-token-text-info-muted {
+    color: var(--docs-color-text-info-muted);
+}
+
+.docs-token-border-muted {
+    border-color: var(--docs-color-border-muted);
+}
+
+.docs-token-border-default {
+    border-color: var(--docs-color-border-default);
+}
+
+.docs-token-border-accent {
+    border-color: var(--docs-color-border-accent);
+}
+
+.docs-token-bg-canvas {
+    background: var(--docs-color-surface-canvas);
+}
+
+.docs-token-bg-panel-faint {
+    background: var(--docs-color-surface-panel-faint);
+}
+
+.docs-token-bg-panel-hover {
+    background: var(--docs-color-surface-panel-hover);
+}
+
+.docs-token-bg-raised {
+    background: var(--docs-color-surface-raised);
+}
+
+.docs-token-bg-accent {
+    background: var(--docs-color-accent);
+}
+
+.docs-token-bg-active {
+    background: var(--docs-color-state-active-fill);
+}
+
+.docs-token-hover-text-accent:hover,
+.docs-token-hover-text-accent:focus-visible {
+    color: var(--docs-color-accent);
+}
+
+.docs-token-hover-text-accent-muted:hover,
+.docs-token-hover-text-accent-muted:focus-visible {
+    color: var(--docs-color-accent-muted);
+}
+
+.docs-token-hover-border-accent:hover,
+.docs-token-hover-border-accent:focus-visible {
+    border-color: var(--docs-color-border-accent-hover);
+}
+
+.docs-token-hover-bg-panel:hover,
+.docs-token-hover-bg-panel:focus-visible {
+    background: var(--docs-color-surface-panel-hover);
+}
+
+.docs-token-hover-bg-raised:hover,
+.docs-token-hover-bg-raised:focus-visible {
+    background: var(--docs-color-surface-raised);
+}
+
+.docs-token-hover-bg-accent-fill:hover,
+.docs-token-hover-bg-accent-fill:focus-visible {
+    background: var(--docs-color-accent-mark-fill);
+}
+
+.docs-token-hover-bg-accent-muted:hover,
+.docs-token-hover-bg-accent-muted:focus-visible {
+    background: var(--docs-color-accent-muted);
+}
+
+.docs-token-hover-bg-accent-strong:hover,
+.docs-token-hover-bg-accent-strong:focus-visible {
+    background: var(--docs-color-accent-strong);
+}
+
+.group:hover .docs-token-group-hover-text-accent-soft,
+.group:focus-within .docs-token-group-hover-text-accent-soft {
+    color: var(--docs-color-accent-soft);
+}
+
+.docs-token-focus-border-accent:focus {
+    border-color: var(--docs-color-accent);
+}
+
+.docs-token-focus-ring-accent:focus {
+    box-shadow: 0 0 0 2px var(--docs-color-accent-glow);
+}
+
+.docs-token-hover-decoration-accent:hover,
+.docs-token-hover-decoration-accent:focus-visible {
+    text-decoration-color: var(--docs-color-accent);
+}
+
 [data-docs-chrome="compact"] .docs-sidebar-brand-desktop {
     padding: 1rem;
 }
@@ -1778,6 +1888,10 @@ body {
 .docs-content--markdown a:hover {
     color: var(--docs-color-accent-soft);
     text-decoration-color: var(--docs-color-accent-soft-underline);
+}
+
+.docs-content--markdown a:visited {
+    color: var(--docs-color-link-visited);
 }
 
 .docs-content--markdown hr {

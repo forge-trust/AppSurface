@@ -5,7 +5,7 @@
 
 <div class="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
     <div class="max-w-3xl">
-        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#14b8a6]">Section</p>
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] docs-token-text-accent">Section</p>
         <h1 class="docs-gradient-title mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">@Model.Heading</h1>
         <p class="mt-4 text-base leading-7 text-slate-300">@Model.Description</p>
         @if (!string.IsNullOrWhiteSpace(Model.AvailabilityMessage))
@@ -19,7 +19,7 @@
              && Model.Section != ForgeTrust.AppSurface.Docs.Models.DocPublicSection.StartHere)
         {
             <a href="@Url.PathBaseAware(Model.StartHereHref)"
-               class="inline-flex items-center gap-2 rounded-full border border-[#2563eb]/45 bg-[#2563eb]/10 px-4 py-2 text-sm font-semibold text-[#bfdbfe] transition-colors hover:border-[#14b8a6] hover:bg-[#14b8a6]/10">
+               class="inline-flex items-center gap-2 rounded-full border docs-token-border-accent docs-token-bg-active px-4 py-2 text-sm font-semibold docs-token-text-info-muted transition-colors docs-token-hover-border-accent docs-token-hover-bg-accent-fill">
                 Start Here
             </a>
         }
@@ -31,7 +31,7 @@
 
     @if (!Model.IsUnavailable && Model.IsSparse && Model.KeyRoutes.Count > 0)
     {
-        <section class="mt-8 rounded-lg border border-[#1b2a43] bg-[#050b17]/40 p-5">
+        <section class="mt-8 rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-5">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">This section is still growing</p>
             <p class="mt-3 text-sm leading-6 text-slate-300">
                 The section is intentionally lean right now. Start with the strongest visible route below and come back as more material lands.
@@ -43,9 +43,9 @@
                         <a href="@Url.PathBaseAware(route.Href)"
                            data-turbo-frame="doc-content"
                            data-turbo-action="advance"
-                           class="group flex flex-col gap-2 rounded-lg border border-[#1b2a43] bg-[#050b17]/60 px-4 py-3 transition-colors hover:border-[#14b8a6]/35 hover:bg-[#08101e]">
+                           class="group flex flex-col gap-2 rounded-lg border docs-token-border-muted docs-token-bg-panel-faint px-4 py-3 transition-colors docs-token-hover-border-accent docs-token-hover-bg-panel">
                             <div class="flex flex-wrap items-center gap-2">
-                                <span class="text-base font-semibold text-white transition-colors group-hover:text-[#ccfbf1]">@route.Title</span>
+                                <span class="text-base font-semibold text-white transition-colors docs-token-group-hover-text-accent-soft">@route.Title</span>
                                 @if (route.PageTypeBadge is not null)
                                 {
                                     <span class="docs-page-badge docs-page-badge--@route.PageTypeBadge.Variant">@route.PageTypeBadge.Label</span>
@@ -88,9 +88,9 @@
                                     <a href="@Url.PathBaseAware(link.Href)"
                                    data-turbo-frame="doc-content"
                                    data-turbo-action="advance"
-                                       class="group block rounded-lg border border-[#1b2a43] bg-[#050b17]/30 px-4 py-3 transition-colors hover:border-[#14b8a6]/35 hover:bg-[#08101e]/70">
+                                       class="group block rounded-lg border docs-token-border-muted docs-token-bg-panel-faint px-4 py-3 transition-colors docs-token-hover-border-accent docs-token-hover-bg-panel">
                                         <div class="flex flex-wrap items-center gap-2">
-                                            <span class="text-base font-semibold text-white transition-colors group-hover:text-[#ccfbf1]">@link.Title</span>
+                                            <span class="text-base font-semibold text-white transition-colors docs-token-group-hover-text-accent-soft">@link.Title</span>
                                             @if (link.PageTypeBadge is not null)
                                             {
                                                 <span class="docs-page-badge docs-page-badge--@link.PageTypeBadge.Variant">@link.PageTypeBadge.Label</span>
