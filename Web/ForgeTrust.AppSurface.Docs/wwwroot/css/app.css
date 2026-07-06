@@ -258,6 +258,10 @@ body {
     background: var(--docs-color-accent);
 }
 
+.docs-token-bg-accent-strong {
+    background: var(--docs-color-accent-strong);
+}
+
 .docs-token-bg-active {
     background: var(--docs-color-state-active-fill);
 }

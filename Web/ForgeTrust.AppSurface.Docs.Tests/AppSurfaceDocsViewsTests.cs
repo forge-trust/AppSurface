@@ -616,6 +616,7 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("outline: var(--docs-focus-outline);", tailwindEntryStylesheet);
         Assert.Contains(".docs-token-text-accent", tailwindEntryStylesheet);
         Assert.Contains(".docs-token-border-accent", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-bg-accent-strong", tailwindEntryStylesheet);
         Assert.Contains(".docs-token-hover-border-accent:hover", tailwindEntryStylesheet);
         Assert.Contains(".docs-token-hover-bg-panel:hover", tailwindEntryStylesheet);
         Assert.Contains(".docs-token-group-hover-text-accent-soft", tailwindEntryStylesheet);
@@ -664,6 +665,27 @@ public class AppSurfaceDocsViewsTests
                     LineNumber = index + 1
                 }))
             .Where(entry => ThemePaletteHexClassRegex.IsMatch(entry.Line))
+            .Select(entry => $"{Path.GetRelativePath(viewRoot, entry.Path)}:{entry.LineNumber}: {entry.Line.Trim()}")
+            .ToArray();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void RazorViews_ShouldKeepWhiteTextOffPlainAccentBackground()
+    {
+        var viewRoot = Path.Combine(GetDocsProjectRoot(), "Views");
+        var violations = Directory
+            .EnumerateFiles(viewRoot, "*.cshtml", SearchOption.AllDirectories)
+            .SelectMany(path => File
+                .ReadLines(path)
+                .Select((line, index) => new
+                {
+                    Path = path,
+                    Line = line,
+                    LineNumber = index + 1
+                }))
+            .Where(entry => ContainsClass(entry.Line, "docs-token-bg-accent") && ContainsClass(entry.Line, "text-white"))
             .Select(entry => $"{Path.GetRelativePath(viewRoot, entry.Path)}:{entry.LineNumber}: {entry.Line.Trim()}")
             .ToArray();
 
@@ -4832,6 +4854,14 @@ public class AppSurfaceDocsViewsTests
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
 
         return Path.Combine(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
+    }
+
+    private static bool ContainsClass(string line, string className)
+    {
+        return Regex.IsMatch(
+            line,
+            $@"(?<![A-Za-z0-9_-]){Regex.Escape(className)}(?![A-Za-z0-9_-])",
+            RegexOptions.CultureInvariant);
     }
 
     private static string RemoveRootTokenBlock(string stylesheet)
