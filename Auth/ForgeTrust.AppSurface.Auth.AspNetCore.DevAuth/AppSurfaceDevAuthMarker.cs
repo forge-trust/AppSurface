@@ -11,9 +11,10 @@ namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 /// Renders an explicit AppSurface DevAuth state marker for host pages.
 /// </summary>
 /// <remarks>
-/// Use this helper from a Development-only page or layout when the selected fake persona should stay visible while
-/// navigating the app. The returned HTML contains only safe persona display values and POST-only controls that target the
-/// mapped DevAuth endpoints. DevAuth does not automatically inject this marker into host output.
+/// Use this helper from pages or layouts where the selected fake persona should stay visible while navigating the app.
+/// The returned HTML contains only safe persona display values and POST-only controls that target the mapped DevAuth
+/// endpoints. DevAuth does not automatically inject this marker into host output, and this helper returns an empty
+/// string when the current environment is not in <see cref="AppSurfaceDevAuthOptions.AllowedEnvironmentNames"/>.
 /// </remarks>
 public static class AppSurfaceDevAuthMarker
 {
@@ -49,6 +50,11 @@ public static class AppSurfaceDevAuthMarker
             environment,
             devAuthOptions,
             dataProtectionProvider);
+
+        if (!status.Enabled)
+        {
+            return string.Empty;
+        }
 
         return RenderMarker(status, devAuthOptions, markerOptions, classPrefix, returnUrl);
     }
