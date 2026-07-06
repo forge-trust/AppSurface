@@ -113,6 +113,7 @@ public sealed class AppSurfaceDevAuthRegistrationTests
                 AddAdmin(options);
             }));
 
+        Assert.Equal(nameof(AppSurfaceDevAuthOptions.AllowedEnvironmentNames), ex.ParamName);
         Assert.Contains("AllowedEnvironmentNames", ex.Message, StringComparison.Ordinal);
     }
 
@@ -128,6 +129,7 @@ public sealed class AppSurfaceDevAuthRegistrationTests
                 AddAdmin(options);
             }));
 
+        Assert.Equal(nameof(AppSurfaceDevAuthOptions.AllowedEnvironmentNames), ex.ParamName);
         Assert.Contains("AllowedEnvironmentNames", ex.Message, StringComparison.Ordinal);
     }
 
@@ -363,6 +365,35 @@ public sealed class AppSurfaceDevAuthRegistrationTests
             })));
 
         await validator.StartAsync(CancellationToken.None);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StartupValidator_WithInvalidAllowedEnvironmentNames_ThrowsArgumentException(
+        bool clearAllowedEnvironmentNames)
+    {
+        var options = CreateOptions(AddAdmin);
+        if (clearAllowedEnvironmentNames)
+        {
+            options.AllowedEnvironmentNames.Clear();
+        }
+        else
+        {
+            options.AllowedEnvironmentNames.Add(" ");
+        }
+
+        var validator = new AppSurfaceDevAuthStartupValidator(
+            new AuthenticationSchemeProvider(Options.Create(new AuthenticationOptions())),
+            Development(),
+            Options.Create(new AuthenticationOptions()),
+            Options.Create(options));
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            validator.StartAsync(CancellationToken.None));
+
+        Assert.Equal(nameof(AppSurfaceDevAuthOptions.AllowedEnvironmentNames), ex.ParamName);
+        Assert.Contains("AllowedEnvironmentNames", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

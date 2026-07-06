@@ -18,12 +18,19 @@ public static class AppSurfaceDevAuthServiceCollectionExtensions
     /// <param name="environment">Host environment used to enforce the DevAuth activation allow-list.</param>
     /// <param name="configure">Callback that configures seeded local personas and DevAuth options once during registration.</param>
     /// <returns>The same service collection for chaining.</returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when required option values are blank or
+    /// <see cref="AppSurfaceDevAuthOptions.AllowedEnvironmentNames"/> is empty or contains blank names.
+    /// </exception>
     /// <exception cref="AppSurfaceDevAuthException">
-    /// Thrown when DevAuth is enabled in an environment that is not allowed or the supplied options are invalid.
+    /// Thrown when DevAuth is enabled in an environment that is not allowed or another DevAuth safety diagnostic fails.
     /// </exception>
     /// <remarks>
     /// DevAuth is fake local authentication. It registers a normal ASP.NET Core authentication handler, but it must
     /// not be used as a production identity provider, user store, OIDC replacement, or durable app-user mapping layer.
+    /// DevAuth activates only when the trimmed host environment name matches
+    /// <see cref="AppSurfaceDevAuthOptions.AllowedEnvironmentNames"/> case-insensitively. The default allow-list contains
+    /// <c>Development</c>; add proof environments only for intentional local/proof hosts.
     /// </remarks>
     public static IServiceCollection AddAppSurfaceDevAuth(
         this IServiceCollection services,
@@ -86,7 +93,8 @@ public static class AppSurfaceDevAuthServiceCollectionExtensions
     /// <exception cref="ArgumentException">
     /// Thrown when <see cref="AppSurfaceDevAuthOptions.SchemeName"/>,
     /// <see cref="AppSurfaceDevAuthOptions.PathPrefix"/>, or
-    /// <see cref="AppSurfaceDevAuthOptions.CookieName"/> is blank.
+    /// <see cref="AppSurfaceDevAuthOptions.CookieName"/> is blank, or when
+    /// <see cref="AppSurfaceDevAuthOptions.AllowedEnvironmentNames"/> is empty or contains blank names.
     /// </exception>
     /// <exception cref="AppSurfaceDevAuthException">
     /// Thrown with <c>ASDEV003</c> when no personas are configured, <c>ASDEV004</c> when a persona lacks its

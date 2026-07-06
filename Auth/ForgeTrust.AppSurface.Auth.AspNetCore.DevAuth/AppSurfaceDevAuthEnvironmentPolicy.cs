@@ -37,16 +37,14 @@ internal static class AppSurfaceDevAuthEnvironmentPolicy
         {
             throw new ArgumentException(
                 "AllowedEnvironmentNames must contain at least one host environment name.",
-                nameof(options));
+                nameof(AppSurfaceDevAuthOptions.AllowedEnvironmentNames));
         }
 
-        if (options.AllowedEnvironmentNames
-            .Where(string.IsNullOrWhiteSpace)
-            .Any())
+        if (options.AllowedEnvironmentNames.Any(string.IsNullOrWhiteSpace))
         {
             throw new ArgumentException(
                 "AllowedEnvironmentNames cannot contain blank host environment names.",
-                nameof(options));
+                nameof(AppSurfaceDevAuthOptions.AllowedEnvironmentNames));
         }
     }
 

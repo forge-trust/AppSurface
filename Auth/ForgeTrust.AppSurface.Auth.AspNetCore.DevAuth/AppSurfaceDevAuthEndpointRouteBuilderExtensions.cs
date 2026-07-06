@@ -167,7 +167,8 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
     {
         SetNoStoreHeaders(httpContext);
         var devAuthOptions = options.Value;
-        if (!AppSurfaceDevAuthEnvironmentPolicy.IsEnvironmentAllowed(environment, devAuthOptions))
+        var environmentAllowed = AppSurfaceDevAuthEnvironmentPolicy.IsEnvironmentAllowed(environment, devAuthOptions);
+        if (!environmentAllowed)
         {
             return Results.NotFound();
         }
@@ -200,7 +201,7 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         }
 
         var status = new AppSurfaceDevAuthStatus(
-            Enabled: AppSurfaceDevAuthEnvironmentPolicy.IsEnvironmentAllowed(environment, devAuthOptions),
+            Enabled: environmentAllowed,
             Environment: environment.EnvironmentName,
             Scheme: devAuthOptions.SchemeName,
             PathPrefix: devAuthOptions.PathPrefix,
@@ -229,7 +230,8 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
     {
         SetNoStoreHeaders(httpContext);
         var devAuthOptions = options.Value;
-        if (!AppSurfaceDevAuthEnvironmentPolicy.IsEnvironmentAllowed(environment, devAuthOptions))
+        var environmentAllowed = AppSurfaceDevAuthEnvironmentPolicy.IsEnvironmentAllowed(environment, devAuthOptions);
+        if (!environmentAllowed)
         {
             return Results.NotFound();
         }
@@ -249,7 +251,7 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         }
 
         var status = new AppSurfaceDevAuthStatus(
-            Enabled: AppSurfaceDevAuthEnvironmentPolicy.IsEnvironmentAllowed(environment, devAuthOptions),
+            Enabled: environmentAllowed,
             Environment: environment.EnvironmentName,
             Scheme: devAuthOptions.SchemeName,
             PathPrefix: devAuthOptions.PathPrefix,

@@ -54,8 +54,9 @@ public sealed class AppSurfaceDevAuthOptions
     /// Gets environment names where DevAuth is allowed to activate.
     /// </summary>
     /// <remarks>
-    /// DevAuth is fake local/proof authentication, not a production safety boundary. The set defaults to
-    /// <see cref="Environments.Development"/>. Add only local or proof environments that should expose fake personas.
+    /// The set defaults to <see cref="Environments.Development"/> and compares names case-insensitively. DevAuth trims
+    /// names when checking the active host environment. Add only local or proof environments that should expose fake
+    /// personas; this allow-list is activation policy for fake auth, not a production safety boundary.
     /// </remarks>
     public ISet<string> AllowedEnvironmentNames { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
