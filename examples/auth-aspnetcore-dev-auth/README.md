@@ -6,7 +6,7 @@ DevAuth is local tooling. It is not production authentication, OIDC, ASP.NET Ide
 
 Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.md) when deciding whether this local persona proof, Auth.Testing, OIDC, or raw ASP.NET Core authentication is the right next step.
 
-The root page renders `AppSurfaceDevAuthMarker` as a persistent in-app overlay without wrapping it in an environment check. The renderer returns an empty string outside allowed environments, so host layouts can call it unconditionally. Selecting `Local Admin`, `Local Viewer`, or `Clear` from the overlay posts to the DevAuth control endpoints and returns to the same page, so the fake auth state remains visible while you use the app. Consumers can skin that marker by passing `AppSurfaceDevAuthMarkerOptions`, including `CssClassPrefix`, `AdditionalCssClass`, and `IncludeDefaultStyles = false`.
+The root page renders `AppSurfaceDevAuthMarker` as a persistent in-app overlay without wrapping it in an environment check. The renderer returns an empty string outside allowed environments, so host layouts can call it unconditionally. The overlay starts collapsed to keep the app usable, then expands when you need to select `Local Admin`, `Local Viewer`, or `Clear`. Those controls post to the DevAuth control endpoints and return to the same page, so the fake auth state remains visible while you use the app. Consumers can skin that marker by passing `AppSurfaceDevAuthMarkerOptions`, including `StartExpanded`, `CssClassPrefix`, `AdditionalCssClass`, and `IncludeDefaultStyles = false`.
 
 To opt in a host-owned proof environment, configure the package explicitly:
 

@@ -85,6 +85,8 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains("data-appsurface-dev-auth=\"marker\"", html, StringComparison.Ordinal);
         Assert.Contains("DEV AUTH", html, StringComparison.Ordinal);
         Assert.Contains("Anonymous", html, StringComparison.Ordinal);
+        Assert.Contains("<details class=\"appsurface-dev-auth-marker__details\">", html, StringComparison.Ordinal);
+        Assert.Contains("<summary class=\"appsurface-dev-auth-marker__summary\">", html, StringComparison.Ordinal);
         Assert.Contains("/_appsurface/dev-auth/select/admin?returnUrl=%2Fdashboard%3Ftab%3Dauth", html, StringComparison.Ordinal);
         Assert.Contains("Open persona lab", html, StringComparison.Ordinal);
         Assert.Contains("Status JSON", html, StringComparison.Ordinal);
@@ -232,6 +234,26 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains("class=\"demo-dev-auth theme-local\"", html, StringComparison.Ordinal);
         Assert.Contains("demo-dev-auth__button", html, StringComparison.Ordinal);
         Assert.DoesNotContain("<style>", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Marker_WithStartExpanded_RendersOpenDisclosure()
+    {
+        using var app = BuildApp();
+        var context = CreateContext(app.Services);
+
+        var html = AppSurfaceDevAuthMarker.Render(
+            context,
+            app.Services.GetRequiredService<IHostEnvironment>(),
+            app.Services.GetRequiredService<IOptions<AppSurfaceDevAuthOptions>>(),
+            app.Services.GetRequiredService<IDataProtectionProvider>(),
+            options =>
+            {
+                options.StartExpanded = true;
+            });
+
+        Assert.Contains("<details class=\"appsurface-dev-auth-marker__details\" open>", html, StringComparison.Ordinal);
+        Assert.Contains("Open persona lab", html, StringComparison.Ordinal);
     }
 
     [Fact]

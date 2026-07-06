@@ -104,7 +104,7 @@ Open the persona lab:
 /_appsurface/dev-auth
 ```
 
-The control page lets you select a seeded persona, clear the persona cookie, inspect safe local claims, and copy a visible marker such as `DEV AUTH: Local Admin (AppSurface.DevAuth)`. For a persistent in-app indicator, render `AppSurfaceDevAuthMarker` from your local layout or proof page. The renderer returns an empty string when the current environment is not in `AllowedEnvironmentNames`, so layouts do not need their own `environment.IsDevelopment()` guard. The default marker is a bottom overlay with POST-only persona controls that returns to the current page after selection.
+The control page lets you select a seeded persona, clear the persona cookie, inspect safe local claims, and copy a visible marker such as `DEV AUTH: Local Admin (AppSurface.DevAuth)`. For a persistent in-app indicator, render `AppSurfaceDevAuthMarker` from your local layout or proof page. The renderer returns an empty string when the current environment is not in `AllowedEnvironmentNames`, so layouts do not need their own `environment.IsDevelopment()` guard. The default marker is a bottom overlay that starts collapsed, keeps the active fake persona visible, and expands to POST-only persona controls that return to the current page after selection.
 
 ## API Reference
 
@@ -128,6 +128,7 @@ The control page lets you select a seeded persona, clear the persona cookie, ins
 - `AppSurfaceDevAuthMarkerOptions.AdditionalCssClass` appends host-owned classes to the marker root.
 - `AppSurfaceDevAuthMarkerOptions.IncludeDefaultStyles` is on by default. Disable it to skin the marker entirely with host CSS.
 - `AppSurfaceDevAuthMarkerOptions.ShowPersonaControls` is on by default. Disable it when a page should show state but send persona changes through the full control page.
+- `AppSurfaceDevAuthMarkerOptions.StartExpanded` is off by default so the marker remains visible without covering local app content. Enable it when a proof page should show controls immediately.
 - `AppSurfaceDevAuthMarkerOptions.ReturnUrl` overrides the local page that marker POSTs return to. When unset, DevAuth returns to the current request path and query.
 
 Persona IDs must be route-safe local identifiers containing only ASCII letters, digits, `.`, `_`, or `-`. The dot-segment IDs `.` and `..` are not allowed, and ids that look like tokens, secrets, passwords, keys, credentials, or emails are rejected. Persona IDs are used in the selection endpoint path and stored as the protected cookie payload.
@@ -185,7 +186,7 @@ Diagnostics, HTML, and status JSON do not include raw tokens, secrets, passwords
 - Use simple route-safe persona IDs such as `admin`, `viewer`, or `qa.local_1`; dot segments, sensitive-looking ids, query strings, fragments, encoded slashes, spaces, and other punctuation are rejected with `ASDEV006`.
 - Call `Subject(...)` for every persona and keep it aligned with `AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim(...))`.
 - Keep the DevAuth marker visible in local sample pages so fake auth is impossible to miss.
-- Prefer `AppSurfaceDevAuthMarker.Render(...)` over copying the generated control-page HTML. Use `IncludeDefaultStyles = false`, `CssClassPrefix`, and `AdditionalCssClass` when the marker needs to match a consumer app.
+- Prefer `AppSurfaceDevAuthMarker.Render(...)` over copying the generated control-page HTML. Use `StartExpanded = true` when the marker should show controls immediately, and use `IncludeDefaultStyles = false`, `CssClassPrefix`, and `AdditionalCssClass` when the marker needs to match a consumer app.
 - DevAuth does not automatically inject an overlay into arbitrary responses. Add the marker explicitly to the pages or local layout where the fake-auth state should be visible; the renderer self-suppresses outside allowed environments.
 - If persona selection returns a same-origin 403, make sure custom local UI posts from the same scheme, host, and port as the mapped DevAuth endpoints.
 

@@ -38,6 +38,15 @@ public sealed class AppSurfaceDevAuthMarkerOptions
     public bool ShowPersonaControls { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets a value indicating whether the marker starts expanded.
+    /// </summary>
+    /// <remarks>
+    /// The default is collapsed so the DevAuth state remains visible without covering local app content. Set this to
+    /// <see langword="true" /> when a proof page should show the persona controls immediately.
+    /// </remarks>
+    public bool StartExpanded { get; set; }
+
+    /// <summary>
     /// Gets or sets the local URL to return to after a marker persona mutation.
     /// </summary>
     /// <remarks>
