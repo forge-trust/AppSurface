@@ -3,7 +3,7 @@ using Microsoft.Extensions.Hosting;
 namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 
 /// <summary>
-/// Options for AppSurface development-only authentication.
+/// Options for AppSurface Development-by-default authentication with explicit local/proof environment opt-in.
 /// </summary>
 public sealed class AppSurfaceDevAuthOptions
 {
