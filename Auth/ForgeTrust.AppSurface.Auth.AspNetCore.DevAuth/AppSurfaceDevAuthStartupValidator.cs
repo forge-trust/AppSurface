@@ -8,10 +8,11 @@ namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 /// Performs DevAuth startup validation after the host service provider has been built.
 /// </summary>
 /// <remarks>
-/// Registration validates the caller-supplied Development environment early, but this hosted service re-checks the real
+/// Registration validates the caller-supplied environment early, but this hosted service re-checks the real
 /// environment resolved from dependency injection and inspects the final authentication defaults and schemes. It rejects
-/// non-Development hosts and real authentication scheme conflicts unless the consumer explicitly enabled the local-proof
-/// override. This service is internal infrastructure for <see cref="AppSurfaceDevAuthServiceCollectionExtensions"/>.
+/// environments outside the DevAuth activation allow-list and real authentication scheme conflicts unless the consumer
+/// explicitly enabled the local-proof override. This service is internal infrastructure for
+/// <see cref="AppSurfaceDevAuthServiceCollectionExtensions"/>.
 /// </remarks>
 internal sealed class AppSurfaceDevAuthStartupValidator : IHostedService
 {
@@ -45,23 +46,29 @@ internal sealed class AppSurfaceDevAuthStartupValidator : IHostedService
     }
 
     /// <summary>
-    /// Validates that DevAuth is running in Development and is not silently coexisting with real authentication.
+    /// Validates that DevAuth is running in an allowed environment and is not silently coexisting with real authentication.
     /// </summary>
     /// <param name="cancellationToken">Startup cancellation token; validation performs only in-memory inspection.</param>
     /// <returns>A completed task when the final host configuration is safe for local DevAuth.</returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when materialized DevAuth options contain blank required values or an invalid
+    /// <see cref="AppSurfaceDevAuthOptions.AllowedEnvironmentNames"/> allow-list.
+    /// </exception>
     /// <exception cref="AppSurfaceDevAuthException">
-    /// Thrown with <c>ASDEV001</c> outside Development, with option diagnostics when materialized options are invalid,
-    /// or with <c>ASDEV002</c> when real schemes/defaults are present without the explicit override.
+    /// Thrown with <c>ASDEV001</c> outside configured proof environments or with <c>ASDEV002</c> when real
+    /// schemes/defaults are present without the explicit override.
     /// </exception>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (!_environment.IsDevelopment())
-        {
-            throw AppSurfaceDevAuthServiceCollectionExtensions.CreateNonDevelopmentException(_environment.EnvironmentName);
-        }
-
         var options = _devAuthOptions.Value;
         AppSurfaceDevAuthServiceCollectionExtensions.ValidateOptions(options);
+
+        if (!AppSurfaceDevAuthEnvironmentPolicy.IsEnvironmentAllowed(_environment, options))
+        {
+            throw AppSurfaceDevAuthServiceCollectionExtensions.CreateNonDevelopmentException(
+                _environment.EnvironmentName,
+                options);
+        }
 
         if (options.AllowDevAuthOverrideForLocalProof)
         {
