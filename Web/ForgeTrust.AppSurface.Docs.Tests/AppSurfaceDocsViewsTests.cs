@@ -653,7 +653,7 @@ public class AppSurfaceDocsViewsTests
     [Fact]
     public void RazorViews_ShouldConsumeDocsChromeTokenHooksInsteadOfThemePaletteHexClasses()
     {
-        var viewRoot = Path.Combine(GetDocsProjectRoot(), "Views");
+        var viewRoot = Path.Join(GetDocsProjectRoot(), "Views");
         var violations = Directory
             .EnumerateFiles(viewRoot, "*.cshtml", SearchOption.AllDirectories)
             .SelectMany(path => File
@@ -674,7 +674,7 @@ public class AppSurfaceDocsViewsTests
     [Fact]
     public void RazorViews_ShouldKeepWhiteTextOffPlainAccentBackground()
     {
-        var viewRoot = Path.Combine(GetDocsProjectRoot(), "Views");
+        var viewRoot = Path.Join(GetDocsProjectRoot(), "Views");
         var violations = Directory
             .EnumerateFiles(viewRoot, "*.cshtml", SearchOption.AllDirectories)
             .SelectMany(path => File
@@ -4739,7 +4739,7 @@ public class AppSurfaceDocsViewsTests
         Action<IServiceCollection>? configureServices = null)
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var webRoot = Path.Combine(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
+        var webRoot = Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
 
         var configValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -4853,7 +4853,7 @@ public class AppSurfaceDocsViewsTests
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
 
-        return Path.Combine(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
+        return Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
     }
 
     private static bool ContainsClass(string line, string className)
