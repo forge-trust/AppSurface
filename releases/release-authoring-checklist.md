@@ -7,6 +7,9 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - run `./eng/release check --version x.y.z` to validate the release inputs, package policy, generated targets, and warning IDs
 - make sure the pull request queue has updated [`unreleased.md`](./unreleased.md)
 - regroup the story so the opening narrative explains what changed and why it matters
+- rewrite maintainer-led bullets into consumer-led entries for every prerelease, release-candidate, and stable note: outcome first, affected package or app shape second, maintainer evidence last
+- replace opaque shorthand with a plain-language explanation before the label, especially for cross-package concepts such as [auth projection](../Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md), [static export safety](../Web/ForgeTrust.RazorWire/README.md), or [release evidence](./README.md)
+- link every substantial feature, named concept, package boundary, workflow, diagnostic family, and CLI command to its best start-here material: package README, guide, runnable example, CLI command reference, or migration section
 - confirm every breaking or behavior-changing update has migration guidance
 - for stable releases, stage the AppSurface Docs exact archive and run `appsurface docs verify-archive --catalog <staging>/versions.json --version x.y.z --trusted-release-root <staging>` before asking the release tool to validate docs evidence
 - for stable releases, confirm the checked-in evidence fields describe the same staged docs archive that `nuget-stable-publish.yml` will export and verify before `publish-nuget`
@@ -19,6 +22,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - for stable releases, confirm `releases/vx.y.z.evidence.json` records `docsArchive.exactTreePath`, `docsArchive.releaseManifestSha256`, and matching `docsArchive.catalogEntry` fields from the staged docs catalog
 - confirm the generated package path updates described in the [package registry](../packages/README.md) point every `classification: public` plus `publish_decision: publish` package at the tagged note
 - review the generated [package readiness evidence](../packages/readiness.md) and resolve or explicitly track package-index blockers before asking maintainers to approve package artifacts; this package-index evidence is separate from the per-version release evidence bundle
+- check that the tagged note gives adopters direct paths to related guides, examples, package docs, and command references instead of only naming the capability
 - when a tagged or release-candidate note supersedes a preview page, remove the preview source file and carry its browser routes as `redirect_aliases` on the new canonical note
 - keep the trust bar accurate for the release state and archive location
 - link the tagged note from [`CHANGELOG.md`](../CHANGELOG.md)

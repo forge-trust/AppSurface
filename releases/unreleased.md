@@ -10,6 +10,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- Documentation and release authoring guidance now require concept links instead of mention-only prose: start with adopter outcomes, explain internal feature labels in plain language, link named packages, concepts, workflows, diagnostics, guides, examples, and CLI commands to their canonical docs, and keep maintainer evidence after the adoption path.
 - AppSurface DevAuth now centralizes its environment activation policy. DevAuth remains Development-by-default, but
   package consumers can explicitly add local/proof environment names through `AllowedEnvironmentNames`; the marker
   self-suppresses outside allowed environments and mapped control/mutation endpoints stay fail-closed.
