@@ -14,12 +14,19 @@ This is the living release note for the next coordinated AppSurface version afte
   unhealthy results.
 - Add an explicit AppSurface Web mapper for an authenticated `GET /_appsurface/config/audit` endpoint that returns the
   active host's sanitized Config audit JSON for support-sensitive operator evidence capture.
+- `ForgeTrust.RazorWire` now includes an explicit Behavior Kit runtime for app-authored progressive enhancement. Root
+  behaviors connect to replaceable DOM roots with `AbortSignal` cleanup, while lifecycle registrations run on initial
+  document load and Turbo logical visits for page-owned browser signals such as PWA display-mode telemetry.
 
 ## Included in the next coordinated version
 
 ### Release and docs surface
 
 - `ForgeTrust.RazorWire` documents auth projection helpers, including `rw:auth-view`, `rw:auth-gate`, `rw:permission-gate`, `rw:login-link`, and `rw:logout-button`, with a paired endpoint-enforcement example and DevAuth marker guidance that keeps local fake personas separate from reusable UI projection.
+- `ForgeTrust.RazorWire` adds `<rw:scripts behavior-kit="true" />` for eager Behavior Kit loading, a queue-backed
+  `window.RazorWire.behaviors` stub in the core runtime, root-scoped `register(...)`, page-lifecycle
+  `registerLifecycle(...)`, stable diagnostics, and docs that explain when to use Behavior Kit instead of built-in
+  managers, islands, or app-owned JavaScript.
 - AppSurface Docs adds a default-off JavaScript event-dispatch verifier that compares public `@event` doclets with direct literal `dispatchEvent(new CustomEvent("event:name", ...))` evidence from the same policy-approved JavaScript harvest inputs. `docs verify-health --verify-event-dispatches` now surfaces non-fatal warning diagnostics, including `Cause`, for doclet-only and dispatch-only drift while leaving strict health blockers unchanged.
 - AppSurface LocalSecrets startup failures that happen before the platform command can run now report `Unavailable` with
   `local-secret-store-unavailable` instead of being classified by words in raw OS exception messages. Real locked-store

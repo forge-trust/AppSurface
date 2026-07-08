@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const runtimePath = new URL('../wwwroot/razorwire/razorwire.js', import.meta.url);
 const runtimeSourcePath = new URL('../assets/src/razorwire.ts', import.meta.url);
 const islandsPath = new URL('../wwwroot/razorwire/razorwire.islands.js', import.meta.url);
+const behaviorKitPath = new URL('../wwwroot/razorwire/behavior-kit.js', import.meta.url);
 const pageNavigationPath = new URL('../wwwroot/razorwire/page-navigation.js', import.meta.url);
 const sectionCopyPath = new URL('../wwwroot/razorwire/section-copy.js', import.meta.url);
 const formInteractionsPath = new URL('../wwwroot/razorwire/form-interactions.js', import.meta.url);
@@ -16,24 +17,30 @@ const packageRootPath = fileURLToPath(packageRoot);
 test('generated runtime outputs keep provenance banners and public package paths', () => {
   const runtime = readFileSync(runtimePath, 'utf8');
   const islands = readFileSync(islandsPath, 'utf8');
+  const behaviorKit = readFileSync(behaviorKitPath, 'utf8');
   const pageNavigation = readFileSync(pageNavigationPath, 'utf8');
   const sectionCopy = readFileSync(sectionCopyPath, 'utf8');
   const formInteractions = readFileSync(formInteractionsPath, 'utf8');
 
   assert.match(runtime, /^\/\/ Generated from assets\/src\/razorwire\.ts\./);
   assert.match(islands, /^\/\/ Generated from assets\/src\/razorwire\.islands\.ts\./);
+  assert.match(behaviorKit, /^\/\/ Generated from assets\/src\/behavior-kit\.ts\./);
   assert.match(pageNavigation, /^\/\/ Generated from assets\/src\/page-navigation\.ts\./);
   assert.match(sectionCopy, /^\/\/ Generated from assets\/src\/section-copy\.ts\./);
   assert.match(formInteractions, /^\/\/ Generated from assets\/src\/form-interactions\.ts\./);
   assert.equal(runtime.includes('sourceMappingURL'), false);
   assert.equal(islands.includes('sourceMappingURL'), false);
+  assert.equal(behaviorKit.includes('sourceMappingURL'), false);
   assert.equal(pageNavigation.includes('sourceMappingURL'), false);
   assert.equal(sectionCopy.includes('sourceMappingURL'), false);
   assert.equal(formInteractions.includes('sourceMappingURL'), false);
   assert.match(runtime, /RazorWireInitialized/);
   assert.match(runtime, /formFailureManager/);
+  assert.match(runtime, /BehaviorKitNotLoaded/);
   assert.match(islands, /RazorWireIslandsInitialized/);
   assert.match(islands, /data-rw-hydrated/);
+  assert.match(behaviorKit, /RazorWireBehaviorKitInitialized/);
+  assert.match(behaviorKit, /registerLifecycle/);
   assert.match(pageNavigation, /pageNavigationManager/);
   assert.match(pageNavigation, /data-rw-page-nav/);
   assert.match(sectionCopy, /sectionCopyManager/);
@@ -55,6 +62,7 @@ test('public contract manifest includes page navigation, section copy, and form 
   assert.match(contracts, /window\.RazorWire\.pageNavigationManager/);
   assert.match(contracts, /window\.RazorWire\.sectionCopyManager/);
   assert.match(contracts, /window\.RazorWire\.formInteractionsManager/);
+  assert.match(contracts, /window\.RazorWire\.behaviors/);
   assert.doesNotMatch(contracts, /@manager/);
   assert.match(contracts, /razorwire:page-nav:active-change/);
   assert.match(contracts, /data-rw-page-nav/);
@@ -69,12 +77,15 @@ test('public contract manifest includes page navigation, section copy, and form 
   assert.match(contracts, /data-rw-form-toggle/);
   assert.match(contracts, /data-rw-form-collection/);
   assert.match(contracts, /data-rw-form-collection-row/);
+  assert.match(contracts, /registerLifecycle/);
+  assert.match(contracts, /BehaviorLifecycleEventInvalid/);
 });
 
 test('generated verifier emits actionable stale-output diagnostics', () => {
   const verifier = readFileSync(new URL('assets/scripts/verify-generated.mjs', packageRoot), 'utf8');
 
   assert.match(verifier, /RWASSET003 RazorWire generated assets are stale/);
+  assert.match(verifier, /behavior-kit\.js/);
   assert.match(verifier, /page-navigation\.js/);
   assert.match(verifier, /section-copy\.js/);
   assert.match(verifier, /form-interactions\.js/);

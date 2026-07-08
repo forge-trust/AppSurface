@@ -84,6 +84,17 @@ public class RazorWireScriptsTagHelper : TagHelper
     public bool FormInteractions { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the Behavior Kit runtime should be eagerly rendered after the core runtime.
+    /// </summary>
+    /// <remarks>
+    /// Behavior Kit is explicit in v1 because app-owned behavior registrations need a predictable public API surface.
+    /// Plain <c>&lt;rw:scripts /&gt;</c> does not lazy-load it from markup. Set this attribute to <c>true</c> when a host
+    /// wants <c>window.RazorWire.behaviors</c> to connect root-scoped behaviors or page-lifecycle registrations.
+    /// </remarks>
+    [HtmlAttributeName("behavior-kit")]
+    public bool BehaviorKit { get; set; }
+
+    /// <summary>
     /// Renders the client-side script tags required by RazorWire and removes the wrapper element so no enclosing tag is emitted.
     /// </summary>
     /// <param name="context">The current tag helper context.</param>
@@ -114,6 +125,9 @@ public class RazorWireScriptsTagHelper : TagHelper
         var islandsJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js");
+        var behaviorKitJs = _fileVersionProvider.AddFileVersionToPath(
+            pathBase,
+            "/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js");
         var pageNavigationJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js");
@@ -153,6 +167,12 @@ public class RazorWireScriptsTagHelper : TagHelper
 <script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}"" data-rw-live-origin=""{liveOrigin}"" data-rw-hybrid-credentials=""{credentialsMode}"" data-rw-antiforgery-endpoint=""{antiforgeryEndpoint}"" data-rw-product-intelligence-enabled=""{productIntelligenceEnabled}""></script>
 <script src=""{islandsJs}""></script>
 ";
+
+        if (BehaviorKit)
+        {
+            scripts += $@"<script src=""{behaviorKitJs}"" data-rw-behavior-kit-runtime=""eager""></script>
+";
+        }
 
         if (PageNavigation)
         {

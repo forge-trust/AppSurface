@@ -27,6 +27,14 @@ const generatedOutputs = [
     gzipBytes: 3_500
   },
   {
+    entry: path.join(assetRoot, 'src', 'behavior-kit.ts'),
+    output: path.join(outputRoot, 'behavior-kit.js'),
+    label: 'behavior-kit.js',
+    banner: 'Generated from assets/src/behavior-kit.ts. Do not edit wwwroot/razorwire/behavior-kit.js by hand.',
+    rawBytes: 18_000,
+    gzipBytes: 5_500
+  },
+  {
     entry: path.join(assetRoot, 'src', 'page-navigation.ts'),
     output: path.join(outputRoot, 'page-navigation.js'),
     label: 'page-navigation.js',

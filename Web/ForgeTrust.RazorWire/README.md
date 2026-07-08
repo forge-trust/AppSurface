@@ -137,6 +137,62 @@ Use RazorWire form interactions when a server-rendered form needs conditional fi
 
 RazorWire owns local behavior, state attributes, sparse `.index` allocation, and accessibility status hooks. Your app owns fields, labels, layout, styling, persistence, and server validation. See the full contract in [Form Interactions](Docs/form-interactions.md).
 
+## Behavior Kit in 3 Minutes
+
+Use RazorWire Behavior Kit when an app needs small local JavaScript that follows RazorWire's lifecycle without becoming a frontend framework. Root behaviors enhance replaceable DOM roots; lifecycle behaviors run once per logical browser visit.
+
+Behavior Kit is explicit in v1:
+
+```cshtml
+<rw:scripts behavior-kit="true" />
+```
+
+Root-scoped behaviors bind app-owned controls and clean up with `AbortSignal`:
+
+```html
+<section data-install-card>
+    <button type="button" data-install-button>Install app</button>
+</section>
+
+<script>
+window.RazorWire.behaviors.register({
+  name: "app.install-card",
+  selector: "[data-install-card]",
+  connect(root, context) {
+    context.query("[data-install-button]")?.addEventListener("click", () => {
+      root.setAttribute("data-install-requested", "true");
+    }, { signal: context.signal });
+  }
+});
+</script>
+```
+
+Lifecycle behaviors cover page-owned browser signals that should not depend on a fake root selector:
+
+```html
+<script>
+window.RazorWire.behaviors.registerLifecycle({
+  name: "app.pwa-display-mode",
+  connect(context) {
+    const installed =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      window.matchMedia("(display-mode: fullscreen)").matches ||
+      window.matchMedia("(display-mode: minimal-ui)").matches ||
+      window.navigator.standalone === true;
+
+    document.dispatchEvent(new CustomEvent("app:pwa-display-mode-seen", {
+      detail: {
+        displayMode: installed ? "installed" : "browser",
+        renderKind: context.renderKind
+      }
+    }));
+  }
+});
+</script>
+```
+
+Use built-in RazorWire managers for package-owned page navigation, section copy, and form interactions. Use Behavior Kit for app-owned root behaviors or logical-visit instrumentation. Use islands for component/module hydration. See [Behavior Kit](Docs/behavior-kit.md) for diagnostics, lifecycle events, and troubleshooting.
+
 ## Page Navigation in 3 Minutes
 
 Use RazorWire page navigation when a server-rendered page needs same-page section links, active state, and optional mobile-panel close behavior without app-specific JavaScript.
@@ -212,7 +268,7 @@ RazorWire markup only lights up when your views import the package TagHelpers an
 ```
 <!-- /appsurface:snippet -->
 
-Plain `<rw:scripts/>` is enough for page navigation, section copy, and form interactions. RazorWire emits small detectors that load `page-navigation.js` only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup, `section-copy.js` only when it contains `data-rw-section-copy` / `data-rw-section-copy-target` markup, and `form-interactions.js` only when it contains `data-rw-form-toggle` or `data-rw-form-collection` markup, including after Turbo page or frame renders. The optional `page-navigation="true"`, `section-copy="true"`, and `form-interactions="true"` attributes are eager-load escape hatches, but they are not required for normal adoption.
+Plain `<rw:scripts/>` is enough for page navigation, section copy, and form interactions. RazorWire emits small detectors that load `page-navigation.js` only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup, `section-copy.js` only when it contains `data-rw-section-copy` / `data-rw-section-copy-target` markup, and `form-interactions.js` only when it contains `data-rw-form-toggle` or `data-rw-form-collection` markup, including after Turbo page or frame renders. The optional `page-navigation="true"`, `section-copy="true"`, and `form-interactions="true"` attributes are eager-load escape hatches, but they are not required for normal adoption. Behavior Kit is explicit in v1; set `behavior-kit="true"` when the page registers `window.RazorWire.behaviors`.
 
 ## Configure Services (Optional)
 
@@ -744,7 +800,7 @@ export function mount(root, props) {
 ```
 
 RazorWire serves `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`,
-`razorwire.islands.js`, and the package demo assets as normal Razor Class Library
+`razorwire.islands.js`, `behavior-kit.js`, and the package demo assets as normal Razor Class Library
 static web assets when the host has a static-web-assets manifest. The same files
 are also embedded into the `ForgeTrust.RazorWire` assembly and mapped as endpoint
 fallbacks by `RazorWireWebModule`, so packaged command-line hosts can serve the

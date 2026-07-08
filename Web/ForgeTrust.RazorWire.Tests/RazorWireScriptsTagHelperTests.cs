@@ -62,6 +62,10 @@ public class RazorWireScriptsTagHelperTests
             .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js?v=456");
         A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
                 "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js?v=kit");
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
                 "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js"))
             .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789");
         A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
@@ -93,6 +97,8 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains(
             "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js?v=456\"",
             content);
+        Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js?v=kit\"", content);
+        Assert.DoesNotContain("data-rw-behavior-kit-runtime", content);
         Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js?v=789\"", content);
         Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/section-copy.js?v=abc\"", content);
         Assert.DoesNotContain("src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js?v=form\"", content);
@@ -106,6 +112,37 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("RazorWireFormInteractionsInitialized", content);
         Assert.Contains("\"[data-rw-form-toggle]\", \"[data-rw-form-collection]\"", content);
         Assert.Contains("turbo:frame-load", content);
+    }
+
+    [Fact]
+    public void Process_WhenBehaviorKitEnabled_RendersEagerScript()
+    {
+        // Arrange
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider)
+        {
+            ViewContext = _viewContext,
+            BehaviorKit = true
+        };
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js?v=kit");
+
+        // Act
+        helper.Process(_context, _output);
+
+        // Assert
+        var content = _output.Content.GetContent();
+        Assert.Contains(
+            "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js?v=kit\"",
+            content);
+        Assert.Contains("data-rw-behavior-kit-runtime=\"eager\"", content);
+        Assert.Contains("data-rw-page-navigation-runtime", content);
+        Assert.Contains("data-rw-section-copy-runtime", content);
+        Assert.Contains("data-rw-form-interactions-runtime", content);
     }
 
     [Fact]
@@ -216,6 +253,7 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("VerifyRazorWireGeneratedAssetsBeforePack", project, StringComparison.Ordinal);
         Assert.Contains("assets:razorwire:verify", project, StringComparison.Ordinal);
         Assert.Contains("RWPACK001", project, StringComparison.Ordinal);
+        Assert.Contains("razorwire\\behavior-kit.js", project, StringComparison.Ordinal);
         Assert.Contains("razorwire\\section-copy.js", project, StringComparison.Ordinal);
         Assert.Contains("razorwire\\form-interactions.js", project, StringComparison.Ordinal);
         Assert.Contains("""<Content Remove="assets\**\*" />""", project, StringComparison.Ordinal);

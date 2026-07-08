@@ -12,6 +12,7 @@ interface Window {
         pageNavigationManager?: unknown;
         sectionCopyManager?: unknown;
         formInteractionsManager?: unknown;
+        behaviors?: unknown;
     };
     Turbo?: TurboRuntime;
 }
@@ -40,6 +41,23 @@ interface RuntimeConfig {
     hybridCredentials: string;
     antiforgeryEndpoint: string;
     productIntelligenceEnabled: boolean;
+}
+
+interface RazorWireBehaviorQueueItem {
+    kind: 'register' | 'registerLifecycle';
+    definition: unknown;
+}
+
+interface RazorWireBehaviorStub {
+    __razorWireBehaviorStub?: true;
+    __queue?: RazorWireBehaviorQueueItem[];
+    __diagnostics?: unknown[];
+    register(definition: unknown): void;
+    registerLifecycle(definition: unknown): void;
+    scan(root?: Document | Element): void;
+    prune(): void;
+    getDiagnostics(): unknown[];
+    clearDiagnostics(): void;
 }
 
 interface FormSubmitState {
@@ -1595,6 +1613,47 @@ declare const Turbo: TurboRuntime | undefined;
         return { url, action };
     }
 
+    function ensureBehaviorStub() {
+        const existing = window.RazorWire?.behaviors as RazorWireBehaviorStub | undefined;
+        if (existing && !existing.__razorWireBehaviorStub) {
+            return existing;
+        }
+
+        const queue = existing?.__queue ?? [];
+        const diagnostics = existing?.__diagnostics ?? [];
+        const stub: RazorWireBehaviorStub = {
+            __razorWireBehaviorStub: true,
+            __queue: queue,
+            __diagnostics: diagnostics,
+            register(definition) {
+                queue.push({ kind: 'register', definition });
+            },
+            registerLifecycle(definition) {
+                queue.push({ kind: 'registerLifecycle', definition });
+            },
+            scan() {
+                diagnostics.push({
+                    code: 'BehaviorKitNotLoaded',
+                    message: 'RazorWire Behavior Kit is not loaded.',
+                    impact: 'Queued behavior registrations will not connect until behavior-kit.js loads.',
+                    fix: 'Render <rw:scripts behavior-kit="true" /> before app behavior bundles.',
+                    docs: 'Web/ForgeTrust.RazorWire/Docs/behavior-kit.md#troubleshooting'
+                });
+            },
+            prune() {
+            },
+            getDiagnostics() {
+                return [...diagnostics];
+            },
+            clearDiagnostics() {
+                diagnostics.length = 0;
+            }
+        };
+
+        window.RazorWire = { ...(window.RazorWire || {}), behaviors: stub };
+        return stub;
+    }
+
     function normalizeVisitUrl(rawUrl: string) {
         if (typeof rawUrl !== 'string' || rawUrl.length === 0 || rawUrl.trim() !== rawUrl) {
             return null;
@@ -1662,7 +1721,8 @@ declare const Turbo: TurboRuntime | undefined;
         config: { ...((window.RazorWire && window.RazorWire.config) || {}), ...runtimeConfig },
         connectionManager,
         localTimeFormatter,
-        formFailureManager
+        formFailureManager,
+        behaviors: ensureBehaviorStub()
     };
     // Global safeguard: Block clicks on disabled elements or their children even if pointer-events are enabled
     document.addEventListener('click', (e) => {

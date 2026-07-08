@@ -31,6 +31,54 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
+ * Behavior Kit manager for app-authored progressive enhancement on replaceable server-rendered DOM and logical browser visits.
+ * @public
+ * @namespace RazorWire
+ * @config window.RazorWire.behaviors
+ * @type {object}
+ * @source <rw:scripts behavior-kit="true" />
+ * @property {Function} register - Registers a root-scoped behavior definition with `name`, `selector`, and `connect(root, context)`.
+ * @property {Function} registerLifecycle - Registers a page-lifecycle behavior definition with `name`, optional `events`, optional `frames`, and `connect(context)`.
+ * @property {Function} scan - Re-scans the document or supplied root for registered behavior selectors.
+ * @property {Function} prune - Disconnects controllers whose roots left the document or no longer match their selector.
+ * @property {Function} getDiagnostics - Returns stable Behavior Kit diagnostics recorded since startup.
+ * @property {Function} clearDiagnostics - Clears recorded Behavior Kit diagnostics.
+ */
+
+/**
+ * Root-scoped Behavior Kit context passed to `window.RazorWire.behaviors.register(...).connect`.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} RazorWireBehaviorContext
+ * @property {AbortSignal} signal - Signal aborted before cleanup when RazorWire disconnects the root.
+ * @property {string} behaviorName - Registered behavior name.
+ * @property {string} rootId - Stable runtime identity for the current behavior/root pair.
+ * @property {Function} query - Scoped `querySelector` helper rooted at the connected element.
+ * @property {Function} queryAll - Scoped `querySelectorAll` helper rooted at the connected element.
+ * @property {Function} diagnostic - Records an app-owned behavior diagnostic with a message and fix.
+ */
+
+/**
+ * Page-lifecycle Behavior Kit context passed to `window.RazorWire.behaviors.registerLifecycle(...).connect`.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} RazorWireLifecycleContext
+ * @property {AbortSignal} signal - Signal aborted before cleanup when the lifecycle behavior reconnects on a later pass.
+ * @property {string} behaviorName - Registered lifecycle behavior name.
+ * @property {string} url - Current browser URL for the lifecycle pass.
+ * @property {"initial"|"turbo:load"|"turbo:render"|"turbo:frame-load"} renderKind - Logical render lifecycle that triggered the pass.
+ * @property {Document|Element} root - Document or frame element that owns the lifecycle pass.
+ * @property {Function} diagnostic - Records an app-owned lifecycle diagnostic with a message and fix.
+ */
+
+/**
+ * Stable Behavior Kit diagnostic codes.
+ * @public
+ * @namespace RazorWire
+ * @typedef {"BehaviorSelectorInvalid"|"BehaviorRegistrationConflict"|"BehaviorConnectFailed"|"BehaviorCleanupFailed"|"BehaviorAbortUnsupported"|"BehaviorLifecycleEventInvalid"|"BehaviorKitNotLoaded"} RazorWireBehaviorDiagnosticCode
+ */
+
+/**
  * Page navigation manager for same-page section links, active state, optional collapsible panels, and lifecycle-safe rebinding.
  * @public
  * @namespace RazorWire
