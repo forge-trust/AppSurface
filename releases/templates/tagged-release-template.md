@@ -16,7 +16,7 @@ Write the short story first. Explain what adopters can do now, who should care, 
 
 - Package chooser or package README:
 - Guide:
-- Runnable example:
+- Example:
 - CLI or verification command:
 
 ## What shipped
@@ -31,7 +31,7 @@ Write the short story first. Explain what adopters can do now, who should care, 
 
 ### Docs and examples
 
-- Describe docs-facing and example changes here. Link guides and runnable examples beside the feature they explain, and connect adjacent concepts readers are likely to need next.
+- Describe docs-facing and example changes here. Link guides and examples beside the feature they explain, and connect adjacent concepts readers are likely to need next.
 
 ### Boundaries and pitfalls
 

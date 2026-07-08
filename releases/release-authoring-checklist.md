@@ -9,7 +9,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - regroup the story so the opening narrative explains what changed and why it matters
 - rewrite maintainer-led bullets into consumer-led entries for every prerelease, release-candidate, and stable note: outcome first, affected package or app shape second, maintainer evidence last
 - replace opaque shorthand with a plain-language explanation before the label, especially for cross-package concepts such as [auth projection](../Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md), [static export safety](../Web/ForgeTrust.RazorWire/README.md), or [release evidence](./README.md)
-- link every substantial feature, named concept, package boundary, workflow, diagnostic family, and CLI command to its best start-here material: package README, guide, runnable example, CLI command reference, or migration section
+- link every substantial feature, named concept, package boundary, workflow, diagnostic family, and CLI command to its best start-here material: package README, guide, example, CLI command reference, or migration section
 - confirm every breaking or behavior-changing update has migration guidance
 - for stable releases, stage the AppSurface Docs exact archive and run `appsurface docs verify-archive --catalog <staging>/versions.json --version x.y.z --trusted-release-root <staging>` before asking the release tool to validate docs evidence
 - for stable releases, confirm the checked-in evidence fields describe the same staged docs archive that `nuget-stable-publish.yml` will export and verify before `publish-nuget`
