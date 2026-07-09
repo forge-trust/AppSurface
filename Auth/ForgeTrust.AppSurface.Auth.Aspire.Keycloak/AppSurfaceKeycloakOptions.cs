@@ -58,8 +58,7 @@ public sealed class AppSurfaceKeycloakOptions
     /// <summary>
     /// Gets or sets the directory that receives generated Keycloak realm import JSON.
     /// </summary>
-    public string RealmImportDirectory { get; set; } =
-        Path.Combine(AppContext.BaseDirectory, "appsurface-keycloak-realms", Path.GetFileName(AppSurfaceKeycloakDefaults.ResourceName));
+    public string RealmImportDirectory { get; set; } = CreateDefaultRealmImportDirectory();
 
     /// <summary>
     /// Gets mutable redirect URIs imported into the public OIDC client.
@@ -205,6 +204,9 @@ public sealed class AppSurfaceKeycloakOptions
     private static bool IsAllowedLocalhost(Uri uri) =>
         (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) || string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal))
         && (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) || string.Equals(uri.Host, "127.0.0.1", StringComparison.Ordinal));
+
+    private static string CreateDefaultRealmImportDirectory() =>
+        Path.Combine(AppContext.BaseDirectory, "appsurface-keycloak-realms", Path.GetFileName(AppSurfaceKeycloakDefaults.ResourceName));
 
     private static AppSurfaceKeycloakUserOptions CreateSeededUser(
         string username,

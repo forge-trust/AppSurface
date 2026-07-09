@@ -19,6 +19,18 @@ public sealed class AppSurfaceKeycloakOptionsTests
         Assert.False(options.UsePersistentDataVolume);
     }
 
+    [Fact]
+    public void RealmImportDirectory_DefaultUsesSafeResourceNameSegment()
+    {
+        var options = new AppSurfaceKeycloakOptions();
+
+        var expectedSuffix = Path.Combine(
+            "appsurface-keycloak-realms",
+            Path.GetFileName(AppSurfaceKeycloakDefaults.ResourceName));
+
+        Assert.EndsWith(expectedSuffix, options.RealmImportDirectory, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("Arealm")]
