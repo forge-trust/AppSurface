@@ -138,9 +138,8 @@ public sealed class AppSurfaceKeycloakReadinessProbe
             .Where(item => item.ValueKind == JsonValueKind.String)
             .Select(item => item.GetString())
             .ToHashSet(StringComparer.Ordinal);
-        foreach (var uri in _options.RedirectUris)
+        foreach (var redirectUri in _options.RedirectUris.Select(uri => uri.ToString()))
         {
-            var redirectUri = uri.ToString();
             if (!redirects.Contains(redirectUri))
             {
                 throw RealmEvidence($"realm import does not contain redirect URI '{redirectUri}'.");
@@ -148,9 +147,8 @@ public sealed class AppSurfaceKeycloakReadinessProbe
         }
 
         var logoutUris = GetPostLogoutRedirectUris(client);
-        foreach (var uri in _options.PostLogoutRedirectUris)
+        foreach (var logoutUri in _options.PostLogoutRedirectUris.Select(uri => uri.ToString()))
         {
-            var logoutUri = uri.ToString();
             if (!logoutUris.Contains(logoutUri))
             {
                 throw RealmEvidence($"realm import does not contain post-logout redirect URI '{logoutUri}'.");

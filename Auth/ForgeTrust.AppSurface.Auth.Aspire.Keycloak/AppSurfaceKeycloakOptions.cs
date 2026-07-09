@@ -191,12 +191,10 @@ public sealed class AppSurfaceKeycloakOptions
 
     private static void ValidateUris(IEnumerable<Uri> uris, string expectedPath, string optionName)
     {
-        foreach (var uri in uris)
+        var invalidUri = uris.Where(uri => !IsSafeLocalhostUri(uri, expectedPath)).FirstOrDefault();
+        if (invalidUri is not null)
         {
-            if (!IsSafeLocalhostUri(uri, expectedPath))
-            {
-                throw Invalid(optionName, $"URI '{uri}' must be absolute localhost HTTP/HTTPS with path '{expectedPath}' and no query, fragment, user info, encoded slash, or encoded backslash.");
-            }
+            throw Invalid(optionName, $"URI '{invalidUri}' must be absolute localhost HTTP/HTTPS with path '{expectedPath}' and no query, fragment, user info, encoded slash, or encoded backslash.");
         }
     }
 
