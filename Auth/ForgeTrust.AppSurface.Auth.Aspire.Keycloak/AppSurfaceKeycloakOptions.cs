@@ -206,7 +206,7 @@ public sealed class AppSurfaceKeycloakOptions
         && (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) || string.Equals(uri.Host, "127.0.0.1", StringComparison.Ordinal));
 
     private static string CreateDefaultRealmImportDirectory() =>
-        Path.Combine(AppContext.BaseDirectory, "appsurface-keycloak-realms", Path.GetFileName(AppSurfaceKeycloakDefaults.ResourceName));
+        AppSurfaceKeycloakRealmImportPaths.CreateDefaultDirectory();
 
     private static AppSurfaceKeycloakUserOptions CreateSeededUser(
         string username,

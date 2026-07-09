@@ -74,7 +74,7 @@ public sealed class AppSurfaceKeycloakReadinessProbe
 
     private void CheckRealmEvidence()
     {
-        var path = Path.Combine(_options.RealmImportDirectory, $"{_options.Realm}-realm.json");
+        var path = AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(_options.RealmImportDirectory, _options.Realm);
         if (!File.Exists(path))
         {
             throw RealmEvidence($"realm import file '{path}' is missing.");

@@ -45,7 +45,7 @@ public static class AppSurfaceKeycloakRealmGenerator
         options.Validate();
 
         Directory.CreateDirectory(options.RealmImportDirectory);
-        var path = Path.Combine(options.RealmImportDirectory, $"{options.Realm}-realm.json");
+        var path = AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(options.RealmImportDirectory, options.Realm);
         File.WriteAllText(path, Generate(options));
         return path;
     }

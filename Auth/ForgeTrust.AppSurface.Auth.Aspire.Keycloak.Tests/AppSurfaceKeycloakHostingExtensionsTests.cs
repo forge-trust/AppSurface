@@ -25,7 +25,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
 
         Assert.Equal("appsurface-web", resource.Configuration.ClientId);
         Assert.Equal($"http://localhost:{keycloakPort}/realms/appsurface-dev", resource.Configuration.Authority);
-        Assert.Equal(Path.Combine(directory.Path, "appsurface-dev-realm.json"), resource.RealmImportFile);
+        Assert.Equal(Path.Join(directory.Path, "appsurface-dev-realm.json"), resource.RealmImportFile);
         Assert.True(File.Exists(resource.RealmImportFile));
         Assert.NotNull(resource.Resource);
         Assert.NotNull(resource.Readiness);
@@ -86,9 +86,14 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
-    private static string GetCurrentTestProjectPath() =>
-        Path.GetFullPath(
-            Path.Combine(
-                AppContext.BaseDirectory,
-                "../../../ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj"));
+    private static string GetCurrentTestProjectPath()
+    {
+        const string projectPath = "../../../ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj";
+        if (Path.IsPathRooted(projectPath))
+        {
+            throw new InvalidOperationException("The test project path must stay relative.");
+        }
+
+        return Path.GetFullPath(projectPath, AppContext.BaseDirectory);
+    }
 }

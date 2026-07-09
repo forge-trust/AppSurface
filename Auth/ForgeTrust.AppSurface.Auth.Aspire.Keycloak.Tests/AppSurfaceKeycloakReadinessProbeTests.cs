@@ -133,7 +133,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         using var directory = new TempDirectory();
         var options = CreateOptions(directory.Path);
         Directory.CreateDirectory(options.RealmImportDirectory);
-        File.WriteAllText(Path.Combine(options.RealmImportDirectory, $"{options.Realm}-realm.json"), "{not-json");
+        File.WriteAllText(AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(options.RealmImportDirectory, options.Realm), "{not-json");
         using var client = new HttpClient(new StubHandler(request =>
         {
             if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
@@ -178,7 +178,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         using var directory = new TempDirectory();
         var options = CreateOptions(directory.Path);
         Directory.CreateDirectory(options.RealmImportDirectory);
-        File.WriteAllText(Path.Combine(options.RealmImportDirectory, $"{options.Realm}-realm.json"), json);
+        File.WriteAllText(AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(options.RealmImportDirectory, options.Realm), json);
         using var client = new HttpClient(new StubHandler(MetadataThenOk));
         var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
 
@@ -195,7 +195,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         var options = CreateOptions(directory.Path);
         Directory.CreateDirectory(options.RealmImportDirectory);
         File.WriteAllText(
-            Path.Combine(options.RealmImportDirectory, $"{options.Realm}-realm.json"),
+            AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(options.RealmImportDirectory, options.Realm),
             """
             {
               "realm": "appsurface-dev",

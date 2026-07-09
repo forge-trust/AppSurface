@@ -24,11 +24,45 @@ public sealed class AppSurfaceKeycloakOptionsTests
     {
         var options = new AppSurfaceKeycloakOptions();
 
-        var expectedSuffix = Path.Combine(
+        var expectedSuffix = Path.Join(
             "appsurface-keycloak-realms",
             Path.GetFileName(AppSurfaceKeycloakDefaults.ResourceName));
 
         Assert.EndsWith(expectedSuffix, options.RealmImportDirectory, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RealmImportPaths_CreateDirectoryUsesFileNameSegment()
+    {
+        var directory = AppSurfaceKeycloakRealmImportPaths.CreateDirectory("/tmp/appsurface", "nested/keycloak-proof");
+
+        Assert.Equal(Path.Join("/tmp/appsurface", "appsurface-keycloak-realms", "keycloak-proof"), directory);
+    }
+
+    [Fact]
+    public void RealmImportPaths_GetRealmImportFilePathUsesFileNameSegment()
+    {
+        var path = AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath("/tmp/appsurface/realms", "/appsurface-dev");
+
+        Assert.Equal(Path.Join("/tmp/appsurface/realms", "appsurface-dev-realm.json"), path);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void RealmImportPaths_WhenDirectoryBlank_ThrowsArgumentException(string directory)
+    {
+        Assert.Throws<ArgumentException>(() => AppSurfaceKeycloakRealmImportPaths.CreateDirectory(directory, "keycloak-proof"));
+        Assert.Throws<ArgumentException>(() => AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(directory, "appsurface-dev"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/")]
+    [InlineData("nested\\keycloak-proof")]
+    public void RealmImportPaths_WhenSegmentUnsafe_ThrowsArgumentException(string segment)
+    {
+        Assert.Throws<ArgumentException>(() => AppSurfaceKeycloakRealmImportPaths.CreateDirectory("/tmp/appsurface", segment));
     }
 
     [Theory]

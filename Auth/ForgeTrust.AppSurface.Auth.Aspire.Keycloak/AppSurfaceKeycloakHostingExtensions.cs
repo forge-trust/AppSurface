@@ -22,10 +22,9 @@ public static class AppSurfaceKeycloakHostingExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        var safeName = Path.GetFileName(name);
         var options = new AppSurfaceKeycloakOptions
         {
-            RealmImportDirectory = Path.Combine(AppContext.BaseDirectory, "appsurface-keycloak-realms", safeName),
+            RealmImportDirectory = AppSurfaceKeycloakRealmImportPaths.CreateDirectory(AppContext.BaseDirectory, name),
         };
         configure?.Invoke(options);
         options.Validate();

@@ -4,8 +4,7 @@ internal sealed class TempDirectory : IDisposable
 {
     public TempDirectory()
     {
-        Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"appsurface-keycloak-tests-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path);
+        Path = Directory.CreateTempSubdirectory($"appsurface-keycloak-tests-{Guid.NewGuid():N}").FullName;
     }
 
     public string Path { get; }
