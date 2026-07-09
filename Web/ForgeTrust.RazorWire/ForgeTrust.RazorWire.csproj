@@ -28,6 +28,7 @@
   <ItemGroup>
     <EmbeddedResource Include="wwwroot\background.png" LogicalName="RazorWireEmbeddedAssets/background.png" />
     <EmbeddedResource Include="wwwroot\exampleJsInterop.js" LogicalName="RazorWireEmbeddedAssets/exampleJsInterop.js" />
+    <EmbeddedResource Include="wwwroot\razorwire\behavior-kit.js" LogicalName="RazorWireEmbeddedAssets/razorwire/behavior-kit.js" />
     <EmbeddedResource Include="wwwroot\razorwire\form-interactions.js" LogicalName="RazorWireEmbeddedAssets/razorwire/form-interactions.js" />
     <EmbeddedResource Include="wwwroot\razorwire\page-navigation.js" LogicalName="RazorWireEmbeddedAssets/razorwire/page-navigation.js" />
     <EmbeddedResource Include="wwwroot\razorwire\razorwire.islands.js" LogicalName="RazorWireEmbeddedAssets/razorwire/razorwire.islands.js" />

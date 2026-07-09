@@ -120,12 +120,9 @@ public sealed class AppSurfaceKeycloakReadinessProbe
             var users = userElements.EnumerateArray()
                 .Select(user => GetOptionalString(user, "username"))
                 .ToHashSet(StringComparer.Ordinal);
-            foreach (var user in _options.SeededUsers)
+            foreach (var user in _options.SeededUsers.Where(user => !users.Contains(user.Username)))
             {
-                if (!users.Contains(user.Username))
-                {
-                    throw RealmEvidence($"realm import does not contain seeded user '{user.Username}'.");
-                }
+                throw RealmEvidence($"realm import does not contain seeded user '{user.Username}'.");
             }
         }
     }
@@ -141,12 +138,11 @@ public sealed class AppSurfaceKeycloakReadinessProbe
             .Where(item => item.ValueKind == JsonValueKind.String)
             .Select(item => item.GetString())
             .ToHashSet(StringComparer.Ordinal);
-        foreach (var redirectUri in _options.RedirectUris.Select(uri => uri.ToString()))
+        foreach (var redirectUri in _options.RedirectUris
+            .Select(uri => uri.ToString())
+            .Where(redirectUri => !redirects.Contains(redirectUri)))
         {
-            if (!redirects.Contains(redirectUri))
-            {
-                throw RealmEvidence($"realm import does not contain redirect URI '{redirectUri}'.");
-            }
+            throw RealmEvidence($"realm import does not contain redirect URI '{redirectUri}'.");
         }
 
         var logoutUris = client.TryGetProperty("attributes", out var attributes)
@@ -155,12 +151,11 @@ public sealed class AppSurfaceKeycloakReadinessProbe
             && postLogout.ValueKind == JsonValueKind.String
                 ? postLogout.GetString()?.Split("##", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.Ordinal) ?? []
                 : [];
-        foreach (var logoutUri in _options.PostLogoutRedirectUris.Select(uri => uri.ToString()))
+        foreach (var logoutUri in _options.PostLogoutRedirectUris
+            .Select(uri => uri.ToString())
+            .Where(logoutUri => !logoutUris.Contains(logoutUri)))
         {
-            if (!logoutUris.Contains(logoutUri))
-            {
-                throw RealmEvidence($"realm import does not contain post-logout redirect URI '{logoutUri}'.");
-            }
+            throw RealmEvidence($"realm import does not contain post-logout redirect URI '{logoutUri}'.");
         }
     }
 

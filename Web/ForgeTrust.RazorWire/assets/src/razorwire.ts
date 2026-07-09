@@ -12,6 +12,7 @@ interface Window {
         pageNavigationManager?: unknown;
         sectionCopyManager?: unknown;
         formInteractionsManager?: unknown;
+        behaviors?: unknown;
     };
     Turbo?: TurboRuntime;
 }
@@ -1632,9 +1633,45 @@ declare const Turbo: TurboRuntime | undefined;
         return false;
     }
 
+    function installBehaviorRegistrationStub() {
+        const existing = window.RazorWire?.behaviors as RazorWireBehaviorRegistrationStub | undefined;
+        if (existing && (existing as { __isRazorWireBehaviorManager?: boolean }).__isRazorWireBehaviorManager === true) {
+            return existing;
+        }
+
+        const queuedDefinitions = Array.isArray(existing?.__queuedDefinitions)
+            ? existing.__queuedDefinitions
+            : [];
+        const diagnostics: unknown[] = [];
+        const stub: RazorWireBehaviorRegistrationStub = {
+            __queuedDefinitions: queuedDefinitions,
+            register(definition: unknown) {
+                queuedDefinitions.push(definition);
+            },
+            scan() {
+            },
+            prune() {
+            },
+            getDiagnostics() {
+                return [...diagnostics];
+            },
+            clearDiagnostics() {
+                diagnostics.length = 0;
+            }
+        };
+
+        window.RazorWire = {
+            ...(window.RazorWire || {}),
+            behaviors: stub
+        };
+
+        return stub;
+    }
+
     // Initialize
     const runtimeConfig = readRuntimeConfig();
     installVisitStreamAction();
+    installBehaviorRegistrationStub();
     const connectionManager = new ConnectionManager(runtimeConfig);
     const localTimeFormatter = new LocalTimeFormatter();
     const formFailureManager = new FormFailureManager(runtimeConfig);

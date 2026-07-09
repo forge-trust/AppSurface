@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
@@ -74,12 +75,9 @@ public sealed class AppSurfaceKeycloakUserOptions
             throw Invalid(nameof(DisplayName), "display name cannot be blank.");
         }
 
-        foreach (var claim in Claims)
+        foreach (var claim in Claims.Where(claim => string.IsNullOrWhiteSpace(claim.Key) || string.IsNullOrWhiteSpace(claim.Value)))
         {
-            if (string.IsNullOrWhiteSpace(claim.Key) || string.IsNullOrWhiteSpace(claim.Value))
-            {
-                throw Invalid(nameof(Claims), "claim keys and values cannot be blank.");
-            }
+            throw Invalid(nameof(Claims), "claim keys and values cannot be blank.");
         }
     }
 

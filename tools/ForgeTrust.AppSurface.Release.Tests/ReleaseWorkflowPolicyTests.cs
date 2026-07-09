@@ -106,10 +106,11 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("PROMOTE_RECOMMENDED: ${{ inputs.promote-recommended }}", publish, StringComparison.Ordinal);
         Assert.Contains("--arg promoteRecommended \"${PROMOTE_RECOMMENDED}\"", publish, StringComparison.Ordinal);
         Assert.Contains("$promoteRecommended != \"true\" or .recommendedVersion == $version", publish, StringComparison.Ordinal);
-        Assert.Contains("gh release download \"${TAG}\" --pattern \"${ARCHIVE_ASSET_NAME}\"", publish, StringComparison.Ordinal);
-        Assert.Contains("gh release edit ${TAG} --draft=false", publish, StringComparison.Ordinal);
+        Assert.Contains("gh release download \"${TAG}\" --repo \"${GITHUB_REPOSITORY}\" --pattern \"${ARCHIVE_ASSET_NAME}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("gh release edit ${TAG} --repo ${GITHUB_REPOSITORY} --draft=false", publish, StringComparison.Ordinal);
+        Assert.Contains("gh release view ${TAG} --repo ${GITHUB_REPOSITORY} --json isDraft,url", publish, StringComparison.Ordinal);
         Assert.Contains("args=(release edit \"${TAG}\" --draft=false)", publish, StringComparison.Ordinal);
-        Assert.Contains("gh release delete ${TAG} --cleanup-tag=false", publish, StringComparison.Ordinal);
+        Assert.Contains("gh release delete ${TAG} --repo ${GITHUB_REPOSITORY} --cleanup-tag=false", publish, StringComparison.Ordinal);
         Assert.Contains("tar -tzf \"${asset_dir}/${asset_name}\"", publish, StringComparison.Ordinal);
         Assert.Contains("unsafe absolute or parent-relative entry", publish, StringComparison.Ordinal);
         Assert.Contains("tar -tzvf \"${asset_dir}/${asset_name}\"", publish, StringComparison.Ordinal);
@@ -126,6 +127,7 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("Required by deploy-pages to mint the GitHub Pages deployment token.", publish, StringComparison.Ordinal);
         Assert.Contains("Required so release validation can verify the protected NuGet workflow run for the tag.", publish, StringComparison.Ordinal);
         Assert.Contains("Required to create or reuse the draft GitHub Release and upload docs archive assets.", publish, StringComparison.Ordinal);
+        Assert.Contains("contents: write # Required because draft release assets are not downloadable with the workflow token under contents: read.", publish, StringComparison.Ordinal);
         Assert.Contains("Required to promote the verified draft GitHub Release to public.", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("attestations: write", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("supportState:\"Supported\"", publish, StringComparison.Ordinal);

@@ -217,6 +217,50 @@ public sealed class AppSurfaceLocalSecretProviderTests
         Assert.DoesNotContain("not-the-port-secret", diagnostic.ToString(), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("null")]
+    public void GetValue_Should_StopResolutionWhenConversionProducesNull(string rawValue)
+    {
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        store.Set(normalizer.Normalize("MyApp", "Development", null, "Payload").Identity!, rawValue);
+        var provider = CreateProvider(store);
+
+        var value = provider.GetValue<SecretPayload>("Development", "Payload");
+        var resolution = provider.ResolveValue<SecretPayload>("Development", "Payload");
+
+        Assert.Null(value);
+        Assert.Equal(LocalSecretResultStatus.ConversionFailed, resolution.Status);
+        Assert.True(provider.TryGetTerminalDiagnostic("Development", "Payload", out var diagnostic));
+        Assert.Equal("local-secret-conversion-failed", diagnostic.Code);
+        if (rawValue.Length > 0)
+        {
+            Assert.DoesNotContain(rawValue, diagnostic.ToDisplayString(), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void DefaultConfigManager_Should_Not_QueryLowerPriorityProviderWhenConversionProducesNull()
+    {
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        store.Set(normalizer.Normalize("MyApp", "Development", null, "Payload").Identity!, "null");
+        var localSecrets = CreateProvider(store);
+        var fileProvider = new StaticProvider(priority: 1, value: """{"Name":"File","Retries":1}""");
+        var environmentProvider = new NullEnvironmentProvider();
+        var manager = new DefaultConfigManager(
+            environmentProvider,
+            [fileProvider, localSecrets],
+            NullLogger<DefaultConfigManager>.Instance);
+
+        var exception = Assert.Throws<ConfigurationResolutionException>(() =>
+            manager.GetValue<SecretPayload>("Development", "Payload"));
+
+        Assert.Equal("local-secret-conversion-failed", exception.Diagnostic.Code);
+        Assert.False(fileProvider.WasCalled);
+    }
+
     [Fact]
     public void GetValue_Should_StopResolutionWhenConversionOverflowsWithoutLeakingRawValue()
     {

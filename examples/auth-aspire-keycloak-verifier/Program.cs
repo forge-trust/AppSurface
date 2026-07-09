@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Text.Json;
 
@@ -230,12 +231,9 @@ public static class Program
 
     private static void CheckRealmSecretEvidence(string importJson, ICollection<string> failures)
     {
-        foreach (var fragment in ForbiddenRealmEvidenceFragments)
+        foreach (var fragment in ForbiddenRealmEvidenceFragments.Where(fragment => importJson.Contains(fragment, StringComparison.OrdinalIgnoreCase)))
         {
-            if (importJson.Contains(fragment, StringComparison.OrdinalIgnoreCase))
-            {
-                failures.Add($"realm import evidence contains forbidden secret marker '{fragment}'.");
-            }
+            failures.Add($"realm import evidence contains forbidden secret marker '{fragment}'.");
         }
     }
 }

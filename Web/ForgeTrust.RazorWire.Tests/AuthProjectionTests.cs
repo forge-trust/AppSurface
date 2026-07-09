@@ -67,6 +67,67 @@ public sealed class AuthProjectionTests
     }
 
     [Fact]
+    public async Task AuthView_ProcessAsync_WhenStaticExport_RendersExplicitAnonymousFallbackWithoutProvider()
+    {
+        var context = CreateContext("rw:auth-view");
+        var output = CreateOutputWithMatchedSlot(context, "rw:auth-view", "Sign in safely", "policy", "docs.publish");
+        var provider = new StubAuthResultProvider(AppSurfaceAuthResult.Allowed(message: "private"));
+
+        await new AuthViewTagHelper
+        {
+            Policy = "docs.publish",
+            IncludeDiagnostics = true,
+            ViewContext = CreateViewContext(provider, staticExport: true),
+        }.ProcessAsync(context, output);
+
+        Assert.Equal(0, provider.CallCount);
+        Assert.Equal("div", output.TagName);
+        Assert.Equal("anonymous", output.Attributes["data-rw-auth-state"].Value);
+        Assert.Equal("auth-view", output.Attributes["data-rw-auth-helper"].Value);
+        Assert.Equal("true", output.Attributes[AuthViewTagHelper.StaticAttributeName].Value);
+        Assert.False(output.Attributes.ContainsName("data-rw-auth-outcome"));
+        Assert.False(output.Attributes.ContainsName("data-rw-auth-policy"));
+        Assert.False(output.Attributes.ContainsName("data-rw-auth-reason"));
+        Assert.False(output.Attributes.ContainsName(AuthViewTagHelper.StaticViolationAttributeName));
+        Assert.Equal("Sign in safely", output.Content.GetContent());
+    }
+
+    [Fact]
+    public async Task AuthView_ProcessAsync_WhenStaticExportFallbackMissing_EmitsViolationWithoutProvider()
+    {
+        var output = CreateOutput("rw:auth-view", string.Empty, "policy", "docs.publish");
+        var provider = new StubAuthResultProvider(AppSurfaceAuthResult.Allowed(message: "private"));
+
+        await new AuthViewTagHelper
+        {
+            Policy = "docs.publish",
+            ViewContext = CreateViewContext(provider, staticExport: true),
+        }.ProcessAsync(CreateContext("rw:auth-view"), output);
+
+        Assert.Equal(0, provider.CallCount);
+        Assert.Equal("anonymous", output.Attributes["data-rw-auth-state"].Value);
+        Assert.Equal(AuthViewTagHelper.StaticMissingFallbackReason, output.Attributes[AuthViewTagHelper.StaticViolationAttributeName].Value);
+        Assert.False(output.Attributes.ContainsName("data-rw-auth-outcome"));
+        Assert.Equal(string.Empty, output.Content.GetContent());
+    }
+
+    [Fact]
+    public async Task AuthView_ProcessAsync_WhenStaticExportFallbackEmpty_EmitsViolation()
+    {
+        var context = CreateContext("rw:auth-view");
+        var output = CreateOutputWithMatchedSlot(context, "rw:auth-view", "   ", "policy", "docs.publish");
+
+        await new AuthViewTagHelper
+        {
+            Policy = "docs.publish",
+            ViewContext = CreateViewContext(new StubAuthResultProvider(AppSurfaceAuthResult.Allowed()), staticExport: true),
+        }.ProcessAsync(context, output);
+
+        Assert.Equal(AuthViewTagHelper.StaticMissingFallbackReason, output.Attributes[AuthViewTagHelper.StaticViolationAttributeName].Value);
+        Assert.Equal(string.Empty, output.Content.GetContent());
+    }
+
+    [Fact]
     public async Task AuthView_ProcessAsync_WhenProviderMissing_RendersSetupFailure()
     {
         var output = CreateOutput("rw:auth-view", string.Empty, "policy", "docs.publish");
@@ -156,6 +217,46 @@ public sealed class AuthProjectionTests
     }
 
     [Fact]
+    public async Task AuthGate_ProcessAsync_WhenStaticExportAllowedGate_EmitsViolationWithoutProvider()
+    {
+        var output = CreateOutput("rw:auth-gate", "Publish", "policy", "docs.publish");
+        var provider = new StubAuthResultProvider(AppSurfaceAuthResult.Allowed());
+
+        await new AuthGateTagHelper
+        {
+            Policy = "docs.publish",
+            ViewContext = CreateViewContext(provider, staticExport: true),
+        }.ProcessAsync(CreateContext("rw:auth-gate"), output);
+
+        Assert.Equal(0, provider.CallCount);
+        Assert.Equal("div", output.TagName);
+        Assert.Equal("auth-gate", output.Attributes["data-rw-auth-helper"].Value);
+        Assert.Equal("anonymous", output.Attributes["data-rw-auth-state"].Value);
+        Assert.Equal(AuthViewTagHelper.StaticPrivateContentReason, output.Attributes[AuthViewTagHelper.StaticViolationAttributeName].Value);
+        Assert.Equal(string.Empty, output.Content.GetContent());
+    }
+
+    [Fact]
+    public async Task AuthGate_ProcessAsync_WhenStaticExportAnonymousGate_RendersWithoutProvider()
+    {
+        var output = CreateOutput("rw:auth-gate", "Sign in", "state", "anonymous");
+        var provider = new StubAuthResultProvider(AppSurfaceAuthResult.Allowed());
+
+        await new AuthGateTagHelper
+        {
+            State = "anonymous",
+            ViewContext = CreateViewContext(provider, staticExport: true),
+        }.ProcessAsync(CreateContext("rw:auth-gate"), output);
+
+        Assert.Equal(0, provider.CallCount);
+        Assert.Equal("div", output.TagName);
+        Assert.Equal("auth-gate", output.Attributes["data-rw-auth-helper"].Value);
+        Assert.Equal("anonymous", output.Attributes["data-rw-auth-state"].Value);
+        Assert.Equal("true", output.Attributes[AuthViewTagHelper.StaticAttributeName].Value);
+        Assert.False(output.Attributes.ContainsName(AuthViewTagHelper.StaticViolationAttributeName));
+    }
+
+    [Fact]
     public async Task AuthGate_ProcessAsync_WhenStateDiffers_Suppresses()
     {
         var output = CreateOutput("rw:auth-gate", "Publish", "policy", "docs.publish");
@@ -229,6 +330,24 @@ public sealed class AuthProjectionTests
         Assert.Equal("permission-gate", output.Attributes["data-rw-auth-helper"].Value);
         Assert.Equal("allowed", output.Attributes["data-rw-auth-state"].Value);
         Assert.False(output.Attributes.ContainsName("state"));
+    }
+
+    [Fact]
+    public async Task PermissionGate_ProcessAsync_WhenStaticExport_EmitsViolationWithoutProvider()
+    {
+        var output = CreateOutput("rw:permission-gate", "Publish", "policy", "docs.publish");
+        var provider = new StubAuthResultProvider(AppSurfaceAuthResult.Allowed());
+
+        await new PermissionGateTagHelper
+        {
+            Policy = "docs.publish",
+            ViewContext = CreateViewContext(provider, staticExport: true),
+        }.ProcessAsync(CreateContext("rw:permission-gate"), output);
+
+        Assert.Equal(0, provider.CallCount);
+        Assert.Equal("permission-gate", output.Attributes["data-rw-auth-helper"].Value);
+        Assert.Equal(AuthViewTagHelper.StaticPrivateContentReason, output.Attributes[AuthViewTagHelper.StaticViolationAttributeName].Value);
+        Assert.Equal(string.Empty, output.Content.GetContent());
     }
 
     [Fact]
@@ -333,6 +452,46 @@ public sealed class AuthProjectionTests
     }
 
     [Fact]
+    public async Task LoginLink_ProcessAsync_WhenStaticExportSafeHref_RendersAnchor()
+    {
+        var output = CreateOutput("rw:login-link", "Sign in", "href", "/login");
+
+        await new LoginLinkTagHelper
+        {
+            Href = "/login",
+            ViewContext = CreateViewContext(provider: null, staticExport: true),
+        }.ProcessAsync(CreateContext("rw:login-link"), output);
+
+        Assert.Equal("a", output.TagName);
+        Assert.Equal("/login", output.Attributes["href"].Value);
+        Assert.Equal("login-link", output.Attributes["data-rw-auth-helper"].Value);
+        Assert.False(output.Attributes.ContainsName(AuthViewTagHelper.StaticViolationAttributeName));
+        Assert.Equal("Sign in", output.Content.GetContent());
+    }
+
+    [Theory]
+    [InlineData("https://idp.example/login")]
+    [InlineData(" //idp.example/login")]
+    [InlineData(" \\idp.example\\login")]
+    [InlineData("/\\idp.example/login")]
+    [InlineData("\\/idp.example/login")]
+    public async Task LoginLink_ProcessAsync_WhenStaticExportUnsafeHref_EmitsViolation(string href)
+    {
+        var output = CreateOutput("rw:login-link", "Sign in", "href", href);
+
+        await new LoginLinkTagHelper
+        {
+            Href = href,
+            ViewContext = CreateViewContext(provider: null, staticExport: true),
+        }.ProcessAsync(CreateContext("rw:login-link"), output);
+
+        Assert.Equal("span", output.TagName);
+        Assert.Equal("login-link", output.Attributes["data-rw-auth-helper"].Value);
+        Assert.Equal(AuthViewTagHelper.StaticUnsafeMetadataReason, output.Attributes[AuthViewTagHelper.StaticViolationAttributeName].Value);
+        Assert.Equal(string.Empty, output.Content.GetContent());
+    }
+
+    [Fact]
     public async Task LogoutButton_ProcessAsync_RendersHostOwnedPostForm()
     {
         var output = CreateOutput("rw:logout-button", "Sign out", "action", "/logout");
@@ -349,6 +508,26 @@ public sealed class AuthProjectionTests
         Assert.Equal("/logout", output.Attributes["action"].Value);
         Assert.Contains("<button type=\"submit\">Sign out</button>", output.Content.GetContent(), StringComparison.Ordinal);
         Assert.Contains("name=\"returnUrl\" value=\"/docs?tab=auth\"", output.Content.GetContent(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LogoutButton_ProcessAsync_WhenStaticExport_EmitsViolationWithoutForm()
+    {
+        var output = CreateOutput("rw:logout-button", "Sign out", "action", "/logout");
+
+        await new LogoutButtonTagHelper(new StubAntiforgery())
+        {
+            Action = "/logout",
+            ReturnUrlPolicy = "current-path",
+            ViewContext = CreateViewContext(provider: null, staticExport: true),
+        }.ProcessAsync(CreateContext("rw:logout-button"), output);
+
+        Assert.Equal("div", output.TagName);
+        Assert.Equal("logout-button", output.Attributes["data-rw-auth-helper"].Value);
+        Assert.Equal(AuthViewTagHelper.StaticPrivateContentReason, output.Attributes[AuthViewTagHelper.StaticViolationAttributeName].Value);
+        Assert.False(output.Attributes.ContainsName("method"));
+        Assert.False(output.Attributes.ContainsName("action"));
+        Assert.DoesNotContain("__RequestVerificationToken", output.Content.GetContent(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -387,6 +566,8 @@ public sealed class AuthProjectionTests
     [Theory]
     [InlineData("//idp.example/logout")]
     [InlineData("\\logout")]
+    [InlineData("/\\idp.example/logout")]
+    [InlineData("\\/idp.example/logout")]
     [InlineData("/logout\u0001")]
     public async Task LogoutButton_ProcessAsync_WhenActionIsUnsafeRelative_DoesNotRenderRequestToken(string action)
     {
@@ -454,7 +635,11 @@ public sealed class AuthProjectionTests
         };
     }
 
-    private static ViewContext CreateViewContext(IRazorWireAuthResultProvider? provider, string path = "/", string query = "")
+    private static ViewContext CreateViewContext(
+        IRazorWireAuthResultProvider? provider,
+        string path = "/",
+        string query = "",
+        bool staticExport = false)
     {
         var services = new ServiceCollection();
         if (provider is not null)
@@ -468,6 +653,10 @@ public sealed class AuthProjectionTests
         };
         httpContext.Request.Path = path;
         httpContext.Request.QueryString = new QueryString(query);
+        if (staticExport)
+        {
+            httpContext.Request.Headers[RazorWireStaticExportRequest.HeaderName] = RazorWireStaticExportRequest.HeaderValue;
+        }
 
         return new ViewContext(
             new ActionContext(httpContext, new Microsoft.AspNetCore.Routing.RouteData(), new ActionDescriptor()),
@@ -513,6 +702,33 @@ public sealed class AuthProjectionTests
             (_, _) => Task.FromResult<TagHelperContent>(new DefaultTagHelperContent().SetHtmlContent(childContent)));
     }
 
+    private static TagHelperOutput CreateOutputWithMatchedSlot(
+        TagHelperContext context,
+        string tagName,
+        string childContent,
+        params string[] nameValuePairs)
+    {
+        var attributes = new TagHelperAttributeList();
+        for (var i = 0; i + 1 < nameValuePairs.Length; i += 2)
+        {
+            attributes.SetAttribute(nameValuePairs[i], nameValuePairs[i + 1]);
+        }
+
+        return new TagHelperOutput(
+            tagName,
+            attributes,
+            (_, _) =>
+            {
+                if (context.Items.TryGetValue(AuthViewTagHelper.SlotContextKey, out var value)
+                    && value is AuthViewTagHelper.AuthSlotContext slotContext)
+                {
+                    slotContext.MatchedExplicitSlot = true;
+                }
+
+                return Task.FromResult<TagHelperContent>(new DefaultTagHelperContent().SetHtmlContent(childContent));
+            });
+    }
+
     private sealed class StubAuthResultProvider : IRazorWireAuthResultProvider
     {
         private readonly AppSurfaceAuthResult _result;
@@ -522,10 +738,13 @@ public sealed class AuthProjectionTests
             _result = result;
         }
 
+        public int CallCount { get; private set; }
+
         public Task<AppSurfaceAuthResult> AuthorizeAsync(
             RazorWireAuthRequest request,
             CancellationToken cancellationToken = default)
         {
+            CallCount++;
             return Task.FromResult(_result);
         }
     }

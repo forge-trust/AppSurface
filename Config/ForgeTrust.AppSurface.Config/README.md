@@ -8,11 +8,11 @@ This package provides the configuration layer for AppSurface modules. It combine
 
 `ForgeTrust.AppSurface.Config` does not store secrets by itself. Use `ForgeTrust.AppSurface.Config.LocalSecrets` only
 when a solo or hobbyist app needs local, single-machine, pre-vault secret posture with source-aware diagnostics. Use
-environment variables, key-per-file, or a remote vault for CI, containers, team environments, and production. The
-migration ladder is:
+`ForgeTrust.AppSurface.Config.GoogleSecretManager` when a Google Cloud host should read explicitly mapped secrets from
+Google Secret Manager. Environment variables remain the top emergency override. The migration ladder is:
 
 ```text
-appsettings defaults < LocalSecrets < environment variables < future remote vault provider
+appsettings defaults < LocalSecrets < Google Secret Manager < environment variables
 ```
 
 ## Release Guidance
@@ -25,7 +25,9 @@ AppSurface ships as a coordinated package family. Before installing this package
 - **`IConfigManager`**: Central access point for resolving configuration values.
 - **`IConfigProvider`**: Abstraction for reading configuration from a source.
 - **`FileBasedConfigProvider`**: Loads configuration from files.
+- **`ConfigValueConverter`**: Shared provider conversion helper for scalar, enum, `Guid`, nullable, and JSON-backed values.
 - **`IConfigAuditReporter`**: Builds source-aware configuration audit reports for known config entries.
+- **`IConfigProviderAuditDiagnostics`**: Public provider seam for source-aware audit resolution without exposing secret values.
 - **`ConfigAuditTextRenderer`**: Renders a safe, human-readable audit report from the structured model.
 - **`ConfigAuditReportDiffer`**: Compares two existing sanitized audit reports without re-resolving providers.
 - **`ConfigAuditDiffTextRenderer`**: Renders deterministic diff text with explicit redaction and evidence-mode wording.

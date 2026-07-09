@@ -345,7 +345,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read # Required to download the draft release asset for public digest verification.
+      contents: write # Required because draft release assets are not downloadable with the workflow token under contents: read.
 
     steps:
       - name: Verify deployed docs and uploaded release assets
@@ -393,7 +393,7 @@ jobs:
             echo "Expected manifest ${EXPECTED_MANIFEST_SHA256}; got ${actual_manifest_sha256}." >&2
             exit 1
           fi
-          gh release download "${TAG}" --pattern "${ARCHIVE_ASSET_NAME}" --dir "${asset_dir}" --clobber
+          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern "${ARCHIVE_ASSET_NAME}" --dir "${asset_dir}" --clobber
           actual_archive_sha256="$(sha256sum "${asset_dir}/${ARCHIVE_ASSET_NAME}" | awk '{print $1}')"
           if [[ "${actual_archive_sha256}" != "${EXPECTED_ARCHIVE_SHA256}" ]]; then
             echo "Expected archive ${EXPECTED_ARCHIVE_SHA256}; got ${actual_archive_sha256}." >&2
@@ -407,9 +407,9 @@ jobs:
             echo "- Release manifest SHA-256: ${EXPECTED_MANIFEST_SHA256}"
             echo "- Release asset: ${ARCHIVE_ASSET_NAME}"
             echo "- Archive SHA-256: ${EXPECTED_ARCHIVE_SHA256}"
-            echo "- Resume draft: \`gh release view ${TAG} --json isDraft,url\`"
-            echo "- Publish draft: \`gh release edit ${TAG} --draft=false\`"
-            echo "- Abort draft: \`gh release delete ${TAG} --cleanup-tag=false\`"
+            echo "- Resume draft: \`gh release view ${TAG} --repo ${GITHUB_REPOSITORY} --json isDraft,url\`"
+            echo "- Publish draft: \`gh release edit ${TAG} --repo ${GITHUB_REPOSITORY} --draft=false\`"
+            echo "- Abort draft: \`gh release delete ${TAG} --repo ${GITHUB_REPOSITORY} --cleanup-tag=false\`"
           } >> "${GITHUB_STEP_SUMMARY}"
 
   publish-github-release:

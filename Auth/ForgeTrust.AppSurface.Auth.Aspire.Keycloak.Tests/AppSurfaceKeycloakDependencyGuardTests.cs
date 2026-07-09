@@ -53,9 +53,8 @@ public sealed class AppSurfaceKeycloakDependencyGuardTests
             "Web/ForgeTrust.RazorWire.Auth.AspNetCore/ForgeTrust.RazorWire.Auth.AspNetCore.csproj",
         };
 
-        foreach (var project in runtimeProjects)
+        foreach (var document in runtimeProjects.Select(LoadProject))
         {
-            var document = LoadProject(project);
             var packageReferences = document.Descendants("PackageReference")
                 .Select(element => element.Attribute("Include")?.Value)
                 .Where(value => value is not null)

@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
@@ -58,7 +59,7 @@ public sealed class AppSurfaceKeycloakOptions
     /// Gets or sets the directory that receives generated Keycloak realm import JSON.
     /// </summary>
     public string RealmImportDirectory { get; set; } =
-        Path.Combine(AppContext.BaseDirectory, "appsurface-keycloak-realms", AppSurfaceKeycloakDefaults.ResourceName);
+        Path.Combine(AppContext.BaseDirectory, "appsurface-keycloak-realms", Path.GetFileName(AppSurfaceKeycloakDefaults.ResourceName));
 
     /// <summary>
     /// Gets mutable redirect URIs imported into the public OIDC client.
@@ -191,15 +192,13 @@ public sealed class AppSurfaceKeycloakOptions
 
     private static void ValidateUris(IEnumerable<Uri> uris, string expectedPath, string optionName)
     {
-        foreach (var uri in uris)
+        foreach (var uri in uris.Where(uri =>
+            !uri.IsAbsoluteUri || !IsAllowedLocalhost(uri) || !string.Equals(uri.AbsolutePath, expectedPath, StringComparison.Ordinal)
+            || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment) || !string.IsNullOrEmpty(uri.UserInfo)
+            || uri.OriginalString.Contains("%2f", StringComparison.OrdinalIgnoreCase)
+            || uri.OriginalString.Contains("%5c", StringComparison.OrdinalIgnoreCase)))
         {
-            if (!uri.IsAbsoluteUri || !IsAllowedLocalhost(uri) || !string.Equals(uri.AbsolutePath, expectedPath, StringComparison.Ordinal)
-                || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment) || !string.IsNullOrEmpty(uri.UserInfo)
-                || uri.OriginalString.Contains("%2f", StringComparison.OrdinalIgnoreCase)
-                || uri.OriginalString.Contains("%5c", StringComparison.OrdinalIgnoreCase))
-            {
-                throw Invalid(optionName, $"URI '{uri}' must be absolute localhost HTTP/HTTPS with path '{expectedPath}' and no query, fragment, user info, encoded slash, or encoded backslash.");
-            }
+            throw Invalid(optionName, $"URI '{uri}' must be absolute localhost HTTP/HTTPS with path '{expectedPath}' and no query, fragment, user info, encoded slash, or encoded backslash.");
         }
     }
 

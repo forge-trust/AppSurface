@@ -35,7 +35,8 @@ The root `assets:typecheck`, `assets:test`, `assets:build`, and `assets:verify` 
 - `assets/src/page-navigation.ts` is the authored source for the lazy page-navigation runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js`.
 - `assets/src/section-copy.ts` is the authored source for the lazy section-copy runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`.
 - `assets/src/form-interactions.ts` is the authored source for the lazy form-interactions runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js`.
-- `wwwroot/razorwire/razorwire.js`, `wwwroot/razorwire/razorwire.islands.js`, `wwwroot/razorwire/page-navigation.js`, `wwwroot/razorwire/section-copy.js`, and `wwwroot/razorwire/form-interactions.js` are generated, minified, committed package outputs. Do not edit them by hand.
+- `assets/src/behavior-kit.ts` is the authored source for the eager native behavior-kit runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js`.
+- `wwwroot/razorwire/razorwire.js`, `wwwroot/razorwire/razorwire.islands.js`, `wwwroot/razorwire/page-navigation.js`, `wwwroot/razorwire/section-copy.js`, `wwwroot/razorwire/form-interactions.js`, and `wwwroot/razorwire/behavior-kit.js` are generated, minified, committed package outputs. Do not edit them by hand.
 - `assets/contracts/razorwire-public-contracts.js` is a docs-only manifest for AppSurface Docs JavaScript API harvesting. It documents browser contracts without forcing the harvester to parse generated runtime bundles.
 - `wwwroot/razorwire/exampleJsInterop.js` remains hand-authored, demo-only JavaScript. It is not part of the generated runtime pipeline.
 
@@ -51,8 +52,9 @@ The TypeScript migration preserves the public browser surface:
   - `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js`
   - `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`
   - `/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js`
-- Tag helper output: `<rw:scripts />`, Turbo attributes, optional Turbo CDN URL, SRI, `crossorigin`, and lazy/eager split-runtime detectors.
-- Global state: `window.RazorWire`, `window.RazorWire.config`, `connectionManager`, `localTimeFormatter`, `formFailureManager`, `pageNavigationManager`, and `sectionCopyManager`.
+  - `/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js`
+- Tag helper output: `<rw:scripts />`, `<rw:scripts behavior-kit="true" />`, Turbo attributes, optional Turbo CDN URL, SRI, `crossorigin`, and lazy/eager split-runtime detectors.
+- Global state: `window.RazorWire`, `window.RazorWire.config`, `connectionManager`, `localTimeFormatter`, `formFailureManager`, `pageNavigationManager`, `sectionCopyManager`, `formInteractionsManager`, and `behaviors`.
 - Form events: `razorwire:form:submit-start`, `razorwire:form:failure`, `razorwire:form:diagnostic`, and `razorwire:form:submit-end`.
 - DOM hooks: `data-rw-*` form, island, page-navigation, and section-copy attributes, including generated failure UI and section-copy fallback markers.
 - CSS hooks: RazorWire form failure variables, generated form error attributes, page-navigation state attributes, and section-copy state/fallback attributes.
