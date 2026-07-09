@@ -240,6 +240,55 @@ test('diagnostics cover conflicts, invalid selectors, failures, and missing abor
     true);
 });
 
+test('diagnostics preserve root context for repeated failures', () => {
+  const { context, document } = loadRuntime();
+  for (let index = 0; index < 2; index += 1) {
+    const root = document.createElement('section');
+    root.setAttribute('data-widget', 'true');
+    document.body.appendChild(root);
+  }
+
+  context.window.RazorWire.behaviors.register({
+    name: 'demo.widget',
+    selector: '[data-widget]',
+    connect() {
+      throw new Error('same failure');
+    }
+  });
+
+  const diagnostics = context.window.RazorWire.behaviors.getDiagnostics()
+    .filter(diagnostic => diagnostic.code === 'BehaviorConnectFailed');
+  assert.equal(diagnostics.length, 2);
+  assert.equal(new Set(diagnostics.map(diagnostic => diagnostic.rootId)).size, 2);
+});
+
+test('app-reported diagnostics use a distinct code for root and lifecycle contexts', () => {
+  const { context, document } = loadRuntime();
+  const root = document.createElement('section');
+  root.setAttribute('data-widget', 'true');
+  document.body.appendChild(root);
+
+  context.window.RazorWire.behaviors.register({
+    name: 'demo.widget',
+    selector: '[data-widget]',
+    connect(_, behavior) {
+      behavior.diagnostic('Root warning', 'Fix the root behavior.');
+    }
+  });
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'demo.page',
+    connect(lifecycle) {
+      lifecycle.diagnostic('Lifecycle warning', 'Fix the lifecycle behavior.');
+    }
+  });
+
+  const diagnostics = context.window.RazorWire.behaviors.getDiagnostics();
+  assert.equal(diagnostics.filter(diagnostic => diagnostic.code === 'BehaviorDiagnostic').length, 2);
+  assert.equal(diagnostics.some(diagnostic => diagnostic.code === 'BehaviorConnectFailed'), false);
+  assert.ok(diagnostics.some(diagnostic => diagnostic.behaviorName === 'demo.widget' && diagnostic.rootId));
+  assert.ok(diagnostics.some(diagnostic => diagnostic.behaviorName === 'demo.page'));
+});
+
 function loadRuntime(options = {}) {
   const document = new FakeDocument();
   const abortController = Object.hasOwn(options, 'abortController') ? options.abortController : AbortController;

@@ -297,7 +297,7 @@ RazorWire markup only lights up when your views import the package TagHelpers an
 
 Plain `<rw:scripts/>` is enough for page navigation, section copy, and form interactions. RazorWire emits small detectors that load `page-navigation.js` only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup, `section-copy.js` only when it contains `data-rw-section-copy` / `data-rw-section-copy-target` markup, and `form-interactions.js` only when it contains `data-rw-form-toggle` or `data-rw-form-collection` markup, including after Turbo page or frame renders. The optional `page-navigation="true"`, `section-copy="true"`, and `form-interactions="true"` attributes are eager-load escape hatches, but they are not required for normal adoption. Behavior Kit is explicit in v1; set `behavior-kit="true"` when the page registers `window.RazorWire.behaviors`.
 
-App-authored behavior kit registration is different: use `<rw:scripts behavior-kit="true" />` when app bundles call `window.RazorWire.behaviors.register(...)`. Behavior kit has no v1 lazy marker or synthetic static-export reference.
+App-authored behavior kit registration is different: use `<rw:scripts behavior-kit="true" />` when app bundles call `window.RazorWire.behaviors.register(...)` or `window.RazorWire.behaviors.registerLifecycle(...)`. Behavior kit has no v1 lazy marker or synthetic static-export reference.
 
 ## Configure Services (Optional)
 

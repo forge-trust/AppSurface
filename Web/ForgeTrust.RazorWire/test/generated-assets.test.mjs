@@ -81,8 +81,16 @@ test('public contract manifest includes page navigation, section copy, and form 
   assert.match(contracts, /data-rw-form-collection/);
   assert.match(contracts, /data-rw-form-collection-row/);
   assert.match(contracts, /registerLifecycle/);
+  assert.match(contracts, /BehaviorDiagnostic/);
   assert.match(contracts, /BehaviorConnectFailed/);
   assert.match(contracts, /BehaviorLifecycleEventInvalid/);
+});
+
+test('core behavior stub de-dupes missing-kit diagnostics', () => {
+  const source = readFileSync(runtimeSourcePath, 'utf8');
+
+  assert.match(source, /code:\s*'BehaviorKitNotLoaded'/);
+  assert.match(source, /diagnostics\.some\(diagnostic =>/);
 });
 
 test('generated verifier emits actionable stale-output diagnostics', () => {

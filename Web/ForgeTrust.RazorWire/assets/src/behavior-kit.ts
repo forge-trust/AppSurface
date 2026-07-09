@@ -319,7 +319,7 @@ interface LifecyclePass {
                     renderKind: pass.renderKind,
                     root: pass.root,
                     diagnostic: (message, fix) => this.recordDiagnostic(
-                        'BehaviorConnectFailed',
+                        'BehaviorDiagnostic',
                         message,
                         'The lifecycle behavior reported an app-owned diagnostic.',
                         fix,
@@ -424,7 +424,7 @@ interface LifecyclePass {
                 query: selector => root.querySelector(selector),
                 queryAll: selector => Array.from(root.querySelectorAll(selector)),
                 diagnostic: (message, fix) => this.recordDiagnostic(
-                    'BehaviorConnectFailed',
+                    'BehaviorDiagnostic',
                     message,
                     'The behavior reported an app-owned diagnostic.',
                     fix,
@@ -482,7 +482,12 @@ interface LifecyclePass {
             behaviorName?: string,
             rootId?: string) {
             const diagnostic = { code, message, impact, fix, docs: docsHref, behaviorName, rootId };
-            if (this.diagnostics.some(existing => existing.code === code && existing.message === message && existing.behaviorName === behaviorName)) {
+            if (this.diagnostics.some(existing =>
+                existing.code === code
+                && existing.message === message
+                && existing.behaviorName === behaviorName
+                && existing.rootId === rootId
+                && existing.fix === fix)) {
                 return;
             }
 

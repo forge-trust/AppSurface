@@ -45,7 +45,7 @@ window.RazorWire = window.RazorWire || {};
  * @public
  * @namespace RazorWire
  * @typedef {Object} RazorWireLifecycleDefinition
- * @property {string} name - Stable lifecycle behavior name. Repeated registrations with the same lifecycle options are idempotent within the current pass.
+ * @property {string} name - Stable lifecycle behavior name. Names are immutable for the page lifetime; repeated registrations with the same lifecycle options are idempotent.
  * @property {Array<"initial"|"turbo:load"|"turbo:render">} [events] - Logical page lifecycle events that should run the behavior. Defaults to `["initial", "turbo:load"]`.
  * @property {boolean} [frames] - Set to `true` to run on `turbo:frame-load`; frame loads are ignored by default.
  * @property {Function} connect - Callback invoked for each matching lifecycle pass. It receives `context` and may return a cleanup function.
@@ -110,7 +110,7 @@ window.RazorWire = window.RazorWire || {};
  * Stable Behavior Kit diagnostic codes.
  * @public
  * @namespace RazorWire
- * @typedef {"BehaviorSelectorInvalid"|"BehaviorRegistrationConflict"|"BehaviorConnectFailed"|"BehaviorCleanupFailed"|"BehaviorAbortUnsupported"|"BehaviorLifecycleEventInvalid"|"BehaviorKitNotLoaded"} RazorWireBehaviorDiagnosticCode
+ * @typedef {"BehaviorSelectorInvalid"|"BehaviorRegistrationConflict"|"BehaviorDiagnostic"|"BehaviorConnectFailed"|"BehaviorCleanupFailed"|"BehaviorAbortUnsupported"|"BehaviorLifecycleEventInvalid"|"BehaviorKitNotLoaded"} RazorWireBehaviorDiagnosticCode
  */
 
 /**

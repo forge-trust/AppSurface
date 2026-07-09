@@ -1632,6 +1632,13 @@ declare const Turbo: TurboRuntime | undefined;
                 queue.push({ kind: 'registerLifecycle', definition });
             },
             scan() {
+                if (diagnostics.some(diagnostic =>
+                    !!diagnostic
+                    && typeof diagnostic === 'object'
+                    && (diagnostic as { code?: unknown }).code === 'BehaviorKitNotLoaded')) {
+                    return;
+                }
+
                 diagnostics.push({
                     code: 'BehaviorKitNotLoaded',
                     message: 'RazorWire Behavior Kit is not loaded.',

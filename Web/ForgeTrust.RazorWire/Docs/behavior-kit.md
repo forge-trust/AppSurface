@@ -81,6 +81,7 @@ Call `window.RazorWire.behaviors.getDiagnostics()` in development tests or brows
 | --- | --- |
 | `BehaviorSelectorInvalid` | A root behavior selector cannot be scanned. |
 | `BehaviorRegistrationConflict` | The same behavior name was registered with incompatible options. |
+| `BehaviorDiagnostic` | A root or lifecycle behavior reported an app-owned diagnostic through `context.diagnostic(...)`. |
 | `BehaviorConnectFailed` | A root or lifecycle callback threw while connecting. |
 | `BehaviorCleanupFailed` | A cleanup callback threw while disconnecting. |
 | `BehaviorAbortUnsupported` | The browser cannot provide `AbortController` / `AbortSignal`. |
