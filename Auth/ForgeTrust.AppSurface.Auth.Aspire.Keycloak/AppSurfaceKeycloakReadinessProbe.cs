@@ -138,21 +138,23 @@ public sealed class AppSurfaceKeycloakReadinessProbe
             .Where(item => item.ValueKind == JsonValueKind.String)
             .Select(item => item.GetString())
             .ToHashSet(StringComparer.Ordinal);
-        foreach (var redirectUri in _options.RedirectUris.Select(uri => uri.ToString()))
+        var missingRedirectUri = _options.RedirectUris
+            .Select(uri => uri.ToString())
+            .Where(redirectUri => !redirects.Contains(redirectUri))
+            .FirstOrDefault();
+        if (missingRedirectUri is not null)
         {
-            if (!redirects.Contains(redirectUri))
-            {
-                throw RealmEvidence($"realm import does not contain redirect URI '{redirectUri}'.");
-            }
+            throw RealmEvidence($"realm import does not contain redirect URI '{missingRedirectUri}'.");
         }
 
         var logoutUris = GetPostLogoutRedirectUris(client);
-        foreach (var logoutUri in _options.PostLogoutRedirectUris.Select(uri => uri.ToString()))
+        var missingLogoutUri = _options.PostLogoutRedirectUris
+            .Select(uri => uri.ToString())
+            .Where(logoutUri => !logoutUris.Contains(logoutUri))
+            .FirstOrDefault();
+        if (missingLogoutUri is not null)
         {
-            if (!logoutUris.Contains(logoutUri))
-            {
-                throw RealmEvidence($"realm import does not contain post-logout redirect URI '{logoutUri}'.");
-            }
+            throw RealmEvidence($"realm import does not contain post-logout redirect URI '{missingLogoutUri}'.");
         }
     }
 

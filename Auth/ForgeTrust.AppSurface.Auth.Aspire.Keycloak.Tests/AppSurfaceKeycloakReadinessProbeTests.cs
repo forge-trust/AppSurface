@@ -281,6 +281,78 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         Assert.Contains("redirect URI", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task CheckOnceAsync_WhenLaterConfiguredRedirectMissing_ThrowsRealmEvidenceDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+        options.RedirectUris.Add(new Uri("http://127.0.0.1:5059/signin-appsurface-oidc"));
+        Directory.CreateDirectory(options.RealmImportDirectory);
+        File.WriteAllText(
+            AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(options.RealmImportDirectory, options.Realm),
+            """
+            {
+              "realm": "appsurface-dev",
+              "clients": [
+                {
+                  "clientId": "appsurface-web",
+                  "redirectUris": [ "http://localhost:5059/signin-appsurface-oidc" ],
+                  "attributes": {
+                    "post.logout.redirect.uris": "http://localhost:5059/signout-callback-appsurface-oidc"
+                  }
+                }
+              ],
+              "users": [
+                { "username": "admin" },
+                { "username": "viewer" }
+              ]
+            }
+            """);
+        using var client = new HttpClient(new StubHandler(MetadataThenOk));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid, exception.Code);
+        Assert.Contains("http://127.0.0.1:5059/signin-appsurface-oidc", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckOnceAsync_WhenLaterConfiguredPostLogoutRedirectMissing_ThrowsRealmEvidenceDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+        options.PostLogoutRedirectUris.Add(new Uri("http://127.0.0.1:5059/signout-callback-appsurface-oidc"));
+        Directory.CreateDirectory(options.RealmImportDirectory);
+        File.WriteAllText(
+            AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(options.RealmImportDirectory, options.Realm),
+            """
+            {
+              "realm": "appsurface-dev",
+              "clients": [
+                {
+                  "clientId": "appsurface-web",
+                  "redirectUris": [ "http://localhost:5059/signin-appsurface-oidc" ],
+                  "attributes": {
+                    "post.logout.redirect.uris": "http://localhost:5059/signout-callback-appsurface-oidc"
+                  }
+                }
+              ],
+              "users": [
+                { "username": "admin" },
+                { "username": "viewer" }
+              ]
+            }
+            """);
+        using var client = new HttpClient(new StubHandler(MetadataThenOk));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid, exception.Code);
+        Assert.Contains("http://127.0.0.1:5059/signout-callback-appsurface-oidc", exception.Message, StringComparison.Ordinal);
+    }
+
     private static HttpResponseMessage MetadataThenOk(HttpRequestMessage request)
     {
         if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
