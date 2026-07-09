@@ -150,9 +150,13 @@ public sealed class AppSurfaceKeycloakOptionsTests
 
     [Theory]
     [InlineData("https://example.com/signin-appsurface-oidc")]
+    [InlineData("ftp://localhost/signin-appsurface-oidc")]
     [InlineData("http://localhost/signin-appsurface-oidc?x=1")]
+    [InlineData("http://localhost/signin-appsurface-oidc#x")]
+    [InlineData("http://user@localhost/signin-appsurface-oidc")]
     [InlineData("http://localhost/other")]
     [InlineData("http://localhost/signin%2fappsurface-oidc")]
+    [InlineData("http://localhost/signin%5cappsurface-oidc")]
     public void Validate_WhenRedirectUnsafe_Throws(string redirect)
     {
         var options = new AppSurfaceKeycloakOptions();
@@ -161,6 +165,30 @@ public sealed class AppSurfaceKeycloakOptionsTests
         var exception = Assert.Throws<AppSurfaceKeycloakException>(options.Validate);
 
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, exception.Code);
+    }
+
+    [Fact]
+    public void Validate_WhenRedirectRelative_Throws()
+    {
+        var options = new AppSurfaceKeycloakOptions();
+        options.RedirectUris.Add(new Uri("/signin-appsurface-oidc", UriKind.Relative));
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(options.Validate);
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, exception.Code);
+    }
+
+    [Fact]
+    public void Validate_WhenLoopbackHttpsRedirects_Accepts()
+    {
+        var options = new AppSurfaceKeycloakOptions();
+        options.RedirectUris.Add(new Uri("https://127.0.0.1:5059/signin-appsurface-oidc", UriKind.Absolute));
+        options.PostLogoutRedirectUris.Add(new Uri("https://localhost:5059/signout-callback-appsurface-oidc", UriKind.Absolute));
+
+        options.Validate();
+
+        Assert.Equal("https", options.RedirectUris.Single().Scheme);
+        Assert.Equal("127.0.0.1", options.RedirectUris.Single().Host);
     }
 
     [Theory]
@@ -213,7 +241,11 @@ public sealed class AppSurfaceKeycloakOptionsTests
 
     [Theory]
     [InlineData("Auser", "local-password", "valid-subject", "Valid Name", nameof(AppSurfaceKeycloakUserOptions.Username))]
+    [InlineData(".", "local-password", "valid-subject", "Valid Name", nameof(AppSurfaceKeycloakUserOptions.Username))]
+    [InlineData("..", "local-password", "valid-subject", "Valid Name", nameof(AppSurfaceKeycloakUserOptions.Username))]
     [InlineData("valid-user", "", "valid-subject", "Valid Name", nameof(AppSurfaceKeycloakUserOptions.Password))]
+    [InlineData("valid-user", "local-password", "InvalidSubject", "Valid Name", nameof(AppSurfaceKeycloakUserOptions.Subject))]
+    [InlineData("valid-user", "local-password", ".", "Valid Name", nameof(AppSurfaceKeycloakUserOptions.Subject))]
     [InlineData("valid-user", "local-password", "..", "Valid Name", nameof(AppSurfaceKeycloakUserOptions.Subject))]
     [InlineData("valid-user", "local-password", "valid-subject", " ", nameof(AppSurfaceKeycloakUserOptions.DisplayName))]
     public void Validate_WhenSeededUserInvalid_ThrowsSafeDiagnostic(

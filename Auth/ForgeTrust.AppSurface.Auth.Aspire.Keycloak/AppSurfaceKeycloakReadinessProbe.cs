@@ -138,25 +138,45 @@ public sealed class AppSurfaceKeycloakReadinessProbe
             .Where(item => item.ValueKind == JsonValueKind.String)
             .Select(item => item.GetString())
             .ToHashSet(StringComparer.Ordinal);
-        foreach (var redirectUri in _options.RedirectUris
-            .Select(uri => uri.ToString())
-            .Where(redirectUri => !redirects.Contains(redirectUri)))
+        foreach (var uri in _options.RedirectUris)
         {
-            throw RealmEvidence($"realm import does not contain redirect URI '{redirectUri}'.");
+            var redirectUri = uri.ToString();
+            if (!redirects.Contains(redirectUri))
+            {
+                throw RealmEvidence($"realm import does not contain redirect URI '{redirectUri}'.");
+            }
         }
 
-        var logoutUris = client.TryGetProperty("attributes", out var attributes)
-            && attributes.ValueKind == JsonValueKind.Object
-            && attributes.TryGetProperty("post.logout.redirect.uris", out var postLogout)
-            && postLogout.ValueKind == JsonValueKind.String
-                ? postLogout.GetString()?.Split("##", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.Ordinal) ?? []
-                : [];
-        foreach (var logoutUri in _options.PostLogoutRedirectUris
-            .Select(uri => uri.ToString())
-            .Where(logoutUri => !logoutUris.Contains(logoutUri)))
+        var logoutUris = GetPostLogoutRedirectUris(client);
+        foreach (var uri in _options.PostLogoutRedirectUris)
         {
-            throw RealmEvidence($"realm import does not contain post-logout redirect URI '{logoutUri}'.");
+            var logoutUri = uri.ToString();
+            if (!logoutUris.Contains(logoutUri))
+            {
+                throw RealmEvidence($"realm import does not contain post-logout redirect URI '{logoutUri}'.");
+            }
         }
+    }
+
+    private static HashSet<string> GetPostLogoutRedirectUris(JsonElement client)
+    {
+        if (!client.TryGetProperty("attributes", out var attributes) || attributes.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        if (!attributes.TryGetProperty("post.logout.redirect.uris", out var postLogout) || postLogout.ValueKind != JsonValueKind.String)
+        {
+            return [];
+        }
+
+        var postLogoutValue = postLogout.GetString();
+        if (string.IsNullOrEmpty(postLogoutValue))
+        {
+            return [];
+        }
+
+        return postLogoutValue.Split("##", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.Ordinal);
     }
 
     private async Task CheckAuthorizationChallengeAsync(AppSurfaceKeycloakConfigurationProjection projection, CancellationToken cancellationToken)

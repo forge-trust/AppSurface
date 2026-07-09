@@ -32,6 +32,24 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceKeycloak_WhenPersistentVolumeDisabled_StillWritesRealmImport()
+    {
+        using var directory = new TempDirectory();
+        var keycloakPort = GetAvailablePort();
+        var webProofPort = GetAvailablePort();
+        var builder = DistributedApplication.CreateBuilder([]);
+
+        var resource = builder.AddAppSurfaceKeycloak("keycloak-proof", options =>
+        {
+            options.KeycloakPort = keycloakPort;
+            options.WebProofPort = webProofPort;
+            options.RealmImportDirectory = directory.Path;
+        });
+
+        Assert.True(File.Exists(resource.RealmImportFile));
+    }
+
+    [Fact]
     public void Projection_WhenClientSecretRequired_UsesBooleanStringAndRejectsNullProject()
     {
         var projection = new AppSurfaceKeycloakConfigurationProjection(

@@ -55,12 +55,12 @@ public sealed class AppSurfaceKeycloakUserOptions
 
     internal void Validate()
     {
-        if (!UserOrSubjectPattern.IsMatch(Username) || Username is "." or "..")
+        if (!UserOrSubjectPattern.IsMatch(Username))
         {
             throw Invalid(nameof(Username), "username must match ^[a-z][a-z0-9._-]{1,63}$ and cannot be . or ...");
         }
 
-        if (!UserOrSubjectPattern.IsMatch(Subject) || Subject is "." or "..")
+        if (!UserOrSubjectPattern.IsMatch(Subject))
         {
             throw Invalid(nameof(Subject), "subject must match ^[a-z][a-z0-9._-]{1,63}$ and cannot be . or ...");
         }

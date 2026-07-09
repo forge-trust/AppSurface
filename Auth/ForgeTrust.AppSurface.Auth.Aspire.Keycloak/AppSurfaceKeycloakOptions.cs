@@ -191,15 +191,24 @@ public sealed class AppSurfaceKeycloakOptions
 
     private static void ValidateUris(IEnumerable<Uri> uris, string expectedPath, string optionName)
     {
-        foreach (var uri in uris.Where(uri =>
-            !uri.IsAbsoluteUri || !IsAllowedLocalhost(uri) || !string.Equals(uri.AbsolutePath, expectedPath, StringComparison.Ordinal)
-            || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment) || !string.IsNullOrEmpty(uri.UserInfo)
-            || uri.OriginalString.Contains("%2f", StringComparison.OrdinalIgnoreCase)
-            || uri.OriginalString.Contains("%5c", StringComparison.OrdinalIgnoreCase)))
+        foreach (var uri in uris)
         {
-            throw Invalid(optionName, $"URI '{uri}' must be absolute localhost HTTP/HTTPS with path '{expectedPath}' and no query, fragment, user info, encoded slash, or encoded backslash.");
+            if (!IsSafeLocalhostUri(uri, expectedPath))
+            {
+                throw Invalid(optionName, $"URI '{uri}' must be absolute localhost HTTP/HTTPS with path '{expectedPath}' and no query, fragment, user info, encoded slash, or encoded backslash.");
+            }
         }
     }
+
+    private static bool IsSafeLocalhostUri(Uri uri, string expectedPath) =>
+        uri.IsAbsoluteUri
+        && IsAllowedLocalhost(uri)
+        && string.Equals(uri.AbsolutePath, expectedPath, StringComparison.Ordinal)
+        && string.IsNullOrEmpty(uri.Query)
+        && string.IsNullOrEmpty(uri.Fragment)
+        && string.IsNullOrEmpty(uri.UserInfo)
+        && !uri.OriginalString.Contains("%2f", StringComparison.OrdinalIgnoreCase)
+        && !uri.OriginalString.Contains("%5c", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsAllowedLocalhost(Uri uri) =>
         (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) || string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal))

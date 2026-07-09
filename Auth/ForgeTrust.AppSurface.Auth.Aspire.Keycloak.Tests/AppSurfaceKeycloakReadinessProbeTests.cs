@@ -46,6 +46,21 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
     }
 
     [Fact]
+    public async Task CheckOnceAsync_WhenIssuerMissing_ThrowsMetadataDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+        AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
+        using var client = new HttpClient(new StubHandler(_ => Json("""{}""")));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.MetadataInvalid, exception.Code);
+        Assert.Contains("<missing>", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CheckOnceAsync_WhenMetadataRequestFails_ThrowsUnavailableDiagnostic()
     {
         using var directory = new TempDirectory();
@@ -99,6 +114,31 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
 
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.AuthorizationChallengeInvalid, exception.Code);
         Assert.DoesNotContain("appsurface-admin-local-only", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckOnceAsync_WhenAuthorizationRedirects_Succeeds()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+        AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
+        using var client = new HttpClient(new StubHandler(request =>
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
+            {
+                return Json("""{"issuer":"http://localhost:8080/realms/appsurface-dev"}""");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.Redirect)
+            {
+                Headers = { Location = new Uri("http://localhost:5059/signin-appsurface-oidc?code=local") },
+            };
+        }));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var result = await probe.CheckOnceAsync();
+
+        Assert.Equal("appsurface-dev", result.Realm);
     }
 
     [Fact]
@@ -169,9 +209,19 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
     [InlineData("""{"clients":[],"users":[{"username":"admin"},{"username":"viewer"}]}""", "expected realm id")]
     [InlineData("""{"realm":"appsurface-dev","users":[{"username":"admin"},{"username":"viewer"}]}""", "clients array")]
     [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":["http://localhost:5059/signin-appsurface-oidc"]}]}""", "users array")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[42],"users":[{"username":"admin"},{"username":"viewer"}]}""", "public client id")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"redirectUris":["http://localhost:5059/signin-appsurface-oidc"]}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "public client id")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":42}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "public client id")]
     [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"other","redirectUris":["http://localhost:5059/signin-appsurface-oidc"]}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "public client id")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":[42]}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "redirect URI")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":["http://localhost:5059/signin-appsurface-oidc"]}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "post-logout redirect URI")]
     [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","attributes":{"post.logout.redirect.uris":"http://localhost:5059/signout-callback-appsurface-oidc"}}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "client redirect URIs")]
     [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":["http://localhost:5059/signin-appsurface-oidc"],"attributes":{"post.logout.redirect.uris":"http://localhost:5059/signout-callback-appsurface-oidc"}}],"users":[{"username":"admin"}]}""", "seeded user")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":["http://localhost:5059/signin-appsurface-oidc"],"attributes":{"post.logout.redirect.uris":"http://localhost:5059/signout-callback-appsurface-oidc"}}],"users":[42,{"username":"viewer"}]}""", "seeded user")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":["http://localhost:5059/signin-appsurface-oidc"],"attributes":{"post.logout.redirect.uris":"http://localhost:5059/signout-callback-appsurface-oidc"}}],"users":[{"username":42},{"username":"viewer"}]}""", "seeded user")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":["http://localhost:5059/signin-appsurface-oidc"],"attributes":[]}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "post-logout redirect URI")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":["http://localhost:5059/signin-appsurface-oidc"],"attributes":{"post.logout.redirect.uris":""}}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "post-logout redirect URI")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":["http://localhost:5059/signin-appsurface-oidc"],"attributes":{"post.logout.redirect.uris":42}}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "post-logout redirect URI")]
     [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":["http://localhost:5059/signin-appsurface-oidc"],"attributes":{}}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "post-logout redirect URI")]
     public async Task CheckOnceAsync_WhenRealmEvidenceIncomplete_ThrowsSpecificDiagnostic(string json, string expectedMessage)
     {
