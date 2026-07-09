@@ -63,6 +63,9 @@ test('public contract manifest includes page navigation, section copy, and form 
   assert.match(contracts, /window\.RazorWire\.sectionCopyManager/);
   assert.match(contracts, /window\.RazorWire\.formInteractionsManager/);
   assert.match(contracts, /window\.RazorWire\.behaviors/);
+  assert.match(contracts, /RazorWireBehaviorDefinition/);
+  assert.match(contracts, /RazorWireLifecycleDefinition/);
+  assert.match(contracts, /RazorWireBehaviorDiagnostic/);
   assert.doesNotMatch(contracts, /@manager/);
   assert.match(contracts, /razorwire:page-nav:active-change/);
   assert.match(contracts, /data-rw-page-nav/);
@@ -78,6 +81,7 @@ test('public contract manifest includes page navigation, section copy, and form 
   assert.match(contracts, /data-rw-form-collection/);
   assert.match(contracts, /data-rw-form-collection-row/);
   assert.match(contracts, /registerLifecycle/);
+  assert.match(contracts, /BehaviorConnectFailed/);
   assert.match(contracts, /BehaviorLifecycleEventInvalid/);
 });
 

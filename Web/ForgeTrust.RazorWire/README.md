@@ -103,6 +103,33 @@ dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.App
 
 For failed submissions, RazorWire also ships a convention-based form UX stack: default form-local fallbacks for unhandled failures, server helpers for validation errors, anti-forgery diagnostics in development, and styling/event hooks for consumers. See [Failed Form UX](Docs/form-failures.md) or run the sample and visit `/Reactivity/FormFailures`.
 
+## Behavior Kit in 3 Minutes
+
+Use RazorWire behavior kit when app-owned JavaScript needs to enhance server-rendered DOM without duplicate document listeners after Turbo visits, frame replacement, partial updates, or repeated bundle evaluation.
+
+```cshtml
+<rw:scripts behavior-kit="true" />
+<script src="~/js/page-behaviors.js" asp-append-version="true"></script>
+```
+
+```js
+window.RazorWire.behaviors.register({
+  name: "demo.preview",
+  selector: "[data-demo-preview]",
+  connect(root, context) {
+    const button = context.query("[data-demo-preview-button]");
+    const output = context.query("[data-demo-preview-output]");
+    if (!button || !output) return;
+
+    button.addEventListener("click", () => {
+      output.textContent = new Date().toLocaleTimeString();
+    }, { signal: context.signal });
+  }
+});
+```
+
+Behavior kit is eager-only in v1. Plain `<rw:scripts />` lazy-loads built-in page navigation, section copy, and form interactions when their markup is present; it does not infer app behavior registration from generic markers. Use built-in managers for package-owned behavior, islands for component/module hydration, and behavior kit for small lifecycle-safe progressive enhancement on replaceable server DOM. See the full contract in [Behavior Kit](Docs/behavior-kit.md).
+
 ## Form Interactions in 3 Minutes
 
 Use RazorWire form interactions when a server-rendered form needs conditional fields or one-dimensional model-bound collection rows without page-local JavaScript.
@@ -269,6 +296,8 @@ RazorWire markup only lights up when your views import the package TagHelpers an
 <!-- /appsurface:snippet -->
 
 Plain `<rw:scripts/>` is enough for page navigation, section copy, and form interactions. RazorWire emits small detectors that load `page-navigation.js` only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup, `section-copy.js` only when it contains `data-rw-section-copy` / `data-rw-section-copy-target` markup, and `form-interactions.js` only when it contains `data-rw-form-toggle` or `data-rw-form-collection` markup, including after Turbo page or frame renders. The optional `page-navigation="true"`, `section-copy="true"`, and `form-interactions="true"` attributes are eager-load escape hatches, but they are not required for normal adoption. Behavior Kit is explicit in v1; set `behavior-kit="true"` when the page registers `window.RazorWire.behaviors`.
+
+App-authored behavior kit registration is different: use `<rw:scripts behavior-kit="true" />` when app bundles call `window.RazorWire.behaviors.register(...)`. Behavior kit has no v1 lazy marker or synthetic static-export reference.
 
 ## Configure Services (Optional)
 
@@ -664,6 +693,10 @@ Projects a passive auth result into one server-rendered slot. Child slots includ
 </rw:auth-view>
 ```
 
+Static export forces auth projection into a public anonymous/fallback state and never writes protected allowed content to
+disk. Exported protected views need an explicit `rw:auth-anonymous` fallback. See
+[Static Auth Projection](Docs/static-auth-projection.md).
+
 ### `rw:auth-gate` and `rw:permission-gate`
 
 Conditionally render child content when a projected policy reaches the requested state. `rw:permission-gate` is an
@@ -761,6 +794,11 @@ app.MapPost("/docs/publish", PublishAsync)
 `data-rw-auth-helper`. Policy names and reason details are emitted only when `include-diagnostics="true"` is set. Raw
 `AppSurfaceAuthResult.Message`, arbitrary metadata, persona names, subjects, schemes, and DevAuth state are not rendered
 by default.
+
+Static export is stricter: the exporter sends `X-RazorWire-Static-Export: auth-anonymous-v1`, renders only explicit
+anonymous fallback output, rejects allowed gates and logout forms, strips outcome details from static auth markers, and
+fails with `RWEXPORT010` before writing unsafe text artifacts. See
+[Static Auth Projection](Docs/static-auth-projection.md).
 
 Available states are `allowed`, `anonymous`, `forbidden`, `setup-failure`, `unsafe-navigation`,
 `stale-or-unknown-session`, and `unknown`. `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` remains separate local

@@ -13,28 +13,37 @@ on:
         description: Branch or ref that must contain the tag commit.
         required: false
         default: main
-      docs-catalog:
-        description: Staged AppSurface Docs versions.json for stable docs evidence verification.
+      promote-recommended:
+        description: Promote this stable docs archive to recommendedVersion.
         required: false
-      docs-trusted-release-root:
-        description: Trusted release root that contains staged docs exact trees.
-        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
 
 concurrency:
   group: release-publish-${{ inputs.tag }}
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: read # Required so jobs can checkout the release tooling unless a narrower job override applies.
 
 jobs:
-  publish:
+  validate-release:
     if: ${{ github.repository == 'forge-trust/AppSurface' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      actions: read
-      contents: write
+      actions: read # Required so release validation can verify the protected NuGet workflow run for the tag.
+      contents: read # Required to checkout the repository and inspect tag-bound release artifacts.
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      tag_commit: ${{ steps.release.outputs.tag_commit }}
+      notes_file: ${{ steps.release.outputs.notes_file }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      docs_release_manifest_sha256: ${{ steps.release.outputs.docs_release_manifest_sha256 }}
 
     steps:
       - name: Checkout repository
@@ -63,37 +72,384 @@ jobs:
           VERSION: ${{ inputs.version }}
           TAG: ${{ inputs.tag }}
           BASE_REF: ${{ inputs.base-ref }}
-          DOCS_CATALOG: ${{ inputs.docs-catalog }}
-          DOCS_TRUSTED_RELEASE_ROOT: ${{ inputs.docs-trusted-release-root }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          docs_args=()
-          if [[ -n "${DOCS_CATALOG}" ]]; then
-            docs_args+=(--docs-catalog "${DOCS_CATALOG}")
-          fi
-          if [[ -n "${DOCS_TRUSTED_RELEASE_ROOT}" ]]; then
-            docs_args+=(--docs-trusted-release-root "${DOCS_TRUSTED_RELEASE_ROOT}")
-          fi
           ./eng/release publish \
             --version "${VERSION}" \
             --tag "${TAG}" \
             --base-ref "${BASE_REF}" \
             --dry-run \
-            --github-output "${GITHUB_OUTPUT}" \
-            "${docs_args[@]}"
+            --github-output "${GITHUB_OUTPUT}"
 
-      - name: Create GitHub Release
+  publish-docs-archive:
+    if: ${{ github.repository == 'forge-trust/AppSurface' }}
+    needs: validate-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # Required to create or reuse the draft GitHub Release and upload docs archive assets.
+    outputs:
+      archive_asset_name: ${{ steps.docs.outputs.archive_asset_name }}
+      archive_sha256: ${{ steps.docs.outputs.archive_sha256 }}
+      sha256_path: ${{ steps.docs.outputs.sha256_path }}
+      catalog_path: ${{ steps.docs.outputs.catalog_path }}
+      pages_staging_root: ${{ steps.docs.outputs.pages_staging_root }}
+      exact_tree_path: ${{ steps.docs.outputs.exact_tree_path }}
+      release_manifest_sha256: ${{ steps.docs.outputs.release_manifest_sha256 }}
+      recovery_summary_path: ${{ steps.docs.outputs.recovery_summary_path }}
+
+    steps:
+      - name: Checkout repository at tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-release.outputs.tag_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Build AppSurface Docs exporter
+        run: dotnet build ForgeTrust.AppSurface.slnx -c Release
+
+      - name: Export current docs root and exact docs tree
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.release.outputs.tag }}
-          TITLE: AppSurface ${{ steps.release.outputs.tag }}
-          NOTES_FILE: ${{ steps.release.outputs.notes_file }}
-          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+          VERSION: ${{ needs.validate-release.outputs.version }}
+          EXISTING_PAGES_ROOT: ${{ runner.temp }}/appsurface-existing-pages
+          AppSurfaceDocs__Contributor__DefaultBranch: ${{ inputs.base-ref }}
+          AppSurfaceDocs__Contributor__SourceRef: ${{ needs.validate-release.outputs.tag_commit }}
+          AppSurfaceDocs__Contributor__SourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{branch}/{path}
+          AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{ref}/{path}#L{line}
+          AppSurfaceDocs__Contributor__EditUrlTemplate: https://github.com/${{ github.repository }}/edit/{branch}/{path}
+          AppSurfaceDocs__Contributor__LastUpdatedMode: Git
+          AppSurfaceDocs__Identity__DisplayName: AppSurface
+          AppSurfaceDocs__Identity__Wordmark__HighlightText: Surface
+          AppSurfaceDocs__Identity__Wordmark__HighlightColor: "#3b82f6"
+          AppSurfaceDocs__Identity__BrandingAssets__DirectoryPath: branding
+          AppSurfaceDocs__Identity__BrandingAssets__AllowSvgAssets: "true"
+          AppSurfaceDocs__Identity__Logo__Path: /branding/appsurface-site-icon.svg
+          AppSurfaceDocs__Identity__Favicon__SvgPath: /branding/appsurface-site-icon.svg
+          AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js
         run: |
           set -euo pipefail
-          args=(release create "${TAG}" --verify-tag --title "${TITLE}" --notes-file "${NOTES_FILE}")
+          exact_tree="${RUNNER_TEMP}/appsurface-docs-exact/releases/${VERSION}"
+          mkdir -p "${exact_tree}"
+          printf '%s\n' '/' '/docs' > "${RUNNER_TEMP}/appsurface-docs-seeds.txt"
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build --no-restore -- \
+            docs export \
+            --repo . \
+            --mode cdn \
+            --seeds "${RUNNER_TEMP}/appsurface-docs-seeds.txt" \
+            --output "${EXISTING_PAGES_ROOT}" \
+            --public-origin https://forge-trust.com \
+            --startup-timeout-seconds 30 \
+            --strict
+          cp -R "${EXISTING_PAGES_ROOT}/." "${exact_tree}/"
+
+      - name: Hydrate existing release docs archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate-release.outputs.version }}
+          EXISTING_PAGES_ROOT: ${{ runner.temp }}/appsurface-existing-pages
+        run: |
+          set -euo pipefail
+          assets_root="${RUNNER_TEMP}/appsurface-release-docs-assets"
+          mkdir -p "${assets_root}" "${EXISTING_PAGES_ROOT}/releases"
+          mapfile -t release_rows < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+              --jq '.[] | select(.draft | not) | [.tag_name, .prerelease] | @tsv'
+          )
+          if [[ "${#release_rows[@]}" -eq 0 ]]; then
+            exit 0
+          fi
+          catalog_entries="${RUNNER_TEMP}/appsurface-existing-release-docs-catalog.jsonl"
+          : > "${catalog_entries}"
+          for release_row in "${release_rows[@]}"; do
+            IFS=$'\t' read -r release_tag _is_prerelease <<< "${release_row}"
+            release_version="${release_tag#v}"
+            if [[ "${release_version}" == "${VERSION}" ]]; then
+              continue
+            fi
+            asset_name="appsurface-docs-v${release_version}.tar.gz"
+            asset_dir="${assets_root}/${release_version}"
+            exact_tree="${EXISTING_PAGES_ROOT}/releases/${release_version}"
+            mkdir -p "${asset_dir}" "${exact_tree}"
+            if ! gh release download "${release_tag}" --pattern "${asset_name}" --dir "${asset_dir}" --clobber; then
+              echo "No release docs archive asset found for ${release_tag}; skipping." >&2
+              continue
+            fi
+            if tar -tzf "${asset_dir}/${asset_name}" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+              echo "Release docs archive ${asset_name} contains an unsafe absolute or parent-relative entry." >&2
+              exit 1
+            fi
+            if ! tar -tzvf "${asset_dir}/${asset_name}" | awk '{ kind = substr($1, 1, 1); if (kind != "-" && kind != "d") exit 1 }'; then
+              echo "Release docs archive ${asset_name} contains a non-regular tar entry." >&2
+              exit 1
+            fi
+            rm -rf "${exact_tree}"
+            mkdir -p "${exact_tree}"
+            tar -xzf "${asset_dir}/${asset_name}" -C "${exact_tree}"
+            manifest="${exact_tree}/.appsurface-docs-release-manifest.json"
+            if [[ ! -f "${manifest}" ]]; then
+              echo "Release docs archive ${asset_name} did not contain .appsurface-docs-release-manifest.json." >&2
+              exit 1
+            fi
+            manifest_sha256="$(sha256sum "${manifest}" | awk '{print $1}')"
+            jq -nc \
+              --arg version "${release_version}" \
+              --arg exactTreePath "releases/${release_version}" \
+              --arg releaseManifestSha256 "${manifest_sha256}" \
+              '{version:$version,label:$version,summary:("AppSurface " + $version),supportState:"Maintained",visibility:"Public",advisoryState:"None",exactTreePath:$exactTreePath,releaseManifestSha256:$releaseManifestSha256}' \
+              >> "${catalog_entries}"
+          done
+          if [[ -s "${catalog_entries}" ]]; then
+            jq -s \
+              'def semver_key: (.version | capture("^(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)") | [.major,.minor,.patch] | map(tonumber));
+               def stable_version: (.version | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"));
+               (sort_by(semver_key) | reverse) as $versions |
+               ($versions | map(select(stable_version)) | sort_by(semver_key) | reverse | first | .version // null) as $recommended |
+               {schema:"appsurface-docs-version-catalog-v1",recommendedVersion:$recommended,versions:($versions | map(. + {supportState:(if .version == $recommended then "Current" else "Maintained" end)}))}' \
+              "${catalog_entries}" > "${EXISTING_PAGES_ROOT}/versions.json"
+          fi
+
+      - name: Create docs publication plan
+        id: docs
+        env:
+          VERSION: ${{ needs.validate-release.outputs.version }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.validate-release.outputs.docs_release_manifest_sha256 }}
+          PROMOTE_RECOMMENDED: ${{ inputs.promote-recommended }}
+          EXISTING_PAGES_ROOT: ${{ runner.temp }}/appsurface-existing-pages
+        run: |
+          set -euo pipefail
+          exact_tree="${RUNNER_TEMP}/appsurface-docs-exact/releases/${VERSION}"
+          archive="${RUNNER_TEMP}/appsurface-docs-v${VERSION}.tar.gz"
+          pages_staging="${RUNNER_TEMP}/appsurface-docs-pages"
+          plan="${RUNNER_TEMP}/docs-publication-plan.json"
+          summary="${RUNNER_TEMP}/docs-publication-summary.md"
+          case "${PROMOTE_RECOMMENDED}" in
+            true|false) ;;
+            *)
+              echo "promote-recommended must be true or false; got ${PROMOTE_RECOMMENDED}." >&2
+              exit 1
+              ;;
+          esac
+          promote_arg=()
+          if [[ "${PROMOTE_RECOMMENDED}" != "true" ]]; then
+            promote_arg+=(--promote-recommended false)
+          fi
+          expected_release_manifest_sha256="${EXPECTED_MANIFEST_SHA256}"
+          if [[ "${expected_release_manifest_sha256}" == "generated" ]]; then
+            expected_release_manifest_sha256="$(sha256sum "${exact_tree}/.appsurface-docs-release-manifest.json" | awk '{print $1}')"
+          fi
+          ./eng/release docs-publication \
+            --version "${VERSION}" \
+            --tag "${TAG}" \
+            --docs-exact-tree "${exact_tree}" \
+            --existing-pages-root "${EXISTING_PAGES_ROOT}" \
+            --archive-output "${archive}" \
+            --pages-staging-root "${pages_staging}" \
+            --plan-output "${plan}" \
+            --summary-output "${summary}" \
+            --expected-release-manifest-sha256 "${expected_release_manifest_sha256}" \
+            --github-output "${GITHUB_OUTPUT}" \
+            "${promote_arg[@]}"
+
+      - name: Verify staged docs archive
+        env:
+          VERSION: ${{ needs.validate-release.outputs.version }}
+          CATALOG_PATH: ${{ steps.docs.outputs.catalog_path }}
+          PAGES_STAGING_ROOT: ${{ steps.docs.outputs.pages_staging_root }}
+        run: |
+          set -euo pipefail
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build --no-restore -- \
+            docs verify-archive \
+            --catalog "${CATALOG_PATH}" \
+            --version "${VERSION}" \
+            --trusted-release-root "${PAGES_STAGING_ROOT}"
+
+      - name: Create or reuse draft release and upload docs assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
+          TAG_COMMIT: ${{ needs.validate-release.outputs.tag_commit }}
+          VERSION: ${{ needs.validate-release.outputs.version }}
+          TITLE: AppSurface ${{ needs.validate-release.outputs.tag }}
+          ARCHIVE_PATH: ${{ steps.docs.outputs.archive_path }}
+          SHA256_PATH: ${{ steps.docs.outputs.sha256_path }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          actual_tag_commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          if [[ "${actual_tag_commit}" != "${TAG_COMMIT}" ]]; then
+            echo "Expected ${TAG} to resolve to ${TAG_COMMIT}; got ${actual_tag_commit}." >&2
+            exit 1
+          fi
+          notes_file="${RUNNER_TEMP}/release-notes.md"
+          git show "${TAG_COMMIT}:releases/v${VERSION}.md" > "${notes_file}"
+          if gh release view "${TAG}" --json isDraft --jq '.isDraft' | grep -qx true; then
+            echo "Reusing draft release ${TAG}."
+            gh release edit "${TAG}" --title "${TITLE}" --notes-file "${notes_file}"
+          else
+            gh release create "${TAG}" --verify-tag --draft --title "${TITLE}" --notes-file "${notes_file}"
+          fi
+          gh release upload "${TAG}" "${ARCHIVE_PATH}" "${SHA256_PATH}" --clobber
+
+      - name: Upload docs publication artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: docs-publication-${{ needs.validate-release.outputs.version }}
+          path: |
+            ${{ runner.temp }}/docs-publication-plan.json
+            ${{ steps.docs.outputs.archive_path }}
+            ${{ steps.docs.outputs.sha256_path }}
+            ${{ steps.docs.outputs.recovery_summary_path }}
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ steps.docs.outputs.pages_staging_root }}
+          include-hidden-files: true
+
+  deploy-docs-pages:
+    if: ${{ github.repository == 'forge-trust/AppSurface' }}
+    needs:
+      - validate-release
+      - publish-docs-archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write # Required to publish the verified Pages artifact.
+      id-token: write # Required by deploy-pages to mint the GitHub Pages deployment token.
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy verified docs Pages payload
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+
+  verify-public-docs:
+    if: ${{ github.repository == 'forge-trust/AppSurface' }}
+    needs:
+      - validate-release
+      - publish-docs-archive
+      - deploy-docs-pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # Required because draft release assets are not downloadable with the workflow token under contents: read.
+
+    steps:
+      - name: Verify deployed docs and uploaded release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
+          VERSION: ${{ needs.validate-release.outputs.version }}
+          PAGE_URL: ${{ needs.deploy-docs-pages.outputs.page_url }}
+          EXPECTED_ARCHIVE_SHA256: ${{ needs.publish-docs-archive.outputs.archive_sha256 }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.publish-docs-archive.outputs.release_manifest_sha256 }}
+          ARCHIVE_ASSET_NAME: ${{ needs.publish-docs-archive.outputs.archive_asset_name }}
+          EXACT_TREE_PATH: ${{ needs.publish-docs-archive.outputs.exact_tree_path }}
+          PRERELEASE: ${{ needs.validate-release.outputs.prerelease }}
+          PROMOTE_RECOMMENDED: ${{ inputs.promote-recommended }}
+        run: |
+          set -euo pipefail
+          root="${PAGE_URL%/}"
+          catalog="${RUNNER_TEMP}/versions.json"
+          manifest="${RUNNER_TEMP}/release-manifest.json"
+          asset_dir="${RUNNER_TEMP}/release-assets"
+          mkdir -p "${asset_dir}"
+          case "${PROMOTE_RECOMMENDED}" in
+            true|false) ;;
+            *)
+              echo "promote-recommended must be true or false; got ${PROMOTE_RECOMMENDED}." >&2
+              exit 1
+              ;;
+          esac
+          curl -fsSL "${root}/versions.json" -o "${catalog}"
+          curl -fsSL "${root}/docs" -o "${RUNNER_TEMP}/docs-root.html"
+          curl -fsSL "${root}/${EXACT_TREE_PATH}/.appsurface-docs-release-manifest.json" -o "${manifest}"
+          curl -fsSL "${root}/${EXACT_TREE_PATH}/index.html" -o "${RUNNER_TEMP}/index.html"
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            jq -e --arg version "${VERSION}" --arg digest "${EXPECTED_MANIFEST_SHA256}" \
+              'any(.versions[]; .version == $version and .releaseManifestSha256 == $digest)' \
+              "${catalog}"
+          else
+            jq -e --arg version "${VERSION}" --arg digest "${EXPECTED_MANIFEST_SHA256}" \
+              --arg promoteRecommended "${PROMOTE_RECOMMENDED}" \
+              '($promoteRecommended != "true" or .recommendedVersion == $version) and any(.versions[]; .version == $version and .releaseManifestSha256 == $digest)' \
+              "${catalog}"
+          fi
+          actual_manifest_sha256="$(sha256sum "${manifest}" | awk '{print $1}')"
+          if [[ "${actual_manifest_sha256}" != "${EXPECTED_MANIFEST_SHA256}" ]]; then
+            echo "Expected manifest ${EXPECTED_MANIFEST_SHA256}; got ${actual_manifest_sha256}." >&2
+            exit 1
+          fi
+          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern "${ARCHIVE_ASSET_NAME}" --dir "${asset_dir}" --clobber
+          actual_archive_sha256="$(sha256sum "${asset_dir}/${ARCHIVE_ASSET_NAME}" | awk '{print $1}')"
+          if [[ "${actual_archive_sha256}" != "${EXPECTED_ARCHIVE_SHA256}" ]]; then
+            echo "Expected archive ${EXPECTED_ARCHIVE_SHA256}; got ${actual_archive_sha256}." >&2
+            exit 1
+          fi
+          {
+            echo "## AppSurface Docs publication proof"
+            echo
+            echo "- Pages catalog: ${root}/versions.json"
+            echo "- Exact tree: ${root}/${EXACT_TREE_PATH}/"
+            echo "- Release manifest SHA-256: ${EXPECTED_MANIFEST_SHA256}"
+            echo "- Release asset: ${ARCHIVE_ASSET_NAME}"
+            echo "- Archive SHA-256: ${EXPECTED_ARCHIVE_SHA256}"
+            echo "- Resume draft: \`gh release view ${TAG} --repo ${GITHUB_REPOSITORY} --json isDraft,url\`"
+            echo "- Publish draft: \`gh release edit ${TAG} --repo ${GITHUB_REPOSITORY} --draft=false\`"
+            echo "- Abort draft: \`gh release delete ${TAG} --repo ${GITHUB_REPOSITORY} --cleanup-tag=false\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  publish-github-release:
+    if: ${{ github.repository == 'forge-trust/AppSurface' }}
+    needs:
+      - validate-release
+      - publish-docs-archive
+      - deploy-docs-pages
+      - verify-public-docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # Required to promote the verified draft GitHub Release to public.
+
+    steps:
+      - name: Checkout repository at validated tag commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-release.outputs.tag_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Publish draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
+          TAG_COMMIT: ${{ needs.validate-release.outputs.tag_commit }}
+          PRERELEASE: ${{ needs.validate-release.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          actual_tag_commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          if [[ "${actual_tag_commit}" != "${TAG_COMMIT}" ]]; then
+            echo "Expected ${TAG} to resolve to ${TAG_COMMIT}; got ${actual_tag_commit}." >&2
+            exit 1
+          fi
+          args=(release edit "${TAG}" --draft=false)
           if [[ "${PRERELEASE}" == "true" ]]; then
             args+=(--prerelease)
+          else
+            args+=(--latest)
           fi
           gh "${args[@]}"

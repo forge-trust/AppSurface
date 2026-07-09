@@ -33,6 +33,8 @@
   <Folder Name="/Config/">
     <Project Path="Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/ForgeTrust.AppSurface.Config.LocalSecrets.Tests.csproj" />
     <Project Path="Config/ForgeTrust.AppSurface.Config.LocalSecrets/ForgeTrust.AppSurface.Config.LocalSecrets.csproj" />
+    <Project Path="Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests.csproj" />
+    <Project Path="Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/ForgeTrust.AppSurface.Config.GoogleSecretManager.csproj" />
     <Project Path="Config/ForgeTrust.AppSurface.Config.Tests/ForgeTrust.AppSurface.Config.Tests.csproj" />
     <Project Path="Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj" />
   </Folder>
@@ -71,6 +73,12 @@
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.Tests/ForgeTrust.AppSurface.Flow.Tests.csproj" />
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj" />
     <Project Path="Flow/ForgeTrust.AppSurface.Flow.DurableTask.Tests/ForgeTrust.AppSurface.Flow.DurableTask.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Workers/">
+    <Project Path="Workers/ForgeTrust.AppSurface.Workers/ForgeTrust.AppSurface.Workers.csproj" />
+    <Project Path="Workers/ForgeTrust.AppSurface.Workers.Tests/ForgeTrust.AppSurface.Workers.Tests.csproj" />
+    <Project Path="Workers/ForgeTrust.AppSurface.Workers.DurableTask/ForgeTrust.AppSurface.Workers.DurableTask.csproj" />
+    <Project Path="Workers/ForgeTrust.AppSurface.Workers.DurableTask.Tests/ForgeTrust.AppSurface.Workers.DurableTask.Tests.csproj" />
   </Folder>
   <Folder Name="/Intelligence/">
     <Project Path="Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj" />

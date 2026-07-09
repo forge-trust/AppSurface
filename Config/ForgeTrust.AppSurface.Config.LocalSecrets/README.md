@@ -129,7 +129,8 @@ index entry still reports `local-secret-missing`.
 - `SingleMachineSelfHosted` is explicit self-hosting. It does not provide team vault guarantees.
 - `Disabled` stops LocalSecrets from resolving values.
 
-Use environment variables, key-per-file, or a remote vault in CI, containers, team environments, and production.
+Use environment variables, key-per-file, or `ForgeTrust.AppSurface.Config.GoogleSecretManager` in CI, containers, team
+environments, and Google Cloud production hosts.
 
 ## Release Guidance
 
@@ -181,11 +182,11 @@ For nonstandard installs, repeat the same commands with `--secret-tool-path "$SE
 ## Migration Ladder
 
 ```text
-appsettings defaults < LocalSecrets < environment variables < future remote vault provider
+appsettings defaults < LocalSecrets < Google Secret Manager < environment variables
 ```
 
 Keep the same AppSurface config key when moving from `.env`, `dotnet user-secrets`, or accidental
-`appsettings.Development.json` secrets into LocalSecrets. Later vault providers should preserve the same logical key.
+`appsettings.Development.json` secrets into LocalSecrets. Remote providers should preserve the same logical key.
 
 Guides:
 
@@ -193,4 +194,4 @@ Guides:
 - [Migrate from dotnet user-secrets](docs/migrate-from-user-secrets.md)
 - [Migrate from .env](docs/migrate-from-dotenv.md)
 - [Use env or key-per-file in CI and containers](docs/use-env-or-key-per-file-in-ci-and-containers.md)
-- [Move to a future remote vault](docs/move-to-future-remote-vault.md)
+- [Move to Google Secret Manager](docs/move-to-future-remote-vault.md)

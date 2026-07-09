@@ -59,6 +59,14 @@ const generatedOutputs = [
     banner: 'Generated from assets/src/form-interactions.ts. Do not edit wwwroot/razorwire/form-interactions.js by hand.',
     rawBytes: 24_000,
     gzipBytes: 7_000
+  },
+  {
+    entry: path.join(assetRoot, 'src', 'behavior-kit.ts'),
+    output: path.join(outputRoot, 'behavior-kit.js'),
+    label: 'behavior-kit.js',
+    banner: 'Generated from assets/src/behavior-kit.ts. Do not edit wwwroot/razorwire/behavior-kit.js by hand.',
+    rawBytes: 20_000,
+    gzipBytes: 6_000
   }
 ];
 

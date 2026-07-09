@@ -1019,6 +1019,10 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         var options = new AppSurfaceDocsOptions
         {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                InitialRequestWaitBudgetMilliseconds = 5000
+            },
             Routing = new AppSurfaceDocsRoutingOptions
             {
                 DocsRootPath = "/docs/next"

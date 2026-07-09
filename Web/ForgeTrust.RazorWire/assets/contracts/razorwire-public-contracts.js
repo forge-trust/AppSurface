@@ -31,6 +31,41 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
+ * Behavior definition registered with the RazorWire Behavior Kit.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} RazorWireBehaviorDefinition
+ * @property {string} name - Stable behavior name. Names are immutable for the page lifetime; repeated registrations with the same selector are idempotent.
+ * @property {string} selector - CSS selector for roots that should receive one connected behavior controller.
+ * @property {Function} connect - Callback invoked once per matching connected root. It receives `(root, context)` and may return a cleanup function.
+ */
+
+/**
+ * Page-lifecycle definition registered with the RazorWire Behavior Kit.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} RazorWireLifecycleDefinition
+ * @property {string} name - Stable lifecycle behavior name. Repeated registrations with the same lifecycle options are idempotent within the current pass.
+ * @property {Array<"initial"|"turbo:load"|"turbo:render">} [events] - Logical page lifecycle events that should run the behavior. Defaults to `["initial", "turbo:load"]`.
+ * @property {boolean} [frames] - Set to `true` to run on `turbo:frame-load`; frame loads are ignored by default.
+ * @property {Function} connect - Callback invoked for each matching lifecycle pass. It receives `context` and may return a cleanup function.
+ */
+
+/**
+ * Diagnostic emitted by the RazorWire Behavior Kit.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} RazorWireBehaviorDiagnostic
+ * @property {RazorWireBehaviorDiagnosticCode} code - Stable diagnostic code.
+ * @property {string} message - Required problem statement for the invalid registration or lifecycle failure.
+ * @property {string} impact - Required explanation of the behavior RazorWire skipped, changed, or could not guarantee.
+ * @property {string} fix - Required remediation guidance suitable for docs, tests, and development diagnostics.
+ * @property {string} docs - Required repository documentation path for troubleshooting guidance.
+ * @property {string} [behaviorName] - Behavior name associated with the diagnostic when available.
+ * @property {string} [rootId] - Runtime-generated behavior/root identity when available.
+ */
+
+/**
  * Behavior Kit manager for app-authored progressive enhancement on replaceable server-rendered DOM and logical browser visits.
  * @public
  * @namespace RazorWire
