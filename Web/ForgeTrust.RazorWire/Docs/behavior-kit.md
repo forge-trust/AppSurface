@@ -92,7 +92,7 @@ Call `window.RazorWire.behaviors.getDiagnostics()` in development tests or brows
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| A behavior never connects | `<rw:scripts behavior-kit="true" />` is missing or loaded after the app bundle without the core stub. | Render `<rw:scripts behavior-kit="true" />` in the layout and keep app registrations after RazorWire core. |
+| A behavior never connects | `<rw:scripts behavior-kit="true" />` is missing, or app code calls `scan()` before `behavior-kit.js` initializes. The queue-backed stub preserves early `register(...)` and `registerLifecycle(...)` calls. | Render `<rw:scripts behavior-kit="true" />` in the layout and call `scan()` only after the eager script has loaded. |
 | A click handler fires twice | App code registered unmanaged document listeners outside Behavior Kit. | Move the listener into `connect` and bind with `{ signal: context.signal }`. |
 | Page telemetry misses Turbo visits | The work was modeled as a root behavior on `body`. | Use `registerLifecycle` so logical visits, not body replacement, drive the sample. |
 | A behavior conflicts after hot reload or repeated bundle evaluation | The same name changed selector, events, or frame options. | Keep names and options stable, or choose a new behavior name. |
