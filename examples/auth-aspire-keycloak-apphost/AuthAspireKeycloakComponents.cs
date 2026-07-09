@@ -96,9 +96,7 @@ public sealed class AuthAspireKeycloakVerifierComponent : IAspireComponent<Proje
         return appBuilder
             .AddProject<Projects.AuthAspireKeycloakVerifier>("auth-aspire-keycloak-verifier")
             .WithEnvironment("AUTH_ASPIRE_KEYCLOAK_TARGET_URL", web.GetEndpoint("http"))
-            .WithEnvironment("AUTH_ASPIRE_KEYCLOAK_AUTHORITY", metadata.Configuration.Authority)
             .WithEnvironment("AUTH_ASPIRE_KEYCLOAK_CLIENT_ID", metadata.Configuration.ClientId)
-            .WithEnvironment("AUTH_ASPIRE_KEYCLOAK_REALM", AppSurfaceKeycloakDefaults.Realm)
             .WithEnvironment("AUTH_ASPIRE_KEYCLOAK_REALM_IMPORT_FILE", metadata.RealmImportFile)
             .WithReference(keycloak)
             .WaitFor(web)

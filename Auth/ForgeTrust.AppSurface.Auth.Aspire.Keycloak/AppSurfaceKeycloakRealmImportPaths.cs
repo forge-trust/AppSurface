@@ -31,6 +31,8 @@ internal static class AppSurfaceKeycloakRealmImportPaths
     {
         var fileName = Path.GetFileName(value);
         if (string.IsNullOrWhiteSpace(fileName)
+            || string.Equals(fileName, ".", StringComparison.Ordinal)
+            || string.Equals(fileName, "..", StringComparison.Ordinal)
             || Path.IsPathRooted(fileName)
             || fileName.Contains('/', StringComparison.Ordinal)
             || fileName.Contains('\\', StringComparison.Ordinal))

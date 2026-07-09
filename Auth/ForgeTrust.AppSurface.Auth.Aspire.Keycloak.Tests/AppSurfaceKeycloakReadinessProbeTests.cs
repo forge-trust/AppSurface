@@ -11,18 +11,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         using var directory = new TempDirectory();
         var options = CreateOptions(directory.Path);
         AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
-        using var client = new HttpClient(new StubHandler(request =>
-        {
-            if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
-            {
-                return Json("""{"issuer":"http://localhost:8080/realms/appsurface-dev"}""");
-            }
-
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("<html>login</html>"),
-            };
-        }));
+        using var client = new HttpClient(new StubHandler(MetadataThenOk));
         var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
 
         var result = await probe.CheckOnceAsync();

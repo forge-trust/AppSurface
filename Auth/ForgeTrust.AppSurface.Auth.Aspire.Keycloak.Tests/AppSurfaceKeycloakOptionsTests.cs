@@ -59,6 +59,8 @@ public sealed class AppSurfaceKeycloakOptionsTests
     [Theory]
     [InlineData("")]
     [InlineData("/")]
+    [InlineData(".")]
+    [InlineData("..")]
     [InlineData("nested\\keycloak-proof")]
     public void RealmImportPaths_WhenSegmentUnsafe_ThrowsArgumentException(string segment)
     {

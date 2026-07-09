@@ -86,15 +86,31 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     [Fact]
     public void ResourceConstructor_StoresWrapperValues()
     {
+        var builder = DistributedApplication.CreateBuilder([]);
+        var keycloak = builder.AddKeycloak("keycloak-wrapper", GetAvailablePort());
         var projection = new AppSurfaceKeycloakOptions().CreateConfigurationProjection();
         var readiness = new AppSurfaceKeycloakReadinessProbe(new AppSurfaceKeycloakOptions());
 
-        var resource = new AppSurfaceKeycloakResource(null!, projection, readiness, "/tmp/appsurface-dev-realm.json");
+        var resource = new AppSurfaceKeycloakResource(keycloak, projection, readiness, "/tmp/appsurface-dev-realm.json");
 
-        Assert.Null(resource.Resource);
+        Assert.Same(keycloak, resource.Resource);
         Assert.Same(projection, resource.Configuration);
         Assert.Same(readiness, resource.Readiness);
         Assert.Equal("/tmp/appsurface-dev-realm.json", resource.RealmImportFile);
+    }
+
+    [Fact]
+    public void ResourceConstructor_WhenArgumentsInvalid_Throws()
+    {
+        var builder = DistributedApplication.CreateBuilder([]);
+        var keycloak = builder.AddKeycloak("keycloak-wrapper", GetAvailablePort());
+        var projection = new AppSurfaceKeycloakOptions().CreateConfigurationProjection();
+        var readiness = new AppSurfaceKeycloakReadinessProbe(new AppSurfaceKeycloakOptions());
+
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceKeycloakResource(null!, projection, readiness, "/tmp/appsurface-dev-realm.json"));
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceKeycloakResource(keycloak, null!, readiness, "/tmp/appsurface-dev-realm.json"));
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceKeycloakResource(keycloak, projection, null!, "/tmp/appsurface-dev-realm.json"));
+        Assert.Throws<ArgumentException>(() => new AppSurfaceKeycloakResource(keycloak, projection, readiness, " "));
     }
 
     private static int GetAvailablePort()

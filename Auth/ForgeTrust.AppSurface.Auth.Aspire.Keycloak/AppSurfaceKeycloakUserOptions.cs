@@ -53,16 +53,20 @@ public sealed class AppSurfaceKeycloakUserOptions
     /// </summary>
     public IDictionary<string, string> Claims { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Validates the seeded user's username, subject, password, display name, and claim entries.
+    /// </summary>
+    /// <exception cref="AppSurfaceKeycloakException">A seeded user option is invalid.</exception>
     internal void Validate()
     {
         if (!UserOrSubjectPattern.IsMatch(Username))
         {
-            throw Invalid(nameof(Username), "username must match ^[a-z][a-z0-9._-]{1,63}$ and cannot be . or ...");
+            throw Invalid(nameof(Username), "username must match ^[a-z][a-z0-9._-]{1,63}$ and cannot be . or ..");
         }
 
         if (!UserOrSubjectPattern.IsMatch(Subject))
         {
-            throw Invalid(nameof(Subject), "subject must match ^[a-z][a-z0-9._-]{1,63}$ and cannot be . or ...");
+            throw Invalid(nameof(Subject), "subject must match ^[a-z][a-z0-9._-]{1,63}$ and cannot be . or ..");
         }
 
         if (string.IsNullOrWhiteSpace(Password))

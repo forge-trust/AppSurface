@@ -21,7 +21,10 @@ public sealed class AppSurfaceKeycloakReadinessProbe
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
         _options = options;
-        _httpClient = httpClient ?? new HttpClient();
+        _httpClient = httpClient ?? new HttpClient
+        {
+            Timeout = AppSurfaceKeycloakDefaults.ReadinessTimeout,
+        };
     }
 
     /// <summary>
@@ -52,23 +55,26 @@ public sealed class AppSurfaceKeycloakReadinessProbe
                 $"Problem: Keycloak OpenID metadata is unavailable. Cause: {ex.Message} Fix: confirm the container runtime is available, port {_options.KeycloakPort} is free, and Keycloak finished realm import. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable}.");
         }
 
-        if (!response.IsSuccessStatusCode)
+        using (response)
         {
-            throw new AppSurfaceKeycloakException(
-                AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable,
-                $"Problem: Keycloak OpenID metadata returned HTTP {(int)response.StatusCode}. Cause: Keycloak is not ready for realm '{_options.Realm}'. Fix: wait for startup, inspect container logs, or reset stale persistent data. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable}.");
-        }
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new AppSurfaceKeycloakException(
+                    AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable,
+                    $"Problem: Keycloak OpenID metadata returned HTTP {(int)response.StatusCode}. Cause: Keycloak is not ready for realm '{_options.Realm}'. Fix: wait for startup, inspect container logs, or reset stale persistent data. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable}.");
+            }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-        var issuer = document.RootElement.TryGetProperty("issuer", out var issuerProperty)
-            ? issuerProperty.GetString()
-            : null;
-        if (!string.Equals(issuer, authority, StringComparison.Ordinal))
-        {
-            throw new AppSurfaceKeycloakException(
-                AppSurfaceKeycloakDiagnosticCodes.MetadataInvalid,
-                $"Problem: Keycloak metadata issuer does not match the expected AppSurface realm. Cause: expected '{authority}' but received '{issuer ?? "<missing>"}'. Fix: verify the realm import and authority configuration. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AppSurfaceKeycloakDiagnosticCodes.MetadataInvalid}.");
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var issuer = document.RootElement.TryGetProperty("issuer", out var issuerProperty)
+                ? issuerProperty.GetString()
+                : null;
+            if (!string.Equals(issuer, authority, StringComparison.Ordinal))
+            {
+                throw new AppSurfaceKeycloakException(
+                    AppSurfaceKeycloakDiagnosticCodes.MetadataInvalid,
+                    $"Problem: Keycloak metadata issuer does not match the expected AppSurface realm. Cause: expected '{authority}' but received '{issuer ?? "<missing>"}'. Fix: verify the realm import and authority configuration. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AppSurfaceKeycloakDiagnosticCodes.MetadataInvalid}.");
+            }
         }
     }
 
@@ -182,7 +188,7 @@ public sealed class AppSurfaceKeycloakReadinessProbe
     private async Task CheckAuthorizationChallengeAsync(AppSurfaceKeycloakConfigurationProjection projection, CancellationToken cancellationToken)
     {
         var authorizationUri = $"{projection.Authority}/protocol/openid-connect/auth?client_id={Uri.EscapeDataString(projection.ClientId)}&redirect_uri={Uri.EscapeDataString(_options.RedirectUris[0].ToString())}&response_type=code&scope=openid&state=appsurface-state&nonce=appsurface-nonce";
-        var response = await _httpClient.GetAsync(authorizationUri, cancellationToken).ConfigureAwait(false);
+        using var response = await _httpClient.GetAsync(authorizationUri, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.BadRequest

@@ -151,7 +151,7 @@ public static class Program
         try
         {
             using var response = await httpClient.GetAsync(new Uri(options.TargetUri!, "auth/proof/protected"), cancellationToken);
-            if (response.StatusCode is not (HttpStatusCode.Redirect or HttpStatusCode.Found or HttpStatusCode.RedirectMethod))
+            if (!IsRedirect(response.StatusCode))
             {
                 failures.Add($"/auth/proof/protected expected redirect challenge but returned HTTP {(int)response.StatusCode}.");
             }
@@ -170,13 +170,23 @@ public static class Program
             return;
         }
 
-        if (!File.Exists(options.RealmImportFile))
+        string importJson;
+        try
         {
-            failures.Add("realm import evidence file does not exist.");
+            if (!File.Exists(options.RealmImportFile))
+            {
+                failures.Add("realm import evidence file does not exist.");
+                return;
+            }
+
+            importJson = File.ReadAllText(options.RealmImportFile);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            failures.Add($"realm import evidence could not be read: {exception.GetType().Name}.");
             return;
         }
 
-        var importJson = File.ReadAllText(options.RealmImportFile);
         CheckRealmSecretEvidence(importJson, failures);
 
         JsonDocument document;
@@ -229,6 +239,13 @@ public static class Program
             ? property.GetString()
             : null;
 
+    private static bool IsRedirect(HttpStatusCode statusCode) =>
+        statusCode is HttpStatusCode.Moved
+            or HttpStatusCode.Redirect
+            or HttpStatusCode.RedirectMethod
+            or HttpStatusCode.TemporaryRedirect
+            or HttpStatusCode.PermanentRedirect;
+
     private static void CheckRealmSecretEvidence(string importJson, ICollection<string> failures)
     {
         foreach (var fragment in ForbiddenRealmEvidenceFragments.Where(fragment => importJson.Contains(fragment, StringComparison.OrdinalIgnoreCase)))
@@ -238,6 +255,16 @@ public static class Program
     }
 }
 
+/// <summary>
+/// Holds the verifier contract projected by the AppHost and the polling policy used by the local proof.
+/// </summary>
+/// <param name="TargetUri">The web proof root URI supplied by the AppHost.</param>
+/// <param name="ClientId">The Keycloak public client id expected in realm evidence.</param>
+/// <param name="RealmImportFile">The generated realm import file used as local evidence.</param>
+/// <param name="Timeout">The maximum polling duration before the verifier fails.</param>
+/// <param name="PollInterval">The delay between proof attempts.</param>
+/// <param name="IsValid">Whether parsing produced a usable verifier contract.</param>
+/// <param name="Error">The safe diagnostic shown when parsing fails.</param>
 internal sealed record VerifierOptions(
     Uri? TargetUri,
     string? ClientId,
@@ -247,6 +274,16 @@ internal sealed record VerifierOptions(
     bool IsValid,
     string Error)
 {
+    /// <summary>
+    /// Parses command-line overrides and AppHost-projected environment values into verifier options.
+    /// </summary>
+    /// <param name="args">Command-line arguments for local verifier overrides.</param>
+    /// <param name="environment">Environment accessor used to read AppHost-projected values.</param>
+    /// <returns>Parsed options, or an invalid result with a safe diagnostic.</returns>
+    /// <remarks>
+    /// The verifier is intended to run through the AppHost verify profile; direct execution must provide the same
+    /// target and realm evidence inputs or parsing fails closed.
+    /// </remarks>
     public static VerifierOptions Parse(
         IReadOnlyList<string> args,
         Func<string, string?> environment)
@@ -289,9 +326,23 @@ internal sealed record VerifierOptions(
             string.Empty);
     }
 
+    /// <summary>
+    /// Creates an invalid option result with a user-facing diagnostic.
+    /// </summary>
+    /// <param name="error">The safe diagnostic explaining how to recover.</param>
+    /// <returns>An invalid verifier options value.</returns>
     private static VerifierOptions Invalid(string error) =>
         new(null, null, null, TimeSpan.Zero, TimeSpan.Zero, false, error);
 
+    /// <summary>
+    /// Normalizes a configured target URI so relative probe paths compose predictably.
+    /// </summary>
+    /// <param name="value">The raw target URI value.</param>
+    /// <returns>The target URI with a trailing slash when a value is present.</returns>
+    /// <remarks>
+    /// This avoids the common URI-composition pitfall where a base URI without a trailing slash drops its final path
+    /// segment when combined with relative proof endpoints.
+    /// </remarks>
     private static string? EnsureTrailingSlash(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))

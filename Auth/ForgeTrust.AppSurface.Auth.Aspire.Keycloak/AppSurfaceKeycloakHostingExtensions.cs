@@ -37,7 +37,7 @@ public static class AppSurfaceKeycloakHostingExtensions
             .WithRealmImport(options.RealmImportDirectory);
         if (options.UsePersistentDataVolume)
         {
-            keycloak.WithDataVolume();
+            keycloak = keycloak.WithDataVolume();
         }
 
         var projection = options.CreateConfigurationProjection();

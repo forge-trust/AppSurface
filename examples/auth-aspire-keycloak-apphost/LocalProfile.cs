@@ -70,7 +70,7 @@ public sealed partial class VerifyProfile : ICommand
     public async ValueTask ExecuteAsync(IConsole console)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        var appBuilder = new DistributedApplicationBuilder([]);
+        var appBuilder = DistributedApplication.CreateBuilder([]);
         var context = new AspireStartupContext(appBuilder);
         context.Resolve(_web);
         context.Resolve(_verifier);

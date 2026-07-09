@@ -42,7 +42,7 @@ keycloak.Configuration.ApplyTo(web)
     .WaitFor(keycloak.Resource);
 ```
 
-`AddAppSurfaceKeycloak(...)` generates a deterministic realm import, calls the official Aspire `AddKeycloak(...)` API, mounts the realm import directory with `WithRealmImport(...)`, and returns the underlying `IResourceBuilder<KeycloakResource>` for normal Aspire APIs.
+`AddAppSurfaceKeycloak(...)` generates a deterministic realm import, calls the official Aspire `AddKeycloak(...)` API, mounts the realm import directory with `WithRealmImport(...)`, and returns an `AppSurfaceKeycloakResource` wrapper whose `Resource` property exposes the underlying `IResourceBuilder<KeycloakResource>` for normal Aspire APIs.
 
 ## Defaults
 

@@ -21,6 +21,11 @@ public sealed class AppSurfaceKeycloakResource
         AppSurfaceKeycloakReadinessProbe readiness,
         string realmImportFile)
     {
+        ArgumentNullException.ThrowIfNull(resource);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(readiness);
+        ArgumentException.ThrowIfNullOrWhiteSpace(realmImportFile);
+
         Resource = resource;
         Configuration = configuration;
         Readiness = readiness;
