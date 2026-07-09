@@ -46,6 +46,26 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     }
 
     [Fact]
+    public void Projection_ApplyToAddsAllowlistedEnvironmentVariablesToProjectResource()
+    {
+        var builder = DistributedApplication.CreateBuilder([]);
+        var project = builder.AddProject(
+            "web",
+            GetCurrentTestProjectPath());
+        var projection = new AppSurfaceKeycloakOptions().CreateConfigurationProjection();
+
+        var returned = projection.ApplyTo(project);
+
+        Assert.Same(project, returned);
+    }
+
+    [Fact]
+    public void Defaults_ExposeBoundedReadinessTimeout()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(120), AppSurfaceKeycloakDefaults.ReadinessTimeout);
+    }
+
+    [Fact]
     public void ResourceConstructor_StoresWrapperValues()
     {
         var projection = new AppSurfaceKeycloakOptions().CreateConfigurationProjection();
@@ -65,4 +85,10 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
+
+    private static string GetCurrentTestProjectPath() =>
+        Path.GetFullPath(
+            Path.Combine(
+                AppContext.BaseDirectory,
+                "../../../ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj"));
 }
