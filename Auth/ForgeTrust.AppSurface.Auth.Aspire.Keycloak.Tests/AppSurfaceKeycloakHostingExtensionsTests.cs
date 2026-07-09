@@ -1,0 +1,68 @@
+using System.Net;
+using System.Net.Sockets;
+using Aspire.Hosting;
+using ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
+
+namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests;
+
+public sealed class AppSurfaceKeycloakHostingExtensionsTests
+{
+    [Fact]
+    public void AddAppSurfaceKeycloak_WritesRealmImportAndReturnsSecretSafeWrapper()
+    {
+        using var directory = new TempDirectory();
+        var keycloakPort = GetAvailablePort();
+        var webProofPort = GetAvailablePort();
+        var builder = DistributedApplication.CreateBuilder([]);
+
+        var resource = builder.AddAppSurfaceKeycloak("keycloak-proof", options =>
+        {
+            options.KeycloakPort = keycloakPort;
+            options.WebProofPort = webProofPort;
+            options.RealmImportDirectory = directory.Path;
+            options.UsePersistentDataVolume = true;
+        });
+
+        Assert.Equal("appsurface-web", resource.Configuration.ClientId);
+        Assert.Equal($"http://localhost:{keycloakPort}/realms/appsurface-dev", resource.Configuration.Authority);
+        Assert.Equal(Path.Combine(directory.Path, "appsurface-dev-realm.json"), resource.RealmImportFile);
+        Assert.True(File.Exists(resource.RealmImportFile));
+        Assert.NotNull(resource.Resource);
+        Assert.NotNull(resource.Readiness);
+    }
+
+    [Fact]
+    public void Projection_WhenClientSecretRequired_UsesBooleanStringAndRejectsNullProject()
+    {
+        var projection = new AppSurfaceKeycloakConfigurationProjection(
+            "http://localhost:8080/realms/appsurface-dev",
+            "appsurface-web",
+            "/signin-appsurface-oidc",
+            "/signout-callback-appsurface-oidc",
+            requireClientSecret: true);
+
+        Assert.Equal("true", projection.EnvironmentVariables["Authentication__Oidc__RequireClientSecret"]);
+        Assert.Throws<ArgumentNullException>(() => projection.ApplyTo(null!));
+    }
+
+    [Fact]
+    public void ResourceConstructor_StoresWrapperValues()
+    {
+        var projection = new AppSurfaceKeycloakOptions().CreateConfigurationProjection();
+        var readiness = new AppSurfaceKeycloakReadinessProbe(new AppSurfaceKeycloakOptions());
+
+        var resource = new AppSurfaceKeycloakResource(null!, projection, readiness, "/tmp/appsurface-dev-realm.json");
+
+        Assert.Null(resource.Resource);
+        Assert.Same(projection, resource.Configuration);
+        Assert.Same(readiness, resource.Readiness);
+        Assert.Equal("/tmp/appsurface-dev-realm.json", resource.RealmImportFile);
+    }
+
+    private static int GetAvailablePort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+}

@@ -46,6 +46,36 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
     }
 
     [Fact]
+    public async Task CheckOnceAsync_WhenMetadataRequestFails_ThrowsUnavailableDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+        AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
+        using var client = new HttpClient(new StubHandler(_ => throw new HttpRequestException("connection refused")));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable, exception.Code);
+        Assert.Contains("connection refused", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckOnceAsync_WhenMetadataReturnsFailure_ThrowsUnavailableDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+        AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
+        using var client = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable, exception.Code);
+        Assert.Contains("HTTP 503", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CheckOnceAsync_WhenAuthorizationRejectsClient_ThrowsChallengeDiagnostic()
     {
         using var directory = new TempDirectory();
@@ -122,6 +152,43 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
     }
 
     [Fact]
+    public async Task CheckOnceAsync_WhenRealmEvidenceFileMissing_ThrowsRealmEvidenceDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+        using var client = new HttpClient(new StubHandler(MetadataThenOk));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid, exception.Code);
+        Assert.Contains("missing", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("""{"clients":[],"users":[{"username":"admin"},{"username":"viewer"}]}""", "expected realm id")]
+    [InlineData("""{"realm":"appsurface-dev","users":[{"username":"admin"},{"username":"viewer"}]}""", "clients array")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":["http://localhost:5059/signin-appsurface-oidc"]}]}""", "users array")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"other","redirectUris":["http://localhost:5059/signin-appsurface-oidc"]}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "public client id")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","attributes":{"post.logout.redirect.uris":"http://localhost:5059/signout-callback-appsurface-oidc"}}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "client redirect URIs")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":["http://localhost:5059/signin-appsurface-oidc"],"attributes":{"post.logout.redirect.uris":"http://localhost:5059/signout-callback-appsurface-oidc"}}],"users":[{"username":"admin"}]}""", "seeded user")]
+    [InlineData("""{"realm":"appsurface-dev","clients":[{"clientId":"appsurface-web","redirectUris":["http://localhost:5059/signin-appsurface-oidc"],"attributes":{}}],"users":[{"username":"admin"},{"username":"viewer"}]}""", "post-logout redirect URI")]
+    public async Task CheckOnceAsync_WhenRealmEvidenceIncomplete_ThrowsSpecificDiagnostic(string json, string expectedMessage)
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+        Directory.CreateDirectory(options.RealmImportDirectory);
+        File.WriteAllText(Path.Combine(options.RealmImportDirectory, $"{options.Realm}-realm.json"), json);
+        using var client = new HttpClient(new StubHandler(MetadataThenOk));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid, exception.Code);
+        Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CheckOnceAsync_WhenRealmEvidenceMissingRedirect_ThrowsRealmEvidenceDiagnostic()
     {
         using var directory = new TempDirectory();
@@ -162,6 +229,19 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
 
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid, exception.Code);
         Assert.Contains("redirect URI", exception.Message, StringComparison.Ordinal);
+    }
+
+    private static HttpResponseMessage MetadataThenOk(HttpRequestMessage request)
+    {
+        if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
+        {
+            return Json("""{"issuer":"http://localhost:8080/realms/appsurface-dev"}""");
+        }
+
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("<html>login</html>"),
+        };
     }
 
     private static AppSurfaceKeycloakOptions CreateOptions(string directory) =>
