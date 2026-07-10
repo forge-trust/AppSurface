@@ -1142,6 +1142,370 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task RunAsync_LongestFirst_ShouldRunMeasuredProjectsFirstWithinExclusiveSegments()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var first = repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
+        var slow = repo.WriteFile("tests/Slow.Tests/Slow.Tests.csproj", "<Project />");
+        var browser = repo.WriteFile("tests/Browser.Tests/Browser.Tests.csproj", "<Project><PackageReference Include=\"Microsoft.Playwright\" /></Project>");
+        var after = repo.WriteFile("tests/After.Tests/After.Tests.csproj", "<Project />");
+        var priorTimings = repo.WriteFile("prior-timings.json", """
+            {
+              "projects": [
+                { "project": "tests/First.Tests/First.Tests.csproj", "seconds": 5 },
+                { "project": "tests/Slow.Tests/Slow.Tests.csproj", "seconds": 50 },
+                { "project": "tests/After.Tests/After.Tests.csproj", "seconds": 90 }
+              ]
+            }
+            """);
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects:
+            [
+                "tests/First.Tests/First.Tests.csproj",
+                "tests/Slow.Tests/Slow.Tests.csproj",
+                "tests/Browser.Tests/Browser.Tests.csproj",
+                "tests/After.Tests/After.Tests.csproj",
+            ],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            ScheduleTimingsPath: priorTimings);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
+        Assert.Equal(["Slow.Tests", "First.Tests", "Browser.Tests", "After.Tests"], tests.Select(command => Path.GetFileNameWithoutExtension(command.Arguments[1])).ToArray());
+        var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
+        Assert.Contains("\"mode\": \"longest-first\"", timings, StringComparison.Ordinal);
+        Assert.Contains("\"originalIndex\": 1", timings, StringComparison.Ordinal);
+        Assert.Contains("\"executionIndex\": 0", timings, StringComparison.Ordinal);
+        Assert.Contains("\"scheduleReason\": \"prior-timing\"", timings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_LongestFirst_ShouldKeepJunitArtifactsOnOriginalIndex()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var first = repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
+        var slow = repo.WriteFile("tests/Slow.Tests/Slow.Tests.csproj", "<Project />");
+        var priorTimings = repo.WriteFile("prior-timings.json", """
+            {
+              "projects": [
+                { "project": "tests/First.Tests/First.Tests.csproj", "seconds": 5 },
+                { "project": "tests/Slow.Tests/Slow.Tests.csproj", "seconds": 50 }
+              ]
+            }
+            """);
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/First.Tests/First.Tests.csproj", "tests/Slow.Tests/Slow.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            ScheduleTimingsPath: priorTimings,
+            TestResults: CoverageRunTestResultFormat.Junit);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
+        Assert.Equal(["Slow.Tests", "First.Tests"], tests.Select(command => Path.GetFileNameWithoutExtension(command.Arguments[1])).ToArray());
+        Assert.Contains(tests[0].Arguments, argument => argument.Contains("junit-coverage-2-Slow.Tests-", StringComparison.Ordinal));
+        Assert.Contains(tests[1].Arguments, argument => argument.Contains("junit-coverage-1-First.Tests-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_LongestFirst_ShouldReadInferredTimingsBeforeClean()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var first = repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
+        var slow = repo.WriteFile("tests/Slow.Tests/Slow.Tests.csproj", "<Project />");
+        repo.WriteFile("TestResults/coverage-merged/.appsurface-coverage-output", "AppSurface coverage output directory");
+        repo.WriteFile("TestResults/coverage-merged/timings.json", """
+            {
+              "projects": [
+                { "project": "tests/First.Tests/First.Tests.csproj", "seconds": 5 },
+                { "project": "tests/Slow.Tests/Slow.Tests.csproj", "seconds": 50 }
+              ]
+            }
+            """);
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/First.Tests/First.Tests.csproj", "tests/Slow.Tests/Slow.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
+        Assert.Equal(["Slow.Tests", "First.Tests"], tests.Select(command => Path.GetFileNameWithoutExtension(command.Arguments[1])).ToArray());
+        var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
+        Assert.Contains("\"kind\": \"inferred\"", timings, StringComparison.Ordinal);
+        Assert.Contains("\"status\": \"loaded\"", timings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_LongestFirst_MissingInferredTimings_ShouldWarnAndUseInputOrderForUnknownProjects()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var first = repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
+        var second = repo.WriteFile("tests/Second.Tests/Second.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/First.Tests/First.Tests.csproj", "tests/Second.Tests/Second.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
+        Assert.Equal(["First.Tests", "Second.Tests"], tests.Select(command => Path.GetFileNameWithoutExtension(command.Arguments[1])).ToArray());
+        Assert.Contains("Schedule warning", console.ReadErrorString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_LongestFirst_ExplicitMalformedTimings_ShouldThrowBeforeTests()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        var priorTimings = repo.WriteFile("prior-timings.json", "{ not-json");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/Sample.Tests/Sample.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            ScheduleTimingsPath: priorTimings);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--schedule-timings file could not be read", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
+    }
+
+    [Fact]
+    public async Task RunAsync_LongestFirst_MissingExplicitTimings_ShouldThrowBeforeTests()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/Sample.Tests/Sample.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            ScheduleTimingsPath: "missing-timings.json");
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--schedule-timings file was not found", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
+    }
+
+    [Fact]
+    public async Task RunAsync_LongestFirst_DuplicateExplicitTimings_ShouldThrowBeforeTests()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        var priorTimings = repo.WriteFile("prior-timings.json", """
+            {
+              "projects": [
+                { "project": "tests/Sample.Tests/Sample.Tests.csproj", "seconds": 5 },
+                { "project": "tests/Sample.Tests/Sample.Tests.csproj", "seconds": 10 }
+              ]
+            }
+            """);
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/Sample.Tests/Sample.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            ScheduleTimingsPath: priorTimings);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Duplicate project timing", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
+    }
+
+    [Fact]
+    public async Task RunAsync_LongestFirst_PriorityProjects_ShouldRunBeforeMeasuredProjects()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var fast = repo.WriteFile("tests/Fast.Tests/Fast.Tests.csproj", "<Project />");
+        var slow = repo.WriteFile("tests/Slow.Tests/Slow.Tests.csproj", "<Project />");
+        var priorTimings = repo.WriteFile("prior-timings.json", """
+            {
+              "projects": [
+                { "project": "tests/Fast.Tests/Fast.Tests.csproj", "seconds": 1 },
+                { "project": "tests/Slow.Tests/Slow.Tests.csproj", "seconds": 90 }
+              ]
+            }
+            """);
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/Fast.Tests/Fast.Tests.csproj", "tests/Slow.Tests/Slow.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            ScheduleTimingsPath: priorTimings,
+            PriorityTestProjects: ["Fast.Tests.csproj"]);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
+        Assert.Equal(["Fast.Tests", "Slow.Tests"], tests.Select(command => Path.GetFileNameWithoutExtension(command.Arguments[1])).ToArray());
+        var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
+        Assert.Contains("\"scheduleReason\": \"priority\"", timings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_LongestFirst_PriorityExclusiveProject_ShouldThrowBeforeTests()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var browser = repo.WriteFile("tests/Browser.Tests/Browser.Tests.csproj", "<Project><PackageReference Include=\"Microsoft.Playwright\" /></Project>");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/Browser.Tests/Browser.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            PriorityTestProjects: ["Browser.Tests.csproj"]);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("cannot target an exclusive project", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
+    }
+
+    [Fact]
+    public async Task RunAsync_LongestFirst_UnmatchedPriorityProject_ShouldThrowBeforeTests()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/Sample.Tests/Sample.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            PriorityTestProjects: ["Missing.Tests.csproj"]);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("did not match any selected test project", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
+    }
+
+    [Fact]
+    public async Task RunAsync_LongestFirst_DuplicatePriorityProject_ShouldThrowBeforeTests()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/Sample.Tests/Sample.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            PriorityTestProjects: ["Sample.Tests.csproj", "Sample.Tests.csproj"]);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("contains a duplicate project", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
+    }
+
+    [Fact]
+    public async Task RunAsync_LongestFirst_AmbiguousPriorityProject_ShouldThrowBeforeTests()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        _ = repo.WriteFile("tests/First/Sample.Tests.csproj", "<Project />");
+        _ = repo.WriteFile("tests/Second/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/First/Sample.Tests.csproj", "tests/Second/Sample.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            PriorityTestProjects: ["Sample.Tests.csproj"]);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("matched more than one selected project", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
+    }
+
+    [Fact]
+    public async Task RunAsync_DryRun_LongestFirst_ShouldPrintPlannedSchedule()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var first = repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
+        var slow = repo.WriteFile("tests/Slow.Tests/Slow.Tests.csproj", "<Project />");
+        var priorTimings = repo.WriteFile("prior-timings.json", """
+            {
+              "projects": [
+                { "project": "tests/First.Tests/First.Tests.csproj", "seconds": 5 },
+                { "project": "tests/Slow.Tests/Slow.Tests.csproj", "seconds": 50 }
+              ]
+            }
+            """);
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/First.Tests/First.Tests.csproj", "tests/Slow.Tests/Slow.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            ScheduleTimingsPath: priorTimings,
+            DryRun: true);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Empty(runner.Commands);
+        var output = console.ReadOutputString();
+        Assert.Contains("Schedule: longest-first", output, StringComparison.Ordinal);
+        Assert.Contains("Planned execution order", output, StringComparison.Ordinal);
+        Assert.Contains("execution 1: original 2", output, StringComparison.Ordinal);
+        Assert.Contains("prior-timing scheduled 50s", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldRejectPopulatedOutputWithoutOwnershipMarker()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -1232,6 +1596,60 @@ public sealed class CoverageRunTests
 
         Assert.Contains("ASCOV111", exception.Message, StringComparison.Ordinal);
         Assert.Contains("#491", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRejectUnsupportedScheduleModeBeforeRunningTests()
+    {
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()))
+        {
+            Schedule = "fastest",
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--schedule must be input-order or longest-first", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRejectScheduleTimingsWithoutLongestFirst()
+    {
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()))
+        {
+            ScheduleTimings = "prior-timings.json",
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--schedule-timings requires --schedule longest-first", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRejectPriorityProjectWithoutLongestFirst()
+    {
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()))
+        {
+            PriorityTestProjects = ["Sample.Tests.csproj"],
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--priority-test-project requires --schedule longest-first", exception.Message, StringComparison.Ordinal);
         Assert.Empty(runner.Commands);
     }
 
@@ -1511,11 +1929,15 @@ public sealed class CoverageRunTests
     private static CoverageProjectRunResult CreateProjectRunResult(string repoPath, IReadOnlyList<string> junitPaths)
         => new(
             0,
+            0,
             new CoverageRunProject(
                 "tests/Sample.Tests/Sample.Tests.csproj",
                 Path.Join(repoPath, "tests", "Sample.Tests", "Sample.Tests.csproj"),
                 "Sample.Tests",
                 IsExclusive: false),
+            ScheduledSeconds: null,
+            DurationSource: "none",
+            ScheduleReason: "input-order",
             Seconds: 7,
             ExitCode: 0,
             LogFile: Path.Join(repoPath, "dotnet-test.log"),
@@ -1533,6 +1955,9 @@ public sealed class CoverageRunTests
         string OutputDirectory = "TestResults/coverage-merged",
         string Configuration = "Debug",
         int Parallelism = 1,
+        CoverageRunScheduleMode ScheduleMode = CoverageRunScheduleMode.InputOrder,
+        string? ScheduleTimingsPath = null,
+        IReadOnlyList<string>? PriorityTestProjects = null,
         bool NoRestore = false,
         bool Build = false,
         bool NoBuild = false,
@@ -1553,6 +1978,9 @@ public sealed class CoverageRunTests
             OutputDirectory,
             Configuration,
             Parallelism,
+            ScheduleMode,
+            ScheduleTimingsPath,
+            PriorityTestProjects ?? [],
             NoRestore,
             Build,
             NoBuild,

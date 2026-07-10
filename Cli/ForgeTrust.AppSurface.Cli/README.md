@@ -155,6 +155,8 @@ appsurface coverage run \
 
 The v1 contract assumes selected test projects are already instrumented with Coverlet. No managed test result export happens by default. Use `--test-results junit` when AppSurface should own top-level JUnit artifacts, and make sure every selected test project references `JunitXml.TestLogger`. `junit` is the only managed test-result format supported in this release; `trx` and TUnit-compatible parsing are reserved for follow-up work. `--logger` remains raw `dotnet test` pass-through and does not create AppSurface-managed artifacts.
 
+The default schedule is input order. For repositories with enough projects for long-tail timing to matter, pass `--schedule longest-first` so non-exclusive projects with longer prior durations start first within each exclusive-project segment. The first run usually has no timing history and keeps unknown projects in input order; later runs can reuse the previous output directory's `timings.json` automatically.
+
 #### Already Has Coverlet
 
 ```bash
@@ -184,6 +186,9 @@ Options:
 - `--output`: Coverage output directory. Defaults to `TestResults/coverage-merged`.
 - `--configuration`: Build/test configuration. Defaults to `Debug`.
 - `--parallelism`: Positive integer for non-exclusive test project concurrency. Defaults to `1`.
+- `--schedule`: Project scheduling mode. Use `input-order` for stable input order or `longest-first` to start longer non-exclusive projects first. Defaults to `input-order`.
+- `--schedule-timings`: Explicit `timings.json` file for `--schedule longest-first`. When omitted, longest-first reads the previous `timings.json` from the current output directory before cleanup.
+- `--priority-test-project`: Repeatable non-exclusive project path or file name to schedule before duration-sorted projects when `--schedule longest-first` is used.
 - `--no-restore`: Passes `--no-restore` to build and test commands.
 - `--build`: Builds the solution once before tests, including explicit-project runs.
 - `--no-build`: Skips the solution build before tests.
@@ -200,11 +205,31 @@ Options:
 - `--no-clean`: Preserves existing AppSurface-owned output instead of cleaning known coverage artifacts first.
 - `--verbosity`: `dotnet test` verbosity. Defaults to `minimal`.
 
+Duration-aware scheduling keeps exclusive projects as barriers. If discovery returns `A.Tests`, `Browser.IntegrationTests`, and `B.Tests`, `B.Tests` never jumps ahead of the exclusive browser project even when it was slower in the previous run. AppSurface sorts only the non-exclusive segment before each barrier and only the non-exclusive segment after it.
+
+```bash
+dotnet tool run appsurface coverage run \
+  --solution ./MyApp.slnx \
+  --parallelism 4 \
+  --schedule longest-first
+```
+
+Use `--schedule-timings` when CI stores the previous run's timings somewhere other than the output directory:
+
+```bash
+dotnet tool run appsurface coverage run \
+  --solution ./MyApp.slnx \
+  --schedule longest-first \
+  --schedule-timings ./artifacts/previous-coverage/timings.json
+```
+
+Use `--priority-test-project` for a known bottleneck that should start first even when its timing is missing or temporarily shorter. Priority projects must match one selected non-exclusive project. Duplicate, unmatched, ambiguous, or exclusive priority values fail before tests run so a typo does not silently change CI behavior.
+
 Artifacts are local and private by default:
 
 - `coverage.cobertura.xml`: Merged Cobertura file consumed by `coverage gate`.
 - `summary.txt`: Human-readable merged line and branch coverage summary.
-- `timings.json`: Machine-readable build, test, merge, managed test-result, diagnostics, artifact, log, and exit-code data.
+- `timings.json`: Machine-readable build, test, merge, schedule, managed test-result, diagnostics, artifact, log, and exit-code data. Per-project entries include both `originalIndex` for stable artifact naming and `executionIndex` for the actual launch order.
 - `reportgenerator-summary.txt`: Text summary from the package-owned ReportGenerator merge when available.
 - `junit-coverage-<index>-<project-name-hash>.xml`: AppSurface-managed JUnit test results when `--test-results junit` or `--slow-test-diagnostics` is used.
 - `slow-test-diagnostics.md` and `slow-test-diagnostics.json`: Slow-test evidence, parser warnings, metadata completeness, and diagnostic overhead when `--slow-test-diagnostics` is used.
