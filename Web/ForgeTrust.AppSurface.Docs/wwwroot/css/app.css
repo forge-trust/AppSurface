@@ -1889,13 +1889,13 @@ body {
     text-underline-offset: 0.18em;
 }
 
+.docs-content--markdown a:visited {
+    color: var(--docs-color-link-visited);
+}
+
 .docs-content--markdown a:hover {
     color: var(--docs-color-accent-soft);
     text-decoration-color: var(--docs-color-accent-soft-underline);
-}
-
-.docs-content--markdown a:visited {
-    color: var(--docs-color-link-visited);
 }
 
 .docs-content--markdown hr {

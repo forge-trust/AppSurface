@@ -276,6 +276,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("#9cf", resolved.CssVariables["--docs-color-link"]);
         Assert.Equal("#fbf", resolved.CssVariables["--docs-color-link-visited"]);
         Assert.Equal("rgba(0, 170, 255, 0.56)", resolved.CssVariables["--docs-color-border-accent-hover"]);
+        Assert.Equal("rgba(136, 136, 255, 0.12)", resolved.CssVariables["--docs-color-border-accent-faint"]);
         Assert.Equal("rgba(136, 136, 255, 0.14)", resolved.CssVariables["--docs-color-accent-fill-soft"]);
         Assert.Equal("0 0 0 1px #88f inset", resolved.CssVariables["--docs-focus-ring-inset"]);
     }

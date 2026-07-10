@@ -622,12 +622,17 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains(".docs-token-group-hover-text-accent-soft", tailwindEntryStylesheet);
         Assert.Contains(".docs-content--markdown a:visited", tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-color-link-visited);", tailwindEntryStylesheet);
+        Assert.True(
+            tailwindEntryStylesheet.IndexOf(".docs-content--markdown a:visited", StringComparison.Ordinal)
+            < tailwindEntryStylesheet.IndexOf(".docs-content--markdown a:hover", StringComparison.Ordinal));
 
         Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #050b17);", searchStylesheet);
         Assert.Contains("--docs-search-color-accent-glow: var(--docs-color-accent-glow,", searchStylesheet);
         Assert.Contains("--docs-search-focus-ring-inset: var(--docs-focus-ring-inset,", searchStylesheet);
         Assert.Contains(":root[data-docs-density=\"compact\"] #docs-search-input", searchStylesheet);
         Assert.Contains(":root[data-docs-density=\"compact\"] .docs-search-result-link", searchStylesheet);
+        Assert.Contains("padding-top: 0.05rem;", searchStylesheet);
+        Assert.Contains("padding-bottom: 0.75rem;", searchStylesheet);
         Assert.Contains("background: var(--docs-search-color-surface-canvas);", searchStylesheet);
         Assert.Contains("border: 1px solid var(--docs-search-color-border-default);", searchStylesheet);
         Assert.Contains("box-shadow: var(--docs-search-focus-ring-inset);", searchStylesheet);

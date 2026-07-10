@@ -10,7 +10,7 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
         const string html =
             """
             <!DOCTYPE html>
-            <html>
+            <html class="docs-theme-preset-app-surface-dark docs-density-comfortable docs-chrome-standard">
             <head>
               <link rel="stylesheet" href="/docs/search.css" />
               <link rel="preload" href="/docs/search-index.json" as="fetch" crossorigin="use-credentials" />
@@ -40,6 +40,7 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
         Assert.Contains("\"endpointUrl\":\"/docs/v/1.2.3/_metrics/collect\"", rewritten);
         Assert.DoesNotContain("docsVersionsUrl", rewritten);
         Assert.Contains("href=\"/docs/versions\"", rewritten);
+        Assert.Contains("class=\"docs-theme-preset-app-surface-dark docs-density-comfortable docs-chrome-standard\"", rewritten);
     }
 
     [Fact]
@@ -48,7 +49,8 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
         const string html =
             """
             <!DOCTYPE html>
-            <html data-docs-theme-preset="graphite-dark"
+            <html class="docs-theme-preset-graphite-dark docs-density-compact docs-chrome-compact"
+                  data-docs-theme-preset="graphite-dark"
                   data-docs-density="compact"
                   data-docs-chrome="compact"
                   style="scrollbar-gutter: stable; --docs-color-surface-canvas:#080a0d;--docs-color-accent:#38bdf8;">
@@ -67,6 +69,7 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
         Assert.Contains("data-docs-theme-preset=\"graphite-dark\"", rewritten);
         Assert.Contains("data-docs-density=\"compact\"", rewritten);
         Assert.Contains("data-docs-chrome=\"compact\"", rewritten);
+        Assert.Contains("class=\"docs-theme-preset-graphite-dark docs-density-compact docs-chrome-compact\"", rewritten);
         Assert.Contains("--docs-color-surface-canvas:#080a0d;", rewritten);
         Assert.Contains("--docs-color-accent:#38bdf8;", rewritten);
         Assert.Contains("href=\"/docs/v/1.2.3/search.css\"", rewritten);

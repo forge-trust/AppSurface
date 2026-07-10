@@ -378,7 +378,7 @@
 }
 
 :root[data-docs-density="compact"] .docs-search-result-link {
-    padding-top: 0.75rem;
+    padding-top: 0.05rem;
     padding-bottom: 0.75rem;
 }
 

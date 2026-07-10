@@ -54,11 +54,27 @@ internal sealed record AppSurfaceDocsResolvedTheme(
     IReadOnlyDictionary<string, string> CssVariables,
     string CssVariableStyle);
 
+/// <summary>
+/// Centralizes normalization, validation, and render-ready resolution for the AppSurface Docs theme contract.
+/// </summary>
+/// <remarks>
+/// Hosts configure <see cref="AppSurfaceDocsThemeOptions"/>, while this policy keeps every consumer on one resolved
+/// theme boundary. Run <see cref="Normalize"/> during post-configuration before calling <see cref="Validate"/> or
+/// <see cref="Resolve"/>.
+/// </remarks>
 internal static class AppSurfaceDocsThemePolicy
 {
     private const double TextContrastRatio = 4.5d;
     private const double UserInterfaceContrastRatio = 3d;
 
+    /// <summary>
+    /// Normalizes mutable theme options in place.
+    /// </summary>
+    /// <param name="theme">The configured theme options to normalize.</param>
+    /// <remarks>
+    /// This method creates omitted nested sections and canonicalizes configured CSS hex colors. Call it during
+    /// post-configuration before validation or resolution so those later operations observe a stable options shape.
+    /// </remarks>
     public static void Normalize(AppSurfaceDocsThemeOptions theme)
     {
         ArgumentNullException.ThrowIfNull(theme);
@@ -71,6 +87,15 @@ internal static class AppSurfaceDocsThemePolicy
         theme.Colors.VisitedLinkColor = NormalizeCssHexColorOrNull(theme.Colors.VisitedLinkColor);
     }
 
+    /// <summary>
+    /// Adds configuration failures for an AppSurface Docs theme.
+    /// </summary>
+    /// <param name="theme">The normalized theme options to validate.</param>
+    /// <param name="failures">The destination for actionable validation messages.</param>
+    /// <remarks>
+    /// Contrast checks use the selected preset's canvas and raised backgrounds because v1 intentionally does not
+    /// expose raw surface overrides. This makes the reported contrast guarantee match the surfaces the package renders.
+    /// </remarks>
     public static void Validate(AppSurfaceDocsThemeOptions? theme, List<string> failures)
     {
         ArgumentNullException.ThrowIfNull(failures);
@@ -124,6 +149,15 @@ internal static class AppSurfaceDocsThemePolicy
         }
     }
 
+    /// <summary>
+    /// Resolves theme options into the attributes and CSS variables consumed by rendered and exported docs.
+    /// </summary>
+    /// <param name="options">The normalized theme options to resolve.</param>
+    /// <returns>The immutable theme contract for layouts, search, and static output.</returns>
+    /// <remarks>
+    /// Call <see cref="Normalize"/> before resolution for configured options. The null-tolerant fallback exists only
+    /// to keep rendering defensive when no theme section is supplied.
+    /// </remarks>
     public static AppSurfaceDocsResolvedTheme Resolve(AppSurfaceDocsThemeOptions? options)
     {
         var theme = options ?? new AppSurfaceDocsThemeOptions();
@@ -360,7 +394,7 @@ internal static class AppSurfaceDocsThemePolicy
         variables["--docs-color-border-accent-muted"] = ToRgba(accentStrong, 0.34);
         variables["--docs-color-border-accent-active"] = ToRgba(accent, 0.48);
         variables["--docs-color-border-accent-subtle"] = ToRgba(accentStrong, 0.22);
-        variables["--docs-color-border-accent-faint"] = ToRgba(variables["--docs-color-accent-violet"], 0.12);
+        variables["--docs-color-border-accent-faint"] = ToRgba(accentStrong, 0.12);
         variables["--docs-color-border-accent-strong"] = ToRgba(accent, 0.7);
         variables["--docs-color-border-accent-readable"] = ToRgba(accent, 0.62);
         variables["--docs-color-link-underline"] = ToRgba(link, 0.5);
