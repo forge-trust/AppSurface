@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
+    <ProjectReference Include="../../examples/auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj" />
   </ItemGroup>

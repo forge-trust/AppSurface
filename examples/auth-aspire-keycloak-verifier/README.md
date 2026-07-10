@@ -5,3 +5,5 @@ This helper is run by the `verify` profile in `examples/auth-aspire-keycloak-app
 ```bash
 aspire run --non-interactive --apphost examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj -- verify
 ```
+
+For direct diagnostics, `--target <url>` overrides the AppHost-projected web proof URL and `--timeout-seconds <seconds>` must be between 1 and 300.

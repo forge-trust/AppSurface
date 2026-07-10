@@ -316,6 +316,11 @@ internal sealed record VerifierOptions(
             return Invalid("Problem: verifier client id is missing. Cause: AUTH_ASPIRE_KEYCLOAK_CLIENT_ID was not supplied by the AppHost. Fix: run through the AppHost verify profile. Docs: examples/auth-aspire-keycloak-apphost/README.md.");
         }
 
+        if (timeoutSeconds <= 0 || timeoutSeconds > 300)
+        {
+            return Invalid("Problem: verifier timeout is invalid. Cause: --timeout-seconds must be between 1 and 300. Fix: run through the AppHost verify profile or pass a bounded timeout. Docs: examples/auth-aspire-keycloak-apphost/README.md.");
+        }
+
         return new VerifierOptions(
             targetUri,
             clientId,
