@@ -28,7 +28,7 @@ public sealed class AppSurfaceCliAppTests
         var targetRequestTask = AcceptRequestWithinAsync(targetListener, TimeSpan.FromMilliseconds(250));
 
         var client = provider.GetRequiredService<IPwaVerificationHttpClient>();
-        var response = await client.GetAsync(new Uri($"http://127.0.0.1:{redirectPort}/redirect"), CancellationToken.None);
+        var response = await client.GetAsync(new Uri($"http://127.0.0.1:{redirectPort}/redirect"), 1024, CancellationToken.None);
 
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         Assert.False(response.IsSuccess);

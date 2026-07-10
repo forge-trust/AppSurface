@@ -30,12 +30,12 @@ internal static partial class PwaOptionsValidator
             diagnostics.Add(new PwaDiagnostic("ASPWA009", PwaDiagnosticSeverity.Error, "PwaOptions.Display is not a supported display mode."));
         }
 
-        if (!options.Icons.Any(icon => string.Equals(icon.Sizes, "192x192", StringComparison.OrdinalIgnoreCase)))
+        if (!options.Icons.Any(icon => HasIconSizeToken(icon.Sizes, "192x192")))
         {
             diagnostics.Add(new PwaDiagnostic("ASPWA010", PwaDiagnosticSeverity.Error, "PWA support requires a declared 192x192 icon."));
         }
 
-        if (!options.Icons.Any(icon => string.Equals(icon.Sizes, "512x512", StringComparison.OrdinalIgnoreCase)))
+        if (!options.Icons.Any(icon => HasIconSizeToken(icon.Sizes, "512x512")))
         {
             diagnostics.Add(new PwaDiagnostic("ASPWA011", PwaDiagnosticSeverity.Error, "PWA support requires a declared 512x512 icon."));
         }
@@ -45,9 +45,9 @@ internal static partial class PwaOptionsValidator
             var icon = options.Icons[i];
             RequireLocalPath(icon.Source, "ASPWA012", $"PwaOptions.Icons[{i}].Source must be an app-root-relative path.", diagnostics);
 
-            if (!IconSizePattern().IsMatch(icon.Sizes ?? string.Empty))
+            if (!HasValidIconSizeTokens(icon.Sizes))
             {
-                diagnostics.Add(new PwaDiagnostic("ASPWA013", PwaDiagnosticSeverity.Error, $"PwaOptions.Icons[{i}].Sizes must use WIDTHxHEIGHT, for example 192x192."));
+                diagnostics.Add(new PwaDiagnostic("ASPWA013", PwaDiagnosticSeverity.Error, $"PwaOptions.Icons[{i}].Sizes must use WIDTHxHEIGHT tokens, for example 192x192 or 192x192 512x512."));
             }
 
             RequireText(icon.Type, "ASPWA014", $"PwaOptions.Icons[{i}].Type is required.", diagnostics);
@@ -225,6 +225,24 @@ internal static partial class PwaOptionsValidator
     {
         var queryStart = value.IndexOf('?');
         return queryStart < 0 ? value : value[..queryStart];
+    }
+
+    private static bool HasIconSizeToken(string? sizes, string expected)
+    {
+        return GetIconSizeTokens(sizes).Contains(expected, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool HasValidIconSizeTokens(string? sizes)
+    {
+        var tokens = GetIconSizeTokens(sizes);
+        return tokens.Count > 0 && tokens.All(token => IconSizePattern().IsMatch(token));
+    }
+
+    private static IReadOnlyList<string> GetIconSizeTokens(string? sizes)
+    {
+        return string.IsNullOrWhiteSpace(sizes)
+            ? []
+            : sizes.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     [GeneratedRegex("^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")]

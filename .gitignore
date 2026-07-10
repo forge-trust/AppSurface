@@ -82,6 +82,7 @@ junit.xml
 .gstack/
 .pnpm-store/
 **/node_modules/
+examples/web-pwa-install/pwa-verify.json
 
 # Tailwind binary
 **/tailwindcss

@@ -229,6 +229,18 @@ public sealed class PwaOptionsTests
         Assert.Null(exception);
     }
 
+    [Fact]
+    public void ThrowIfInvalid_AcceptsMultipleIconSizeTokens()
+    {
+        var options = CreateValidOptions();
+        options.Icons.Clear();
+        options.Icons.Add(new PwaIcon { Source = "/icons/app.png", Sizes = "192x192 512x512", Type = "image/png" });
+
+        var exception = Record.Exception(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Null(exception);
+    }
+
     internal static PwaOptions CreateValidOptions()
     {
         var options = new PwaOptions

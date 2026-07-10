@@ -31,7 +31,7 @@ Add the TagHelper to an MVC/Razor layout:
 Verify a running app:
 
 ```bash
-appsurface pwa verify --url https://app.example.com
+appsurface pwa verify --base-url https://app.example.com --entry-path /account/resume
 ```
 
 During local development, open `/_appsurface/pwa` for an HTML checklist and `/_appsurface/pwa/status.json` for machine-readable diagnostics.
@@ -51,7 +51,7 @@ Required values when enabled:
 | `Display` | `Standalone` | Maps to `standalone`, `minimal-ui`, `fullscreen`, or `browser`. |
 | `ThemeColor` | Empty | Hex color emitted to the manifest and `<meta name="theme-color">`. |
 | `BackgroundColor` | Empty | Hex color emitted to the manifest. |
-| `Icons` | Empty | Must include at least one `192x192` icon and one `512x512` icon. |
+| `Icons` | Empty | Must include at least one `192x192` icon token and one `512x512` icon token. A single manifest icon can list multiple space-separated sizes when that matches the asset. |
 
 Optional values:
 
@@ -101,20 +101,37 @@ Development diagnostics are available at:
 - `/_appsurface/pwa`
 - `/_appsurface/pwa/status.json`
 
-The status JSON reports stable AppSurface diagnostics for startup-validatable configuration, manifest metadata, head-tag hints, and offline posture. Production hides diagnostics by default; use `PwaDiagnosticEndpointExposure.Always` only for intentionally public readiness checks.
+The status JSON reports stable AppSurface diagnostics for startup-validatable configuration, manifest metadata, head-tag hints, and offline posture. It always includes `configuredServiceWorkerPath` so `appsurface pwa verify` can prove the service-worker endpoint is absent when `offlineEnabled` is `false`; `serviceWorkerPath` and `offlineFallbackPath` are populated only when the offline strategy is enabled. Production hides diagnostics by default; use `PwaDiagnosticEndpointExposure.Always` only for intentionally public readiness checks.
 
 ## CLI Verification
 
-`appsurface pwa verify --url <origin>` checks a running origin:
+`appsurface pwa verify --url <origin>` checks a running origin. Prefer `--base-url` plus `--entry-path` when the app has a path base or the meaningful install surface is not `/`:
+
+```bash
+appsurface pwa verify \
+  --base-url https://app.example.com \
+  --entry-path /account/resume \
+  --expect-start-url / \
+  --expect-scope / \
+  --expect-display standalone \
+  --expect-theme-color '#2563eb' \
+  --expect-background-color '#ffffff' \
+  --expect-icon 192x192 \
+  --expect-icon 512x512 \
+  --json
+```
+
+The verifier checks:
 
 - HTTPS or localhost install-context acceptability.
-- Root HTML manifest link presence.
+- Entry HTML manifest link presence, with same-origin and same-base-path redirect handling.
 - Manifest route reachability and `application/manifest+json` content type.
 - Manifest fields, display mode, same-origin `start_url`, same-origin `scope`, and `start_url` within `scope`.
-- Required `192x192` and `512x512` icons.
-- Icon reachability and basic image content type.
+- Required `192x192` and `512x512` icon tokens, plus any repeated `--expect-icon` assertions.
+- Icon reachability, image content type, and decoded PNG dimensions when available.
 - Diagnostic endpoint posture.
 - Service worker reachability when diagnostics report offline enabled.
+- Service worker absence when diagnostics are exposed, offline is disabled, and the configured service-worker path is known.
 
 Use JSON output when integrating the verifier into CI:
 
@@ -122,7 +139,7 @@ Use JSON output when integrating the verifier into CI:
 appsurface pwa verify --url https://app.example.com --json
 ```
 
-The command emits stable diagnostic codes and exits nonzero when install-critical checks fail.
+The command emits stable diagnostic codes and exits nonzero when install-critical checks fail. JSON output uses `schemaVersion: 2`, keeps the original `passed`, `origin`, `manifestPath`, and `diagnostics` fields, and adds entry URL, manifest fields, icon evidence, and diagnostic `subject`/`expected`/`actual`/`fix` details for CI artifacts.
 
 ## Browser Caveats
 
@@ -135,6 +152,7 @@ Common reasons a browser may still hide installation:
 - The icon asset is unreachable, too small, or not an image.
 - The manifest link is missing from the HTML head.
 - `start_url` or `scope` points outside the current origin.
+- The verified entry path redirects to a different origin, path base, or login shell that does not include the manifest link.
 - The browser requires additional platform-specific signals.
 
 Use AppSurface diagnostics and `appsurface pwa verify` to prove the web contract first, then debug browser-specific prompt behavior from browser DevTools.
@@ -146,4 +164,4 @@ Use AppSurface diagnostics and `appsurface pwa verify` to prove the web contract
 - Keep `StartUrl` inside `Scope`; otherwise browsers may treat the manifest as inconsistent.
 - Serve icons from stable same-origin paths. Versioned URLs are fine in head metadata, but manifest icon `src` values should remain app-root-relative.
 - Keep diagnostics development-only unless the app deliberately wants public PWA readiness metadata.
-- For apps behind a reverse proxy path base, verify through the externally visible URL, not only the inner Kestrel URL.
+- For apps behind a reverse proxy path base, verify through the externally visible URL and a real entry path, not only the inner Kestrel root.
