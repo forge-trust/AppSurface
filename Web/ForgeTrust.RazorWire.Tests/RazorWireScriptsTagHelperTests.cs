@@ -296,7 +296,6 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("razorwire\\behavior-kit.js", project, StringComparison.Ordinal);
         Assert.Contains("razorwire\\section-copy.js", project, StringComparison.Ordinal);
         Assert.Contains("razorwire\\form-interactions.js", project, StringComparison.Ordinal);
-        Assert.Contains("razorwire\\behavior-kit.js", project, StringComparison.Ordinal);
         Assert.Contains("""<Content Remove="assets\**\*" />""", project, StringComparison.Ordinal);
         Assert.Contains("""<None Remove="assets\**\*" />""", project, StringComparison.Ordinal);
     }

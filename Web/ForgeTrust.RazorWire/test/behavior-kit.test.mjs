@@ -289,6 +289,28 @@ test('app-reported diagnostics use a distinct code for root and lifecycle contex
   assert.ok(diagnostics.some(diagnostic => diagnostic.behaviorName === 'demo.page'));
 });
 
+test('lifecycle conflicts are diagnosed and diagnostics can be cleared', () => {
+  const { context } = loadRuntime();
+
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'demo.page',
+    connect() {}
+  });
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'demo.page',
+    frames: true,
+    connect() {}
+  });
+
+  const diagnostics = context.window.RazorWire.behaviors.getDiagnostics();
+  assert.equal(diagnostics.length, 1);
+  assert.equal(diagnostics[0].code, 'BehaviorRegistrationConflict');
+  assert.match(diagnostics[0].message, /Lifecycle behavior "demo\.page"/);
+
+  context.window.RazorWire.behaviors.clearDiagnostics();
+  assert.equal(context.window.RazorWire.behaviors.getDiagnostics().length, 0);
+});
+
 function loadRuntime(options = {}) {
   const document = new FakeDocument();
   const abortController = Object.hasOwn(options, 'abortController') ? options.abortController : AbortController;

@@ -93,6 +93,14 @@ test('core behavior stub de-dupes missing-kit diagnostics', () => {
   assert.match(source, /diagnostics\.some\(diagnostic =>/);
 });
 
+test('generated asset manifests list each behavior kit output once', () => {
+  const build = readFileSync(new URL('assets/scripts/build.mjs', packageRoot), 'utf8');
+  const verifier = readFileSync(new URL('assets/scripts/verify-generated.mjs', packageRoot), 'utf8');
+
+  assert.equal(build.match(/label:\s*'behavior-kit\.js'/g)?.length, 1);
+  assert.equal(verifier.match(/'behavior-kit\.js'/g)?.length, 1);
+});
+
 test('generated verifier emits actionable stale-output diagnostics', () => {
   const verifier = readFileSync(new URL('assets/scripts/verify-generated.mjs', packageRoot), 'utf8');
 
