@@ -11,6 +11,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ### Release and docs surface
 
 - AppSurface Docs adds Theme Contract v1. Hosts can configure `AppSurfaceDocs:Theme` with dark-family presets (`AppSurfaceDark` and `GraphiteDark`), accent/link color overrides, and density/chrome controls. The package validates enum values, CSS hex colors, null nested theme sections, and contrast-sensitive overrides at startup, emits resolved root attributes and CSS variables into rendered HTML, and freezes those variables into static exports and published archives instead of adding a dynamic themed CSS asset route.
+- Documentation and release authoring guidance now require concept links instead of mention-only prose: start with adopter outcomes, explain internal feature labels in plain language, link named packages, concepts, workflows, diagnostics, guides, examples, and CLI commands to their canonical docs, and keep maintainer evidence after the adoption path.
 - AppSurface DevAuth now centralizes its environment activation policy. DevAuth remains Development-by-default, but
   package consumers can explicitly add local/proof environment names through `AllowedEnvironmentNames`; the marker
   self-suppresses outside allowed environments and mapped control/mutation endpoints stay fail-closed.
