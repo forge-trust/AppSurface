@@ -2,6 +2,8 @@
 
 AppSurface Web owns the baseline install contract for Progressive Web Apps: manifest metadata, head tags, diagnostics, and explicit offline fallback wiring. It does not promise that every browser will show an install prompt. Browsers still decide when and how to surface installation.
 
+This first readiness slice is verifier and server-known diagnostics only. It does not include an install CTA helper, icon generation command, push subscription package, badge helper, browser-executed capability reporting, or telemetry pipeline. Those rails need separate APIs because they involve user-facing copy, generated image assets, browser permission state, endpoint custody, safe counts, and product-owned event interpretation.
+
 ## Quick Start
 
 Enable PWA metadata from `WebOptions.Pwa`:
