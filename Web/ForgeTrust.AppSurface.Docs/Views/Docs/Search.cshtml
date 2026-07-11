@@ -1,12 +1,12 @@
 @model ForgeTrust.AppSurface.Docs.Models.SearchPageViewModel
 @inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
 @{
-    const string FailureLinkClass = "grid gap-1 rounded-lg border border-[#1b2a43] bg-[#0d182a]/55 px-[0.95rem] py-[0.85rem] no-underline transition-colors hover:border-[#14b8a6]/45 hover:bg-[#0d182a]/80";
+    const string FailureLinkClass = "grid gap-1 rounded-lg border docs-token-border-muted docs-token-bg-raised px-[0.95rem] py-[0.85rem] no-underline transition-colors docs-token-hover-border-accent docs-token-hover-bg-raised";
 }
 
 <div id="docs-search-page" class="docs-search-page">
     <header class="grid gap-[0.55rem]">
-        <p class="m-0 text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[#14b8a6]">AppSurface Search</p>
+        <p class="m-0 text-[0.72rem] font-semibold uppercase tracking-[0.16em] docs-token-text-accent">AppSurface Search</p>
         <h1 class="docs-gradient-title m-0 text-[clamp(2rem,4vw,3rem)] font-bold leading-[1.02]">@Model.Title</h1>
         <p class="m-0 max-w-[52rem] text-base leading-[1.6] text-slate-400">@Model.Orientation</p>
     </header>
@@ -83,7 +83,7 @@
                        data-rw-recovery-source-state="loading"
                        data-turbo-frame="doc-content"
                        data-turbo-action="advance">
-                        <span class="text-[0.95rem] font-semibold text-[#14b8a6]">@link.Title</span>
+                        <span class="text-[0.95rem] font-semibold docs-token-text-accent">@link.Title</span>
                         <span class="text-[0.82rem] leading-[1.45] text-slate-400">@link.Description</span>
                     </a>
                 }
@@ -94,7 +94,7 @@
                        data-rw-recovery-link-kind="server_fallback"
                        data-rw-recovery-source-state="loading"
                        data-turbo-frame="_top">
-                        <span class="text-[0.95rem] font-semibold text-[#14b8a6]">@link.Title</span>
+                        <span class="text-[0.95rem] font-semibold docs-token-text-accent">@link.Title</span>
                         <span class="text-[0.82rem] leading-[1.45] text-slate-400">@link.Description</span>
                     </a>
                 }

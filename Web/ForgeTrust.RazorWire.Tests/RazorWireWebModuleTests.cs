@@ -227,6 +227,14 @@ public class RazorWireWebModuleTests
             Assert.Equal("text/javascript", islandsResponse.Content.Headers.ContentType?.MediaType);
             Assert.True(islandsResponse.Content.Headers.ContentLength > 0);
 
+            using var behaviorKitResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js");
+            Assert.Equal(HttpStatusCode.OK, behaviorKitResponse.StatusCode);
+            Assert.Equal("text/javascript", behaviorKitResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains(
+                "Generated from assets/src/behavior-kit.ts",
+                await behaviorKitResponse.Content.ReadAsStringAsync(),
+                StringComparison.Ordinal);
+
             using var pageNavigationResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js");
             Assert.Equal(HttpStatusCode.OK, pageNavigationResponse.StatusCode);
             Assert.Equal("text/javascript", pageNavigationResponse.Content.Headers.ContentType?.MediaType);
@@ -249,14 +257,6 @@ public class RazorWireWebModuleTests
             Assert.Contains(
                 "Generated from assets/src/form-interactions.ts",
                 await formInteractionsResponse.Content.ReadAsStringAsync(),
-                StringComparison.Ordinal);
-
-            using var behaviorKitResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js");
-            Assert.Equal(HttpStatusCode.OK, behaviorKitResponse.StatusCode);
-            Assert.Equal("text/javascript", behaviorKitResponse.Content.Headers.ContentType?.MediaType);
-            Assert.Contains(
-                "Generated from assets/src/behavior-kit.ts",
-                await behaviorKitResponse.Content.ReadAsStringAsync(),
                 StringComparison.Ordinal);
 
             using var imageResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/background.png");
