@@ -1448,6 +1448,28 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task RunAsync_LongestFirst_DuplicatePriorityProjectAlias_ShouldThrowBeforeTests()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects: ["tests/Sample.Tests/Sample.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            PriorityTestProjects: ["tests/Sample.Tests/Sample.Tests.csproj", "Sample.Tests.csproj"]);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("contains a duplicate project", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
+    }
+
+    [Fact]
     public async Task RunAsync_LongestFirst_AmbiguousPriorityProject_ShouldThrowBeforeTests()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");

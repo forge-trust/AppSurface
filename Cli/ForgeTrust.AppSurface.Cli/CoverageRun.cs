@@ -911,7 +911,16 @@ internal sealed class CoverageRunWorkflow
                     "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
             }
 
-            ranks[matches[0].OriginalIndex] = rank;
+            if (!ranks.TryAdd(matches[0].OriginalIndex, rank))
+            {
+                throw CoverageRunDiagnostics.Create(
+                    "ASCOV101",
+                    "--priority-test-project contains a duplicate project.",
+                    $"Project: {priority}.",
+                    "Pass each priority project once.",
+                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+            }
+
         }
 
         return ranks;
