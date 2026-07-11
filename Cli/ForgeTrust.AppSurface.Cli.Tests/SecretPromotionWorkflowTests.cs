@@ -407,6 +407,43 @@ public sealed class SecretPromotionWorkflowTests
         Assert.Equal(1, google.SecretProbeCalls);
     }
 
+    [Theory]
+    [MemberData(nameof(InvalidPlanConfigurations))]
+    public void Plan_InvalidDeclaredConfiguration_ReturnsUsageBeforeAnySecretRead(string configuration, string expectedMessage)
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var google = new FakeGoogleClient();
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        var configPath = temp.WriteFile("promotion.json", configuration);
+
+        var exception = Assert.Throws<CommandException>(() => workflow.CreatePlan(
+            new SecretPromotionPlanRequest(
+                configPath,
+                "job",
+                Path.Join(temp.Path, "plan.json"),
+                false,
+                TimeSpan.FromMinutes(10),
+                CreateContext(new InMemoryAppSurfaceLocalSecretStore()))));
+
+        Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, google.AccessCalls);
+        Assert.Empty(google.Writes);
+    }
+
+    public static IEnumerable<object[]> InvalidPlanConfigurations()
+    {
+        yield return ["{", "valid secret-promotion JSON"];
+        yield return ["{\"version\":2,\"endpoints\":[],\"jobs\":[]}", "--config must be"];
+        yield return ["{\"version\":1,\"endpoints\":[],\"jobs\":[]}", "No declared promotion job"];
+        yield return ["{\"version\":1,\"endpoints\":[],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"missing\",\"rows\":[]},{\"name\":\"job\",\"source\":\"local\",\"destination\":\"missing\",\"rows\":[]}]}", "declared more than once"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"destination\":\"projects/p/secrets/s\"}]}]}", "must name source"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"azure\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"destination\":\"projects/p/secrets/s\"}]}]}", "V1 supports only"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"destination\":\"projects/p/secrets/s\"},{\"key\":\"Key\",\"destination\":\"projects/p/secrets/t\"}]}]}", "unique non-empty keys"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"production\",\"provider\":\"google\",\"environment\":\"production\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"production\",\"rows\":[{\"key\":\"Key\",\"destination\":\"projects/p/secrets/s\"}]}]}", "allowMutableLocalSource"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}},{\"name\":\"production\",\"provider\":\"google\",\"environment\":\"production\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"staging\",\"destination\":\"production\",\"rows\":[{\"key\":\"Key\",\"source\":\"projects/p/secrets/s/versions/latest\",\"destination\":\"projects/q/secrets/t\"}]}]}", "explicit numeric version"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"source\":\"unexpected\",\"destination\":\"projects/p/secrets/s\"}]}]}", "Local source rows"];
+    }
+
     private static SecretsCommandContext CreateContext(IAppSurfaceLocalSecretStore store) =>
         new(new AppSurfaceLocalSecretIdentityNormalizer(), store, "AppSurfaceApp", "Development", null);
 

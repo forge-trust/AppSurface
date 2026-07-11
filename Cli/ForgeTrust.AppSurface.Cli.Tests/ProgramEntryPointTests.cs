@@ -67,6 +67,29 @@ public sealed class ProgramEntryPointTests
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("plan", "--out")]
+    [InlineData("apply", "--plan")]
+    public async Task SecretsTransferCommands_Should_DescribeRequiredArtifacts(string command, string requiredOption)
+    {
+        var result = await InvokeProgramEntryPointAsync(["secrets", "transfer", command, "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(requiredOption, result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("plan", "--config is required.")]
+    [InlineData("apply", "--config is required.")]
+    public async Task SecretsTransferCommands_Should_RequireConfigurationBeforeAnyProviderWork(string command, string expectedDiagnostic)
+    {
+        var result = await InvokeProgramEntryPointAsync(["secrets", "transfer", command]);
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains(expectedDiagnostic, result.AllText, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task SecretsCommands_Should_Set_List_Get_And_Delete_Without_PrintingSecretValue()
     {

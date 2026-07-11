@@ -146,6 +146,39 @@ public sealed class GoogleSecretManagerTransferClientTests
         Assert.Equal("google-secret-transfer-unavailable", result.Diagnostic?.Code);
     }
 
+    [Theory]
+    [InlineData(StatusCode.NotFound, GoogleSecretManagerTransferStatus.Missing)]
+    [InlineData(StatusCode.InvalidArgument, GoogleSecretManagerTransferStatus.InvalidResource)]
+    [InlineData(StatusCode.Cancelled, GoogleSecretManagerTransferStatus.Cancelled)]
+    [InlineData(StatusCode.Unknown, GoogleSecretManagerTransferStatus.ProviderFailed)]
+    public void AccessSecretVersion_Should_MapProviderFailuresValueSafely(StatusCode statusCode, GoogleSecretManagerTransferStatus expected)
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(accessException: new RpcException(new Status(statusCode, "sentinel-secret"))));
+
+        var result = client.AccessSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(expected, result.Status);
+        Assert.DoesNotContain("sentinel-secret", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(StatusCode.NotFound, GoogleSecretManagerTransferStatus.Missing)]
+    [InlineData(StatusCode.PermissionDenied, GoogleSecretManagerTransferStatus.AccessDenied)]
+    [InlineData(StatusCode.InvalidArgument, GoogleSecretManagerTransferStatus.InvalidResource)]
+    [InlineData(StatusCode.Cancelled, GoogleSecretManagerTransferStatus.Cancelled)]
+    [InlineData(StatusCode.Unknown, GoogleSecretManagerTransferStatus.ProviderFailed)]
+    public void AddSecretVersion_Should_MapProviderFailuresValueSafely(StatusCode statusCode, GoogleSecretManagerTransferStatus expected)
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(new RpcException(new Status(statusCode, "sentinel-secret"))));
+
+        var result = client.AddSecretVersion("projects/project/secrets/api-key", "payload", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(expected, result.Status);
+        Assert.DoesNotContain("sentinel-secret", result.ToString(), StringComparison.Ordinal);
+    }
+
     private sealed class TransferSecretManagerServiceClient(
         Exception? exception = null,
         SecretVersion.Types.State versionState = SecretVersion.Types.State.Enabled,
