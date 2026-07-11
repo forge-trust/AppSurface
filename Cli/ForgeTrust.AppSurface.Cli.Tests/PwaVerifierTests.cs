@@ -76,6 +76,17 @@ public sealed class PwaVerifierTests
     }
 
     [Fact]
+    public void VerificationOptions_NormalizesBlankEntryPathAndFormatsExpectedIconPurpose()
+    {
+        var options = PwaVerificationOptions.Create(new Uri("https://app.example.test"), entryPath: " ", expectedIcons: null);
+        var expectedIcon = PwaExpectedIcon.Parse("512x512:maskable");
+
+        Assert.Equal("/", options.EntryPath);
+        Assert.Empty(options.ExpectedIcons);
+        Assert.Equal("512x512:maskable", expectedIcon.ToString());
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RejectsConflictingUrlAndBaseUrl()
     {
         var command = new PwaVerifyCommand(new PwaVerifier(new FakePwaHttpClient()))
@@ -269,6 +280,8 @@ public sealed class PwaVerifierTests
     [InlineData("/account/resume?token=secret")]
     [InlineData("/account/resume#section")]
     [InlineData("/bad path")]
+    [InlineData("/bad\tpath")]
+    [InlineData("/bad{tenant}")]
     [InlineData("/bad%zz")]
     public void VerificationTarget_RejectsUnsafeEntryPaths(string entryPath)
     {
