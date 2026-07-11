@@ -1153,8 +1153,8 @@ public sealed class CoverageRunTests
             {
               "projects": [
                 { "project": "tests/First.Tests/First.Tests.csproj", "seconds": 5 },
-                { "project": "tests/Slow.Tests/Slow.Tests.csproj", "seconds": 50 },
-                { "project": "tests/After.Tests/After.Tests.csproj", "seconds": 90 }
+                { "project": ".\\tests\\Slow.Tests\\Slow.Tests.csproj", "seconds": 50 },
+                { "project": "./tests/After.Tests/After.Tests.csproj", "seconds": 90 }
               ]
             }
             """);
@@ -1171,7 +1171,9 @@ public sealed class CoverageRunTests
                 "tests/After.Tests/After.Tests.csproj",
             ],
             ScheduleMode: CoverageRunScheduleMode.LongestFirst,
-            ScheduleTimingsPath: priorTimings);
+            ScheduleTimingsPath: priorTimings,
+            NoDiscoverExclusive: true,
+            ExclusiveTestProjects: [" ./tests/Browser.Tests/Browser.Tests.csproj "]);
 
         var result = await workflow.RunAsync(request, console, CancellationToken.None);
 
@@ -1424,7 +1426,7 @@ public sealed class CoverageRunTests
             TestProjects: ["tests/Fast.Tests/Fast.Tests.csproj", "tests/Slow.Tests/Slow.Tests.csproj"],
             ScheduleMode: CoverageRunScheduleMode.LongestFirst,
             ScheduleTimingsPath: priorTimings,
-            PriorityTestProjects: ["Fast.Tests.csproj"]);
+            PriorityTestProjects: [" Fast.Tests.csproj ", " .\\tests\\Slow.Tests\\Slow.Tests.csproj "]);
 
         var result = await workflow.RunAsync(request, console, CancellationToken.None);
 

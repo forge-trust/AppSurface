@@ -769,10 +769,10 @@ internal sealed class CoverageRunWorkflow
 
     private static bool MatchesProject(string candidate, string relativePath, string fullPath)
     {
-        var normalizedCandidate = Normalize(candidate);
-        return string.Equals(normalizedCandidate, Normalize(relativePath), StringComparison.OrdinalIgnoreCase)
-            || string.Equals(normalizedCandidate, Normalize(fullPath), StringComparison.OrdinalIgnoreCase)
-            || string.Equals(candidate, Path.GetFileName(fullPath), StringComparison.OrdinalIgnoreCase);
+        var normalizedCandidate = NormalizeProjectKey(candidate);
+        return string.Equals(normalizedCandidate, NormalizeProjectKey(relativePath), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedCandidate, NormalizeProjectKey(fullPath), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedCandidate, NormalizeProjectKey(Path.GetFileName(fullPath)), StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<CoverageRunSchedulePlan> CreateSchedulePlanAsync(
@@ -1654,7 +1654,16 @@ internal sealed class CoverageRunWorkflow
         return string.IsNullOrWhiteSpace(sanitized) ? "project" : sanitized;
     }
 
-    private static string NormalizeProjectKey(string path) => Normalize(path.Trim()).ToUpperInvariant();
+    private static string NormalizeProjectKey(string path)
+    {
+        var normalized = Normalize(path.Trim());
+        while (normalized.StartsWith("./", StringComparison.Ordinal))
+        {
+            normalized = normalized[2..];
+        }
+
+        return normalized.ToUpperInvariant();
+    }
 
     private static string Normalize(string path) => path.Replace('\\', '/');
 }
