@@ -15,6 +15,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - `appsurface secrets transfer plan|apply` adds declared, value-safe LocalSecrets and Google promotion jobs. Plans bind exact endpoint mappings, configuration digest, expiry, and destination preconditions; Google destinations add a new version only when an apply plan permits replacement.
+- AppSurface Docs now exposes Theme Contract v1 through `AppSurfaceDocs:Theme`, adding dark-family presets, supported accent/link overrides, density/chrome controls, startup validation, and export/archive-safe resolved CSS variables.
 
 ## 0.2.0-preview.2 - 2026-07-02
 

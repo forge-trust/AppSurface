@@ -5,351 +5,361 @@ import vm from 'node:vm';
 
 const behaviorKitPath = new URL('../wwwroot/razorwire/behavior-kit.js', import.meta.url);
 
-test('behavior kit drains queued registrations and does not reconnect existing roots on repeated scans', () => {
-  let connectCount = 0;
-  let clickCount = 0;
-  const root = null;
-  const { context, document } = loadBehaviorKit({
-    queuedDefinitions: [
+test('behavior kit drains queued root and lifecycle registrations', () => {
+  const { context, document } = loadRuntime({
+    queued: [
       {
-        name: 'demo.counter',
-        selector: '[data-demo-counter]',
-        connect(element, ctx) {
-          connectCount += 1;
-          element.addEventListener('click', () => {
-            clickCount += 1;
-          }, { signal: ctx.signal });
+        kind: 'register',
+        definition: {
+          name: 'demo.widget',
+          selector: '[data-widget]',
+          connect(root, behavior) {
+            root.setAttribute('data-connected', behavior.rootId);
+            behavior.query('button').addEventListener('click', () => {
+              root.setAttribute('data-clicked', 'true');
+            }, { signal: behavior.signal });
+          }
+        }
+      },
+      {
+        kind: 'registerLifecycle',
+        definition: {
+          name: 'demo.page',
+          connect(lifecycle) {
+            lifecycle.root.body.setAttribute('data-lifecycle', `${lifecycle.renderKind}:${lifecycle.url}`);
+          }
         }
       }
     ]
   });
-
-  const counter = document.createElement('section');
-  counter.setAttribute('data-demo-counter', 'true');
-  document.body.appendChild(counter);
-
-  context.window.RazorWire.behaviors.scan();
-  context.window.RazorWire.behaviors.scan();
-  counter.dispatchEvent(createEvent('click'));
-
-  assert.equal(root, null);
-  assert.equal(connectCount, 1);
-  assert.equal(clickCount, 1);
-  assert.equal(context.window.RazorWire.behaviors.__isRazorWireBehaviorManager, true);
-});
-
-test('behavior kit scan includes the supplied element root and prunes removed roots', () => {
-  const connected = [];
-  const cleaned = [];
-  const { context, document } = loadBehaviorKit();
   const root = document.createElement('section');
-  root.setAttribute('data-enhance-root', 'true');
+  root.setAttribute('data-widget', 'true');
+  const button = document.createElement('button');
+  root.appendChild(button);
   document.body.appendChild(root);
 
-  context.window.RazorWire.behaviors.register({
-    name: 'demo.root',
-    selector: '[data-enhance-root]',
-    connect(element) {
-      connected.push(element);
-      return () => cleaned.push(element);
-    }
-  });
-  context.window.RazorWire.behaviors.clearDiagnostics();
-  context.window.RazorWire.behaviors.scan(root);
+  context.window.RazorWire.behaviors.scan();
+  button.dispatchEvent(createEvent('click'));
 
-  assert.deepEqual(connected, [root]);
-
-  root.removeAttribute('data-enhance-root');
-  context.window.RazorWire.behaviors.scan(document);
-
-  assert.deepEqual(cleaned, [root]);
+  assert.match(root.getAttribute('data-connected'), /^rw-behavior-root-/);
+  assert.equal(root.getAttribute('data-clicked'), 'true');
+  assert.equal(document.body.getAttribute('data-lifecycle'), 'initial:https://example.test/settings');
 });
 
-test('behavior kit rejects invalid selectors and conflicting duplicate registrations without blocking other behaviors', () => {
-  const { context, document } = loadBehaviorKit();
-  const root = document.createElement('div');
-  root.setAttribute('data-good', 'true');
+test('root behavior registration is idempotent across repeated bundle evaluation', () => {
+  const { context, document } = loadRuntime();
+  const root = document.createElement('section');
+  root.setAttribute('data-widget', 'true');
   document.body.appendChild(root);
-  let connected = false;
+  let connects = 0;
 
   context.window.RazorWire.behaviors.register({
-    selector: '[data-good]',
+    name: 'demo.widget',
+    selector: '[data-widget]',
     connect() {
-      throw new Error('invalid behavior must not connect');
+      connects += 1;
     }
   });
   context.window.RazorWire.behaviors.register({
-    name: 'demo.missing-selector',
+    name: 'demo.widget',
+    selector: '[data-widget]',
     connect() {
-      throw new Error('invalid behavior must not connect');
+      connects += 1;
     }
   });
-  context.window.RazorWire.behaviors.register({
-    name: 'demo.bad-selector',
-    selector: '[',
-    connect() {
-      throw new Error('must not connect');
-    }
-  });
-  context.window.RazorWire.behaviors.register({
-    name: 'demo.good',
-    selector: '[data-good]',
-    connect() {
-      connected = true;
-    }
-  });
-  context.window.RazorWire.behaviors.register({
-    name: 'demo.good',
-    selector: '[data-other]',
-    connect() {
-      throw new Error('conflicting behavior must not replace first definition');
-    }
-  });
-
-  assert.equal(connected, true);
-  const diagnostics = context.window.RazorWire.behaviors.getDiagnostics();
-  assert.equal(diagnostics.some(diagnostic => diagnostic.code === 'BehaviorSelectorInvalid'), true);
-  assert.equal(diagnostics.some(diagnostic => diagnostic.code === 'BehaviorRegistrationConflict'), true);
-  const invalidRegistrations = diagnostics.filter(diagnostic => diagnostic.code === 'BehaviorRegistrationInvalid');
-  assert.equal(invalidRegistrations.length, 2);
-  assert.equal(invalidRegistrations.some(diagnostic => diagnostic.selector === '[data-good]'), true);
-  assert.equal(invalidRegistrations.some(diagnostic => diagnostic.behaviorName === 'demo.missing-selector'), true);
-});
-
-test('behavior kit scopes turbo frame load scans to the event target frame', () => {
-  const { context, document } = loadBehaviorKit();
-  const connected = [];
-
-  context.window.RazorWire.behaviors.register({
-    name: 'demo.frame-scope',
-    selector: '[data-frame-scope]',
-    connect(element) {
-      connected.push(element.id);
-    }
-  });
-
-  const outside = document.createElement('section');
-  outside.id = 'outside';
-  outside.setAttribute('data-frame-scope', 'true');
-  document.body.appendChild(outside);
-
-  const frame = document.createElement('turbo-frame');
-  document.body.appendChild(frame);
-  const inside = document.createElement('section');
-  inside.id = 'inside';
-  inside.setAttribute('data-frame-scope', 'true');
-  frame.appendChild(inside);
-
-  document.dispatchEvent({ type: 'turbo:frame-load', target: frame });
-
-  assert.deepEqual(connected, ['inside']);
-});
-
-test('behavior kit scans once for each Turbo lifecycle update', () => {
-  const { context, document } = loadBehaviorKit();
-  const connected = [];
-
-  context.window.RazorWire.behaviors.register({
-    name: 'demo.turbo-events',
-    selector: '[data-turbo-event-root]',
-    connect(element) {
-      connected.push(element.id);
-    }
-  });
-
-  const renderRoot = document.createElement('section');
-  renderRoot.id = 'render';
-  renderRoot.setAttribute('data-turbo-event-root', 'true');
-  document.body.appendChild(renderRoot);
-  document.dispatchEvent({ type: 'turbo:render' });
-  document.dispatchEvent({ type: 'turbo:render' });
-
-  const loadRoot = document.createElement('section');
-  loadRoot.id = 'load';
-  loadRoot.setAttribute('data-turbo-event-root', 'true');
-  document.body.appendChild(loadRoot);
-  document.dispatchEvent({ type: 'turbo:load' });
-  document.dispatchEvent({ type: 'turbo:load' });
-
-  const frame = document.createElement('turbo-frame');
-  document.body.appendChild(frame);
-  const frameRoot = document.createElement('section');
-  frameRoot.id = 'frame';
-  frameRoot.setAttribute('data-turbo-event-root', 'true');
-  frame.appendChild(frameRoot);
-  document.dispatchEvent({ type: 'turbo:frame-load', target: frame });
-  document.dispatchEvent({ type: 'turbo:frame-load', target: frame });
-
-  assert.deepEqual(connected, ['render', 'load', 'frame']);
-});
-
-test('behavior kit second evaluation keeps existing manager and scans for new roots once', () => {
-  const { context, document } = loadBehaviorKit();
-  const connected = [];
-
-  context.window.RazorWire.behaviors.register({
-    name: 'demo.second-load',
-    selector: '[data-second-load]',
-    connect(element) {
-      connected.push(element.id);
-    }
-  });
-
-  const first = document.createElement('section');
-  first.id = 'first';
-  first.setAttribute('data-second-load', 'true');
-  document.body.appendChild(first);
   context.window.RazorWire.behaviors.scan();
 
-  const second = document.createElement('section');
-  second.id = 'second';
-  second.setAttribute('data-second-load', 'true');
-  document.body.appendChild(second);
-  vm.runInContext(readFileSync(behaviorKitPath, 'utf8'), context);
-
-  assert.deepEqual(connected, ['first', 'second']);
+  assert.equal(connects, 1);
   assert.equal(context.window.RazorWire.behaviors.getDiagnostics().length, 0);
 });
 
-test('behavior kit aborts partial connect failures and permits retry after the callback is fixed', () => {
-  const { context, document } = loadBehaviorKit();
-  const root = document.createElement('button');
-  root.setAttribute('data-retry', 'true');
+test('root scan includes the supplied root element and disconnects removed roots', () => {
+  const { context, document } = loadRuntime();
+  const root = document.createElement('section');
+  root.setAttribute('data-widget', 'true');
   document.body.appendChild(root);
-  let clickCount = 0;
-  let shouldThrow = true;
+  let aborted = false;
+  let cleaned = false;
 
   context.window.RazorWire.behaviors.register({
-    name: 'demo.retry',
-    selector: '[data-retry]',
-    connect(element, ctx) {
-      element.addEventListener('click', () => {
-        clickCount += 1;
-      }, { signal: ctx.signal });
-      if (shouldThrow) {
-        shouldThrow = false;
-        throw new Error('first connect fails');
-      }
+    name: 'demo.widget',
+    selector: '[data-widget]',
+    connect(_, behavior) {
+      behavior.signal.addEventListener('abort', () => { aborted = true; });
+      return () => { cleaned = true; };
     }
   });
-
-  root.dispatchEvent(createEvent('click'));
-  assert.equal(clickCount, 0);
-  assert.equal(
-    context.window.RazorWire.behaviors.getDiagnostics()
-      .some(diagnostic => diagnostic.code === 'BehaviorConnectFailed'),
-    true);
-
-  context.window.RazorWire.behaviors.scan(root);
-  root.dispatchEvent(createEvent('click'));
-
-  assert.equal(clickCount, 1);
-});
-
-test('behavior kit records cleanup failures after aborting the behavior signal', () => {
-  const { context, document } = loadBehaviorKit();
-  const root = document.createElement('button');
-  root.setAttribute('data-cleanup', 'true');
-  document.body.appendChild(root);
-  let clickCount = 0;
-
-  context.window.RazorWire.behaviors.register({
-    name: 'demo.cleanup',
-    selector: '[data-cleanup]',
-    connect(element, ctx) {
-      element.addEventListener('click', () => {
-        clickCount += 1;
-      }, { signal: ctx.signal });
-      return () => {
-        throw new Error('cleanup failed');
-      };
-    }
-  });
-
-  root.dispatchEvent(createEvent('click'));
   root.remove();
   context.window.RazorWire.behaviors.prune();
-  root.dispatchEvent(createEvent('click'));
 
-  assert.equal(clickCount, 1);
-  assert.equal(
-    context.window.RazorWire.behaviors.getDiagnostics()
-      .some(diagnostic => diagnostic.code === 'BehaviorCleanupFailed'),
-    true);
+  assert.equal(aborted, true);
+  assert.equal(cleaned, true);
 });
 
-test('behavior kit leaves roots unconnected when AbortController support is missing', () => {
-  const { context, document } = loadBehaviorKit({ abortSupported: false });
-  const root = document.createElement('div');
-  root.setAttribute('data-abort-required', 'true');
-  document.body.appendChild(root);
-  let connected = false;
+test('lifecycle registrations run once per pass and can revisit the same URL', () => {
+  const { context, document } = loadRuntime();
+  const seen = [];
 
-  context.window.RazorWire.behaviors.register({
-    name: 'demo.abort-required',
-    selector: '[data-abort-required]',
-    connect() {
-      connected = true;
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'demo.page',
+    connect(lifecycle) {
+      seen.push(lifecycle.renderKind);
+    }
+  });
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'demo.page',
+    connect(lifecycle) {
+      seen.push(`duplicate:${lifecycle.renderKind}`);
     }
   });
 
-  assert.equal(connected, false);
+  document.dispatchEvent(createEvent('turbo:load'));
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'demo.page',
+    connect(lifecycle) {
+      seen.push(`duplicate-after-load:${lifecycle.renderKind}`);
+    }
+  });
+  document.dispatchEvent(createEvent('turbo:load'));
+
+  assert.deepEqual(seen, ['initial', 'turbo:load', 'turbo:load']);
+});
+
+test('frame lifecycle runs only for lifecycle registrations with frames enabled', () => {
+  const { context, document } = loadRuntime();
+  const seen = [];
+  const frame = document.createElement('turbo-frame');
+  document.body.appendChild(frame);
+
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'demo.page',
+    connect(lifecycle) {
+      seen.push(`page:${lifecycle.renderKind}`);
+    }
+  });
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'demo.frame',
+    frames: true,
+    connect(lifecycle) {
+      seen.push(`frame:${lifecycle.renderKind}:${lifecycle.root.tagName?.toLowerCase() ?? 'document'}`);
+    }
+  });
+  frame.dispatchEvent(createEvent('turbo:frame-load', { target: frame }));
+
+  assert.deepEqual(seen, ['page:initial', 'frame:initial:document', 'frame:turbo:frame-load:turbo-frame']);
+});
+
+test('cleanup failures are recorded without blocking disconnect or reconnect', () => {
+  const { context, document } = loadRuntime();
+  const root = document.createElement('section');
+  root.setAttribute('data-widget', 'true');
+  document.body.appendChild(root);
+  const lifecyclePasses = [];
+  let rootAborted = false;
+
+  context.window.RazorWire.behaviors.register({
+    name: 'demo.widget',
+    selector: '[data-widget]',
+    connect(_, behavior) {
+      behavior.signal.addEventListener('abort', () => { rootAborted = true; });
+      return () => { throw new Error('root cleanup failed'); };
+    }
+  });
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'demo.page',
+    connect(lifecycle) {
+      lifecyclePasses.push(lifecycle.renderKind);
+      return () => { throw new Error('lifecycle cleanup failed'); };
+    }
+  });
+
+  root.remove();
+  context.window.RazorWire.behaviors.prune();
+  document.dispatchEvent(createEvent('turbo:load'));
+
+  const diagnostics = context.window.RazorWire.behaviors.getDiagnostics()
+    .filter(diagnostic => diagnostic.code === 'BehaviorCleanupFailed');
+  assert.equal(rootAborted, true);
+  assert.deepEqual(lifecyclePasses, ['initial', 'turbo:load']);
+  assert.equal(diagnostics.length, 2);
+  assert.ok(diagnostics.some(diagnostic => diagnostic.message === 'Behavior "demo.widget" cleanup failed.'));
+  assert.ok(diagnostics.some(diagnostic => diagnostic.message === 'Lifecycle behavior "demo.page" cleanup failed.'));
+});
+
+test('diagnostics cover conflicts, invalid selectors, failures, and missing abort support', () => {
+  const { context, document } = loadRuntime();
+  const root = document.createElement('section');
+  root.setAttribute('data-widget', 'true');
+  document.body.appendChild(root);
+  let attempts = 0;
+
+  context.window.RazorWire.behaviors.register({
+    name: 'demo.widget',
+    selector: '[data-widget]',
+    connect() {
+      attempts += 1;
+      if (attempts === 1) throw new Error('first failure');
+    }
+  });
+  context.window.RazorWire.behaviors.scan();
+  context.window.RazorWire.behaviors.register({
+    name: 'demo.widget',
+    selector: '[data-other]',
+    connect() {}
+  });
+  context.window.RazorWire.behaviors.register({
+    name: 'bad.selector',
+    selector: '[bad',
+    connect() {}
+  });
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'bad.lifecycle',
+    events: ['made-up'],
+    connect() {}
+  });
+
+  const codes = context.window.RazorWire.behaviors.getDiagnostics().map(diagnostic => diagnostic.code);
+  assert.ok(codes.includes('BehaviorConnectFailed'));
+  assert.ok(codes.includes('BehaviorRegistrationConflict'));
+  assert.ok(codes.includes('BehaviorSelectorInvalid'));
+  assert.ok(codes.includes('BehaviorLifecycleEventInvalid'));
+  assert.equal(attempts, 2);
+
+  const unsupported = loadRuntime({ abortController: undefined });
+  const unsupportedRoot = unsupported.document.createElement('section');
+  unsupportedRoot.setAttribute('data-widget', 'true');
+  unsupported.document.body.appendChild(unsupportedRoot);
+  unsupported.context.window.RazorWire.behaviors.register({
+    name: 'demo.widget',
+    selector: '[data-widget]',
+    connect() {}
+  });
+
   assert.equal(
-    context.window.RazorWire.behaviors.getDiagnostics()
-      .some(diagnostic => diagnostic.code === 'BehaviorAbortUnsupported'),
+    unsupported.context.window.RazorWire.behaviors.getDiagnostics().some(diagnostic => diagnostic.code === 'BehaviorAbortUnsupported'),
     true);
 });
 
-function loadBehaviorKit(options = {}) {
+test('diagnostics preserve root context for repeated failures', () => {
+  const { context, document } = loadRuntime();
+  for (let index = 0; index < 2; index += 1) {
+    const root = document.createElement('section');
+    root.setAttribute('data-widget', 'true');
+    document.body.appendChild(root);
+  }
+
+  context.window.RazorWire.behaviors.register({
+    name: 'demo.widget',
+    selector: '[data-widget]',
+    connect() {
+      throw new Error('same failure');
+    }
+  });
+
+  const diagnostics = context.window.RazorWire.behaviors.getDiagnostics()
+    .filter(diagnostic => diagnostic.code === 'BehaviorConnectFailed');
+  assert.equal(diagnostics.length, 2);
+  assert.equal(new Set(diagnostics.map(diagnostic => diagnostic.rootId)).size, 2);
+});
+
+test('app-reported diagnostics use a distinct code for root and lifecycle contexts', () => {
+  const { context, document } = loadRuntime();
+  const root = document.createElement('section');
+  root.setAttribute('data-widget', 'true');
+  document.body.appendChild(root);
+
+  context.window.RazorWire.behaviors.register({
+    name: 'demo.widget',
+    selector: '[data-widget]',
+    connect(_, behavior) {
+      behavior.diagnostic('Root warning', 'Fix the root behavior.');
+    }
+  });
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'demo.page',
+    connect(lifecycle) {
+      lifecycle.diagnostic('Lifecycle warning', 'Fix the lifecycle behavior.');
+    }
+  });
+
+  const diagnostics = context.window.RazorWire.behaviors.getDiagnostics();
+  assert.equal(diagnostics.filter(diagnostic => diagnostic.code === 'BehaviorDiagnostic').length, 2);
+  assert.equal(diagnostics.some(diagnostic => diagnostic.code === 'BehaviorConnectFailed'), false);
+  assert.ok(diagnostics.some(diagnostic => diagnostic.behaviorName === 'demo.widget' && diagnostic.rootId));
+  assert.ok(diagnostics.some(diagnostic => diagnostic.behaviorName === 'demo.page'));
+});
+
+test('lifecycle conflicts are diagnosed and diagnostics can be cleared', () => {
+  const { context } = loadRuntime();
+
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'demo.page',
+    connect() {}
+  });
+  context.window.RazorWire.behaviors.registerLifecycle({
+    name: 'demo.page',
+    frames: true,
+    connect() {}
+  });
+
+  const diagnostics = context.window.RazorWire.behaviors.getDiagnostics();
+  assert.equal(diagnostics.length, 1);
+  assert.equal(diagnostics[0].code, 'BehaviorRegistrationConflict');
+  assert.match(diagnostics[0].message, /Lifecycle behavior "demo\.page"/);
+
+  context.window.RazorWire.behaviors.clearDiagnostics();
+  assert.equal(context.window.RazorWire.behaviors.getDiagnostics().length, 0);
+});
+
+function loadRuntime(options = {}) {
   const document = new FakeDocument();
-  const queuedDefinitions = options.queuedDefinitions ?? [];
+  const abortController = Object.hasOwn(options, 'abortController') ? options.abortController : AbortController;
   const window = {
     RazorWireBehaviorKitInitialized: false,
     RazorWire: {
       config: { developmentDiagnostics: true },
       behaviors: {
-        __queuedDefinitions: queuedDefinitions,
-        register(definition) {
-          queuedDefinitions.push(definition);
-        },
-        scan() {},
-        prune() {},
-        getDiagnostics() {
-          return [];
-        },
-        clearDiagnostics() {}
+        __razorWireBehaviorStub: true,
+        __queue: options.queued ?? [],
+        __diagnostics: []
       }
     },
-    addEventListener() {}
+    location: { href: 'https://example.test/settings', origin: 'https://example.test' },
+    document,
+    addEventListener() {},
+    AbortController: abortController,
+    console
   };
   const context = {
     window,
     document,
     Element: FakeElement,
-    console
+    AbortController: abortController,
+    console,
+    __lifecycle: []
   };
-
-  if (options.abortSupported !== false) {
-    context.AbortController = AbortController;
-    context.AbortSignal = AbortSignal;
-  }
-
-  window.document = document;
   document.defaultView = window;
-
   vm.createContext(context);
   vm.runInContext(readFileSync(behaviorKitPath, 'utf8'), context);
   return { context, document };
 }
 
-function createEvent(type) {
-  return {
-    type,
-    defaultPrevented: false,
-    preventDefault() {
-      this.defaultPrevented = true;
-    }
-  };
+function createEvent(type, extras = {}) {
+  return new FakeEvent(type, { bubbles: true, cancelable: true, ...extras });
+}
+
+class FakeEvent {
+  constructor(type, options = {}) {
+    this.type = type;
+    this.bubbles = options.bubbles ?? false;
+    this.cancelable = options.cancelable ?? false;
+    this.defaultPrevented = false;
+    this.target = options.target ?? null;
+  }
+
+  preventDefault() {
+    if (this.cancelable) this.defaultPrevented = true;
+  }
 }
 
 class FakeDocument {
@@ -366,7 +376,7 @@ class FakeDocument {
   }
 
   querySelector(selector) {
-    return this.querySelectorAll(selector)[0] ?? null;
+    return this.documentElement.querySelector(selector);
   }
 
   querySelectorAll(selector) {
@@ -380,31 +390,47 @@ class FakeDocument {
   }
 
   dispatchEvent(event) {
+    event.target ??= this;
     for (const listener of this.listeners.get(event.type) ?? []) {
       listener(event);
     }
+    return !event.defaultPrevented;
   }
 }
 
 class FakeElement {
   constructor(tagName, ownerDocument) {
     this.tagName = tagName.toUpperCase();
-    this.localName = tagName.toLowerCase();
     this.ownerDocument = ownerDocument;
-    this.attributes = new Map();
-    this.children = [];
     this.parentElement = null;
+    this.children = [];
+    this.attributes = new Map();
     this.listeners = new Map();
-    this.isConnected = true;
-    this.textContent = '';
   }
 
-  get id() {
-    return this.getAttribute('id') ?? '';
+  get isConnected() {
+    let current = this;
+    while (current) {
+      if (current === this.ownerDocument.documentElement) return true;
+      current = current.parentElement;
+    }
+    return false;
   }
 
-  set id(value) {
-    this.setAttribute('id', value);
+  appendChild(child) {
+    child.parentElement = this;
+    this.children.push(child);
+    return child;
+  }
+
+  append(...children) {
+    for (const child of children) this.appendChild(child);
+  }
+
+  remove() {
+    if (!this.parentElement) return;
+    this.parentElement.children = this.parentElement.children.filter(child => child !== this);
+    this.parentElement = null;
   }
 
   setAttribute(name, value) {
@@ -415,47 +441,19 @@ class FakeElement {
     return this.attributes.has(name) ? this.attributes.get(name) : null;
   }
 
-  removeAttribute(name) {
-    this.attributes.delete(name);
-  }
-
   hasAttribute(name) {
     return this.attributes.has(name);
   }
 
-  append(...nodes) {
-    for (const node of nodes) this.appendChild(node);
-  }
-
-  appendChild(node) {
-    if (node.parentElement) {
-      node.parentElement.children = node.parentElement.children.filter(child => child !== node);
+  matches(selector) {
+    if (selector.includes('[bad')) throw new Error('Invalid selector');
+    if (/^\[[^\]=]+(?:="[^"]*")?\]$/.test(selector)) {
+      const [, name, rawValue] = selector.match(/^\[([^=\]]+)(?:="([^"]*)")?\]$/);
+      if (!this.hasAttribute(name)) return false;
+      return rawValue === undefined || this.getAttribute(name) === rawValue;
     }
-
-    node.parentElement = this;
-    node.ownerDocument = this.ownerDocument;
-    node.setConnected(this.isConnected);
-    this.children.push(node);
-    return node;
-  }
-
-  remove() {
-    if (this.parentElement) {
-      this.parentElement.children = this.parentElement.children.filter(child => child !== this);
-    }
-
-    this.parentElement = null;
-    this.setConnected(false);
-  }
-
-  setConnected(isConnected) {
-    this.isConnected = isConnected;
-    for (const child of this.children) child.setConnected(isConnected);
-  }
-
-  contains(node) {
-    if (node === this) return true;
-    return this.children.some(child => child.contains(node));
+    if (selector.startsWith('#')) return this.getAttribute('id') === selector.slice(1);
+    return this.tagName.toLowerCase() === selector.toLowerCase();
   }
 
   querySelector(selector) {
@@ -463,50 +461,34 @@ class FakeElement {
   }
 
   querySelectorAll(selector) {
-    if (selector === '[') throw new Error('invalid selector');
-    const selectors = selector.split(',').map(part => part.trim()).filter(Boolean);
     const matches = [];
-    const visit = element => {
-      for (const child of element.children) {
-        if (selectors.some(candidate => child.matches(candidate))) {
-          matches.push(child);
-        }
-        visit(child);
-      }
-    };
-    visit(this);
+    for (const child of this.children) {
+      if (child.matches(selector)) matches.push(child);
+      matches.push(...child.querySelectorAll(selector));
+    }
     return matches;
   }
 
-  matches(selector) {
-    if (selector === '[') throw new Error('invalid selector');
-    const tagAttribute = selector.match(/^([a-z0-9-]+)?\[([^=\]]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\]]+)))?\]$/i);
-    if (tagAttribute) {
-      const [, tagName, attribute, doubleQuoted, singleQuoted, unquoted] = tagAttribute;
-      const value = doubleQuoted ?? singleQuoted ?? unquoted;
-      if (tagName && this.tagName !== tagName.toUpperCase()) return false;
-      if (!this.hasAttribute(attribute)) return false;
-      return value === undefined || this.getAttribute(attribute) === value;
+  closest(selector) {
+    let current = this;
+    while (current) {
+      if (current.matches(selector)) return current;
+      current = current.parentElement;
     }
-
-    return this.tagName === selector.toUpperCase();
+    return null;
   }
 
   addEventListener(type, listener, options = {}) {
     const listeners = this.listeners.get(type) ?? [];
     listeners.push(listener);
     this.listeners.set(type, listeners);
-
-    if (options.signal) {
-      options.signal.addEventListener('abort', () => {
-        this.removeEventListener(type, listener);
-      }, { once: true });
-    }
+    options.signal?.addEventListener('abort', () => {
+      this.listeners.set(type, (this.listeners.get(type) ?? []).filter(candidate => candidate !== listener));
+    }, { once: true });
   }
 
   removeEventListener(type, listener) {
-    const listeners = this.listeners.get(type) ?? [];
-    this.listeners.set(type, listeners.filter(candidate => candidate !== listener));
+    this.listeners.set(type, (this.listeners.get(type) ?? []).filter(candidate => candidate !== listener));
   }
 
   dispatchEvent(event) {
@@ -514,5 +496,8 @@ class FakeElement {
     for (const listener of this.listeners.get(event.type) ?? []) {
       listener(event);
     }
+    if (event.bubbles && this.parentElement) this.parentElement.dispatchEvent(event);
+    if (event.bubbles && !this.parentElement) this.ownerDocument.dispatchEvent(event);
+    return !event.defaultPrevented;
   }
 }

@@ -6,9 +6,9 @@
         : "border-rose-500/35 bg-rose-950/30 text-rose-200";
     var diagnosticsDotClass = Model.Diagnostics.Status?.Ok == true ? "bg-emerald-300" : "bg-rose-300";
 
-    <details class="group mb-3 rounded-lg border border-[#1b2a43] bg-[#07111f]/70 text-xs" data-docs-diagnostics-chrome="true">
+    <details class="group mb-3 rounded-lg border docs-token-border-muted docs-token-bg-panel-faint text-xs" data-docs-diagnostics-chrome="true">
         <summary class="list-none cursor-pointer">
-            <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-[#0d182a]/70">
+            <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2 transition-colors docs-token-hover-bg-raised">
                 <span class="min-w-0 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">@Model.Diagnostics.Label</span>
                 <span class="inline-flex flex-none items-center gap-2">
                     @if (Model.Diagnostics.Status is not null)
@@ -33,7 +33,7 @@
                             @if (!string.IsNullOrWhiteSpace(diagnosticsTool.Href))
                             {
                                 <a href="@Url.PathBaseAware(diagnosticsTool.Href)"
-                                   class="block text-sm font-medium text-slate-300 no-underline transition-colors hover:text-[#14b8a6]">
+                                   class="block text-sm font-medium text-slate-300 no-underline transition-colors docs-token-hover-text-accent">
                                     @diagnosticsTool.Label
                                 </a>
                             }
@@ -51,7 +51,7 @@
                         @if (diagnosticsTool.JsonAction is not null)
                         {
                             <a href="@Url.PathBaseAware(diagnosticsTool.JsonAction.Href)"
-                               class="mt-1 inline-flex rounded border border-[#1b2a43] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 no-underline transition-colors hover:border-[#14b8a6]/45 hover:text-[#14b8a6]">
+                               class="mt-1 inline-flex rounded border docs-token-border-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 no-underline transition-colors docs-token-hover-border-accent docs-token-hover-text-accent">
                                 @diagnosticsTool.JsonAction.Label
                             </a>
                         }
@@ -63,11 +63,11 @@
 }
 @foreach (var sidebarSection in Model.Sections)
 {
-    <details class="group border-b border-[#0d182a]/80 py-2 last:border-b-0" @(sidebarSection.IsExpanded ? "open" : null)>
+    <details class="group border-b docs-token-border-muted py-2 last:border-b-0" @(sidebarSection.IsExpanded ? "open" : null)>
         <summary class="list-none cursor-pointer">
-            <div class="flex items-center justify-between gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-[#0d182a]/70">
+            <div class="flex items-center justify-between gap-3 rounded-lg px-2 py-2 transition-colors docs-token-hover-bg-raised">
                 <a href="@Url.PathBaseAware(sidebarSection.Href)"
-                   class="text-xs font-semibold uppercase tracking-[0.16em] @(sidebarSection.IsActive ? "text-[#14b8a6]" : "text-slate-400 hover:text-[#14b8a6]")"
+                   class="text-xs font-semibold uppercase tracking-[0.16em] @(sidebarSection.IsActive ? "docs-token-text-accent" : "text-slate-400 docs-token-hover-text-accent")"
                    aria-current="@(sidebarSection.IsActive ? "location" : null)">
                     @sidebarSection.Label
                 </a>
@@ -91,7 +91,7 @@
                                 <a href="@Url.PathBaseAware(link.Href)"
                                    data-turbo-frame="doc-content"
                                    data-turbo-action="advance"
-                                   class="block rounded-md px-2 py-1.5 text-sm font-medium transition-colors @(link.IsCurrent ? "bg-[#0d182a] text-[#bfdbfe]" : "text-slate-400 hover:bg-[#0d182a] hover:text-[#14b8a6]")"
+                                   class="block rounded-md px-2 py-1.5 text-sm font-medium transition-colors @(link.IsCurrent ? "docs-token-bg-raised docs-token-text-info-muted" : "text-slate-400 docs-token-hover-bg-raised docs-token-hover-text-accent")"
                                    aria-current="@(link.IsCurrent ? "page" : null)">
                                     @link.Title
                                 </a>

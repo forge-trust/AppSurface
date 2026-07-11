@@ -8,11 +8,13 @@ This is the living release note for the next coordinated AppSurface version afte
   promotion jobs against existing Google secrets only. Plans bind configuration digest, expiry, and destination
   preconditions; `--apply` is required for mutation, production jobs require explicit confirmation, and all text/JSON
   diagnostics stay value-safe.
+- `ForgeTrust.RazorWire` Behavior Kit now exposes root-scoped registrations for DOM enhancement and page-lifecycle registrations for logical browser visits, including Skoolit-style PWA display-mode telemetry without fake body selectors or app-owned Turbo listeners.
 
 ## Included in the next coordinated version
 
 ### Release and docs surface
 
+- AppSurface Docs adds Theme Contract v1. Hosts can configure `AppSurfaceDocs:Theme` with dark-family presets (`AppSurfaceDark` and `GraphiteDark`), accent/link color overrides, and density/chrome controls. The package validates enum values, CSS hex colors, null nested theme sections, and contrast-sensitive overrides at startup, emits resolved root attributes and CSS variables into rendered HTML, and freezes those variables into static exports and published archives instead of adding a dynamic themed CSS asset route.
 - Documentation and release authoring guidance now require concept links instead of mention-only prose: start with adopter outcomes, explain internal feature labels in plain language, link named packages, concepts, workflows, diagnostics, guides, examples, and CLI commands to their canonical docs, and keep maintainer evidence after the adoption path.
 - AppSurface DevAuth now centralizes its environment activation policy. DevAuth remains Development-by-default, but
   package consumers can explicitly add local/proof environment names through `AllowedEnvironmentNames`; the marker
@@ -20,6 +22,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - Split stable and prerelease NuGet publish tag triggers so prerelease tags no longer start the stable publish workflow before the prerelease gate.
 - AppSurface DevAuth marker overlays now start collapsed by default while keeping the active fake persona visible, and
   `AppSurfaceDevAuthMarkerOptions.StartExpanded` lets local proof pages opt back into immediate persona controls.
+- `ForgeTrust.RazorWire` documents `<rw:scripts behavior-kit="true" />`, the queue-backed `window.RazorWire.behaviors` stub, root `register(...)`, page-lifecycle `registerLifecycle(...)`, stable diagnostics, and guidance for choosing built-in managers, root behaviors, lifecycle behaviors, islands, or app-owned JavaScript.
 
 ## Migration watch
 

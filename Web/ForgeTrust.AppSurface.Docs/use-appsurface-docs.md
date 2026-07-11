@@ -127,6 +127,32 @@ and any configured favicon path must be served by the host just like a logo asse
 
 Leave `Identity:Wordmark` unset for a plain-text docs title. The built-in sidebar and mobile header clip long display names with an ellipsis so they do not push the chrome outside its bounds. Configure `DisplayName`, `HighlightText`, and `HighlightColor` when the publishing repository wants a shorter product wordmark treatment. The highlight text must be a substring of `DisplayName`, and the color must be a CSS hex color so the docs layout cannot receive arbitrary style declarations from configuration.
 
+Add theme settings when the consuming repository should make the built-in docs shell feel first-party without replacing views or overriding internal CSS selectors:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Theme": {
+      "Preset": "GraphiteDark",
+      "Colors": {
+        "AccentColor": "#38bdf8",
+        "AccentStrongColor": "#a5b4fc",
+        "LinkColor": "#93c5fd",
+        "VisitedLinkColor": "#c4b5fd"
+      },
+      "Layout": {
+        "Density": "Compact",
+        "Chrome": "Compact"
+      }
+    }
+  }
+}
+```
+
+The default theme is `AppSurfaceDark` with comfortable density and standard chrome. `GraphiteDark` is the second dark-family preset for lower-saturation surfaces. Blank color values use the selected preset default. Color overrides must be CSS hex colors and must meet startup contrast checks for their role; validation messages name the exact config key, bad value, required contrast ratio, tested preset background, and fix. The same keys work through environment variables, for example `AppSurfaceDocs__Theme__Preset=GraphiteDark` and `AppSurfaceDocs__Theme__Colors__AccentColor=#38bdf8`.
+
+The supported theme contract is intentionally narrow. Use `Preset`, `Colors`, `Density`, and `Chrome` for package-owned docs chrome. Do not rely on `--docs-*` custom property names as a public API, do not use theme settings for arbitrary surface/text/syntax-token overrides, and do not expect light mode, system mode, view replacement, layout slots, or external theme packages in v1. Static exports and published release archives freeze the resolved theme into their exported HTML; changing host config later does not rewrite already-exported archives.
+
 ## Define the public source boundary
 
 Before pointing AppSurface Docs at a large repository, decide which paths are meant to be public. The safest production shape is a small global include list, then optional Markdown, C#, and JavaScript refinements:
