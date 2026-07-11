@@ -186,6 +186,33 @@ public sealed class SecretPromotionWorkflowTests
     }
 
     [Fact]
+    public void Apply_TamperedProductionFlag_StillRequiresExactJobConfirmation()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("promotion.json", GoogleToProductionConfiguration());
+        var planPath = Path.Join(temp.Path, "promotion.plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        google.Secrets["projects/production/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-production", planPath, false, TimeSpan.FromMinutes(10), context));
+        var plan = JsonNode.Parse(File.ReadAllText(planPath))!.AsObject();
+        plan["production"] = false;
+        File.WriteAllText(planPath, plan.ToJsonString());
+
+        var exception = Assert.Throws<CommandException>(() =>
+        {
+            workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+        });
+
+        Assert.Contains("--confirm", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(google.Writes);
+        Assert.DoesNotContain("sentinel-remote-secret", exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Apply_ConfigDigestChanges_FailsBeforeReadingSource()
     {
         using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
@@ -209,6 +236,37 @@ public sealed class SecretPromotionWorkflowTests
         Assert.Equal(0, google.AccessCalls);
         Assert.Empty(google.Writes);
         Assert.DoesNotContain("sentinel-local-secret", exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Plan_NullJobRow_IsRejectedAsUsageBeforeAnyProbe()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var context = CreateContext(new InMemoryAppSurfaceLocalSecretStore());
+        var configPath = temp.WriteFile(
+            "promotion.json",
+            """
+            {
+              "version": 1,
+              "endpoints": [
+                { "name": "staging", "provider": "google", "environment": "staging", "credential": { "mode": "applicationDefault" } }
+              ],
+              "jobs": [
+                { "name": "local-to-staging", "source": "local", "destination": "staging", "rows": [null] }
+              ]
+            }
+            """);
+        var google = new FakeGoogleClient();
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+
+        var exception = Assert.Throws<CommandException>(() =>
+        {
+            workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "local-to-staging", Path.Join(temp.Path, "plan.json"), false, TimeSpan.FromMinutes(10), context));
+        });
+
+        Assert.Contains("--config must be", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, google.AccessCalls);
+        Assert.Empty(google.Writes);
     }
 
     [Fact]

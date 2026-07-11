@@ -147,7 +147,7 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
         var endpoints = ResolveEndpoints(loaded.Configuration, job);
         ValidateJob(job, endpoints, plan.Replace);
         ValidatePlanRows(plan.Rows, job, endpoints, request.Context);
-        if (plan.Production && !string.Equals(request.Confirmation, plan.JobName, StringComparison.Ordinal))
+        if (IsProduction(endpoints.Destination) && !string.Equals(request.Confirmation, plan.JobName, StringComparison.Ordinal))
         {
             throw SecretPromotionCommandExtensions.Usage("A production destination requires --confirm with the exact job name.");
         }
@@ -212,7 +212,11 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
         try
         {
             var configuration = JsonSerializer.Deserialize<SecretPromotionConfiguration>(bytes, JsonOptions);
-            if (configuration?.Version != 1 || configuration.Jobs is null || configuration.Endpoints is null)
+            if (configuration?.Version != 1 ||
+                configuration.Jobs is null ||
+                configuration.Endpoints is null ||
+                configuration.Endpoints.Any(static endpoint => endpoint is null) ||
+                configuration.Jobs.Any(static job => job is null || job.Rows is null || job.Rows.Any(static row => row is null)))
             {
                 throw SecretPromotionCommandExtensions.Usage("--config must be a version 1 secret-promotion configuration with endpoints and jobs.");
             }
