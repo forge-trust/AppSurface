@@ -55,6 +55,24 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void Probe_Should_FindStorageNamesWithJsonEscapedCharacters()
+    {
+        using var temp = TempDirectory.Create();
+        var store = new FileAppSurfaceLocalSecretStore(Path.Join(temp.Path, "secrets.json"));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:\"Snow-雪")
+            .Identity!;
+
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(identity, "sentinel-local-secret").Status);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Found, probe.Status);
+        Assert.Equal(string.Empty, probe.Value);
+        Assert.DoesNotContain("sentinel-local-secret", probe.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Probe_Should_NotReadStoredValueObject_WhenStorageNameMatches()
     {
         var identity = new AppSurfaceLocalSecretIdentityNormalizer()
@@ -165,6 +183,90 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
         Assert.DoesNotContain("raw-secret", probe.ToString(), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Probe_Should_SkipEveryValidNestedJsonValueShapeBeforeMatchingEntry()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var json =
+            "{" +
+            "\"Ignored\":{" +
+            "\"text\":\"escaped \\\"quote\\\" and unicode \\u0031\"," +
+            "\"object\":{\"nested\":true}," +
+            "\"array\":[false,null,\"text\",-1.25e+3]," +
+            "\"integer\":0," +
+            "\"number\":12.5E-2" +
+            "}," +
+            "\"" + identity.StorageName + "\":{}" +
+            "}";
+        var store = CreateProbeStore(json);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Found, probe.Status);
+        Assert.Equal(string.Empty, probe.Value);
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedSkippedValues))]
+    public void Probe_Should_ReturnInvalidStore_ForMalformedSkippedValue(string value)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var store = CreateProbeStore("{\"Ignored\":{\"value\":" + value + "},\"" + identity.StorageName + "\":{}}");
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Probe_Should_ReturnValueSafeFailure_ForReadExceptions(bool unauthorized)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(openRead: () =>
+            {
+                if (unauthorized)
+                {
+                    throw new UnauthorizedAccessException("sentinel-local-secret");
+                }
+
+                throw new IOException("sentinel-local-secret");
+            }));
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(unauthorized ? LocalSecretResultStatus.Locked : LocalSecretResultStatus.Unavailable, probe.Status);
+        Assert.DoesNotContain("sentinel-local-secret", probe.ToString(), StringComparison.Ordinal);
+    }
+
+    public static IEnumerable<object[]> MalformedSkippedValues()
+    {
+        yield return ["\"unterminated"];
+        yield return ["\"\\q\""];
+        yield return ["\"\\u0X00\""];
+        yield return ["[1 2]"];
+        yield return ["{\"nested\" 1}"];
+        yield return ["truex"];
+        yield return ["01"];
+        yield return ["1."];
+        yield return ["1e+"];
+    }
+
+    private static FileAppSurfaceLocalSecretStore CreateProbeStore(string json) =>
+        new(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(openRead: () => new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json))));
 
     [Fact]
     public void Delete_Should_ReturnMissing_WhenKeyDoesNotExist()

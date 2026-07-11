@@ -44,6 +44,40 @@ public sealed class GoogleSecretManagerTransferClientTests
         Assert.DoesNotContain("raw-secret", result.Diagnostic?.ToDisplayString(), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(StatusCode.InvalidArgument, GoogleSecretManagerTransferStatus.InvalidResource, "google-secret-transfer-invalid-resource")]
+    [InlineData(StatusCode.Cancelled, GoogleSecretManagerTransferStatus.Cancelled, "google-secret-transfer-cancelled")]
+    [InlineData(StatusCode.Unavailable, GoogleSecretManagerTransferStatus.Unavailable, "google-secret-transfer-unavailable")]
+    [InlineData(StatusCode.Unknown, GoogleSecretManagerTransferStatus.ProviderFailed, "google-secret-transfer-failed")]
+    public void ProbeSecretVersion_Should_MapProviderStatusesValueSafely(
+        StatusCode statusCode,
+        GoogleSecretManagerTransferStatus expectedStatus,
+        string expectedDiagnostic)
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(new RpcException(new Status(statusCode, "sentinel-secret"))));
+
+        var result = client.ProbeSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(expectedStatus, result.Status);
+        Assert.Equal(expectedDiagnostic, result.Diagnostic?.Code);
+        Assert.DoesNotContain("sentinel-secret", result.Diagnostic?.ToDisplayString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ProbeSecretVersion_Should_MapClientAvailabilityFailures(bool timeout)
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(timeout ? new TimeoutException() : new InvalidOperationException()));
+
+        var result = client.ProbeSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.Unavailable, result.Status);
+        Assert.Equal("google-secret-transfer-unavailable", result.Diagnostic?.Code);
+    }
+
     [Fact]
     public void AddSecretVersion_Should_WriteUtf8PayloadToExistingSecret()
     {
@@ -85,10 +119,38 @@ public sealed class GoogleSecretManagerTransferClientTests
         Assert.DoesNotContain("raw-secret", result.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AccessSecretVersion_Should_FailValueSafely_WhenProviderOmitsPayload()
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(returnNullPayload: true));
+
+        var result = client.AccessSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.ProviderFailed, result.Status);
+        Assert.Equal("google-secret-transfer-failed", result.Diagnostic?.Code);
+        Assert.Null(result.Payload);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AddSecretVersion_Should_MapClientAvailabilityFailures(bool timeout)
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(timeout ? new TimeoutException() : new InvalidOperationException()));
+
+        var result = client.AddSecretVersion("projects/project/secrets/api-key", "payload", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.Unavailable, result.Status);
+        Assert.Equal("google-secret-transfer-unavailable", result.Diagnostic?.Code);
+    }
+
     private sealed class TransferSecretManagerServiceClient(
         Exception? exception = null,
         SecretVersion.Types.State versionState = SecretVersion.Types.State.Enabled,
-        Exception? accessException = null) : SecretManagerServiceClient
+        Exception? accessException = null,
+        bool returnNullPayload = false) : SecretManagerServiceClient
     {
         public string? LastAddParent { get; private set; }
 
@@ -113,6 +175,11 @@ public sealed class GoogleSecretManagerTransferClientTests
             if (accessException != null)
             {
                 throw accessException;
+            }
+
+            if (returnNullPayload)
+            {
+                return new AccessSecretVersionResponse { Name = request.Name };
             }
 
             return new AccessSecretVersionResponse

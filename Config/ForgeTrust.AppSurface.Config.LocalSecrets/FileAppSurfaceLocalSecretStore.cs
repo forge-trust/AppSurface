@@ -320,7 +320,8 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
     private bool ContainsStorageName(string storageName)
     {
         using var stream = _fileSystem.OpenRead(_path);
-        return ContainsTopLevelProperty(stream, Encoding.UTF8.GetBytes(storageName));
+        var serializedStorageName = JsonSerializer.SerializeToUtf8Bytes(storageName);
+        return ContainsTopLevelProperty(stream, serializedStorageName.AsSpan(1, serializedStorageName.Length - 2));
     }
 
     private static bool ContainsTopLevelProperty(Stream stream, ReadOnlySpan<byte> propertyName)
@@ -406,8 +407,8 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
 
             if (next == '\\')
             {
-                matched = false;
-                SkipJsonEscape(reader);
+                MatchJsonStringByte(next, expected, ref matched, ref index);
+                ReadJsonEscapeAndMatch(reader, expected, ref matched, ref index);
                 continue;
             }
 
@@ -416,14 +417,49 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
                 throw new JsonException("Local secret file store string contains an invalid control character.");
             }
 
-            if (matched)
+            MatchJsonStringByte(next, expected, ref matched, ref index);
+        }
+    }
+
+    private static void MatchJsonStringByte(int value, ReadOnlySpan<byte> expected, ref bool matched, ref int index)
+    {
+        if (matched && (index >= expected.Length || expected[index] != (byte)value))
+        {
+            matched = false;
+        }
+
+        index++;
+    }
+
+    private static void ReadJsonEscapeAndMatch(JsonByteReader reader, ReadOnlySpan<byte> expected, ref bool matched, ref int index)
+    {
+        var escaped = reader.Read();
+        if (escaped < 0)
+        {
+            throw new JsonException("Local secret file store escape sequence is unterminated.");
+        }
+
+        MatchJsonStringByte(escaped, expected, ref matched, ref index);
+        if (escaped is not ('"' or '\\' or '/' or 'b' or 'f' or 'n' or 'r' or 't' or 'u'))
+        {
+            throw new JsonException("Local secret file store escape sequence is invalid.");
+        }
+
+        if (escaped == 'u')
+        {
+            for (var position = 0; position < 4; position++)
             {
-                if (index >= expected.Length || expected[index] != (byte)next)
+                var hex = reader.Read();
+                if (hex < 0)
                 {
-                    matched = false;
+                    throw new JsonException("Local secret file store unicode escape sequence is unterminated.");
                 }
 
-                index++;
+                MatchJsonStringByte(hex, expected, ref matched, ref index);
+                if (!IsJsonHexDigit(hex))
+                {
+                    throw new JsonException("Local secret file store unicode escape sequence is invalid.");
+                }
             }
         }
     }
