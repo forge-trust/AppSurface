@@ -105,6 +105,7 @@ internal sealed partial class PwaVerifyCommand : ICommand
                 ExpectedThemeColor,
                 ExpectedBackgroundColor,
                 ExpectedIcons);
+            _ = PwaVerificationTarget.Create(options.BaseUrl, options.EntryPath);
         }
         catch (ArgumentException ex)
         {
@@ -203,7 +204,9 @@ internal sealed partial class PwaVerifier
 
         var entry = await FetchAsync(target, target.EntryUri, "entry", MaxTextResponseBytes, diagnostics, cancellationToken);
         var manifestUri = new Uri(target.BaseUri, "manifest.webmanifest");
-        if (entry.IsSuccess && entry.ContentType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase))
+        if (!entry.RedirectLimitExceeded
+            && entry.IsSuccess
+            && entry.ContentType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase))
         {
             var extractedManifestPath = ExtractManifestPath(entry.Body);
             if (string.IsNullOrWhiteSpace(extractedManifestPath))
@@ -241,7 +244,7 @@ internal sealed partial class PwaVerifier
                 manifestUri = linkedManifestUri;
             }
         }
-        else
+        else if (!entry.RedirectLimitExceeded)
         {
             diagnostics.Add(Error(
                 "ASPWA201",
@@ -253,6 +256,11 @@ internal sealed partial class PwaVerifier
         }
 
         var manifest = await FetchAsync(target, manifestUri, "manifest", MaxTextResponseBytes, diagnostics, cancellationToken);
+        if (manifest.RedirectLimitExceeded)
+        {
+            return BuildReport(target, manifestUri, manifestDocument, iconEvidence, diagnostics);
+        }
+
         if (!manifest.IsSuccess)
         {
             diagnostics.Add(Error(
@@ -329,7 +337,7 @@ internal sealed partial class PwaVerifier
 
                 var iconResponse = await FetchAsync(target, iconUri, $"icon:{icon.Source}", MaxIconResponseBytes, diagnostics, cancellationToken);
                 PwaImageDimensions? dimensions = null;
-                if (!iconResponse.IsSuccess)
+                if (!iconResponse.RedirectLimitExceeded && !iconResponse.IsSuccess)
                 {
                     diagnostics.Add(Error(
                         "ASPWA212",
@@ -339,7 +347,8 @@ internal sealed partial class PwaVerifier
                         $"HTTP {(int)iconResponse.StatusCode}",
                         "Publish the icon file at the declared manifest path."));
                 }
-                else if (!iconResponse.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                else if (!iconResponse.RedirectLimitExceeded
+                    && !iconResponse.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
                 {
                     diagnostics.Add(Error(
                         "ASPWA213",
@@ -349,7 +358,7 @@ internal sealed partial class PwaVerifier
                         iconResponse.ContentType,
                         "Serve the icon with an image content type."));
                 }
-                else
+                else if (!iconResponse.RedirectLimitExceeded)
                 {
                     dimensions = TryDecodePngDimensions(iconResponse.BodyBytes);
                     if (dimensions is not null)
@@ -390,6 +399,11 @@ internal sealed partial class PwaVerifier
             MaxTextResponseBytes,
             diagnostics,
             cancellationToken);
+        if (diagnosticsResponse.RedirectLimitExceeded)
+        {
+            return;
+        }
+
         if (diagnosticsResponse.StatusCode == HttpStatusCode.NotFound)
         {
             diagnostics.Add(Info("ASPWA220", "AppSurface PWA diagnostics are not exposed at /_appsurface/pwa/status.json. This is expected for production defaults."));
@@ -450,7 +464,7 @@ internal sealed partial class PwaVerifier
             else
             {
                 var serviceWorker = await FetchAsync(target, serviceWorkerUri, "service-worker", MaxTextResponseBytes, diagnostics, cancellationToken);
-                if (!serviceWorker.IsSuccess)
+                if (!serviceWorker.RedirectLimitExceeded && !serviceWorker.IsSuccess)
                 {
                     diagnostics.Add(Error("ASPWA226", $"Service worker {serviceWorkerPath} returned HTTP {(int)serviceWorker.StatusCode}."));
                 }
@@ -475,7 +489,7 @@ internal sealed partial class PwaVerifier
         else
         {
             var offlineFallback = await FetchAsync(target, offlineFallbackUri, "offline-fallback", MaxTextResponseBytes, diagnostics, cancellationToken);
-            if (!offlineFallback.IsSuccess)
+            if (!offlineFallback.RedirectLimitExceeded && !offlineFallback.IsSuccess)
             {
                 diagnostics.Add(Error("ASPWA238", $"Offline fallback {offlineFallbackPath} returned HTTP {(int)offlineFallback.StatusCode}."));
             }
@@ -489,11 +503,11 @@ internal sealed partial class PwaVerifier
         PwaVerificationOptions options,
         List<PwaVerificationDiagnostic> diagnostics)
     {
-        RequireText(manifest.Name, "ASPWA205", "Manifest name is required.", diagnostics);
-        RequireText(manifest.ShortName, "ASPWA206", "Manifest short_name is required.", diagnostics);
+        RequireText(manifest.Name, "manifest.name", "ASPWA205", "Manifest name is required.", diagnostics);
+        RequireText(manifest.ShortName, "manifest.short_name", "ASPWA206", "Manifest short_name is required.", diagnostics);
         RequireDisplayMode(manifest.Display, diagnostics);
-        RequireSameOriginPath(target, manifestUri, manifest.StartUrl, "ASPWA208", "Manifest start_url must resolve to the app origin.", diagnostics);
-        RequireSameOriginPath(target, manifestUri, manifest.Scope, "ASPWA209", "Manifest scope must resolve to the app origin.", diagnostics);
+        RequireSameOriginPath(target, manifestUri, manifest.StartUrl, "manifest.start_url", "ASPWA208", "Manifest start_url must resolve to the app origin.", diagnostics);
+        RequireSameOriginPath(target, manifestUri, manifest.Scope, "manifest.scope", "ASPWA209", "Manifest scope must resolve to the app origin.", diagnostics);
         RequireStartUrlWithinScope(target, manifestUri, manifest.StartUrl, manifest.Scope, diagnostics);
         RequireHexColor(manifest.ThemeColor, "ASPWA232", "Manifest theme_color must be a CSS hex color such as #2563eb.", diagnostics);
         RequireHexColor(manifest.BackgroundColor, "ASPWA233", "Manifest background_color must be a CSS hex color such as #ffffff.", diagnostics);
@@ -534,11 +548,16 @@ internal sealed partial class PwaVerifier
         return value is "browser" or "minimal-ui" or "standalone" or "fullscreen";
     }
 
-    private static void RequireText(string? value, string code, string message, List<PwaVerificationDiagnostic> diagnostics)
+    private static void RequireText(
+        string? value,
+        string subject,
+        string code,
+        string message,
+        List<PwaVerificationDiagnostic> diagnostics)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            diagnostics.Add(Error(code, message, actual: "missing"));
+            diagnostics.Add(Error(code, message, subject, "non-empty", "missing"));
         }
     }
 
@@ -558,6 +577,7 @@ internal sealed partial class PwaVerifier
         PwaVerificationTarget target,
         Uri baseUri,
         string? value,
+        string subject,
         string code,
         string message,
         List<PwaVerificationDiagnostic> diagnostics)
@@ -565,13 +585,18 @@ internal sealed partial class PwaVerifier
         if (string.IsNullOrWhiteSpace(value)
             || !ResolvesToOrigin(target, baseUri, value, out var uri))
         {
-            diagnostics.Add(Error(code, message, actual: value ?? "missing"));
+            diagnostics.Add(Error(code, message, subject, target.Origin.ToString().TrimEnd('/'), value ?? "missing"));
             return;
         }
 
         if (!IsUnderBasePath(target, uri.AbsolutePath))
         {
-            diagnostics.Add(Error("ASPWA231", $"{message} It must also stay under the verified base path."));
+            diagnostics.Add(Error(
+                "ASPWA231",
+                $"{message} It must also stay under the verified base path.",
+                subject,
+                target.BasePath,
+                uri.AbsolutePath));
         }
     }
 
@@ -648,6 +673,11 @@ internal sealed partial class PwaVerifier
         }
 
         var serviceWorker = await FetchAsync(target, serviceWorkerUri, "service-worker-absence", MaxTextResponseBytes, diagnostics, cancellationToken);
+        if (serviceWorker.RedirectLimitExceeded)
+        {
+            return;
+        }
+
         if (serviceWorker.StatusCode == HttpStatusCode.NotFound)
         {
             diagnostics.Add(Info(
@@ -674,9 +704,9 @@ internal sealed partial class PwaVerifier
         List<PwaVerificationDiagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
-        var redirects = new List<PwaRedirectEvidence>();
         var currentUri = requestUri;
-        for (var i = 0; i <= MaxRedirects; i++)
+        var redirectsFollowed = 0;
+        while (true)
         {
             var response = await _httpClient.GetAsync(currentUri, maxBytes, cancellationToken);
             if (response.BodyTruncated)
@@ -692,28 +722,27 @@ internal sealed partial class PwaVerifier
 
             if (!IsRedirect(response.StatusCode))
             {
-                return new PwaFetchedResponse(currentUri, response, redirects);
+                return new PwaFetchedResponse(currentUri, response);
+            }
+
+            if (redirectsFollowed == MaxRedirects)
+            {
+                diagnostics.Add(Error("ASPWA264", $"Redirect response for {subject} exceeded {MaxRedirects} hops.", subject, $"<={MaxRedirects}", $">{MaxRedirects}"));
+                return new PwaFetchedResponse(currentUri, response, true);
             }
 
             if (string.IsNullOrWhiteSpace(response.RedirectLocation))
             {
                 diagnostics.Add(Error("ASPWA260", $"Redirect response for {subject} omitted a Location header.", subject, "Location", "missing"));
-                return new PwaFetchedResponse(currentUri, response, redirects);
+                return new PwaFetchedResponse(currentUri, response);
             }
 
             if (!Uri.TryCreate(currentUri, response.RedirectLocation, out var nextUri))
             {
                 diagnostics.Add(Error("ASPWA261", $"Redirect response for {subject} had an invalid Location header.", subject, "valid-uri", RedactUriValue(response.RedirectLocation)));
-                return new PwaFetchedResponse(currentUri, response, redirects);
+                return new PwaFetchedResponse(currentUri, response);
             }
 
-            redirects.Add(new PwaRedirectEvidence(EvidencePath(currentUri), EvidencePath(nextUri), (int)response.StatusCode));
-            diagnostics.Add(Info(
-                "ASPWA266",
-                $"Verifier followed redirect for {subject}.",
-                subject,
-                EvidencePath(currentUri),
-                EvidencePath(nextUri)));
             if (!IsSameOrigin(target, nextUri))
             {
                 diagnostics.Add(Error(
@@ -723,7 +752,7 @@ internal sealed partial class PwaVerifier
                     target.Origin.ToString().TrimEnd('/'),
                     RedactUriValue(nextUri.ToString()),
                     "Keep PWA verifier redirects on the verified app origin."));
-                return new PwaFetchedResponse(currentUri, response, redirects);
+                return new PwaFetchedResponse(currentUri, response);
             }
 
             if (!IsUnderBasePath(target, nextUri.AbsolutePath))
@@ -735,14 +764,18 @@ internal sealed partial class PwaVerifier
                     target.BasePath,
                     nextUri.AbsolutePath,
                     "Keep PWA verifier redirects under the verified base URL path."));
-                return new PwaFetchedResponse(currentUri, response, redirects);
+                return new PwaFetchedResponse(currentUri, response);
             }
 
+            diagnostics.Add(Info(
+                "ASPWA266",
+                $"Verifier followed redirect for {subject}.",
+                subject,
+                EvidencePath(currentUri),
+                EvidencePath(nextUri)));
+            redirectsFollowed++;
             currentUri = nextUri;
         }
-
-        diagnostics.Add(Error("ASPWA264", $"Redirect response for {subject} exceeded {MaxRedirects} hops.", subject, $"<={MaxRedirects}", $">{MaxRedirects}"));
-        return new PwaFetchedResponse(currentUri, new PwaHttpResponse(HttpStatusCode.TooManyRequests, string.Empty, [], null, false), redirects);
     }
 
     private static bool IsRedirect(HttpStatusCode statusCode)
@@ -929,7 +962,7 @@ internal sealed partial class PwaVerifier
         return new PwaVerificationReport(
             2,
             diagnostics.All(d => d.Severity != "error"),
-            target.BaseUri.ToString().TrimEnd('/'),
+            target.Origin.ToString().TrimEnd('/'),
             target.BaseUri.ToString().TrimEnd('/'),
             target.EntryPath,
             target.EntryUri.ToString(),
@@ -1009,13 +1042,34 @@ internal sealed partial class PwaVerifier
     private static partial Regex HexColorPattern();
 }
 
+/// <summary>
+/// Fetches verifier resources without automatically following redirects.
+/// </summary>
+/// <remarks>
+/// Redirect custody stays with <see cref="PwaVerifier"/> so origin and path-base boundaries are checked before each hop.
+/// </remarks>
 internal interface IPwaVerificationHttpClient
 {
+    /// <summary>
+    /// Fetches one response and reads no more than the requested body limit.
+    /// </summary>
+    /// <param name="uri">The absolute resource URI.</param>
+    /// <param name="maxBodyBytes">The maximum response-body bytes retained for evidence.</param>
+    /// <param name="cancellationToken">Cancels the network request and bounded body read.</param>
+    /// <returns>The response metadata and bounded body.</returns>
     Task<PwaHttpResponse> GetAsync(Uri uri, int maxBodyBytes, CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Adapts <see cref="HttpClient"/> to the verifier's bounded, redirect-aware fetch contract.
+/// </summary>
+/// <param name="httpClient">A client configured with automatic redirect handling disabled.</param>
+/// <remarks>
+/// Enabling automatic redirects bypasses the verifier's same-origin and path-base checks.
+/// </remarks>
 internal sealed class PwaVerificationHttpClient(HttpClient httpClient) : IPwaVerificationHttpClient
 {
+    /// <inheritdoc />
     public async Task<PwaHttpResponse> GetAsync(Uri uri, int maxBodyBytes, CancellationToken cancellationToken)
     {
         using var response = await httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -1062,6 +1116,14 @@ internal sealed class PwaVerificationHttpClient(HttpClient httpClient) : IPwaVer
     }
 }
 
+/// <summary>
+/// Captures one bounded HTTP response before verifier-managed redirect handling.
+/// </summary>
+/// <param name="StatusCode">The actual server status code.</param>
+/// <param name="ContentType">The response media type, or an empty string when absent.</param>
+/// <param name="BodyBytes">The retained response bytes, capped by the requested read limit.</param>
+/// <param name="RedirectLocation">The unmodified Location header value, when present.</param>
+/// <param name="BodyTruncated">Whether bytes beyond the configured read limit were discarded.</param>
 internal sealed record PwaHttpResponse(
     HttpStatusCode StatusCode,
     string ContentType,
@@ -1069,11 +1131,38 @@ internal sealed record PwaHttpResponse(
     string? RedirectLocation,
     bool BodyTruncated)
 {
+    /// <summary>
+    /// Gets whether the actual response status is in the HTTP 2xx range.
+    /// </summary>
     public bool IsSuccess => (int)StatusCode >= 200 && (int)StatusCode < 300;
 
+    /// <summary>
+    /// Gets the retained body decoded as UTF-8 text.
+    /// </summary>
+    /// <remarks>Binary consumers should use <see cref="BodyBytes"/> instead.</remarks>
     public string Body => Encoding.UTF8.GetString(BodyBytes);
 }
 
+/// <summary>
+/// Represents schema-versioned PWA verification evidence written by the CLI.
+/// </summary>
+/// <param name="SchemaVersion">The JSON evidence schema version.</param>
+/// <param name="Passed">Whether no error-severity diagnostics were recorded.</param>
+/// <param name="Origin">The verified scheme, host, and port without a path base.</param>
+/// <param name="BaseUrl">The verified application root, including its path base.</param>
+/// <param name="EntryPath">The app-root-relative entry path supplied to the verifier.</param>
+/// <param name="EntryUrl">The absolute entry URL resolved under <paramref name="BaseUrl"/>.</param>
+/// <param name="ManifestPath">The app-origin-relative manifest path discovered or probed.</param>
+/// <param name="StartUrl">The manifest start_url value, when parsed.</param>
+/// <param name="Scope">The manifest scope value, when parsed.</param>
+/// <param name="Display">The manifest display value, when parsed.</param>
+/// <param name="ThemeColor">The manifest theme_color value, when parsed.</param>
+/// <param name="BackgroundColor">The manifest background_color value, when parsed.</param>
+/// <param name="Icons">Bounded fetch and dimension evidence for manifest icons.</param>
+/// <param name="Diagnostics">Stable diagnostics supporting the pass or failure result.</param>
+/// <remarks>
+/// Consumers should branch on <paramref name="SchemaVersion"/> and diagnostic codes instead of parsing human-readable messages.
+/// </remarks>
 internal sealed record PwaVerificationReport(
     int SchemaVersion,
     bool Passed,
@@ -1090,6 +1179,18 @@ internal sealed record PwaVerificationReport(
     IReadOnlyList<PwaIconEvidence> Icons,
     IReadOnlyList<PwaVerificationDiagnostic> Diagnostics);
 
+/// <summary>
+/// Represents one stable, structured PWA verification observation.
+/// </summary>
+/// <param name="Code">The stable ASPWA2xx identifier.</param>
+/// <param name="Severity">The lowercase error, warning, or info token.</param>
+/// <param name="Message">A human-readable explanation.</param>
+/// <param name="Subject">The bounded manifest field or verifier surface involved.</param>
+/// <param name="Expected">The expected bounded value, when applicable.</param>
+/// <param name="Actual">The observed redacted value, when applicable.</param>
+/// <param name="Fix">A concise remediation, when known.</param>
+/// <param name="DocsUrl">Canonical documentation for the diagnostic, when available.</param>
+/// <remarks>Do not place query strings, fragments, response bodies, or other secrets in structured evidence.</remarks>
 internal sealed record PwaVerificationDiagnostic(
     string Code,
     string Severity,
@@ -1100,8 +1201,26 @@ internal sealed record PwaVerificationDiagnostic(
     string? Fix = null,
     string? DocsUrl = null);
 
+/// <summary>
+/// Normalizes the trusted origin, application path base, and real entry route used by one verification run.
+/// </summary>
+/// <param name="Origin">The scheme, host, and port boundary.</param>
+/// <param name="BaseUri">The application root including its normalized path base.</param>
+/// <param name="BasePath">The normalized path base ending in a slash.</param>
+/// <param name="EntryPath">The validated app-root-relative entry path.</param>
+/// <param name="EntryUri">The entry path resolved beneath <paramref name="BaseUri"/>.</param>
+/// <remarks>
+/// Query strings and fragments belong in neither the base URL nor entry path because verifier evidence intentionally excludes them.
+/// </remarks>
 internal sealed record PwaVerificationTarget(Uri Origin, Uri BaseUri, string BasePath, string EntryPath, Uri EntryUri)
 {
+    /// <summary>
+    /// Creates a normalized verification target after enforcing the URL and entry-path boundaries.
+    /// </summary>
+    /// <param name="url">An absolute HTTP or HTTPS application root without a query or fragment.</param>
+    /// <param name="entryPath">An app-root-relative path without traversal, query, fragment, or absolute URL syntax.</param>
+    /// <returns>The normalized target used for all verifier requests.</returns>
+    /// <exception cref="ArgumentException">The URL or entry path violates a verifier boundary.</exception>
     public static PwaVerificationTarget Create(Uri url, string entryPath = "/")
     {
         if (!IsSafeEntryPath(entryPath))
@@ -1172,6 +1291,18 @@ internal sealed record PwaVerificationTarget(Uri Origin, Uri BaseUri, string Bas
     }
 }
 
+/// <summary>
+/// Carries normalized CLI assertions into a PWA verification run.
+/// </summary>
+/// <param name="BaseUrl">The absolute app root to verify.</param>
+/// <param name="EntryPath">The app-root-relative HTML entry route.</param>
+/// <param name="ExpectedStartUrl">An optional exact manifest start_url assertion.</param>
+/// <param name="ExpectedScope">An optional exact manifest scope assertion.</param>
+/// <param name="ExpectedDisplay">An optional exact manifest display assertion.</param>
+/// <param name="ExpectedThemeColor">An optional exact manifest theme_color assertion.</param>
+/// <param name="ExpectedBackgroundColor">An optional exact manifest background_color assertion.</param>
+/// <param name="ExpectedIcons">Parsed icon size and purpose assertions.</param>
+/// <remarks>Target safety is enforced by <see cref="PwaVerificationTarget.Create(Uri, string)"/> before network access.</remarks>
 internal sealed record PwaVerificationOptions(
     Uri BaseUrl,
     string EntryPath,
@@ -1182,6 +1313,19 @@ internal sealed record PwaVerificationOptions(
     string? ExpectedBackgroundColor,
     IReadOnlyList<PwaExpectedIcon> ExpectedIcons)
 {
+    /// <summary>
+    /// Creates verification options and parses repeated icon assertions.
+    /// </summary>
+    /// <param name="baseUrl">The absolute app root to verify.</param>
+    /// <param name="entryPath">The app-root-relative entry route; blank values normalize to root.</param>
+    /// <param name="expectedStartUrl">An optional exact start_url assertion.</param>
+    /// <param name="expectedScope">An optional exact scope assertion.</param>
+    /// <param name="expectedDisplay">An optional exact display assertion.</param>
+    /// <param name="expectedThemeColor">An optional exact theme_color assertion.</param>
+    /// <param name="expectedBackgroundColor">An optional exact background_color assertion.</param>
+    /// <param name="expectedIcons">Repeated WIDTHxHEIGHT or WIDTHxHEIGHT:purpose assertions.</param>
+    /// <returns>Normalized options for <see cref="PwaVerifier"/>.</returns>
+    /// <exception cref="ArgumentException">An icon assertion is malformed.</exception>
     public static PwaVerificationOptions Create(
         Uri baseUrl,
         string entryPath = "/",
@@ -1204,8 +1348,19 @@ internal sealed record PwaVerificationOptions(
     }
 }
 
+/// <summary>
+/// Represents one explicit manifest icon size and optional purpose assertion.
+/// </summary>
+/// <param name="Size">A positive WIDTHxHEIGHT token.</param>
+/// <param name="Purpose">An optional manifest purpose token such as maskable.</param>
 internal sealed partial record PwaExpectedIcon(string Size, string? Purpose)
 {
+    /// <summary>
+    /// Parses a command-line icon assertion.
+    /// </summary>
+    /// <param name="value">WIDTHxHEIGHT or WIDTHxHEIGHT:purpose.</param>
+    /// <returns>The parsed assertion.</returns>
+    /// <exception cref="ArgumentException">The size or purpose token is malformed.</exception>
     public static PwaExpectedIcon Parse(string value)
     {
         var parts = value.Split(':', 2, StringSplitOptions.TrimEntries);
@@ -1222,29 +1377,62 @@ internal sealed partial record PwaExpectedIcon(string Size, string? Purpose)
         return new PwaExpectedIcon(parts[0], parts.Length == 2 ? parts[1] : null);
     }
 
+    /// <summary>
+    /// Formats the assertion using its command-line token shape.
+    /// </summary>
+    /// <returns>WIDTHxHEIGHT or WIDTHxHEIGHT:purpose.</returns>
     public override string ToString() => string.IsNullOrWhiteSpace(Purpose) ? Size : $"{Size}:{Purpose}";
 
     [GeneratedRegex("^[1-9][0-9]*x[1-9][0-9]*$", RegexOptions.IgnoreCase)]
     private static partial Regex IconSizeAssertionPattern();
 }
 
-internal sealed record PwaFetchedResponse(Uri FinalUri, PwaHttpResponse Response, IReadOnlyList<PwaRedirectEvidence> Redirects)
+/// <summary>
+/// Captures the final verifier-managed fetch state after zero or more accepted redirects.
+/// </summary>
+/// <param name="FinalUri">The URI that produced <paramref name="Response"/>.</param>
+/// <param name="Response">The actual final response without fabricated sentinel status codes.</param>
+/// <param name="RedirectLimitExceeded">Whether this response was an unfollowed redirect beyond the hop limit.</param>
+/// <remarks>
+/// Callers must not reinterpret <paramref name="Response"/> as a terminal HTTP failure when <paramref name="RedirectLimitExceeded"/> is true; ASPWA264 is the authoritative failure.
+/// </remarks>
+internal sealed record PwaFetchedResponse(Uri FinalUri, PwaHttpResponse Response, bool RedirectLimitExceeded = false)
 {
+    /// <summary>Gets the actual final response status code.</summary>
     public HttpStatusCode StatusCode => Response.StatusCode;
 
+    /// <summary>Gets the actual final response media type.</summary>
     public string ContentType => Response.ContentType;
 
+    /// <summary>Gets the retained final response body decoded as UTF-8.</summary>
     public string Body => Response.Body;
 
+    /// <summary>Gets the retained final response bytes.</summary>
     public byte[] BodyBytes => Response.BodyBytes;
 
+    /// <summary>Gets whether the actual final response is in the HTTP 2xx range.</summary>
     public bool IsSuccess => Response.IsSuccess;
 }
 
-internal sealed record PwaRedirectEvidence(string FromPath, string ToPath, int StatusCode);
-
+/// <summary>
+/// Represents dimensions decoded directly from a bounded PNG response.
+/// </summary>
+/// <param name="Width">The positive pixel width.</param>
+/// <param name="Height">The positive pixel height.</param>
 internal sealed record PwaImageDimensions(int Width, int Height);
 
+/// <summary>
+/// Represents privacy-safe fetch and optional PNG dimension evidence for one manifest icon.
+/// </summary>
+/// <param name="Source">The manifest src value.</param>
+/// <param name="Sizes">The manifest sizes token list.</param>
+/// <param name="Type">The declared media type.</param>
+/// <param name="Purpose">The declared purpose token list.</param>
+/// <param name="Path">The fetched app-origin-relative path without query or fragment.</param>
+/// <param name="ContentType">The observed response media type.</param>
+/// <param name="Width">The decoded PNG width, when available.</param>
+/// <param name="Height">The decoded PNG height, when available.</param>
+/// <param name="Fetched">Whether the icon returned an HTTP 2xx response.</param>
 internal sealed record PwaIconEvidence(
     string? Source,
     string? Sizes,
@@ -1256,6 +1444,17 @@ internal sealed record PwaIconEvidence(
     int? Height,
     bool Fetched);
 
+/// <summary>
+/// Models the manifest fields required for install-readiness verification.
+/// </summary>
+/// <param name="Name">The manifest name.</param>
+/// <param name="ShortName">The manifest short_name.</param>
+/// <param name="StartUrl">The manifest start_url.</param>
+/// <param name="Scope">The manifest scope.</param>
+/// <param name="Display">The manifest display mode.</param>
+/// <param name="ThemeColor">The manifest theme_color.</param>
+/// <param name="BackgroundColor">The manifest background_color.</param>
+/// <param name="Icons">The manifest icon declarations.</param>
 internal sealed record PwaManifestProbe(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("short_name")] string? ShortName,
@@ -1266,12 +1465,28 @@ internal sealed record PwaManifestProbe(
     [property: JsonPropertyName("background_color")] string? BackgroundColor,
     [property: JsonPropertyName("icons")] IReadOnlyList<PwaIconProbe>? Icons);
 
+/// <summary>
+/// Models one manifest icon declaration without trusting it as fetched evidence.
+/// </summary>
+/// <param name="Source">The manifest src value.</param>
+/// <param name="Sizes">The space-delimited manifest sizes tokens.</param>
+/// <param name="Type">The declared media type.</param>
+/// <param name="Purpose">The space-delimited manifest purpose tokens.</param>
 internal sealed record PwaIconProbe(
     [property: JsonPropertyName("src")] string? Source,
     [property: JsonPropertyName("sizes")] string? Sizes,
     [property: JsonPropertyName("type")] string? Type,
     [property: JsonPropertyName("purpose")] string? Purpose);
 
+/// <summary>
+/// Models the server-known AppSurface PWA diagnostics used for offline posture checks.
+/// </summary>
+/// <param name="Enabled">Whether AppSurface PWA metadata is enabled.</param>
+/// <param name="OfflineEnabled">Whether the offline strategy is enabled.</param>
+/// <param name="ServiceWorkerPath">The active service-worker path when offline is enabled.</param>
+/// <param name="OfflineFallbackPath">The active offline fallback path when offline is enabled.</param>
+/// <param name="ConfiguredServiceWorkerPath">The configured worker path used to prove absence when offline is disabled.</param>
+/// <remarks>These server-known values do not prove browser runtime capability or registration state.</remarks>
 internal sealed record PwaStatusProbe(
     bool Enabled,
     bool OfflineEnabled,

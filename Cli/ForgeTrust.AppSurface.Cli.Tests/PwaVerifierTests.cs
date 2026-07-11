@@ -75,6 +75,26 @@ public sealed class PwaVerifierTests
         Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("https://app.example.test", "../admin", "--entry-path must be an app-root-relative path")]
+    [InlineData("https://app.example.test/?token=secret", "/", "must not include a query string or fragment")]
+    public async Task ExecuteAsync_ReportsUnsafeVerificationTargetsAsCommandErrors(
+        string baseUrl,
+        string entryPath,
+        string expectedMessage)
+    {
+        var command = new PwaVerifyCommand(new PwaVerifier(new FakePwaHttpClient()))
+        {
+            BaseUrl = baseUrl,
+            EntryPath = entryPath
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void VerificationOptions_NormalizesBlankEntryPathAndFormatsExpectedIconPurpose()
     {
@@ -317,6 +337,7 @@ public sealed class PwaVerifierTests
 
         Assert.False(report.Passed);
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA262");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA266");
     }
 
     [Fact]
@@ -368,6 +389,7 @@ public sealed class PwaVerifierTests
 
         Assert.False(report.Passed);
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA263");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA266");
     }
 
     [Fact]
@@ -407,6 +429,96 @@ public sealed class PwaVerifierTests
 
         Assert.False(report.Passed);
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA264");
+        Assert.Equal(5, report.Diagnostics.Count(diagnostic => diagnostic.Code == "ASPWA266"));
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA201" or "ASPWA202");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Actual?.Contains("429", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_DoesNotReportHttpFailureWhenManifestRedirectLimitIsExceeded()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", HtmlWithManifestLink(), "text/html");
+        http.AddRedirect("https://app.example.test/manifest.webmanifest", "/manifest.webmanifest");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA264");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA202");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_DoesNotReportHttpFailureWhenIconRedirectLimitIsExceeded()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", HtmlWithManifestLink(), "text/html");
+        http.Add("https://app.example.test/manifest.webmanifest", ValidManifest(), "application/manifest+json");
+        http.AddRedirect("https://app.example.test/icons/app-192.png", "/icons/app-192.png");
+        http.Add("https://app.example.test/icons/app-512.png", "png", "image/png");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA264");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA212");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_DoesNotReportHttpWarningWhenDiagnosticsRedirectLimitIsExceeded()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.AddRedirect("https://app.example.test/_appsurface/pwa/status.json", "/_appsurface/pwa/status.json");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA264");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA221");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_DoesNotReportHttpFailuresWhenOfflineResourceRedirectLimitsAreExceeded()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """{"enabled":true,"offlineEnabled":true,"serviceWorkerPath":"/service-worker.js","offlineFallbackPath":"/offline.html"}""",
+            "application/json");
+        http.AddRedirect("https://app.example.test/service-worker.js", "/service-worker.js");
+        http.AddRedirect("https://app.example.test/offline.html", "/offline.html");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Equal(2, report.Diagnostics.Count(diagnostic => diagnostic.Code == "ASPWA264"));
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA226" or "ASPWA238");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_DoesNotReportReachabilityWhenServiceWorkerAbsenceRedirectLimitIsExceeded()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """{"enabled":true,"offlineEnabled":false,"configuredServiceWorkerPath":"/service-worker.js"}""",
+            "application/json");
+        http.AddRedirect("https://app.example.test/service-worker.js", "/service-worker.js");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA264");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA240" or "ASPWA256");
     }
 
     [Fact]
@@ -710,7 +822,8 @@ public sealed class PwaVerifierTests
         var report = await verifier.VerifyAsync(new Uri("https://app.example.test/tenant/"), CancellationToken.None);
 
         Assert.True(report.Passed);
-        Assert.Equal("https://app.example.test/tenant", report.Origin);
+        Assert.Equal("https://app.example.test", report.Origin);
+        Assert.Equal("https://app.example.test/tenant", report.BaseUrl);
         Assert.Equal("/tenant/manifest.webmanifest", report.ManifestPath);
     }
 
@@ -736,7 +849,12 @@ public sealed class PwaVerifierTests
         var report = await verifier.VerifyAsync(new Uri("https://app.example.test/tenant/"), CancellationToken.None);
 
         Assert.False(report.Passed);
-        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA231");
+        Assert.Contains(
+            report.Diagnostics,
+            diagnostic => diagnostic.Code == "ASPWA231"
+                && diagnostic.Subject == "manifest.start_url"
+                && diagnostic.Expected == "/tenant/"
+                && diagnostic.Actual == "/");
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA228");
     }
 
@@ -985,11 +1103,11 @@ public sealed class PwaVerifierTests
         var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
 
         Assert.False(report.Passed);
-        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA205");
-        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA206");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA205" && diagnostic.Subject == "manifest.name");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA206" && diagnostic.Subject == "manifest.short_name");
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA207");
-        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA208");
-        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA209");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA208" && diagnostic.Subject == "manifest.start_url");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA209" && diagnostic.Subject == "manifest.scope");
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA210");
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA211");
     }
@@ -1011,7 +1129,12 @@ public sealed class PwaVerifierTests
         var report = await verifier.VerifyAsync(new Uri("https://app.example.test/tenant/"), CancellationToken.None);
 
         Assert.False(report.Passed);
-        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA231");
+        Assert.Contains(
+            report.Diagnostics,
+            diagnostic => diagnostic.Code == "ASPWA231"
+                && diagnostic.Subject == "manifest.scope"
+                && diagnostic.Expected == "/tenant/"
+                && diagnostic.Actual == "/admin/");
     }
 
     [Fact]

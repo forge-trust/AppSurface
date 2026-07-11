@@ -141,7 +141,7 @@ Use JSON output when integrating the verifier into CI:
 appsurface pwa verify --url https://app.example.com --json
 ```
 
-The command emits stable diagnostic codes and exits nonzero when install-critical checks fail. JSON output uses `schemaVersion: 2`, keeps the original `passed`, `origin`, `manifestPath`, and `diagnostics` fields, and adds entry URL, manifest fields, icon evidence, and diagnostic `subject`/`expected`/`actual`/`fix` details for CI artifacts.
+The command emits stable diagnostic codes and exits nonzero when install-critical checks fail. JSON output uses `schemaVersion: 2`, keeps the original `passed`, `origin`, `manifestPath`, and `diagnostics` fields, and adds `baseUrl`, entry URL, manifest fields, icon evidence, and diagnostic `subject`/`expected`/`actual`/`fix` details for CI artifacts. `origin` contains only scheme, host, and port; `baseUrl` includes the verified path base.
 
 ## Browser Caveats
 
