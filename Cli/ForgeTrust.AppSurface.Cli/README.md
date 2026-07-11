@@ -162,7 +162,8 @@ JSON contain resources, actions, and diagnostic codes only: never values, bytes,
 exceptions.
 
 Google destinations must already exist. Without `--replace`, an enabled destination version or an existing LocalSecrets
-destination blocks the job. With `--replace`, Google adds a new enabled version and LocalSecrets overwrites the value.
+destination is skipped while independent ready rows continue. With `--replace`, Google adds a new enabled version and
+LocalSecrets overwrites the value.
 The workflow never creates secrets, changes IAM, disables/destroys versions, rotates values, provisions Terraform, or
 starts background synchronization. Writes are ordered but cross-secret atomicity is unavailable; an uncertain Google
 write is recorded as `IndeterminateWrite` and is never retried automatically.
