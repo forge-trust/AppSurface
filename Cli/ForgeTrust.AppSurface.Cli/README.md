@@ -16,7 +16,7 @@ The CLI also includes public coverage commands for private-by-default CI coverag
 
 `appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, delete keys, and run doctor diagnostics for platform availability.
 
-`appsurface pwa verify` checks the install metadata served by `ForgeTrust.AppSurface.Web`: secure origin posture, manifest discovery and content, icon reachability, same-origin start URL and scope, head link presence, diagnostics exposure, and opt-in offline service worker plus fallback posture.
+`appsurface pwa verify` checks the install metadata served by `ForgeTrust.AppSurface.Web`: secure origin posture, entry-page manifest discovery, redirect boundaries, manifest content, icon reachability and PNG dimensions, same-origin start URL and scope, head link presence, diagnostics exposure, and opt-in offline service worker plus fallback posture.
 
 Future CLI authentication is design-only today. The [authenticated command design](docs/authenticated-command-design.md) keeps auth centered on protected command execution, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the first protected command wedge, and requires browser/loopback PKCE, RFC 8628 device flow, CI no-prompt behavior, secure token-cache boundaries, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 
@@ -73,10 +73,28 @@ Verify PWA install metadata for a running AppSurface Web app:
 
 ```bash
 appsurface pwa verify --url https://app.example.com
-appsurface pwa verify --url http://localhost:5055 --json
+appsurface pwa verify --base-url http://localhost:5055 --entry-path /account/resume --json
 ```
 
-The verifier accepts HTTPS origins plus localhost, `127.0.0.1`, and `::1` development origins. It reports stable `ASPWA2xx` diagnostics for manifest reachability, required manifest fields, required `192x192` and `512x512` icons, icon content types, root-page manifest links, `start_url`/`scope` consistency, development diagnostics, and offline service worker plus offline fallback reachability when the app enables an offline strategy. JSON output is intended for CI or smoke tests; text output is optimized for local copy-paste debugging.
+The verifier accepts HTTPS origins plus localhost, `127.0.0.1`, and `::1` development origins. Use `--entry-path` for the real HTML page a user lands on after auth, resume, or setup redirects; the path is app-root-relative and is resolved under any path base in `--url` or `--base-url`. The verifier follows same-origin, same-base-path redirects for entry, manifest, diagnostics, icon, service-worker, and offline fallback requests, and fails when a redirect leaves that boundary.
+
+Use explicit assertions when CI should prove a product contract instead of only checking generic installability:
+
+```bash
+appsurface pwa verify \
+  --base-url https://app.example.com \
+  --entry-path /account/resume \
+  --expect-start-url / \
+  --expect-scope / \
+  --expect-display standalone \
+  --expect-theme-color '#2563eb' \
+  --expect-background-color '#ffffff' \
+  --expect-icon 192x192 \
+  --expect-icon 512x512 \
+  --json
+```
+
+The verifier reports stable `ASPWA2xx` diagnostics for manifest reachability, required manifest fields, required `192x192` and `512x512` icon tokens, optional expected icon declarations such as `512x512:maskable`, icon content types, decoded PNG dimensions when available, entry-page manifest links, `start_url`/`scope` consistency, development diagnostics, and offline service worker plus offline fallback reachability when the app enables an offline strategy. When diagnostics are exposed and offline is disabled, the verifier also probes the configured service-worker path and records proof that it is not mapped. JSON output uses `schemaVersion: 2`, preserves legacy `passed`, `origin`, `manifestPath`, and `diagnostics` fields, and adds `baseUrl`, entry URL, manifest fields, icon evidence, and structured diagnostic details for CI evidence. `origin` contains only scheme, host, and port; `baseUrl` includes the verified path base.
 
 ### `appsurface secrets`
 

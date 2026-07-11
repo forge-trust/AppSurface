@@ -160,10 +160,10 @@ Add the head helper to your MVC layout:
 Run the app on HTTPS or localhost, then verify the install contract:
 
 ```bash
-appsurface pwa verify --url https://app.example.com
+appsurface pwa verify --base-url https://app.example.com --entry-path /account/resume --expect-display standalone --expect-icon 192x192 --expect-icon 512x512
 ```
 
-AppSurface maps `/manifest.webmanifest` with `application/manifest+json`, exposes development-only diagnostics at `/_appsurface/pwa`, and emits no service worker unless `options.Pwa.Offline.Enabled` is true. Minimal API and custom-layout apps can copy the exact generated tags from `/_appsurface/pwa` instead of using the TagHelper.
+AppSurface maps `/manifest.webmanifest` with `application/manifest+json`, exposes development-only diagnostics at `/_appsurface/pwa`, and emits no service worker unless `options.Pwa.Offline.Enabled` is true. The verifier can check the real entry path, follow safe same-origin redirects, assert manifest values, decode PNG icon dimensions, and prove the configured service-worker path is absent when diagnostics say offline is disabled. Minimal API and custom-layout apps can copy the exact generated tags from `/_appsurface/pwa` instead of using the TagHelper.
 
 For the full API shape, browser caveats, offline pitfalls, and CLI proof flow, see [PWA install support](Docs/pwa-install.md). For executable proof, run [examples/web-pwa-install](../../examples/web-pwa-install/README.md).
 

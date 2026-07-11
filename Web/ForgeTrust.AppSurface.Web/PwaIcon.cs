@@ -5,8 +5,9 @@ namespace ForgeTrust.AppSurface.Web;
 /// </summary>
 /// <remarks>
 /// <see cref="Source"/> must be an app-root-relative path such as <c>/icons/app-192.png</c>. AppSurface validates the
-/// declared <see cref="Sizes"/> values and exposes them in diagnostics, but it does not decode image dimensions at
-/// runtime. Use <c>appsurface pwa verify</c> to prove icon URLs are reachable from a running app.
+/// declared <see cref="Sizes"/> token values and exposes them in diagnostics, but it does not decode image dimensions
+/// at runtime. Use <c>appsurface pwa verify</c> to prove icon URLs are reachable and decode PNG dimensions from a
+/// running app.
 /// </remarks>
 public sealed class PwaIcon
 {
@@ -16,7 +17,7 @@ public sealed class PwaIcon
     public string Source { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the manifest size token, for example <c>192x192</c>.
+    /// Gets or sets the manifest size token list, for example <c>192x192</c> or <c>192x192 512x512</c>.
     /// </summary>
     public string Sizes { get; set; } = string.Empty;
 
