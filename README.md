@@ -170,14 +170,18 @@ dotnet build
 dotnet test --no-build
 ```
 
-Run merged solution coverage for this repository's AppSurface-specific validation lane:
+Run the repository's full AppSurface coverage-and-gate lane:
 
 ```bash
 ./scripts/coverage-solution.sh
-dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- coverage gate --coverage TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --min-patch-branch 85
 ```
 
-This command:
+For a local checkout, the default patch comparison is `origin/main`. The CI workflow overrides that
+value with `HEAD^1` for its pull-request merge checkout, so its patch gate evaluates exactly the
+tested merge tree. Set `COVERAGE_GATE_DIFF_BASE=` to run only the aggregate gate, as CI does for
+baseline builds.
+
+This workflow:
 - Runs each solution test project.
 - Collects coverage only for `ForgeTrust.AppSurface.*` modules.
 - Excludes test modules (`*.Tests` and `*.IntegrationTests`) from coverage.
@@ -190,6 +194,8 @@ This command:
   overhead in seconds and as a percent of elapsed runner time at diagnostics generation.
 - Uses the source AppSurface CLI and its package-owned ReportGenerator dependency for the default
   full-solution lane.
+- Gates at 95% line coverage and 85% branch coverage, plus 95% line and 85% branch coverage for
+  the selected patch when a diff base is configured.
 
 Private package-consuming repositories should use the public CLI runner instead of this repository's script:
 
@@ -200,7 +206,9 @@ dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merge
 
 The `appsurface coverage run` command discovers `.sln`/`.slnx` test projects or accepts repeated `--test-project` values, runs Coverlet-instrumented projects, writes private local artifacts under `TestResults/coverage-merged`, and merges Cobertura through the CLI package's ReportGenerator dependency without reading the consumer repo's tool manifest. No separate merge command is required for ordinary package consumers: `coverage run` produces `TestResults/coverage-merged/coverage.cobertura.xml` directly. Managed test results are opt-in with `--test-results junit`; this requires selected test projects to reference `JunitXml.TestLogger`. `--slow-test-diagnostics` implies managed JUnit results and writes `slow-test-diagnostics.md` and `.json` beside the merged coverage file. Use `appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged` when a matrix job or custom test workflow already produced shard files named `coverage.cobertura.xml`. The optional `appsurface coverage gate` command evaluates that merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage accepts exactly one source: `--diff-base` for local Git history, `--diff-file` for a CI-produced unified diff artifact, or `--diff-stdin` for piped unified diff text. External diff artifacts are private local inputs, are bounded at 20 MiB, and fail closed when non-empty content is not unified diff text. The coverage commands are intentionally private-by-default: they do not upload coverage, call GitHub APIs, or store trends.
 
-The script also supports bounded test groups for local or CI experiments:
+The legacy grouped script modes remain coverage-only for bounded local or CI experiments; use the
+public [`appsurface coverage gate`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
+command separately when a grouped artifact needs gating:
 
 ```bash
 BUILD_CONFIGURATION=Release BUILD_SOLUTION=false ./scripts/coverage-solution.sh --group web --output TestResults/coverage-groups/web
