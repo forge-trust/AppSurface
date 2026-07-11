@@ -13,7 +13,7 @@
     <div class="mb-8 docs-hero-panel rounded-lg p-5 sm:p-6">
         <div class="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div class="max-w-3xl">
-                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#14b8a6]">ForgeTrust AppSurface</p>
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] docs-token-text-accent">ForgeTrust AppSurface</p>
                 @if (string.Equals(Model.Heading, docsIdentity.DisplayName, StringComparison.Ordinal))
                 {
                     @ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsWordmarkHtml.Render(docsIdentity, "docs-wordmark mt-3 text-3xl sm:text-4xl", "h1")
@@ -32,9 +32,9 @@
     </div>
 
     <section class="docs-surface-panel rounded-lg p-6 sm:p-8">
-        <div class="flex flex-col gap-4 border-b border-[#1b2a43] pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div class="flex flex-col gap-4 border-b docs-token-border-muted pb-5 sm:flex-row sm:items-end sm:justify-between">
             <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#14b8a6]">Start Here</p>
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] docs-token-text-accent">Start Here</p>
                 <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Follow the proof path first.</h2>
                 <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
                     Understand what the system is for, see it working, then choose the next implementation route with context.
@@ -44,7 +44,7 @@
             {
                 <a href="@Url.PathBaseAware(Model.StartHereHref)"
                    aria-label="Browse Start Here"
-                   class="inline-flex min-h-11 items-center gap-2 self-start rounded-full border border-[#2563eb]/45 bg-[#2563eb]/10 px-4 py-2 text-sm font-semibold text-[#bfdbfe] transition-colors hover:border-[#14b8a6] hover:bg-[#14b8a6]/10">
+                   class="inline-flex min-h-11 items-center gap-2 self-start rounded-full border docs-token-border-accent docs-token-bg-active px-4 py-2 text-sm font-semibold docs-token-text-info-muted transition-colors docs-token-hover-border-accent docs-token-hover-bg-accent-fill">
                     Start Here
                     <svg class="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                         <circle cx="10" cy="10" r="7"></circle>
@@ -59,7 +59,7 @@
             <div class="mt-6 space-y-8">
                 @foreach (var featuredGroup in Model.FeaturedPageGroups.Where(group => group.Pages.Count > 0))
                 {
-                    <section class="border-t border-[#1b2a43] pt-5 first:border-t-0 first:pt-0">
+                    <section class="border-t docs-token-border-muted pt-5 first:border-t-0 first:pt-0">
                         <div class="max-w-3xl">
                             <h3 class="text-base font-semibold text-white">@featuredGroup.Label</h3>
                             @if (!string.IsNullOrWhiteSpace(featuredGroup.Summary))
@@ -74,11 +74,11 @@
                                     <a href="@Url.PathBaseAware(featuredPage.Href)"
                                        data-turbo-frame="doc-content"
                                        data-turbo-action="advance"
-                                       class="group block rounded-lg border border-[#1b2a43] bg-[#050b17]/50 px-5 py-4 transition-colors hover:border-[#14b8a6]/45 hover:bg-[#08101e]">
+                                       class="group block rounded-lg border docs-token-border-muted docs-token-bg-panel-faint px-5 py-4 transition-colors docs-token-hover-border-accent docs-token-hover-bg-panel">
                                         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                             <div class="min-w-0 flex-1">
                                                 <div class="flex flex-wrap items-center gap-3">
-                                                    <p class="text-xs font-semibold uppercase tracking-[0.16em] text-[#14b8a6]">@featuredPage.Question</p>
+                                                    <p class="text-xs font-semibold uppercase tracking-[0.16em] docs-token-text-accent">@featuredPage.Question</p>
                                                     @if (featuredPage.PageTypeBadge is not null)
                                                     {
                                                         <span class="docs-page-badge docs-page-badge--@featuredPage.PageTypeBadge.Variant">
@@ -86,13 +86,13 @@
                                                         </span>
                                                     }
                                                 </div>
-                                                <h4 class="mt-3 text-lg font-semibold text-white transition-colors group-hover:text-[#ccfbf1]">@featuredPage.Title</h4>
+                                                <h4 class="mt-3 text-lg font-semibold text-white transition-colors docs-token-group-hover-text-accent-soft">@featuredPage.Title</h4>
                                                 @if (!string.IsNullOrWhiteSpace(featuredPage.SupportingText))
                                                 {
                                                     <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-300">@featuredPage.SupportingText</p>
                                                 }
                                             </div>
-                                            <span class="inline-flex items-center text-sm font-semibold text-[#bfdbfe] transition-colors group-hover:text-[#ccfbf1]">
+                                            <span class="inline-flex items-center text-sm font-semibold docs-token-text-info-muted transition-colors docs-token-group-hover-text-accent-soft">
                                                 <svg class="h-4 w-4 transition-transform group-hover:translate-x-1" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                                                     <circle cx="10" cy="10" r="7"></circle>
                                                     <path d="M8.5 6.75L11.75 10 8.5 13.25"></path>
@@ -118,7 +118,7 @@
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div class="min-w-0 flex-1">
                             <a href="@Url.PathBaseAware(secondarySection.Href)"
-                               class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 transition-colors hover:text-[#14b8a6]">
+                               class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 transition-colors docs-token-hover-text-accent">
                                 @secondarySection.Label
                             </a>
                             <p class="mt-3 max-w-3xl text-sm leading-6 text-slate-300">@secondarySection.Purpose</p>
@@ -134,14 +134,14 @@
                                     <a href="@Url.PathBaseAware(route.Href)"
                                        data-turbo-frame="doc-content"
                                        data-turbo-action="advance"
-                                       class="group flex flex-col gap-2 rounded-lg border border-[#1b2a43] bg-[#050b17]/30 px-4 py-3 transition-colors hover:border-[#14b8a6]/35 hover:bg-[#08101e]/70 sm:flex-row sm:items-start sm:justify-between">
+                                       class="group flex flex-col gap-2 rounded-lg border docs-token-border-muted docs-token-bg-panel-faint px-4 py-3 transition-colors docs-token-hover-border-accent docs-token-hover-bg-panel sm:flex-row sm:items-start sm:justify-between">
                                         <div class="min-w-0 flex-1">
                                             @if (!string.IsNullOrWhiteSpace(route.Eyebrow))
                                             {
                                                 <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">@route.Eyebrow</p>
                                             }
                                             <div class="mt-1 flex flex-wrap items-center gap-2">
-                                                <span class="text-base font-semibold text-white transition-colors group-hover:text-[#ccfbf1]">@route.Title</span>
+                                                <span class="text-base font-semibold text-white transition-colors docs-token-group-hover-text-accent-soft">@route.Title</span>
                                                 @if (route.PageTypeBadge is not null)
                                                 {
                                                     <span class="docs-page-badge docs-page-badge--@route.PageTypeBadge.Variant">
@@ -154,7 +154,7 @@
                                                 <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-400">@route.Summary</p>
                                             }
                                         </div>
-                                        <span class="inline-flex items-center text-sm font-semibold text-[#bfdbfe] transition-colors group-hover:text-[#ccfbf1]">
+                                        <span class="inline-flex items-center text-sm font-semibold docs-token-text-info-muted transition-colors docs-token-group-hover-text-accent-soft">
                                             <svg class="h-4 w-4 transition-transform group-hover:translate-x-1" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                                                 <circle cx="10" cy="10" r="7"></circle>
                                                 <path d="M8.5 6.75L11.75 10 8.5 13.25"></path>
