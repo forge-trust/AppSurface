@@ -165,22 +165,34 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
         using var cache = new MemoryCache(new MemoryCacheOptions());
         await using var services = new ServiceCollection().BuildServiceProvider();
         var harvester = new BlockingHarvester();
+        var preHarvesterDelayStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePreHarvesterDelay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var coordinator = CreateCoordinator(
             harvester,
             cache,
             services,
-            configureOptions: options => options.Harvest.TestingPreHarvestDelayMilliseconds = 500);
+            configureOptions: options => options.Harvest.TestingPreHarvestDelayMilliseconds = 500,
+            testingPreHarvesterDelayAsync: async (delay, cancellationToken) =>
+            {
+                Assert.Equal(TimeSpan.FromMilliseconds(500), delay);
+                preHarvesterDelayStarted.TrySetResult();
+                await releasePreHarvesterDelay.Task.WaitAsync(cancellationToken);
+            });
 
-        Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
-        await WaitUntilAsync(() => coordinator.CurrentProgress.State == AppSurfaceDocsHarvestRunState.Running);
+        try
+        {
+            Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
+            await preHarvesterDelayStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
 
-        Assert.Equal(0, harvester.CallCount);
-        await WaitUntilAsync(
-            () => coordinator.CurrentProgress.Activity.Any(
-                activity => activity.Message.Contains("before harvesters start", StringComparison.OrdinalIgnoreCase)));
-        Assert.Contains(
-            coordinator.CurrentProgress.Activity,
-            activity => activity.Message.Contains("before harvesters start", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(0, harvester.CallCount);
+            Assert.Contains(
+                coordinator.CurrentProgress.Activity,
+                activity => activity.Message.Contains("before harvesters start", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            releasePreHarvesterDelay.TrySetResult();
+        }
 
         await harvester.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
         harvester.Complete(new DocNode("Ready", "README.md", "<p>Ready</p>"));
@@ -385,7 +397,8 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
         IServiceProvider services,
         IAppSurfaceDocsHtmlSanitizer? sanitizer = null,
         TimeSpan? failureCacheDuration = null,
-        Action<AppSurfaceDocsOptions>? configureOptions = null)
+        Action<AppSurfaceDocsOptions>? configureOptions = null,
+        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null)
     {
         var environment = new TestWebHostEnvironment();
         if (sanitizer is null)
@@ -410,7 +423,9 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             sanitizer,
             new DocsUrlBuilder(options),
             NullLogger<DocAggregator>.Instance,
-            progress);
+            resolveGitLastUpdatedUtcAsync: null,
+            harvestProgress: progress,
+            testingPreHarvesterDelayAsync: testingPreHarvesterDelayAsync);
 
         return new AppSurfaceDocsHarvestCoordinator(
             aggregator,
