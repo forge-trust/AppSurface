@@ -34,7 +34,7 @@ packages:
     release_notes_path: releases/v0.2.0-preview.2.md
     order: 25
     use_when: Add this after Config when a solo or hobbyist AppSurface app needs local development secrets before adopting a remote vault.
-    includes: AppSurfaceLocalSecretsModule, OS-backed local secret store adapters, trusted Linux `secret-tool` resolution, fail-closed posture modes, Unix mode-bit-hardened file fallback for deterministic examples/tests, local secret identity normalization, structured source diagnostics, test seams, and the `appsurface secrets` workflow.
+    includes: AppSurfaceLocalSecretsModule, OS-backed local secret store adapters, trusted Linux `secret-tool` resolution, fail-closed posture modes, Unix mode-bit-hardened file fallback for deterministic examples/tests, local secret identity normalization, metadata-only probe seam, structured source diagnostics, test seams, and the `appsurface secrets` workflow.
     does_not_include: Team secret sharing, CI/container secret injection, production rotation, remote vault storage, cloud secret managers, generic vault abstractions, PATH-based executable discovery, or file-fallback parity with OS credential stores.
     start_here_path: Config/ForgeTrust.AppSurface.Config.LocalSecrets/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Config.LocalSecrets` after Config when local development secrets need source-aware diagnostics before a remote vault exists, including trusted Linux `secret-tool` resolution for nonstandard installs.
@@ -52,8 +52,8 @@ packages:
     release_notes_path: releases/v0.2.0-preview.2.md
     order: 26
     use_when: Add this after Config when an AppSurface app running on Google Cloud should resolve explicitly mapped configuration secrets from Google Secret Manager while keeping environment variables as the emergency override.
-    includes: AppSurfaceGoogleSecretManagerModule, explicit logical-key to Secret Manager mappings, optional scoped convention resolver, fail-closed terminal diagnostics for claimed keys, Google client test seam, source-aware config audit integration, and UTF-8 text conversion through AppSurface Config.
-    does_not_include: Secret creation, writes, deletion, rotation, IAM provisioning, Terraform or gcloud workflows, generic multi-cloud vault abstraction, mutation CLI commands, background refresh, or runtime credential minting.
+    includes: AppSurfaceGoogleSecretManagerModule, explicit logical-key to Secret Manager mappings, optional scoped convention resolver, fail-closed terminal diagnostics for claimed keys, Google client and promotion test seams, source-aware config audit integration, UTF-8 text conversion through AppSurface Config, and CLI-assisted declared LocalSecrets or Google promotion to existing Google secrets.
+    does_not_include: Secret creation, deletion, disable/destroy operations, rotation, IAM provisioning, Terraform or gcloud workflows, generic multi-cloud vault abstraction, background refresh, or runtime credential minting.
     start_here_path: Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Config.GoogleSecretManager` after Config when production-like Google Cloud hosts should read mapped AppSurface config secrets from Secret Manager with fail-closed diagnostics.
     depends_on:

@@ -141,6 +141,32 @@ to the current CLI invocation; configure `AppSurfaceLocalSecretsOptions.LinuxSec
 `--secret-tool-path` and `--store-file` are mutually exclusive so `doctor` cannot report file-store readiness when you
 meant to verify the Linux platform store.
 
+#### `appsurface secrets transfer`
+
+Create a value-free plan for a reviewed source-to-sink job, then revalidate and apply that artifact:
+
+```bash
+appsurface secrets transfer plan --config ./secret-promotion.json --job staging-to-production --out ./staging-to-production.plan.json
+appsurface secrets transfer apply --config ./secret-promotion.json --plan ./staging-to-production.plan.json --apply --confirm staging-to-production
+```
+
+The JSON configuration declares named endpoints and exact jobs. `local` is the built-in LocalSecrets endpoint; Google
+endpoints select either `applicationDefault` or a validated `credentialFile`. A job always supplies the logical key and
+the exact remote source version or destination secret parent. This supports LocalSecrets to Google and Google staging to
+Google production without exposing arbitrary `--from`/`--to` flags. Azure is a future adapter, not a v1 dependency.
+
+`plan` performs metadata-only probes and records a configuration digest, expiry, canonical resources, and destination
+preconditions. It never reads a secret payload. `apply --apply` requires the same configuration, rejects stale or changed
+plans before reading values, and requires `--confirm <job>` for production-labelled destinations. Output and plan/receipt
+JSON contain resources, actions, and diagnostic codes only: never values, bytes, hashes, credentials, or raw provider
+exceptions.
+
+Google destinations must already exist. Without `--replace`, an enabled destination version or an existing LocalSecrets
+destination blocks the job. With `--replace`, Google adds a new enabled version and LocalSecrets overwrites the value.
+The workflow never creates secrets, changes IAM, disables/destroys versions, rotates values, provisions Terraform, or
+starts background synchronization. Writes are ordered but cross-secret atomicity is unavailable; an uncertain Google
+write is recorded as `IndeterminateWrite` and is never retried automatically.
+
 ### `appsurface coverage run`
 
 Run instrumented .NET test projects and merge private Cobertura artifacts.

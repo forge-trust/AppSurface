@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Console\ForgeTrust.AppSurface.Console\ForgeTrust.AppSurface.Console.csproj" />
+    <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config.GoogleSecretManager\ForgeTrust.AppSurface.Config.GoogleSecretManager.csproj" />
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config.LocalSecrets\ForgeTrust.AppSurface.Config.LocalSecrets.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Web\ForgeTrust.AppSurface.Web.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Docs.Standalone\ForgeTrust.AppSurface.Docs.Standalone.csproj" />

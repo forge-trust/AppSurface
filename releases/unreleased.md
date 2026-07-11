@@ -4,7 +4,10 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
-- Add merged public changes here as they land.
+- `appsurface secrets transfer plan|apply` now plans and applies declared LocalSecrets and Google Secret Manager
+  promotion jobs against existing Google secrets only. Plans bind configuration digest, expiry, and destination
+  preconditions; `--apply` is required for mutation, production jobs require explicit confirmation, and all text/JSON
+  diagnostics stay value-safe.
 
 ## Included in the next coordinated version
 

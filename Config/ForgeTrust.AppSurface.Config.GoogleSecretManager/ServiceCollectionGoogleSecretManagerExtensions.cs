@@ -58,4 +58,38 @@ public static class ServiceCollectionGoogleSecretManagerExtensions
         services.AddSingleton(client);
         return services;
     }
+
+    /// <summary>
+    /// Replaces the Google Secret Manager transfer client seam.
+    /// </summary>
+    /// <typeparam name="TClient">The transfer client implementation type.</typeparam>
+    /// <param name="services">The service collection to configure.</param>
+    /// <returns>The original service collection.</returns>
+    public static IServiceCollection UseAppSurfaceGoogleSecretTransferClient<TClient>(this IServiceCollection services)
+        where TClient : class, IAppSurfaceGoogleSecretTransferClient
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.RemoveAll<IAppSurfaceGoogleSecretTransferClient>();
+        services.AddSingleton<IAppSurfaceGoogleSecretTransferClient, TClient>();
+        return services;
+    }
+
+    /// <summary>
+    /// Replaces the Google Secret Manager transfer client seam with a specific instance.
+    /// </summary>
+    /// <param name="services">The service collection to configure.</param>
+    /// <param name="client">The transfer client instance.</param>
+    /// <returns>The original service collection.</returns>
+    public static IServiceCollection UseAppSurfaceGoogleSecretTransferClient(
+        this IServiceCollection services,
+        IAppSurfaceGoogleSecretTransferClient client)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(client);
+
+        services.RemoveAll<IAppSurfaceGoogleSecretTransferClient>();
+        services.AddSingleton(client);
+        return services;
+    }
 }

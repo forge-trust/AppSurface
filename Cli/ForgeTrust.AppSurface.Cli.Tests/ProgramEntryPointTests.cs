@@ -1,12 +1,15 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Text;
 using System.Text.Json;
 
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Caching;
+using ForgeTrust.AppSurface.Config.GoogleSecretManager;
 using ForgeTrust.AppSurface.Config.LocalSecrets;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
@@ -56,7 +59,7 @@ public sealed class ProgramEntryPointTests
         var result = await InvokeEntryPointAsync(["secrets", "--help"]);
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("Manage AppSurface local development secrets.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Manage AppSurface local development secrets and explicit remote transfers.", result.AllText, StringComparison.Ordinal);
         Assert.Contains("set", result.AllText, StringComparison.Ordinal);
         Assert.Contains("doctor", result.AllText, StringComparison.Ordinal);
         Assert.Contains("appsurface secrets [command] --help", result.AllText, StringComparison.Ordinal);
@@ -3058,6 +3061,11 @@ public sealed class ProgramEntryPointTests
         options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceDocsHostRunner>(runner));
     }
 
+    private static void RegisterGoogleTransferClient(ConsoleOptions options, FakeGoogleSecretTransferClient client)
+    {
+        options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceGoogleSecretTransferClient>(client));
+    }
+
     private static void RegisterRunner(ConsoleOptions options, CapturingAppSurfaceDocsExportRunner runner)
     {
         options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceDocsExportRunner>(runner));
@@ -3248,6 +3256,87 @@ public sealed class ProgramEntryPointTests
                     Stderr,
                     string.Join(Environment.NewLine, LogMessages)
                 });
+    }
+
+    private sealed class FakeGoogleSecretTransferClient : IAppSurfaceGoogleSecretTransferClient
+    {
+        public Dictionary<string, bool> Secrets { get; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, byte[]> Versions { get; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, GoogleSecretManagerTransferStatus> VersionProbeFailures { get; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, GoogleSecretManagerTransferStatus> AccessFailures { get; } = new(StringComparer.Ordinal);
+
+        public List<(string ResourceName, string Value)> Writes { get; } = [];
+
+        public int ProbeSecretCalls { get; private set; }
+
+        public int VersionProbeCalls { get; private set; }
+
+        public int AccessCalls { get; private set; }
+
+        public AppSurfaceGoogleSecretProbeResult ProbeSecret(string secretResourceName, TimeSpan timeout)
+        {
+            ProbeSecretCalls++;
+            return Secrets.TryGetValue(secretResourceName, out var hasEnabledVersions)
+                ? AppSurfaceGoogleSecretProbeResult.Ready(secretResourceName, hasEnabledVersions)
+                : AppSurfaceGoogleSecretProbeResult.Failed(
+                    GoogleSecretManagerTransferStatus.Missing,
+                    secretResourceName,
+                    CreateDiagnostic(GoogleSecretManagerTransferStatus.Missing));
+        }
+
+        public AppSurfaceGoogleSecretProbeResult ProbeSecretVersion(string versionResourceName, TimeSpan timeout)
+        {
+            VersionProbeCalls++;
+            if (VersionProbeFailures.TryGetValue(versionResourceName, out var status))
+            {
+                return AppSurfaceGoogleSecretProbeResult.Failed(status, versionResourceName, CreateDiagnostic(status));
+            }
+
+            return Versions.ContainsKey(versionResourceName)
+                    ? AppSurfaceGoogleSecretProbeResult.Ready(versionResourceName)
+                    : AppSurfaceGoogleSecretProbeResult.Failed(
+                        GoogleSecretManagerTransferStatus.Missing,
+                        versionResourceName,
+                        CreateDiagnostic(GoogleSecretManagerTransferStatus.Missing));
+        }
+
+        public AppSurfaceGoogleSecretAccessResult AccessSecretVersion(string versionResourceName, TimeSpan timeout)
+        {
+            AccessCalls++;
+            if (AccessFailures.TryGetValue(versionResourceName, out var status))
+            {
+                return AppSurfaceGoogleSecretAccessResult.Failed(status, versionResourceName, CreateDiagnostic(status));
+            }
+
+            return AppSurfaceGoogleSecretAccessResult.Accessed(
+                versionResourceName,
+                new AppSurfaceGoogleSecretPayload(Versions[versionResourceName], versionResourceName));
+        }
+
+        public AppSurfaceGoogleSecretWriteResult AddSecretVersion(string secretResourceName, string value, TimeSpan timeout)
+        {
+            Writes.Add((secretResourceName, value));
+            return AppSurfaceGoogleSecretWriteResult.Written(
+                secretResourceName,
+                $"{secretResourceName}/versions/{Writes.Count.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        private static AppSurfaceGoogleSecretTransferDiagnostic CreateDiagnostic(GoogleSecretManagerTransferStatus status) =>
+            new(
+                status switch
+                {
+                    GoogleSecretManagerTransferStatus.AccessDenied => "google-secret-transfer-access-denied",
+                    GoogleSecretManagerTransferStatus.NotEnabled => "google-secret-transfer-version-not-enabled",
+                    _ => "fake-google-secret-transfer-diagnostic"
+                },
+                "Google Secret Manager fake transfer failed.",
+                $"The fake transfer client returned {status}.",
+                "Adjust the fake transfer test setup.",
+                "google-secret-manager-transfer",
+                false);
     }
 
     private sealed class CapturingAppSurfaceDocsHostRunner : IAppSurfaceDocsHostRunner

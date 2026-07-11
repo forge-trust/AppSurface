@@ -37,6 +37,136 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void Probe_Should_ReportExistenceWithoutReturningSecretValue()
+    {
+        using var temp = TempDirectory.Create();
+        var store = new FileAppSurfaceLocalSecretStore(Path.Join(temp.Path, "secrets.json"));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var set = store.Set(identity, "sk_test_secret");
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Found, set.Status);
+        Assert.Equal(LocalSecretResultStatus.Found, probe.Status);
+        Assert.Equal(string.Empty, probe.Value);
+        Assert.DoesNotContain("sk_test_secret", probe.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Probe_Should_NotReadStoredValueObject_WhenStorageNameMatches()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var json = "{\"" + identity.StorageName + "\":{\"ApplicationName\":\"MyApp\",\"Environment\":\"Development\",\"KeyPrefix\":null,\"Key\":\"Stripe:ApiKey\",\"Value\":\"sk_test_secret\"}}";
+        var valueObjectOffset = System.Text.Encoding.UTF8.GetByteCount(json[..json.IndexOf("{\"ApplicationName\"", StringComparison.Ordinal)]);
+        var store = new FileAppSurfaceLocalSecretStore(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(openRead: () => new ThrowAfterPositionStream(System.Text.Encoding.UTF8.GetBytes(json), valueObjectOffset + 1)));
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Found, probe.Status);
+        Assert.DoesNotContain("sk_test_secret", probe.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Probe_Should_ReturnInvalidStore_WhenMatchedValueIsMissing()
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "secrets.json");
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        File.WriteAllText(path, "{\"" + identity.StorageName + "\":");
+        if (IsUnix())
+        {
+            new FileInfo(path).UnixFileMode = SecretFileMode;
+        }
+
+        var store = new FileAppSurfaceLocalSecretStore(path);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void Probe_Should_ReturnInvalidStore_WhenMatchedValueIsNotObject()
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "secrets.json");
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        File.WriteAllText(path, "{\"" + identity.StorageName + "\":true}");
+        if (IsUnix())
+        {
+            new FileInfo(path).UnixFileMode = SecretFileMode;
+        }
+
+        var store = new FileAppSurfaceLocalSecretStore(path);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void Probe_Should_ReturnInvalidStore_WhenEarlierValueIsNotObject()
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "secrets.json");
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        File.WriteAllText(
+            path,
+            "{\"Other\":true,\"" + identity.StorageName + "\":{\"ApplicationName\":\"MyApp\",\"Environment\":\"Development\",\"KeyPrefix\":null,\"Key\":\"Stripe:ApiKey\",\"Value\":\"raw-secret\"}}");
+        if (IsUnix())
+        {
+            new FileInfo(path).UnixFileMode = SecretFileMode;
+        }
+
+        var store = new FileAppSurfaceLocalSecretStore(path);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+        Assert.DoesNotContain("raw-secret", probe.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Probe_Should_ReturnInvalidStore_WhenEarlierValueIsMalformed()
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "secrets.json");
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        File.WriteAllText(
+            path,
+            "{\"Other\":[},\"" + identity.StorageName + "\":{\"ApplicationName\":\"MyApp\",\"Environment\":\"Development\",\"KeyPrefix\":null,\"Key\":\"Stripe:ApiKey\",\"Value\":\"raw-secret\"}}");
+        if (IsUnix())
+        {
+            new FileInfo(path).UnixFileMode = SecretFileMode;
+        }
+
+        var store = new FileAppSurfaceLocalSecretStore(path);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+        Assert.DoesNotContain("raw-secret", probe.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Delete_Should_ReturnMissing_WhenKeyDoesNotExist()
     {
         using var temp = TempDirectory.Create();
@@ -1267,6 +1397,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     private sealed class ThrowingFileSystem(
         Func<string>? read = null,
         Action<string>? write = null,
+        Func<Stream>? openRead = null,
         Func<FileSecretPostureResult>? readPath = null,
         Func<FileSecretPostureResult>? existingFilePosture = null,
         Func<FileSecretPostureResult>? prepareWrite = null,
@@ -1276,6 +1407,9 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         public bool FileExists(string path) => true;
 
         public string ReadAllText(string path) => read?.Invoke() ?? "{}";
+
+        public Stream OpenRead(string path) =>
+            openRead?.Invoke() ?? new MemoryStream(System.Text.Encoding.UTF8.GetBytes(ReadAllText(path)));
 
         public FileSecretPostureResult InspectReadPath(string path) => readPath?.Invoke() ?? FileSecretPostureResult.Ready();
 
@@ -1291,5 +1425,55 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         }
 
         public FileSecretPostureResult Doctor(string path) => doctor?.Invoke() ?? FileSecretPostureResult.Ready();
+    }
+
+    private sealed class ThrowAfterPositionStream(byte[] data, int throwAt) : Stream
+    {
+        private int _position;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => _position;
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            ArgumentNullException.ThrowIfNull(buffer);
+            if (_position >= throwAt)
+            {
+                throw new InvalidOperationException("Probe read into the stored value payload.");
+            }
+
+            if (_position >= data.Length)
+            {
+                return 0;
+            }
+
+            var availableBeforeThrow = throwAt - _position;
+            var available = Math.Min(data.Length - _position, availableBeforeThrow);
+            var bytesRead = Math.Min(count, available);
+            Array.Copy(data, _position, buffer, offset, bytesRead);
+            _position += bytesRead;
+            return bytesRead;
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

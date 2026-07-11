@@ -18,7 +18,7 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// </remarks>
 [ExcludeFromCodeCoverage(
     Justification = "Real OS credential stores depend on desktop session state, prompts, and native services; deterministic tests cover fake stores and status mapping.")]
-public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
+public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
 {
     private static readonly string[] LinuxSecretToolTrustedCandidates = ["/usr/bin/secret-tool", "/bin/secret-tool"];
 
@@ -61,6 +61,24 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
     /// <inheritdoc />
     public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
         _inner.List(applicationName, environment, keyPrefix);
+
+    /// <inheritdoc />
+    public AppSurfaceLocalSecretResult Probe(AppSurfaceLocalSecretIdentity identity)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+
+        return _inner is IAppSurfaceLocalSecretMetadataStore metadataStore
+            ? metadataStore.Probe(identity)
+            : AppSurfaceLocalSecretResult.NotFound(
+                LocalSecretResultStatus.ProviderFailed,
+                new AppSurfaceLocalSecretDiagnostic(
+                    "local-secret-metadata-unsupported",
+                    "Local secret metadata probe is unavailable.",
+                    "The configured LocalSecrets store does not expose metadata-only probes.",
+                    "Use an AppSurface LocalSecrets store that implements metadata probes before running secret transfer dry-runs.",
+                    "local-secrets-without-a-remote-vault"),
+                Name);
+    }
 
     /// <inheritdoc />
     public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
@@ -436,7 +454,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
     private sealed class DiagnosticLocalSecretStore(
         LocalSecretResultStatus status,
-        AppSurfaceLocalSecretDiagnostic diagnostic) : IAppSurfaceLocalSecretStore
+        AppSurfaceLocalSecretDiagnostic diagnostic) : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
     {
         public string Name => nameof(DiagnosticLocalSecretStore);
 
@@ -448,6 +466,8 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
             AppSurfaceLocalSecretListResult.Failed(status, diagnostic, Name);
+
+        public AppSurfaceLocalSecretResult Probe(AppSurfaceLocalSecretIdentity identity) => Unsupported();
 
         public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) => Unsupported();
 
@@ -967,7 +987,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         }
     }
 
-    internal abstract class IndexedLocalSecretStore : IAppSurfaceLocalSecretStore
+    internal abstract class IndexedLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
     {
         protected const string IndexKey = "__appsurface_index__";
 
@@ -1070,6 +1090,21 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             }
 
             return AppSurfaceLocalSecretListResult.Found(liveKeys, Name);
+        }
+
+        public AppSurfaceLocalSecretResult Probe(AppSurfaceLocalSecretIdentity identity)
+        {
+            ArgumentNullException.ThrowIfNull(identity);
+
+            var index = ReadIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
+            if (index.Status != LocalSecretResultStatus.Found)
+            {
+                return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
+            }
+
+            return index.Keys.Contains(identity.Key, StringComparer.Ordinal)
+                ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
+                : AppSurfaceLocalSecretResult.Missing(Name);
         }
 
         public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
