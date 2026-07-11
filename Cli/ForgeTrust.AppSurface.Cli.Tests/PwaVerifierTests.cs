@@ -58,6 +58,23 @@ public sealed class PwaVerifierTests
         Assert.Equal("--url or --base-url must be an absolute http or https URL.", exception.Message);
     }
 
+    [Theory]
+    [InlineData("wat", "--expect-icon must use WIDTHxHEIGHT")]
+    [InlineData("512x512:", "--expect-icon purpose must not be blank")]
+    public async Task ExecuteAsync_RejectsMalformedExpectedIcons(string expectedIcon, string expectedMessage)
+    {
+        var command = new PwaVerifyCommand(new PwaVerifier(new FakePwaHttpClient()))
+        {
+            Url = "https://app.example.test",
+            ExpectedIcons = [expectedIcon]
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ExecuteAsync_RejectsConflictingUrlAndBaseUrl()
     {
@@ -233,6 +250,17 @@ public sealed class PwaVerifierTests
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void VerificationTarget_RejectsBlankEntryPaths(string entryPath)
+    {
+        var exception = Assert.Throws<ArgumentException>(
+            () => PwaVerificationTarget.Create(new Uri("https://app.example.test"), entryPath));
+
+        Assert.Contains("--entry-path must be an app-root-relative path", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("/../admin")]
     [InlineData("/%2e%2e/admin")]
     [InlineData(" /account/resume")]
@@ -327,6 +355,28 @@ public sealed class PwaVerifierTests
 
         Assert.False(report.Passed);
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA263");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_FailsWhenEntryManifestLinkLeavesPathBase()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/tenant/account/resume", HtmlWithManifestLink("/manifest.webmanifest"), "text/html");
+        http.Add(
+            "https://app.example.test/tenant/manifest.webmanifest",
+            ValidManifest("/tenant/", "/tenant/", "/tenant/icons/app-192.png", "/tenant/icons/app-512.png"),
+            "application/manifest+json");
+        http.Add("https://app.example.test/tenant/icons/app-192.png", "png", "image/png");
+        http.Add("https://app.example.test/tenant/icons/app-512.png", "png", "image/png");
+        http.Add("https://app.example.test/tenant/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test/tenant/"), entryPath: "/account/resume"),
+            CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA227");
     }
 
     [Fact]
@@ -475,6 +525,80 @@ public sealed class PwaVerifierTests
     }
 
     [Fact]
+    public async Task VerifyAsync_FailsWhenDecodedPngIconDimensionsDoNotMatchExpectedAssertion()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", HtmlWithManifestLink(), "text/html");
+        http.Add(
+            "https://app.example.test/manifest.webmanifest",
+            """
+            {
+              "name": "Field Notes",
+              "short_name": "Notes",
+              "start_url": "/",
+              "scope": "/",
+              "display": "standalone",
+              "theme_color": "#2563eb",
+              "background_color": "#ffffff",
+              "icons": [
+                { "src": "/icons/app-192.png", "sizes": "128x128 192x192", "type": "image/png" },
+                { "src": "/icons/app-512.png", "sizes": "512x512", "type": "image/png" }
+              ]
+            }
+            """,
+            "application/manifest+json");
+        http.AddBytes("https://app.example.test/icons/app-192.png", PngBytes(128, 128), "image/png");
+        http.AddBytes("https://app.example.test/icons/app-512.png", PngBytes(512, 512), "image/png");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), expectedIcons: ["192x192"]),
+            CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(
+            report.Diagnostics,
+            diagnostic => diagnostic.Code == "ASPWA242"
+                && diagnostic.Message.Contains("explicit verifier assertion", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task VerifyAsync_RecordsUnfetchedEvidenceForBlankIconSource()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", HtmlWithManifestLink(), "text/html");
+        http.Add(
+            "https://app.example.test/manifest.webmanifest",
+            """
+            {
+              "name": "Field Notes",
+              "short_name": "Notes",
+              "start_url": "/",
+              "scope": "/",
+              "display": "standalone",
+              "theme_color": "#2563eb",
+              "background_color": "#ffffff",
+              "icons": [
+                { "src": "/icons/app-192.png", "sizes": "192x192", "type": "image/png" },
+                { "src": "/icons/app-512.png", "sizes": "512x512", "type": "image/png" },
+                { "src": "", "sizes": "96x96", "type": "image/png" }
+              ]
+            }
+            """,
+            "application/manifest+json");
+        http.AddBytes("https://app.example.test/icons/app-192.png", PngBytes(192, 192), "image/png");
+        http.AddBytes("https://app.example.test/icons/app-512.png", PngBytes(512, 512), "image/png");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.True(report.Passed);
+        Assert.Contains(report.Icons, icon => icon is { Source: "", Fetched: false });
+    }
+
+    [Fact]
     public async Task VerifyAsync_ProvesServiceWorkerAbsenceWhenOfflineIsDisabled()
     {
         var http = new FakePwaHttpClient();
@@ -489,6 +613,23 @@ public sealed class PwaVerifierTests
 
         Assert.True(report.Passed);
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA256");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_SkipsServiceWorkerAbsenceProofWhenConfiguredWorkerLeavesOrigin()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """{"enabled":true,"offlineEnabled":false,"configuredServiceWorkerPath":"https://cdn.example.test/service-worker.js"}""",
+            "application/json");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.True(report.Passed);
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA240" or "ASPWA256");
     }
 
     [Fact]
