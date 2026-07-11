@@ -213,7 +213,7 @@ public sealed class AppSurfaceKeycloakOptions
         && (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) || string.Equals(uri.Host, "127.0.0.1", StringComparison.Ordinal));
 
     private static string CreateDefaultRealmImportDirectory() =>
-        AppSurfaceKeycloakRealmImportPaths.CreateDefaultDirectory();
+        AppSurfaceKeycloakRealmImportPaths.GetDefaultImportDirectory();
 
     private static AppSurfaceKeycloakUserOptions CreateSeededUser(
         string username,

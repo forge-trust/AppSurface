@@ -646,6 +646,9 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "authaspirekeycloakverifier": {
+        "type": "Project"
+      },
       "forgetrust.appsurface.aspire": {
         "type": "Project",
         "dependencies": {

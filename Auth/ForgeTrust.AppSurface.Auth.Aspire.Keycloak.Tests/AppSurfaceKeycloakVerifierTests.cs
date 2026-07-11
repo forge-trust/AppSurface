@@ -1,4 +1,3 @@
-using System.Net;
 using AuthAspireKeycloakVerifier;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests;
@@ -26,9 +25,23 @@ public sealed class AppSurfaceKeycloakVerifierTests
         Assert.Empty(output.ToString());
     }
 
+    [Theory]
+    [InlineData("1", 1)]
+    [InlineData("300", 300)]
+    public void Parse_WhenTimeoutAtInclusiveBoundary_AcceptsValue(string timeoutSeconds, int expectedSeconds)
+    {
+        var options = VerifierOptions.Parse(
+            ["--target", "http://localhost:5059", "--timeout-seconds", timeoutSeconds],
+            _ => null);
+
+        Assert.True(options.IsValid);
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), options.Timeout);
+        Assert.Empty(options.Error);
+    }
+
     private sealed class StubHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            throw new InvalidOperationException("Invalid verifier options must fail before HTTP transport is used.");
     }
 }

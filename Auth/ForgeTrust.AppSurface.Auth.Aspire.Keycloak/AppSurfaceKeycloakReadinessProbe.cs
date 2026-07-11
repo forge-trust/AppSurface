@@ -8,23 +8,47 @@ namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 /// </summary>
 public sealed class AppSurfaceKeycloakReadinessProbe
 {
+    private static readonly HttpClient DefaultHttpClient = new(new HttpClientHandler { AllowAutoRedirect = false })
+    {
+        Timeout = AppSurfaceKeycloakDefaults.ReadinessTimeout,
+    };
+
     private readonly HttpClient _httpClient;
     private readonly AppSurfaceKeycloakOptions _options;
+    private readonly Func<string, string> _readAllText;
 
     /// <summary>
     /// Creates a readiness probe for validated Keycloak proof options.
     /// </summary>
     /// <param name="options">The proof options to verify.</param>
     /// <param name="httpClient">Optional HTTP client, primarily for tests.</param>
+    /// <remarks>
+    /// The default client uses the bounded readiness timeout and disables automatic redirects so authorization
+    /// challenge checks can inspect Keycloak's raw response. Injected clients should preserve those behaviors.
+    /// </remarks>
     public AppSurfaceKeycloakReadinessProbe(AppSurfaceKeycloakOptions options, HttpClient? httpClient = null)
+        : this(options, httpClient ?? DefaultHttpClient, File.ReadAllText)
+    {
+    }
+
+    /// <summary>
+    /// Creates a readiness probe with injectable HTTP and realm-file readers for deterministic tests.
+    /// </summary>
+    /// <param name="options">The proof options to verify.</param>
+    /// <param name="httpClient">HTTP client used for metadata and authorization requests.</param>
+    /// <param name="readAllText">Realm import file reader.</param>
+    internal AppSurfaceKeycloakReadinessProbe(
+        AppSurfaceKeycloakOptions options,
+        HttpClient httpClient,
+        Func<string, string> readAllText)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(httpClient);
+        ArgumentNullException.ThrowIfNull(readAllText);
         options.Validate();
         _options = options;
-        _httpClient = httpClient ?? new HttpClient
-        {
-            Timeout = AppSurfaceKeycloakDefaults.ReadinessTimeout,
-        };
+        _httpClient = httpClient;
+        _readAllText = readAllText;
     }
 
     /// <summary>
@@ -53,6 +77,12 @@ public sealed class AppSurfaceKeycloakReadinessProbe
             throw new AppSurfaceKeycloakException(
                 AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable,
                 $"Problem: Keycloak OpenID metadata is unavailable. Cause: {ex.Message} Fix: confirm the container runtime is available, port {_options.KeycloakPort} is free, and Keycloak finished realm import. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable}.");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new AppSurfaceKeycloakException(
+                AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable,
+                $"Problem: Keycloak OpenID metadata is unavailable. Cause: the metadata request exceeded the configured readiness HTTP timeout. Fix: confirm the container runtime is available, port {_options.KeycloakPort} is free, and Keycloak finished realm import. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable}.");
         }
 
         using (response)
@@ -86,10 +116,20 @@ public sealed class AppSurfaceKeycloakReadinessProbe
             throw RealmEvidence($"realm import file '{path}' is missing.");
         }
 
+        string importJson;
+        try
+        {
+            importJson = _readAllText(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw RealmEvidence($"realm import could not be read ({ex.GetType().Name}).");
+        }
+
         JsonDocument document;
         try
         {
-            document = JsonDocument.Parse(File.ReadAllText(path));
+            document = JsonDocument.Parse(importJson);
         }
         catch (JsonException)
         {

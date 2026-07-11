@@ -24,7 +24,7 @@ public static class AppSurfaceKeycloakHostingExtensions
 
         var options = new AppSurfaceKeycloakOptions
         {
-            RealmImportDirectory = AppSurfaceKeycloakRealmImportPaths.CreateDirectory(AppContext.BaseDirectory, name),
+            RealmImportDirectory = AppSurfaceKeycloakRealmImportPaths.ResolveImportDirectory(AppContext.BaseDirectory, name),
         };
         configure?.Invoke(options);
         options.Validate();

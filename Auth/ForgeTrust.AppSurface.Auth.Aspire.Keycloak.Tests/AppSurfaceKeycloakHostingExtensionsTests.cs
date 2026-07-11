@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
 using ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests;
@@ -11,17 +12,9 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     public void AddAppSurfaceKeycloak_WritesRealmImportAndReturnsSecretSafeWrapper()
     {
         using var directory = new TempDirectory();
-        var keycloakPort = GetAvailablePort();
-        var webProofPort = GetAvailablePort();
         var builder = DistributedApplication.CreateBuilder([]);
 
-        var resource = builder.AddAppSurfaceKeycloak("keycloak-proof", options =>
-        {
-            options.KeycloakPort = keycloakPort;
-            options.WebProofPort = webProofPort;
-            options.RealmImportDirectory = directory.Path;
-            options.UsePersistentDataVolume = true;
-        });
+        var (resource, keycloakPort) = AddWithAvailablePorts(builder, directory.Path, usePersistentDataVolume: true);
 
         Assert.Equal("appsurface-web", resource.Configuration.ClientId);
         Assert.Equal($"http://localhost:{keycloakPort}/realms/appsurface-dev", resource.Configuration.Authority);
@@ -35,16 +28,9 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     public void AddAppSurfaceKeycloak_WhenPersistentVolumeDisabled_StillWritesRealmImport()
     {
         using var directory = new TempDirectory();
-        var keycloakPort = GetAvailablePort();
-        var webProofPort = GetAvailablePort();
         var builder = DistributedApplication.CreateBuilder([]);
 
-        var resource = builder.AddAppSurfaceKeycloak("keycloak-proof", options =>
-        {
-            options.KeycloakPort = keycloakPort;
-            options.WebProofPort = webProofPort;
-            options.RealmImportDirectory = directory.Path;
-        });
+        var (resource, _) = AddWithAvailablePorts(builder, directory.Path, usePersistentDataVolume: false);
 
         Assert.True(File.Exists(resource.RealmImportFile));
     }
@@ -64,7 +50,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     }
 
     [Fact]
-    public void Projection_ApplyToAddsAllowlistedEnvironmentVariablesToProjectResource()
+    public async Task Projection_ApplyToAddsAllowlistedEnvironmentVariablesToProjectResource()
     {
         var builder = DistributedApplication.CreateBuilder([]);
         var project = builder.AddProject(
@@ -73,8 +59,22 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         var projection = new AppSurfaceKeycloakOptions().CreateConfigurationProjection();
 
         var returned = projection.ApplyTo(project);
+        Assert.True(project.Resource.TryGetEnvironmentVariables(out var annotations));
+        var environment = new Dictionary<string, object>(StringComparer.Ordinal);
+        var context = new EnvironmentCallbackContext(
+            new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run),
+            environment,
+            CancellationToken.None);
+        foreach (var annotation in annotations)
+        {
+            await annotation.Callback(context);
+        }
 
         Assert.Same(project, returned);
+        foreach (var pair in projection.EnvironmentVariables)
+        {
+            Assert.Equal(pair.Value, Assert.IsType<string>(environment[pair.Key]));
+        }
     }
 
     [Fact]
@@ -118,6 +118,42 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+
+    private static (AppSurfaceKeycloakResource Resource, int KeycloakPort) AddWithAvailablePorts(
+        IDistributedApplicationBuilder builder,
+        string realmImportDirectory,
+        bool usePersistentDataVolume)
+    {
+        const int maxAttempts = 5;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var keycloakPort = GetAvailablePort();
+            var webProofPort = GetAvailablePort();
+            if (keycloakPort == webProofPort)
+            {
+                continue;
+            }
+
+            try
+            {
+                var resource = builder.AddAppSurfaceKeycloak("keycloak-proof", options =>
+                {
+                    options.KeycloakPort = keycloakPort;
+                    options.WebProofPort = webProofPort;
+                    options.RealmImportDirectory = realmImportDirectory;
+                    options.UsePersistentDataVolume = usePersistentDataVolume;
+                });
+                return (resource, keycloakPort);
+            }
+            catch (AppSurfaceKeycloakException exception)
+                when (exception.Code == AppSurfaceKeycloakDiagnosticCodes.PortOccupied && attempt < maxAttempts)
+            {
+                // Retry with fresh ports if another process wins the preflight race.
+            }
+        }
+
+        throw new InvalidOperationException("Could not reserve distinct local ports for the Keycloak hosting test.");
     }
 
     private static string GetCurrentTestProjectPath()

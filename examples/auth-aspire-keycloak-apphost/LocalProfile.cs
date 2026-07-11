@@ -41,6 +41,7 @@ public sealed partial class LocalProfile : AspireProfile
 public sealed partial class VerifyProfile : ICommand
 {
     private const string VerifierResourceName = "auth-aspire-keycloak-verifier";
+    private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(30);
 
     private readonly AuthAspireKeycloakComponent _keycloak;
     private readonly AuthAspireKeycloakWebComponent _web;
@@ -67,6 +68,11 @@ public sealed partial class VerifyProfile : ICommand
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Sets <see cref="Environment.ExitCode"/> to <c>0</c> for success, <c>1</c> for verifier failure, <c>124</c> for
+    /// timeout, <c>-536</c> for a non-fatal verification exception, or <c>-537</c> when otherwise-successful shutdown
+    /// fails. Callers and CI scripts can use these values to distinguish proof outcomes.
+    /// </remarks>
     public async ValueTask ExecuteAsync(IConsole console)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
@@ -117,7 +123,8 @@ public sealed partial class VerifyProfile : ICommand
         {
             try
             {
-                await app.StopAsync(CancellationToken.None);
+                using var stopTimeout = new CancellationTokenSource(ShutdownTimeout);
+                await app.StopAsync(stopTimeout.Token);
             }
             catch (Exception exception) when (IsNonFatalVerificationException(exception))
             {

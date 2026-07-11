@@ -32,9 +32,9 @@ public sealed class AppSurfaceKeycloakOptionsTests
     }
 
     [Fact]
-    public void RealmImportPaths_CreateDirectoryUsesFileNameSegment()
+    public void RealmImportPaths_ResolveImportDirectoryUsesFileNameSegment()
     {
-        var directory = AppSurfaceKeycloakRealmImportPaths.CreateDirectory("/tmp/appsurface", "nested/keycloak-proof");
+        var directory = AppSurfaceKeycloakRealmImportPaths.ResolveImportDirectory("/tmp/appsurface", "nested/keycloak-proof");
 
         Assert.Equal(Path.Join("/tmp/appsurface", "appsurface-keycloak-realms", "keycloak-proof"), directory);
     }
@@ -52,7 +52,7 @@ public sealed class AppSurfaceKeycloakOptionsTests
     [InlineData(" ")]
     public void RealmImportPaths_WhenDirectoryBlank_ThrowsArgumentException(string directory)
     {
-        Assert.Throws<ArgumentException>(() => AppSurfaceKeycloakRealmImportPaths.CreateDirectory(directory, "keycloak-proof"));
+        Assert.Throws<ArgumentException>(() => AppSurfaceKeycloakRealmImportPaths.ResolveImportDirectory(directory, "keycloak-proof"));
         Assert.Throws<ArgumentException>(() => AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(directory, "appsurface-dev"));
     }
 
@@ -64,7 +64,7 @@ public sealed class AppSurfaceKeycloakOptionsTests
     [InlineData("nested\\keycloak-proof")]
     public void RealmImportPaths_WhenSegmentUnsafe_ThrowsArgumentException(string segment)
     {
-        Assert.Throws<ArgumentException>(() => AppSurfaceKeycloakRealmImportPaths.CreateDirectory("/tmp/appsurface", segment));
+        Assert.Throws<ArgumentException>(() => AppSurfaceKeycloakRealmImportPaths.ResolveImportDirectory("/tmp/appsurface", segment));
     }
 
     [Theory]
@@ -127,6 +127,20 @@ public sealed class AppSurfaceKeycloakOptionsTests
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData("relative")]
+    [InlineData("/signed-out?query=1")]
+    public void Validate_WhenSignedOutCallbackPathInvalid_ThrowsSafeDiagnostic(string callbackPath)
+    {
+        var options = new AppSurfaceKeycloakOptions { SignedOutCallbackPath = callbackPath };
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(options.Validate);
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, exception.Code);
+        Assert.Contains(nameof(AppSurfaceKeycloakOptions.SignedOutCallbackPath), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(65536)]
     public void Validate_WhenFixedPortInvalid_ThrowsSafeDiagnostic(int port)
@@ -137,6 +151,19 @@ public sealed class AppSurfaceKeycloakOptionsTests
 
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, exception.Code);
         Assert.Contains(nameof(AppSurfaceKeycloakOptions.KeycloakPort), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(65536)]
+    public void Validate_WhenWebProofPortInvalid_ThrowsSafeDiagnostic(int port)
+    {
+        var options = new AppSurfaceKeycloakOptions { WebProofPort = port };
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(options.Validate);
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, exception.Code);
+        Assert.Contains(nameof(AppSurfaceKeycloakOptions.WebProofPort), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
