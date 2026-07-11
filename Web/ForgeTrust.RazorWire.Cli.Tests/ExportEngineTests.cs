@@ -4385,6 +4385,31 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractReferences_Should_Preserve_Explicit_BehaviorKit_Runtime_Without_Marker_Synthesis()
+    {
+        var html = """
+            <script src="/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js?v=abc"></script>
+            <main data-rw-behavior="pwa-display-mode"></main>
+            """;
+
+        var explicitReference = Assert.Single(
+            _sut.ExtractReferences(html, "/docs/start", htmlScope: true),
+            reference => reference.Path == "/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js");
+
+        Assert.Equal(ExportReferenceKind.ScriptSrc, explicitReference.Kind);
+        Assert.Equal(ExportReferenceRole.StaticAsset, explicitReference.Role);
+        Assert.Equal("?v=abc", explicitReference.Query);
+
+        var markerOnlyHtml = """
+            <main data-rw-behavior="pwa-display-mode"></main>
+            """;
+
+        Assert.DoesNotContain(
+            _sut.ExtractReferences(markerOnlyHtml, "/docs/start", htmlScope: true),
+            reference => reference.Path.Contains("/razorwire/behavior-kit.js", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void ExtractReferences_Should_Ignore_Hash_Only_Css_References()
     {
         var css = """

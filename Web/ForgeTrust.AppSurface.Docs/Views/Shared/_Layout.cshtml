@@ -3,12 +3,14 @@
 @inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetPathResolver AssetPathResolver
 @inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetVersioner AssetVersioner
 @inject ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsIdentityResolver IdentityResolver
+@inject ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsThemeResolver ThemeResolver
 @inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
 @inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsOptions DocsOptions
 @inject Microsoft.Extensions.Options.IOptions<AppSurfaceProductIntelligenceOptions> ProductIntelligenceOptions
 @{
     var stylesheetPath = AssetVersioner.AppendVersion(AssetPathResolver.StylesheetPath, "css/site.gen.css");
     var docsIdentity = IdentityResolver.Identity;
+    var docsTheme = ThemeResolver.Theme;
     var docsRoutes = DocsUrlBuilder.Routes;
     var docsRootUrl = Url.PathBaseAware(docsRoutes.Home);
     var docsHomeUrl = Url.PathBaseAware(docsIdentity.HomeHref);
@@ -74,9 +76,16 @@
         "Search",
         StringComparison.OrdinalIgnoreCase);
     var suppressSidebar = ViewData["SuppressSidebar"] is true;
+    var docsThemeRootClass = $"h-full docs-shell-root {docsTheme.RootCssClass}";
+    var docsThemeStyle = $"scrollbar-gutter: stable; {docsTheme.CssVariableStyle}";
 }
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-[#050b17] border-[#1b2a43]" style="scrollbar-gutter: stable;">
+<html lang="en"
+      class="@docsThemeRootClass"
+      style="@docsThemeStyle"
+      data-docs-theme-preset="@docsTheme.PresetAttribute"
+      data-docs-density="@docsTheme.DensityAttribute"
+      data-docs-chrome="@docsTheme.ChromeAttribute">
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -107,11 +116,11 @@
     <script>window.__appSurfaceDocsConfig = @Html.Raw(docsClientConfigJson);</script>
     <script src="@docsSearchClientUrl" defer asp-append-version="false"></script>
 </head>
-<body class="h-full flex flex-col text-slate-200 overflow-hidden">
-<a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-0 focus:left-0 focus:z-50 focus:p-4 focus:bg-[#0d182a] focus:text-white">Skip to content</a>
+<body class="docs-shell-body h-full flex flex-col overflow-hidden">
+<a href="#main-content" class="docs-skip-link sr-only focus:not-sr-only focus:absolute focus:top-0 focus:left-0 focus:z-50 focus:p-4">Skip to content</a>
 <div class="flex h-full min-h-0 overflow-hidden">
     <button id="docs-sidebar-overlay"
-            class="fixed inset-0 z-30 bg-[#050b17]/75 backdrop-blur-sm hidden md:hidden"
+            class="docs-sidebar-overlay fixed inset-0 z-30 backdrop-blur-sm hidden md:hidden"
             type="button"
             tabindex="-1"
             aria-label="Close navigation menu">
@@ -119,10 +128,10 @@
 
     <!-- Sidebar -->
     <aside id="docs-sidebar"
-           class="fixed inset-y-0 left-0 z-40 w-72 max-w-[90vw] flex-shrink-0 border-r border-[#1b2a43] bg-[#050b17]/95 flex flex-col transform transition-transform duration-200 ease-out md:relative md:z-auto md:w-64 md:max-w-none md:translate-x-0"
+           class="docs-sidebar-panel fixed inset-y-0 left-0 z-40 w-72 max-w-[90vw] flex-shrink-0 border-r flex flex-col transform transition-transform duration-200 ease-out md:relative md:z-auto md:w-64 md:max-w-none md:translate-x-0"
            tabindex="-1"
            aria-hidden="false">
-        <div class="docs-sidebar-header flex items-center justify-between p-4 border-b border-[#1b2a43] md:hidden">
+        <div class="docs-sidebar-header flex items-center justify-between p-4 border-b md:hidden">
             <a href="@docsHomeUrl" class="docs-brand">
                 @if (docsIdentity.Logo is not null)
                 {
@@ -136,11 +145,11 @@
             </a>
             <button id="docs-sidebar-close"
                     type="button"
-                    class="px-2 py-1 text-xs font-semibold tracking-wide uppercase text-slate-300 border border-[#314461] rounded-md hover:text-[#14b8a6] hover:border-[#14b8a6]/50">
+                    class="docs-sidebar-close px-2 py-1 text-xs font-semibold tracking-wide uppercase border rounded-md">
                 Close
             </button>
         </div>
-        <div class="hidden md:block p-6">
+        <div class="docs-sidebar-brand-desktop hidden md:block p-6">
             <a href="@docsHomeUrl" class="docs-brand">
                 @if (docsIdentity.Logo is not null)
                 {
@@ -155,7 +164,7 @@
                 </span>
             </a>
         </div>
-        <div id="docs-search-shell" class="mb-3 px-4 pb-2">
+        <div id="docs-search-shell" class="docs-search-shell mb-3 px-4 pb-2">
             <label for="docs-search-input" class="sr-only">Search docs</label>
             <input id="docs-search-input"
                    type="search"
@@ -165,38 +174,38 @@
                    aria-controls="docs-search-results"
                    role="combobox"
                    autocomplete="off" />
-            <p id="docs-search-status" class="mt-1 text-xs text-slate-500" aria-live="polite"></p>
+            <p id="docs-search-status" class="docs-search-status mt-1 text-xs" aria-live="polite"></p>
             <ul id="docs-search-results" class="hidden" role="listbox" aria-label="Search results"></ul>
             <a href="@docsSearchUrl"
                data-rw-search-workspace-link
-               class="mt-[0.7rem] inline-flex w-full items-center justify-between gap-3 rounded-lg border border-[#2563eb]/35 bg-gradient-to-b from-[#0d182a] to-[#07101f] px-3.5 py-2.5 text-[0.82rem] font-semibold text-[#e5e7eb] no-underline transition-colors hover:border-[#14b8a6]/60 hover:from-[#10213a] hover:to-[#07101f] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#2563eb]">
+               class="docs-search-workspace-link mt-[0.7rem] inline-flex w-full items-center justify-between gap-3 rounded-lg border px-3.5 py-2.5 text-[0.82rem] font-semibold no-underline transition-colors focus-visible:outline-none">
                 <span>Open Search Workspace</span>
-                <span class="text-[0.7rem] uppercase tracking-[0.08em] text-[#14b8a6]">Cmd/Ctrl+K</span>
+                <span class="docs-search-workspace-kbd text-[0.7rem] uppercase tracking-[0.08em]">Cmd/Ctrl+K</span>
             </a>
         </div>
-        <nav class="flex-grow overflow-y-auto px-4 pb-4 space-y-1 min-h-0" aria-label="Documentation navigation">
+        <nav class="docs-sidebar-nav flex-grow overflow-y-auto px-4 pb-4 space-y-1 min-h-0" aria-label="Documentation navigation">
             @if (!suppressSidebar)
             {
                 @await Component.InvokeAsync("Sidebar")
             }
             else
             {
-                <p class="rounded-lg border border-[#1b2a43] bg-[#07101f] px-3 py-2 text-left text-xs text-slate-400">
+                <p class="docs-sidebar-empty rounded-lg border px-3 py-2 text-left text-xs">
                     Navigation will appear when docs are ready.
                 </p>
             }
         </nav>
-        <div id="docs-sidebar-footer" class="p-4 border-t border-[#1b2a43] text-xs text-slate-500 text-center">
+        <div id="docs-sidebar-footer" class="docs-sidebar-footer p-4 border-t text-xs text-center">
             @docsIdentity.DisplayName
         </div>
     </aside>
 
     <!-- Main Content -->
     <main id="main-content" role="main" tabindex="-1" class="h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-transparent">
-        <header class="md:hidden sticky top-0 z-20 border-b border-[#1b2a43] bg-[#050b17]/95 backdrop-blur px-4 py-3 flex items-center gap-3">
+        <header class="docs-mobile-header md:hidden sticky top-0 z-20 border-b backdrop-blur px-4 py-3 flex items-center gap-3">
             <button id="docs-sidebar-open"
                     type="button"
-                    class="inline-flex items-center justify-center w-9 h-9 rounded-md border border-[#314461] text-slate-200 hover:text-[#14b8a6] hover:border-[#14b8a6]/50"
+                    class="docs-sidebar-open inline-flex items-center justify-center w-9 h-9 rounded-md border"
                     aria-label="Open navigation menu"
                     aria-controls="docs-sidebar"
                     aria-expanded="false">
@@ -215,7 +224,7 @@
                 }
                 @ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsWordmarkHtml.Render(docsIdentity, "docs-wordmark truncate text-lg")
             </a>
-            <a href="@docsSearchUrl" class="ml-auto inline-flex items-center gap-2 rounded-full border border-[#2563eb]/45 bg-[#2563eb]/10 px-3 py-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-[#bfdbfe] hover:border-[#14b8a6] hover:bg-[#14b8a6]/10">
+            <a href="@docsSearchUrl" class="docs-mobile-search-link ml-auto inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.18em]">
                 <span>Search</span>
                 <span aria-hidden="true">/</span>
             </a>

@@ -32,6 +32,9 @@ public class AppSurfaceDocsViewsTests
     private static readonly Regex RawCssColorLiteralRegex = new(
         @"#[0-9a-fA-F]{3,8}\b|rgba?\(",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex ThemePaletteHexClassRegex = new(
+        @"(?:^|\s)(?:group-hover:|hover:|focus:)?(?:text|bg|border|decoration|ring|outline|shadow)-\[#(?:050b17|07111f|08101e|0d182a|14b8a6|1b2a43|1d4ed8|2563eb|263650|2dd4bf|314461|5eead4|99f6e4|bfdbfe|ccfbf1)\](?:/[0-9]+)?",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     [Fact]
     public void Layout_ShouldContain_SearchShellMarkers()
@@ -49,6 +52,10 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("rel=\"icon\" type=\"image/svg+xml\" href=\"@docsBrandIconUrl\"", layout);
         Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"search-client.js\")", layout);
         Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"minisearch.min.js\")", layout);
+        Assert.Contains("ThemeResolver.Theme", layout);
+        Assert.Contains("data-docs-theme-preset", layout);
+        Assert.Contains("data-docs-density", layout);
+        Assert.Contains("data-docs-chrome", layout);
     }
 
     [Fact]
@@ -94,6 +101,41 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("\"metrics\":{\"enabled\":false", html);
         Assert.Contains("\"feedbackEnabled\":false", html);
         Assert.DoesNotContain("\"endpointUrl\":\"/some-base/docs/_metrics/collect\"", html);
+    }
+
+    [Fact]
+    public async Task Layout_ShouldRenderResolvedThemeAttributesAndVariables()
+    {
+        using var services = CreateServiceProvider(
+            CreateDocs(),
+            new Dictionary<string, string?>
+            {
+                ["AppSurfaceDocs:Theme:Preset"] = "GraphiteDark",
+                ["AppSurfaceDocs:Theme:Colors:AccentColor"] = "#38BDF8",
+                ["AppSurfaceDocs:Theme:Colors:AccentStrongColor"] = "#A5B4FC",
+                ["AppSurfaceDocs:Theme:Colors:LinkColor"] = "#93C5FD",
+                ["AppSurfaceDocs:Theme:Colors:VisitedLinkColor"] = "#C4B5FD",
+                ["AppSurfaceDocs:Theme:Layout:Density"] = "Compact",
+                ["AppSurfaceDocs:Theme:Layout:Chrome"] = "Compact"
+            });
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Search",
+            c => c.Search(),
+            pathBase: "/some-base");
+
+        Assert.Contains("data-docs-theme-preset=\"graphite-dark\"", html);
+        Assert.Contains("data-docs-density=\"compact\"", html);
+        Assert.Contains("data-docs-chrome=\"compact\"", html);
+        Assert.Contains("docs-theme-preset-graphite-dark docs-density-compact docs-chrome-compact", html);
+        Assert.Contains("--docs-color-surface-canvas:#080a0d;", html);
+        Assert.Contains("--docs-color-accent:#38bdf8;", html);
+        Assert.Contains("--docs-color-accent-strong:#a5b4fc;", html);
+        Assert.Contains("--docs-color-link:#93c5fd;", html);
+        Assert.Contains("--docs-color-link-visited:#c4b5fd;", html);
+        Assert.Contains("--docs-focus-ring-inset:0 0 0 1px #a5b4fc inset;", html);
+        Assert.Matches("href=\"/some-base/docs/search\\.css\\?v=[^\"]+\"", html);
     }
 
     [Fact]
@@ -558,18 +600,39 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("--docs-color-accent-strong: #2563eb;", tailwindEntryStylesheet);
         Assert.Contains("--docs-color-wordmark-edge-shadow: rgba(0, 0, 0, 0.45);", tailwindEntryStylesheet);
         Assert.Contains("--docs-focus-ring-inset:", tailwindEntryStylesheet);
+        Assert.Contains(".docs-shell-root", tailwindEntryStylesheet);
+        Assert.Contains(".docs-search-workspace-link", tailwindEntryStylesheet);
+        Assert.Contains("[data-docs-density=\"compact\"] .docs-search-shell", tailwindEntryStylesheet);
+        Assert.Contains("[data-docs-chrome=\"compact\"] .docs-sidebar-brand-desktop", tailwindEntryStylesheet);
 
         Assert.Contains("border: 1px solid var(--docs-color-border-default);", tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-color-accent);", tailwindEntryStylesheet);
+        Assert.DoesNotContain("color: var(--docs-color-accent-strong);", tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-brand-wordmark-highlight-color, currentColor);", tailwindEntryStylesheet);
         Assert.Contains(".docs-brand .docs-wordmark", tailwindEntryStylesheet);
         Assert.Contains("max-width: 100%;", tailwindEntryStylesheet);
         Assert.Contains("text-overflow: ellipsis;", tailwindEntryStylesheet);
         Assert.Contains("text-shadow: 0 1px 2px var(--docs-color-wordmark-edge-shadow);", tailwindEntryStylesheet);
         Assert.Contains("outline: var(--docs-focus-outline);", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-text-accent", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-border-accent", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-bg-accent-strong", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-hover-border-accent:hover", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-hover-bg-panel:hover", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-group-hover-text-accent-soft", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown a:visited", tailwindEntryStylesheet);
+        Assert.Contains("color: var(--docs-color-link-visited);", tailwindEntryStylesheet);
+        Assert.True(
+            tailwindEntryStylesheet.IndexOf(".docs-content--markdown a:visited", StringComparison.Ordinal)
+            < tailwindEntryStylesheet.IndexOf(".docs-content--markdown a:hover", StringComparison.Ordinal));
 
         Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #050b17);", searchStylesheet);
+        Assert.Contains("--docs-search-color-accent-glow: var(--docs-color-accent-glow,", searchStylesheet);
         Assert.Contains("--docs-search-focus-ring-inset: var(--docs-focus-ring-inset,", searchStylesheet);
+        Assert.Contains(":root[data-docs-density=\"compact\"] #docs-search-input", searchStylesheet);
+        Assert.Contains(":root[data-docs-density=\"compact\"] .docs-search-result-link", searchStylesheet);
+        Assert.Contains("padding-top: 0.05rem;", searchStylesheet);
+        Assert.Contains("padding-bottom: 0.75rem;", searchStylesheet);
         Assert.Contains("background: var(--docs-search-color-surface-canvas);", searchStylesheet);
         Assert.Contains("border: 1px solid var(--docs-search-color-border-default);", searchStylesheet);
         Assert.Contains("box-shadow: var(--docs-search-focus-ring-inset);", searchStylesheet);
@@ -590,6 +653,48 @@ public class AppSurfaceDocsViewsTests
 
         Assert.Empty(FindUnclassifiedRawColorLiterals(tailwindEntryStylesheet));
         Assert.Empty(FindUnclassifiedRawColorLiterals(searchStylesheet));
+    }
+
+    [Fact]
+    public void RazorViews_ShouldConsumeDocsChromeTokenHooksInsteadOfThemePaletteHexClasses()
+    {
+        var viewRoot = Path.Join(GetDocsProjectRoot(), "Views");
+        var violations = Directory
+            .EnumerateFiles(viewRoot, "*.cshtml", SearchOption.AllDirectories)
+            .SelectMany(path => File
+                .ReadLines(path)
+                .Select((line, index) => new
+                {
+                    Path = path,
+                    Line = line,
+                    LineNumber = index + 1
+                }))
+            .Where(entry => ThemePaletteHexClassRegex.IsMatch(entry.Line))
+            .Select(entry => $"{Path.GetRelativePath(viewRoot, entry.Path)}:{entry.LineNumber}: {entry.Line.Trim()}")
+            .ToArray();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void RazorViews_ShouldKeepWhiteTextOffPlainAccentBackground()
+    {
+        var viewRoot = Path.Join(GetDocsProjectRoot(), "Views");
+        var violations = Directory
+            .EnumerateFiles(viewRoot, "*.cshtml", SearchOption.AllDirectories)
+            .SelectMany(path => File
+                .ReadLines(path)
+                .Select((line, index) => new
+                {
+                    Path = path,
+                    Line = line,
+                    LineNumber = index + 1
+                }))
+            .Where(entry => ContainsClass(entry.Line, "docs-token-bg-accent") && ContainsClass(entry.Line, "text-white"))
+            .Select(entry => $"{Path.GetRelativePath(viewRoot, entry.Path)}:{entry.LineNumber}: {entry.Line.Trim()}")
+            .ToArray();
+
+        Assert.Empty(violations);
     }
 
     [Fact]
@@ -4639,7 +4744,7 @@ public class AppSurfaceDocsViewsTests
         Action<IServiceCollection>? configureServices = null)
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var webRoot = Path.Combine(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
+        var webRoot = Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
 
         var configValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -4729,11 +4834,8 @@ public class AppSurfaceDocsViewsTests
 
     private static string ReadTailwindEntryStylesheetMarkup()
     {
-        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var stylesheetPath = Path.Combine(
-            repoRoot,
-            "Web",
-            "ForgeTrust.AppSurface.Docs",
+            GetDocsProjectRoot(),
             "wwwroot",
             "css",
             "app.css");
@@ -4743,16 +4845,28 @@ public class AppSurfaceDocsViewsTests
 
     private static string ReadSearchStylesheetMarkup()
     {
-        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var stylesheetPath = Path.Combine(
-            repoRoot,
-            "Web",
-            "ForgeTrust.AppSurface.Docs",
+            GetDocsProjectRoot(),
             "wwwroot",
             "docs",
             "search.css");
 
         return File.ReadAllText(stylesheetPath);
+    }
+
+    private static string GetDocsProjectRoot()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+
+        return Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
+    }
+
+    private static bool ContainsClass(string line, string className)
+    {
+        return Regex.IsMatch(
+            line,
+            $@"(?<![A-Za-z0-9_-]){Regex.Escape(className)}(?![A-Za-z0-9_-])",
+            RegexOptions.CultureInvariant);
     }
 
     private static string RemoveRootTokenBlock(string stylesheet)

@@ -181,20 +181,20 @@ audits:
     source_paths:
       - Web/ForgeTrust.RazorWire/assets/src/razorwire.ts
       - Web/ForgeTrust.RazorWire/assets/src/razorwire.islands.ts
+      - Web/ForgeTrust.RazorWire/assets/src/behavior-kit.ts
       - Web/ForgeTrust.RazorWire/assets/src/page-navigation.ts
       - Web/ForgeTrust.RazorWire/assets/src/section-copy.ts
       - Web/ForgeTrust.RazorWire/assets/src/form-interactions.ts
-      - Web/ForgeTrust.RazorWire/assets/src/behavior-kit.ts
       - Web/ForgeTrust.RazorWire/assets/scripts/build.mjs
       - Web/ForgeTrust.RazorWire/assets/scripts/verify-generated.mjs
       - Web/ForgeTrust.RazorWire/test/generated-assets.test.mjs
     generated_paths:
       - Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js
       - Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.islands.js
+      - Web/ForgeTrust.RazorWire/wwwroot/razorwire/behavior-kit.js
       - Web/ForgeTrust.RazorWire/wwwroot/razorwire/page-navigation.js
       - Web/ForgeTrust.RazorWire/wwwroot/razorwire/section-copy.js
       - Web/ForgeTrust.RazorWire/wwwroot/razorwire/form-interactions.js
-      - Web/ForgeTrust.RazorWire/wwwroot/razorwire/behavior-kit.js
     reason: RazorWire embeds generated browser runtime assets built from first-party TypeScript sources. Pack runs RWPACK001 generated asset verification before nuspec generation.
     reviewed_on: 2026-06-07
     source: Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj VerifyRazorWireGeneratedAssetsForPack

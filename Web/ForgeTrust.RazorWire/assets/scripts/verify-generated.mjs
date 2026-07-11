@@ -8,10 +8,10 @@ const repoRoot = path.resolve(scriptRoot, '..', '..', '..', '..');
 const trackedOutputPaths = [
   path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'razorwire.js'),
   path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'razorwire.islands.js'),
+  path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'behavior-kit.js'),
   path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'page-navigation.js'),
   path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'section-copy.js'),
-  path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'form-interactions.js'),
-  path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'behavior-kit.js')
+  path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'form-interactions.js')
 ];
 
 function readGeneratedOutput(relativePath) {

@@ -36,6 +36,19 @@ The release evidence bundle is not a signature or hosted-build attestation. It i
 
 Each release note should open with the narrative that matters to evaluators and adopters. Explain what changed, why it matters, and which parts of the product surface are affected before dropping into mechanical lists.
 
+### Consumer path next
+
+Each major item should answer the reader's next question without making them inspect the repository:
+
+- Who should care?
+- What can they now do?
+- Which package, guide, example, or CLI command should they start with?
+- What boundary or pitfall should they know before adopting it?
+
+Use internal feature names only after the reader-facing behavior is clear. For example, introduce [RazorWire auth projection](../Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md) as rendering allowed, forbidden, and anonymous UI from host-owned ASP.NET Core policies before relying on the phrase "passive auth projection." When a change ships with a guide or example, link that path from the release note next to the feature summary.
+
+Release notes should also connect related concepts instead of only naming them. If an item mentions a package, guide, example, workflow, policy, diagnostic family, CLI command, or cross-package concept, link the first meaningful mention to the canonical page a consumer should read next. Prefer durable start-here links, package READMEs, guides, examples, and public docs routes over transient PRs or maintainer-only notes.
+
 ### Safety second
 
 Every release note should make upgrade risk obvious near the top. Call out whether the note is unreleased or tagged, which surfaces are affected, how fresh the information is, and where migration guidance lives.
