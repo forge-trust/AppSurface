@@ -84,12 +84,12 @@ public class RazorWireScriptsTagHelper : TagHelper
     public bool FormInteractions { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the native behavior-kit runtime should be eagerly rendered after the core runtime.
+    /// Gets or sets a value indicating whether the Behavior Kit runtime should be eagerly rendered after the core runtime.
     /// </summary>
     /// <remarks>
-    /// Behavior kit is an app-authored progressive-enhancement API. It is eager-only in v1 because RazorWire cannot infer
-    /// app behavior registration from markup alone. Set this attribute to <c>true</c> before app bundles call
-    /// <c>window.RazorWire.behaviors.register(...)</c>.
+    /// Behavior Kit is explicit in v1 because app-owned behavior registrations need a predictable public API surface.
+    /// Plain <c>&lt;rw:scripts /&gt;</c> does not lazy-load it from markup. Set this attribute to <c>true</c> when a host
+    /// wants <c>window.RazorWire.behaviors</c> to connect root-scoped behaviors or page-lifecycle registrations.
     /// </remarks>
     [HtmlAttributeName("behavior-kit")]
     public bool BehaviorKit { get; set; }
@@ -125,6 +125,9 @@ public class RazorWireScriptsTagHelper : TagHelper
         var islandsJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js");
+        var behaviorKitJs = _fileVersionProvider.AddFileVersionToPath(
+            pathBase,
+            "/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js");
         var pageNavigationJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js");
@@ -134,9 +137,6 @@ public class RazorWireScriptsTagHelper : TagHelper
         var formInteractionsJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js");
-        var behaviorKitJs = _fileVersionProvider.AddFileVersionToPath(
-            pathBase,
-            "/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js");
 
         var diagnosticsEnabled = _options.Forms.EnableFailureUx
                                  && _options.Forms.EnableDevelopmentDiagnostics
@@ -167,6 +167,12 @@ public class RazorWireScriptsTagHelper : TagHelper
 <script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}"" data-rw-live-origin=""{liveOrigin}"" data-rw-hybrid-credentials=""{credentialsMode}"" data-rw-antiforgery-endpoint=""{antiforgeryEndpoint}"" data-rw-product-intelligence-enabled=""{productIntelligenceEnabled}""></script>
 <script src=""{islandsJs}""></script>
 ";
+
+        if (BehaviorKit)
+        {
+            scripts += $@"<script src=""{behaviorKitJs}"" data-rw-behavior-kit-runtime=""eager""></script>
+";
+        }
 
         if (PageNavigation)
         {
@@ -208,12 +214,6 @@ public class RazorWireScriptsTagHelper : TagHelper
                 "data-rw-form-interactions-runtime",
                 "RazorWireFormInteractionsInitialized",
                 ["[data-rw-form-toggle]", "[data-rw-form-collection]"]);
-        }
-
-        if (BehaviorKit)
-        {
-            scripts += $@"<script src=""{behaviorKitJs}"" data-rw-behavior-kit-runtime=""eager""></script>
-";
         }
 
         output.Content.SetHtmlContent(scripts);
