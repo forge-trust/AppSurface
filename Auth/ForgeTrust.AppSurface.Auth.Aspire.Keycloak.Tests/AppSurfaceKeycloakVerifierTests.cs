@@ -85,6 +85,7 @@ public sealed class AppSurfaceKeycloakVerifierTests
             if (Interlocked.Increment(ref _requestCount) == 3)
             {
                 timeout.Cancel();
+                return Task.FromCanceled<HttpResponseMessage>(cancellationToken);
             }
 
             return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError));
