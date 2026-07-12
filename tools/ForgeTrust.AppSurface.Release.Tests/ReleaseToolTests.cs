@@ -3213,6 +3213,39 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckStablePreparedReleaseAcceptsGeneratedEvidenceDigestAgainstVerifiedCatalogDigest()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(".github/workflows/nuget-stable-publish.yml", "name: NuGet Stable Publish\n");
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var prepare = await RunAsync(
+            ["prepare", "--version", "0.1.0", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+        Assert.Equal(0, prepare.ExitCode);
+
+        var evidenceJson = await ReadFileAsync("releases/v0.1.0.evidence.json");
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(evidenceJson, ReleaseJson.Options)!;
+        var generatedDigestBundle = RefreshSubject(bundle with
+        {
+            DocsArchive = new ReleaseEvidenceDocsArchive(
+                "configured",
+                docs.ExactTreePath,
+                ReleaseEvidence.DocsArchiveGeneratedDigest,
+                "appsurface-docs-release-manifest-v1",
+                docs.FileCount,
+                new ReleaseEvidenceCatalogEntry(docs.ExactTreePath, ReleaseEvidence.DocsArchiveGeneratedDigest))
+        });
+        await WriteFileAsync("releases/v0.1.0.evidence.json", ReleaseEvidence.Serialize(generatedDigestBundle));
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0", "--allow-existing-targets"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("- Docs archive verification: `availableVerified`", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CheckStablePreparedReleaseRequiresDocsEvidenceWithoutAllowExistingTargets()
     {
         await SeedRepositoryAsync();

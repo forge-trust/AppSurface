@@ -48,6 +48,12 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("Unexpected versioned release artifact deletion", prep, StringComparison.Ordinal);
         Assert.Contains("releases/v0.1.0-rc.4.release.json", prep, StringComparison.Ordinal);
         Assert.Contains("Release preparation pull requests must change exactly the four generated artifacts", prep, StringComparison.Ordinal);
+        Assert.Contains("docs export", prep, StringComparison.Ordinal);
+        Assert.Contains("docs verify-archive", prep, StringComparison.Ordinal);
+        Assert.Contains("--docs-catalog", prep, StringComparison.Ordinal);
+        Assert.Contains("--docs-trusted-release-root", prep, StringComparison.Ordinal);
+        Assert.Contains("git worktree add --detach", prep, StringComparison.Ordinal);
+        Assert.Contains("refs/tags/v${version}^{commit}", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("Allowing superseded release sidecar", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("find releases -maxdepth 1 -name 'v*.release.json'", prep, StringComparison.Ordinal);
         Assert.Contains("--github-output", publish, StringComparison.Ordinal);

@@ -2,6 +2,8 @@ using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
@@ -54,8 +56,22 @@ public class ExportEngine
     private const string DocsStaticPartialsMetaName = "rw-docs-static-partials";
     private const string DocsStaticPartialsMetaTag = "<meta name=\"rw-docs-static-partials\" content=\"1\" />";
     private const string AppSurfaceDocsClientConfigMarker = "window.__appSurfaceDocsConfig";
+    private const string AppSurfaceDocsStableArchiveGeneratedAtUtc = "1970-01-01T00:00:00.0000000Z";
     private const int MaxArtifactRedirects = 10;
     private const string RedirectProvenanceDiagnosticCode = "RWEXPORT008";
+
+    private static readonly JsonSerializerOptions AppSurfaceDocsArchiveSearchIndexJsonOptions = new(JsonSerializerDefaults.Web);
+
+    private static readonly string[] AppSurfaceDocsArchiveRootAssetNames =
+    [
+        "minisearch.min.js",
+        "outline-client.js",
+        "search-client.js",
+        "search-index.json",
+        "search.css",
+        "search.html",
+        "search.partial.html"
+    ];
 
     private static readonly Regex TurboFrameOpenTagRegex = new(
         @"<turbo-frame\b[^>]*>",
@@ -146,6 +162,8 @@ public class ExportEngine
         await MaterializeDeploymentExtrasAsync(context, cancellationToken);
         if (context.ReleaseArchiveManifestEnabled)
         {
+            await NormalizeAppSurfaceDocsArchiveSearchIndexAsync(context.OutputPath, cancellationToken);
+            await MaterializeAppSurfaceDocsArchiveRootAssetsAsync(context.OutputPath, cancellationToken);
             context.ReleaseArchiveManifest = await ReleaseArchiveManifestWriter.WriteAsync(context.OutputPath, cancellationToken);
             _logger.LogInformation(
                 """
@@ -169,6 +187,71 @@ public class ExportEngine
 
         sw.Stop();
         _logger.LogInformation("Export completed in {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
+    }
+
+    private static async Task NormalizeAppSurfaceDocsArchiveSearchIndexAsync(
+        string outputPath,
+        CancellationToken cancellationToken)
+    {
+        var searchIndexPaths = new[]
+        {
+            Path.Join(outputPath, "docs", "search-index.json"),
+            Path.Join(outputPath, "search-index.json")
+        };
+
+        foreach (var searchIndexPath in searchIndexPaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!File.Exists(searchIndexPath))
+            {
+                continue;
+            }
+
+            ExportOutputPathGuards.ValidateArchiveEntryPath(outputPath, searchIndexPath, "archive-search-index-normalize");
+            JsonNode? root;
+            await using (var stream = new FileStream(searchIndexPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                root = await JsonNode.ParseAsync(stream, cancellationToken: cancellationToken);
+            }
+
+            if (root is not JsonObject rootObject
+                || rootObject["metadata"] is not JsonObject metadata)
+            {
+                continue;
+            }
+
+            metadata["generatedAtUtc"] = AppSurfaceDocsStableArchiveGeneratedAtUtc;
+            await using var output = new FileStream(searchIndexPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            await JsonSerializer.SerializeAsync(output, rootObject, AppSurfaceDocsArchiveSearchIndexJsonOptions, cancellationToken);
+        }
+    }
+
+    private static async Task MaterializeAppSurfaceDocsArchiveRootAssetsAsync(
+        string outputPath,
+        CancellationToken cancellationToken)
+    {
+        var docsRoot = Path.Join(outputPath, "docs");
+        if (!Directory.Exists(docsRoot))
+        {
+            return;
+        }
+
+        foreach (var fileName in AppSurfaceDocsArchiveRootAssetNames)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var sourcePath = Path.Join(docsRoot, fileName);
+            var targetPath = Path.Join(outputPath, fileName);
+            if (!File.Exists(sourcePath) || File.Exists(targetPath))
+            {
+                continue;
+            }
+
+            ExportOutputPathGuards.ValidateArchiveEntryPath(outputPath, sourcePath, "archive-root-asset-read");
+            ExportOutputPathGuards.ValidateArchiveEntryPath(outputPath, targetPath, "archive-root-asset-write");
+            await using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            await using var target = new FileStream(targetPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            await source.CopyToAsync(target, cancellationToken);
+        }
     }
 
     private static void ValidateDeploymentExtrasReleaseArchivePreflight(ExportContext context)
