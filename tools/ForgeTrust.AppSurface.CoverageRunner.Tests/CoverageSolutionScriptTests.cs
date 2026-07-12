@@ -27,8 +27,12 @@ public sealed class CoverageSolutionScriptTests
 
         var sourceCliNoRestore = script.IndexOf("dotnet_run_args+=(--no-restore)", StringComparison.Ordinal);
         var coverageRunDelimiter = script.IndexOf("    --\n    coverage", StringComparison.Ordinal);
+        var coverageGateExit = script.IndexOf("dotnet \"${coverage_gate_args[@]}\"\n  exit 0\nfi", StringComparison.Ordinal);
+        var legacyRunner = script.IndexOf("dotnet_run_args=(\n  run\n  --project \"$COVERAGE_RUNNER_PROJECT\"", StringComparison.Ordinal);
         Assert.True(sourceCliNoRestore >= 0, "The source CLI lane should pass --no-restore to dotnet run when requested.");
         Assert.True(coverageRunDelimiter > sourceCliNoRestore, "The source CLI lane must append --no-restore before the coverage run delimiter.");
+        Assert.True(coverageGateExit >= 0, "The source CLI lane must exit after its coverage gate succeeds.");
+        Assert.True(legacyRunner > coverageGateExit, "The legacy runner must remain unreachable from the source CLI lane.");
     }
 
     [Fact]

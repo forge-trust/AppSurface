@@ -90,6 +90,7 @@ if [[ "$use_legacy" == "false" ]]; then
   fi
 
   dotnet "${coverage_gate_args[@]}"
+  exit 0
 fi
 
 dotnet_run_args=(

@@ -181,7 +181,7 @@ value with `HEAD^1` for its pull-request merge checkout, so its patch gate evalu
 tested merge tree. Set `COVERAGE_GATE_DIFF_BASE=` to run only the aggregate gate, as CI does for
 baseline builds.
 
-This workflow:
+This command:
 - Runs each solution test project.
 - Collects coverage only for `ForgeTrust.AppSurface.*` modules.
 - Excludes test modules (`*.Tests` and `*.IntegrationTests`) from coverage.
