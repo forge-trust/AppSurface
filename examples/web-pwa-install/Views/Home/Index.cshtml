@@ -1,17 +1,60 @@
 @{
-    ViewData["Title"] = "Install";
+    ViewData["Title"] = "Worker foundation";
     var diagnosticsPath = Url.Content("~/_appsurface/pwa");
     var verifierUrl = $"{Context.Request.Scheme}://{Context.Request.Host}{Context.Request.PathBase}";
 }
 
 <main>
-    <h1>AppSurface PWA install proof</h1>
-    <p>
-        This page uses <code>&lt;appsurface:pwa-head /&gt;</code>, a generated manifest,
-        development diagnostics, and an explicit offline fallback strategy.
-    </p>
-    <p>
-        Open <a href="@diagnosticsPath">@diagnosticsPath</a> for local diagnostics, or run
-        <code>appsurface pwa verify --base-url @verifierUrl --entry-path /account/resume</code>.
-    </p>
+    <header class="hero">
+        <p class="eyebrow">Executable package proof</p>
+        <h1>AppSurface PWA worker foundation</h1>
+        <p class="lede">
+            This page combines install metadata, the starter offline strategy, push event handlers,
+            and explicit service-worker registration. It does not request notification permission,
+            create a push subscription, or send a notification.
+        </p>
+    </header>
+
+    <section class="proof-card" aria-labelledby="registration-heading">
+        <div>
+            <p class="eyebrow">Browser proof</p>
+            <h2 id="registration-heading">Service worker registration</h2>
+        </div>
+        <p id="registration-status" class="status" data-state="initializing" role="status" aria-live="polite" aria-atomic="true">
+            Checking browser support and existing registrations…
+        </p>
+        <button id="register-worker" class="primary-action" type="button" disabled>
+            Register service worker
+        </button>
+        <noscript>
+            <p class="notice">JavaScript is required to run this registration proof. The manifest, diagnostics, and CLI proof remain available without it.</p>
+        </noscript>
+    </section>
+
+    <section aria-labelledby="capabilities-heading">
+        <p class="eyebrow">Truthful posture</p>
+        <h2 id="capabilities-heading">Capability ledger</h2>
+        <dl class="capability-ledger">
+            <div><dt>Install metadata</dt><dd><span class="pill configured">Configured</span></dd></div>
+            <div><dt>Offline handlers</dt><dd><span class="pill configured">Configured</span></dd></div>
+            <div><dt>Push handlers</dt><dd><span class="pill configured">Configured</span></dd></div>
+            <div><dt>Active worker</dt><dd><span id="worker-capability" class="pill pending">Not proven</span></dd></div>
+            <div><dt>Notification permission</dt><dd><span class="pill unconfigured">Not requested</span></dd></div>
+            <div><dt>Push subscription</dt><dd><span class="pill unconfigured">Not configured</span></dd></div>
+            <div><dt>Push delivery</dt><dd><span class="pill unconfigured">Not configured</span></dd></div>
+        </dl>
+    </section>
+
+    <section class="recovery" aria-labelledby="recovery-heading">
+        <p class="eyebrow">Server-side evidence</p>
+        <h2 id="recovery-heading">Diagnostics and CLI</h2>
+        <p>
+            Open <a href="@diagnosticsPath">AppSurface PWA diagnostics</a>, or run
+            <code>appsurface pwa verify --base-url @verifierUrl --entry-path /account/resume</code>.
+            The verifier reports server-known posture; it does not claim permission, subscription, delivery,
+            or browser registration evidence.
+        </p>
+    </section>
 </main>
+
+<script src="~/js/pwa-registration-proof.js" asp-append-version="true" defer></script>

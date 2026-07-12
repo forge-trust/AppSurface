@@ -52,6 +52,51 @@ public sealed class AppSurfacePwaHeadTagHelperTests
         Assert.Contains("href=\"/tenant/icons/app-192.png?v=asset\"", html, StringComparison.Ordinal);
         Assert.Contains("sizes=\"512x512\"", html, StringComparison.Ordinal);
         Assert.Contains("<meta name=\"appsurface:pwa-service-worker\" content=\"/tenant/service-worker.js\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("pwa/register.js", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Process_WhenPushOnly_EmitsWorkerHelperWithoutInstallMetadata()
+    {
+        var options = new PwaOptions();
+        options.Scope = "/workspace/";
+        options.Push.Enabled = true;
+        var helper = new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), options)
+        {
+            ViewContext = CreateViewContext("/tenant")
+        };
+        var output = CreateOutput();
+
+        helper.Process(CreateContext(), output);
+
+        var html = output.Content.GetContent();
+        Assert.DoesNotContain("rel=\"manifest\"", html, StringComparison.Ordinal);
+        Assert.Contains("content=\"/tenant/service-worker.js\"", html, StringComparison.Ordinal);
+        Assert.Contains("content=\"/tenant/workspace/\"", html, StringComparison.Ordinal);
+        Assert.Contains("src=\"/tenant/_appsurface/pwa/register.js?v=", html, StringComparison.Ordinal);
+        Assert.Contains("data-appsurface-pwa-worker=\"/tenant/service-worker.js\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-appsurface-pwa-scope=\"/tenant/workspace/\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Process_PushMetadata_EncodesHostileValues()
+    {
+        var options = new PwaOptions();
+        options.Push.Enabled = true;
+        options.Worker.ServiceWorkerPath = "/worker\"onload=\"bad.js";
+        options.Scope = "/scope\"data-bad=\"x/";
+        var helper = new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), options)
+        {
+            ViewContext = CreateViewContext()
+        };
+        var output = CreateOutput();
+
+        helper.Process(CreateContext(), output);
+
+        var html = output.Content.GetContent();
+        Assert.Contains("/worker&quot;onload=&quot;bad.js", html, StringComparison.Ordinal);
+        Assert.Contains("/scope&quot;data-bad=&quot;x/", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"onload=\"", html, StringComparison.Ordinal);
     }
 
     [Fact]
