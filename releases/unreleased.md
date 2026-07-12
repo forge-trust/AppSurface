@@ -20,6 +20,10 @@ This is the living release note for the next coordinated AppSurface version afte
 - Split stable and prerelease NuGet publish tag triggers so prerelease tags no longer start the stable publish workflow before the prerelease gate.
 - AppSurface DevAuth marker overlays now start collapsed by default while keeping the active fake persona visible, and
   `AppSurfaceDevAuthMarkerOptions.StartExpanded` lets local proof pages opt back into immediate persona controls.
+- Add `ForgeTrust.AppSurface.Auth.Aspire.Keycloak`, an AppHost-only real local OIDC proof package that builds on
+  the official Aspire Keycloak hosting integration, generates deterministic realm/client/user import JSON, projects
+  only safe OIDC settings into a paired `Auth.AspNetCore.Oidc` web proof, adds fixed-port/readiness diagnostics, and
+  keeps Keycloak/Aspire hosting dependencies out of runtime web packages.
 - `ForgeTrust.RazorWire` documents `<rw:scripts behavior-kit="true" />`, the queue-backed `window.RazorWire.behaviors` stub, root `register(...)`, page-lifecycle `registerLifecycle(...)`, stable diagnostics, and guidance for choosing built-in managers, root behaviors, lifecycle behaviors, islands, or app-owned JavaScript.
 - `appsurface pwa verify` now supports route-shaped readiness evidence for real app entry pages. Apps can verify `--base-url` plus `--entry-path`, follow same-origin redirects that stay under the verified path base, assert manifest `start_url`, `scope`, `display`, colors, and icon declarations, decode PNG icon dimensions, write schema v2 JSON evidence, and prove that the configured AppSurface service worker is not reachable when offline support is disabled.
 - AppSurface Web PWA diagnostics now expose the configured service-worker path separately from the active offline service-worker path, so verifier evidence can distinguish "offline disabled and no worker mapped" from "offline enabled with worker/fallback endpoints."

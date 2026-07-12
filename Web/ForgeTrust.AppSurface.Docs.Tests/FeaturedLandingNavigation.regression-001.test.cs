@@ -95,6 +95,8 @@ public class FeaturedLandingNavigationRegressionTests
         services.AddMemoryCache();
         services.AddSingleton<IMemo, Memo>();
         services.AddAppSurfaceDocs();
+        services.Configure<AppSurfaceDocsOptions>(
+            options => options.Harvest.StartupMode = AppSurfaceDocsHarvestStartupMode.Disabled);
         services.RemoveAll<IDocHarvester>();
         services.AddSingleton<IDocHarvester>(_ => new StaticDocHarvester(docs));
         services.AddControllersWithViews()
