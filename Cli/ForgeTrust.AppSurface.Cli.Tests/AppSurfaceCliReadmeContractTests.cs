@@ -118,6 +118,11 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("dotnet tool run appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged", readme, StringComparison.Ordinal);
         Assert.Contains("dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.msbuild", readme, StringComparison.Ordinal);
         Assert.Contains("package-owned ReportGenerator", readme, StringComparison.Ordinal);
+        Assert.Contains("--schedule longest-first", readme, StringComparison.Ordinal);
+        Assert.Contains("--schedule-timings ./artifacts/previous-coverage/timings.json", readme, StringComparison.Ordinal);
+        Assert.Contains("--priority-test-project", readme, StringComparison.Ordinal);
+        Assert.Contains("originalIndex", readme, StringComparison.Ordinal);
+        Assert.Contains("executionIndex", readme, StringComparison.Ordinal);
         Assert.Contains("`.appsurface-coverage-output`", readme, StringComparison.Ordinal);
         Assert.Contains("Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs anchor, and a log path", readme, StringComparison.Ordinal);
         Assert.Contains("Every merge diagnostic uses the `ASCOV130` through `ASCOV139` range", readme, StringComparison.Ordinal);

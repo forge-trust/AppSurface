@@ -85,6 +85,7 @@ internal static class PwaEndpointMapper
             options.Enabled,
             manifestUrl,
             options.Offline.Enabled,
+            AddPathBase(request.PathBase, options.Offline.ServiceWorkerPath),
             options.Offline.Enabled ? AddPathBase(request.PathBase, options.Offline.ServiceWorkerPath) : null,
             options.Offline.Enabled ? AddPathBase(request.PathBase, options.Offline.OfflineFallbackPath) : null,
             diagnostics.Select(diagnostic => new PwaDiagnosticDocument(diagnostic.Code, diagnostic.Severity.ToString().ToLowerInvariant(), diagnostic.Message)).ToArray());
@@ -301,6 +302,7 @@ internal sealed record PwaDiagnosticsDocument(
     bool Enabled,
     string ManifestPath,
     bool OfflineEnabled,
+    string ConfiguredServiceWorkerPath,
     string? ServiceWorkerPath,
     string? OfflineFallbackPath,
     IReadOnlyList<PwaDiagnosticDocument> Diagnostics);

@@ -10,6 +10,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) can now start long-running non-exclusive test projects earlier with `--schedule longest-first`. It reuses prior `timings.json` data when available, preserves integration and Playwright projects as exclusive barriers, supports explicit priority projects, fails invalid explicit timing or priority input before tests run, warns and preserves input order for unmeasured projects when inferred prior timings are missing or unusable, and keeps artifact names stable.
 - AppSurface Docs adds Theme Contract v1. Hosts can configure `AppSurfaceDocs:Theme` with dark-family presets (`AppSurfaceDark` and `GraphiteDark`), accent/link color overrides, and density/chrome controls. The package validates enum values, CSS hex colors, null nested theme sections, and contrast-sensitive overrides at startup, emits resolved root attributes and CSS variables into rendered HTML, and freezes those variables into static exports and published archives instead of adding a dynamic themed CSS asset route.
 - Documentation and release authoring guidance now require concept links instead of mention-only prose: start with adopter outcomes, explain internal feature labels in plain language, link named packages, concepts, workflows, diagnostics, guides, examples, and CLI commands to their canonical docs, and keep maintainer evidence after the adoption path.
 - AppSurface DevAuth now centralizes its environment activation policy. DevAuth remains Development-by-default, but
@@ -23,6 +24,8 @@ This is the living release note for the next coordinated AppSurface version afte
   only safe OIDC settings into a paired `Auth.AspNetCore.Oidc` web proof, adds fixed-port/readiness diagnostics, and
   keeps Keycloak/Aspire hosting dependencies out of runtime web packages.
 - `ForgeTrust.RazorWire` documents `<rw:scripts behavior-kit="true" />`, the queue-backed `window.RazorWire.behaviors` stub, root `register(...)`, page-lifecycle `registerLifecycle(...)`, stable diagnostics, and guidance for choosing built-in managers, root behaviors, lifecycle behaviors, islands, or app-owned JavaScript.
+- `appsurface pwa verify` now supports route-shaped readiness evidence for real app entry pages. Apps can verify `--base-url` plus `--entry-path`, follow same-origin redirects that stay under the verified path base, assert manifest `start_url`, `scope`, `display`, colors, and icon declarations, decode PNG icon dimensions, write schema v2 JSON evidence, and prove that the configured AppSurface service worker is not reachable when offline support is disabled.
+- AppSurface Web PWA diagnostics now expose the configured service-worker path separately from the active offline service-worker path, so verifier evidence can distinguish "offline disabled and no worker mapped" from "offline enabled with worker/fallback endpoints."
 
 ## Migration watch
 
