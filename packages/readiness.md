@@ -6,15 +6,15 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 36
-- Evidence status: manifest evidence complete: 26; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
-- Product families: AppSurface: 24; Forge Trust: 2; Internal support: 7; RazorWire: 3
+- Packages: 38
+- Evidence status: manifest evidence complete: 28; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
+- Product families: AppSurface: 26; Forge Trust: 2; Internal support: 7; RazorWire: 3
 
 ## Package evidence matrix
 
 | Family | Package | Classification | Publish decision | Package-index evidence | Blockers and notes | Conceptual deps | Expected package deps | Start here | Release notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AppSurface | `ForgeTrust.AppSurface.Core` | public | publish | manifest evidence complete | None | None | None | [README](../ForgeTrust.AppSurface.Core/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
+| AppSurface | `ForgeTrust.AppSurface.Core` | public | publish | manifest evidence complete | None | None | None | [README](../ForgeTrust.AppSurface.Core/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Config` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Config/ForgeTrust.AppSurface.Config/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Config.LocalSecrets` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Config` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Config` | [README](../Config/ForgeTrust.AppSurface.Config.LocalSecrets/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Config.GoogleSecretManager` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Config` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Config` | [README](../Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
@@ -33,7 +33,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Workers.DurableTask` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Workers`<br />`ForgeTrust.AppSurface.Flow.DurableTask` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Workers`<br />`ForgeTrust.AppSurface.Flow.DurableTask` | [README](../Workers/ForgeTrust.AppSurface.Workers.DurableTask/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Console` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Console/ForgeTrust.AppSurface.Console/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Dependency.Autofac` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Core` | `ForgeTrust.AppSurface.Core` | [README](../Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
-| AppSurface | `ForgeTrust.AppSurface.Aspire` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Console` | [README](../Aspire/ForgeTrust.AppSurface.Aspire/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
+| AppSurface | `ForgeTrust.AppSurface.Deployment` | public | publish | manifest evidence complete | None | None | None | [README](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) | [notes](../releases/unreleased.md) |
+| AppSurface | `ForgeTrust.AppSurface.Deployment.GcpCloudRun` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Deployment` | `ForgeTrust.AppSurface.Deployment` | [README](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) | [notes](../releases/unreleased.md) |
+| AppSurface | `ForgeTrust.AppSurface.Aspire` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Console`<br />`ForgeTrust.AppSurface.Deployment` | [README](../Aspire/ForgeTrust.AppSurface.Aspire/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Config`<br />`ForgeTrust.AppSurface.Core` | [README](../Web/ForgeTrust.AppSurface.Web/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web.OpenApi` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Web` | [README](../Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) | [notes](../releases/v0.2.0-preview.1.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web.Scalar` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web.OpenApi` | `ForgeTrust.AppSurface.Web.OpenApi` | [README](../Web/ForgeTrust.AppSurface.Web.Scalar/README.md) | [notes](../releases/v0.2.0-preview.1.md) |

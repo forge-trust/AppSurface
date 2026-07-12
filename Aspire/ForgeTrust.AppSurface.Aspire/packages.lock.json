@@ -537,6 +537,9 @@
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.deployment": {
+        "type": "Project"
+      },
       "CliFx": {
         "type": "CentralTransitive",
         "requested": "[3.0.0, )",

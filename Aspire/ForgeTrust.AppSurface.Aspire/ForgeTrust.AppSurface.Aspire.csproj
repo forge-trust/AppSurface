@@ -12,6 +12,11 @@
 
     <ItemGroup>
       <ProjectReference Include="../../Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj" />
+      <ProjectReference Include="../../Deployment/ForgeTrust.AppSurface.Deployment/ForgeTrust.AppSurface.Deployment.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Tests" />
     </ItemGroup>
 
 </Project>
