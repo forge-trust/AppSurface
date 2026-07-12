@@ -182,11 +182,14 @@ test('offline precache failures remain fatal while shared lifecycle failures sta
 });
 
 test('push-only composition has no fetch listener, opens no cache, and retires its owned caches', async () => {
-  const worker = createWorker({ cacheKeys: ['appsurface-pwa-v1', 'appsurface-pwa-scope-v1', 'foreign'] });
+  const worker = createWorker({
+    config: { legacyCacheNames: ['appsurface-pwa-v1'] },
+    cacheKeys: ['appsurface-pwa-v1', 'appsurface-pwa-scope-v1', 'foreign']
+  });
   await worker.emit('activate');
   assert.equal(worker.listeners.has('fetch'), false);
   assert.equal(worker.opened.length, 0);
-  assert.deepEqual(worker.deleted, ['appsurface-pwa-scope-v1']);
+  assert.deepEqual(worker.deleted, ['appsurface-pwa-v1', 'appsurface-pwa-scope-v1']);
 });
 
 test('custom handler import is executed once and failures preserve offline behavior', async () => {

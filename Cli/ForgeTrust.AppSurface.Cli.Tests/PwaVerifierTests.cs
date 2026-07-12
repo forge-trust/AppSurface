@@ -824,6 +824,37 @@ public sealed class PwaVerifierTests
     }
 
     [Fact]
+    public async Task VerifyAsync_ReportsPushObservationWhenInstallManifestIsAbsent()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", "<!doctype html><html><head></head><body></body></html>", "text/html");
+        http.Add("https://app.example.test/manifest.webmanifest", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """
+            {
+              "enabled": false,
+              "manifestPath": "/manifest.webmanifest",
+              "offlineEnabled": false,
+              "workerEnabled": true,
+              "workerPath": "/service-worker.js",
+              "pushEnabled": true,
+              "workerScope": "/",
+              "registrationHelperPath": "/_appsurface/pwa/register.js"
+            }
+            """,
+            "application/json");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA257");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA224" or "ASPWA202");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA240" or "ASPWA256");
+    }
+
+    [Fact]
     public async Task VerifyAsync_ReportsPushObservationWhileValidatingCombinedOfflineResources()
     {
         var http = new FakePwaHttpClient();

@@ -10,6 +10,15 @@ internal static partial class PwaOptionsValidator
 
         var diagnostics = new List<PwaDiagnostic>();
 
+        if (options.Worker.HasServiceWorkerPathConflict)
+        {
+            diagnostics.Add(
+                new PwaDiagnostic(
+                    "ASPWA020",
+                    PwaDiagnosticSeverity.Error,
+                    "PwaOptions.Worker.ServiceWorkerPath and the Offline.ServiceWorkerPath compatibility alias cannot be configured with different values."));
+        }
+
         if (!options.HasAnySurfaceEnabled)
         {
             return diagnostics;
@@ -54,17 +63,9 @@ internal static partial class PwaOptionsValidator
         }
 
         RequireEndpointPath(options.ManifestPath, "ASPWA005", "PwaOptions.ManifestPath must be an app-root-relative endpoint path without percent escapes.", diagnostics);
-        RequireLocalPath(options.Scope, "ASPWA007", "PwaOptions.Scope must be an app-root-relative URL such as /.", diagnostics);
+        RequireScope(options.Scope, options.IsWorkerEnabled, diagnostics);
         RequireEndpointPath(options.DiagnosticsPath, "ASPWA008", "PwaOptions.DiagnosticsPath must be an app-root-relative endpoint path without percent escapes.", diagnostics);
         RequireEndpointPath(options.Worker.ServiceWorkerPath, "ASPWA015", "PwaOptions.Worker.ServiceWorkerPath must be an app-root-relative endpoint path without percent escapes.", diagnostics);
-        if (options.Worker.HasServiceWorkerPathConflict)
-        {
-            diagnostics.Add(
-                new PwaDiagnostic(
-                    "ASPWA020",
-                    PwaDiagnosticSeverity.Error,
-                    "PwaOptions.Worker.ServiceWorkerPath and the Offline.ServiceWorkerPath compatibility alias cannot be configured with different values."));
-        }
 
         if (options.Offline.Enabled)
         {
@@ -272,6 +273,18 @@ internal static partial class PwaOptionsValidator
         if (!IsSafeLocalPath(value))
         {
             diagnostics.Add(new PwaDiagnostic(code, PwaDiagnosticSeverity.Error, message));
+        }
+    }
+
+    private static void RequireScope(string? value, bool workerEnabled, List<PwaDiagnostic> diagnostics)
+    {
+        if (!IsSafeLocalPath(value) || (workerEnabled && value!.Contains('%')))
+        {
+            diagnostics.Add(
+                new PwaDiagnostic(
+                    "ASPWA007",
+                    PwaDiagnosticSeverity.Error,
+                    "PwaOptions.Scope must be an app-root-relative URL such as / and cannot contain percent escapes when a worker capability is enabled."));
         }
     }
 

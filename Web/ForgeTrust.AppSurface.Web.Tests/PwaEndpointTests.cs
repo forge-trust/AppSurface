@@ -238,7 +238,7 @@ public sealed class PwaEndpointTests
         Assert.DoesNotContain("addEventListener(\"fetch\"", workerScript, StringComparison.Ordinal);
         Assert.DoesNotContain("caches.open", workerScript, StringComparison.Ordinal);
         Assert.Contains("caches.keys", workerScript, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"appsurface-pwa-v1\"", workerScript, StringComparison.Ordinal);
+        Assert.Contains("\"appsurface-pwa-v1\"", workerScript, StringComparison.Ordinal);
         Assert.Equal(HttpStatusCode.OK, helper.StatusCode);
         Assert.Contains("AppSurface", helperScript, StringComparison.Ordinal);
         Assert.Contains("\"enabled\": false", statusJson, StringComparison.Ordinal);
@@ -323,6 +323,18 @@ public sealed class PwaEndpointTests
             Environments.Development));
 
         Assert.Contains("ASPWA005", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DisabledPwa_ConflictingWorkerPathAliasesFailStartup()
+    {
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => StartHostAsync(options =>
+        {
+            options.Pwa.Worker.ServiceWorkerPath = "/workers/current.js";
+            options.Pwa.Offline.ServiceWorkerPath = "/workers/legacy.js";
+        }));
+
+        Assert.Contains("ASPWA020", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -128,7 +128,7 @@ internal static class PwaEndpointMapper
             options.Offline.Enabled,
             cachePrefix,
             cachePrefix + "v1",
-            options.Offline.Enabled ? ["appsurface-pwa-v1"] : [],
+            ["appsurface-pwa-v1"],
             options.Offline.Enabled
                 ? options.Offline.StaticAssetPaths
                     .Append(options.Offline.OfflineFallbackPath)

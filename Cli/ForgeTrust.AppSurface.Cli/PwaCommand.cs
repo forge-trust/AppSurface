@@ -255,6 +255,8 @@ internal sealed partial class PwaVerifier
                 "Pass --entry-path for a real app page that renders the PWA head metadata."));
         }
 
+        await ValidateDiagnosticsAsync(target, diagnostics, cancellationToken);
+
         var manifest = await FetchAsync(target, manifestUri, "manifest", MaxTextResponseBytes, diagnostics, cancellationToken);
         if (manifest.RedirectLimitExceeded)
         {
@@ -383,7 +385,6 @@ internal sealed partial class PwaVerifier
             ValidateExpectedIcons(manifestDocument, iconEvidence, options.ExpectedIcons, diagnostics);
         }
 
-        await ValidateDiagnosticsAsync(target, diagnostics, cancellationToken);
         return BuildReport(target, manifestUri, manifestDocument, iconEvidence, diagnostics);
     }
 

@@ -32,7 +32,7 @@
 
   const isSafeMetadata = value => {
     if (typeof value !== "string" || value[0] !== "/" || value.startsWith("//")) return false;
-    if (value.includes("\\") || value.includes("?") || value.includes("#") || /[\u0000-\u0020\u007f{}]/u.test(value)) return false;
+    if (value.includes("\\") || value.includes("%") || value.includes("?") || value.includes("#") || /[\u0000-\u0020\u007f{}]/u.test(value)) return false;
     try {
       let decoded = value;
       while (true) {
@@ -73,7 +73,7 @@
       conflict();
       return;
     }
-    if (!appSurfacePresent || appSurface === undefined) {
+    if (!appSurfacePresent) {
       appSurface = {};
       try {
         Object.defineProperty(window, "AppSurface", { value: appSurface, writable: true, configurable: true });

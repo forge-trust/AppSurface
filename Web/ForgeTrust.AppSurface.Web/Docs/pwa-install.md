@@ -84,13 +84,14 @@ The [push-worker foundation case](https://github.com/forge-trust/AppSurface/issu
 | `Name` | Empty | Required full application name when install metadata is enabled. |
 | `ShortName` | Empty | Required launcher name when install metadata is enabled. |
 | `StartUrl` | `/` | Validated only for install metadata; must remain inside `Scope`. |
-| `Scope` | `/` | Manifest scope and effective worker registration scope. Validated whenever install metadata or a worker capability is active. |
+| `Scope` | `/` | Manifest scope and effective worker registration scope. Validated whenever install metadata or a worker capability is active. Active worker scopes reject percent escapes so registration and notification destinations share one unambiguous path spelling. |
 | `Display` | `Standalone` | Emits `standalone`, `minimal-ui`, `fullscreen`, or `browser`. |
 | `ThemeColor` | Empty | Required install color emitted to the manifest and page head. |
 | `BackgroundColor` | Empty | Required install color emitted to the manifest. |
 | `Icons` | Empty | Requires `192x192` and `512x512` size tokens for install metadata. |
 | `ManifestPath` | `/manifest.webmanifest` | Generated manifest endpoint when install metadata is enabled. The PathBase-adjusted value remains validated and reported in diagnostics for additive older-tool compatibility whenever any PWA surface is active. |
 | `DiagnosticsExposure` | `DevelopmentOnly` | `Always`, `DevelopmentOnly`, or `Never` for AppSurface PWA diagnostics. |
+| `DiagnosticsPath` | `/_appsurface/pwa` | Base path for the diagnostics HTML endpoint and its `/status.json` child. The path is adjusted beneath `PathBase` and rejects percent escapes. |
 
 ### Shared worker and push
 
@@ -225,7 +226,7 @@ Warnings never include payloads, destination URLs, subscription endpoints, ident
 ## Migration and Pitfalls
 
 - Moving or disabling a registered worker is staged browser-state migration, not only a server setting change. First deploy cleanup code from the currently registered path to unregister or replace the old registration and retire owned caches. Only after clients receive that deployment should you stop mapping or move the old path.
-- Moving from a #631 offline worker to push-only at the same worker path is supported: the push-only worker deletes caches in that worker's path-derived namespace and installs no fetch handler. Apps upgrading directly from the older global `appsurface-pwa-v1` cache must first deploy the staged cleanup described above; a push-only worker will not delete that unscoped cache because a sibling same-origin app may still own it.
+- Moving from an older or #631 offline worker to push-only at the same worker path is supported: the push-only worker deletes the legacy `appsurface-pwa-v1` cache and caches in that worker's path-derived namespace, then installs no fetch handler.
 - AppSurface does not guess historical custom worker paths. An app that changes a path owns cleanup for registrations at the previous path.
 - Do not cache authenticated HTML, APIs, tenant data, or logout-sensitive content with the starter offline strategy.
 - Keep `StartUrl` inside `Scope`, and keep the worker scope no broader than the application surface that owns its behavior.

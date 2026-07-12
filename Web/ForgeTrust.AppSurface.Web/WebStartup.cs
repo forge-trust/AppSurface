@@ -347,9 +347,9 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
             _options.StaticFiles.EnableStaticFiles = true;
         }
 
+        PwaOptionsValidator.ThrowIfInvalid(_options.Pwa);
         if (_options.Pwa.HasAnySurfaceEnabled)
         {
-            PwaOptionsValidator.ThrowIfInvalid(_options.Pwa);
             _options.StaticFiles.EnableStaticFiles = true;
         }
 

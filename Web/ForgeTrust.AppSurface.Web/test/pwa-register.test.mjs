@@ -118,7 +118,7 @@ test('helper merges plain namespaces and refuses conflicting values without over
   assert.equal(existing.kept, true);
   assert.equal(typeof existing.Pwa.register, 'function');
 
-  for (const AppSurface of [null, 'occupied', [], () => {}]) {
+  for (const AppSurface of [undefined, null, 'occupied', [], () => {}]) {
     const result = runHelper({ window: { AppSurface } });
     assert.equal(result.context.window.AppSurface, AppSurface);
     assert.deepEqual(result.errors, ['ASPWAJS002']);
@@ -191,6 +191,17 @@ test('helper rejects recursively encoded traversal metadata', async () => {
   const result = runHelper({
     worker: '/tenant/%252e%252e/service-worker.js',
     scope: '/tenant/',
+    navigator: { serviceWorker: {} }
+  });
+  await assert.rejects(
+    result.context.window.AppSurface.Pwa.register(),
+    error => error.name === 'InvalidStateError' && error.message === 'ASPWAJS001');
+});
+
+test('helper rejects percent-escaped active worker metadata', async () => {
+  const result = runHelper({
+    worker: '/tenant/service-worker.js',
+    scope: '/tenant/%61pp/',
     navigator: { serviceWorker: {} }
   });
   await assert.rejects(

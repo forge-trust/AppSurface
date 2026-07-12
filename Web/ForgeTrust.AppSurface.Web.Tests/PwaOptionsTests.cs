@@ -156,7 +156,7 @@ public sealed class PwaOptionsTests
     [InlineData(false)]
     public void ConfigurationBindingDetectsAliasConflictsInEitherBindingOrder(bool legacyFirst)
     {
-        var options = new PwaOptions { Enabled = true };
+        var options = new PwaOptions();
         var legacy = new Dictionary<string, string?> { ["Offline:ServiceWorkerPath"] = "/workers/legacy.js" };
         var current = new Dictionary<string, string?> { ["Worker:ServiceWorkerPath"] = "/workers/current.js" };
 
@@ -164,6 +164,18 @@ public sealed class PwaOptionsTests
         Bind(options, legacyFirst ? current : legacy);
 
         var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
+        Assert.Contains("ASPWA020", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThrowIfInvalid_DisabledOptionsRejectConflictingWorkerPathAliases()
+    {
+        var options = new PwaOptions();
+        options.Worker.ServiceWorkerPath = "/workers/current.js";
+        options.Offline.ServiceWorkerPath = "/workers/legacy.js";
+
+        var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
         Assert.Contains("ASPWA020", exception.Message, StringComparison.Ordinal);
     }
 
@@ -218,6 +230,29 @@ public sealed class PwaOptionsTests
         var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
 
         Assert.Contains("ASPWA023", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("/app%2fnotes/")]
+    [InlineData("/%61pp/")]
+    public void ThrowIfInvalid_RejectsPercentEscapedActiveWorkerScope(string scope)
+    {
+        var options = new PwaOptions { Scope = scope };
+        options.Push.Enabled = true;
+
+        var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Contains("ASPWA007", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThrowIfInvalid_InstallOnlyPreservesSafePercentEscapedManifestScopeCompatibility()
+    {
+        var options = CreateValidOptions();
+        options.StartUrl = "/%61pp/";
+        options.Scope = "/%61pp/";
+
+        Assert.Null(Record.Exception(() => PwaOptionsValidator.ThrowIfInvalid(options)));
     }
 
     [Fact]
