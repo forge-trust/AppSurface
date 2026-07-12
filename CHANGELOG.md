@@ -30,24 +30,13 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Release manifest: `releases/v0.2.0-preview.1.release.json`
 - Release evidence bundle: `releases/v0.2.0-preview.1.evidence.json`
 
-## 0.1.0-rc.4 - 2026-06-16
+## 0.1.0 - 2026-06-27
 
-- Narrative release note: [v0.1.0-rc.4](./releases/v0.1.0-rc.4.md)
-- Release manifest: `releases/v0.1.0-rc.4.release.json`
-- Release evidence bundle: `releases/v0.1.0-rc.4.evidence.json`
-
-## 0.1.0-rc.3 - 2026-06-08
-
-- Narrative release note: [v0.1.0-rc.3](./releases/v0.1.0-rc.3.md)
-- Release manifest: `releases/v0.1.0-rc.3.release.json`
-- Release evidence bundle: `releases/v0.1.0-rc.3.evidence.json`
-
-## 0.1.0-rc.2 - 2026-06-03
-
-- Narrative release note: [v0.1.0-rc.2](./releases/v0.1.0-rc.2.md)
-- Release manifest: `releases/v0.1.0-rc.2.release.json`
-
-## 0.1.0-rc.1 - 2026-05-29
-
-- Narrative release note: [v0.1.0-rc.1](./releases/v0.1.0-rc.1.md)
-- Release manifest: `releases/v0.1.0-rc.1.release.json`
+- Narrative release note: [v0.1.0](./releases/v0.1.0.md)
+- Release manifest: `releases/v0.1.0.release.json`
+- Release evidence bundle: `releases/v0.1.0.evidence.json`
+- Release-candidate history:
+  - `0.1.0-rc.1` - 2026-05-29
+  - `0.1.0-rc.2` - 2026-06-03
+  - `0.1.0-rc.3` - 2026-06-08
+  - `0.1.0-rc.4` - 2026-06-16
