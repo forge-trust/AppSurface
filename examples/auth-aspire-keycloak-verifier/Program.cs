@@ -57,7 +57,7 @@ public static class Program
         using var timeout = new CancellationTokenSource(options.Timeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
 
-        var failures = await ProbeUntilReadyAsync(options, httpClient, linked.Token);
+        var failures = await ProbeUntilReadyAsync(options, httpClient, linked.Token, timeout.Token);
         if (failures.Count > 0)
         {
             await error.WriteLineAsync("AppSurface Auth Aspire Keycloak verification failed.");
@@ -74,15 +74,36 @@ public static class Program
         return 0;
     }
 
-    private static async Task<IReadOnlyList<string>> ProbeUntilReadyAsync(
+    /// <summary>
+    /// Polls the local proof until it succeeds or the caller or verifier timeout stops further attempts.
+    /// </summary>
+    /// <param name="options">The validated verifier contract and polling policy.</param>
+    /// <param name="httpClient">The HTTP client used for each probe attempt.</param>
+    /// <param name="cancellationToken">The linked caller and verifier-timeout token that stops polling.</param>
+    /// <param name="timeoutCancellationToken">The verifier timeout token used to distinguish a timeout from caller cancellation.</param>
+    /// <returns>An empty list when a probe succeeds; otherwise the final probe failures plus a terminal timeout or cancellation reason.</returns>
+    /// <remarks>
+    /// The terminal reason is retained alongside the last probe evidence so CI output can distinguish a transient failed
+    /// probe from a proof that never became ready within the configured budget.
+    /// </remarks>
+    internal static async Task<IReadOnlyList<string>> ProbeUntilReadyAsync(
         VerifierOptions options,
         HttpClient httpClient,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CancellationToken timeoutCancellationToken)
     {
         var lastFailures = new List<string>();
         while (!cancellationToken.IsCancellationRequested)
         {
-            lastFailures = await ProbeOnceAsync(options, httpClient, cancellationToken);
+            try
+            {
+                lastFailures = await ProbeOnceAsync(options, httpClient, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
             if (lastFailures.Count == 0)
             {
                 return [];
@@ -98,7 +119,11 @@ public static class Program
             }
         }
 
-        return lastFailures.Count == 0 ? ["verification timed out before probes succeeded."] : lastFailures;
+        lastFailures.Add(
+            timeoutCancellationToken.IsCancellationRequested
+                ? "verification timed out before probes succeeded."
+                : "verification was canceled before probes succeeded.");
+        return lastFailures;
     }
 
     private static async Task<List<string>> ProbeOnceAsync(
@@ -319,6 +344,11 @@ internal sealed record VerifierOptions(
         if (timeoutSeconds <= 0 || timeoutSeconds > 300)
         {
             return Invalid("Problem: verifier timeout is invalid. Cause: --timeout-seconds must be between 1 and 300. Fix: run through the AppHost verify profile or pass a bounded timeout. Docs: examples/auth-aspire-keycloak-apphost/README.md.");
+        }
+
+        if (string.IsNullOrWhiteSpace(realmImportFile))
+        {
+            return Invalid("Problem: verifier realm import evidence path is missing. Cause: AUTH_ASPIRE_KEYCLOAK_REALM_IMPORT_FILE was not supplied by the AppHost. Fix: run through the AppHost verify profile. Docs: examples/auth-aspire-keycloak-apphost/README.md.");
         }
 
         return new VerifierOptions(
