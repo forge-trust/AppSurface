@@ -480,6 +480,7 @@ public sealed class PwaEndpointTests
         using var diagnosticsHtmlResponse = await app.Client.GetAsync("/tenant/_appsurface/pwa");
         var diagnosticsHtml = await diagnosticsHtmlResponse.Content.ReadAsStringAsync();
         Assert.Contains("&lt;link rel=&quot;manifest&quot; href=&quot;/tenant/manifest.webmanifest&quot;", diagnosticsHtml, StringComparison.Ordinal);
+        Assert.Contains("&lt;link rel=&quot;icon&quot; href=&quot;/tenant/icons/app-192.png&quot;", diagnosticsHtml, StringComparison.Ordinal);
         Assert.Contains(
             "&lt;meta name=&quot;appsurface:pwa-service-worker&quot; content=&quot;/tenant/service-worker.js&quot;",
             diagnosticsHtml,

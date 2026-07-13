@@ -65,9 +65,9 @@ internal static class PwaHeadMetadataBuilder
         foreach (var icon in options.Icons)
         {
             var href = icon.Source;
-            if (fileVersionProvider is not null && PwaOptionsValidator.IsSafeLocalPath(href))
+            if (PwaOptionsValidator.IsSafeLocalPath(href))
             {
-                href = fileVersionProvider.AddFileVersionToPath(pathBase, href);
+                href = fileVersionProvider?.AddFileVersionToPath(pathBase, href) ?? AddPathBase(pathBase, href);
             }
 
             builder.Append("<link rel=\"icon\" href=\"");
