@@ -72,6 +72,30 @@ never invents a continuation for an incompatible definition.
 Event delivery is application-authorized before it reaches the client. Instance and event identifiers locate rows but
 are not authorization proof. Late, duplicate, mismatched-contract, and canceled waits are recorded deterministically.
 
+## Durable scheduling
+
+`PostgreSqlDurableScheduleClient` persists one-off and recurring definitions and exposes bounded queries, lifecycle
+commands, recovery release, and next-occurrence explanation. Targets are registered durable Work or Flow contracts; the
+client validates their exact codecs before accepting a schedule.
+
+Supported definitions are `At`, `After`, `Every`, and full Cron expressions through Cronos 0.13.0. Cron evaluation
+persists the evaluator version, time-zone identity, and UTC occurrence window. A later dependency or time-zone rule
+change cannot reinterpret an occurrence that is already durable.
+
+Recurring schedules default to:
+
+- `ScheduleOverlapPolicy.QueueOne`, which coalesces overlap into at most one pending occurrence; and
+- `ScheduleMisfirePolicy.RunOnce`, which emits one recovery occurrence after downtime and advances to the next future
+  tick.
+
+Those policies are configurable per schedule. Use bounded catch-up or bounded concurrency only when the target's
+business and provider contracts can tolerate it. Updating a schedule increments its generation and invalidates
+not-yet-started occurrences from the prior generation.
+
+`PostgreSqlDurableScheduleProcessor` advances due occurrences in bounded transactions and atomically accepts their Work
+or Flow targets. Run-slot rows preserve active and pending truth across crashes. Terminal target completion releases the
+slot and activates or discards pending state according to the stored overlap policy.
+
 ## Execution and provider safety
 
 Work dispatch uses short claims, renewable leases, revision checks, scope generations, and a store-wide runtime epoch.
@@ -97,6 +121,7 @@ prove the provider did nothing, so the runtime records evidence and follows the 
   same transaction as every mutation.
 - Do not retry an ambiguous provider effect merely because its lease expired.
 - Do not release a suspended Flow after restore unless its manifest and active-wait shape still match persisted history.
+- A scale-to-zero host needs an external activator; persisted schedules cannot wake a process that does not exist.
 
 Operational codes are documented in the [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md).
 

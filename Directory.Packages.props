@@ -17,6 +17,7 @@
     <PackageVersion Include="Autofac.Extensions.DependencyInjection" Version="11.0.0" />
     <PackageVersion Include="CliFx" Version="3.0.0" />
     <PackageVersion Include="CliWrap" Version="3.10.1" />
+    <PackageVersion Include="Cronos" Version="0.13.0" />
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="coverlet.msbuild" Version="10.0.1" />
     <PackageVersion Include="FakeItEasy" Version="9.0.1" />

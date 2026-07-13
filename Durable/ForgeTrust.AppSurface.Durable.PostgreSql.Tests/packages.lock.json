@@ -465,6 +465,7 @@
       "forgetrust.appsurface.durable.postgresql": {
         "type": "Project",
         "dependencies": {
+          "Cronos": "[0.13.0, )",
           "ForgeTrust.AppSurface.Core": "[0.1.0, )",
           "ForgeTrust.AppSurface.Durable": "[0.1.0, )",
           "Npgsql": "[10.0.3, )"
@@ -491,6 +492,12 @@
         "requested": "[3.10.1, )",
         "resolved": "3.10.1",
         "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
+      },
+      "Cronos": {
+        "type": "CentralTransitive",
+        "requested": "[0.13.0, )",
+        "resolved": "0.13.0",
+        "contentHash": "Nkve+Yi0+ol3ntSBRHeW0ka9cJQ8vndSUvvkXqF9LVqwpoqWueyxu/HS275r98RDOmF7/mzRnZW5XXUBXob+TA=="
       },
       "Microsoft.Extensions.Hosting": {
         "type": "CentralTransitive",
