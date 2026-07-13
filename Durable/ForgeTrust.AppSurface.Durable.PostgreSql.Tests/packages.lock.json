@@ -468,6 +468,7 @@
           "Cronos": "[0.13.0, )",
           "ForgeTrust.AppSurface.Core": "[0.1.0, )",
           "ForgeTrust.AppSurface.Durable": "[0.1.0, )",
+          "Microsoft.Extensions.Hosting": "[10.0.8, )",
           "Npgsql": "[10.0.3, )"
         }
       },

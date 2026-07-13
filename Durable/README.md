@@ -10,7 +10,7 @@ Start with:
   schedule, status, and control contracts; and
 - [`ForgeTrust.AppSurface.Durable.PostgreSql`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md) for explicit schema
   deployment, atomic Work acceptance, resumable Flow persistence, full Cronos scheduling, lease fencing, and
-  provider-effect safety.
+  provider-effect safety, bounded activation, runtime health, and opt-in hosted execution.
 
 ## Why this boundary
 

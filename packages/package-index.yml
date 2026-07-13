@@ -304,8 +304,8 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 47
     use_when: Add this in a PostgreSQL-backed host that must atomically accept durable Work, resume typed Flow instances, or run interval and Cronos schedules without another control plane.
-    includes: Explicit numbered PostgreSQL migrations, non-owner row-level-security storage, caller-owned Npgsql transaction handoff, runtime-epoch and lease fencing, provider-effect permits, durable Flow history and waits, bounded recovery inventories, At/After/Every/Cronos definitions, deterministic occurrence windows, configurable misfire and overlap policies, and persisted run slots.
-    does_not_include: Automatic production schema migration at startup, hosted execution, SQL Server, external queues as correctness dependencies, arbitrary async/await replay, or exactly-once provider effects.
+    includes: Explicit numbered PostgreSQL migrations, non-owner RLS storage, caller-owned Npgsql transaction handoff, payload-free dispatch and recovery inventories, store-wide runtime-epoch bootstrap and privileged rotation, persisted active-pass and graceful-drain fencing, claims and lease-generation fencing, effect permits and ambiguous-outcome handling, idempotent operator commands, durable Flow history and active waits, Cronos occurrence and run-slot persistence, bounded pump execution, payload-free health, and opt-in hosted processing.
+    does_not_include: Automatic production schema migration at runtime startup, SQL Server, Durable Task Scheduler, Dapr sidecars, Wolverine, Temporal, Restate, external queues as correctness dependencies, runtime metrics or ActivitySource telemetry, retention automation, multi-backend persistence, arbitrary async/await replay, or exactly-once provider effects.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Durable.PostgreSql` after Durable when PostgreSQL should own Work, resumable Flow history, and durable schedules; apply its embedded migrations explicitly before processing any surface.
     depends_on:

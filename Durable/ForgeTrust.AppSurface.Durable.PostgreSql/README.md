@@ -96,6 +96,46 @@ not-yet-started occurrences from the prior generation.
 or Flow targets. Run-slot rows preserve active and pending truth across crashes. Terminal target completion releases the
 slot and activates or discards pending state according to the stored overlap policy.
 
+## Registration and activation
+
+Register storage explicitly with `AddAppSurfaceDurablePostgreSql`, supplying the runtime-role `NpgsqlDataSource`, the
+current out-of-band runtime epoch, and optional process settings. Registration is passive: it adds clients, schema
+validation, control surfaces, health, and `IDurableRuntimePump`, but starts no polling and applies no migrations.
+
+Call `AddWorkerHost` only in a continuously live worker process. The hosted service repeatedly invokes the same bounded
+pump available to jobs, functions, tests, and externally activated hosts. A scale-to-zero deployment must arrange an
+external activator; PostgreSQL notifications are metadata-only wake hints and cannot start a nonexistent process.
+
+The bounded pump processes Work, Flow, and Schedule surfaces with an item cap and time budget. It serializes passes per
+runtime instance, alternates surface order to avoid starvation, validates schema and epoch compatibility before work,
+and reports whether another immediate pass is useful.
+
+## Runtime health and graceful drain
+
+`IDurableRuntimeHealth.GetAsync` returns a payload-free snapshot containing schema/epoch compatibility, process and
+worker ownership, hosted surfaces, heartbeat and last-successful-sweep timestamps, drain/pass markers, and bounded due
+counts. It never exposes a scope id, aggregate id, provider key, or payload.
+
+`IDurableRuntimeDrainControl.BeginDrainAsync` prevents later passes from claiming new aggregates. It does not cancel
+provider I/O or revoke an effect permit. A custom host must begin drain, await its active pump call, and then terminate.
+The hosted service resumes on startup and records a best-effort drain marker during shutdown.
+
+Worker identity is persisted with a unique process-instance id. Reusing a worker id while another live process owns it
+fails closed; a clean drained process hands ownership off immediately, while an unclean owner remains protected until
+its heartbeat becomes stale.
+
+## Control, reconciliation, and restore
+
+`IDurableWorkControlClient` and `IDurableScopeControlClient` provide authorized reads, bounded payload-free inventories,
+cancellation, and scope disablement. `IDurableWorkOperatorClient` exposes audited reconciliation, manual resolution,
+safe retry, and recovery release commands. Operator requests require exact revision, actor, reason, and evidence fields;
+they do not infer provider truth.
+
+After a point-in-time restore, stop ingress and workers, rotate the out-of-band runtime epoch with the migration-owner
+connection, start the replacement fleet in recovery posture, page each authorized Work/Flow/Schedule inventory,
+reconcile every issued effect permit, release only exact-revision aggregates proven safe, and then resume activation.
+Starting the pump is not a substitute for that audit.
+
 ## Execution and provider safety
 
 Work dispatch uses short claims, renewable leases, revision checks, scope generations, and a store-wide runtime epoch.
@@ -122,6 +162,8 @@ prove the provider did nothing, so the runtime records evidence and follows the 
 - Do not retry an ambiguous provider effect merely because its lease expired.
 - Do not release a suspended Flow after restore unless its manifest and active-wait shape still match persisted history.
 - A scale-to-zero host needs an external activator; persisted schedules cannot wake a process that does not exist.
+- Begin drain and await the active bounded pass before terminating a custom worker host.
+- Never reuse the restored database's former runtime epoch or grant epoch rotation to the ordinary runtime role.
 
 Operational codes are documented in the [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md).
 

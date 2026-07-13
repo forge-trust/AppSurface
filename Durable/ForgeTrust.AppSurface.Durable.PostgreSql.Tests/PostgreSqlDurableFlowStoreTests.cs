@@ -536,7 +536,6 @@ public sealed class PostgreSqlDurableFlowStoreTests
         Assert.Contains("work_canceled", terminalCodes);
     }
 
-#if DURABLE_RUNTIME_HOSTING
     [Theory]
     [InlineData(false, "suspended_reconciliation_required")]
     [InlineData(true, "reconciling")]
@@ -1035,8 +1034,6 @@ public sealed class PostgreSqlDurableFlowStoreTests
         Assert.Equal(DurableFlowState.Canceled, (await rotated.Client.GetAsync(
             new DurableFlowGetRequest(start.ScopeId, start.InstanceId))).Value!.State);
     }
-
-#endif
 
     [Fact]
     public async Task CancelPendingAmbiguity_AppliedTruthProjectsCanceledBeforeRelease()
@@ -1660,7 +1657,6 @@ public sealed class PostgreSqlDurableFlowStoreTests
                 """));
     }
 
-#if DURABLE_RUNTIME_HOSTING
     [Theory]
     [InlineData(DurableProviderSafety.ReconcileBeforeRetry)]
     [InlineData(DurableProviderSafety.ManualResolution)]
@@ -1857,8 +1853,6 @@ public sealed class PostgreSqlDurableFlowStoreTests
                 """));
     }
 
-#endif
-
     [Fact]
     public async Task InvalidDurableFaultCode_SuspendsBeforePersistenceAndRemainsQueryable()
     {
@@ -2050,7 +2044,6 @@ public sealed class PostgreSqlDurableFlowStoreTests
         return CreateRuntime(dataSource, registration, contextCodec, [contextCodec], runtimeEpoch: runtimeEpoch);
     }
 
-#if DURABLE_RUNTIME_HOSTING
     private static OperatorProjectionRuntime CreateOperatorProjectionRuntime(
         NpgsqlDataSource dataSource,
         Guid runtimeEpoch,
@@ -2111,8 +2104,6 @@ public sealed class PostgreSqlDurableFlowStoreTests
             definition.FlowId,
             definition.Version);
     }
-
-#endif
 
     private static DurableFlowRuntime CreateActivityRuntime(
         NpgsqlDataSource dataSource,

@@ -207,6 +207,9 @@ identities, hosted surfaces, heartbeat and last-successful-sweep timestamps, dra
 count and oldest age of due dispatches for those surfaces. It never returns a scope, aggregate id, provider key, or
 payload. The selected storage integration defines registration and operational behavior.
 
+For PostgreSQL registration, activation, and ownership semantics, see the
+[PostgreSQL runtime reference](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#registration-and-activation).
+
 The health snapshot is the preview's current observability API. The runtime does not yet emit a supported `Meter`,
 metrics instrument set, or `ActivitySource` trace model. Stable release requires privacy-bounded metrics and tracing;
 hosts should not infer those signals from high-cardinality scope or aggregate identifiers in the meantime.
