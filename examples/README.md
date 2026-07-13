@@ -3,6 +3,7 @@
 This directory contains sample applications that use **ForgeTrust.AppSurface**.
 
 - [Auth ASP.NET Core bridge example](auth-aspnetcore-bridge/README.md) – proves an ASP.NET Core host-owned auth stack can flow named policy results into AppSurface auth contracts.
+- [Auth Aspire Keycloak AppHost proof](auth-aspire-keycloak-apphost/README.md) – starts real local Keycloak for AppSurface OIDC proof without making runtime web apps reference Keycloak packages.
 - [Auth Web/RazorWire proof](auth-web-razorwire-proof/README.md) – shows a browser-first proof that one ASP.NET Core policy drives both a Minimal API response and a RazorWire-facing state.
 - [Aspire AppHost example](aspire-apphost/README.md) – shows local Aspire AppHost composition with AppSurface profiles and reusable Aspire components.
 - [Console app example](console-app/README.md) – shows how to build a simple console application using [CliFx](https://github.com/Tyrrrz/CliFx) for command definitions.

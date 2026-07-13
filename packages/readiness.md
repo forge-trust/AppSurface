@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 38
-- Evidence status: manifest evidence complete: 28; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
-- Product families: AppSurface: 26; Forge Trust: 2; Internal support: 7; RazorWire: 3
+- Packages: 39
+- Evidence status: manifest evidence complete: 29; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
+- Product families: AppSurface: 27; Forge Trust: 2; Internal support: 7; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -23,6 +23,7 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Auth.AspNetCore` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth` | [README](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth.AspNetCore` | [README](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth.AspNetCore`<br />`ForgeTrust.AppSurface.Auth` | [README](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
+| AppSurface | `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Aspire` | [README](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth.Testing` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth.AspNetCore`<br />`ForgeTrust.AppSurface.Auth` | [README](../Auth/ForgeTrust.AppSurface.Auth.Testing/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Intelligence` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Intelligence/ForgeTrust.AppSurface.Intelligence/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Observability` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Observability/ForgeTrust.AppSurface.Observability/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
