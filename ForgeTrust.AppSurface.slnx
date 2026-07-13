@@ -54,6 +54,10 @@
     <Project Path="Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/ForgeTrust.AppSurface.Deployment.GcpCloudRun.csproj" />
     <Project Path="Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests.csproj" />
   </Folder>
+  <Folder Name="/Durable/">
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.Tests/ForgeTrust.AppSurface.Durable.Tests.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" />
+  </Folder>
   <Folder Name="/Examples/">
     <Project Path="examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj" />
     <Project Path="examples/auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" />

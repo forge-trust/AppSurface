@@ -11,6 +11,32 @@ namespace ForgeTrust.AppSurface.Workers;
 public sealed record DurableWorkerEnvelope<TPayload>
 {
     /// <summary>
+    /// Initializes the original projection-compatible envelope shape without native runtime execution identity.
+    /// </summary>
+    /// <param name="outcome">Defined observable worker outcome.</param>
+    /// <param name="reasonCode">Stable machine-readable safe reason code.</param>
+    /// <param name="retryability">Defined retry classification.</param>
+    /// <param name="correlation">Correlation identifiers for the operation.</param>
+    /// <param name="payload">Optional typed payload.</param>
+    /// <param name="metadata">Optional privacy-safe metadata.</param>
+    /// <param name="diagnostic">Optional safe diagnostic.</param>
+    /// <remarks>
+    /// This exact seven-parameter overload is retained for already-compiled adapters. Native runtimes use the overload
+    /// that also supplies <see cref="DurableWorkerExecutionIdentity"/>.
+    /// </remarks>
+    public DurableWorkerEnvelope(
+        DurableWorkerProjectionOutcome outcome,
+        string reasonCode,
+        DurableWorkerRetryability retryability,
+        DurableWorkerCorrelation correlation,
+        TPayload? payload = default,
+        IReadOnlyDictionary<string, string>? metadata = null,
+        DurableWorkerDiagnostic? diagnostic = null)
+        : this(outcome, reasonCode, retryability, correlation, payload, metadata, diagnostic, executionIdentity: null, initialize: true)
+    {
+    }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="DurableWorkerEnvelope{TPayload}"/> class.
     /// </summary>
     /// <param name="outcome">Defined observable worker outcome.</param>
@@ -18,6 +44,7 @@ public sealed record DurableWorkerEnvelope<TPayload>
     /// <param name="retryability">Defined retry classification for the outcome.</param>
     /// <param name="correlation">Correlation identifiers for the operation.</param>
     /// <param name="payload">Optional typed payload associated with the outcome.</param>
+    /// <param name="executionIdentity">Required native-runtime execution and fencing identity.</param>
     /// <param name="metadata">Optional safe metadata values.</param>
     /// <param name="diagnostic">Optional safe diagnostic details.</param>
     /// <exception cref="ArgumentException">Thrown when required text or metadata is invalid.</exception>
@@ -29,10 +56,35 @@ public sealed record DurableWorkerEnvelope<TPayload>
         string reasonCode,
         DurableWorkerRetryability retryability,
         DurableWorkerCorrelation correlation,
-        TPayload? payload = default,
+        TPayload? payload,
+        DurableWorkerExecutionIdentity executionIdentity,
         IReadOnlyDictionary<string, string>? metadata = null,
         DurableWorkerDiagnostic? diagnostic = null)
+        : this(
+            outcome,
+            reasonCode,
+            retryability,
+            correlation,
+            payload,
+            metadata,
+            diagnostic,
+            executionIdentity ?? throw new ArgumentNullException(nameof(executionIdentity)),
+            initialize: true)
     {
+    }
+
+    private DurableWorkerEnvelope(
+        DurableWorkerProjectionOutcome outcome,
+        string reasonCode,
+        DurableWorkerRetryability retryability,
+        DurableWorkerCorrelation correlation,
+        TPayload? payload,
+        IReadOnlyDictionary<string, string>? metadata,
+        DurableWorkerDiagnostic? diagnostic,
+        DurableWorkerExecutionIdentity? executionIdentity,
+        bool initialize)
+    {
+        _ = initialize;
         if (!Enum.IsDefined(outcome))
         {
             throw new ArgumentOutOfRangeException(nameof(outcome), "Durable worker outcome must be defined.");
@@ -50,6 +102,7 @@ public sealed record DurableWorkerEnvelope<TPayload>
         Payload = payload;
         Metadata = DurableWorkerMetadataSafety.CopySafe(metadata);
         Diagnostic = diagnostic;
+        ExecutionIdentity = executionIdentity;
     }
 
     /// <summary>
@@ -86,4 +139,13 @@ public sealed record DurableWorkerEnvelope<TPayload>
     /// Gets optional sanitized diagnostic details.
     /// </summary>
     public DurableWorkerDiagnostic? Diagnostic { get; }
+
+    /// <summary>
+    /// Gets the native durable execution identity when the envelope was created by a fencing-aware runtime.
+    /// </summary>
+    /// <remarks>
+    /// Legacy adapters may leave this value <see langword="null"/>. Native runtimes must populate it before invoking a
+    /// provider executor; projection repair must not use it as authority to repeat an external effect.
+    /// </remarks>
+    public DurableWorkerExecutionIdentity? ExecutionIdentity { get; }
 }
