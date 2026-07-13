@@ -229,6 +229,32 @@ public sealed class PwaOptionsTests
         Assert.Null(exception);
     }
 
+    [Fact]
+    public void ThrowIfInvalid_AcceptsMultipleIconSizeTokens()
+    {
+        var options = CreateValidOptions();
+        options.Icons.Clear();
+        options.Icons.Add(new PwaIcon { Source = "/icons/app.png", Sizes = "192x192 512x512", Type = "image/png" });
+
+        var exception = Record.Exception(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Null(exception);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("192x192 nope")]
+    public void ThrowIfInvalid_RejectsMissingOrMalformedIconSizeTokens(string sizes)
+    {
+        var options = CreateValidOptions();
+        options.Icons.Clear();
+        options.Icons.Add(new PwaIcon { Source = "/icons/app.png", Sizes = sizes, Type = "image/png" });
+
+        var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Contains("ASPWA013", exception.Message, StringComparison.Ordinal);
+    }
+
     internal static PwaOptions CreateValidOptions()
     {
         var options = new PwaOptions

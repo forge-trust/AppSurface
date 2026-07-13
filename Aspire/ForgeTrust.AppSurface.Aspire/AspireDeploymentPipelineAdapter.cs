@@ -7,8 +7,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ForgeTrust.AppSurface.Aspire;
 
-#pragma warning disable ASPIREPIPELINES001 // Aspire 13.4.3 pipeline API is intentionally isolated in this adapter.
-#pragma warning disable ASPIREPIPELINES004 // Aspire 13.4.3 output service is intentionally isolated in this adapter.
+#pragma warning disable ASPIREPIPELINES001 // Aspire 13.4.4 pipeline API is intentionally isolated in this adapter.
+#pragma warning disable ASPIREPIPELINES004 // Aspire 13.4.4 output service is intentionally isolated in this adapter.
 
 /// <summary>Represents one artifact-only deployment target in the evaluated Aspire resource graph.</summary>
 /// <remarks>The resource has no runtime lifetime or endpoint. It carries provider inputs and a per-pipeline render cache.</remarks>
@@ -82,7 +82,7 @@ internal sealed record AppSurfaceMigrationJobAnnotation(
     string ConfigurationKey,
     bool RequirePrivateNetwork) : IResourceAnnotation;
 
-/// <summary>Isolates the repository-pinned Aspire 13.4.3 experimental deployment-pipeline API.</summary>
+/// <summary>Isolates the repository-pinned Aspire 13.4.4 experimental deployment-pipeline API.</summary>
 internal static class AspireDeploymentPipelineAdapter
 {
     /// <summary>Gets the artifact-only step required by Aspire publish.</summary>

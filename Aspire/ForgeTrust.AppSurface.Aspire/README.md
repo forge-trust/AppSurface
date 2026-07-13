@@ -127,7 +127,7 @@ Aspire AppHost projects treat most `ProjectReference` entries as resources and g
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
-  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.3" />
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.4" />
   <ItemGroup>
     <ProjectReference Include="../../Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="../web-app/WebAppExample.csproj" AspireProjectMetadataTypeName="WebAppExample" />
@@ -151,7 +151,7 @@ For example, `aspire run --apphost examples/aspire-apphost/AspireAppHostExample.
 
 Deployment AppHosts must preserve Aspire's original arguments. Call `DistributedApplication.CreateBuilder(args)` directly; do not route `aspire publish` or `aspire do` through the local `AspireProfile`/CliFx command path.
 
-This preview supports the coordinated Aspire AppHost SDK, `Aspire.Hosting`, and Aspire CLI **13.4.3** patch line. The deployment-pipeline APIs are experimental and isolated inside the package adapter. Use the matching CLI for publish and named-step proof; advancing Aspire requires a package release with compile, packed-consumer, `--list-steps`, publish, and targeted `do` verification before consumers upgrade.
+This preview supports the coordinated Aspire AppHost SDK, `Aspire.Hosting`, and Aspire CLI **13.4.4** patch line. The deployment-pipeline APIs are experimental and isolated inside the package adapter. Use the matching CLI for publish and named-step proof; advancing Aspire requires a package release with compile, packed-consumer, `--list-steps`, publish, and targeted `do` verification before consumers upgrade.
 
 ```csharp
 var builder = DistributedApplication.CreateBuilder(args);

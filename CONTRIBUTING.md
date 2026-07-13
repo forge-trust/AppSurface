@@ -53,12 +53,23 @@ Literal expected paths and tests intentionally exercising `Path.Join` or `Path.C
 - Update [`releases/unreleased.md`](./releases/unreleased.md) whenever a pull request changes behavior, usage guidance, release policy, examples, or docs consumers would care about in release notes.
 - Maintainers may apply the `no-unreleased-entry` label only for changes that do not belong in the public release story, such as repo administration or workflow-only cleanup.
 
+## Writing documentation
+
+- Link named concepts to their canonical documentation instead of only mentioning them. When prose names a package, guide, example, workflow, policy, diagnostic family, CLI command, or cross-package concept, add a nearby link to the best start-here or reference page unless the same paragraph already defines it completely.
+- Prefer useful cross-links over link noise. Link the first meaningful mention in a section, and link again only when the reader is likely to need the destination without scrolling back.
+- Use links to connect concepts, not just files. For example, a release note that mentions [PWA install support](./Web/ForgeTrust.AppSurface.Web/Docs/pwa-install.md) should link to the Web package PWA guide and [PWA example](./examples/web-pwa-install/README.md); a note that mentions [RazorWire auth projection](./Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md) should link to the RazorWire auth package README or [auth proof example](./examples/auth-web-razorwire-proof/README.md).
+- Keep link targets durable. Prefer package READMEs, guides, examples, release notes, and public docs routes over transient PRs, local scratch notes, or maintainer-only recovery material.
+
 ## Writing release notes
 
 - Start from the public [release hub](./releases/README.md).
 - Keep [`CHANGELOG.md`](./CHANGELOG.md) compact. It is the ledger, not the full story.
 - Put detailed adoption notes in the current unreleased page or a tagged release page under [`releases/`](./releases/README.md).
 - Capture breaking or behavior-changing updates in the unreleased page even before `v0.1.0`. Finalized migration guidance moves into the tagged release page when the version ships.
+- Write for package consumers before maintainers. Start each notable entry with the adopter outcome, the package or app shape it applies to, and the next action a reader can take.
+- Link every substantial feature, named concept, workflow, diagnostic family, or package boundary to its best start-here material, such as the package README, guide, example, or CLI proof. Do not leave readers to search the repository after a release note names a capability.
+- Define internal phrases in plain language before using them as labels. Prefer "[RazorWire can render allowed, forbidden, and anonymous UI from your existing ASP.NET Core policies](./Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md)" over opaque shorthand such as "passive auth projection" by itself.
+- Keep maintainer evidence, warning IDs, diagnostics, and generated-artifact details after the consumer path unless those details change adoption risk.
 
 ## Maintainer workflow
 
@@ -75,3 +86,6 @@ dotnet build
 dotnet test --no-build
 ./scripts/coverage-solution.sh
 ```
+
+The default script runs both merged coverage and the repository thresholds. It compares local patch
+coverage with `origin/main`; set `COVERAGE_GATE_DIFF_BASE=` when only aggregate coverage is wanted.

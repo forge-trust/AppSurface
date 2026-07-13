@@ -1,7 +1,9 @@
+using Microsoft.Extensions.Hosting;
+
 namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 
 /// <summary>
-/// Options for AppSurface development-only authentication.
+/// Options for AppSurface Development-by-default authentication with explicit local/proof environment opt-in.
 /// </summary>
 public sealed class AppSurfaceDevAuthOptions
 {
@@ -47,6 +49,19 @@ public sealed class AppSurfaceDevAuthOptions
     /// Gets or sets a value indicating whether control endpoints reject non-loopback requests.
     /// </summary>
     public bool RequireLoopbackControlRequests { get; set; } = true;
+
+    /// <summary>
+    /// Gets environment names where DevAuth is allowed to activate.
+    /// </summary>
+    /// <remarks>
+    /// The set defaults to <see cref="Environments.Development"/> and compares names case-insensitively. DevAuth trims
+    /// names when checking the active host environment. Add only local or proof environments that should expose fake
+    /// personas; this allow-list is activation policy for fake auth, not a production safety boundary.
+    /// </remarks>
+    public ISet<string> AllowedEnvironmentNames { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        Environments.Development,
+    };
 
     /// <summary>
     /// Gets claim types that may appear in the local-only control page claims preview.

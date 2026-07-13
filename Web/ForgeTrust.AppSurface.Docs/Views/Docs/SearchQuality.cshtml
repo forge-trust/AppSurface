@@ -8,7 +8,7 @@
 
 <div class="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
     <header class="max-w-3xl">
-        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#14b8a6]">AppSurface Docs</p>
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] docs-token-text-accent">AppSurface Docs</p>
         <div class="mt-3 flex flex-wrap items-center gap-3">
             <h1 class="docs-gradient-title text-3xl font-semibold tracking-tight sm:text-4xl">Search Quality</h1>
             <span class="rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] @collectionClass">
@@ -22,46 +22,46 @@
     </header>
 
     <section class="mt-6 grid gap-3 text-xs text-slate-300 sm:grid-cols-2 lg:grid-cols-4" aria-label="Metrics mode">
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-3">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-3">
             <span class="block font-semibold uppercase tracking-[0.14em] text-slate-500">Browser Collector</span>
             <span class="mt-1 block text-sm text-slate-100">@(Model.Mode.BrowserCollectorEnabled ? "Enabled" : "Disabled")</span>
         </div>
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-3">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-3">
             <span class="block font-semibold uppercase tracking-[0.14em] text-slate-500">Hosted Review</span>
             <span class="mt-1 block text-sm text-slate-100">@(Model.Mode.HostedReviewEnabled ? "Enabled" : "Disabled")</span>
         </div>
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-3">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-3">
             <span class="block font-semibold uppercase tracking-[0.14em] text-slate-500">Raw Queries</span>
             <span class="mt-1 block text-sm text-slate-100">Disabled</span>
         </div>
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-3">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-3">
             <span class="block font-semibold uppercase tracking-[0.14em] text-slate-500">Window</span>
             <span class="mt-1 block text-sm text-slate-100">@Model.TotalAcceptedEvents / @Model.WindowCapacity events</span>
         </div>
     </section>
 
     <section class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-6" aria-label="Search quality summary">
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Searches</p>
             <p class="mt-2 text-3xl font-semibold text-white">@Model.SubmittedSearches</p>
         </div>
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Zero Results</p>
             <p class="mt-2 text-3xl font-semibold text-rose-100">@Model.ZeroResultSearches</p>
         </div>
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Selections</p>
             <p class="mt-2 text-3xl font-semibold text-emerald-100">@Model.ResultSelections</p>
         </div>
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Recovery</p>
             <p class="mt-2 text-3xl font-semibold text-sky-100">@Model.RecoverySelections</p>
         </div>
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Filters</p>
             <p class="mt-2 text-3xl font-semibold text-slate-100">@Model.FilterChanges</p>
         </div>
-        <div class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+        <div class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Feedback</p>
             <p class="mt-2 text-3xl font-semibold text-teal-100">@Model.FeedbackSubmissions</p>
         </div>
@@ -69,7 +69,7 @@
 
     <section class="mt-8" aria-labelledby="friction-heading">
         <h2 id="friction-heading" class="text-xl font-semibold text-white">Friction Buckets</h2>
-        <div class="mt-4 overflow-hidden rounded-lg border border-[#1b2a43]">
+        <div class="mt-4 overflow-hidden rounded-lg border docs-token-border-muted">
             <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
                 <thead class="bg-slate-950/70 text-xs uppercase tracking-[0.16em] text-slate-500">
                     <tr>
@@ -97,7 +97,7 @@
         <div class="mt-4 grid gap-3 sm:grid-cols-2">
             @foreach (var bucket in Model.FeedbackBuckets)
             {
-                <article class="rounded-lg border border-[#1b2a43] bg-[#050b17]/45 p-4">
+                <article class="rounded-lg border docs-token-border-muted docs-token-bg-panel-faint p-4">
                     <p class="text-sm font-semibold text-white">@bucket.Name</p>
                     <p class="mt-2 text-3xl font-semibold text-slate-100">@bucket.Count</p>
                     <p class="mt-3 text-sm leading-6 text-slate-400">@bucket.SuggestedAction</p>

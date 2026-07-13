@@ -98,6 +98,7 @@ public sealed class PwaEndpointTests
         Assert.Contains("&lt;link rel=&quot;icon&quot; href=&quot;/icons/app-192.png&quot;", html, StringComparison.Ordinal);
         Assert.Contains("\"enabled\": true", json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("\"offlineEnabled\": false", json, StringComparison.Ordinal);
+        Assert.Contains("\"configuredServiceWorkerPath\": \"/service-worker.js\"", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -283,6 +284,7 @@ public sealed class PwaEndpointTests
         using var diagnosticsResponse = await app.Client.GetAsync("/tenant/_appsurface/pwa/status.json");
         var diagnosticsJson = await diagnosticsResponse.Content.ReadAsStringAsync();
         Assert.Contains("\"manifestPath\": \"/tenant/manifest.webmanifest\"", diagnosticsJson, StringComparison.Ordinal);
+        Assert.Contains("\"configuredServiceWorkerPath\": \"/tenant/service-worker.js\"", diagnosticsJson, StringComparison.Ordinal);
         Assert.Contains("\"serviceWorkerPath\": \"/tenant/service-worker.js\"", diagnosticsJson, StringComparison.Ordinal);
         Assert.Contains("\"offlineFallbackPath\": \"/tenant/offline.html\"", diagnosticsJson, StringComparison.Ordinal);
 

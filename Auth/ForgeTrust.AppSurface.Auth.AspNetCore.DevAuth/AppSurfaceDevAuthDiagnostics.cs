@@ -11,7 +11,7 @@ public static class AppSurfaceDevAuthDiagnostics
     public const string DiagnosticCodeKey = "appsurface.devauth.diagnostic_code";
 
     /// <summary>
-    /// DevAuth was enabled outside the Development environment.
+    /// DevAuth was enabled outside its configured environment allow-list.
     /// </summary>
     public const string NonDevelopmentEnvironment = "ASDEV001";
 

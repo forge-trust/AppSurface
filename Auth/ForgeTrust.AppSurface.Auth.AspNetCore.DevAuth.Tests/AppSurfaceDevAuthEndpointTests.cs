@@ -58,7 +58,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
 
         var html = await ReadBodyAsync(context);
 
-        Assert.Contains("AppSurface Dev Auth [DEVELOPMENT ONLY]", html, StringComparison.Ordinal);
+        Assert.Contains("AppSurface Dev Auth [FAKE LOCAL AUTH]", html, StringComparison.Ordinal);
         Assert.Contains("data-appsurface-dev-auth=\"control-page\"", html, StringComparison.Ordinal);
         Assert.Contains("Select persona", html, StringComparison.Ordinal);
         Assert.Contains("Clear persona", html, StringComparison.Ordinal);
@@ -85,9 +85,112 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains("data-appsurface-dev-auth=\"marker\"", html, StringComparison.Ordinal);
         Assert.Contains("DEV AUTH", html, StringComparison.Ordinal);
         Assert.Contains("Anonymous", html, StringComparison.Ordinal);
+        Assert.Contains("<details class=\"appsurface-dev-auth-marker__details\">", html, StringComparison.Ordinal);
+        Assert.Contains("<summary class=\"appsurface-dev-auth-marker__summary\">", html, StringComparison.Ordinal);
         Assert.Contains("/_appsurface/dev-auth/select/admin?returnUrl=%2Fdashboard%3Ftab%3Dauth", html, StringComparison.Ordinal);
         Assert.Contains("Open persona lab", html, StringComparison.Ordinal);
         Assert.Contains("Status JSON", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Marker_InUnallowedEnvironment_ReturnsEmpty()
+    {
+        using var app = BuildApp();
+        var context = CreateContext(app.Services);
+
+        var html = AppSurfaceDevAuthMarker.Render(
+            context,
+            new TestHostEnvironment("Staging"),
+            app.Services.GetRequiredService<IOptions<AppSurfaceDevAuthOptions>>(),
+            app.Services.GetRequiredService<IDataProtectionProvider>());
+
+        Assert.Equal(string.Empty, html);
+    }
+
+    [Fact]
+    public void Marker_InConfiguredStaging_RendersPersistentOverlay()
+    {
+        using var app = BuildApp();
+        var context = CreateContext(app.Services);
+        var options = CreateOptions(devAuthOptions =>
+        {
+            devAuthOptions.AllowedEnvironmentNames.Add("Staging");
+            AddDefaultPersonas(devAuthOptions);
+        });
+
+        var html = AppSurfaceDevAuthMarker.Render(
+            context,
+            new TestHostEnvironment("Staging"),
+            Options.Create(options),
+            app.Services.GetRequiredService<IDataProtectionProvider>());
+
+        Assert.Contains("appsurface-dev-auth-marker", html, StringComparison.Ordinal);
+        Assert.Contains("DEV AUTH", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StatusEndpoint_InUnallowedEnvironment_ReturnsDisabledContract()
+    {
+        await using var app = BuildApp();
+        using var services = BuildEndpointServices("Staging", AddDefaultPersonas);
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/status", HttpMethods.Get);
+        var context = CreateContext(services);
+
+        await endpoint.RequestDelegate!(context);
+
+        var json = await ReadBodyAsync(context);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        Assert.False(root.GetProperty("enabled").GetBoolean());
+        Assert.Equal("Staging", root.GetProperty("environment").GetString());
+        Assert.Equal("no-store, no-cache", context.Response.Headers.CacheControl);
+    }
+
+    [Fact]
+    public async Task ControlPage_InUnallowedEnvironment_ReturnsNotFoundWithoutControls()
+    {
+        await using var app = BuildApp();
+        using var services = BuildEndpointServices("Staging", AddDefaultPersonas);
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/", HttpMethods.Get);
+        var context = CreateContext(services);
+
+        await endpoint.RequestDelegate!(context);
+
+        var html = await ReadBodyAsync(context);
+
+        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+        Assert.DoesNotContain("Select persona", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppSurface Dev Auth", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SelectPersona_InUnallowedEnvironment_ReturnsNotFoundWithoutCookieMutation()
+    {
+        await using var app = BuildApp();
+        using var services = BuildEndpointServices("Staging", AddDefaultPersonas);
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var context = CreateContext(services);
+        context.Request.RouteValues["personaId"] = "admin";
+
+        await endpoint.RequestDelegate!(context);
+
+        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+        Assert.DoesNotContain(AppSurfaceDevAuthDefaults.CookieName, context.Response.Headers.SetCookie.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ClearPersona_InUnallowedEnvironment_ReturnsNotFoundWithoutCookieMutation()
+    {
+        await using var app = BuildApp();
+        using var services = BuildEndpointServices("Staging", AddDefaultPersonas);
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/clear", HttpMethods.Post);
+        var context = CreateContext(services);
+
+        await endpoint.RequestDelegate!(context);
+
+        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+        Assert.DoesNotContain(AppSurfaceDevAuthDefaults.CookieName, context.Response.Headers.SetCookie.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -131,6 +234,26 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains("class=\"demo-dev-auth theme-local\"", html, StringComparison.Ordinal);
         Assert.Contains("demo-dev-auth__button", html, StringComparison.Ordinal);
         Assert.DoesNotContain("<style>", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Marker_WithStartExpanded_RendersOpenDisclosure()
+    {
+        using var app = BuildApp();
+        var context = CreateContext(app.Services);
+
+        var html = AppSurfaceDevAuthMarker.Render(
+            context,
+            app.Services.GetRequiredService<IHostEnvironment>(),
+            app.Services.GetRequiredService<IOptions<AppSurfaceDevAuthOptions>>(),
+            app.Services.GetRequiredService<IDataProtectionProvider>(),
+            options =>
+            {
+                options.StartExpanded = true;
+            });
+
+        Assert.Contains("<details class=\"appsurface-dev-auth-marker__details\" open>", html, StringComparison.Ordinal);
+        Assert.Contains("Open persona lab", html, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -790,6 +913,25 @@ public sealed class AppSurfaceDevAuthEndpointTests
                 .DisplayName("Local Viewer")
                 .Subject("viewer-1")
                 .Claim("role", "viewer"));
+    }
+
+    private static AppSurfaceDevAuthOptions CreateOptions(Action<AppSurfaceDevAuthOptions> configure)
+    {
+        var options = new AppSurfaceDevAuthOptions();
+        configure(options);
+        return options;
+    }
+
+    private static ServiceProvider BuildEndpointServices(
+        string environmentName,
+        Action<AppSurfaceDevAuthOptions> configureDevAuth)
+    {
+        var services = new ServiceCollection();
+        services.AddDataProtection();
+        services.AddLogging();
+        services.AddSingleton<IHostEnvironment>(new TestHostEnvironment(environmentName));
+        services.AddSingleton<IOptions<AppSurfaceDevAuthOptions>>(Options.Create(CreateOptions(configureDevAuth)));
+        return services.BuildServiceProvider();
     }
 
     private static RouteEndpoint FindEndpoint(WebApplication app, string pattern, string method)

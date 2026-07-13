@@ -45,6 +45,92 @@ public sealed class AppSurfaceDevAuthRegistrationTests
 
         Assert.Equal(AppSurfaceDevAuthDiagnostics.NonDevelopmentEnvironment, ex.DiagnosticCode);
         Assert.Contains("ASDEV001 Problem:", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("not enabled for environment 'Production'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("AllowedEnvironmentNames", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDevAuth_WithConfiguredStaging_AllowsRegistration()
+    {
+        var services = new ServiceCollection();
+
+        services.AddAppSurfaceDevAuth(new TestHostEnvironment("Staging"), options =>
+        {
+            options.AllowedEnvironmentNames.Add("Staging");
+            AddAdmin(options);
+        });
+    }
+
+    [Fact]
+    public void AddAppSurfaceDevAuth_ChecksEnvironmentAfterConfigure()
+    {
+        var services = new ServiceCollection();
+        var configured = false;
+
+        services.AddAppSurfaceDevAuth(new TestHostEnvironment("Staging"), options =>
+        {
+            configured = true;
+            options.AllowedEnvironmentNames.Add("Staging");
+            AddAdmin(options);
+        });
+
+        Assert.True(configured);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDevAuth_WithCaseInsensitiveConfiguredEnvironment_AllowsRegistration()
+    {
+        var services = new ServiceCollection();
+
+        services.AddAppSurfaceDevAuth(new TestHostEnvironment("Staging"), options =>
+        {
+            options.AllowedEnvironmentNames.Add("staging");
+            AddAdmin(options);
+        });
+    }
+
+    [Fact]
+    public void AddAppSurfaceDevAuth_WithTrimmedConfiguredEnvironment_AllowsRegistration()
+    {
+        var services = new ServiceCollection();
+
+        services.AddAppSurfaceDevAuth(new TestHostEnvironment("Staging"), options =>
+        {
+            options.AllowedEnvironmentNames.Add(" Staging ");
+            AddAdmin(options);
+        });
+    }
+
+    [Fact]
+    public void AddAppSurfaceDevAuth_WithEmptyAllowedEnvironmentNames_ThrowsArgumentException()
+    {
+        var services = new ServiceCollection();
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            services.AddAppSurfaceDevAuth(Development(), options =>
+            {
+                options.AllowedEnvironmentNames.Clear();
+                AddAdmin(options);
+            }));
+
+        Assert.Equal(nameof(AppSurfaceDevAuthOptions.AllowedEnvironmentNames), ex.ParamName);
+        Assert.Contains("AllowedEnvironmentNames", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDevAuth_WithBlankAllowedEnvironmentName_ThrowsArgumentException()
+    {
+        var services = new ServiceCollection();
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            services.AddAppSurfaceDevAuth(Development(), options =>
+            {
+                options.AllowedEnvironmentNames.Add(" ");
+                AddAdmin(options);
+            }));
+
+        Assert.Equal(nameof(AppSurfaceDevAuthOptions.AllowedEnvironmentNames), ex.ParamName);
+        Assert.Contains("AllowedEnvironmentNames", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -263,6 +349,51 @@ public sealed class AppSurfaceDevAuthRegistrationTests
 
         Assert.Equal(AppSurfaceDevAuthDiagnostics.NonDevelopmentEnvironment, ex.DiagnosticCode);
         Assert.Contains("ASDEV001 Problem:", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StartupValidator_WithConfiguredStaging_AllowsEnvironment()
+    {
+        var validator = new AppSurfaceDevAuthStartupValidator(
+            new AuthenticationSchemeProvider(Options.Create(new AuthenticationOptions())),
+            new TestHostEnvironment("Staging"),
+            Options.Create(new AuthenticationOptions()),
+            Options.Create(CreateOptions(options =>
+            {
+                options.AllowedEnvironmentNames.Add("Staging");
+                AddAdmin(options);
+            })));
+
+        await validator.StartAsync(CancellationToken.None);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StartupValidator_WithInvalidAllowedEnvironmentNames_ThrowsArgumentException(
+        bool clearAllowedEnvironmentNames)
+    {
+        var options = CreateOptions(AddAdmin);
+        if (clearAllowedEnvironmentNames)
+        {
+            options.AllowedEnvironmentNames.Clear();
+        }
+        else
+        {
+            options.AllowedEnvironmentNames.Add(" ");
+        }
+
+        var validator = new AppSurfaceDevAuthStartupValidator(
+            new AuthenticationSchemeProvider(Options.Create(new AuthenticationOptions())),
+            Development(),
+            Options.Create(new AuthenticationOptions()),
+            Options.Create(options));
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            validator.StartAsync(CancellationToken.None));
+
+        Assert.Equal(nameof(AppSurfaceDevAuthOptions.AllowedEnvironmentNames), ex.ParamName);
+        Assert.Contains("AllowedEnvironmentNames", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

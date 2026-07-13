@@ -34,7 +34,8 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
     /// Map this after building the app and before relying on the persona lab in a local proof host. The method validates
     /// the same materialized options used by the authentication handler, reserves the configured path prefix, and rejects
     /// existing endpoints whose route templates are equivalent to DevAuth control routes even when parameter names differ.
-    /// Control endpoints stay loopback-only by default and set no-store headers on every response.
+    /// Control endpoints stay loopback-only by default, honor <see cref="AppSurfaceDevAuthOptions.AllowedEnvironmentNames"/>,
+    /// and set no-store headers on every response.
     /// </remarks>
     public static IEndpointRouteBuilder MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)
     {
@@ -138,6 +139,11 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
     {
         SetNoStoreHeaders(httpContext);
         var status = BuildStatus(httpContext, environment, options.Value, dataProtectionProvider);
+        if (!status.Enabled)
+        {
+            return Results.NotFound();
+        }
+
         return Results.Content(RenderControlPage(status, options.Value), MediaTypeNames.Text.Html, Encoding.UTF8);
     }
 
@@ -161,6 +167,12 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
     {
         SetNoStoreHeaders(httpContext);
         var devAuthOptions = options.Value;
+        var environmentAllowed = AppSurfaceDevAuthEnvironmentPolicy.IsEnvironmentAllowed(environment, devAuthOptions);
+        if (!environmentAllowed)
+        {
+            return Results.NotFound();
+        }
+
         string normalized;
         try
         {
@@ -189,7 +201,7 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         }
 
         var status = new AppSurfaceDevAuthStatus(
-            Enabled: environment.IsDevelopment(),
+            Enabled: environmentAllowed,
             Environment: environment.EnvironmentName,
             Scheme: devAuthOptions.SchemeName,
             PathPrefix: devAuthOptions.PathPrefix,
@@ -218,6 +230,12 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
     {
         SetNoStoreHeaders(httpContext);
         var devAuthOptions = options.Value;
+        var environmentAllowed = AppSurfaceDevAuthEnvironmentPolicy.IsEnvironmentAllowed(environment, devAuthOptions);
+        if (!environmentAllowed)
+        {
+            return Results.NotFound();
+        }
+
         httpContext.Response.Cookies.Delete(
             devAuthOptions.CookieName,
             new CookieOptions
@@ -233,7 +251,7 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         }
 
         var status = new AppSurfaceDevAuthStatus(
-            Enabled: environment.IsDevelopment(),
+            Enabled: environmentAllowed,
             Environment: environment.EnvironmentName,
             Scheme: devAuthOptions.SchemeName,
             PathPrefix: devAuthOptions.PathPrefix,
@@ -292,7 +310,7 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         }
 
         return new AppSurfaceDevAuthStatus(
-            Enabled: environment.IsDevelopment(),
+            Enabled: AppSurfaceDevAuthEnvironmentPolicy.IsEnvironmentAllowed(environment, options),
             Environment: environment.EnvironmentName,
             Scheme: options.SchemeName,
             PathPrefix: options.PathPrefix,
@@ -319,9 +337,9 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         builder.AppendLine("</style>");
         builder.AppendLine("</head>");
         builder.AppendLine($"<body><main {AppSurfaceDevAuthStaticExportMarkers.MarkerAttributeName}=\"control-page\">");
-        builder.AppendLine("<section class=\"danger\" aria-label=\"Development only warning\">");
-        builder.AppendLine("<h1>AppSurface Dev Auth [DEVELOPMENT ONLY]</h1>");
-        builder.AppendLine("<p>This page is local development tooling. Do not enable it in deployed environments.</p>");
+        builder.AppendLine("<section class=\"danger\" aria-label=\"Fake local auth warning\">");
+        builder.AppendLine("<h1>AppSurface Dev Auth [FAKE LOCAL AUTH]</h1>");
+        builder.AppendLine("<p>This page is local/proof tooling. Do not use it as production authentication.</p>");
         builder.AppendLine("</section>");
         builder.AppendLine("<section class=\"grid\" aria-label=\"Current DevAuth state\">");
         builder.AppendLine($"<div class=\"panel\"><strong>Environment</strong><br>{html.Encode(status.Environment)}</div>");

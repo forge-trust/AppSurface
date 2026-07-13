@@ -5,7 +5,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/unreleased.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 10
     use_when: Install this directly only when you are authoring reusable AppSurface modules or host integrations instead of starting from a web, console, or Aspire package.
     includes: Core module abstractions, dependency graph orchestration, AppSurfaceStartup, and StartupContext.
@@ -17,7 +17,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 20
     use_when: Add this when your AppSurface modules need strongly typed configuration primitives, source-aware audit reports, or sanitized config-diff support instead of ad hoc configuration lookups.
     includes: AppSurfaceConfigModule, typed config objects, configuration providers, source-aware audit reports, sanitized audit diff helpers, and explicit configuration access patterns.
@@ -31,7 +31,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 25
     use_when: Add this after Config when a solo or hobbyist AppSurface app needs local development secrets before adopting a remote vault.
     includes: AppSurfaceLocalSecretsModule, OS-backed local secret store adapters, trusted Linux `secret-tool` resolution, fail-closed posture modes, Unix mode-bit-hardened file fallback for deterministic examples/tests, local secret identity normalization, structured source diagnostics, test seams, and the `appsurface secrets` workflow.
@@ -49,7 +49,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 26
     use_when: Add this after Config when an AppSurface app running on Google Cloud should resolve explicitly mapped configuration secrets from Google Secret Manager while keeping environment variables as the emergency override.
     includes: AppSurfaceGoogleSecretManagerModule, explicit logical-key to Secret Manager mappings, optional scoped convention resolver, fail-closed terminal diagnostics for claimed keys, Google client test seam, source-aware config audit integration, and UTF-8 text conversion through AppSurface Config.
@@ -67,7 +67,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 30
     use_when: Add this when your modules need lightweight in-process memoization and cache policy primitives.
     includes: AppSurfaceCachingModule, IMemo or Memo helpers, and cache policy primitives on top of Microsoft.Extensions.Caching.Memory.
@@ -81,7 +81,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 35
     use_when: Add this when authoring AppSurface modules or host integrations that need passive cross-surface auth vocabulary or durable app-user mapping contracts without depending on ASP.NET Core.
     includes: AppSurfaceAuthModule, AppSurfaceAuthOptions, neutral user/session/context contracts, auth outcome and reason results, durable external-subject to app-user-id mapping contracts, passive login/logout prompts, passive audit event descriptions, and reserved metadata keys.
@@ -96,7 +96,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 36
     use_when: Add this in an ASP.NET Core host that already owns authentication and authorization when AppSurface modules need mapped request auth context, named host-policy results, or Minimal API endpoints with AppSurface-shaped auth failure responses.
     includes: AppSurfaceAspNetCoreAuthModule, AddAppSurfaceAspNetCoreAuth registration, AddAppSurfacePolicy policy naming, RequireSurfacePolicy Minimal API endpoint filters with fallback-policy opt-out metadata, ASP.NET Core request auth context mapping, named host-policy evaluation, AppSurfaceAuthResult mapping, ProblemDetails auth failure responses, and safe setup diagnostics.
@@ -111,13 +111,13 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 37
-    use_when: Add this in Development-only ASP.NET Core hosts when package consumers need selectable fake personas, a visible local control page, and AppSurface policy proof without configuring an external identity provider.
-    includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, MapAppSurfaceDevAuth control endpoints, AppSurfaceDevAuthMarker embeddable state overlay, seeded personas, protected persona cookie, loopback-only status JSON, startup safety diagnostics, and ASDEV diagnostic codes.
+    use_when: Add this in Development-by-default ASP.NET Core hosts or explicit local/proof environments when package consumers need selectable fake personas, a visible local control page, and AppSurface policy proof without configuring an external identity provider.
+    includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, explicit allowed environment names, MapAppSurfaceDevAuth control endpoints, AppSurfaceDevAuthMarker embeddable state overlay, seeded personas, protected persona cookie, loopback-only status JSON, startup safety diagnostics, and ASDEV diagnostic codes.
     does_not_include: Production authentication, OIDC, JWT validation, ASP.NET Identity, password handling, durable app-user mapping, user stores, tenant authority, audit sinks, deployment auth, automatic host HTML injection, RazorWire auth UI components, or Auth.Testing integration-test assertions.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts that need fake local personas to prove AppSurface policy results; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep DevAuth separate from Auth.Testing.
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts or explicit local/proof environments that need fake local personas to prove AppSurface policy results; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep DevAuth separate from Auth.Testing.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
   - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj
@@ -126,7 +126,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 38
     use_when: Add this in an ASP.NET Core web host that already chose an OpenID Connect provider and wants AppSurface-named cookie/OIDC schemes with safe defaults and diagnostics.
     includes: AddAppSurfaceOidcAuth registration, AppSurfaceOidcAuthOptions, named cookie and OpenID Connect schemes, authorization-code defaults, SaveTokens false by default, local-only passive login/logout prompt helpers, OIDC subject mapping handoff, event chaining, and stable safe diagnostic codes.
@@ -136,13 +136,28 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
       - ForgeTrust.AppSurface.Auth
+  - project: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 38
+    use_when: Add this in an Aspire AppHost when package consumers need a real local Keycloak-backed AppSurface OIDC proof without making runtime web apps reference Keycloak or Aspire hosting packages.
+    includes: AddAppSurfaceKeycloak AppHost extension, deterministic local realm/client/user import generation, secret-safe OIDC configuration projection, fixed-port preflight diagnostics, multi-signal readiness probe, disposable-data default, persistent-data opt-in, and ASKEYC diagnostics.
+    does_not_include: Runtime web authentication registration, identity-provider hosting in web apps, production Keycloak administration, social IdP setup, confidential-client secret lifecycle, provider SDK abstractions, tenant mapping, user provisioning, durable app-user mapping, token storage, or runtime dependency on Keycloak packages.
+    start_here_path: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` in AppHost/dev/test projects only when a real local OIDC provider proof should pair with `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc`; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep it separate from DevAuth, OIDC registration, and Auth.Testing.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Aspire
   - project: Auth/ForgeTrust.AppSurface.Auth.Testing/ForgeTrust.AppSurface.Auth.Testing.csproj
     classification: public
     publish_decision: publish
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 38
     use_when: Add this in ASP.NET Core integration tests when a consumer needs deterministic AppSurface auth personas, policy outcomes, and ProblemDetails assertions without writing a one-off fake authentication handler.
     includes: AddAppSurfaceTestAuth registration, WebApplicationFactory WithAppSurfaceTestAuth setup, persona registry, CreateAppSurfaceClient persona clients, request-level persona selection, explicit scheme modes, production-environment guard, stable test diagnostics, and framework-neutral AppSurface auth result and ProblemDetails assertions.
@@ -158,7 +173,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 39
     use_when: Add this when your AppSurface modules or host integrations need product-intelligence event contracts before choosing an analytics vendor.
     includes: AppSurfaceProductIntelligenceModule, IAppSurfaceProductIntelligence, AppSurfaceProductEvent, typed product-event registry, validation, sanitization, lifecycle states, selected experimental event allowlists, sensitivity classes, and host-owned sink contracts.
@@ -173,7 +188,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 40
     use_when: Add this when an AppSurface app should publish operational logs, traces, and metrics to Aspire or another OTLP collector.
     includes: AppSurfaceObservabilityModule, OpenTelemetry logging/tracing/metrics registration, endpoint-driven OTLP exporter setup, service identity resource metadata, source and meter naming constants, and safe no-endpoint diagnostics.
@@ -188,7 +203,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 41
     use_when: Add this when your app or module needs typed input/output port flow definitions, generated-case authoring, inferred graph mapping, and local runner tests before durable hosting.
     includes: AppSurfaceFlowModule, FlowNodeOutcome discriminated outcome records, generated Flow authoring attributes and analyzer, IFlowTransformerNode, typed port graph inference, IFlowNode, FlowDefinition, FlowGraphBuilder, flow definition registry, and the in-memory runner.
@@ -213,7 +228,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 43
     use_when: Add this after Flow when the same typed definitions need Durable Task persistence, replay, timers, and authorized resume events.
     includes: AppSurfaceFlowDurableTaskModule, durable flow runner and client services, resume-event authorization contract, timeout and late-event mapping, retry policy decisions, and context serialization validation.
@@ -231,7 +246,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/unreleased.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 44
     use_when: Add this when an app or reusable module needs host-neutral durable worker contracts, explicit claim/completion/projection-repair outcomes, and privacy-safe repair diagnostics before choosing a runtime adapter.
     includes: AppSurfaceWorkersModule, durable worker projection contract, executor contract, typed envelopes, outcome and retryability enums, correlation identifiers, privacy-safe diagnostics, safe metadata validation, and bounded projection repair requests.
@@ -246,7 +261,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/unreleased.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 45
     use_when: Add this after Workers and Flow.DurableTask when durable worker chains should map claim, completion, retry, wait, timeout, stale-signal, and projection-repair outcomes to Durable Task-facing decisions.
     includes: AppSurfaceWorkersDurableTaskModule, durable worker chain runner, worker decision kinds, typed Durable Task-facing decisions, wait/timeout/late-signal helpers, and executor/projection retry policy metadata.
@@ -266,7 +281,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 46
     use_when: Start here for CLI apps and worker-style entry points that should run through the AppSurface startup pipeline with CliFx.
     includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx source-generated command discovery through AppSurface modules.
@@ -281,7 +296,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 50
     use_when: Add this when you need Autofac-specific registrations or container features instead of the default .NET service collection.
     includes: AppSurfaceAutofacModule and Autofac-aware service registration hooks for AppSurface modules.
@@ -344,7 +359,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 70
     use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, health/readiness probes, conventional browser affordances, PWA install metadata, or authenticated config-audit diagnostics before layering on optional UI or docs packages.
     includes: Base ASP.NET Core hosting, default public `/health` and `/ready` ASP.NET Core health-check probes, pre-routing and endpoint-aware middleware composition, endpoint composition, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/service-worker endpoints, opt-in authenticated config audit diagnostics endpoint mapping, and the core AppSurface web module contract.
@@ -360,7 +375,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 80
     use_when: Add this after the base web package when you want generated OpenAPI endpoints for an AppSurface web app.
     includes: AddOpenApi wiring, endpoint explorer setup, endpoint mapping, and default OpenAPI document transforms.
@@ -377,7 +392,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 90
     use_when: Add this after OpenAPI when you want Scalar's interactive API reference UI served by your AppSurface web app.
     includes: Scalar UI endpoint mapping and the OpenAPI module dependency needed to feed it.
@@ -393,13 +408,13 @@ packages:
     product_family: razorwire
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 100
-    use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, islands, lifecycle-safe app-authored page behaviors, local declarative form interactions, or passive auth-result UI projection without moving to a separate frontend app.
-    includes: RazorWire modules, TagHelpers, stream helpers, result-bearing stream authorization, Razor fragment updates, hybrid island support, failed-form UX, page navigation, section copy, native behavior kit, stable form interactions for conditional targets and one-dimensional model-bound collections, and passive auth projection helpers over ForgeTrust.AppSurface.Auth results.
-    does_not_include: OpenAPI generation, API reference UI, Tailwind asset compilation, ASP.NET Core policy evaluation, authentication schemes, cookies, OIDC, ASP.NET Identity, challenge or forbid execution, redirects, DevAuth persona controls, endpoint authorization, or policy definitions.
+    use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, islands, lifecycle-safe app-authored root or page-lifecycle behaviors, local declarative form interactions, or passive auth-result UI projection without moving to a separate frontend app.
+    includes: RazorWire modules, TagHelpers, stream helpers, result-bearing stream authorization, Razor fragment updates, hybrid island support, failed-form UX, page navigation, section copy, Behavior Kit root and lifecycle registrations for app-authored progressive enhancement, stable form interactions for conditional targets and one-dimensional model-bound collections, and passive auth projection helpers over ForgeTrust.AppSurface.Auth results.
+    does_not_include: OpenAPI generation, API reference UI, Tailwind asset compilation, ASP.NET Core policy evaluation, authentication schemes, cookies, OIDC, ASP.NET Identity, challenge or forbid execution, redirects, DevAuth persona controls, endpoint authorization, policy definitions, or a general frontend framework.
     start_here_path: Web/ForgeTrust.RazorWire/README.md
-    recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, server-rendered islands, lifecycle-safe app-authored page behaviors, local declarative form interactions, or passive auth-result UI projection.
+    recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, server-rendered islands, lifecycle-safe app-authored root or page-lifecycle behaviors, local declarative form interactions, or passive auth-result UI projection.
     depends_on:
       - ForgeTrust.AppSurface.Auth
       - ForgeTrust.AppSurface.Intelligence
@@ -414,7 +429,7 @@ packages:
     product_family: razorwire
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/unreleased.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 101
     use_when: Add this in an ASP.NET Core host that already owns authentication and authorization when RazorWire auth projection helpers should render AppSurface-shaped host policy results.
     includes: AddRazorWireAspNetCoreAuth registration and an IRazorWireAuthResultProvider adapter over IAppSurfaceAspNetCorePolicyEvaluator.
@@ -433,7 +448,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 110
     use_when: Add this when you want Tailwind build and watch integration in an AppSurface web app without carrying a Node.js asset pipeline.
     includes: Tailwind standalone CLI integration, watch mode, generated CSS output, and transitive runtime package selection for supported build hosts.
@@ -467,7 +482,7 @@ packages:
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 200
-    note: Reusable docs package for harvesting repository docs into an AppSurface Docs UI. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps.
+    note: Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and the dark-family Theme Contract v1 for branded docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps.
     start_here_path: Web/ForgeTrust.AppSurface.Docs/README.md
     start_here_label: AppSurface Docs README
     expected_dependency_package_ids:
@@ -540,15 +555,15 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.1.md
+    release_notes_path: releases/v0.2.0-preview.2.md
     order: 120
     tool_command_name: appsurface
     use_when: Install this when you want repository-level AppSurface tooling from a global or local .NET tool command.
-    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, and the `appsurface secrets init`, `set`, `get`, `list --names-only`, `delete`, and `doctor` local-secret workflow.
+    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface pwa verify` install-readiness evidence for AppSurface Web apps, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, and the `appsurface secrets init`, `set`, `get`, `list --names-only`, `delete`, and `doctor` local-secret workflow.
     does_not_include: App runtime packages, hosted coverage dashboards, coverage uploads, coverage trend storage, grouped coverage runs, TRX/TUnit result parsing, RazorWire-specific export workflows, or a replacement for project package references.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README
-    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs` workflows or private `appsurface coverage run`, `coverage merge`, and `coverage gate` commands without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
+    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs` workflows, `appsurface pwa verify` install-readiness evidence, or private `appsurface coverage run`, `coverage merge`, and `coverage gate` commands without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
     classification: excluded
     publish_decision: do_not_publish

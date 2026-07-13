@@ -3,7 +3,7 @@ name: NuGet Prerelease Publish
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*-*'
 
 concurrency:
   group: nuget-prerelease-${{ github.ref_name }}

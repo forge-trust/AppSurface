@@ -93,11 +93,12 @@ jobs:
           pnpm --dir Web run assets:build
           pnpm --dir Web run assets:verify
 
-      - name: Run solution coverage
+      - name: Run solution coverage and gate
         env:
           BUILD_CONFIGURATION: Release
           BUILD_NO_RESTORE: true
           COVERAGE_PARALLELISM: 2
+          COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
         run: |
           ./scripts/coverage-solution.sh
 
@@ -124,27 +125,6 @@ jobs:
               echo "No slow-test diagnostics Markdown artifact was generated."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-
-      - name: Gate PR coverage with AppSurface CLI
-        if: ${{ github.event_name == 'pull_request' }}
-        run: |
-          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-restore -- \
-            coverage gate \
-            --coverage TestResults/coverage-merged/coverage.cobertura.xml \
-            --min-line 95 \
-            --min-branch 85 \
-            --diff-base HEAD^1 \
-            --min-patch-line 95 \
-            --min-patch-branch 85
-
-      - name: Gate baseline coverage with AppSurface CLI
-        if: ${{ github.event_name != 'pull_request' }}
-        run: |
-          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-restore -- \
-            coverage gate \
-            --coverage TestResults/coverage-merged/coverage.cobertura.xml \
-            --min-line 95 \
-            --min-branch 85
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
