@@ -29,6 +29,11 @@ public enum FlowRunStatus
     /// The flow handled a timeout branch.
     /// </summary>
     TimedOut = 3,
+
+    /// <summary>
+    /// The Flow is waiting for one typed external activity result.
+    /// </summary>
+    ActivityPending = 4,
 }
 
 /// <summary>
@@ -44,7 +49,8 @@ public sealed record FlowRunResult<TContext>
         string? waitingEventName,
         FlowTimeout? timeout,
         string? timedOutEventName,
-        FlowFault? fault)
+        FlowFault? fault,
+        IFlowActivityRequest<TContext>? activity)
     {
         Status = status;
         Context = context;
@@ -53,6 +59,7 @@ public sealed record FlowRunResult<TContext>
         Timeout = timeout;
         TimedOutEventName = timedOutEventName;
         Fault = fault;
+        Activity = activity;
     }
 
     /// <summary>
@@ -91,6 +98,11 @@ public sealed record FlowRunResult<TContext>
     public FlowFault? Fault { get; }
 
     /// <summary>
+    /// Gets the typed activity request when <see cref="Status"/> is <see cref="FlowRunStatus.ActivityPending"/>.
+    /// </summary>
+    public IFlowActivityRequest<TContext>? Activity { get; }
+
+    /// <summary>
     /// Creates a waiting result.
     /// </summary>
     /// <param name="nodeId">Node id where the flow paused.</param>
@@ -117,6 +129,7 @@ public sealed record FlowRunResult<TContext>
             FlowDefinition<object>.RequireText(eventName, nameof(eventName)),
             timeout,
             null,
+            null,
             null);
 
     /// <summary>
@@ -135,6 +148,7 @@ public sealed record FlowRunResult<TContext>
             FlowRunStatus.Completed,
             FlowNodeOutcome<TContext>.RequireContext(context),
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            null,
             null,
             null,
             null,
@@ -162,6 +176,7 @@ public sealed record FlowRunResult<TContext>
             null,
             null,
             FlowDefinition<object>.RequireText(eventName, nameof(eventName)),
+            null,
             null);
 
     /// <summary>
@@ -182,5 +197,34 @@ public sealed record FlowRunResult<TContext>
             null,
             null,
             null,
-            fault ?? throw new ArgumentNullException(nameof(fault)));
+            fault ?? throw new ArgumentNullException(nameof(fault)),
+            null);
+
+    /// <summary>
+    /// Creates a result that pauses local execution for one typed external activity.
+    /// </summary>
+    /// <param name="nodeId">Node that requested the activity.</param>
+    /// <param name="activity">Typed activity request and context.</param>
+    /// <returns>An activity-pending result.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="nodeId"/> is empty.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="activity"/> is null.</exception>
+    /// <remarks>
+    /// The in-memory runner does not execute activities. Execute the work through a test or host boundary, construct a
+    /// result with the request's typed callsite, and call <see cref="IFlowRunner{TContext}.ResumeActivityAsync"/>.
+    /// </remarks>
+    public static FlowRunResult<TContext> ActivityPending(
+        string nodeId,
+        IFlowActivityRequest<TContext> activity)
+    {
+        ArgumentNullException.ThrowIfNull(activity);
+        return new(
+            FlowRunStatus.ActivityPending,
+            activity.Context,
+            FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            null,
+            null,
+            null,
+            null,
+            activity);
+    }
 }

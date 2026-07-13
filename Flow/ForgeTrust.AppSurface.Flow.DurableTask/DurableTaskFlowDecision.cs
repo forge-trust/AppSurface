@@ -41,6 +41,11 @@ public enum DurableTaskFlowDecisionKind
     /// Ignore a stale or mismatched external event.
     /// </summary>
     IgnoreLateEvent = 5,
+
+    /// <summary>
+    /// Schedule one typed activity and wait for its result before evaluating the same node again.
+    /// </summary>
+    ScheduleActivity = 6,
 }
 
 /// <summary>
@@ -57,7 +62,8 @@ public sealed record DurableTaskFlowDecision<TContext>
         FlowTimeout? timeout,
         FlowRetryPolicy? retryPolicy,
         FlowFault? fault,
-        string? diagnostic)
+        string? diagnostic,
+        IFlowActivityRequest<TContext>? activity)
     {
         Kind = kind;
         Context = context;
@@ -67,6 +73,7 @@ public sealed record DurableTaskFlowDecision<TContext>
         RetryPolicy = retryPolicy;
         Fault = fault;
         Diagnostic = diagnostic;
+        Activity = activity;
     }
 
     /// <summary>
@@ -110,6 +117,11 @@ public sealed record DurableTaskFlowDecision<TContext>
     public string? Diagnostic { get; }
 
     /// <summary>
+    /// Gets the typed activity request for a <see cref="DurableTaskFlowDecisionKind.ScheduleActivity"/> decision.
+    /// </summary>
+    public IFlowActivityRequest<TContext>? Activity { get; }
+
+    /// <summary>
     /// Creates a schedule-node decision.
     /// </summary>
     /// <param name="nodeId">Node id to schedule next.</param>
@@ -134,6 +146,7 @@ public sealed record DurableTaskFlowDecision<TContext>
             null,
             null,
             retryPolicy,
+            null,
             null,
             null);
 
@@ -166,6 +179,7 @@ public sealed record DurableTaskFlowDecision<TContext>
             timeout,
             null,
             null,
+            null,
             null);
 
     /// <summary>
@@ -186,6 +200,7 @@ public sealed record DurableTaskFlowDecision<TContext>
             DurableTaskFlowDecisionKind.Complete,
             FlowNodeOutcome<TContext>.RequireContext(context),
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            null,
             null,
             null,
             null,
@@ -215,6 +230,7 @@ public sealed record DurableTaskFlowDecision<TContext>
             null,
             null,
             null,
+            null,
             null);
 
     /// <summary>
@@ -241,7 +257,8 @@ public sealed record DurableTaskFlowDecision<TContext>
             null,
             null,
             fault ?? throw new ArgumentNullException(nameof(fault)),
-            diagnostic);
+            diagnostic,
+            null);
 
     /// <summary>
     /// Creates an ignored-late-event decision.
@@ -270,5 +287,36 @@ public sealed record DurableTaskFlowDecision<TContext>
             null,
             null,
             null,
-            FlowDefinition<object>.RequireText(diagnostic, nameof(diagnostic)));
+            FlowDefinition<object>.RequireText(diagnostic, nameof(diagnostic)),
+            null);
+
+    /// <summary>
+    /// Creates a decision that asks the Durable Task host to schedule one typed activity.
+    /// </summary>
+    /// <param name="nodeId">Node that requested the activity and will receive its result.</param>
+    /// <param name="activity">Typed activity metadata, work, and persisted Flow context.</param>
+    /// <returns>An activity scheduling decision.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="nodeId"/> is empty.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="activity"/> is null.</exception>
+    /// <remarks>
+    /// The adapter does not execute the activity. The host maps the declared CLR types and contract versions to its
+    /// registered codecs/executor, persists the decision before dispatch, and supplies a
+    /// <see cref="FlowActivityWorkResult"/> on the next <see cref="DurableTaskFlowStep{TContext}"/> evaluation.
+    /// </remarks>
+    public static DurableTaskFlowDecision<TContext> ScheduleActivity(
+        string nodeId,
+        IFlowActivityRequest<TContext> activity)
+    {
+        ArgumentNullException.ThrowIfNull(activity);
+        return new(
+            DurableTaskFlowDecisionKind.ScheduleActivity,
+            activity.Context,
+            FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            null,
+            null,
+            null,
+            null,
+            null,
+            activity);
+    }
 }

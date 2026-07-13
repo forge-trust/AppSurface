@@ -7,6 +7,61 @@ namespace ForgeTrust.AppSurface.Flow.Generators.Tests;
 public sealed class FlowAuthoringGeneratorTests
 {
     [Fact]
+    public void Generator_WithDirectNondeterministicNodeApis_ReportsDeterminismWarnings()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System;
+            using System.Diagnostics;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("nondeterministic")]
+            public partial class NondeterministicFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(FlowState))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(FlowState))]
+                public partial class StartNode : IFlowTransformerNode<FlowState, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(
+                        FlowTransformerContext<FlowState> context,
+                        CancellationToken cancellationToken = default)
+                    {
+                        _ = DateTime.UtcNow;
+                        _ = DateTimeOffset.Now;
+                        _ = Guid.NewGuid();
+                        _ = new Random();
+                        _ = Random.Shared;
+                        _ = Stopwatch.GetTimestamp();
+                        _ = ApplicationClock.UtcNow;
+                        return ValueTask.FromResult(StartNodeOutcomes.Done(context.State));
+                    }
+                }
+            }
+
+            public sealed record FlowState;
+
+            public static class ApplicationClock
+            {
+                public static DateTime UtcNow => default;
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(source);
+        var warnings = diagnostics
+            .Where(diagnostic => diagnostic.Id == "ASFLOWA007")
+            .DistinctBy(diagnostic => (diagnostic.Location.SourceSpan, diagnostic.GetMessage()))
+            .ToArray();
+
+        Assert.Equal(6, warnings.Length);
+        Assert.All(warnings, warning => Assert.Equal(DiagnosticSeverity.Warning, warning.Severity));
+        Assert.DoesNotContain(
+            warnings,
+            warning => warning.GetMessage().Contains("ApplicationClock", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Generator_WithValidGeneratedAuthoring_EmitsEnvelopeOutcomesAndBuilder()
     {
         var source = """
@@ -76,6 +131,7 @@ public sealed class FlowAuthoringGeneratorTests
                 [FlowOutcome("submitted", FlowOutcomeKind.Wait, typeof(StartContext))]
                 [FlowOutcome("expired", FlowOutcomeKind.TimedOut, typeof(StartContext))]
                 [FlowOutcome("denied", FlowOutcomeKind.Fault, typeof(FlowFault))]
+                [FlowOutcome("notify", FlowOutcomeKind.Activity, typeof(StartContext), typeof(NotifyWork), typeof(NotifyResult), CallsiteId = "approval.notify", WorkContractVersion = 2, ResultContractVersion = 3)]
                 public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
                 {
                     public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
@@ -94,6 +150,8 @@ public sealed class FlowAuthoringGeneratorTests
             public sealed record StartContext;
             public sealed record ReviewContext;
             public sealed record DoneContext;
+            public sealed record NotifyWork(string ApprovalId);
+            public sealed record NotifyResult(string MessageId);
             """;
 
         var (output, diagnostics, generated) = RunGenerator(source);
@@ -104,6 +162,10 @@ public sealed class FlowAuthoringGeneratorTests
         Assert.Contains("FlowNodeOutcome<ApprovalFlowContext>.Wait(\"submitted\"", generated, StringComparison.Ordinal);
         Assert.Contains("FlowNodeOutcome<ApprovalFlowContext>.TimedOut(\"expired\"", generated, StringComparison.Ordinal);
         Assert.Contains("FlowNodeOutcome<ApprovalFlowContext>.Fault(typed.Context.Code, typed.Context.Message)", generated, StringComparison.Ordinal);
+        Assert.Contains("FlowActivityCallsite<global::TestApp.NotifyWork, global::TestApp.NotifyResult> NotifyCallsite", generated, StringComparison.Ordinal);
+        Assert.Contains("new(\"approval.notify\", 2, 3)", generated, StringComparison.Ordinal);
+        Assert.Contains("FlowNodeOutcome<ApprovalFlowContext>.Activity(StartNodeOutcomes.NotifyCallsite, typed.Work", generated, StringComparison.Ordinal);
+        Assert.Contains("ActivityResult = context.ActivityResult", generated, StringComparison.Ordinal);
         Assert.Contains("FlowTimeout? Timeout = null", generated, StringComparison.Ordinal);
         Assert.Contains("if (outcome is null)", generated, StringComparison.Ordinal);
         Assert.Contains("Generated flow node 'start' returned null.", generated, StringComparison.Ordinal);
@@ -113,6 +175,180 @@ public sealed class FlowAuthoringGeneratorTests
         Assert.Contains("MarkStartNodeSubmittedTerminal", generated, StringComparison.Ordinal);
         Assert.Contains("MarkStartNodeExpiredTerminal", generated, StringComparison.Ordinal);
         Assert.Contains("MarkStartNodeDeniedTerminal", generated, StringComparison.Ordinal);
+        Assert.Contains("MarkStartNodeNotifyTerminal", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Generator_WithActivityMissingWorkAndResultContracts_ReportsInvalidDeclaration()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("notify", FlowOutcomeKind.Activity, typeof(StartContext))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
+                        throw new System.NotImplementedException();
+                }
+            }
+
+            public sealed record StartContext;
+            """;
+
+        var (_, diagnostics, generated) = RunGenerator(source);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "ASFLOWA005");
+        Assert.DoesNotContain("FlowActivityCallsite", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Generator_WithActivityContextThatDoesNotMatchNodeInput_ReportsInvalidDeclaration()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("notify", FlowOutcomeKind.Activity, typeof(OtherContext), typeof(NotifyWork), typeof(NotifyResult))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
+                        throw new System.NotImplementedException();
+                }
+            }
+
+            public sealed record StartContext;
+            public sealed record OtherContext;
+            public sealed record NotifyWork;
+            public sealed record NotifyResult;
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(source);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == "ASFLOWA005" &&
+            diagnostic.GetMessage().Contains("resumes the same node", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Generator_WithInvalidActivityIdentityOrVersions_ReportsInvalidDeclaration()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("notify", FlowOutcomeKind.Activity, typeof(StartContext), typeof(NotifyWork), typeof(NotifyResult), CallsiteId = " ", WorkContractVersion = 0, ResultContractVersion = -1)]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
+                        throw new System.NotImplementedException();
+                }
+            }
+
+            public sealed record StartContext;
+            public sealed record NotifyWork;
+            public sealed record NotifyResult;
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(source);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == "ASFLOWA005" && diagnostic.GetMessage().Contains("CallsiteId", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == "ASFLOWA005" && diagnostic.GetMessage().Contains("versions", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Generator_WithActivityContractsOnNonActivityOutcome_ReportsInvalidDeclaration()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(StartContext), typeof(NotifyWork), typeof(NotifyResult))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
+                        throw new System.NotImplementedException();
+                }
+            }
+
+            public sealed record StartContext;
+            public sealed record NotifyWork;
+            public sealed record NotifyResult;
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(source);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == "ASFLOWA005" &&
+            diagnostic.GetMessage().Contains("activity metadata", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Generator_WithDuplicateExplicitActivityCallsiteIds_ReportsInvalidDeclaration()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("notify", FlowOutcomeKind.Activity, typeof(StartContext), typeof(NotifyWork), typeof(NotifyResult), CallsiteId = "shared")]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(FlowTransformerContext<StartContext> context, CancellationToken cancellationToken = default) =>
+                        throw new System.NotImplementedException();
+                }
+
+                [FlowNode("other", typeof(OtherContext))]
+                [FlowOutcome("notify-again", FlowOutcomeKind.Activity, typeof(OtherContext), typeof(NotifyWork), typeof(NotifyResult), CallsiteId = "shared")]
+                public partial class OtherNode : IFlowTransformerNode<OtherContext, OtherNodeOutcomes>
+                {
+                    public ValueTask<OtherNodeOutcomes> ExecuteAsync(FlowTransformerContext<OtherContext> context, CancellationToken cancellationToken = default) =>
+                        throw new System.NotImplementedException();
+                }
+            }
+
+            public sealed record StartContext;
+            public sealed record OtherContext;
+            public sealed record NotifyWork;
+            public sealed record NotifyResult;
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(source);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == "ASFLOWA005" &&
+            diagnostic.GetMessage().Contains("callsite id 'shared' more than once", StringComparison.Ordinal));
     }
 
     [Fact]

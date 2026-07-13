@@ -11,6 +11,15 @@ public sealed class InMemoryFlowRunnerTests
     }
 
     [Fact]
+    public void Constructor_WithNullTransitionEvaluator_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new InMemoryFlowRunner<TestState>(
+                Options.Create(new AppSurfaceFlowOptions()),
+                null!));
+    }
+
+    [Fact]
     public async Task RunAsync_WithNullDefinition_ThrowsArgumentNullException()
     {
         await Assert.ThrowsAsync<ArgumentNullException>(async () =>
@@ -192,6 +201,72 @@ public sealed class InMemoryFlowRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_StopsAtActivityAndResumeActivityCompletesSameNode()
+    {
+        var node = new ActivityNode();
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", node)
+            .StartAt("start")
+            .Build();
+        var runner = Runner();
+
+        var pending = await runner.RunAsync(definition, new TestState(0, "created"));
+
+        Assert.Equal(FlowRunStatus.ActivityPending, pending.Status);
+        Assert.Equal("start", pending.NodeId);
+        Assert.Equal(ActivityNode.Callsite.CallsiteId, pending.Activity?.CallsiteId);
+        Assert.Equal(typeof(ActivityWork), pending.Activity?.WorkType);
+        Assert.Equal(typeof(ActivityResult), pending.Activity?.ResultType);
+        Assert.Equal(new TestState(0, "activity-pending"), pending.Context);
+
+        var completed = await runner.ResumeActivityAsync(
+            definition,
+            "start",
+            pending.Context!,
+            ActivityNode.Callsite.CreateResult(new ActivityResult("sent")));
+
+        Assert.Equal(FlowRunStatus.Completed, completed.Status);
+        Assert.Equal(new TestState(0, "sent"), completed.Context);
+        Assert.Equal(2, node.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task ResumeActivityAsync_WithNullResult_ThrowsArgumentNullException()
+    {
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", new CompleteNode())
+            .StartAt("start")
+            .Build();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await Runner().ResumeActivityAsync(
+                definition,
+                "start",
+                new TestState(0, "waiting"),
+                null!));
+    }
+
+    [Fact]
+    public async Task CustomV1Runner_DefaultActivityResumeReportsUnsupported()
+    {
+        IFlowRunner<TestState> runner = new LegacyRunner();
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", new CompleteNode())
+            .StartAt("start")
+            .Build();
+
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            await runner.ResumeActivityAsync(
+                definition,
+                "start",
+                new TestState(0, "waiting"),
+                ActivityNode.Callsite.CreateResult(new ActivityResult("sent"))));
+    }
+
+    [Fact]
     public async Task RunAsync_WithCanceledToken_ThrowsOperationCanceledException()
     {
         var definition = FlowGraphBuilder<TestState>
@@ -336,6 +411,53 @@ public sealed class InMemoryFlowRunnerTests
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult<FlowNodeOutcome<TestState>>(
                 FlowNodeOutcome<TestState>.Next(_target, context.State with { Count = context.State.Count + 1 }));
+    }
+
+    private sealed record ActivityWork(string ApprovalId);
+
+    private sealed record ActivityResult(string Status);
+
+    private sealed class ActivityNode : IFlowNode<TestState>
+    {
+        internal static FlowActivityCallsite<ActivityWork, ActivityResult> Callsite { get; } =
+            new("send-email", 1, 1);
+
+        internal int ExecutionCount { get; private set; }
+
+        public ValueTask<FlowNodeOutcome<TestState>> ExecuteAsync(
+            FlowExecutionContext<TestState> context,
+            CancellationToken cancellationToken = default)
+        {
+            ExecutionCount++;
+            if (Callsite.TryGetResult(context.ActivityResult, out var result))
+            {
+                return ValueTask.FromResult<FlowNodeOutcome<TestState>>(
+                    FlowNodeOutcome<TestState>.Complete(context.State with { Status = result.Status }));
+            }
+
+            return ValueTask.FromResult<FlowNodeOutcome<TestState>>(
+                FlowNodeOutcome<TestState>.Activity(
+                    Callsite,
+                    new ActivityWork("APR-1001"),
+                    context.State with { Status = "activity-pending" }));
+        }
+    }
+
+    private sealed class LegacyRunner : IFlowRunner<TestState>
+    {
+        public ValueTask<FlowRunResult<TestState>> RunAsync(
+            FlowDefinition<TestState> definition,
+            TestState initialContext,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(FlowRunResult<TestState>.Completed(definition.StartNodeId, initialContext));
+
+        public ValueTask<FlowRunResult<TestState>> ResumeAsync(
+            FlowDefinition<TestState> definition,
+            string nodeId,
+            TestState context,
+            FlowResumeEvent resumeEvent,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(FlowRunResult<TestState>.Completed(nodeId, context));
     }
 
     private sealed class MutableNextNode : IFlowNode<TestState>
