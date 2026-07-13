@@ -303,11 +303,11 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/unreleased.md
     order: 47
-    use_when: Add this in a PostgreSQL-backed host that must atomically accept durable Work with domain changes and recover execution without another control plane.
-    includes: Explicit numbered PostgreSQL migrations, non-owner row-level-security storage, caller-owned Npgsql transaction handoff, request fingerprints, runtime-epoch fencing, scoped Work dispatch, lease generations, provider-effect permits, cancellation, retries, and scope disablement.
-    does_not_include: Automatic production schema migration at startup, hosted execution, Flow processing, schedule evaluation, SQL Server, external queues as correctness dependencies, or exactly-once provider effects.
+    use_when: Add this in a PostgreSQL-backed host that must atomically accept durable Work with domain changes or resume typed Flow instances without another control plane.
+    includes: Explicit numbered PostgreSQL migrations, non-owner row-level-security storage, caller-owned Npgsql transaction handoff, request fingerprints, runtime-epoch fencing, scoped Work dispatch, lease generations, provider-effect permits, cancellation and retries, durable Flow history, active waits, typed activities, authorized events, and bounded recovery inventories.
+    does_not_include: Automatic production schema migration at startup, hosted execution, schedule evaluation, SQL Server, external queues as correctness dependencies, arbitrary async/await replay, or exactly-once provider effects.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Durable.PostgreSql` after Durable when PostgreSQL should own the Work protocol; apply its embedded migrations explicitly before accepting or processing Work.
+    recipe_summary: Add `ForgeTrust.AppSurface.Durable.PostgreSql` after Durable when PostgreSQL should own Work and resumable Flow history; apply its embedded migrations explicitly before processing either surface.
     depends_on:
       - ForgeTrust.AppSurface.Durable
     expected_dependency_package_ids:

@@ -9,7 +9,7 @@ Start with:
 - [`ForgeTrust.AppSurface.Durable`](ForgeTrust.AppSurface.Durable/README.md) for host-neutral work, Flow, payload,
   schedule, status, and control contracts; and
 - [`ForgeTrust.AppSurface.Durable.PostgreSql`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md) for explicit schema
-  deployment, atomic Work acceptance, scoped dispatch, lease fencing, and provider-effect safety.
+  deployment, atomic Work acceptance, resumable Flow persistence, lease fencing, and provider-effect safety.
 
 ## Why this boundary
 

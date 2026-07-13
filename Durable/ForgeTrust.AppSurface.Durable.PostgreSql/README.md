@@ -50,6 +50,28 @@ opens, commits, rolls back, replaces, or disposes that transaction. A mismatched
 Requests require a registered Work contract and codec. The registration's provider-safety policy must exactly match the
 request, and duplicate command identifiers return the original acceptance only when the canonical fingerprint matches.
 
+## Resumable Flow persistence
+
+`PostgreSqlDurableFlowClient` starts, queries, lists, resumes, cancels, and releases typed Flow instances. A start request
+uses an explicitly registered Flow definition and the exact allowlisted context codec. Each accepted command persists a
+canonical fingerprint so command-id reuse can return the original result without silently changing intent.
+
+The Flow store advances exactly one explicit transition at a time. Its history records calls, results, event waits,
+timers, suspensions, cancellations, and terminal outcomes with stable sequence identities. This is deliberate decision
+orchestration, not arbitrary stack replay; ordinary asynchronous activity code remains supported outside the durable
+authoring boundary.
+
+Activity calls become durable Work with an immutable activity identity. Completion is projected back into the waiting
+Flow only after Work fencing succeeds. A process crash between those operations is repaired from persisted state rather
+than by repeating a provider effect.
+
+`GetAsync` returns the authorized full snapshot. `ListAsync` is a bounded, payload-free inventory intended for recovery
+and operator views. Release after restore requires exact revision, runtime-epoch, manifest, and wait-shape evidence; it
+never invents a continuation for an incompatible definition.
+
+Event delivery is application-authorized before it reaches the client. Instance and event identifiers locate rows but
+are not authorization proof. Late, duplicate, mismatched-contract, and canceled waits are recorded deterministically.
+
 ## Execution and provider safety
 
 Work dispatch uses short claims, renewable leases, revision checks, scope generations, and a store-wide runtime epoch.
@@ -74,6 +96,7 @@ prove the provider did nothing, so the runtime records evidence and follows the 
 - Scope identifiers are authorization context, not proof by themselves; set and enforce row-level scope state inside the
   same transaction as every mutation.
 - Do not retry an ambiguous provider effect merely because its lease expired.
+- Do not release a suspended Flow after restore unless its manifest and active-wait shape still match persisted history.
 
 Operational codes are documented in the [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md).
 
