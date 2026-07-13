@@ -34,7 +34,7 @@ internal static class PwaStaticFileShadowValidator
         }
 
         var file = fileProvider.GetFileInfo(path.TrimStart('/'));
-        if (file.Exists)
+        if (file.Exists && !file.IsDirectory)
         {
             throw new InvalidOperationException(
                 $"AppSurface PWA configuration is invalid: ASPWA024: The generated {surface} route is shadowed by a static web-root file. Remove the static file or configure a different AppSurface path.");

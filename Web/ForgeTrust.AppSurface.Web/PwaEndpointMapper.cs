@@ -225,7 +225,9 @@ internal static class PwaEndpointMapper
             : "<p>Manifest: disabled</p>";
         var registrationGuidance = options.Push.Enabled
             ? "<p>Push registration is explicit: <code>await window.AppSurface.Pwa.register();</code></p><p>Registration does not request permission, create a subscription, or prove delivery.</p>"
-            : "<p>The registration helper is not emitted for this offline-only worker.</p>";
+            : options.Offline.Enabled
+                ? "<p>The registration helper is not emitted for this offline-only worker.</p>"
+                : "<p>No worker capability or registration helper is active.</p>";
         await httpContext.Response.WriteAsync(
             $$"""
             <!doctype html>

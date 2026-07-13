@@ -108,6 +108,8 @@ public sealed class PwaEndpointTests
         Assert.Contains("&lt;link rel=&quot;manifest&quot; href=&quot;/manifest.webmanifest&quot;", html, StringComparison.Ordinal);
         Assert.Contains("&lt;meta name=&quot;theme-color&quot; content=&quot;#2563eb&quot;", html, StringComparison.Ordinal);
         Assert.Contains("&lt;link rel=&quot;icon&quot; href=&quot;/icons/app-192.png&quot;", html, StringComparison.Ordinal);
+        Assert.Contains("No worker capability or registration helper is active.", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("offline-only worker", html, StringComparison.Ordinal);
         Assert.Contains("\"enabled\": true", json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("\"offlineEnabled\": false", json, StringComparison.Ordinal);
         Assert.Contains("\"configuredServiceWorkerPath\": \"/service-worker.js\"", json, StringComparison.Ordinal);

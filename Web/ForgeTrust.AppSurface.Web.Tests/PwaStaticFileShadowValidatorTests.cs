@@ -43,6 +43,20 @@ public sealed class PwaStaticFileShadowValidatorTests
     }
 
     [Fact]
+    public void ThrowIfInvalid_WhenRouteMatchesDirectory_DoesNotRejectStartup()
+    {
+        var options = new PwaOptions();
+        options.Push.Enabled = true;
+
+        var exception = Record.Exception(
+            () => PwaStaticFileShadowValidator.ThrowIfInvalid(
+                options,
+                new StubFileProvider(isDirectory: true, "service-worker.js", "_appsurface/pwa/register.js")));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
     public void ThrowIfInvalid_RejectsNullArguments()
     {
         Assert.Throws<ArgumentNullException>(
@@ -51,20 +65,32 @@ public sealed class PwaStaticFileShadowValidatorTests
             () => PwaStaticFileShadowValidator.ThrowIfInvalid(new PwaOptions(), null!));
     }
 
-    private sealed class StubFileProvider(params string[] paths) : IFileProvider
+    private sealed class StubFileProvider : IFileProvider
     {
-        private readonly HashSet<string> _paths = new(paths, StringComparer.Ordinal);
+        private readonly HashSet<string> _paths;
+        private readonly bool _isDirectory;
+
+        public StubFileProvider(params string[] paths)
+            : this(isDirectory: false, paths)
+        {
+        }
+
+        public StubFileProvider(bool isDirectory, params string[] paths)
+        {
+            _paths = new HashSet<string>(paths, StringComparer.Ordinal);
+            _isDirectory = isDirectory;
+        }
 
         public IDirectoryContents GetDirectoryContents(string subpath) => NotFoundDirectoryContents.Singleton;
 
         public IFileInfo GetFileInfo(string subpath) => _paths.Contains(subpath)
-            ? new StubFileInfo(subpath)
+            ? new StubFileInfo(subpath, _isDirectory)
             : new NotFoundFileInfo(subpath);
 
         public IChangeToken Watch(string filter) => NullChangeToken.Singleton;
     }
 
-    private sealed class StubFileInfo(string name) : IFileInfo
+    private sealed class StubFileInfo(string name, bool isDirectory) : IFileInfo
     {
         public bool Exists => true;
 
@@ -76,7 +102,7 @@ public sealed class PwaStaticFileShadowValidatorTests
 
         public DateTimeOffset LastModified => DateTimeOffset.UnixEpoch;
 
-        public bool IsDirectory => false;
+        public bool IsDirectory => isDirectory;
 
         public Stream CreateReadStream() => Stream.Null;
     }
