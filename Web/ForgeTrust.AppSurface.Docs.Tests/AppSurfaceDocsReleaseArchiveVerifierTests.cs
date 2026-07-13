@@ -320,9 +320,17 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
         var caseSensitive = AppSurfaceDocsReleaseArchiveFileSystem.ResolvePhysicalPathComparer(
             "/release/archive",
             _ => false);
+        var uppercaseRoot = AppSurfaceDocsReleaseArchiveFileSystem.ResolvePhysicalPathComparer(
+            "/RELEASE/ARCHIVE",
+            _ => false);
+        var numericRoot = AppSurfaceDocsReleaseArchiveFileSystem.ResolvePhysicalPathComparer(
+            "/123/456",
+            _ => throw new InvalidOperationException("A root without letters must not probe another path."));
 
         Assert.Same(StringComparer.OrdinalIgnoreCase, caseInsensitive);
         Assert.Same(StringComparer.Ordinal, caseSensitive);
+        Assert.Same(StringComparer.Ordinal, uppercaseRoot);
+        Assert.Same(StringComparer.Ordinal, numericRoot);
     }
 
     [Fact]
