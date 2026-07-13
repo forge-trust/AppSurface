@@ -312,6 +312,20 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
     }
 
     [Fact]
+    public void ResolvePhysicalPathComparer_ShouldUseTheArchiveRootsFilesystemBehavior()
+    {
+        var caseInsensitive = AppSurfaceDocsReleaseArchiveFileSystem.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => true);
+        var caseSensitive = AppSurfaceDocsReleaseArchiveFileSystem.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => false);
+
+        Assert.Same(StringComparer.OrdinalIgnoreCase, caseInsensitive);
+        Assert.Same(StringComparer.Ordinal, caseSensitive);
+    }
+
+    [Fact]
     public void TryVerify_ShouldFail_WhenArchiveFilesCannotBeEnumerated()
     {
         var digest = WriteManifest();
@@ -584,7 +598,10 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
 
     private sealed class ExtraEnumeratedFileSystem(string extraPath, StringComparer pathComparer) : AppSurfaceDocsReleaseArchiveFileSystem
     {
-        internal override StringComparer PathComparer => pathComparer;
+        internal override StringComparer GetPathComparer(string rootPath)
+        {
+            return pathComparer;
+        }
 
         internal override bool FileExists(string path)
         {

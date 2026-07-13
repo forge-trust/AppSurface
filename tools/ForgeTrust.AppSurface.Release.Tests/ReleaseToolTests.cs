@@ -2788,6 +2788,20 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void StableDocsArchiveGateDetectsTheArchiveRootsFilesystemCasingRules()
+    {
+        var caseInsensitive = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => true);
+        var caseSensitive = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => false);
+
+        Assert.Same(StringComparer.OrdinalIgnoreCase, caseInsensitive);
+        Assert.Same(StringComparer.Ordinal, caseSensitive);
+    }
+
+    [Fact]
     public async Task StableDocsArchiveGateReportsExactTreeSegmentInspectionFailure()
     {
         await SeedRepositoryAsync();

@@ -600,7 +600,9 @@ internal static class ReleaseDocsArchiveGate
             return false;
         }
 
-        var physicalManifestPaths = CreatePhysicalManifestPathSet(files.Keys, PhysicalPathComparer);
+        var physicalManifestPaths = CreatePhysicalManifestPathSet(
+            files.Keys,
+            ResolvePhysicalPathComparer(exactTreePath, Directory.Exists));
         var unmanifestedServeableFile = serveableFiles
             .Where(serveableFile => !physicalManifestPaths.Contains(serveableFile))
             .FirstOrDefault();
@@ -627,6 +629,39 @@ internal static class ReleaseDocsArchiveGate
         ArgumentNullException.ThrowIfNull(manifestPaths);
         ArgumentNullException.ThrowIfNull(pathComparer);
         return new HashSet<string>(manifestPaths, pathComparer);
+    }
+
+    /// <summary>
+    /// Resolves physical filesystem casing behavior without writing probe files into an immutable archive.
+    /// </summary>
+    /// <param name="rootPath">Existing exact release tree.</param>
+    /// <param name="directoryExists">Directory existence operation used for the read-only case-variant probe.</param>
+    /// <returns>An ordinal comparer matching the archive root's case behavior.</returns>
+    internal static StringComparer ResolvePhysicalPathComparer(string rootPath, Func<string, bool> directoryExists)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        ArgumentNullException.ThrowIfNull(directoryExists);
+        var fullRootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+        for (var index = fullRootPath.Length - 1; index >= 0; index--)
+        {
+            var character = fullRootPath[index];
+            if (!char.IsAsciiLetter(character))
+            {
+                continue;
+            }
+
+            var alternateCharacter = char.IsAsciiLetterLower(character)
+                ? char.ToUpperInvariant(character)
+                : char.ToLowerInvariant(character);
+            var alternateRootPathCharacters = fullRootPath.ToCharArray();
+            alternateRootPathCharacters[index] = alternateCharacter;
+            var alternateRootPath = new string(alternateRootPathCharacters);
+            return directoryExists(alternateRootPath)
+                ? StringComparer.OrdinalIgnoreCase
+                : StringComparer.Ordinal;
+        }
+
+        return StringComparer.Ordinal;
     }
 
     private static bool TryEnumerateOrdinaryServeableFiles(
@@ -1003,10 +1038,6 @@ internal static class ReleaseDocsArchiveGate
         FileSystemInspectorOverride.Value = inspector;
         return new FileSystemInspectorScope(previous);
     }
-
-    private static StringComparer PhysicalPathComparer { get; } = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-        ? StringComparer.OrdinalIgnoreCase
-        : StringComparer.Ordinal;
 
     private static StringComparison PhysicalPathComparison { get; } = OperatingSystem.IsWindows()
         ? StringComparison.OrdinalIgnoreCase

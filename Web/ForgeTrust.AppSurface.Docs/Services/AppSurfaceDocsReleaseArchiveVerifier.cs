@@ -263,7 +263,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
             return false;
         }
 
-        var physicalManifestPaths = new HashSet<string>(files.Keys, fileSystem.PathComparer);
+        var physicalManifestPaths = new HashSet<string>(files.Keys, fileSystem.GetPathComparer(exactTreePath));
         foreach (var relativePath in archiveFilePaths.Select(filePath => NormalizeRelativePath(exactTreePath, filePath)))
         {
             if (string.Equals(relativePath, FileName, StringComparison.Ordinal))
@@ -455,11 +455,47 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
 internal abstract class AppSurfaceDocsReleaseArchiveFileSystem
 {
     /// <summary>
-    /// Gets the comparer used by the physical filesystem when resolving archive paths.
+    /// Gets the comparer used by the physical filesystem when resolving paths beneath an archive root.
     /// </summary>
-    internal virtual StringComparer PathComparer => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-        ? StringComparer.OrdinalIgnoreCase
-        : StringComparer.Ordinal;
+    /// <param name="rootPath">Existing exact release tree whose filesystem behavior is required.</param>
+    /// <returns>The comparer matching the root's physical filesystem casing rules.</returns>
+    internal virtual StringComparer GetPathComparer(string rootPath)
+    {
+        return ResolvePhysicalPathComparer(rootPath, Directory.Exists);
+    }
+
+    /// <summary>
+    /// Resolves physical filesystem casing behavior without writing probe files into an immutable archive.
+    /// </summary>
+    /// <param name="rootPath">Existing exact release tree.</param>
+    /// <param name="directoryExists">Directory existence operation used for the read-only case-variant probe.</param>
+    /// <returns>An ordinal comparer matching the archive root's case behavior.</returns>
+    internal static StringComparer ResolvePhysicalPathComparer(string rootPath, Func<string, bool> directoryExists)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        ArgumentNullException.ThrowIfNull(directoryExists);
+        var fullRootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+        for (var index = fullRootPath.Length - 1; index >= 0; index--)
+        {
+            var character = fullRootPath[index];
+            if (!char.IsAsciiLetter(character))
+            {
+                continue;
+            }
+
+            var alternateCharacter = char.IsAsciiLetterLower(character)
+                ? char.ToUpperInvariant(character)
+                : char.ToLowerInvariant(character);
+            var alternateRootPathCharacters = fullRootPath.ToCharArray();
+            alternateRootPathCharacters[index] = alternateCharacter;
+            var alternateRootPath = new string(alternateRootPathCharacters);
+            return directoryExists(alternateRootPath)
+                ? StringComparer.OrdinalIgnoreCase
+                : StringComparer.Ordinal;
+        }
+
+        return StringComparer.Ordinal;
+    }
 
     /// <summary>
     /// Gets the physical filesystem adapter used by runtime verification.
