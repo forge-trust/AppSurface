@@ -9,6 +9,7 @@ public sealed class FlowOutcomeTests
         Assert.Equal(1, (int)FlowRunStatus.Completed);
         Assert.Equal(2, (int)FlowRunStatus.Faulted);
         Assert.Equal(3, (int)FlowRunStatus.TimedOut);
+        Assert.Equal(4, (int)FlowRunStatus.ActivityPending);
     }
 
     [Fact]
@@ -91,5 +92,31 @@ public sealed class FlowOutcomeTests
         Assert.Throws<ArgumentNullException>(() => new FlowFaultOutcome<TestState>(null!));
     }
 
+    [Fact]
+    public void ActivityPendingResult_CapturesRequest()
+    {
+        var outcome = FlowNodeOutcome<TestState>.Activity(
+            new FlowActivityCallsite<TestWork, TestResult>("send-email"),
+            new TestWork("APR-1001"),
+            new TestState("waiting"));
+
+        var result = FlowRunResult<TestState>.ActivityPending("review", outcome);
+
+        Assert.Equal(FlowRunStatus.ActivityPending, result.Status);
+        Assert.Same(outcome, result.Activity);
+        Assert.Same(outcome.Context, result.Context);
+    }
+
+    [Fact]
+    public void ActivityPendingResult_WithNullRequest_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            FlowRunResult<TestState>.ActivityPending("review", null!));
+    }
+
     private sealed record TestState(string Value);
+
+    private sealed record TestWork(string Id);
+
+    private sealed record TestResult(string Status);
 }

@@ -26,6 +26,7 @@ public sealed class FlowExecutionContextTests
         Assert.Equal("review", context.NodeId);
         Assert.Equal(state, context.State);
         Assert.Same(resumeEvent, context.ResumeEvent);
+        Assert.Null(context.ActivityResult);
     }
 
     [Fact]
@@ -38,6 +39,25 @@ public sealed class FlowExecutionContextTests
             new TestState("created"));
 
         Assert.Null(context.ResumeEvent);
+        Assert.Null(context.ActivityResult);
+    }
+
+    [Fact]
+    public void Initializer_CapturesActivityResult()
+    {
+        var callsite = new FlowActivityCallsite<TestWork, TestResult>("send-email");
+        var result = callsite.CreateResult(new TestResult("sent"));
+
+        var context = new FlowExecutionContext<TestState>(
+            "approval",
+            "1",
+            "review",
+            new TestState("waiting"))
+        {
+            ActivityResult = result,
+        };
+
+        Assert.Same(result, context.ActivityResult);
     }
 
     [Fact]
@@ -50,7 +70,12 @@ public sealed class FlowExecutionContextTests
         Assert.Null(context.NodeId);
         Assert.Null(context.State);
         Assert.Null(context.ResumeEvent);
+        Assert.Null(context.ActivityResult);
     }
 
     private sealed record TestState(string Status);
+
+    private sealed record TestWork(string Id);
+
+    private sealed record TestResult(string Status);
 }

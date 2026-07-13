@@ -11,6 +11,7 @@ public sealed class DurableTaskFlowDecisionTests
         Assert.Equal(3, (int)DurableTaskFlowDecisionKind.Fault);
         Assert.Equal(4, (int)DurableTaskFlowDecisionKind.TimedOut);
         Assert.Equal(5, (int)DurableTaskFlowDecisionKind.IgnoreLateEvent);
+        Assert.Equal(6, (int)DurableTaskFlowDecisionKind.ScheduleActivity);
     }
 
     [Fact]
@@ -100,6 +101,30 @@ public sealed class DurableTaskFlowDecisionTests
         Assert.Equal("Event was late.", decision.Diagnostic);
     }
 
+    [Fact]
+    public void ScheduleActivity_CapturesTypedRequestWithoutRetryMetadata()
+    {
+        var activity = FlowNodeOutcome<TestState>.Activity(
+            new FlowActivityCallsite<TestWork, TestResult>("send-email", 2, 3),
+            new TestWork("APR-1001"),
+            new TestState("activity-pending"));
+
+        var decision = DurableTaskFlowDecision<TestState>.ScheduleActivity("review", activity);
+
+        Assert.Equal(DurableTaskFlowDecisionKind.ScheduleActivity, decision.Kind);
+        Assert.Equal("review", decision.NodeId);
+        Assert.Same(activity, decision.Activity);
+        Assert.Same(activity.Context, decision.Context);
+        Assert.Null(decision.RetryPolicy);
+    }
+
+    [Fact]
+    public void ScheduleActivity_WithNullRequest_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            DurableTaskFlowDecision<TestState>.ScheduleActivity("review", null!));
+    }
+
     [Theory]
     [InlineData("schedule-node")]
     [InlineData("wait-node")]
@@ -111,10 +136,15 @@ public sealed class DurableTaskFlowDecisionTests
     [InlineData("ignore-node")]
     [InlineData("ignore-event")]
     [InlineData("ignore-diagnostic")]
+    [InlineData("activity-node")]
     public void Factories_WithEmptyRequiredText_ThrowArgumentException(string scenario)
     {
         var state = new TestState("ready");
         var fault = new FlowFault("approval.failed", "Approval failed.");
+        var activity = FlowNodeOutcome<TestState>.Activity(
+            new FlowActivityCallsite<TestWork, TestResult>("send-email"),
+            new TestWork("APR-1001"),
+            state);
         var exception = Assert.Throws<ArgumentException>(() => scenario switch
         {
             "schedule-node" => DurableTaskFlowDecision<TestState>.ScheduleNode(" ", state),
@@ -127,6 +157,7 @@ public sealed class DurableTaskFlowDecisionTests
             "ignore-node" => DurableTaskFlowDecision<TestState>.IgnoreLateEvent(" ", "denied", "Event was late."),
             "ignore-event" => DurableTaskFlowDecision<TestState>.IgnoreLateEvent("review", " ", "Event was late."),
             "ignore-diagnostic" => DurableTaskFlowDecision<TestState>.IgnoreLateEvent("review", "denied", " "),
+            "activity-node" => DurableTaskFlowDecision<TestState>.ScheduleActivity(" ", activity),
             _ => throw new InvalidOperationException("Unknown scenario."),
         });
 
@@ -158,4 +189,8 @@ public sealed class DurableTaskFlowDecisionTests
     }
 
     private sealed record TestState(string Status);
+
+    private sealed record TestWork(string ApprovalId);
+
+    private sealed record TestResult(string Status);
 }

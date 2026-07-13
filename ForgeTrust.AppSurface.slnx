@@ -46,6 +46,12 @@
     <Project Path="Dependency/ForgeTrust.AppSurface.Dependency.Autofac.Tests/ForgeTrust.AppSurface.Dependency.Autofac.Tests.csproj" />
     <Project Path="Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj" />
   </Folder>
+  <Folder Name="/Durable/">
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.Tests/ForgeTrust.AppSurface.Durable.Tests.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj" />
+  </Folder>
   <Folder Name="/Examples/">
     <Project Path="examples/auth-aspnetcore-dev-auth/AuthAspNetCoreDevAuthExample.csproj" />
     <Project Path="examples/auth-aspnetcore-bridge/AuthAspNetCoreBridgeExample.csproj" />
@@ -55,6 +61,7 @@
     <Project Path="examples/aspire-apphost/AspireAppHostExample.csproj" />
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
+    <Project Path="examples/durable-postgresql/DurablePostgreSqlExample.csproj" />
     <Project Path="examples/local-secrets/LocalSecretsExample.csproj" />
     <Project Path="examples/flow-generated-authoring/FlowGeneratedAuthoringExample.csproj" />
     <Project Path="examples/flow-approval-local/FlowApprovalLocalExample.csproj" />

@@ -369,6 +369,31 @@
           "ForgeTrust.AppSurface.Docs": "[0.1.0, )"
         }
       },
+      "forgetrust.appsurface.durable": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Flow": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Workers": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.durable.postgresql": {
+        "type": "Project",
+        "dependencies": {
+          "Cronos": "[0.13.0, )",
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Durable": "[0.1.0, )",
+          "Microsoft.Extensions.Hosting": "[10.0.8, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
+      "forgetrust.appsurface.flow": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "Microsoft.Extensions.Options": "[10.0.8, )"
+        }
+      },
       "forgetrust.appsurface.intelligence": {
         "type": "Project",
         "dependencies": {
@@ -410,6 +435,12 @@
       "forgetrust.appsurface.web.tailwind.runtime.win-x64": {
         "type": "Project"
       },
+      "forgetrust.appsurface.workers": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+        }
+      },
       "forgetrust.razorwire": {
         "type": "Project",
         "dependencies": {
@@ -443,6 +474,12 @@
         "requested": "[0.17.1, )",
         "resolved": "0.17.1",
         "contentHash": "5MPI4bbixlwxb0W/smOMeIR+QlxMy5/5jD+WnIAw4pBC+7AhLPe5bS3cLgQMJyvd6q0A48sG+uYOt/ep406GLA=="
+      },
+      "Cronos": {
+        "type": "CentralTransitive",
+        "requested": "[0.13.0, )",
+        "resolved": "0.13.0",
+        "contentHash": "Nkve+Yi0+ol3ntSBRHeW0ka9cJQ8vndSUvvkXqF9LVqwpoqWueyxu/HS275r98RDOmF7/mzRnZW5XXUBXob+TA=="
       },
       "HtmlSanitizer": {
         "type": "CentralTransitive",
@@ -578,6 +615,15 @@
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.8",
           "Microsoft.Extensions.Primitives": "10.0.8"
+        }
+      },
+      "Npgsql": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.3, )",
+        "resolved": "10.0.3",
+        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w==",
+        "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
         }
       },
       "TextMateSharp": {

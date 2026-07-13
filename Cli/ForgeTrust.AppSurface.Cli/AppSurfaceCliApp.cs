@@ -79,6 +79,7 @@ internal static class AppSurfaceCliApp
         services.AddSingleton(TimeProvider.System);
         services.AddTransient<CoverageRunWorkflow>();
         services.AddTransient<CoverageMergeWorkflow>();
+        services.AddSingleton<IDurableSchemaCommandService, DurableSchemaCommandService>();
         AddExportEngineServices(services);
         services.AddHttpClient<IAppSurfaceDocsHealthHttpClient, AppSurfaceDocsHealthHttpClient>(
             client => { client.Timeout = TimeSpan.FromSeconds(60); });

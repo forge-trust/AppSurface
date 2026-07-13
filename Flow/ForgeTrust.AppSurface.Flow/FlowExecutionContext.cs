@@ -20,4 +20,15 @@ public readonly record struct FlowExecutionContext<TContext>(
     string Version,
     string NodeId,
     TContext State,
-    FlowResumeEvent? ResumeEvent = null);
+    FlowResumeEvent? ResumeEvent = null)
+{
+    /// <summary>
+    /// Gets the optional typed activity result that resumed the node.
+    /// </summary>
+    /// <remarks>
+    /// This property is null during initial execution and external-event resumption. Use the activity's
+    /// <see cref="FlowActivityCallsite{TWork,TResult}"/> to validate and unwrap a result. A runner never supplies both
+    /// <see cref="ResumeEvent"/> and this property for one evaluation.
+    /// </remarks>
+    public FlowActivityWorkResult? ActivityResult { get; init; }
+}

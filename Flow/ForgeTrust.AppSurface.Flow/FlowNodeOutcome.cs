@@ -33,6 +33,20 @@ public abstract record FlowNodeOutcome<TContext>
         new(eventName, context, timeout);
 
     /// <summary>
+    /// Creates an outcome that waits for an external event carrying one exact typed payload contract.
+    /// </summary>
+    /// <typeparam name="TPayload">Expected allowlisted event payload type.</typeparam>
+    /// <param name="callsite">Stable event name and durable payload contract.</param>
+    /// <param name="context">Context to persist while waiting.</param>
+    /// <param name="timeout">Optional wait timeout.</param>
+    /// <returns>A typed external-event wait outcome.</returns>
+    public static FlowWait<TContext> Wait<TPayload>(
+        FlowEventCallsite<TPayload> callsite,
+        TContext context,
+        FlowTimeout? timeout = null) =>
+        new(callsite, context, timeout);
+
+    /// <summary>
     /// Creates an outcome indicating the node handled a timeout branch.
     /// </summary>
     /// <param name="eventName">Event whose wait expired.</param>
@@ -54,6 +68,26 @@ public abstract record FlowNodeOutcome<TContext>
     /// <param name="message">Human-readable diagnostic message.</param>
     /// <returns>A fault outcome.</returns>
     public static FlowFaultOutcome<TContext> Fault(string code, string message) => new(new FlowFault(code, message));
+
+    /// <summary>
+    /// Creates an outcome that schedules one typed external activity and pauses the Flow node for its result.
+    /// </summary>
+    /// <typeparam name="TWork">Serializable work contract sent to the activity executor.</typeparam>
+    /// <typeparam name="TResult">Serializable result contract returned to the same node.</typeparam>
+    /// <param name="callsite">Stable typed activity callsite.</param>
+    /// <param name="work">Work value to persist and execute.</param>
+    /// <param name="context">Context to persist atomically with the activity command.</param>
+    /// <returns>An activity outcome.</returns>
+    /// <remarks>
+    /// Returning this outcome does not execute <paramref name="work"/>. A durable host records the transition and
+    /// activity command atomically, executes the work through its provider-safe worker boundary, and resumes this same
+    /// node with <see cref="FlowActivityWorkResult{TResult}"/>. Nodes must not perform the external effect themselves.
+    /// </remarks>
+    public static FlowActivity<TContext, TWork, TResult> Activity<TWork, TResult>(
+        FlowActivityCallsite<TWork, TResult> callsite,
+        TWork work,
+        TContext context) =>
+        new(callsite, work, context);
 
     internal static TContext RequireContext(TContext context)
     {
@@ -104,10 +138,27 @@ public sealed record FlowWait<TContext> : FlowNodeOutcome<TContext>
         Timeout = timeout;
     }
 
+    /// <summary>Initializes a typed external-event wait.</summary>
+    /// <param name="eventCallsite">Exact event and payload contract.</param>
+    /// <param name="context">Context to persist while waiting.</param>
+    /// <param name="timeout">Optional wait timeout.</param>
+    public FlowWait(IFlowEventCallsite eventCallsite, TContext context, FlowTimeout? timeout = null)
+    {
+        EventCallsite = eventCallsite ?? throw new ArgumentNullException(nameof(eventCallsite));
+        EventName = eventCallsite.EventName;
+        Context = RequireContext(context);
+        Timeout = timeout;
+    }
+
     /// <summary>
     /// Gets the external event name.
     /// </summary>
     public string EventName { get; }
+
+    /// <summary>
+    /// Gets the exact typed event contract, or <see langword="null"/> when this wait explicitly accepts no payload.
+    /// </summary>
+    public IFlowEventCallsite? EventCallsite { get; }
 
     /// <summary>
     /// Gets the context to persist while waiting.
@@ -187,4 +238,87 @@ public sealed record FlowFaultOutcome<TContext> : FlowNodeOutcome<TContext>
     /// This member intentionally hides the static fault factory on <see cref="FlowNodeOutcome{TContext}"/>.
     /// </remarks>
     public new FlowFault Fault { get; }
+}
+
+/// <summary>
+/// Schedules one typed external activity and pauses the current Flow node until its result is available.
+/// </summary>
+/// <typeparam name="TContext">Serializable context type carried by the Flow.</typeparam>
+/// <typeparam name="TWork">Serializable work contract sent to the activity executor.</typeparam>
+/// <typeparam name="TResult">Serializable result contract returned to the same node.</typeparam>
+/// <remarks>
+/// The generic properties are convenient for node tests. Durable hosts should consume
+/// <see cref="IFlowActivityRequest{TContext}"/> to read declared CLR types, versions, work, and context without
+/// reflection.
+/// </remarks>
+public sealed record FlowActivity<TContext, TWork, TResult> :
+    FlowNodeOutcome<TContext>,
+    IFlowActivityRequest<TContext>
+{
+    /// <summary>
+    /// Initializes an activity outcome.
+    /// </summary>
+    /// <param name="callsite">Stable typed activity callsite.</param>
+    /// <param name="work">Work value to persist and execute.</param>
+    /// <param name="context">Context to persist while waiting for the result.</param>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="callsite"/>, <paramref name="work"/>, or <paramref name="context"/> is null.
+    /// </exception>
+    public FlowActivity(
+        FlowActivityCallsite<TWork, TResult> callsite,
+        TWork work,
+        TContext context)
+    {
+        Callsite = callsite ?? throw new ArgumentNullException(nameof(callsite));
+        ArgumentNullException.ThrowIfNull(work);
+        Work = work;
+        Context = RequireContext(context);
+    }
+
+    /// <summary>
+    /// Gets the stable typed callsite.
+    /// </summary>
+    public FlowActivityCallsite<TWork, TResult> Callsite { get; }
+
+    /// <summary>
+    /// Gets the typed work value.
+    /// </summary>
+    public TWork Work { get; }
+
+    /// <summary>
+    /// Gets the Flow context to persist atomically with the activity command.
+    /// </summary>
+    public TContext Context { get; }
+
+    /// <inheritdoc />
+    public string CallsiteId => Callsite.CallsiteId;
+
+    /// <inheritdoc />
+    public Type WorkType => typeof(TWork);
+
+    /// <inheritdoc />
+    public int WorkContractVersion => Callsite.WorkContractVersion;
+
+    /// <inheritdoc />
+    public Type ResultType => typeof(TResult);
+
+    /// <inheritdoc />
+    public int ResultContractVersion => Callsite.ResultContractVersion;
+
+    object IFlowActivityRequest<TContext>.Work => Work!;
+
+    FlowActivityWorkResult IFlowActivityRequest<TContext>.CreateResult(object result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (result is not TResult typed)
+        {
+            throw new ArgumentException(
+                string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"Activity callsite '{CallsiteId}' expected decoded result type '{typeof(TResult).FullName}', but received '{result.GetType().FullName}'."),
+                nameof(result));
+        }
+
+        return Callsite.CreateResult(typed);
+    }
 }

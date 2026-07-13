@@ -18,6 +18,8 @@ public sealed class AppSurfaceFlowModuleTests
         using var provider = services.BuildServiceProvider();
         Assert.NotNull(provider.GetRequiredService<IOptions<AppSurfaceFlowOptions>>().Value);
         Assert.IsType<FlowDefinitionRegistry>(provider.GetRequiredService<IFlowDefinitionRegistry>());
+        Assert.IsType<FlowTransitionEvaluator<TestState>>(
+            provider.GetRequiredService<IFlowTransitionEvaluator<TestState>>());
         Assert.IsType<InMemoryFlowRunner<TestState>>(provider.GetRequiredService<IFlowRunner<TestState>>());
     }
 

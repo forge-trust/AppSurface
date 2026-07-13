@@ -22,6 +22,26 @@ public sealed class DurableTaskFlowStepTests
         Assert.Equal("review", step.NodeId);
         Assert.Same(state, step.Context);
         Assert.Same(resumeEvent, step.ResumeEvent);
+        Assert.Null(step.ActivityResult);
+    }
+
+    [Fact]
+    public void Initializer_CapturesActivityResult()
+    {
+        var callsite = new FlowActivityCallsite<TestWork, TestResult>("send-email");
+        var result = callsite.CreateResult(new TestResult("sent"));
+
+        var step = new DurableTaskFlowStep<TestState>(
+            "approval",
+            "1",
+            "instance-1",
+            "review",
+            new TestState("waiting"))
+        {
+            ActivityResult = result,
+        };
+
+        Assert.Same(result, step.ActivityResult);
     }
 
     [Theory]
@@ -58,4 +78,8 @@ public sealed class DurableTaskFlowStepTests
         new(flowId, version, instanceId, nodeId, new TestState("waiting"));
 
     private sealed record TestState(string Status);
+
+    private sealed record TestWork(string ApprovalId);
+
+    private sealed record TestResult(string Status);
 }

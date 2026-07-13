@@ -36,6 +36,17 @@ public sealed class DurableTaskFlowRunnerTests
     }
 
     [Fact]
+    public void Constructor_WithNullTransitionEvaluator_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new DurableTaskFlowRunner<TestState>(
+                new FlowDefinitionRegistry(),
+                new FlowContextSerializationValidator(new SystemTextJsonFlowContextSerializer()),
+                Options.Create(new AppSurfaceFlowDurableTaskOptions()),
+                null!));
+    }
+
+    [Fact]
     public async Task StartAsync_WithEmptyInstanceId_ThrowsArgumentException()
     {
         await Assert.ThrowsAsync<ArgumentException>(async () =>
@@ -169,6 +180,85 @@ public sealed class DurableTaskFlowRunnerTests
         await AssertDecision(new CompleteNode(), DurableTaskFlowDecisionKind.Complete, null);
         await AssertDecision(new FaultNode(), DurableTaskFlowDecisionKind.Fault, "approval.failed");
         await AssertDecision(new TimeoutNode(), DurableTaskFlowDecisionKind.TimedOut, null);
+    }
+
+    [Fact]
+    public async Task RunNodeAsync_MapsActivityAndTypedResultThroughSharedEvaluator()
+    {
+        var node = new ActivityNode("activity-pending");
+        var registry = new FlowDefinitionRegistry();
+        registry.Register(Definition(node, "review"));
+        var runner = Runner(registry);
+
+        var pending = await runner.RunNodeAsync(
+            new DurableTaskFlowStep<TestState>(
+                "approval",
+                "1",
+                "instance-1",
+                "review",
+                new TestState("created")));
+
+        Assert.Equal(DurableTaskFlowDecisionKind.ScheduleActivity, pending.Kind);
+        Assert.Equal("review", pending.NodeId);
+        Assert.Equal("send-email", pending.Activity?.CallsiteId);
+        Assert.Equal(typeof(ActivityWork), pending.Activity?.WorkType);
+        Assert.Equal(typeof(ActivityResult), pending.Activity?.ResultType);
+        Assert.Equal(new ActivityWork("APR-1001"), pending.Activity?.Work);
+        Assert.Equal(new TestState("activity-pending"), pending.Context);
+
+        var completed = await runner.RunNodeAsync(
+            new DurableTaskFlowStep<TestState>(
+                "approval",
+                "1",
+                "instance-1",
+                "review",
+                pending.Context!)
+            {
+                ActivityResult = ActivityNode.Callsite.CreateResult(new ActivityResult("sent")),
+            });
+
+        Assert.Equal(DurableTaskFlowDecisionKind.Complete, completed.Kind);
+        Assert.Equal(new TestState("sent"), completed.Context);
+        Assert.Equal(2, node.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task RunNodeAsync_WithExternalEventAndActivityResult_RejectsAmbiguousResume()
+    {
+        var registry = new FlowDefinitionRegistry();
+        registry.Register(Definition(new ActivityNode("activity-pending"), "review"));
+
+        var step = new DurableTaskFlowStep<TestState>(
+            "approval",
+            "1",
+            "instance-1",
+            "review",
+            new TestState("waiting"),
+            new FlowResumeEvent("approved"))
+        {
+            ActivityResult = ActivityNode.Callsite.CreateResult(new ActivityResult("sent")),
+        };
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await Runner(registry).RunNodeAsync(step));
+    }
+
+    [Fact]
+    public async Task RunNodeAsync_WithNonSerializableActivityContext_ReturnsFaultDecision()
+    {
+        var registry = new FlowDefinitionRegistry();
+        registry.Register(Definition(new ActivityNode("non-durable"), "review"));
+
+        var decision = await Runner(registry, serializer: new StatusSensitiveSerializer()).RunNodeAsync(
+            new DurableTaskFlowStep<TestState>(
+                "approval",
+                "1",
+                "instance-1",
+                "review",
+                new TestState("created")));
+
+        Assert.Equal(DurableTaskFlowDecisionKind.Fault, decision.Kind);
+        Assert.Equal("flow.context-not-durable", decision.Fault?.Code);
     }
 
     [Fact]
@@ -426,6 +516,43 @@ public sealed class DurableTaskFlowRunnerTests
             FlowExecutionContext<TestState> context,
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult<FlowNodeOutcome<TestState>>(FlowNodeOutcome<TestState>.TimedOut("approved", new TestState("timeout")));
+    }
+
+    private sealed record ActivityWork(string ApprovalId);
+
+    private sealed record ActivityResult(string Status);
+
+    private sealed class ActivityNode : IFlowNode<TestState>
+    {
+        private readonly string _pendingStatus;
+
+        internal ActivityNode(string pendingStatus)
+        {
+            _pendingStatus = pendingStatus;
+        }
+
+        internal static FlowActivityCallsite<ActivityWork, ActivityResult> Callsite { get; } =
+            new("send-email", 2, 3);
+
+        internal int ExecutionCount { get; private set; }
+
+        public ValueTask<FlowNodeOutcome<TestState>> ExecuteAsync(
+            FlowExecutionContext<TestState> context,
+            CancellationToken cancellationToken = default)
+        {
+            ExecutionCount++;
+            if (Callsite.TryGetResult(context.ActivityResult, out var result))
+            {
+                return ValueTask.FromResult<FlowNodeOutcome<TestState>>(
+                    FlowNodeOutcome<TestState>.Complete(new TestState(result.Status)));
+            }
+
+            return ValueTask.FromResult<FlowNodeOutcome<TestState>>(
+                FlowNodeOutcome<TestState>.Activity(
+                    Callsite,
+                    new ActivityWork("APR-1001"),
+                    new TestState(_pendingStatus)));
+        }
     }
 
     private sealed class NullOutcomeNode : IFlowNode<TestState>

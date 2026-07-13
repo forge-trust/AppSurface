@@ -1,7 +1,7 @@
 namespace ForgeTrust.AppSurface.Flow;
 
 /// <summary>
-/// Runs AppSurface Flow definitions until the next wait or terminal outcome.
+/// Runs AppSurface Flow definitions until the next external-event wait, typed activity, or terminal outcome.
 /// </summary>
 /// <typeparam name="TContext">Serializable context type carried by the flow.</typeparam>
 public interface IFlowRunner<TContext>
@@ -33,4 +33,26 @@ public interface IFlowRunner<TContext>
         TContext context,
         FlowResumeEvent resumeEvent,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resumes a node that is waiting for one typed activity result.
+    /// </summary>
+    /// <param name="definition">Flow definition to run.</param>
+    /// <param name="nodeId">Node id that requested the activity.</param>
+    /// <param name="context">Context persisted with the activity request.</param>
+    /// <param name="activityResult">Decoded typed activity result.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The result after execution pauses or ends.</returns>
+    /// <remarks>
+    /// The default implementation preserves compatibility for custom v1 runners and reports that activity resumption
+    /// is unsupported. Runners that surface <see cref="FlowRunStatus.ActivityPending"/> must override this method.
+    /// </remarks>
+    ValueTask<FlowRunResult<TContext>> ResumeActivityAsync(
+        FlowDefinition<TContext> definition,
+        string nodeId,
+        TContext context,
+        FlowActivityWorkResult activityResult,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromException<FlowRunResult<TContext>>(
+            new NotSupportedException($"Flow runner '{GetType().FullName}' does not support activity resumption."));
 }

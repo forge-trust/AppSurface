@@ -5,6 +5,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ## What is taking shape
 
 - `ForgeTrust.RazorWire` Behavior Kit now exposes root-scoped registrations for DOM enhancement and page-lifecycle registrations for logical browser visits, including Skoolit-style PWA display-mode telemetry without fake body selectors or app-owned Turbo listeners.
+- [`ForgeTrust.AppSurface.Durable`](../Durable/ForgeTrust.AppSurface.Durable/README.md) and [`ForgeTrust.AppSurface.Durable.PostgreSql`](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) add a native PostgreSQL durable runtime preview for atomic work handoff, explicit one-node Flow persistence, and `At`/`After`/`Every`/Cronos scheduling. PostgreSQL remains the only required control plane; recurring schedules default to configurable `QueueOne + RunOnce`, provider effects are explicitly at-least-once, ambiguous outcomes suspend instead of being retried blindly, and a store-wide recovery epoch fences stale fleets after restore. A [runnable example](../examples/durable-postgresql/README.md) covers source-generated contracts, explicit schema setup, bounded pumping, operator control, and worker activation.
 
 ## Included in the next coordinated version
 
