@@ -1,14 +1,16 @@
 # ForgeTrust.AppSurface.Durable
 
 `ForgeTrust.AppSurface.Durable` defines the host-neutral contracts for durable work, resumable
-[AppSurface Flow](../../Flow/ForgeTrust.AppSurface.Flow/README.md), and durable schedules. Use
-[`ForgeTrust.AppSurface.Durable.PostgreSql`](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) when PostgreSQL should
-own the authoritative schema, atomic Work handoff, and execution fencing.
+[AppSurface Flow](../../Flow/ForgeTrust.AppSurface.Flow/README.md), and durable schedules. Add
+[`ForgeTrust.AppSurface.Durable.PostgreSql`](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) for the authoritative
+store, migrations, bounded runtime pump, and opt-in hosted execution.
 
 The package is a public preview. It deliberately does not promise stable history compatibility until a second consumer,
 rolling-upgrade proof, restore proof, and the published capacity gate have all passed.
 
-For the package-family rationale and scope, start at [Portable durable execution](../README.md).
+For a complete host you can run locally, follow the
+[durable PostgreSQL tutorial](../../examples/durable-postgresql/README.md). For the package-family rationale and scope,
+start at [Portable durable execution](../README.md).
 
 ## Choose this package when
 
@@ -205,10 +207,8 @@ pending/coalesced occurrence state and never resurrects a deleted schedule.
 application-owned health endpoint. It reports schema and epoch compatibility, the configured worker and process-instance
 identities, hosted surfaces, heartbeat and last-successful-sweep timestamps, drain and active-pass markers, plus the
 count and oldest age of due dispatches for those surfaces. It never returns a scope, aggregate id, provider key, or
-payload. The selected storage integration defines registration and operational behavior.
-
-For PostgreSQL registration, activation, and ownership semantics, see the
-[PostgreSQL runtime reference](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#registration-and-activation).
+payload. See the [PostgreSQL worker and health reference](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#runtime-health-and-graceful-drain)
+for registration and operational behavior.
 
 The health snapshot is the preview's current observability API. The runtime does not yet emit a supported `Meter`,
 metrics instrument set, or `ActivitySource` trace model. Stable release requires privacy-bounded metrics and tracing;
@@ -243,6 +243,9 @@ performs resume on startup and a best-effort drain marker on shutdown.
   rows must not run blindly, and the pump never substitutes for the authorized inventory and recovery audit.
 - Automatic startup DDL is not supported. Apply numbered PostgreSQL migrations explicitly before compatible workers
   claim work.
+
+For PostgreSQL setup and migration commands, continue with the
+[PostgreSQL package reference](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md).
 
 ## Release Guidance
 

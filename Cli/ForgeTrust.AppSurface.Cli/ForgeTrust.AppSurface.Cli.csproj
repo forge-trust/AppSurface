@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Console\ForgeTrust.AppSurface.Console\ForgeTrust.AppSurface.Console.csproj" />
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config.LocalSecrets\ForgeTrust.AppSurface.Config.LocalSecrets.csproj" />
+    <ProjectReference Include="..\..\Durable\ForgeTrust.AppSurface.Durable.PostgreSql\ForgeTrust.AppSurface.Durable.PostgreSql.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Web\ForgeTrust.AppSurface.Web.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Docs.Standalone\ForgeTrust.AppSurface.Docs.Standalone.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.RazorWire.Cli\ForgeTrust.RazorWire.Cli.csproj" />

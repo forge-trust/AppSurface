@@ -66,6 +66,7 @@
     <Project Path="examples/aspire-apphost/AspireAppHostExample.csproj" />
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
+    <Project Path="examples/durable-postgresql/DurablePostgreSqlExample.csproj" />
     <Project Path="examples/local-secrets/LocalSecretsExample.csproj" />
     <Project Path="examples/flow-generated-authoring/FlowGeneratedAuthoringExample.csproj" />
     <Project Path="examples/flow-approval-local/FlowApprovalLocalExample.csproj" />

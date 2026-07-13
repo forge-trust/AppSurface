@@ -159,6 +159,37 @@ to the current CLI invocation; configure `AppSurfaceLocalSecretsOptions.LinuxSec
 `--secret-tool-path` and `--store-file` are mutually exclusive so `doctor` cannot report file-store readiness when you
 meant to verify the Linux platform store.
 
+### `appsurface durable schema`
+
+Inspect and deploy the explicit numbered migrations owned by
+[`ForgeTrust.AppSurface.Durable.PostgreSql`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md):
+
+```bash
+export APPSURFACE_DURABLE_CONNECTION='<migration-owner PostgreSQL connection string>'
+
+appsurface durable schema status
+appsurface durable schema script --from-version 0 --output ./artifacts/appsurface-durable.sql
+appsurface durable schema preflight
+appsurface durable schema apply --apply
+```
+
+All four commands read the connection string from `APPSURFACE_DURABLE_CONNECTION` by default. Use
+`--connection-env NAME` to select another environment variable. Connection strings are intentionally not accepted as
+command-line values because process listings and shell history are not secret stores; command output never echoes the
+resolved value.
+
+- `status` reads installed migration metadata and reader/writer compatibility without mutation.
+- `script` generates deterministic SQL under the package advisory lock. It writes to standard output unless `--output`
+  is supplied and refuses to replace an existing file without `--force`.
+- `preflight` is noninteractive and exits unsuccessfully unless this package is inside both the installed reader and
+  writer ranges. Run it before workers begin claiming.
+- `apply` requires the explicit `--apply` confirmation and a migration-owner connection. Runtime roles should not own
+  the schema or receive DDL privileges.
+
+Application startup validates compatibility but never applies migrations. The CLI deliberately has no raw work retry,
+cancel, reconcile, Flow-resume, schedule-mutation, or restore-release commands: those operations require application
+authorization, an actor, a reason, expected revision, and durable audit history.
+
 ### `appsurface coverage run`
 
 Run instrumented .NET test projects and merge private Cobertura artifacts.

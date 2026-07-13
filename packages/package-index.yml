@@ -303,11 +303,11 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/unreleased.md
     order: 47
-    use_when: Add this in a PostgreSQL-backed host that must atomically accept durable Work, resume typed Flow instances, or run interval and Cronos schedules without another control plane.
-    includes: Explicit numbered PostgreSQL migrations, non-owner RLS storage, caller-owned Npgsql transaction handoff, payload-free dispatch and recovery inventories, store-wide runtime-epoch bootstrap and privileged rotation, persisted active-pass and graceful-drain fencing, claims and lease-generation fencing, effect permits and ambiguous-outcome handling, idempotent operator commands, durable Flow history and active waits, Cronos occurrence and run-slot persistence, bounded pump execution, payload-free health, and opt-in hosted processing.
-    does_not_include: Automatic production schema migration at runtime startup, SQL Server, Durable Task Scheduler, Dapr sidecars, Wolverine, Temporal, Restate, external queues as correctness dependencies, runtime metrics or ActivitySource telemetry, retention automation, multi-backend persistence, arbitrary async/await replay, or exactly-once provider effects.
+    use_when: Add this in a PostgreSQL-backed AppSurface host that must atomically accept durable work with domain changes, resume typed Flow instances after restarts, or operate interval and Cronos schedules without another control plane.
+    includes: Explicit numbered PostgreSQL migrations, non-owner RLS storage, caller-owned Npgsql transaction handoff, payload-free dispatch, Work/Flow recovery inventory, and runtime health, store-wide runtime-epoch bootstrap and privileged rotation, persisted active-pass and graceful-drain fencing, claims and lease-generation fencing, effect permits and ambiguous-outcome handling, idempotent started/completed operator commands, durable Flow history and active-wait resume, CronosV1 occurrence and run-slot persistence, bounded pump execution, and opt-in hosted processing.
+    does_not_include: Automatic production schema migration at runtime startup, SQL Server, Durable Task Scheduler, Dapr sidecars, Wolverine, Temporal, Restate, external queues as correctness dependencies, runtime metrics/ActivitySource telemetry, retention automation, multi-backend persistence, or exactly-once provider effects.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Durable.PostgreSql` after Durable when PostgreSQL should own Work, resumable Flow history, and durable schedules; apply its embedded migrations explicitly before processing any surface.
+    recipe_summary: Add `ForgeTrust.AppSurface.Durable.PostgreSql` after Durable when PostgreSQL should be the sole durable control plane and apply its embedded numbered migrations explicitly before starting workers.
     depends_on:
       - ForgeTrust.AppSurface.Durable
     expected_dependency_package_ids:
@@ -566,11 +566,11 @@ packages:
     order: 120
     tool_command_name: appsurface
     use_when: Install this when you want repository-level AppSurface tooling from a global or local .NET tool command.
-    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface pwa verify` install-readiness evidence for AppSurface Web apps, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, and the `appsurface secrets init`, `set`, `get`, `list --names-only`, `delete`, and `doctor` local-secret workflow.
-    does_not_include: App runtime packages, hosted coverage dashboards, coverage uploads, coverage trend storage, grouped coverage runs, TRX/TUnit result parsing, RazorWire-specific export workflows, or a replacement for project package references.
+    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface pwa verify` install-readiness evidence for AppSurface Web apps, explicit `appsurface durable schema status`, `script`, `apply`, and `preflight` deployment operations, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, and the `appsurface secrets init`, `set`, `get`, `list --names-only`, `delete`, and `doctor` local-secret workflow.
+    does_not_include: App runtime hosting, raw durable work/operator mutation commands, automatic startup DDL, hosted coverage dashboards, coverage uploads, coverage trend storage, grouped coverage runs, TRX/TUnit result parsing, RazorWire-specific export workflows, or a replacement for project package references.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README
-    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs` workflows, `appsurface pwa verify` install-readiness evidence, or private `appsurface coverage run`, `coverage merge`, and `coverage gate` commands without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
+    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want AppSurface docs/PWA/coverage tooling or explicit durable schema deployment checks without exposing runtime work mutations; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
     classification: excluded
     publish_decision: do_not_publish

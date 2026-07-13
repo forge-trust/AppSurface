@@ -82,6 +82,11 @@ This approach aims to:
 - [**ForgeTrust.AppSurface.Flow**](./Flow/ForgeTrust.AppSurface.Flow/README.md) – Typed long-running process contracts, generated-case authoring, graph validation, definition registry, and an in-memory runner for local tests and hello-world flows.
 - [**ForgeTrust.AppSurface.Flow.DurableTask**](./Flow/ForgeTrust.AppSurface.Flow.DurableTask/README.md) – Durable Task adapter boundary with runner/client services, resume-event authorization, timeout, late-event and retry behavior, and context serialization validation.
 
+### [Durable](./Durable/README.md)
+
+- [**ForgeTrust.AppSurface.Durable**](./Durable/ForgeTrust.AppSurface.Durable/README.md) – Host-neutral contracts for typed durable work, resumable one-node Flow transitions, bounded runtime activation, payload-free health, graceful drain, authorized control, and `At`/`After`/`Every`/Cron schedules.
+- [**ForgeTrust.AppSurface.Durable.PostgreSql**](./Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) – PostgreSQL storage, explicit numbered migrations, scoped claims, effect fencing, schedule recovery, restore operations, persisted worker health/drain fencing, and opt-in hosted execution with no separate workflow control plane.
+
 ### [Console](./Console/README.md)
 
 - [**ForgeTrust.AppSurface.Console**](./Console/ForgeTrust.AppSurface.Console/README.md) – Helpers for building command line apps with [CliFx](https://github.com/Tyrrrz/CliFx), source-generated command descriptors, a `CriticalService`-based command runner, and helpers for configuring services.
@@ -231,6 +236,7 @@ Check out the examples to see how modules are composed in practice:
 dotnet run --project examples/auth-aspnetcore-bridge
 dotnet run --project examples/auth-web-razorwire-proof/AuthWebRazorWireProofExample.csproj
 dotnet run --project examples/console-app
+dotnet run --project examples/durable-postgresql -- help
 dotnet run --project examples/flow-approval-local/FlowApprovalLocalExample.csproj
 dotnet run --project examples/product-readiness-lab/ProductReadinessLab.csproj -- --report
 aspire run --non-interactive --apphost examples/product-readiness-lab-apphost/ProductReadinessLabAppHost.csproj -- verify
@@ -285,6 +291,9 @@ how to use this project.
   solo development before a remote vault exists.
 - [Flow approval local example](examples/flow-approval-local/README.md) – shows a typed
   flow that waits for an approval event and resumes through the in-memory runner.
+- [Durable PostgreSQL example](examples/durable-postgresql/README.md) – shows source-generated
+  durable contracts, explicit schema setup, enqueue/pump/status/control, full Cronos
+  scheduling, runtime health and graceful drain, and continuous or externally activated workers.
 - [Product readiness lab](examples/product-readiness-lab/README.md) – runs a composed
   local evaluator with AppSurface Web, Auth.AspNetCore, Flow, DurableTask-facing
   host-shape guidance, and Postgres product-state proof. Use its AppHost `verify`

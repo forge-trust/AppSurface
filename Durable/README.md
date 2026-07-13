@@ -1,16 +1,18 @@
 # Portable durable execution
 
-AppSurface Durable defines host-neutral contracts for work that must survive process restarts, typed Flows that must
-resume at explicit transition boundaries, and schedules that must recover after downtime. Storage and worker hosting
-remain separate integration concerns.
+AppSurface Durable is a small, PostgreSQL-first runtime for work that must survive process restarts, typed Flows that
+must resume at explicit transition boundaries, and schedules that must recover after downtime. It keeps the application
+contract host-neutral while putting the authoritative work, Flow, timer, schedule, lease, and effect history in the
+application's PostgreSQL database.
 
 Start with:
 
 - [`ForgeTrust.AppSurface.Durable`](ForgeTrust.AppSurface.Durable/README.md) for host-neutral work, Flow, payload,
-  schedule, status, and control contracts; and
-- [`ForgeTrust.AppSurface.Durable.PostgreSql`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md) for explicit schema
-  deployment, atomic Work acceptance, resumable Flow persistence, full Cronos scheduling, lease fencing, and
-  provider-effect safety, bounded activation, runtime health, and opt-in hosted execution.
+  schedule, status, and control contracts;
+- [`ForgeTrust.AppSurface.Durable.PostgreSql`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md) for storage, migrations,
+  row-level security, worker activation, restore, and operations; and
+- the [runnable PostgreSQL tutorial](../examples/durable-postgresql/README.md) for source-generated codecs, enqueue,
+  bounded pumping, control, and Cronos scheduling.
 
 ## Why this boundary
 
@@ -31,4 +33,6 @@ a general message bus, a multi-database transaction, automatic production DDL, o
 Use an existing Durable Task adapter when its control plane is already acceptable, or a larger workflow platform when
 those capabilities are the actual requirement.
 
-Operational failures use the shared [`ASDURxxx` diagnostics catalog](../troubleshooting/durable-diagnostics.md).
+Operational failures use the shared [`ASDURxxx` diagnostics catalog](../troubleshooting/durable-diagnostics.md). Schema
+deployment uses the canonical [`appsurface durable schema`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-durable-schema)
+commands.
