@@ -295,6 +295,24 @@ packages:
       - ForgeTrust.AppSurface.Core
       - ForgeTrust.AppSurface.Flow
       - ForgeTrust.AppSurface.Workers
+  - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 47
+    use_when: Add this in a PostgreSQL-backed host that must atomically accept durable Work with domain changes and recover execution without another control plane.
+    includes: Explicit numbered PostgreSQL migrations, non-owner row-level-security storage, caller-owned Npgsql transaction handoff, request fingerprints, runtime-epoch fencing, scoped Work dispatch, lease generations, provider-effect permits, cancellation, retries, and scope disablement.
+    does_not_include: Automatic production schema migration at startup, hosted execution, Flow processing, schedule evaluation, SQL Server, external queues as correctness dependencies, or exactly-once provider effects.
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Durable.PostgreSql` after Durable when PostgreSQL should own the Work protocol; apply its embedded migrations explicitly before accepting or processing Work.
+    depends_on:
+      - ForgeTrust.AppSurface.Durable
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Core
+      - ForgeTrust.AppSurface.Durable
   - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
     classification: public
     publish_decision: publish
@@ -302,7 +320,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.2.md
-    order: 47
+    order: 48
     use_when: Start here for CLI apps and worker-style entry points that should run through the AppSurface startup pipeline with CliFx.
     includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx source-generated command discovery through AppSurface modules.
     does_not_include: ASP.NET Core hosting, OpenAPI surfaces, or Razor-based UI composition.

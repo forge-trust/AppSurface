@@ -1,8 +1,9 @@
 # ForgeTrust.AppSurface.Durable
 
 `ForgeTrust.AppSurface.Durable` defines the host-neutral contracts for durable work, resumable
-[AppSurface Flow](../../Flow/ForgeTrust.AppSurface.Flow/README.md), and durable schedules. A storage integration owns the
-authoritative store, migrations, bounded runtime pump, and optional hosted execution.
+[AppSurface Flow](../../Flow/ForgeTrust.AppSurface.Flow/README.md), and durable schedules. Use
+[`ForgeTrust.AppSurface.Durable.PostgreSql`](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) when PostgreSQL should
+own the authoritative schema, atomic Work handoff, and execution fencing.
 
 The package is a public preview. It deliberately does not promise stable history compatibility until a second consumer,
 rolling-upgrade proof, restore proof, and the published capacity gate have all passed.
@@ -25,7 +26,7 @@ plane and storage boundary are already acceptable.
 | Surface | Start here | Important default |
 |---|---|---|
 | Durable work | `IDurableWorkClient`, `DurableWorkRequest`, `AddDurableWork` | At-least-once execution; provider safety must be declared |
-| Transactional handoff | Storage integration transaction writer | Uses the caller's exact domain transaction |
+| Transactional handoff | PostgreSQL `IDurableWorkTransactionWriter` | Uses the caller's exact `NpgsqlTransaction` |
 | Flow | `IDurableFlowClient`, `DurableFlowRegistration<TContext>` | Exactly one node decision is persisted at a time |
 | Scheduling | `IDurableScheduleClient`, `DurableSchedule` | `QueueOne` overlap plus `RunOnce` misfire |
 | Worker activation | `IDurableRuntimePump.RunOnceAsync` | Item-bounded, with a time budget for starting additional work |

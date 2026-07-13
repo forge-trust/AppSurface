@@ -51,6 +51,8 @@
   <Folder Name="/Durable/">
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.Tests/ForgeTrust.AppSurface.Durable.Tests.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj" />
   </Folder>
   <Folder Name="/Examples/">
     <Project Path="examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj" />
