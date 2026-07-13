@@ -48,6 +48,10 @@
     <Project Path="Dependency/ForgeTrust.AppSurface.Dependency.Autofac.Tests/ForgeTrust.AppSurface.Dependency.Autofac.Tests.csproj" />
     <Project Path="Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj" />
   </Folder>
+  <Folder Name="/Durable/">
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.Tests/ForgeTrust.AppSurface.Durable.Tests.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" />
+  </Folder>
   <Folder Name="/Examples/">
     <Project Path="examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj" />
     <Project Path="examples/auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" />

@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 37
-- Evidence status: manifest evidence complete: 27; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
-- Product families: AppSurface: 25; Forge Trust: 2; Internal support: 7; RazorWire: 3
+- Packages: 38
+- Evidence status: manifest evidence complete: 28; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
+- Product families: AppSurface: 26; Forge Trust: 2; Internal support: 7; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -32,6 +32,7 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Flow.DurableTask` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Flow` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Flow` | [README](../Flow/ForgeTrust.AppSurface.Flow.DurableTask/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Workers` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Workers/ForgeTrust.AppSurface.Workers/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Workers.DurableTask` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Workers`<br />`ForgeTrust.AppSurface.Flow.DurableTask` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Workers`<br />`ForgeTrust.AppSurface.Flow.DurableTask` | [README](../Workers/ForgeTrust.AppSurface.Workers.DurableTask/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
+| AppSurface | `ForgeTrust.AppSurface.Durable` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Flow`<br />`ForgeTrust.AppSurface.Workers` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Flow`<br />`ForgeTrust.AppSurface.Workers` | [README](../Durable/ForgeTrust.AppSurface.Durable/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Console` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Console/ForgeTrust.AppSurface.Console/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Dependency.Autofac` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Core` | `ForgeTrust.AppSurface.Core` | [README](../Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Aspire` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Console` | [README](../Aspire/ForgeTrust.AppSurface.Aspire/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
