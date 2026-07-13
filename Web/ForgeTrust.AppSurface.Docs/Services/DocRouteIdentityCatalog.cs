@@ -436,6 +436,7 @@ internal sealed class DocRouteIdentityCatalog
         List<DocHarvestDiagnostic> diagnostics)
     {
         if (string.IsNullOrWhiteSpace(aliasRoutePath)
+            || IsRootReadme(StripFragment(identity.SourcePath))
             || string.Equals(aliasRoutePath, identity.PublicRoutePath, StringComparison.OrdinalIgnoreCase))
         {
             return false;

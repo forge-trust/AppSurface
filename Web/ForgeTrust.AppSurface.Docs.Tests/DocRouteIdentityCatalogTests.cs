@@ -180,6 +180,18 @@ public sealed class DocRouteIdentityCatalogTests
     }
 
     [Fact]
+    public void BuildRouteManifest_ShouldNotPublishRootReadmeRecoveryAliases()
+    {
+        var catalog = CreateCatalog(new DocNode("Home", "README.md", "<p>Home</p>"));
+
+        var manifest = catalog.BuildRouteManifest();
+
+        var home = Assert.Single(manifest.Entries, entry => entry.SourcePath == "README.md");
+        Assert.Equal(string.Empty, home.CanonicalRoutePath);
+        Assert.Empty(home.RecoveryAliases);
+    }
+
+    [Fact]
     public void BuildRouteManifest_ShouldSkipImplicitRecoveryAlias_WhenPublicRouteOwnsSamePath()
     {
         var catalog = CreateCatalog(

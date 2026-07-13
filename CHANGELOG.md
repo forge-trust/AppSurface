@@ -15,6 +15,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - AppSurface Docs now exposes Theme Contract v1 through `AppSurfaceDocs:Theme`, adding dark-family presets, supported accent/link overrides, density/chrome controls, startup validation, and export/archive-safe resolved CSS variables.
+- AppSurface Auth adds an AppHost-only `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` package for real local Keycloak OIDC proof, with deterministic realm/client/user import, secret-safe OIDC projection, fixed-port/readiness diagnostics, and a focused AppHost/web/verifier sample.
 - `appsurface pwa verify` can now prove real entry pages such as `/account/resume`, follow same-origin path-base-safe redirects, assert manifest values and icon declarations, decode PNG icon dimensions for CI evidence, and prove the configured AppSurface service worker is absent when offline support is disabled.
 - [`ForgeTrust.AppSurface.Web`](./Web/ForgeTrust.AppSurface.Web/Docs/pwa-install.md) now composes independent offline and push capabilities into one service worker, exposes inert explicit browser registration, validates a strict privacy-safe notification payload and click destination, and keeps permission, subscription, and delivery application-owned.
 

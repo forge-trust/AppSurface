@@ -16,12 +16,23 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--test-results junit", script, StringComparison.Ordinal);
         Assert.Contains("--slow-test-diagnostics", script, StringComparison.Ordinal);
         Assert.Contains("--logger \"GitHubActions;report-warnings=false\"", script, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_GATE_DIFF_BASE", script, StringComparison.Ordinal);
+        Assert.Contains("coverage\n    gate", script, StringComparison.Ordinal);
+        Assert.Contains("--min-line 95", script, StringComparison.Ordinal);
+        Assert.Contains("--min-branch 85", script, StringComparison.Ordinal);
+        Assert.Contains("--diff-base \"$COVERAGE_GATE_DIFF_BASE\"", script, StringComparison.Ordinal);
+        Assert.Contains("--min-patch-line 95", script, StringComparison.Ordinal);
+        Assert.Contains("--min-patch-branch 85", script, StringComparison.Ordinal);
         Assert.Equal(2, CountOccurrences(script, "dotnet_run_args+=(--no-restore)"));
 
         var sourceCliNoRestore = script.IndexOf("dotnet_run_args+=(--no-restore)", StringComparison.Ordinal);
         var coverageRunDelimiter = script.IndexOf("    --\n    coverage", StringComparison.Ordinal);
+        var coverageGateExit = script.IndexOf("dotnet \"${coverage_gate_args[@]}\"\n  exit 0\nfi", StringComparison.Ordinal);
+        var legacyRunner = script.IndexOf("dotnet_run_args=(\n  run\n  --project \"$COVERAGE_RUNNER_PROJECT\"", StringComparison.Ordinal);
         Assert.True(sourceCliNoRestore >= 0, "The source CLI lane should pass --no-restore to dotnet run when requested.");
         Assert.True(coverageRunDelimiter > sourceCliNoRestore, "The source CLI lane must append --no-restore before the coverage run delimiter.");
+        Assert.True(coverageGateExit >= 0, "The source CLI lane must exit after its coverage gate succeeds.");
+        Assert.True(legacyRunner > coverageGateExit, "The legacy runner must remain unreachable from the source CLI lane.");
     }
 
     [Fact]
@@ -44,8 +55,11 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("BUILD_CONFIGURATION: Release", workflow, StringComparison.Ordinal);
         Assert.Contains("BUILD_NO_RESTORE: true", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}", workflow, StringComparison.Ordinal);
         Assert.Contains("./scripts/coverage-solution.sh", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("coverage run \\", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("Gate PR coverage with AppSurface CLI", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("Gate baseline coverage with AppSurface CLI", workflow, StringComparison.Ordinal);
     }
 
     private static string ReadScript()
