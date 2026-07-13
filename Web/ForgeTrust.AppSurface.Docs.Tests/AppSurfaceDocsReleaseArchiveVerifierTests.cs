@@ -279,13 +279,36 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
     {
         var index = WriteFile("index.html", "<html>ok</html>");
         var digest = WriteManifest(index);
-        var fileSystem = new ExtraEnumeratedFileSystem(TestPathUtils.PathUnder(_tempDirectory, "INDEX.HTML"));
+        var fileSystem = new ExtraEnumeratedFileSystem(
+            TestPathUtils.PathUnder(_tempDirectory, "INDEX.HTML"),
+            StringComparer.Ordinal);
 
         var failure = VerifyFailure(digest, fileSystem);
 
         Assert.Equal("ASDOCSARCHIVE009", failure.Code);
         Assert.Equal("INDEX.HTML", failure.Path);
         Assert.Contains("serveable file", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldPass_WhenCaseInsensitiveFilesystemReportsManifestPathWithDifferentCasing()
+    {
+        var index = WriteFile("index.html", "<html>ok</html>");
+        var digest = WriteManifest(index);
+        var fileSystem = new ExtraEnumeratedFileSystem(
+            TestPathUtils.PathUnder(_tempDirectory, "INDEX.HTML"),
+            StringComparer.OrdinalIgnoreCase);
+
+        var verified = AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
+            _tempDirectory,
+            digest,
+            fileSystem,
+            out var archive,
+            out var failure);
+
+        Assert.True(verified, failure?.Detail);
+        Assert.Null(failure);
+        Assert.NotNull(archive);
     }
 
     [Fact]
@@ -559,8 +582,10 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
         }
     }
 
-    private sealed class ExtraEnumeratedFileSystem(string extraPath) : AppSurfaceDocsReleaseArchiveFileSystem
+    private sealed class ExtraEnumeratedFileSystem(string extraPath, StringComparer pathComparer) : AppSurfaceDocsReleaseArchiveFileSystem
     {
+        internal override StringComparer PathComparer => pathComparer;
+
         internal override bool FileExists(string path)
         {
             return File.Exists(path);

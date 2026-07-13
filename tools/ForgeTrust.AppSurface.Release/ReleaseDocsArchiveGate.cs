@@ -600,8 +600,9 @@ internal static class ReleaseDocsArchiveGate
             return false;
         }
 
+        var physicalManifestPaths = CreatePhysicalManifestPathSet(files.Keys, PhysicalPathComparer);
         var unmanifestedServeableFile = serveableFiles
-            .Where(serveableFile => !files.ContainsKey(serveableFile))
+            .Where(serveableFile => !physicalManifestPaths.Contains(serveableFile))
             .FirstOrDefault();
         if (unmanifestedServeableFile is not null)
         {
@@ -611,6 +612,21 @@ internal static class ReleaseDocsArchiveGate
 
         fileCount = files.Count;
         return true;
+    }
+
+    /// <summary>
+    /// Creates the physical-path coverage set for a release manifest under the filesystem's casing rules.
+    /// </summary>
+    /// <param name="manifestPaths">Logical paths recorded by the release manifest.</param>
+    /// <param name="pathComparer">Comparer matching the physical filesystem's case behavior.</param>
+    /// <returns>A set used to match paths returned by physical archive enumeration.</returns>
+    internal static IReadOnlySet<string> CreatePhysicalManifestPathSet(
+        IEnumerable<string> manifestPaths,
+        StringComparer pathComparer)
+    {
+        ArgumentNullException.ThrowIfNull(manifestPaths);
+        ArgumentNullException.ThrowIfNull(pathComparer);
+        return new HashSet<string>(manifestPaths, pathComparer);
     }
 
     private static bool TryEnumerateOrdinaryServeableFiles(
@@ -987,6 +1003,10 @@ internal static class ReleaseDocsArchiveGate
         FileSystemInspectorOverride.Value = inspector;
         return new FileSystemInspectorScope(previous);
     }
+
+    private static StringComparer PhysicalPathComparer { get; } = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
 
     private static StringComparison PhysicalPathComparison { get; } = OperatingSystem.IsWindows()
         ? StringComparison.OrdinalIgnoreCase

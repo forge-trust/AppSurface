@@ -263,6 +263,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
             return false;
         }
 
+        var physicalManifestPaths = new HashSet<string>(files.Keys, fileSystem.PathComparer);
         foreach (var relativePath in archiveFilePaths.Select(filePath => NormalizeRelativePath(exactTreePath, filePath)))
         {
             if (string.Equals(relativePath, FileName, StringComparison.Ordinal))
@@ -275,7 +276,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
                 continue;
             }
 
-            if (!files.ContainsKey(relativePath))
+            if (!physicalManifestPaths.Contains(relativePath))
             {
                 failure = AppSurfaceDocsArchiveVerificationFailure.Create(
                     "ASDOCSARCHIVE009",
@@ -453,6 +454,13 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
 /// </remarks>
 internal abstract class AppSurfaceDocsReleaseArchiveFileSystem
 {
+    /// <summary>
+    /// Gets the comparer used by the physical filesystem when resolving archive paths.
+    /// </summary>
+    internal virtual StringComparer PathComparer => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
+
     /// <summary>
     /// Gets the physical filesystem adapter used by runtime verification.
     /// </summary>

@@ -2772,6 +2772,22 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void StableDocsArchiveGateMatchesPhysicalPathsUsingFilesystemCasingRules()
+    {
+        string[] manifestPaths = ["docs/intelligence/package.html"];
+
+        var caseInsensitivePaths = ReleaseDocsArchiveGate.CreatePhysicalManifestPathSet(
+            manifestPaths,
+            StringComparer.OrdinalIgnoreCase);
+        var caseSensitivePaths = ReleaseDocsArchiveGate.CreatePhysicalManifestPathSet(
+            manifestPaths,
+            StringComparer.Ordinal);
+
+        Assert.Contains("docs/Intelligence/package.html", caseInsensitivePaths);
+        Assert.DoesNotContain("docs/Intelligence/package.html", caseSensitivePaths);
+    }
+
+    [Fact]
     public async Task StableDocsArchiveGateReportsExactTreeSegmentInspectionFailure()
     {
         await SeedRepositoryAsync();
