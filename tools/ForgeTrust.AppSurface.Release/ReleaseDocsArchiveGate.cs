@@ -602,7 +602,7 @@ internal static class ReleaseDocsArchiveGate
 
         var physicalManifestPaths = CreatePhysicalManifestPathSet(
             files.Keys,
-            ResolvePhysicalPathComparer(exactTreePath, Directory.Exists));
+            ResolvePhysicalPathComparer(exactTreePath, Directory.Exists, Directory.EnumerateFileSystemEntries));
         var unmanifestedServeableFile = serveableFiles
             .Where(serveableFile => !physicalManifestPaths.Contains(serveableFile))
             .FirstOrDefault();
@@ -636,26 +636,60 @@ internal static class ReleaseDocsArchiveGate
     /// </summary>
     /// <param name="rootPath">Existing exact release tree.</param>
     /// <param name="directoryExists">Directory existence operation used for the read-only case-variant probe.</param>
+    /// <param name="enumerateFileSystemEntries">Filesystem enumeration used to reject ambiguous case-variant siblings.</param>
     /// <returns>An ordinal comparer matching the archive root's case behavior.</returns>
-    internal static StringComparer ResolvePhysicalPathComparer(string rootPath, Func<string, bool> directoryExists)
+    internal static StringComparer ResolvePhysicalPathComparer(
+        string rootPath,
+        Func<string, bool> directoryExists,
+        Func<string, IEnumerable<string>> enumerateFileSystemEntries)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
         ArgumentNullException.ThrowIfNull(directoryExists);
-        var fullRootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
-        for (var index = fullRootPath.Length - 1; index >= 0; index--)
+        ArgumentNullException.ThrowIfNull(enumerateFileSystemEntries);
+        var probePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+        while (!string.IsNullOrEmpty(probePath))
         {
-            var character = fullRootPath[index];
-            if (!char.IsAsciiLetter(character))
+            var segment = Path.GetFileName(probePath);
+            var parentPath = Path.GetDirectoryName(probePath);
+            var letterIndex = -1;
+            for (var index = segment.Length - 1; index >= 0; index--)
             {
+                if (char.IsAsciiLetter(segment[index]))
+                {
+                    letterIndex = index;
+                    break;
+                }
+            }
+
+            if (letterIndex < 0 || string.IsNullOrEmpty(parentPath))
+            {
+                probePath = parentPath ?? string.Empty;
                 continue;
             }
 
-            var alternateCharacter = char.IsAsciiLetterLower(character)
-                ? char.ToUpperInvariant(character)
-                : char.ToLowerInvariant(character);
-            var alternateRootPathCharacters = fullRootPath.ToCharArray();
-            alternateRootPathCharacters[index] = alternateCharacter;
-            var alternateRootPath = new string(alternateRootPathCharacters);
+            int matchingEntryCount;
+            try
+            {
+                matchingEntryCount = enumerateFileSystemEntries(parentPath)
+                    .Select(Path.GetFileName)
+                    .Where(entryName => string.Equals(entryName, segment, StringComparison.OrdinalIgnoreCase))
+                    .Take(2)
+                    .Count();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return StringComparer.Ordinal;
+            }
+            if (matchingEntryCount != 1)
+            {
+                return StringComparer.Ordinal;
+            }
+
+            var alternateSegmentCharacters = segment.ToCharArray();
+            alternateSegmentCharacters[letterIndex] = char.IsAsciiLetterLower(alternateSegmentCharacters[letterIndex])
+                ? char.ToUpperInvariant(alternateSegmentCharacters[letterIndex])
+                : char.ToLowerInvariant(alternateSegmentCharacters[letterIndex]);
+            var alternateRootPath = Path.Combine(parentPath, new string(alternateSegmentCharacters));
             return directoryExists(alternateRootPath)
                 ? StringComparer.OrdinalIgnoreCase
                 : StringComparer.Ordinal;

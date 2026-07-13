@@ -2792,21 +2792,35 @@ public sealed class ReleaseToolTests : IDisposable
     {
         var caseInsensitive = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
             "/release/archive",
-            _ => true);
+            _ => true,
+            _ => ["/release/archive"]);
         var caseSensitive = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
             "/release/archive",
-            _ => false);
+            _ => false,
+            _ => ["/release/archive"]);
         var uppercaseRoot = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
             "/RELEASE/ARCHIVE",
-            _ => false);
+            _ => false,
+            _ => ["/RELEASE/ARCHIVE"]);
         var numericRoot = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
             "/123/456",
-            _ => throw new InvalidOperationException("A root without letters must not probe another path."));
+            _ => throw new InvalidOperationException("A root without letters must not probe another path."),
+            _ => throw new InvalidOperationException("A root without letters must not enumerate another path."));
+        var ambiguousSibling = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => true,
+            _ => ["/release/archive", "/release/archivE"]);
+        var unreadableParent = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => true,
+            _ => throw new IOException("Parent enumeration failed."));
 
         Assert.Same(StringComparer.OrdinalIgnoreCase, caseInsensitive);
         Assert.Same(StringComparer.Ordinal, caseSensitive);
         Assert.Same(StringComparer.Ordinal, uppercaseRoot);
         Assert.Same(StringComparer.Ordinal, numericRoot);
+        Assert.Same(StringComparer.Ordinal, ambiguousSibling);
+        Assert.Same(StringComparer.Ordinal, unreadableParent);
     }
 
     [Fact]
