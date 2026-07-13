@@ -10,7 +10,7 @@ This directory contains sample applications that use **ForgeTrust.AppSurface**.
 - [LocalSecrets example](local-secrets/README.md) – shows how to set one local development secret, resolve it through AppSurface Config, and inspect diagnostics without printing the value.
 - [Web app example](web-app/README.md) – demonstrates starting a minimal ASP.NET Core web application.
 - [Web error-page proof](web-error-pages/README.md) – verifies AppSurface Web browser status pages, production exception pages, and API-friendly non-HTML behavior.
-- [Web PWA install proof](web-pwa-install/README.md) – shows AppSurface Web manifest generation, head metadata, development diagnostics, CLI verification, and explicit offline fallback setup.
+- [Web PWA worker proof](web-pwa-install/README.md) – shows AppSurface Web install metadata, combined offline and push-worker behavior, explicit browser registration, development diagnostics, and CLI verification.
 - [Config validation example](config-validation/README.md) – shows scalar validation on a strongly typed config wrapper and the startup failure shape.
 - [Flow approval local example](flow-approval-local/README.md) – shows a typed flow that waits for an approval event and resumes through the in-memory runner.
 - [Flow generated authoring example](flow-generated-authoring/README.md) – shows generated outcome cases, typed input/output ports, inferred and explicit graph mapping, and generated lowering into the in-memory runner.
