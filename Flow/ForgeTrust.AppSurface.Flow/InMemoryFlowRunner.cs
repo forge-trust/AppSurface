@@ -23,6 +23,7 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
     /// Initializes a new instance of the <see cref="InMemoryFlowRunner{TContext}"/> class.
     /// </summary>
     /// <param name="options">Runner options.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is null.</exception>
     public InMemoryFlowRunner(IOptions<AppSurfaceFlowOptions> options)
         : this(options, new FlowTransitionEvaluator<TContext>())
     {
@@ -33,6 +34,9 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
     /// </summary>
     /// <param name="options">Runner options.</param>
     /// <param name="transitionEvaluator">Host-neutral one-node evaluator.</param>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="options"/> or <paramref name="transitionEvaluator"/> is null.
+    /// </exception>
     public InMemoryFlowRunner(
         IOptions<AppSurfaceFlowOptions> options,
         IFlowTransitionEvaluator<TContext> transitionEvaluator)

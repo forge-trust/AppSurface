@@ -175,9 +175,21 @@ public sealed record FlowTransition<TContext>
     /// </summary>
     public IFlowActivityRequest<TContext>? Activity { get; }
 
+    /// <summary>Creates a next-node transition carrying the declared target and persisted context.</summary>
+    /// <param name="nodeId">Node that produced the transition.</param>
+    /// <param name="nextNodeId">Declared target node.</param>
+    /// <param name="context">Context to persist for the target node.</param>
+    /// <returns>A transition whose target and context are populated.</returns>
     internal static FlowTransition<TContext> Next(string nodeId, string nextNodeId, TContext context) =>
         new(FlowTransitionKind.Next, nodeId, context, nextNodeId, null, null, null, null, null);
 
+    /// <summary>Creates a wait transition carrying the event contract, persisted context, and optional timeout.</summary>
+    /// <param name="nodeId">Node that produced the transition.</param>
+    /// <param name="eventName">External event name.</param>
+    /// <param name="eventCallsite">Exact typed event contract, or null for an explicit no-payload wait.</param>
+    /// <param name="context">Context to persist while waiting.</param>
+    /// <param name="timeout">Optional durable timeout.</param>
+    /// <returns>A transition whose event, context, and timeout fields are populated.</returns>
     internal static FlowTransition<TContext> Waiting(
         string nodeId,
         string eventName,
@@ -186,15 +198,32 @@ public sealed record FlowTransition<TContext>
         FlowTimeout? timeout) =>
         new(FlowTransitionKind.Wait, nodeId, context, null, eventName, eventCallsite, timeout, null, null);
 
+    /// <summary>Creates a timeout transition carrying the expired event name and resulting context.</summary>
+    /// <param name="nodeId">Node that handled the timeout.</param>
+    /// <param name="eventName">External event whose wait expired.</param>
+    /// <param name="context">Context after timeout handling.</param>
+    /// <returns>A transition whose event name and context are populated.</returns>
     internal static FlowTransition<TContext> TimedOut(string nodeId, string eventName, TContext context) =>
         new(FlowTransitionKind.TimedOut, nodeId, context, null, eventName, null, null, null, null);
 
+    /// <summary>Creates a terminal completion transition carrying the final context.</summary>
+    /// <param name="nodeId">Node that completed the Flow.</param>
+    /// <param name="context">Final context.</param>
+    /// <returns>A transition whose context is populated.</returns>
     internal static FlowTransition<TContext> Completed(string nodeId, TContext context) =>
         new(FlowTransitionKind.Complete, nodeId, context, null, null, null, null, null, null);
 
+    /// <summary>Creates a fault transition carrying only the process-level fault.</summary>
+    /// <param name="nodeId">Node associated with the fault.</param>
+    /// <param name="fault">Stable fault code and safe message.</param>
+    /// <returns>A transition whose fault is populated and whose context is absent.</returns>
     internal static FlowTransition<TContext> Faulted(string nodeId, FlowFault fault) =>
         new(FlowTransitionKind.Fault, nodeId, default, null, null, null, null, fault, null);
 
+    /// <summary>Creates an activity transition carrying the activity request and its persisted context.</summary>
+    /// <param name="nodeId">Node that requested the activity.</param>
+    /// <param name="activity">Typed activity request produced by the node.</param>
+    /// <returns>A transition whose activity and context are populated.</returns>
     internal static FlowTransition<TContext> ActivityRequested(
         string nodeId,
         IFlowActivityRequest<TContext> activity) =>
@@ -233,6 +262,13 @@ public interface IFlowTransitionEvaluator<TContext>
     /// One mapped transition. Missing nodes, undeclared next targets, and unsupported outcomes become fault
     /// transitions; caller argument errors, cancellation, and node exceptions propagate.
     /// </returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="definition"/> or <paramref name="input"/> is null, or when the selected node
+    /// returns a null outcome.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> is canceled before or during node execution.
+    /// </exception>
     ValueTask<FlowTransition<TContext>> EvaluateAsync(
         FlowDefinition<TContext> definition,
         FlowTransitionInput<TContext> input,

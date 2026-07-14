@@ -220,6 +220,21 @@ public sealed class InMemoryFlowRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_WithUnsupportedOutcome_ThrowsFlowDefinitionException()
+    {
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", new UnsupportedOutcomeNode())
+            .StartAt("start")
+            .Build();
+
+        var exception = await Assert.ThrowsAsync<FlowDefinitionException>(async () =>
+            await Runner().RunAsync(definition, new TestState(0, "created")));
+
+        Assert.Contains(typeof(UnsupportedOutcome).FullName!, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunAsync_StopsAtActivityAndResumeActivityCompletesSameNode()
     {
         var node = new ActivityNode();
@@ -418,6 +433,8 @@ public sealed class InMemoryFlowRunnerTests
 
     private sealed record ApprovalSubmitted(string ApprovedBy);
 
+    private sealed record UnsupportedOutcome : FlowNodeOutcome<TestState>;
+
     private sealed class NextNode : IFlowNode<TestState>
     {
         private readonly string _target;
@@ -586,6 +603,14 @@ public sealed class InMemoryFlowRunnerTests
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult<FlowNodeOutcome<TestState>>(
                 FlowNodeOutcome<TestState>.Fault("approval.failed", "Approval failed."));
+    }
+
+    private sealed class UnsupportedOutcomeNode : IFlowNode<TestState>
+    {
+        public ValueTask<FlowNodeOutcome<TestState>> ExecuteAsync(
+            FlowExecutionContext<TestState> context,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<FlowNodeOutcome<TestState>>(new UnsupportedOutcome());
     }
 
     private sealed class NullOutcomeNode : IFlowNode<TestState>

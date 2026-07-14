@@ -107,6 +107,13 @@ public sealed class DurableTaskFlowRunner<TContext> : IDurableTaskFlowRunner<TCo
     /// <summary>
     /// Initializes a new instance of the <see cref="DurableTaskFlowRunner{TContext}"/> class.
     /// </summary>
+    /// <param name="registry">Flow definition registry.</param>
+    /// <param name="serializationValidator">Configured durable context validator.</param>
+    /// <param name="options">Durable Task adapter options.</param>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="registry"/>, <paramref name="serializationValidator"/>, or
+    /// <paramref name="options"/> is null.
+    /// </exception>
     public DurableTaskFlowRunner(
         IFlowDefinitionRegistry registry,
         FlowContextSerializationValidator serializationValidator,
@@ -122,6 +129,10 @@ public sealed class DurableTaskFlowRunner<TContext> : IDurableTaskFlowRunner<TCo
     /// <param name="serializationValidator">Configured durable context validator.</param>
     /// <param name="options">Durable Task adapter options.</param>
     /// <param name="transitionEvaluator">Shared host-neutral one-node evaluator.</param>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="registry"/>, <paramref name="serializationValidator"/>,
+    /// <paramref name="options"/>, or <paramref name="transitionEvaluator"/> is null.
+    /// </exception>
     public DurableTaskFlowRunner(
         IFlowDefinitionRegistry registry,
         FlowContextSerializationValidator serializationValidator,

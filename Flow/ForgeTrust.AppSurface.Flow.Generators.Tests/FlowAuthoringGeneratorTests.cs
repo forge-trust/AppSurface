@@ -3315,6 +3315,45 @@ public sealed class FlowAuthoringGeneratorTests
     }
 
     [Fact]
+    public void Generator_WithLessAccessibleActivityContracts_ReportsInvalidDeclarations()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("notify", FlowOutcomeKind.Activity, typeof(StartContext), typeof(NotifyWork), typeof(NotifyResult))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(
+                        FlowTransformerContext<StartContext> context,
+                        CancellationToken cancellationToken = default) =>
+                        throw new System.NotImplementedException();
+                }
+            }
+
+            public sealed record StartContext;
+            internal sealed record NotifyWork;
+            internal sealed record NotifyResult;
+            """;
+
+        var (_, diagnostics, generated) = RunGenerator(source);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == "ASFLOWA005" &&
+            diagnostic.GetMessage().Contains("work contract", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == "ASFLOWA005" &&
+            diagnostic.GetMessage().Contains("result contract", StringComparison.Ordinal));
+        Assert.Empty(generated);
+    }
+
+    [Fact]
     public void Generator_WithReferencedFlowInvalidGraphLambdaParameterList_ReportsInvalidDeclaration()
     {
         var libraryReference = BuildReferencedApprovalFlowReference();

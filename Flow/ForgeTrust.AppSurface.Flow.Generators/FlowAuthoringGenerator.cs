@@ -637,7 +637,9 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
             }
 
             var semanticModel = compilation.GetSemanticModel(declaration.SyntaxTree);
-            foreach (var memberAccess in declaration.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+            foreach (var memberAccess in declaration.DescendantNodes().OfType<MemberAccessExpressionSyntax>()
+                         .Where(static memberAccess =>
+                             IsNondeterministicMemberCandidate(memberAccess.Name.Identifier.ValueText)))
             {
                 if (IsWithinNameOf(memberAccess))
                 {
@@ -657,7 +659,9 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
             }
 
             foreach (var identifier in declaration.DescendantNodes().OfType<IdentifierNameSyntax>()
-                         .Where(identifier => identifier.Parent is not MemberAccessExpressionSyntax))
+                         .Where(static identifier =>
+                             identifier.Parent is not MemberAccessExpressionSyntax &&
+                             IsNondeterministicMemberCandidate(identifier.Identifier.ValueText)))
             {
                 if (IsWithinNameOf(identifier))
                 {
@@ -752,6 +756,9 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         api = string.Empty;
         return false;
     }
+
+    private static bool IsNondeterministicMemberCandidate(string name) =>
+        name is "Now" or "UtcNow" or "Today" or "Shared" or "NewGuid" or "GetTimestamp";
 
     private static bool IsWithinNameOf(SyntaxNode node) =>
         node.AncestorsAndSelf().OfType<InvocationExpressionSyntax>().Any(invocation =>

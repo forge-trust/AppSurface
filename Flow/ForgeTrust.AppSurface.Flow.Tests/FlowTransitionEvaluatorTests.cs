@@ -188,6 +188,17 @@ public sealed class FlowTransitionEvaluatorTests
     }
 
     [Fact]
+    public async Task EvaluateAsync_WithUnsupportedOutcome_ReturnsStableFault()
+    {
+        var transition = await Evaluate(new UnsupportedOutcome());
+
+        Assert.Equal(FlowTransitionKind.Fault, transition.Kind);
+        Assert.Equal("flow.outcome-unsupported", transition.Fault?.Code);
+        Assert.Contains(typeof(UnsupportedOutcome).FullName!, transition.Fault?.Message, StringComparison.Ordinal);
+        Assert.Null(transition.Context);
+    }
+
+    [Fact]
     public async Task EvaluateAsync_MapsActivityWithReflectionFreeMetadata()
     {
         var callsite = new FlowActivityCallsite<TestWork, TestResult>("send-email", 2, 3);
@@ -285,6 +296,8 @@ public sealed class FlowTransitionEvaluatorTests
     private sealed record TestResult(string Status);
 
     private sealed record TestEvent(string ApprovedBy);
+
+    private sealed record UnsupportedOutcome : FlowNodeOutcome<TestState>;
 
     private sealed class OutcomeNode : IFlowNode<TestState>
     {
