@@ -17,7 +17,9 @@ public static class AppSurfaceDeploymentBuilderExtensions
     /// <remarks>
     /// The publish step writes artifacts only. It does not call a cloud API, apply infrastructure, resolve secret
     /// values, execute a job, or change traffic. Verification is exposed as the separately named
-    /// <c>appsurface-gcp-verify</c> step and is required to remain read-only.
+    /// <c>appsurface-gcp-verify</c> step, performs shadow parity for pre-cutover adoption, and is required to remain
+    /// read-only. After writer cutover, the application-owned release workflow may call the provider target directly
+    /// with <see cref="DeploymentParityMode.Owned"/>.
     /// </remarks>
     public static IResourceBuilder<IComputeEnvironmentResource> AddAppSurfaceDeploymentTarget(
         this IDistributedApplicationBuilder builder,
@@ -144,7 +146,11 @@ public sealed class AppSurfaceMigrationJobOptions
         return this;
     }
 
-    /// <summary>Requires the provider target to supply private networking.</summary>
+    /// <summary>
+    /// Requires the provider target to supply private networking. Version 1 supports candidate preparation and
+    /// requires every migration-job configuration to call this method; otherwise building the annotation throws
+    /// <c>ASDEPLOY207</c>.
+    /// </summary>
     public AppSurfaceMigrationJobOptions RequirePrivateNetwork()
     {
         _requirePrivateNetwork = true;

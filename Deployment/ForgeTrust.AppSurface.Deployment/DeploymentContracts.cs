@@ -488,7 +488,8 @@ public sealed class DeploymentArtifact
             throw new ArgumentException("ASDEPLOY119: artifact name must be one portable safe file name.", nameof(fileName));
         }
         ArgumentNullException.ThrowIfNull(content);
-        return new DeploymentArtifact(fileName, content.ToArray(), DeploymentCanonicalJson.Hash(content));
+        var copiedContent = content.ToArray();
+        return new DeploymentArtifact(fileName, copiedContent, DeploymentCanonicalJson.Hash(copiedContent));
     }
 
     private static bool IsPortableFileName(string fileName)

@@ -10,9 +10,11 @@ A migration job contains an immutable `registry/repository@sha256:<64 lowercase 
 
 ## Provider contract
 
-`IDeploymentTarget.RenderAsync` receives validated intent, a non-secret binding-profile path, output directory, generator version, and optional trusted authoring root. The GCP target uses that root to reject every symlink or reparse point between the AppHost and profile before reading. It returns named `DeploymentArtifact` values with exact SHA-256 hashes. Rendering must be deterministic and must not call cloud APIs, apply infrastructure, or execute work.
+`IDeploymentTarget.RenderAsync` receives validated intent, a non-secret binding-profile path, output directory, generator version, and optional trusted authoring root. The GCP target uses that root to reject every symlink or reparse point between the AppHost and profile before reading. Without a trusted root, it scans every ancestor to the filesystem root while permitting only the standard macOS `/var`, `/tmp`, and `/etc` aliases to their matching `/private` directories; application-controlled ancestor symlinks still fail. It returns named `DeploymentArtifact` values with exact SHA-256 hashes. Rendering must be deterministic and must not call cloud APIs, apply infrastructure, or execute work.
 
 `IDeploymentTarget.VerifyAsync` receives the freshly rendered result and either `Shadow` or `Owned` parity mode. Verification may inspect deployed state read-only. It must not accept or start an execution or alter traffic.
+
+`GcloudCommandRunner` resolves `gcloud` directly on Unix-like hosts. On Windows it uses the Cloud SDK's `gcloud.cmd` launcher through a bounded `cmd.exe /d /c` dispatch that rejects whitespace, control characters, and shell metacharacters in every token before process start. Provider-generated verification arguments satisfy that contract; free-form shell fragments do not.
 
 `DeploymentArtifact.Create` accepts one portable file name only. It rejects directory segments, control characters, Windows-invalid punctuation and device names, and trailing dots or spaces before any filesystem write. `DeploymentArtifactBundleWriter` validates the complete file set, rejects portable case collisions and the reserved ownership-marker name, rejects a non-owned or mixed directory, writes to a same-parent staging directory, and swaps the complete bundle only after all bytes have been written. Give each target a dedicated output directory; do not place unrelated files there or edit generated artifacts.
 

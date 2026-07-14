@@ -189,12 +189,15 @@ aspire do appsurface-gcp-verify --environment Staging --output-path ./artifacts/
 
 The artifact step is required by Aspire's standard `Publish` aggregation step. The named verification step depends on artifact publication, so targeted verification regenerates the same complete bundle before read-only inspection. Ordinary publish never runs verification.
 
+The native `appsurface-gcp-verify` step always uses [`Shadow` parity](../../Deployment/reference.md#parity-modes) because it is the pre-cutover adoption proof. After state import and the single-writer cutover, the application-owned release workflow can call `IDeploymentTarget.VerifyAsync` with `Owned` parity to require AppSurface provenance labels; the native step does not infer that authority change.
+
 Pitfalls:
 
 - Every annotated migration project must be assigned with `WithComputeEnvironment`; AppSurface does not guess a target.
 - Image and source parameters must be non-secret, canonical evidence. Images must include the full repository and SHA-256 digest, and source revisions must be full lowercase commits.
 - Output must be an empty directory or an AppSurface-owned directory containing exactly the generated bundle. Unexpected or non-owned files are rejected.
 - `aspire publish` makes no cloud calls and changes no infrastructure. CI remains responsible for credentials, state, apply, job execution, canaries, approval, and promotion.
+- `appsurface-gcp-verify` is intentionally shadow-only. Do not treat it as proof that the generated writer is authoritative after cutover.
 
 ## Discovery Rules
 

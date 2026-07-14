@@ -3,6 +3,15 @@ using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
 public sealed class GcloudCommandRunnerTests
 {
     [Fact]
+    public void DefaultConstructorSelectsPlatformLauncher()
+    {
+        var runner = new GcloudCommandRunner();
+
+        Assert.Equal(OperatingSystem.IsWindows() ? "gcloud.cmd" : "gcloud", runner.Command);
+        Assert.Equal(OperatingSystem.IsWindows(), runner.RequiresWindowsCommandInterpreter);
+    }
+
+    [Fact]
     public void ConstructorRejectsBlankExecutable()
     {
         Assert.Throws<ArgumentException>(() => new GcloudCommandRunner(" "));
@@ -50,6 +59,22 @@ public sealed class GcloudCommandRunnerTests
         var runner = new GcloudCommandRunner(ProcessPath());
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(20));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runner.RunAsync(Command(LongSleep()), TimeSpan.FromSeconds(5), cancellation.Token));
+    }
+
+    [Fact]
+    public void BuildWindowsCommandAcceptsProviderTokensAndRejectsShellSyntax()
+    {
+        Assert.Equal(
+            "gcloud.cmd run jobs describe migration --project skoolit-staging --format=json --quiet",
+            GcloudCommandRunner.BuildWindowsCommand(
+                "gcloud.cmd",
+                ["run", "jobs", "describe", "migration", "--project", "skoolit-staging", "--format=json", "--quiet"]));
+
+        Assert.Throws<ArgumentException>(() => GcloudCommandRunner.BuildWindowsCommand("gcloud.cmd", ["migration&whoami"]));
+        Assert.Throws<ArgumentException>(() => GcloudCommandRunner.BuildWindowsCommand("gcloud.cmd", ["two words"]));
+        Assert.Throws<ArgumentException>(() => GcloudCommandRunner.BuildWindowsCommand("gcloud.cmd", [null!]));
+        Assert.Throws<ArgumentNullException>(() => GcloudCommandRunner.BuildWindowsCommand("gcloud.cmd", null!));
+        Assert.Throws<ArgumentException>(() => GcloudCommandRunner.BuildWindowsCommand(" ", []));
     }
 
     private static string ProcessPath() => OperatingSystem.IsWindows()

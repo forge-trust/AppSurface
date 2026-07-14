@@ -158,6 +158,22 @@ public sealed class GcpCloudRunDeploymentTargetTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAsync_RejectsGrandparentSymlinkWithoutTrustedRoot()
+    {
+        var realDirectory = Path.Join(_root, "real-grandparent");
+        var nested = Path.Join(realDirectory, "nested");
+        Directory.CreateDirectory(nested);
+        File.Copy(await WriteProfileAsync(), Path.Join(nested, "profile.json"));
+        var linkedGrandparent = Path.Join(_root, "linked-grandparent");
+        Directory.CreateSymbolicLink(linkedGrandparent, realDirectory);
+
+        var error = await Assert.ThrowsAsync<DeploymentValidationException>(() =>
+            GcpCloudRunBindingProfile.LoadAsync(Path.Join(linkedGrandparent, "nested", "profile.json"), "Staging"));
+
+        Assert.Equal("ASDEPLOY131", error.Diagnostic.Code);
+    }
+
+    [Fact]
     public async Task LoadAsync_RejectsNestedAncestorSymlinkWithinTrustedRoot()
     {
         var outside = Path.Join(_root, "outside");
@@ -185,6 +201,31 @@ public sealed class GcpCloudRunDeploymentTargetTests : IDisposable
             GcpCloudRunBindingProfile.LoadAsync(path, "Staging", appHost));
 
         Assert.Equal("ASDEPLOY131", error.Diagnostic.Code);
+    }
+
+    [Fact]
+    public async Task LoadAsync_AcceptsTrustedRootWithWindowsCaseDifference()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var profile = await GcpCloudRunBindingProfile.LoadAsync(
+            await WriteProfileAsync(),
+            "Staging",
+            _root.ToUpperInvariant());
+
+        Assert.Equal("Staging", profile.Environment);
+    }
+
+    [Fact]
+    public async Task LoadAsync_ClassifiesFileThatBecomesUnreadable()
+    {
+        var path = await WriteProfileAsync();
+        await using var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        var error = await Assert.ThrowsAsync<DeploymentValidationException>(() =>
+            GcpCloudRunBindingProfile.LoadAsync(path, "Staging"));
+
+        Assert.Equal("ASDEPLOY130", error.Diagnostic.Code);
     }
 
     [Fact]

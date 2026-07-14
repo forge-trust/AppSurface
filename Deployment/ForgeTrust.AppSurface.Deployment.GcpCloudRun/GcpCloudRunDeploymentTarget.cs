@@ -534,30 +534,47 @@ public sealed class GcloudCommandException : Exception
     public string Fix { get; }
 }
 
-/// <summary>Production gcloud process runner. It never uses a shell and kills the process tree on timeout or cancellation.</summary>
+/// <summary>
+/// Production gcloud process runner. It launches the executable directly except on Windows, where the Cloud SDK's
+/// <c>gcloud.cmd</c> launcher requires <c>cmd.exe</c>; that path rejects whitespace and shell metacharacters before
+/// dispatch. The runner kills the process tree on timeout or cancellation.
+/// </summary>
 public sealed class GcloudCommandRunner : IGcloudCommandRunner
 {
-    private readonly string _executable;
+    private const string WindowsGcloudCommand = "gcloud.cmd";
+    private readonly string _command;
+    private readonly bool _requiresWindowsCommandInterpreter;
 
-    /// <summary>Initializes a runner that resolves <c>gcloud</c> through the host process path.</summary>
+    /// <summary>Initializes a runner that resolves the platform's gcloud launcher through the host process path.</summary>
     public GcloudCommandRunner()
-        : this("gcloud")
+        : this(OperatingSystem.IsWindows() ? WindowsGcloudCommand : "gcloud", OperatingSystem.IsWindows())
     {
     }
 
     internal GcloudCommandRunner(string executable)
+        : this(executable, requiresWindowsCommandInterpreter: false)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(executable);
-        _executable = executable;
     }
+
+    private GcloudCommandRunner(string command, bool requiresWindowsCommandInterpreter)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(command);
+        _command = command;
+        _requiresWindowsCommandInterpreter = requiresWindowsCommandInterpreter;
+    }
+
+    /// <summary>Gets the selected gcloud command for platform-contract tests.</summary>
+    internal string Command => _command;
+
+    /// <summary>Gets whether the selected command requires the bounded Windows command-interpreter path.</summary>
+    internal bool RequiresWindowsCommandInterpreter => _requiresWindowsCommandInterpreter;
 
     /// <inheritdoc />
     public async Task<GcloudCommandResult> RunAsync(IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(arguments);
         if (timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
-        var startInfo = new ProcessStartInfo { FileName = _executable, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument ?? throw new ArgumentException("gcloud arguments cannot be null.", nameof(arguments)));
+        var startInfo = CreateStartInfo(arguments);
         using var process = new Process { StartInfo = startInfo };
         try
         {
@@ -588,6 +605,61 @@ public sealed class GcloudCommandRunner : IGcloudCommandRunner
         }
 
         return new GcloudCommandResult(process.ExitCode, await stdout, await stderr);
+    }
+
+    private ProcessStartInfo CreateStartInfo(IReadOnlyList<string> arguments)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _requiresWindowsCommandInterpreter
+                ? Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe"
+                : _command,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+
+        if (_requiresWindowsCommandInterpreter)
+        {
+            startInfo.ArgumentList.Add("/d");
+            startInfo.ArgumentList.Add("/c");
+            startInfo.ArgumentList.Add(BuildWindowsCommand(_command, arguments));
+            return startInfo;
+        }
+
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument ?? throw new ArgumentException("gcloud arguments cannot be null.", nameof(arguments)));
+        return startInfo;
+    }
+
+    /// <summary>Builds a metacharacter-free Windows command line for the fixed Cloud SDK launcher.</summary>
+    /// <param name="command">The fixed executable command name.</param>
+    /// <param name="arguments">Ordered gcloud arguments.</param>
+    /// <returns>A command string safe for the bounded <c>cmd.exe /d /c</c> dispatch path.</returns>
+    internal static string BuildWindowsCommand(string command, IReadOnlyList<string> arguments)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(command);
+        ArgumentNullException.ThrowIfNull(arguments);
+        var tokens = new string[arguments.Count + 1];
+        tokens[0] = RequireSafeWindowsToken(command, nameof(command));
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            tokens[index + 1] = RequireSafeWindowsToken(arguments[index], nameof(arguments));
+        }
+
+        return string.Join(' ', tokens);
+    }
+
+    private static string RequireSafeWindowsToken(string? token, string parameterName)
+    {
+        if (string.IsNullOrEmpty(token) ||
+            token.Any(char.IsWhiteSpace) ||
+            token.Any(char.IsControl) ||
+            token.IndexOfAny(['&', '|', '<', '>', '^', '%', '!', '"', '(', ')']) >= 0)
+        {
+            throw new ArgumentException("Windows gcloud arguments must be non-empty tokens without whitespace or command-shell metacharacters.", parameterName);
+        }
+
+        return token;
     }
 
     [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Best-effort process cleanup handles OS timing races after timeout or cancellation; public failure paths are covered.")]

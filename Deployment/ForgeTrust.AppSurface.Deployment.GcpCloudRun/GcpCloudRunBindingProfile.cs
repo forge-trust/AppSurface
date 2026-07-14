@@ -24,11 +24,13 @@ public sealed record GcpCloudRunBindingProfile(
     IReadOnlyDictionary<string, string> ServiceAccounts,
     IReadOnlyDictionary<string, GcpCloudRunSecretBinding> Secrets)
 {
+    private static readonly TimeSpan PatternMatchTimeout = TimeSpan.FromSeconds(1);
+
     /// <summary>Gets the only schema version supported by this package.</summary>
     public const string SupportedSchemaVersion = "1.0";
 
     /// <summary>Loads and strictly validates a profile without resolving any secret value.</summary>
-    /// <param name="path">Path to a regular JSON file. Symbolic links are rejected.</param>
+    /// <param name="path">Path to a regular JSON file. The file and every ancestor to the filesystem root must not be symbolic links or reparse points, except the standard macOS <c>/var</c>, <c>/tmp</c>, and <c>/etc</c> aliases.</param>
     /// <param name="expectedEnvironment">Aspire environment selected for publishing.</param>
     /// <param name="cancellationToken">Cancellation observed while reading and parsing the profile.</param>
     public static async Task<GcpCloudRunBindingProfile> LoadAsync(string path, string expectedEnvironment, CancellationToken cancellationToken = default)
@@ -52,17 +54,20 @@ public sealed record GcpCloudRunBindingProfile(
             throw Failure("ASDEPLOY130", "GCP binding profile was not found.", "The configured profile path does not name an existing file.", "Provide a checked-in non-secret GcpCloudRunBindingProfile.v1 JSON file.");
         }
 
-        RejectSymbolicLinkChain(fullPath, trustedRoot);
-
         JsonDocument document;
         try
         {
+            RejectSymbolicLinkChain(fullPath, trustedRoot);
             await using var stream = File.OpenRead(fullPath);
             document = await JsonDocument.ParseAsync(stream, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Disallow, AllowTrailingCommas = false }, cancellationToken);
         }
         catch (JsonException)
         {
             throw Failure("ASDEPLOY132", "GCP binding profile is malformed.", "The file is not valid closed-schema JSON.", "Fix the JSON and validate it against GcpCloudRunBindingProfile.v1.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw Failure("ASDEPLOY130", "GCP binding profile could not be read.", "The checked profile became unavailable or unreadable while loading.", "Retry after confirming the checked-in profile still exists and is readable.");
         }
 
         using (document)
@@ -186,7 +191,7 @@ public sealed record GcpCloudRunBindingProfile(
 
     private static void RejectSymbolicLinkChain(string fullPath, string? trustedRoot)
     {
-        var root = trustedRoot is null ? Path.GetDirectoryName(fullPath)! : Path.GetFullPath(trustedRoot);
+        var root = trustedRoot is null ? Path.GetPathRoot(fullPath)! : Path.GetFullPath(trustedRoot);
         var relative = Path.GetRelativePath(root, fullPath);
         if (Path.IsPathFullyQualified(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) || relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
         {
@@ -196,7 +201,8 @@ public sealed record GcpCloudRunBindingProfile(
         FileSystemInfo? current = new FileInfo(fullPath);
         while (current is not null)
         {
-            if (current.LinkTarget is not null || current.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            if ((current.LinkTarget is not null || current.Attributes.HasFlag(FileAttributes.ReparsePoint)) &&
+                !(trustedRoot is null && IsFileSystemRootDirectoryAlias(current)))
             {
                 throw Failure("ASDEPLOY131", "GCP binding profile symlinks are forbidden.", $"'{current.FullName}' is a symbolic link or reparse point.", "Use a regular checked-in JSON file and directory chain.");
             }
@@ -207,12 +213,26 @@ public sealed record GcpCloudRunBindingProfile(
                 DirectoryInfo directory => directory.Parent,
                 _ => null,
             };
-            if (current is DirectoryInfo trustedDirectory && string.Equals(trustedDirectory.FullName, root, StringComparison.Ordinal))
+            if (current is DirectoryInfo trustedDirectory && string.Equals(trustedDirectory.FullName, root, FileSystemPathComparison))
             {
                 if (trustedDirectory.LinkTarget is not null || trustedDirectory.Attributes.HasFlag(FileAttributes.ReparsePoint)) throw Failure("ASDEPLOY131", "GCP binding profile symlinks are forbidden.", $"'{trustedDirectory.FullName}' is a symbolic link or reparse point.", "Use a real AppHost directory and checked-in profile path.");
                 break;
             }
         }
+    }
+
+    private static bool IsFileSystemRootDirectoryAlias(FileSystemInfo entry)
+    {
+        if (!OperatingSystem.IsMacOS() ||
+            entry is not DirectoryInfo directory ||
+            directory.Parent is not DirectoryInfo parent ||
+            !string.Equals(parent.FullName, Path.GetPathRoot(directory.FullName), FileSystemPathComparison) ||
+            directory.Name is not ("var" or "tmp" or "etc"))
+        {
+            return false;
+        }
+
+        return string.Equals(directory.LinkTarget, Path.Join("private", directory.Name), StringComparison.Ordinal);
     }
 
     private static void ValidateProjectId(string value, string field) => ValidatePattern(value, field, "^[a-z][a-z0-9-]{4,28}[a-z0-9]$", "a 6-30 character lowercase Google Cloud project id");
@@ -226,7 +246,7 @@ public sealed record GcpCloudRunBindingProfile(
     private static void ValidateServiceAccount(string value, string field)
     {
         ValidateLiteral(value, field);
-        if (!Regex.IsMatch(value, "^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$", RegexOptions.CultureInvariant)) throw Failure("ASDEPLOY142", "Malformed service account email.", $"'{field}' is not a canonical user-managed service account email.", "Use SERVICE_ACCOUNT_NAME@PROJECT_ID.iam.gserviceaccount.com.");
+        if (!MatchesPattern(value, "^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$")) throw Failure("ASDEPLOY142", "Malformed service account email.", $"'{field}' is not a canonical user-managed service account email.", "Use SERVICE_ACCOUNT_NAME@PROJECT_ID.iam.gserviceaccount.com.");
     }
 
     private static void ValidateCloudSqlConnectionName(string value)
@@ -251,7 +271,19 @@ public sealed record GcpCloudRunBindingProfile(
     private static void ValidatePattern(string value, string field, string pattern, string expected)
     {
         ValidateLiteral(value, field);
-        if (!Regex.IsMatch(value, pattern, RegexOptions.CultureInvariant)) throw Failure("ASDEPLOY141", "Malformed GCP identifier.", $"'{field}' is not {expected}.", "Use the canonical GCP resource identifier.");
+        if (!MatchesPattern(value, pattern)) throw Failure("ASDEPLOY141", "Malformed GCP identifier.", $"'{field}' is not {expected}.", "Use the canonical GCP resource identifier.");
+    }
+
+    private static bool MatchesPattern(string value, string pattern)
+    {
+        try
+        {
+            return Regex.IsMatch(value, pattern, RegexOptions.CultureInvariant, PatternMatchTimeout);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
     }
 
     private static void ValidateLiteral(string value, string field)
@@ -272,6 +304,10 @@ public sealed record GcpCloudRunBindingProfile(
     }
 
     private static DeploymentValidationException Failure(string code, string problem, string cause, string fix) => new(DeploymentDiagnostic.Create(code, problem, cause, fix));
+
+    private static StringComparison FileSystemPathComparison => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
 }
 
 /// <summary>Externally provisioned Direct VPC binding.</summary>

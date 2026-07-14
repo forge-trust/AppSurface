@@ -29,4 +29,6 @@ aspire do appsurface-gcp-verify --apphost examples/aspire-deployment-apphost/Asp
 
 Verification regenerates the bundle, validates its hashes, describes the bound Job and IAM policy, and compares normalized operational fields. It does not execute the job. Inherited or custom IAM effectiveness remains `not-independently-verified`.
 
+This native named step uses [`Shadow` parity](../../Deployment/reference.md#parity-modes) only. After state import and writer cutover, the application-owned release workflow must invoke the provider target with `Owned` parity when it needs provenance-label enforcement.
+
 Do not use the sample profile as production infrastructure configuration. Capture the existing deployed and imported-provider contract first, especially task count, parallelism, retries, and timeout. State import and switching the authoritative writer require a separate reviewed cutover.

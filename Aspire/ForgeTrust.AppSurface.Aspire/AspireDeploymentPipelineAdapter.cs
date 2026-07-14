@@ -96,7 +96,7 @@ internal static class AspireDeploymentPipelineAdapter
     /// <summary>Gets the user-facing pure-publish description.</summary>
     internal const string PublishStepDescription = "Render deterministic AppSurface deployment artifacts without cloud calls or infrastructure changes.";
     /// <summary>Gets the user-facing read-only verification description.</summary>
-    internal const string VerifyStepDescription = "Regenerate artifacts and perform read-only GCP deployment parity verification.";
+    internal const string VerifyStepDescription = "Regenerate artifacts and perform read-only shadow GCP deployment parity verification.";
 
     /// <summary>Registers publish and verification factories with their native Aspire dependency relationships.</summary>
     /// <param name="builder">Target resource builder receiving pipeline annotations.</param>

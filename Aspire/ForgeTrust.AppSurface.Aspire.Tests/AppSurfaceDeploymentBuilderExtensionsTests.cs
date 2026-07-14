@@ -44,6 +44,7 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
         Assert.Equal(AspireDeploymentPipelineAdapter.PublishStepName, AspireDeploymentPipelineAdapter.VerifyDependsOnStepName);
         Assert.Contains("without cloud calls", AspireDeploymentPipelineAdapter.PublishStepDescription, StringComparison.Ordinal);
         Assert.Contains("read-only", AspireDeploymentPipelineAdapter.VerifyStepDescription, StringComparison.Ordinal);
+        Assert.Contains("shadow", AspireDeploymentPipelineAdapter.VerifyStepDescription, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -455,11 +456,16 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
     [Fact]
     public async Task VerifyRendered_ReportsReadOnlySuccessAndNegativeAssurance()
     {
-        var graph = CreateAnnotatedGraph(target: new FakeTarget(
-            AllCapabilities,
-            verify: _ => new DeploymentVerifyResult(true, 12, [], "no-public-principal")));
         var summaries = new Dictionary<string, string>(StringComparer.Ordinal);
         var reporting = A.Fake<IReportingStep>();
+        DeploymentParityMode? parityMode = null;
+        var graph = CreateAnnotatedGraph(target: new FakeTarget(
+            AllCapabilities,
+            verify: request =>
+            {
+                parityMode = request.ParityMode;
+                return new DeploymentVerifyResult(true, 12, [], "no-public-principal");
+            }));
 
         await AspireDeploymentPipelineAdapter.VerifyRenderedAsync(
             Assert.IsType<AppSurfaceDeploymentTargetResource>(graph.Target.Resource),
@@ -470,6 +476,7 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
 
         Assert.Equal("12", summaries["AppSurface parity fields"]);
         Assert.Equal("no-public-principal", summaries["AppSurface authorization"]);
+        Assert.Equal(DeploymentParityMode.Shadow, parityMode);
         A.CallTo(() => reporting.CompleteAsync(
                 "Read-only verification completed. No job was executed.",
                 CompletionState.Completed,
