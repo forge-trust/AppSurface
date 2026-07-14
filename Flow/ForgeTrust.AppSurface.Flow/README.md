@@ -231,12 +231,15 @@ var transition = await evaluator.EvaluateAsync(
 
 The evaluator maps every outcome to `FlowTransition<TContext>`, validates declared `Next` targets, and exposes activity metadata without reflection. A durable host must commit that transition before evaluating another node. For Activity, it must atomically persist the Flow context, activity command, and wait registration before dispatching external work.
 
+Transition creation is deliberately package-owned so every runner shares one mapping and validation contract. Decorate `IFlowTransitionEvaluator<TContext>` and delegate to `FlowTransitionEvaluator<TContext>` when adding telemetry or other cross-cutting behavior; custom implementations cannot manufacture alternative transitions. Put custom process behavior in node outcomes instead of replacing evaluator semantics.
+
 ## Decisions And Pitfalls
 
 - Flow ids, versions, node ids, generated outcome names, event names, event contract names/versions, activity callsite ids, and activity contract versions are durable identifiers. Treat them like persisted schema once real instances exist.
 - Durable identifiers reject empty values but otherwise preserve whitespace and compare ordinally. They are not trimmed, case-folded, or normalized. Avoid leading/trailing whitespace, choose one casing, and change an identifier only with a new Flow version while old definitions remain available for nonterminal instances.
 - Flow nodes are transition-only. A host may evaluate a node again if the process dies before its decision commits, so nodes must not call providers, write application state, read wall-clock time, or generate hidden random identifiers. Pass nondeterministic values through explicit context/resume contracts and return Activity for external effects.
 - `IFlowTransitionEvaluator<TContext>` evaluates one node; `IFlowRunner<TContext>` may follow several in-memory `Next` transitions. Durable runtimes must use the evaluator and commit each decision, not call the multi-step runner.
+- `IFlowTransitionEvaluator<TContext>` is an interception seam, not an alternative transition factory. Decorators must delegate transition creation to `FlowTransitionEvaluator<TContext>`; author different process decisions as node outcomes.
 - Generated authoring uses nominal context types as typed ports. Two record types with the same properties are different ports; one record type reused in multiple places is the same port.
 - Generated authoring resolves `Next` targets by matching an outcome output context type to exactly one declared node input context, then exposes that transition through a generated `GraphBuilder.Map...To...` method. If no node or multiple nodes match, the generator reports an error.
 - If two nodes can accept the same kind of work, give the branches distinct nominal port types unless the graph really should be ambiguous. The generator does not guess between two nodes with the same input context type.

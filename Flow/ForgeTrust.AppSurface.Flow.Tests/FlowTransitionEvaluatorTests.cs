@@ -14,6 +14,17 @@ public sealed class FlowTransitionEvaluatorTests
     }
 
     [Fact]
+    public void Evaluator_ExposesStableManifestIdentity()
+    {
+        var evaluator = new FlowTransitionEvaluator<TestState>();
+
+        Assert.Equal("appsurface.flow-transition-evaluator", FlowTransitionEvaluator<TestState>.StableEvaluatorId);
+        Assert.Equal("v1", FlowTransitionEvaluator<TestState>.CurrentEvaluatorVersion);
+        Assert.Equal(FlowTransitionEvaluator<TestState>.StableEvaluatorId, evaluator.EvaluatorId);
+        Assert.Equal(FlowTransitionEvaluator<TestState>.CurrentEvaluatorVersion, evaluator.EvaluatorVersion);
+    }
+
+    [Fact]
     public void Input_CapturesNodeContextAndExternalResume()
     {
         var state = new TestState("waiting");

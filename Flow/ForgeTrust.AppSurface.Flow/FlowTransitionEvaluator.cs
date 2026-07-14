@@ -239,6 +239,10 @@ public sealed record FlowTransition<TContext>
 /// <see cref="FlowNext{TContext}"/> transitions, persist state, validate serialization, schedule timers, or execute
 /// activities. Nodes can be evaluated again when a process dies before the host commits the returned transition, so
 /// they must be side-effect-free and must receive nondeterministic inputs through explicit context or resume contracts.
+/// Transition creation is package-owned so every runner observes the same mapping and validation semantics. External
+/// implementations should decorate and delegate to <see cref="FlowTransitionEvaluator{TContext}"/> for concerns such
+/// as telemetry; they cannot manufacture alternative transitions. Express custom process behavior through node
+/// outcomes instead of replacing the evaluator's transition semantics.
 /// </remarks>
 public interface IFlowTransitionEvaluator<TContext>
 {

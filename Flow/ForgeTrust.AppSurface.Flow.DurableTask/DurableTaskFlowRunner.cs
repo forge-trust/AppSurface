@@ -128,7 +128,10 @@ public sealed class DurableTaskFlowRunner<TContext> : IDurableTaskFlowRunner<TCo
     /// <param name="registry">Flow definition registry.</param>
     /// <param name="serializationValidator">Configured durable context validator.</param>
     /// <param name="options">Durable Task adapter options.</param>
-    /// <param name="transitionEvaluator">Shared host-neutral one-node evaluator.</param>
+    /// <param name="transitionEvaluator">
+    /// Shared host-neutral one-node evaluator. Custom implementations should decorate and delegate to
+    /// <see cref="FlowTransitionEvaluator{TContext}"/>; transition creation remains package-owned.
+    /// </param>
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="registry"/>, <paramref name="serializationValidator"/>,
     /// <paramref name="options"/>, or <paramref name="transitionEvaluator"/> is null.

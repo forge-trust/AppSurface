@@ -157,6 +157,17 @@ public sealed class FlowActivityTests
         Assert.Throws<ArgumentNullException>(() => callsite.CreateResult(null!));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void WorkResult_WithNonPositiveResultVersion_ThrowsArgumentOutOfRangeException(int version)
+    {
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new FlowActivityWorkResult<TestResult>("send-email", version, new TestResult("provider-123")));
+
+        Assert.Equal("resultContractVersion", exception.ParamName);
+    }
+
     [Fact]
     public void TryGetResult_WithExactCallsiteTypeAndVersion_ReturnsTypedResult()
     {
