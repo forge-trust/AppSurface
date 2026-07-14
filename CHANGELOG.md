@@ -14,9 +14,12 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
+- [`ForgeTrust.AppSurface.Web.OpenApi`](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) now requires `Microsoft.OpenApi` in the range `[2.7.5, 3.0.0)` and uses `Microsoft.AspNetCore.OpenApi` 10.0.9, keeping .NET 10 consumers on the supported 2.x line above the range affected by [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc) without changing OpenAPI or Scalar endpoint behavior.
 - AppSurface Docs now exposes Theme Contract v1 through `AppSurfaceDocs:Theme`, adding dark-family presets, supported accent/link overrides, density/chrome controls, startup validation, and export/archive-safe resolved CSS variables.
 - AppSurface Docs now isolates its built-in views behind a package-specific absolute Razor layout, preventing ordinary host `_ViewStart` and `_Layout` conventions from silently removing Docs styling, client configuration, and search scripts while preserving deliberate Razor Class Library overrides.
+- AppSurface Auth adds an AppHost-only `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` package for real local Keycloak OIDC proof, with deterministic realm/client/user import, secret-safe OIDC projection, fixed-port/readiness diagnostics, and a focused AppHost/web/verifier sample.
 - `appsurface pwa verify` can now prove real entry pages such as `/account/resume`, follow same-origin path-base-safe redirects, assert manifest values and icon declarations, decode PNG icon dimensions for CI evidence, and prove the configured AppSurface service worker is absent when offline support is disabled.
+- [`ForgeTrust.AppSurface.Web`](./Web/ForgeTrust.AppSurface.Web/Docs/pwa-install.md) now composes independent offline and push capabilities into one service worker, exposes inert explicit browser registration, validates a strict privacy-safe notification payload and click destination, and keeps permission, subscription, and delivery application-owned.
 
 ## 0.2.0-preview.2 - 2026-07-02
 
@@ -30,24 +33,13 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Release manifest: `releases/v0.2.0-preview.1.release.json`
 - Release evidence bundle: `releases/v0.2.0-preview.1.evidence.json`
 
-## 0.1.0-rc.4 - 2026-06-16
+## 0.1.0 - 2026-06-27
 
-- Narrative release note: [v0.1.0-rc.4](./releases/v0.1.0-rc.4.md)
-- Release manifest: `releases/v0.1.0-rc.4.release.json`
-- Release evidence bundle: `releases/v0.1.0-rc.4.evidence.json`
-
-## 0.1.0-rc.3 - 2026-06-08
-
-- Narrative release note: [v0.1.0-rc.3](./releases/v0.1.0-rc.3.md)
-- Release manifest: `releases/v0.1.0-rc.3.release.json`
-- Release evidence bundle: `releases/v0.1.0-rc.3.evidence.json`
-
-## 0.1.0-rc.2 - 2026-06-03
-
-- Narrative release note: [v0.1.0-rc.2](./releases/v0.1.0-rc.2.md)
-- Release manifest: `releases/v0.1.0-rc.2.release.json`
-
-## 0.1.0-rc.1 - 2026-05-29
-
-- Narrative release note: [v0.1.0-rc.1](./releases/v0.1.0-rc.1.md)
-- Release manifest: `releases/v0.1.0-rc.1.release.json`
+- Narrative release note: [v0.1.0](./releases/v0.1.0.md)
+- Release manifest: `releases/v0.1.0.release.json`
+- Release evidence bundle: `releases/v0.1.0.evidence.json`
+- Release-candidate history:
+  - `0.1.0-rc.1` - 2026-05-29
+  - `0.1.0-rc.2` - 2026-06-03
+  - `0.1.0-rc.3` - 2026-06-08
+  - `0.1.0-rc.4` - 2026-06-16

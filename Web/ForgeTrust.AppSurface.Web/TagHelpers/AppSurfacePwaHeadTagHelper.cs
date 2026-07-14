@@ -1,5 +1,3 @@
-using System.Text;
-using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
@@ -12,10 +10,10 @@ namespace ForgeTrust.AppSurface.Web.TagHelpers;
 /// </summary>
 /// <remarks>
 /// Render <c>&lt;appsurface:pwa-head /&gt;</c> inside the document <c>&lt;head&gt;</c> after enabling
-/// <see cref="PwaOptions"/>. The helper emits the manifest link, theme-color metadata, mobile app-capable hints, icon
-/// links, and the service-worker path as inert metadata when an explicit offline strategy is configured. It does not
-/// register a service worker or display an install prompt; host JavaScript or a future RazorWire affordance can opt into
-/// that UI deliberately.
+/// <see cref="PwaOptions"/>. The helper emits install metadata only when <see cref="PwaOptions.Enabled"/> is enabled,
+/// emits inert worker path/scope metadata for active worker capabilities, and loads the inert registration helper only
+/// when push is enabled. It never registers a worker, displays an install prompt, requests notification permission, or
+/// creates a push subscription; the application invokes registration deliberately.
 /// </remarks>
 [HtmlTargetElement("appsurface:pwa-head")]
 public sealed class AppSurfacePwaHeadTagHelper : TagHelper
@@ -45,55 +43,16 @@ public sealed class AppSurfacePwaHeadTagHelper : TagHelper
     public override void Process(TagHelperContext context, TagHelperOutput output)
     {
         output.TagName = null;
-        if (!_options.Enabled)
+        if (!_options.HasAnySurfaceEnabled)
         {
             output.Content.SetHtmlContent(string.Empty);
             return;
         }
 
-        var pathBase = ViewContext.HttpContext.Request.PathBase;
-        var manifestPath = pathBase.Add(new PathString(_options.ManifestPath)).Value ?? _options.ManifestPath;
-        var builder = new StringBuilder();
-        builder.Append("<link rel=\"manifest\" href=\"");
-        builder.Append(HtmlEncoder.Default.Encode(manifestPath));
-        builder.AppendLine("\" />");
-        builder.Append("<meta name=\"theme-color\" content=\"");
-        builder.Append(HtmlEncoder.Default.Encode(_options.ThemeColor));
-        builder.AppendLine("\" />");
-        builder.Append("<meta name=\"application-name\" content=\"");
-        builder.Append(HtmlEncoder.Default.Encode(_options.Name));
-        builder.AppendLine("\" />");
-        builder.Append("<meta name=\"apple-mobile-web-app-capable\" content=\"yes\" />");
-        builder.Append("<meta name=\"apple-mobile-web-app-title\" content=\"");
-        builder.Append(HtmlEncoder.Default.Encode(_options.ShortName));
-        builder.AppendLine("\" />");
-
-        foreach (var icon in _options.Icons)
-        {
-            var href = icon.Source;
-            if (PwaOptionsValidator.IsSafeLocalPath(href))
-            {
-                href = _fileVersionProvider.AddFileVersionToPath(pathBase, href);
-            }
-
-            builder.Append("<link rel=\"icon\" href=\"");
-            builder.Append(HtmlEncoder.Default.Encode(href));
-            builder.Append("\" sizes=\"");
-            builder.Append(HtmlEncoder.Default.Encode(icon.Sizes));
-            builder.Append("\" type=\"");
-            builder.Append(HtmlEncoder.Default.Encode(icon.Type));
-            builder.AppendLine("\" />");
-        }
-
-        if (_options.Offline.Enabled)
-        {
-            var serviceWorkerPath = pathBase.Add(new PathString(_options.Offline.ServiceWorkerPath)).Value
-                ?? _options.Offline.ServiceWorkerPath;
-            builder.Append("<meta name=\"appsurface:pwa-service-worker\" content=\"");
-            builder.Append(HtmlEncoder.Default.Encode(serviceWorkerPath));
-            builder.AppendLine("\" />");
-        }
-
-        output.Content.SetHtmlContent(builder.ToString());
+        output.Content.SetHtmlContent(
+            PwaHeadMetadataBuilder.Build(
+                ViewContext.HttpContext.Request.PathBase,
+                _options,
+                _fileVersionProvider));
     }
 }

@@ -279,13 +279,81 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
     {
         var index = WriteFile("index.html", "<html>ok</html>");
         var digest = WriteManifest(index);
-        var fileSystem = new ExtraEnumeratedFileSystem(TestPathUtils.PathUnder(_tempDirectory, "INDEX.HTML"));
+        var fileSystem = new ExtraEnumeratedFileSystem(
+            TestPathUtils.PathUnder(_tempDirectory, "INDEX.HTML"),
+            StringComparer.Ordinal);
 
         var failure = VerifyFailure(digest, fileSystem);
 
         Assert.Equal("ASDOCSARCHIVE009", failure.Code);
         Assert.Equal("INDEX.HTML", failure.Path);
         Assert.Contains("serveable file", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldPass_WhenCaseInsensitiveFilesystemReportsManifestPathWithDifferentCasing()
+    {
+        var index = WriteFile("index.html", "<html>ok</html>");
+        var digest = WriteManifest(index);
+        var fileSystem = new ExtraEnumeratedFileSystem(
+            TestPathUtils.PathUnder(_tempDirectory, "INDEX.HTML"),
+            StringComparer.OrdinalIgnoreCase);
+
+        var verified = AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
+            _tempDirectory,
+            digest,
+            fileSystem,
+            out var archive,
+            out var failure);
+
+        Assert.True(verified, failure?.Detail);
+        Assert.Null(failure);
+        Assert.NotNull(archive);
+    }
+
+    [Fact]
+    public void ResolvePhysicalPathComparer_ShouldUseTheArchiveRootsFilesystemBehavior()
+    {
+        var caseInsensitive = AppSurfaceDocsReleaseArchiveFileSystem.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => true,
+            _ => ["/release/archive/.appsurface-docs-release-manifest.json"]);
+        var caseSensitive = AppSurfaceDocsReleaseArchiveFileSystem.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => false,
+            _ => ["/release/archive/.appsurface-docs-release-manifest.json"]);
+        var uppercaseRoot = AppSurfaceDocsReleaseArchiveFileSystem.ResolvePhysicalPathComparer(
+            "/RELEASE/ARCHIVE",
+            _ => false,
+            _ => ["/RELEASE/ARCHIVE/.appsurface-docs-release-manifest.json"]);
+        var numericRoot = AppSurfaceDocsReleaseArchiveFileSystem.ResolvePhysicalPathComparer(
+            "/123/456",
+            _ => true,
+            _ => ["/123/456/.appsurface-docs-release-manifest.json"]);
+        var ambiguousSibling = AppSurfaceDocsReleaseArchiveFileSystem.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => true,
+            _ =>
+            [
+                "/release/archive/.appsurface-docs-release-manifest.json",
+                "/release/archive/.appsurface-docs-release-manifest.jsoN"
+            ]);
+        var unreadableParent = AppSurfaceDocsReleaseArchiveFileSystem.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => true,
+            _ => throw new IOException("Parent enumeration failed."));
+        var unreadableProbe = AppSurfaceDocsReleaseArchiveFileSystem.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => throw new IOException("Manifest probe failed."),
+            _ => ["/release/archive/.appsurface-docs-release-manifest.json"]);
+
+        Assert.Same(StringComparer.OrdinalIgnoreCase, caseInsensitive);
+        Assert.Same(StringComparer.Ordinal, caseSensitive);
+        Assert.Same(StringComparer.Ordinal, uppercaseRoot);
+        Assert.Same(StringComparer.OrdinalIgnoreCase, numericRoot);
+        Assert.Same(StringComparer.Ordinal, ambiguousSibling);
+        Assert.Same(StringComparer.Ordinal, unreadableParent);
+        Assert.Same(StringComparer.Ordinal, unreadableProbe);
     }
 
     [Fact]
@@ -559,8 +627,13 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
         }
     }
 
-    private sealed class ExtraEnumeratedFileSystem(string extraPath) : AppSurfaceDocsReleaseArchiveFileSystem
+    private sealed class ExtraEnumeratedFileSystem(string extraPath, StringComparer pathComparer) : AppSurfaceDocsReleaseArchiveFileSystem
     {
+        internal override StringComparer GetPathComparer(string rootPath)
+        {
+            return pathComparer;
+        }
+
         internal override bool FileExists(string path)
         {
             return File.Exists(path);

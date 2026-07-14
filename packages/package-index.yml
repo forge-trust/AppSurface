@@ -136,6 +136,21 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
       - ForgeTrust.AppSurface.Auth
+  - project: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 38
+    use_when: Add this in an Aspire AppHost when package consumers need a real local Keycloak-backed AppSurface OIDC proof without making runtime web apps reference Keycloak or Aspire hosting packages.
+    includes: AddAppSurfaceKeycloak AppHost extension, deterministic local realm/client/user import generation, secret-safe OIDC configuration projection, fixed-port preflight diagnostics, multi-signal readiness probe, disposable-data default, persistent-data opt-in, and ASKEYC diagnostics.
+    does_not_include: Runtime web authentication registration, identity-provider hosting in web apps, production Keycloak administration, social IdP setup, confidential-client secret lifecycle, provider SDK abstractions, tenant mapping, user provisioning, durable app-user mapping, token storage, or runtime dependency on Keycloak packages.
+    start_here_path: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` in AppHost/dev/test projects only when a real local OIDC provider proof should pair with `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc`; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep it separate from DevAuth, OIDC registration, and Auth.Testing.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Aspire
   - project: Auth/ForgeTrust.AppSurface.Auth.Testing/ForgeTrust.AppSurface.Auth.Testing.csproj
     classification: public
     publish_decision: publish
@@ -315,11 +330,11 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.2.md
     order: 70
-    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, health/readiness probes, conventional browser affordances, PWA install metadata, or authenticated config-audit diagnostics before layering on optional UI or docs packages.
-    includes: Base ASP.NET Core hosting, default public `/health` and `/ready` ASP.NET Core health-check probes, pre-routing and endpoint-aware middleware composition, endpoint composition, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/service-worker endpoints, opt-in authenticated config audit diagnostics endpoint mapping, and the core AppSurface web module contract.
-    does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, AppSurface Docs host, browser-specific install prompt UI, broad offline route/app-data caching, automatic diagnostics exposure, or authorization policy definitions.
+    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, health/readiness probes, conventional browser affordances, PWA install metadata or push-worker plumbing, or authenticated config-audit diagnostics before layering on optional UI or docs packages.
+    includes: Base ASP.NET Core hosting, default public `/health` and `/ready` ASP.NET Core health-check probes, pre-routing and endpoint-aware middleware composition, endpoint composition, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/shared-worker endpoints, explicit offline behavior, push-event plumbing, an inert service-worker registration helper, opt-in authenticated config audit diagnostics endpoint mapping, and the core AppSurface web module contract.
+    does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, AppSurface Docs host, browser-specific install or permission UI, push subscription persistence or delivery, broad offline route/app-data caching, automatic diagnostics exposure, or authorization policy definitions.
     start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
-    recipe_summary: Start with `ForgeTrust.AppSurface.Web` for AppSurface ASP.NET Core hosting and default `/health` plus `/ready` platform probes; enable `WebOptions.Pwa` in the same package when the app needs installable PWA metadata and diagnostics, or map config audit diagnostics explicitly when support needs sanitized operator evidence.
+    recipe_summary: Start with `ForgeTrust.AppSurface.Web` for AppSurface ASP.NET Core hosting and default `/health` plus `/ready` platform probes; enable independent `WebOptions.Pwa` install, offline, or push-worker capabilities in the same package, or map config audit diagnostics explicitly when support needs sanitized operator evidence.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Core

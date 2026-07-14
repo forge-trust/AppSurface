@@ -2772,6 +2772,67 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void StableDocsArchiveGateMatchesPhysicalPathsUsingFilesystemCasingRules()
+    {
+        string[] manifestPaths = ["docs/intelligence/package.html"];
+
+        var caseInsensitivePaths = ReleaseDocsArchiveGate.CreatePhysicalManifestPathSet(
+            manifestPaths,
+            StringComparer.OrdinalIgnoreCase);
+        var caseSensitivePaths = ReleaseDocsArchiveGate.CreatePhysicalManifestPathSet(
+            manifestPaths,
+            StringComparer.Ordinal);
+
+        Assert.Contains("docs/Intelligence/package.html", caseInsensitivePaths);
+        Assert.DoesNotContain("docs/Intelligence/package.html", caseSensitivePaths);
+    }
+
+    [Fact]
+    public void StableDocsArchiveGateDetectsTheArchiveRootsFilesystemCasingRules()
+    {
+        var caseInsensitive = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => true,
+            _ => ["/release/archive/.appsurface-docs-release-manifest.json"]);
+        var caseSensitive = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => false,
+            _ => ["/release/archive/.appsurface-docs-release-manifest.json"]);
+        var uppercaseRoot = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
+            "/RELEASE/ARCHIVE",
+            _ => false,
+            _ => ["/RELEASE/ARCHIVE/.appsurface-docs-release-manifest.json"]);
+        var numericRoot = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
+            "/123/456",
+            _ => true,
+            _ => ["/123/456/.appsurface-docs-release-manifest.json"]);
+        var ambiguousSibling = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => true,
+            _ =>
+            [
+                "/release/archive/.appsurface-docs-release-manifest.json",
+                "/release/archive/.appsurface-docs-release-manifest.jsoN"
+            ]);
+        var unreadableParent = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => true,
+            _ => throw new IOException("Parent enumeration failed."));
+        var unreadableProbe = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => throw new IOException("Manifest probe failed."),
+            _ => ["/release/archive/.appsurface-docs-release-manifest.json"]);
+
+        Assert.Same(StringComparer.OrdinalIgnoreCase, caseInsensitive);
+        Assert.Same(StringComparer.Ordinal, caseSensitive);
+        Assert.Same(StringComparer.Ordinal, uppercaseRoot);
+        Assert.Same(StringComparer.OrdinalIgnoreCase, numericRoot);
+        Assert.Same(StringComparer.Ordinal, ambiguousSibling);
+        Assert.Same(StringComparer.Ordinal, unreadableParent);
+        Assert.Same(StringComparer.Ordinal, unreadableProbe);
+    }
+
+    [Fact]
     public async Task StableDocsArchiveGateReportsExactTreeSegmentInspectionFailure()
     {
         await SeedRepositoryAsync();
@@ -3210,6 +3271,39 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("- Docs archive verification: `availableVerified`", result.Stdout, StringComparison.Ordinal);
         Assert.Contains("- Docs verified file count: `2`", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckStablePreparedReleaseAcceptsGeneratedEvidenceDigestAgainstVerifiedCatalogDigest()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(".github/workflows/nuget-stable-publish.yml", "name: NuGet Stable Publish\n");
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var prepare = await RunAsync(
+            ["prepare", "--version", "0.1.0", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+        Assert.Equal(0, prepare.ExitCode);
+
+        var evidenceJson = await ReadFileAsync("releases/v0.1.0.evidence.json");
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(evidenceJson, ReleaseJson.Options)!;
+        var generatedDigestBundle = RefreshSubject(bundle with
+        {
+            DocsArchive = new ReleaseEvidenceDocsArchive(
+                "configured",
+                docs.ExactTreePath,
+                ReleaseEvidence.DocsArchiveGeneratedDigest,
+                "appsurface-docs-release-manifest-v1",
+                docs.FileCount,
+                new ReleaseEvidenceCatalogEntry(docs.ExactTreePath, ReleaseEvidence.DocsArchiveGeneratedDigest))
+        });
+        await WriteFileAsync("releases/v0.1.0.evidence.json", ReleaseEvidence.Serialize(generatedDigestBundle));
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0", "--allow-existing-targets"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("- Docs archive verification: `availableVerified`", result.Stdout, StringComparison.Ordinal);
     }
 
     [Fact]

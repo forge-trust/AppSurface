@@ -263,6 +263,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
             return false;
         }
 
+        var physicalManifestPaths = new HashSet<string>(files.Keys, fileSystem.GetPathComparer(exactTreePath));
         foreach (var relativePath in archiveFilePaths.Select(filePath => NormalizeRelativePath(exactTreePath, filePath)))
         {
             if (string.Equals(relativePath, FileName, StringComparison.Ordinal))
@@ -275,7 +276,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
                 continue;
             }
 
-            if (!files.ContainsKey(relativePath))
+            if (!physicalManifestPaths.Contains(relativePath))
             {
                 failure = AppSurfaceDocsArchiveVerificationFailure.Create(
                     "ASDOCSARCHIVE009",
@@ -453,6 +454,64 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
 /// </remarks>
 internal abstract class AppSurfaceDocsReleaseArchiveFileSystem
 {
+    /// <summary>
+    /// Gets the comparer used by the physical filesystem when resolving paths beneath an archive root.
+    /// </summary>
+    /// <param name="rootPath">Existing exact release tree whose filesystem behavior is required.</param>
+    /// <returns>The comparer matching the root's physical filesystem casing rules.</returns>
+    internal virtual StringComparer GetPathComparer(string rootPath)
+    {
+        return ResolvePhysicalPathComparer(rootPath, File.Exists, Directory.EnumerateFileSystemEntries);
+    }
+
+    /// <summary>
+    /// Resolves physical filesystem casing behavior without writing probe files into an immutable archive.
+    /// </summary>
+    /// <param name="rootPath">Existing exact release tree.</param>
+    /// <param name="fileExists">File existence operation used for the read-only case-variant probe.</param>
+    /// <param name="enumerateFileSystemEntries">Filesystem enumeration used to reject ambiguous case-variant siblings.</param>
+    /// <returns>An ordinal comparer matching the archive root's case behavior.</returns>
+    internal static StringComparer ResolvePhysicalPathComparer(
+        string rootPath,
+        Func<string, bool> fileExists,
+        Func<string, IEnumerable<string>> enumerateFileSystemEntries)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        ArgumentNullException.ThrowIfNull(fileExists);
+        ArgumentNullException.ThrowIfNull(enumerateFileSystemEntries);
+        var fullRootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+        int matchingEntryCount;
+        try
+        {
+            matchingEntryCount = enumerateFileSystemEntries(fullRootPath)
+                .Select(Path.GetFileName)
+                .Where(entryName => string.Equals(entryName, AppSurfaceDocsReleaseArchiveVerifier.FileName, StringComparison.OrdinalIgnoreCase))
+                .Take(2)
+                .Count();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return StringComparer.Ordinal;
+        }
+
+        if (matchingEntryCount != 1)
+        {
+            return StringComparer.Ordinal;
+        }
+
+        var alternateManifestFileName = AppSurfaceDocsReleaseArchiveVerifier.FileName[..^1] + 'N';
+        try
+        {
+            return fileExists(Path.Join(fullRootPath, alternateManifestFileName))
+                ? StringComparer.OrdinalIgnoreCase
+                : StringComparer.Ordinal;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return StringComparer.Ordinal;
+        }
+    }
+
     /// <summary>
     /// Gets the physical filesystem adapter used by runtime verification.
     /// </summary>
