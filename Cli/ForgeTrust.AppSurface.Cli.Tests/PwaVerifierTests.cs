@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using CliFx;
 using CliFx.Infrastructure;
 
@@ -7,6 +8,31 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class PwaVerifierTests
 {
+    [Fact]
+    public void StatusProbe_DeserializesWorkerMetadataFromNewServers()
+    {
+        var status = JsonSerializer.Deserialize<PwaStatusProbe>(
+            """
+            {
+              "enabled": false,
+              "offlineEnabled": false,
+              "workerEnabled": true,
+              "workerPath": "/tenant/service-worker.js",
+              "pushEnabled": true,
+              "workerScope": "/tenant/",
+              "registrationHelperPath": "/tenant/_appsurface/pwa/register.js"
+            }
+            """,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.NotNull(status);
+        Assert.True(status.WorkerEnabled);
+        Assert.Equal("/tenant/service-worker.js", status.WorkerPath);
+        Assert.True(status.PushEnabled);
+        Assert.Equal("/tenant/", status.WorkerScope);
+        Assert.Equal("/tenant/_appsurface/pwa/register.js", status.RegistrationHelperPath);
+    }
+
     [Fact]
     public async Task ExecuteAsync_WritesTextReport_WhenVerificationPasses()
     {

@@ -27,9 +27,15 @@ internal static class PwaScriptAssets
     /// <summary>Gets the content-derived cache version for the registration helper.</summary>
     public static string RegistrationHelperVersion { get; } = BuildVersion(RegistrationHelper);
 
-    private static string Read(string fileName)
+    private static string Read(string fileName) => Read(typeof(PwaScriptAssets).Assembly, fileName);
+
+    /// <summary>Reads a named PWA resource from an assembly.</summary>
+    /// <param name="assembly">The assembly that owns the embedded PWA resource.</param>
+    /// <param name="fileName">The final file name beneath the embedded Assets.Pwa namespace.</param>
+    /// <returns>The UTF-8 resource contents.</returns>
+    /// <exception cref="InvalidOperationException">The named resource cannot be found or opened.</exception>
+    internal static string Read(Assembly assembly, string fileName)
     {
-        var assembly = typeof(PwaScriptAssets).Assembly;
         var resourceName = assembly.GetManifestResourceNames()
             .SingleOrDefault(name => name.EndsWith($".Assets.Pwa.{fileName}", StringComparison.Ordinal));
         if (resourceName is null)

@@ -7,7 +7,11 @@
     { "value": "/a%2f..%2fb", "valid": false },
     { "value": "/%2e%2e/secret", "valid": false },
     { "value": "/%252e%252e/secret", "valid": false },
+    { "value": "/%2e/secret", "valid": false },
     { "value": "/bad%escape", "valid": false },
+    { "value": "/encoded%00control", "valid": false },
+    { "value": "/encoded%20space", "valid": false },
+    { "value": "/encoded%7Btenant%7D", "valid": false },
     { "value": "/encoded%3Fquery", "valid": false },
     { "value": "/encoded%23fragment", "valid": false }
   ],

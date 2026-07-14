@@ -5,6 +5,15 @@ namespace ForgeTrust.AppSurface.Web.Tests;
 public sealed class PwaOptionsTests
 {
     [Fact]
+    public void ScriptAssets_ReadRejectsMissingEmbeddedResource()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => PwaScriptAssets.Read(typeof(PwaOptionsTests).Assembly, "missing.js"));
+
+        Assert.Contains("missing.js", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SharedPathVectors_MatchCSharpValidation()
     {
         using var document = System.Text.Json.JsonDocument.Parse(PwaScriptAssets.PathValidationVectors);
@@ -226,6 +235,19 @@ public sealed class PwaOptionsTests
         var options = new PwaOptions();
         options.Push.Enabled = true;
         options.Worker.ServiceWorkerPath = "/_APPSURFACE/pwa/register.js/";
+
+        var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Contains("ASPWA023", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThrowIfInvalid_RejectsKnownPwaRouteCollisionAtRoot()
+    {
+        var options = new PwaOptions();
+        options.Push.Enabled = true;
+        options.Worker.ServiceWorkerPath = "/";
+        options.Worker.RegistrationHelperPath = "/";
 
         var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
 

@@ -43,6 +43,19 @@ public sealed class PwaStaticFileShadowValidatorTests
     }
 
     [Fact]
+    public void ThrowIfInvalid_WhenWorkerPathIsUnsafe_DoesNotInspectStaticFiles()
+    {
+        var options = new PwaOptions();
+        options.Offline.Enabled = true;
+        options.Worker.ServiceWorkerPath = "relative-worker.js";
+
+        var exception = Record.Exception(
+            () => PwaStaticFileShadowValidator.ThrowIfInvalid(options, new StubFileProvider("relative-worker.js")));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
     public void ThrowIfInvalid_WhenRouteMatchesDirectory_DoesNotRejectStartup()
     {
         var options = new PwaOptions();

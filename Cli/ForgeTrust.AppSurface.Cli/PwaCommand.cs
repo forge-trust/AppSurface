@@ -432,7 +432,7 @@ internal sealed partial class PwaVerifier
                 await ValidateEnabledOfflineDiagnosticsAsync(target, status, diagnostics, cancellationToken);
             }
             else if (status is not null
-                && status.WorkerEnabled != true
+                && status.WorkerEnabled is not true
                 && !string.IsNullOrWhiteSpace(status.ConfiguredServiceWorkerPath))
             {
                 await ProveServiceWorkerAbsentAsync(target, status.ConfiguredServiceWorkerPath!, diagnostics, cancellationToken);
