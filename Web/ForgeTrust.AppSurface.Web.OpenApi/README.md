@@ -14,6 +14,12 @@ The `AppSurfaceWebOpenApiModule` simplifies the configuration of OpenAPI by:
 
 AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
 
+## OpenAPI.NET Dependency Floor
+
+This package directly requires `Microsoft.OpenApi` 2.7.5 or later to avoid the process-termination vulnerability described by [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc). The direct dependency is intentional: `Microsoft.AspNetCore.OpenApi` 10.0.9 still declares a 2.0.0 minimum, which allows NuGet to select a vulnerable version unless the consuming package supplies a safer floor.
+
+AppSurface itself restores and verifies `Microsoft.OpenApi` 2.7.5 on the 2.x line. The published NuGet dependency is a minimum with no upper bound, so downstream dependency resolution may select a later version. That open-ended range is not a claim that AppSurface has tested or guarantees compatibility with `Microsoft.OpenApi` 3.x; consumers overriding the coordinated dependency graph must run their own OpenAPI generation and endpoint tests.
+
 ## Usage
 
 To enable OpenAPI support in your application, add the `AppSurfaceWebOpenApiModule` as a dependency in your root module:
