@@ -172,6 +172,10 @@ return FlowNodeOutcome<ApprovalState>.Wait(
     context.State with { Status = "waiting" });
 ```
 
+When local execution stops at this wait, `FlowRunResult<TContext>.EventCallsite` preserves the typed contract while
+`WaitingEventName` preserves the event name. String waits leave `EventCallsite` null. This makes the in-memory result
+useful to host adapters and contract tests without implying that the runner performs authorization or decoding.
+
 A durable host first loads the persisted wait registration, checks authorization and the exact case-sensitive event
 name, selects an allowlisted codec from `ContractName` plus `ContractVersion`, validates the decoded value against
 `PayloadType`, and only then supplies `FlowResumeEvent` to the evaluator. Delivery ownership, late-event policy, and
@@ -247,6 +251,7 @@ The evaluator maps every outcome to `FlowTransition<TContext>`, validates declar
 - Flow benchmarks isolate runner orchestration overhead. Use Flow for graph safety, long-running process contracts, and durable-host alignment; use a direct loop when all you need is a pure in-process tight state machine.
 - Use `FlowWait<TContext>.Timeout` as metadata for durable hosts. The core runner reports the timeout request but does not race timers.
 - `FlowEventCallsite<TPayload>` is passive manifest metadata. The core evaluator forwards a supplied `FlowResumeEvent`; it does not prove that the event matches a prior wait, authorize its sender, decode its payload, or reject duplicates. Durable hosts must perform those checks before evaluation.
+- Public host boundaries snapshot extensible `IFlowEventCallsite` and `IFlowActivityRequest<TContext>` metadata after validating required values, declared CLR types, and positive contract versions. Custom implementations must still expose stable, side-effect-free getters; mutable work and context objects are not deep-cloned and should be serialized immediately.
 - Keep context types serializer-friendly if you plan to use Durable Task. The Durable Task adapter validates JSON round-trips before evaluating nodes.
 - Expected business failure belongs in the typed activity result contract. Technical exhaustion, provider ambiguity, and retry safety belong to the durable activity host; a Flow node must not infer that a timed-out provider call had no effect.
 - `FlowActivityCallsite<TWork, TResult>.TryGetResult` returns false for absent or mismatched results. Use `GetResult` when a mismatch is a definition/runtime invariant violation and should throw a focused `FlowDefinitionException`.

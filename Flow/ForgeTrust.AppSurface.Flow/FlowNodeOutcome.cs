@@ -40,6 +40,9 @@ public abstract record FlowNodeOutcome<TContext>
     /// <param name="context">Context to persist while waiting.</param>
     /// <param name="timeout">Optional wait timeout.</param>
     /// <returns>A typed external-event wait outcome.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="callsite"/> or <paramref name="context"/> is null.
+    /// </exception>
     public static FlowWait<TContext> Wait<TPayload>(
         FlowEventCallsite<TPayload> callsite,
         TContext context,
@@ -81,6 +84,9 @@ public abstract record FlowNodeOutcome<TContext>
     /// <param name="work">Work value to persist and execute.</param>
     /// <param name="context">Context to persist atomically with the activity command.</param>
     /// <returns>An activity outcome.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="callsite"/>, <paramref name="work"/>, or <paramref name="context"/> is null.
+    /// </exception>
     /// <remarks>
     /// Returning this outcome does not execute <paramref name="work"/>. A durable host records the transition and
     /// activity command atomically, executes the work through its provider-safe worker boundary, and resumes this same
@@ -145,10 +151,21 @@ public sealed record FlowWait<TContext> : FlowNodeOutcome<TContext>
     /// <param name="eventCallsite">Exact event and payload contract.</param>
     /// <param name="context">Context to persist while waiting.</param>
     /// <param name="timeout">Optional wait timeout.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the event name, contract name, or contract version exposed by
+    /// <paramref name="eventCallsite"/> is empty.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="eventCallsite"/>, its payload type, or <paramref name="context"/> is null.
+    /// </exception>
+    /// <remarks>
+    /// Extensible callsite metadata is validated and copied into an immutable snapshot. Later mutations to the supplied
+    /// implementation do not change this wait.
+    /// </remarks>
     public FlowWait(IFlowEventCallsite eventCallsite, TContext context, FlowTimeout? timeout = null)
     {
-        EventCallsite = eventCallsite ?? throw new ArgumentNullException(nameof(eventCallsite));
-        EventName = eventCallsite.EventName;
+        EventCallsite = FlowEventCallsiteContract.Snapshot(eventCallsite, nameof(eventCallsite));
+        EventName = EventCallsite.EventName;
         Context = RequireContext(context);
         Timeout = timeout;
     }

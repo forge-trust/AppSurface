@@ -47,6 +47,7 @@ public sealed record FlowRunResult<TContext>
         TContext? context,
         string? nodeId,
         string? waitingEventName,
+        IFlowEventCallsite? eventCallsite,
         FlowTimeout? timeout,
         string? timedOutEventName,
         FlowFault? fault,
@@ -56,6 +57,7 @@ public sealed record FlowRunResult<TContext>
         Context = context;
         NodeId = nodeId;
         WaitingEventName = waitingEventName;
+        EventCallsite = eventCallsite;
         Timeout = timeout;
         TimedOutEventName = timedOutEventName;
         Fault = fault;
@@ -81,6 +83,15 @@ public sealed record FlowRunResult<TContext>
     /// Gets the event name awaited by a waiting result.
     /// </summary>
     public string? WaitingEventName { get; }
+
+    /// <summary>
+    /// Gets the immutable typed event contract for a waiting result, or <see langword="null"/> for a string wait.
+    /// </summary>
+    /// <remarks>
+    /// The runner preserves this metadata so a host can select an allowlisted payload codec. The result does not
+    /// authorize, decode, or deduplicate event delivery.
+    /// </remarks>
+    public IFlowEventCallsite? EventCallsite { get; }
 
     /// <summary>
     /// Gets the optional timeout associated with a waiting result.
@@ -127,10 +138,44 @@ public sealed record FlowRunResult<TContext>
             FlowNodeOutcome<TContext>.RequireContext(context),
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
             FlowDefinition<object>.RequireText(eventName, nameof(eventName)),
+            null,
             timeout,
             null,
             null,
             null);
+
+    /// <summary>
+    /// Creates a waiting result with an exact typed payload contract.
+    /// </summary>
+    /// <param name="nodeId">Node id where the Flow paused.</param>
+    /// <param name="eventCallsite">Exact event name and durable payload contract.</param>
+    /// <param name="context">Context to preserve while the Flow is waiting.</param>
+    /// <param name="timeout">Optional timeout associated with the wait.</param>
+    /// <returns>A waiting result that preserves immutable event metadata.</returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> or callsite text metadata is empty.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="eventCallsite"/>, its payload type, or <paramref name="context"/> is null.
+    /// </exception>
+    public static FlowRunResult<TContext> Waiting(
+        string nodeId,
+        IFlowEventCallsite eventCallsite,
+        TContext context,
+        FlowTimeout? timeout = null)
+    {
+        var snapshot = FlowEventCallsiteContract.Snapshot(eventCallsite, nameof(eventCallsite));
+        return new(
+            FlowRunStatus.Waiting,
+            FlowNodeOutcome<TContext>.RequireContext(context),
+            FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            snapshot.EventName,
+            snapshot,
+            timeout,
+            null,
+            null,
+            null);
+    }
 
     /// <summary>
     /// Creates a completed result.
@@ -148,6 +193,7 @@ public sealed record FlowRunResult<TContext>
             FlowRunStatus.Completed,
             FlowNodeOutcome<TContext>.RequireContext(context),
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            null,
             null,
             null,
             null,
@@ -175,6 +221,7 @@ public sealed record FlowRunResult<TContext>
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
             null,
             null,
+            null,
             FlowDefinition<object>.RequireText(eventName, nameof(eventName)),
             null,
             null);
@@ -197,6 +244,7 @@ public sealed record FlowRunResult<TContext>
             null,
             null,
             null,
+            null,
             fault ?? throw new ArgumentNullException(nameof(fault)),
             null);
 
@@ -206,8 +254,13 @@ public sealed record FlowRunResult<TContext>
     /// <param name="nodeId">Node that requested the activity.</param>
     /// <param name="activity">Typed activity request and context.</param>
     /// <returns>An activity-pending result.</returns>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="nodeId"/> is empty.</exception>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="activity"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> or activity metadata is empty, a contract version is invalid, or the work
+    /// value does not implement its declared type.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="activity"/> or one of its required values is null.
+    /// </exception>
     /// <remarks>
     /// The in-memory runner does not execute activities. Execute the work through a test or host boundary, construct a
     /// result with the request's typed callsite, and call <see cref="IFlowRunner{TContext}.ResumeActivityAsync"/>.
@@ -216,15 +269,16 @@ public sealed record FlowRunResult<TContext>
         string nodeId,
         IFlowActivityRequest<TContext> activity)
     {
-        ArgumentNullException.ThrowIfNull(activity);
+        var snapshot = FlowActivityRequestContract.Snapshot(activity, nameof(activity));
         return new(
             FlowRunStatus.ActivityPending,
-            activity.Context,
+            snapshot.Context,
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
             null,
             null,
             null,
             null,
-            activity);
+            null,
+            snapshot);
     }
 }

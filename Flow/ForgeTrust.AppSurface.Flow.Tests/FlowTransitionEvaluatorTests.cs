@@ -162,7 +162,7 @@ public sealed class FlowTransitionEvaluatorTests
 
         Assert.Equal(FlowTransitionKind.Wait, transition.Kind);
         Assert.Equal(callsite.EventName, transition.EventName);
-        Assert.Same(callsite, transition.EventCallsite);
+        Assert.NotSame(callsite, transition.EventCallsite);
         Assert.Equal(typeof(TestEvent), transition.EventCallsite?.PayloadType);
         Assert.Equal(callsite.ContractName, transition.EventCallsite?.ContractName);
         Assert.Equal(callsite.ContractVersion, transition.EventCallsite?.ContractVersion);

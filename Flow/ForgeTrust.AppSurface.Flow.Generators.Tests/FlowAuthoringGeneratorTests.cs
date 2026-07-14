@@ -15,6 +15,8 @@ public sealed class FlowAuthoringGeneratorTests
             using System.Diagnostics;
             using System.Threading;
             using System.Threading.Tasks;
+            using static System.DateTime;
+            using static System.Guid;
 
             [FlowAuthoring("nondeterministic")]
             public partial class NondeterministicFlow
@@ -29,8 +31,15 @@ public sealed class FlowAuthoringGeneratorTests
                         CancellationToken cancellationToken = default)
                     {
                         _ = DateTime.UtcNow;
+                        _ = DateTime.Today;
                         _ = DateTimeOffset.Now;
                         _ = Guid.NewGuid();
+                        _ = UtcNow;
+                        _ = Today;
+                        _ = NewGuid();
+                        _ = nameof(DateTime.UtcNow);
+                        _ = nameof(NewGuid);
+                        _ = @nameof(DateTime.UtcNow);
                         _ = new Random();
                         Random random = new();
                         _ = random;
@@ -39,6 +48,8 @@ public sealed class FlowAuthoringGeneratorTests
                         _ = ApplicationClock.UtcNow;
                         return ValueTask.FromResult(StartNodeOutcomes.Done(context.State));
                     }
+
+                    private static T @nameof<T>(T value) => value;
                 }
             }
 
@@ -56,7 +67,7 @@ public sealed class FlowAuthoringGeneratorTests
             .DistinctBy(diagnostic => (diagnostic.Location.SourceSpan, diagnostic.GetMessage()))
             .ToArray();
 
-        Assert.Equal(7, warnings.Length);
+        Assert.Equal(12, warnings.Length);
         Assert.All(warnings, warning => Assert.Equal(DiagnosticSeverity.Warning, warning.Severity));
         Assert.DoesNotContain(
             warnings,
@@ -178,6 +189,94 @@ public sealed class FlowAuthoringGeneratorTests
         Assert.Contains("MarkStartNodeExpiredTerminal", generated, StringComparison.Ordinal);
         Assert.Contains("MarkStartNodeDeniedTerminal", generated, StringComparison.Ordinal);
         Assert.Contains("MarkStartNodeNotifyTerminal", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Generator_WithCollidingOutcomeUnionMemberNames_ReportsInvalidDeclaration()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Text;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("notify", FlowOutcomeKind.Activity, typeof(StartContext), typeof(NotifyWork), typeof(NotifyResult))]
+                [FlowOutcome("notify-callsite", FlowOutcomeKind.Complete, typeof(StartContext))]
+                [FlowOutcome("foo", FlowOutcomeKind.Complete, typeof(StartContext))]
+                [FlowOutcome("foo-outcome", FlowOutcomeKind.Complete, typeof(StartContext))]
+                [FlowOutcome("require-context", FlowOutcomeKind.Complete, typeof(StartContext))]
+                [FlowOutcome("clone", FlowOutcomeKind.Complete, typeof(StartContext))]
+                [FlowOutcome("equality-contract", FlowOutcomeKind.Complete, typeof(StartContext))]
+                [FlowOutcome("equals", FlowOutcomeKind.Complete, typeof(object))]
+                [FlowOutcome("print-members", FlowOutcomeKind.Complete, typeof(StringBuilder))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(
+                        FlowTransformerContext<StartContext> context,
+                        CancellationToken cancellationToken = default) =>
+                        throw new System.NotImplementedException();
+                }
+            }
+
+            public sealed record StartContext;
+            public sealed record NotifyWork;
+            public sealed record NotifyResult;
+            """;
+
+        var (_, diagnostics, generated) = RunGenerator(source);
+        var messages = diagnostics
+            .Where(diagnostic => diagnostic.Id == "ASFLOWA005")
+            .Select(diagnostic => diagnostic.GetMessage())
+            .ToArray();
+
+        Assert.Contains(messages, message => message.Contains("NotifyCallsite", StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("FooOutcome", StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("RequireContext", StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("Clone", StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("EqualityContract", StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("Equals", StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("PrintMembers", StringComparison.Ordinal));
+        Assert.DoesNotContain("public abstract partial record StartNodeOutcomes", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Generator_WithOverloadableRecordMemberNamesAndDistinctSignatures_GeneratesNormally()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("approval")]
+            public partial class ApprovalFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(StartContext))]
+                [FlowOutcome("equals", FlowOutcomeKind.Complete, typeof(StartContext))]
+                [FlowOutcome("print-members", FlowOutcomeKind.Complete, typeof(StartContext))]
+                public partial class StartNode : IFlowTransformerNode<StartContext, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(
+                        FlowTransformerContext<StartContext> context,
+                        CancellationToken cancellationToken = default) =>
+                        ValueTask.FromResult<StartNodeOutcomes>(StartNodeOutcomes.Equals(context.State));
+                }
+            }
+
+            public sealed record StartContext;
+            """;
+
+        var (output, diagnostics, generated) = RunGenerator(source);
+
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.DoesNotContain(output.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.Contains("public static EqualsOutcome Equals(", generated, StringComparison.Ordinal);
+        Assert.Contains("public static PrintMembersOutcome PrintMembers(", generated, StringComparison.Ordinal);
     }
 
     [Fact]

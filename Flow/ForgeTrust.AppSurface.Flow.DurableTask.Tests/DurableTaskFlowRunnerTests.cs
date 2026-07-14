@@ -174,7 +174,9 @@ public sealed class DurableTaskFlowRunnerTests
 
         Assert.Equal(DurableTaskFlowDecisionKind.WaitForExternalEvent, decision.Kind);
         Assert.Equal(TypedWaitNode.Callsite.EventName, decision.EventName);
-        Assert.Same(TypedWaitNode.Callsite, decision.EventCallsite);
+        Assert.Equal(TypedWaitNode.Callsite.PayloadType, decision.EventCallsite?.PayloadType);
+        Assert.Equal(TypedWaitNode.Callsite.ContractName, decision.EventCallsite?.ContractName);
+        Assert.Equal(TypedWaitNode.Callsite.ContractVersion, decision.EventCallsite?.ContractVersion);
     }
 
     [Fact]

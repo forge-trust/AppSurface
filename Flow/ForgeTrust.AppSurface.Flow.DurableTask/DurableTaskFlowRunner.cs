@@ -53,6 +53,10 @@ public interface IDurableTaskFlowRunner<TContext>
     /// unsupported outcomes are returned as <see cref="DurableTaskFlowDecisionKind.Fault"/> decisions.
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="step"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="step"/> carries both a resume event and an activity result. A node evaluation can
+    /// resume from only one external input at a time.
+    /// </exception>
     /// <remarks>
     /// When <see cref="AppSurfaceFlowDurableTaskOptions.ValidateContextSerialization"/> is enabled, this method
     /// validates the input context before executing the node and validates returned contexts before scheduling a node or

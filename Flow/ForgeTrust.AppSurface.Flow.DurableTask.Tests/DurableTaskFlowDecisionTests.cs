@@ -62,7 +62,10 @@ public sealed class DurableTaskFlowDecisionTests
 
         Assert.Equal(DurableTaskFlowDecisionKind.WaitForExternalEvent, decision.Kind);
         Assert.Equal(callsite.EventName, decision.EventName);
-        Assert.Same(callsite, decision.EventCallsite);
+        Assert.NotSame(callsite, decision.EventCallsite);
+        Assert.Equal(callsite.PayloadType, decision.EventCallsite?.PayloadType);
+        Assert.Equal(callsite.ContractName, decision.EventCallsite?.ContractName);
+        Assert.Equal(callsite.ContractVersion, decision.EventCallsite?.ContractVersion);
     }
 
     [Fact]
@@ -180,7 +183,8 @@ public sealed class DurableTaskFlowDecisionTests
 
         Assert.Equal(DurableTaskFlowDecisionKind.ScheduleActivity, decision.Kind);
         Assert.Equal("review", decision.NodeId);
-        Assert.Same(activity, decision.Activity);
+        Assert.Equal(activity.CallsiteId, decision.Activity?.CallsiteId);
+        Assert.Same(activity.Work, decision.Activity?.Work);
         Assert.Same(activity.Context, decision.Context);
         Assert.Null(decision.RetryPolicy);
     }
@@ -190,6 +194,32 @@ public sealed class DurableTaskFlowDecisionTests
     {
         Assert.Throws<ArgumentNullException>(() =>
             DurableTaskFlowDecision<TestState>.ScheduleActivity("review", null!));
+    }
+
+    [Fact]
+    public void ScheduleActivity_SnapshotsExtensibleRequestMetadata()
+    {
+        var request = new MutableActivityRequest();
+
+        var decision = DurableTaskFlowDecision<TestState>.ScheduleActivity("review", request);
+        request.CallsiteId = "changed";
+        request.WorkContractVersion = 9;
+        request.Context = new TestState("changed");
+
+        Assert.Equal("send-email", decision.Activity?.CallsiteId);
+        Assert.Equal(2, decision.Activity?.WorkContractVersion);
+        Assert.Equal(new TestState("activity-pending"), decision.Context);
+    }
+
+    [Fact]
+    public void ScheduleActivity_WithNullExtensibleContext_ThrowsArgumentNullException()
+    {
+        var request = new MutableActivityRequest { Context = null! };
+
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            DurableTaskFlowDecision<TestState>.ScheduleActivity("review", request));
+
+        Assert.Equal("activity", exception.ParamName);
     }
 
     [Theory]
@@ -268,4 +298,24 @@ public sealed class DurableTaskFlowDecisionTests
         string ContractName,
         string ContractVersion,
         Type PayloadType) : IFlowEventCallsite;
+
+    private sealed class MutableActivityRequest : IFlowActivityRequest<TestState>
+    {
+        public string CallsiteId { get; set; } = "send-email";
+
+        public Type WorkType { get; set; } = typeof(TestWork);
+
+        public int WorkContractVersion { get; set; } = 2;
+
+        public Type ResultType { get; set; } = typeof(TestResult);
+
+        public int ResultContractVersion { get; set; } = 3;
+
+        public object Work { get; set; } = new TestWork("APR-1001");
+
+        public TestState Context { get; set; } = new("activity-pending");
+
+        public FlowActivityWorkResult CreateResult(object result) =>
+            new FlowActivityCallsite<TestWork, TestResult>("send-email", 2, 3).CreateResult((TestResult)result);
+    }
 }

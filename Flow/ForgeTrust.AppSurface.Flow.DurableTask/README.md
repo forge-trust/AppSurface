@@ -88,5 +88,6 @@ Authorization should consider the flow id, version, durable instance id, waiting
 - Do not replay an activity result into a different node or callsite. Validate it against the persisted wait before setting `ActivityResult`; the typed callsite also fails closed on type, identity, or version mismatch.
 - Do not treat late events as success. The default behavior ignores them because delayed external events are expected in timer races.
 - Do not discard `EventCallsite` from typed wait decisions. Validate its exact event name and durable payload contract against the persisted wait before decoding and resuming; CLR `PayloadType` is runtime codec metadata, not a wire identifier.
+- Decision factories validate and snapshot extensible event-callsite and activity-request metadata. They do not deep-clone application work or context values, so persist those values atomically before dispatch and avoid mutable custom request implementations.
 - Do not register Semantic Kernel in this package. Agentic flow authoring belongs in samples or a future package, not the Durable Task adapter.
 - Validate context serialization before starting durable instances so replay failures happen during local tests or startup verification, not halfway through a production process.

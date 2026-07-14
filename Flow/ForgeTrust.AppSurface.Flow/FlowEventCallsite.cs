@@ -63,3 +63,38 @@ public sealed class FlowEventCallsite<TPayload> : IFlowEventCallsite
     /// <inheritdoc />
     public string ContractVersion { get; }
 }
+
+/// <summary>
+/// Validates and snapshots event-callsite metadata at public host boundaries.
+/// </summary>
+/// <remarks>
+/// <see cref="IFlowEventCallsite"/> is extensible, so implementations can expose mutable or inconsistent getters.
+/// Capturing each value once prevents later mutation from changing an already-created wait or durable decision.
+/// </remarks>
+internal static class FlowEventCallsiteContract
+{
+    /// <summary>Creates an immutable, validated copy of an event callsite.</summary>
+    /// <param name="eventCallsite">Callsite supplied through a public API.</param>
+    /// <param name="parameterName">Public parameter name used by validation exceptions.</param>
+    /// <returns>Immutable event metadata safe to retain.</returns>
+    internal static IFlowEventCallsite Snapshot(IFlowEventCallsite eventCallsite, string parameterName)
+    {
+        ArgumentNullException.ThrowIfNull(eventCallsite, parameterName);
+        if (eventCallsite is SnapshotCallsite snapshot)
+        {
+            return snapshot;
+        }
+
+        var eventName = FlowDefinition<object>.RequireText(eventCallsite.EventName, parameterName);
+        var payloadType = eventCallsite.PayloadType ?? throw new ArgumentNullException(parameterName);
+        var contractName = FlowDefinition<object>.RequireText(eventCallsite.ContractName, parameterName);
+        var contractVersion = FlowDefinition<object>.RequireText(eventCallsite.ContractVersion, parameterName);
+        return new SnapshotCallsite(eventName, payloadType, contractName, contractVersion);
+    }
+
+    private sealed record SnapshotCallsite(
+        string EventName,
+        Type PayloadType,
+        string ContractName,
+        string ContractVersion) : IFlowEventCallsite;
+}

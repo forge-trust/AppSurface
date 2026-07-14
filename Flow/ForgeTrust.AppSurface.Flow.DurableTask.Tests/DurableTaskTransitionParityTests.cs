@@ -84,10 +84,17 @@ public sealed class DurableTaskTransitionParityTests
         Assert.Equal(transition.Context, decision.Context);
         Assert.Equal(transition.NextNodeId, expectedDecisionKind == DurableTaskFlowDecisionKind.ScheduleNode ? decision.NodeId : null);
         Assert.Equal(transition.EventName, decision.EventName);
-        Assert.Equal(transition.EventCallsite, decision.EventCallsite);
+        Assert.Equal(transition.EventCallsite?.PayloadType, decision.EventCallsite?.PayloadType);
+        Assert.Equal(transition.EventCallsite?.ContractName, decision.EventCallsite?.ContractName);
+        Assert.Equal(transition.EventCallsite?.ContractVersion, decision.EventCallsite?.ContractVersion);
         Assert.Equal(transition.Timeout, decision.Timeout);
         Assert.Equal(transition.Fault, decision.Fault);
-        Assert.Equal(transition.Activity, decision.Activity);
+        Assert.Equal(transition.Activity?.CallsiteId, decision.Activity?.CallsiteId);
+        Assert.Equal(transition.Activity?.WorkType, decision.Activity?.WorkType);
+        Assert.Equal(transition.Activity?.WorkContractVersion, decision.Activity?.WorkContractVersion);
+        Assert.Equal(transition.Activity?.ResultType, decision.Activity?.ResultType);
+        Assert.Equal(transition.Activity?.ResultContractVersion, decision.Activity?.ResultContractVersion);
+        Assert.Equal(transition.Activity?.Work, decision.Activity?.Work);
     }
 
     public sealed record TestState(string Status);

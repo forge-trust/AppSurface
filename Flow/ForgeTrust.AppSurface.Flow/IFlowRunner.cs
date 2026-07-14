@@ -43,6 +43,9 @@ public interface IFlowRunner<TContext>
     /// <param name="activityResult">Decoded typed activity result.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The result after execution pauses or ends.</returns>
+    /// <exception cref="NotSupportedException">
+    /// Thrown by the default implementation when the runner has not implemented activity resumption.
+    /// </exception>
     /// <remarks>
     /// The default implementation preserves compatibility for custom v1 runners and reports that activity resumption
     /// is unsupported. Runners that surface <see cref="FlowRunStatus.ActivityPending"/> must override this method.

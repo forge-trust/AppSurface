@@ -175,10 +175,143 @@ public interface IFlowActivityRequest<TContext>
     /// <returns>A typed work result suitable for resuming the Flow node.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="result"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="result"/> has the wrong CLR type.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown by validated host-boundary wrappers when an extensible implementation returns null, substitutes a
+    /// different decoded value, or returns callsite, type, or version metadata that differs from the captured request.
+    /// </exception>
     /// <remarks>
     /// This method lets a host bridge a registered non-generic codec back into the typed Flow result without reflection.
+    /// Implementations must wrap the exact decoded value supplied by the host and preserve the request's callsite id,
+    /// declared result type, and result contract version.
     /// </remarks>
     FlowActivityWorkResult CreateResult(object result);
+}
+
+/// <summary>
+/// Validates and snapshots activity requests supplied through extensible public host boundaries.
+/// </summary>
+/// <remarks>
+/// A request snapshot preserves the metadata, work value, and context that a host must persist atomically. The work
+/// and context contracts themselves should be immutable or serialized immediately; this helper does not deep-clone
+/// application values.
+/// </remarks>
+internal static class FlowActivityRequestContract
+{
+    /// <summary>Creates an immutable, validated activity-request wrapper.</summary>
+    /// <typeparam name="TContext">Serializable Flow context type.</typeparam>
+    /// <param name="activity">Request supplied through a public API.</param>
+    /// <param name="parameterName">Public parameter name used by validation exceptions.</param>
+    /// <returns>A request whose metadata cannot change after validation.</returns>
+    internal static IFlowActivityRequest<TContext> Snapshot<TContext>(
+        IFlowActivityRequest<TContext> activity,
+        string parameterName)
+    {
+        ArgumentNullException.ThrowIfNull(activity, parameterName);
+        if (activity is SnapshotRequest<TContext> snapshot)
+        {
+            return snapshot;
+        }
+
+        var callsiteId = FlowDefinition<object>.RequireText(activity.CallsiteId, parameterName);
+        var workType = activity.WorkType ?? throw new ArgumentNullException(parameterName);
+        var workContractVersion = RequirePositiveVersion(activity.WorkContractVersion, parameterName);
+        var resultType = activity.ResultType ?? throw new ArgumentNullException(parameterName);
+        var resultContractVersion = RequirePositiveVersion(activity.ResultContractVersion, parameterName);
+        var work = activity.Work ?? throw new ArgumentNullException(parameterName);
+        if (!workType.IsInstanceOfType(work))
+        {
+            throw new ArgumentException("The activity work value must implement its declared work type.", parameterName);
+        }
+
+        var context = activity.Context;
+        ArgumentNullException.ThrowIfNull(context, parameterName);
+        return new SnapshotRequest<TContext>(
+            callsiteId,
+            workType,
+            workContractVersion,
+            resultType,
+            resultContractVersion,
+            work,
+            context,
+            activity.CreateResult);
+    }
+
+    private static int RequirePositiveVersion(int version, string parameterName)
+    {
+        if (version < 1)
+        {
+            throw new ArgumentOutOfRangeException(parameterName, version, "Contract versions must be at least 1.");
+        }
+
+        return version;
+    }
+
+    private sealed class SnapshotRequest<TContext> : IFlowActivityRequest<TContext>
+    {
+        private readonly Func<object, FlowActivityWorkResult> _resultFactory;
+
+        internal SnapshotRequest(
+            string callsiteId,
+            Type workType,
+            int workContractVersion,
+            Type resultType,
+            int resultContractVersion,
+            object work,
+            TContext context,
+            Func<object, FlowActivityWorkResult> resultFactory)
+        {
+            CallsiteId = callsiteId;
+            WorkType = workType;
+            WorkContractVersion = workContractVersion;
+            ResultType = resultType;
+            ResultContractVersion = resultContractVersion;
+            Work = work;
+            Context = context;
+            _resultFactory = resultFactory;
+        }
+
+        public string CallsiteId { get; }
+
+        public Type WorkType { get; }
+
+        public int WorkContractVersion { get; }
+
+        public Type ResultType { get; }
+
+        public int ResultContractVersion { get; }
+
+        public object Work { get; }
+
+        public TContext Context { get; }
+
+        public FlowActivityWorkResult CreateResult(object result)
+        {
+            ArgumentNullException.ThrowIfNull(result);
+            if (!ResultType.IsInstanceOfType(result))
+            {
+                throw new ArgumentException("The activity result must implement the declared result type.", nameof(result));
+            }
+
+            var workResult = _resultFactory(result) ??
+                throw new InvalidOperationException("The activity result factory returned null.");
+            if (!string.Equals(workResult.CallsiteId, CallsiteId, StringComparison.Ordinal) ||
+                workResult.ResultType != ResultType ||
+                workResult.ResultContractVersion != ResultContractVersion ||
+                !ResultType.IsInstanceOfType(workResult.Result) ||
+                !PreservesDecodedValue(result, workResult.Result))
+            {
+                throw new InvalidOperationException(
+                    "The activity result factory returned a result that does not match the captured callsite contract.");
+            }
+
+            return workResult;
+        }
+
+        private bool PreservesDecodedValue(object decodedResult, object workResult) =>
+            ResultType.IsValueType
+                ? Equals(decodedResult, workResult)
+                : ReferenceEquals(decodedResult, workResult);
+    }
 }
 
 /// <summary>

@@ -223,17 +223,13 @@ public sealed record DurableTaskFlowDecision<TContext>
         TContext context,
         FlowTimeout? timeout)
     {
-        ArgumentNullException.ThrowIfNull(eventCallsite);
-        var eventName = FlowDefinition<object>.RequireText(eventCallsite.EventName, nameof(eventCallsite));
-        FlowDefinition<object>.RequireText(eventCallsite.ContractName, nameof(eventCallsite));
-        FlowDefinition<object>.RequireText(eventCallsite.ContractVersion, nameof(eventCallsite));
-        ArgumentNullException.ThrowIfNull(eventCallsite.PayloadType, nameof(eventCallsite));
+        var snapshot = FlowEventCallsiteContract.Snapshot(eventCallsite, nameof(eventCallsite));
         return new(
             DurableTaskFlowDecisionKind.WaitForExternalEvent,
             FlowNodeOutcome<TContext>.RequireContext(context),
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
-            eventName,
-            eventCallsite,
+            snapshot.EventName,
+            snapshot,
             timeout,
             null,
             null,
@@ -359,8 +355,13 @@ public sealed record DurableTaskFlowDecision<TContext>
     /// <param name="nodeId">Node that requested the activity and will receive its result.</param>
     /// <param name="activity">Typed activity metadata, work, and persisted Flow context.</param>
     /// <returns>An activity scheduling decision.</returns>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="nodeId"/> is empty.</exception>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="activity"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> or activity metadata is empty, a contract version is invalid, or the work
+    /// value does not implement its declared type.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="activity"/> or one of its required values is null.
+    /// </exception>
     /// <remarks>
     /// The adapter does not execute the activity. The host maps the declared CLR types and contract versions to its
     /// registered codecs/executor, persists the decision before dispatch, and supplies a
@@ -370,10 +371,10 @@ public sealed record DurableTaskFlowDecision<TContext>
         string nodeId,
         IFlowActivityRequest<TContext> activity)
     {
-        ArgumentNullException.ThrowIfNull(activity);
+        var snapshot = FlowActivityRequestContract.Snapshot(activity, nameof(activity));
         return new(
             DurableTaskFlowDecisionKind.ScheduleActivity,
-            activity.Context,
+            snapshot.Context,
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
             null,
             null,
@@ -381,6 +382,6 @@ public sealed record DurableTaskFlowDecision<TContext>
             null,
             null,
             null,
-            activity);
+            snapshot);
     }
 }

@@ -134,11 +134,17 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
                     currentContext = transition.Context!;
                     break;
                 case FlowTransitionKind.Wait:
-                    return FlowRunResult<TContext>.Waiting(
-                        currentNodeId,
-                        transition.EventName!,
-                        transition.Context!,
-                        transition.Timeout);
+                    return transition.EventCallsite is null
+                        ? FlowRunResult<TContext>.Waiting(
+                            currentNodeId,
+                            transition.EventName!,
+                            transition.Context!,
+                            transition.Timeout)
+                        : FlowRunResult<TContext>.Waiting(
+                            currentNodeId,
+                            transition.EventCallsite,
+                            transition.Context!,
+                            transition.Timeout);
                 case FlowTransitionKind.TimedOut:
                     return FlowRunResult<TContext>.TimedOut(
                         currentNodeId,

@@ -467,12 +467,14 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                     $"Flow node '{node.Symbol.Name}' must declare at least one [FlowOutcome].");
             }
 
-            foreach (var duplicate in node.Outcomes.GroupBy(CaseName, StringComparer.Ordinal).Where(group => group.Count() > 1))
+            foreach (var duplicate in GeneratedOutcomeUnionMemberNames(node)
+                         .GroupBy(name => name, StringComparer.Ordinal)
+                         .Where(group => group.Count() > 1))
             {
                 ReportError(
                     InvalidDeclaration,
                     node.Symbol.Locations.FirstOrDefault(),
-                    $"Flow node '{node.Symbol.Name}' declares multiple outcomes that generate the case '{duplicate.Key}'. Use unique outcome names.");
+                    $"Flow node '{node.Symbol.Name}' generates multiple outcome-union members named '{duplicate.Key}'. Use outcome names that remain unique after generated suffixes are applied.");
             }
 
             foreach (var outcome in node.Outcomes)
@@ -637,6 +639,11 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
             var semanticModel = compilation.GetSemanticModel(declaration.SyntaxTree);
             foreach (var memberAccess in declaration.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
             {
+                if (IsWithinNameOf(memberAccess))
+                {
+                    continue;
+                }
+
                 if (TryDescribeNondeterministicMember(
                         semanticModel.GetSymbolInfo(memberAccess).Symbol,
                         out var api))
@@ -644,6 +651,26 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                     yield return Diagnostic.Create(
                         NondeterministicNodeApi,
                         memberAccess.GetLocation(),
+                        node.NodeId,
+                        api);
+                }
+            }
+
+            foreach (var identifier in declaration.DescendantNodes().OfType<IdentifierNameSyntax>()
+                         .Where(identifier => identifier.Parent is not MemberAccessExpressionSyntax))
+            {
+                if (IsWithinNameOf(identifier))
+                {
+                    continue;
+                }
+
+                if (TryDescribeNondeterministicMember(
+                        semanticModel.GetSymbolInfo(identifier).Symbol,
+                        out var api))
+                {
+                    yield return Diagnostic.Create(
+                        NondeterministicNodeApi,
+                        identifier.GetLocation(),
                         node.NodeId,
                         api);
                 }
@@ -689,6 +716,13 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                 return true;
             }
 
+            if (string.Equals(containingType, "System.DateTime", StringComparison.Ordinal) &&
+                string.Equals(property.Name, "Today", StringComparison.Ordinal))
+            {
+                api = "System.DateTime.Today";
+                return true;
+            }
+
             if (string.Equals(containingType, "System.Random", StringComparison.Ordinal) &&
                 string.Equals(property.Name, "Shared", StringComparison.Ordinal))
             {
@@ -718,6 +752,11 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         api = string.Empty;
         return false;
     }
+
+    private static bool IsWithinNameOf(SyntaxNode node) =>
+        node.AncestorsAndSelf().OfType<InvocationExpressionSyntax>().Any(invocation =>
+            invocation.Expression is IdentifierNameSyntax identifier &&
+            string.Equals(identifier.Identifier.Text, "nameof", StringComparison.Ordinal));
 
     private static bool IsSystemRandom(ITypeSymbol? symbol) =>
         symbol is not null && string.Equals(symbol.ToDisplayString(), "System.Random", StringComparison.Ordinal);
@@ -1806,6 +1845,44 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         var identifier = ToPascalIdentifier(outcome.Name);
         return identifier[0] == '_' ? "Outcome" + identifier.Substring(1) : identifier;
     }
+
+    private static IEnumerable<string> GeneratedOutcomeUnionMemberNames(NodeSpec node)
+    {
+        yield return "RequireContext";
+        yield return "Clone";
+        yield return "EqualityContract";
+        foreach (var outcome in node.Outcomes)
+        {
+            var caseName = CaseName(outcome);
+            yield return caseName;
+            yield return caseName + "Outcome";
+            if (string.Equals(outcome.Kind, "Activity", StringComparison.Ordinal))
+            {
+                yield return caseName + "Callsite";
+            }
+
+            if (OutcomeFactoryHasSingleContextParameter(outcome) &&
+                string.Equals(caseName, "Equals", StringComparison.Ordinal) &&
+                outcome.OutputContext?.SpecialType == SpecialType.System_Object)
+            {
+                yield return "Equals";
+            }
+
+            if (OutcomeFactoryHasSingleContextParameter(outcome) &&
+                string.Equals(caseName, "PrintMembers", StringComparison.Ordinal) &&
+                string.Equals(
+                    outcome.OutputContext?.ToDisplayString(),
+                    "System.Text.StringBuilder",
+                    StringComparison.Ordinal))
+            {
+                yield return "PrintMembers";
+            }
+        }
+    }
+
+    private static bool OutcomeFactoryHasSingleContextParameter(OutcomeSpec outcome) =>
+        !string.Equals(outcome.Kind, "Activity", StringComparison.Ordinal) &&
+        !string.Equals(outcome.Kind, "Wait", StringComparison.Ordinal);
 
     private static string GraphBuilderNextMethodName(NodeSpec node, OutcomeSpec outcome, NodeSpec target) =>
         "Map" + node.Symbol.Name + CaseName(outcome) + "To" + target.Symbol.Name;

@@ -48,8 +48,11 @@ public sealed class FlowEventCallsiteTests
 
         var wait = FlowNodeOutcome<TestState>.Wait(callsite, context, timeout);
 
-        Assert.Same(callsite, wait.EventCallsite);
+        Assert.NotSame(callsite, wait.EventCallsite);
         Assert.Equal(callsite.EventName, wait.EventName);
+        Assert.Equal(callsite.PayloadType, wait.EventCallsite?.PayloadType);
+        Assert.Equal(callsite.ContractName, wait.EventCallsite?.ContractName);
+        Assert.Equal(callsite.ContractVersion, wait.EventCallsite?.ContractVersion);
         Assert.Same(context, wait.Context);
         Assert.Same(timeout, wait.Timeout);
     }
@@ -63,7 +66,78 @@ public sealed class FlowEventCallsiteTests
         Assert.Equal("callsite", exception.ParamName);
     }
 
+    [Fact]
+    public void TypedWait_SnapshotsExtensibleCallsiteMetadata()
+    {
+        var callsite = new MutableCallsite
+        {
+            EventName = "approval-submitted",
+            PayloadType = typeof(ApprovalSubmitted),
+            ContractName = "approval.submitted",
+            ContractVersion = "v1",
+        };
+
+        var wait = new FlowWait<TestState>(callsite, new TestState("waiting"));
+        callsite.EventName = "changed";
+        callsite.PayloadType = typeof(string);
+        callsite.ContractName = "changed";
+        callsite.ContractVersion = "v2";
+
+        Assert.Equal("approval-submitted", wait.EventName);
+        Assert.Equal(typeof(ApprovalSubmitted), wait.EventCallsite?.PayloadType);
+        Assert.Equal("approval.submitted", wait.EventCallsite?.ContractName);
+        Assert.Equal("v1", wait.EventCallsite?.ContractVersion);
+    }
+
+    [Fact]
+    public void TypedWaitingResult_SnapshotsExtensibleCallsiteMetadata()
+    {
+        var callsite = new MutableCallsite
+        {
+            EventName = "approval-submitted",
+            PayloadType = typeof(ApprovalSubmitted),
+            ContractName = "approval.submitted",
+            ContractVersion = "v1",
+        };
+
+        var result = FlowRunResult<TestState>.Waiting("review", callsite, new TestState("waiting"));
+        callsite.ContractVersion = "v2";
+
+        Assert.Equal("approval-submitted", result.WaitingEventName);
+        Assert.Equal(typeof(ApprovalSubmitted), result.EventCallsite?.PayloadType);
+        Assert.Equal("approval.submitted", result.EventCallsite?.ContractName);
+        Assert.Equal("v1", result.EventCallsite?.ContractVersion);
+    }
+
+    [Fact]
+    public void TypedWaitingResult_WithNullPayloadType_ThrowsArgumentNullException()
+    {
+        var callsite = new MutableCallsite
+        {
+            EventName = "approval-submitted",
+            PayloadType = null!,
+            ContractName = "approval.submitted",
+            ContractVersion = "v1",
+        };
+
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            FlowRunResult<TestState>.Waiting("review", callsite, new TestState("waiting")));
+
+        Assert.Equal("eventCallsite", exception.ParamName);
+    }
+
     private sealed record ApprovalSubmitted(string ApprovedBy);
 
     private sealed record TestState(string Status);
+
+    private sealed class MutableCallsite : IFlowEventCallsite
+    {
+        public required string EventName { get; set; }
+
+        public required Type PayloadType { get; set; }
+
+        public required string ContractName { get; set; }
+
+        public required string ContractVersion { get; set; }
+    }
 }

@@ -127,7 +127,26 @@ public sealed class InMemoryFlowRunnerTests
         Assert.Equal(FlowRunStatus.Waiting, result.Status);
         Assert.Equal("start", result.NodeId);
         Assert.Equal("approved", result.WaitingEventName);
+        Assert.Null(result.EventCallsite);
         Assert.Same(timeout, result.Timeout);
+    }
+
+    [Fact]
+    public async Task RunAsync_StopsAtTypedWaitAndPreservesContractMetadata()
+    {
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", new TypedWaitNode())
+            .StartAt("start")
+            .Build();
+
+        var result = await Runner().RunAsync(definition, new TestState(0, "created"));
+
+        Assert.Equal(FlowRunStatus.Waiting, result.Status);
+        Assert.Equal(TypedWaitNode.Callsite.EventName, result.WaitingEventName);
+        Assert.Equal(TypedWaitNode.Callsite.PayloadType, result.EventCallsite?.PayloadType);
+        Assert.Equal(TypedWaitNode.Callsite.ContractName, result.EventCallsite?.ContractName);
+        Assert.Equal(TypedWaitNode.Callsite.ContractVersion, result.EventCallsite?.ContractVersion);
     }
 
     [Fact]
@@ -397,6 +416,8 @@ public sealed class InMemoryFlowRunnerTests
 
     private sealed record TestState(int Count, string Status);
 
+    private sealed record ApprovalSubmitted(string ApprovedBy);
+
     private sealed class NextNode : IFlowNode<TestState>
     {
         private readonly string _target;
@@ -523,6 +544,18 @@ public sealed class InMemoryFlowRunnerTests
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult<FlowNodeOutcome<TestState>>(
                 FlowNodeOutcome<TestState>.Wait("approved", context.State with { Status = "waiting" }, _timeout));
+    }
+
+    private sealed class TypedWaitNode : IFlowNode<TestState>
+    {
+        internal static FlowEventCallsite<ApprovalSubmitted> Callsite { get; } =
+            new("approval-submitted", "approval.submitted", "v1");
+
+        public ValueTask<FlowNodeOutcome<TestState>> ExecuteAsync(
+            FlowExecutionContext<TestState> context,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<FlowNodeOutcome<TestState>>(
+                FlowNodeOutcome<TestState>.Wait(Callsite, context.State with { Status = "waiting" }));
     }
 
     private sealed class ResumeCompleteNode : IFlowNode<TestState>
