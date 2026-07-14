@@ -15,6 +15,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - AppSurface Docs now exposes Theme Contract v1 through `AppSurfaceDocs:Theme`, adding dark-family presets, supported accent/link overrides, density/chrome controls, startup validation, and export/archive-safe resolved CSS variables.
+- AppSurface Docs now isolates its built-in views behind a package-specific absolute Razor layout, preventing ordinary host `_ViewStart` and `_Layout` conventions from silently removing Docs styling, client configuration, and search scripts while preserving deliberate Razor Class Library overrides.
 - `appsurface pwa verify` can now prove real entry pages such as `/account/resume`, follow same-origin path-base-safe redirects, assert manifest values and icon declarations, decode PNG icon dimensions for CI evidence, and prove the configured AppSurface service worker is absent when offline support is disabled.
 
 ## 0.2.0-preview.2 - 2026-07-02

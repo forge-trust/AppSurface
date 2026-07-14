@@ -113,6 +113,7 @@
     <Project Path="Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj" />
     <Project Path="Web/ForgeTrust.RazorWire.Tests/ForgeTrust.RazorWire.Tests.csproj" />
     <Project Path="Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Docs.ConsumerFixture/ForgeTrust.AppSurface.Docs.ConsumerFixture.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj" />
