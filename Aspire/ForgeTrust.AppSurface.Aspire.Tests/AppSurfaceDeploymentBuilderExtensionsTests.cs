@@ -6,6 +6,7 @@ using ForgeTrust.AppSurface.Aspire;
 using ForgeTrust.AppSurface.Deployment;
 using ForgeTrust.AppSurface.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 
 #pragma warning disable ASPIREPIPELINES001 // Tests pin the adapter to the repository-supported Aspire 13.4.4 API.
 #pragma warning disable ASPIREPIPELINES004 // Tests pin the adapter output service to Aspire 13.4.4.
@@ -45,6 +46,64 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
         Assert.Contains("without cloud calls", AspireDeploymentPipelineAdapter.PublishStepDescription, StringComparison.Ordinal);
         Assert.Contains("read-only", AspireDeploymentPipelineAdapter.VerifyStepDescription, StringComparison.Ordinal);
         Assert.Contains("shadow", AspireDeploymentPipelineAdapter.VerifyStepDescription, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RegisteredSteps_PublishThenVerifyThroughNativeAspireActions()
+    {
+        var output = NewOutputDirectory();
+        try
+        {
+            var verified = false;
+            var graph = CreateAnnotatedGraph(target: new FakeTarget(
+                AllCapabilities,
+                render: _ => new DeploymentRenderResult("fake", [DeploymentArtifact.Create("provider.json", "{}\n"u8.ToArray())]),
+                verify: request =>
+                {
+                    verified = true;
+                    Assert.Equal(DeploymentParityMode.Shadow, request.ParityMode);
+                    return new DeploymentVerifyResult(true, 1, [], "private-only");
+                }));
+            graph.Project.WithComputeEnvironment(graph.Target);
+            var resource = Assert.IsType<AppSurfaceDeploymentTargetResource>(graph.Target.Resource);
+            var model = new DistributedApplicationModel(graph.Builder.Resources);
+            var services = CreateOutputServices(output);
+            var pipelineContext = new PipelineContext(
+                model,
+                new DistributedApplicationExecutionContext(DistributedApplicationOperation.Publish),
+                services,
+                NullLogger.Instance,
+                CancellationToken.None);
+            var factoryContext = new PipelineStepFactoryContext
+            {
+                PipelineContext = pipelineContext,
+                Resource = resource,
+            };
+            var reporting = A.Fake<IReportingStep>();
+            var stepContext = new PipelineStepContext
+            {
+                PipelineContext = pipelineContext,
+                ReportingStep = reporting,
+            };
+            var steps = new List<PipelineStep>();
+            foreach (var annotation in resource.Annotations.OfType<PipelineStepAnnotation>())
+                steps.AddRange(await annotation.CreateStepsAsync(factoryContext));
+
+            var publish = Assert.Single(steps, step => step.Name == AspireDeploymentPipelineAdapter.PublishStepName);
+            var verify = Assert.Single(steps, step => step.Name == AspireDeploymentPipelineAdapter.VerifyStepName);
+            await publish.Action(stepContext);
+            await verify.Action(stepContext);
+
+            Assert.NotNull(resource.LastRenderResult);
+            Assert.True(verified);
+            Assert.Equal(4, pipelineContext.Summary.Items.Count);
+            A.CallTo(() => reporting.CompleteAsync(A<string>._, CompletionState.Completed, CancellationToken.None))
+                .MustHaveHappenedTwiceExactly();
+        }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+        }
     }
 
     [Fact]

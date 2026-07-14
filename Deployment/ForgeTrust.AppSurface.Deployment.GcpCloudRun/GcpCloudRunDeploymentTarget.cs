@@ -556,7 +556,10 @@ public sealed class GcloudCommandRunner : IGcloudCommandRunner
     {
     }
 
-    private GcloudCommandRunner(string command, bool requiresWindowsCommandInterpreter)
+    /// <summary>Initializes a runner with an explicit launcher and dispatch mode for platform-contract verification.</summary>
+    /// <param name="command">Executable or fixed command-interpreter launcher name.</param>
+    /// <param name="requiresWindowsCommandInterpreter">Whether to dispatch the fixed launcher through <c>cmd.exe /d /c</c>.</param>
+    internal GcloudCommandRunner(string command, bool requiresWindowsCommandInterpreter)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
         _command = command;
@@ -607,7 +610,10 @@ public sealed class GcloudCommandRunner : IGcloudCommandRunner
         return new GcloudCommandResult(process.ExitCode, await stdout, await stderr);
     }
 
-    private ProcessStartInfo CreateStartInfo(IReadOnlyList<string> arguments)
+    /// <summary>Builds the non-shell or bounded Windows process-start contract without launching a process.</summary>
+    /// <param name="arguments">Ordered provider arguments.</param>
+    /// <returns>A fully configured process start description.</returns>
+    internal ProcessStartInfo CreateStartInfo(IReadOnlyList<string> arguments)
     {
         var startInfo = new ProcessStartInfo
         {

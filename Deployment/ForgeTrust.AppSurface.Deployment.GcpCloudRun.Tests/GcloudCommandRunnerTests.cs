@@ -77,6 +77,20 @@ public sealed class GcloudCommandRunnerTests
         Assert.Throws<ArgumentException>(() => GcloudCommandRunner.BuildWindowsCommand(" ", []));
     }
 
+    [Fact]
+    public void CreateStartInfoBuildsBoundedWindowsCommandInterpreterDispatch()
+    {
+        var runner = new GcloudCommandRunner("gcloud.cmd", requiresWindowsCommandInterpreter: true);
+
+        var startInfo = runner.CreateStartInfo(["run", "jobs", "describe", "migration", "--format=json"]);
+
+        Assert.Equal(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", startInfo.FileName);
+        Assert.Equal(["/d", "/c", "gcloud.cmd run jobs describe migration --format=json"], startInfo.ArgumentList);
+        Assert.True(startInfo.RedirectStandardOutput);
+        Assert.True(startInfo.RedirectStandardError);
+        Assert.False(startInfo.UseShellExecute);
+    }
+
     private static string ProcessPath() => OperatingSystem.IsWindows()
         ? Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe"
         : "/bin/sh";
