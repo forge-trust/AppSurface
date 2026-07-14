@@ -44,8 +44,75 @@ public sealed class DurableTaskFlowDecisionTests
         Assert.Equal(DurableTaskFlowDecisionKind.WaitForExternalEvent, decision.Kind);
         Assert.Equal("review", decision.NodeId);
         Assert.Equal("approved", decision.EventName);
+        Assert.Null(decision.EventCallsite);
         Assert.Equal(new TestState("waiting"), decision.Context);
         Assert.Same(timeout, decision.Timeout);
+    }
+
+    [Fact]
+    public void WaitForExternalEvent_WithTypedCallsite_CapturesContractMetadata()
+    {
+        var callsite = new FlowEventCallsite<TestEvent>("approved", "approval.submitted", "v1");
+
+        var decision = DurableTaskFlowDecision<TestState>.WaitForExternalEvent(
+            "review",
+            callsite,
+            new TestState("waiting"),
+            null);
+
+        Assert.Equal(DurableTaskFlowDecisionKind.WaitForExternalEvent, decision.Kind);
+        Assert.Equal(callsite.EventName, decision.EventName);
+        Assert.Same(callsite, decision.EventCallsite);
+    }
+
+    [Fact]
+    public void WaitForExternalEvent_WithNullCallsite_ThrowsArgumentNullException()
+    {
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            DurableTaskFlowDecision<TestState>.WaitForExternalEvent(
+                "review",
+                (IFlowEventCallsite)null!,
+                new TestState("waiting"),
+                null));
+
+        Assert.Equal("eventCallsite", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData("eventName")]
+    [InlineData("contractName")]
+    [InlineData("contractVersion")]
+    public void WaitForExternalEvent_WithInvalidCallsiteText_ThrowsArgumentException(string invalidProperty)
+    {
+        var callsite = new TestEventCallsite(
+            invalidProperty == "eventName" ? " " : "approved",
+            invalidProperty == "contractName" ? " " : "approval.submitted",
+            invalidProperty == "contractVersion" ? " " : "v1",
+            typeof(TestEvent));
+
+        var exception = Assert.Throws<ArgumentException>(() =>
+            DurableTaskFlowDecision<TestState>.WaitForExternalEvent(
+                "review",
+                callsite,
+                new TestState("waiting"),
+                null));
+
+        Assert.Equal("eventCallsite", exception.ParamName);
+    }
+
+    [Fact]
+    public void WaitForExternalEvent_WithNullPayloadType_ThrowsArgumentNullException()
+    {
+        var callsite = new TestEventCallsite("approved", "approval.submitted", "v1", null!);
+
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            DurableTaskFlowDecision<TestState>.WaitForExternalEvent(
+                "review",
+                callsite,
+                new TestState("waiting"),
+                null));
+
+        Assert.Equal("eventCallsite", exception.ParamName);
     }
 
     [Fact]
@@ -193,4 +260,12 @@ public sealed class DurableTaskFlowDecisionTests
     private sealed record TestWork(string ApprovalId);
 
     private sealed record TestResult(string Status);
+
+    private sealed record TestEvent(string ApprovedBy);
+
+    private sealed record TestEventCallsite(
+        string EventName,
+        string ContractName,
+        string ContractVersion,
+        Type PayloadType) : IFlowEventCallsite;
 }

@@ -10,6 +10,7 @@ AppSurface ships as a coordinated package family. Before installing this package
 
 - `FlowNodeOutcome<TContext>` and its append-only `Next`, `Wait`, `TimedOut`, `Complete`, `Fault`, and typed `Activity` outcomes.
 - `FlowActivityCallsite<TWork, TResult>`, `IFlowActivityRequest<TContext>`, and `FlowActivityWorkResult<TResult>` for reflection-free work dispatch and result resumption.
+- `FlowEventCallsite<TPayload>` for exact external-event name and payload-contract metadata without persisting CLR type names.
 - `IFlowNode<TContext>`, `FlowExecutionContext<TContext>`, `FlowResumeEvent`, and `IFlowTransitionEvaluator<TContext>`.
 - `FlowGraphBuilder<TContext>` and immutable `FlowDefinition<TContext>` graph validation.
 - `IFlowDefinitionRegistry` for host and adapter lookup by context type, flow id, and version.
@@ -154,6 +155,33 @@ var completed = await runner.ResumeActivityAsync(
     activityResult);
 ```
 
+### Typed external events
+
+Use `FlowEventCallsite<TPayload>` when an external event carries a payload whose durable contract must be explicit. The
+callsite is manifest metadata: it names the event and the payload contract, while `TPayload` tells the host which
+runtime type its allowlisted codec must produce. It does not authorize delivery or decode the payload itself.
+
+```csharp
+var approvalSubmitted = new FlowEventCallsite<ApprovalSubmitted>(
+    "approval-submitted",
+    "approval.submitted",
+    "v1");
+
+return FlowNodeOutcome<ApprovalState>.Wait(
+    approvalSubmitted,
+    context.State with { Status = "waiting" });
+```
+
+A durable host first loads the persisted wait registration, checks authorization and the exact case-sensitive event
+name, selects an allowlisted codec from `ContractName` plus `ContractVersion`, validates the decoded value against
+`PayloadType`, and only then supplies `FlowResumeEvent` to the evaluator. Delivery ownership, late-event policy, and
+duplicate handling belong to that host. Use the string-based `Wait` overload when an event intentionally carries no
+payload.
+
+```csharp
+public sealed record ApprovalSubmitted(string ApprovedBy);
+```
+
 ### Low-level runtime contract
 
 ```csharp
@@ -201,7 +229,8 @@ The evaluator maps every outcome to `FlowTransition<TContext>`, validates declar
 
 ## Decisions And Pitfalls
 
-- Flow ids, versions, node ids, generated outcome names, activity callsite ids, and activity contract versions are durable identifiers. Treat them like persisted schema once real instances exist.
+- Flow ids, versions, node ids, generated outcome names, event names, event contract names/versions, activity callsite ids, and activity contract versions are durable identifiers. Treat them like persisted schema once real instances exist.
+- Durable identifiers reject empty values but otherwise preserve whitespace and compare ordinally. They are not trimmed, case-folded, or normalized. Avoid leading/trailing whitespace, choose one casing, and change an identifier only with a new Flow version while old definitions remain available for nonterminal instances.
 - Flow nodes are transition-only. A host may evaluate a node again if the process dies before its decision commits, so nodes must not call providers, write application state, read wall-clock time, or generate hidden random identifiers. Pass nondeterministic values through explicit context/resume contracts and return Activity for external effects.
 - `IFlowTransitionEvaluator<TContext>` evaluates one node; `IFlowRunner<TContext>` may follow several in-memory `Next` transitions. Durable runtimes must use the evaluator and commit each decision, not call the multi-step runner.
 - Generated authoring uses nominal context types as typed ports. Two record types with the same properties are different ports; one record type reused in multiple places is the same port.
@@ -217,6 +246,7 @@ The evaluator maps every outcome to `FlowTransition<TContext>`, validates declar
 - The in-memory runner uses prevalidated internal routing metadata from `FlowDefinition<TContext>` so local execution does not repeat graph-existence checks on every `Next` transition. This preserves the public `Nodes` graph view and the undeclared target diagnostic from `FlowDefinition<TContext>` construction.
 - Flow benchmarks isolate runner orchestration overhead. Use Flow for graph safety, long-running process contracts, and durable-host alignment; use a direct loop when all you need is a pure in-process tight state machine.
 - Use `FlowWait<TContext>.Timeout` as metadata for durable hosts. The core runner reports the timeout request but does not race timers.
+- `FlowEventCallsite<TPayload>` is passive manifest metadata. The core evaluator forwards a supplied `FlowResumeEvent`; it does not prove that the event matches a prior wait, authorize its sender, decode its payload, or reject duplicates. Durable hosts must perform those checks before evaluation.
 - Keep context types serializer-friendly if you plan to use Durable Task. The Durable Task adapter validates JSON round-trips before evaluating nodes.
 - Expected business failure belongs in the typed activity result contract. Technical exhaustion, provider ambiguity, and retry safety belong to the durable activity host; a Flow node must not infer that a timed-out provider call had no effect.
 - `FlowActivityCallsite<TWork, TResult>.TryGetResult` returns false for absent or mismatched results. Use `GetResult` when a mismatch is a definition/runtime invariant violation and should throw a focused `FlowDefinitionException`.

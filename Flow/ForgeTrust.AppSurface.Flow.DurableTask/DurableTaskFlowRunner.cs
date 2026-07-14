@@ -276,10 +276,20 @@ public sealed class DurableTaskFlowRunner<TContext> : IDurableTaskFlowRunner<TCo
     private DurableTaskFlowDecision<TContext> MapWait(FlowTransition<TContext> transition)
     {
         var contextFault = ValidateOutcomeContext(transition.NodeId, transition.Context!);
-        return contextFault
-            ?? DurableTaskFlowDecision<TContext>.WaitForExternalEvent(
+        if (contextFault is not null)
+        {
+            return contextFault;
+        }
+
+        return transition.EventCallsite is null
+            ? DurableTaskFlowDecision<TContext>.WaitForExternalEvent(
                 transition.NodeId,
                 transition.EventName!,
+                transition.Context!,
+                transition.Timeout)
+            : DurableTaskFlowDecision<TContext>.WaitForExternalEvent(
+                transition.NodeId,
+                transition.EventCallsite,
                 transition.Context!,
                 transition.Timeout);
     }

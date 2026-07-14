@@ -13,7 +13,10 @@ public sealed class DurableTaskTransitionParityTests
                 DurableTaskFlowDecisionKind.ScheduleNode
             },
             {
-                FlowNodeOutcome<TestState>.Wait("approved", new TestState("waiting"), new FlowTimeout(TimeSpan.FromMinutes(1))),
+                FlowNodeOutcome<TestState>.Wait(
+                    new FlowEventCallsite<TestEvent>("approved", "approval.submitted", "v1"),
+                    new TestState("waiting"),
+                    new FlowTimeout(TimeSpan.FromMinutes(1))),
                 FlowTransitionKind.Wait,
                 DurableTaskFlowDecisionKind.WaitForExternalEvent
             },
@@ -81,6 +84,7 @@ public sealed class DurableTaskTransitionParityTests
         Assert.Equal(transition.Context, decision.Context);
         Assert.Equal(transition.NextNodeId, expectedDecisionKind == DurableTaskFlowDecisionKind.ScheduleNode ? decision.NodeId : null);
         Assert.Equal(transition.EventName, decision.EventName);
+        Assert.Equal(transition.EventCallsite, decision.EventCallsite);
         Assert.Equal(transition.Timeout, decision.Timeout);
         Assert.Equal(transition.Fault, decision.Fault);
         Assert.Equal(transition.Activity, decision.Activity);
@@ -91,6 +95,8 @@ public sealed class DurableTaskTransitionParityTests
     public sealed record TestWork(string ApprovalId);
 
     public sealed record TestResult(string Status);
+
+    public sealed record TestEvent(string ApprovedBy);
 
     private sealed class OutcomeNode : IFlowNode<TestState>
     {

@@ -164,6 +164,20 @@ public sealed class DurableTaskFlowRunnerTests
     }
 
     [Fact]
+    public async Task RunNodeAsync_MapsTypedWaitContractMetadata()
+    {
+        var registry = new FlowDefinitionRegistry();
+        registry.Register(Definition(new TypedWaitNode(), "review"));
+
+        var decision = await Runner(registry).RunNodeAsync(
+            new DurableTaskFlowStep<TestState>("approval", "1", "instance-1", "review", new TestState("created")));
+
+        Assert.Equal(DurableTaskFlowDecisionKind.WaitForExternalEvent, decision.Kind);
+        Assert.Equal(TypedWaitNode.Callsite.EventName, decision.EventName);
+        Assert.Same(TypedWaitNode.Callsite, decision.EventCallsite);
+    }
+
+    [Fact]
     public async Task RunNodeAsync_WhenNodeReturnsNull_ThrowsArgumentNullException()
     {
         var registry = new FlowDefinitionRegistry();
@@ -470,6 +484,8 @@ public sealed class DurableTaskFlowRunnerTests
 
     private sealed record TestState(string Status);
 
+    private sealed record TestEvent(string ApprovedBy);
+
     private sealed class NextNode : IFlowNode<TestState>
     {
         private readonly string _target;
@@ -492,6 +508,18 @@ public sealed class DurableTaskFlowRunnerTests
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult<FlowNodeOutcome<TestState>>(
                 FlowNodeOutcome<TestState>.Wait("approved", new TestState("waiting"), new FlowTimeout(TimeSpan.FromMinutes(2))));
+    }
+
+    private sealed class TypedWaitNode : IFlowNode<TestState>
+    {
+        internal static FlowEventCallsite<TestEvent> Callsite { get; } =
+            new("approved", "approval.submitted", "v1");
+
+        public ValueTask<FlowNodeOutcome<TestState>> ExecuteAsync(
+            FlowExecutionContext<TestState> context,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<FlowNodeOutcome<TestState>>(
+                FlowNodeOutcome<TestState>.Wait(Callsite, new TestState("waiting")));
     }
 
     private sealed class CompleteNode : IFlowNode<TestState>

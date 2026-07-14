@@ -32,7 +32,11 @@ Durable Task owns persistence, replay, timers, and external event delivery. This
 3. Ask the shared core evaluator to execute the current node exactly once.
 4. Validate the returned Flow context and map the host-neutral transition to a durable decision.
 
-`FlowWait<TContext>` becomes `WaitForExternalEvent` with optional timeout metadata. A host should race that external event against its durable timer. When an event arrives after the timer branch already won, `ResumeAsync` returns `IgnoreLateEvent` by default.
+`FlowWait<TContext>` becomes `WaitForExternalEvent` with optional timeout metadata. Typed waits also preserve their
+`IFlowEventCallsite` on the decision so a host can select an allowlisted payload codec from the durable contract name
+and version before resuming the node. The adapter does not authorize or decode the event. A host should race that
+external event against its durable timer. When an event arrives after the timer branch already won, `ResumeAsync`
+returns `IgnoreLateEvent` by default.
 
 `FlowActivity<TContext, TWork, TResult>` becomes `ScheduleActivity`. The decision exposes callsite id, declared work/result CLR types, contract versions, work, and persisted Flow context through `IFlowActivityRequest<TContext>` without reflection. A host integrates it as follows:
 
@@ -83,5 +87,6 @@ Authorization should consider the flow id, version, durable instance id, waiting
 - Do not derive activity codec selection from runtime object inspection. Use the declared `WorkType`, `ResultType`, and contract versions, and treat the callsite id as persisted schema.
 - Do not replay an activity result into a different node or callsite. Validate it against the persisted wait before setting `ActivityResult`; the typed callsite also fails closed on type, identity, or version mismatch.
 - Do not treat late events as success. The default behavior ignores them because delayed external events are expected in timer races.
+- Do not discard `EventCallsite` from typed wait decisions. Validate its exact event name and durable payload contract against the persisted wait before decoding and resuming; CLR `PayloadType` is runtime codec metadata, not a wire identifier.
 - Do not register Semantic Kernel in this package. Agentic flow authoring belongs in samples or a future package, not the Durable Task adapter.
 - Validate context serialization before starting durable instances so replay failures happen during local tests or startup verification, not halfway through a production process.

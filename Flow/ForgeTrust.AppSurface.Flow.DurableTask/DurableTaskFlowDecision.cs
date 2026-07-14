@@ -59,6 +59,7 @@ public sealed record DurableTaskFlowDecision<TContext>
         TContext? context,
         string? nodeId,
         string? eventName,
+        IFlowEventCallsite? eventCallsite,
         FlowTimeout? timeout,
         FlowRetryPolicy? retryPolicy,
         FlowFault? fault,
@@ -69,6 +70,7 @@ public sealed record DurableTaskFlowDecision<TContext>
         Context = context;
         NodeId = nodeId;
         EventName = eventName;
+        EventCallsite = eventCallsite;
         Timeout = timeout;
         RetryPolicy = retryPolicy;
         Fault = fault;
@@ -95,6 +97,17 @@ public sealed record DurableTaskFlowDecision<TContext>
     /// Gets the external event associated with the decision.
     /// </summary>
     public string? EventName { get; }
+
+    /// <summary>
+    /// Gets the exact typed external-event contract for a wait decision, or <see langword="null"/> for a no-payload
+    /// string wait.
+    /// </summary>
+    /// <remarks>
+    /// The Durable Task host uses this metadata to select an allowlisted payload codec and validate the delivered event
+    /// against its persisted wait registration before resuming the Flow node. The decision does not authorize or decode
+    /// the event itself.
+    /// </remarks>
+    public IFlowEventCallsite? EventCallsite { get; }
 
     /// <summary>
     /// Gets the optional timeout for a wait decision.
@@ -145,6 +158,7 @@ public sealed record DurableTaskFlowDecision<TContext>
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
             null,
             null,
+            null,
             retryPolicy,
             null,
             null,
@@ -176,11 +190,56 @@ public sealed record DurableTaskFlowDecision<TContext>
             FlowNodeOutcome<TContext>.RequireContext(context),
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
             FlowDefinition<object>.RequireText(eventName, nameof(eventName)),
+            null,
             timeout,
             null,
             null,
             null,
             null);
+
+    /// <summary>
+    /// Creates a wait-for-external-event decision with an exact typed payload contract.
+    /// </summary>
+    /// <param name="nodeId">Node id where the durable flow is waiting.</param>
+    /// <param name="eventCallsite">Exact event name and durable payload contract.</param>
+    /// <param name="context">Context to persist while waiting.</param>
+    /// <param name="timeout">Optional timeout associated with the external event wait.</param>
+    /// <returns>A typed external-event wait decision.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="nodeId"/> is empty.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the event name, contract name, or contract version exposed by <paramref name="eventCallsite"/> is
+    /// empty.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="eventCallsite"/>, its payload type, or <paramref name="context"/> is null.
+    /// </exception>
+    /// <remarks>
+    /// This overload preserves the callsite metadata emitted by the shared Flow transition evaluator. The host remains
+    /// responsible for authorization, persisted wait ownership, payload decoding, and duplicate delivery handling.
+    /// </remarks>
+    public static DurableTaskFlowDecision<TContext> WaitForExternalEvent(
+        string nodeId,
+        IFlowEventCallsite eventCallsite,
+        TContext context,
+        FlowTimeout? timeout)
+    {
+        ArgumentNullException.ThrowIfNull(eventCallsite);
+        var eventName = FlowDefinition<object>.RequireText(eventCallsite.EventName, nameof(eventCallsite));
+        FlowDefinition<object>.RequireText(eventCallsite.ContractName, nameof(eventCallsite));
+        FlowDefinition<object>.RequireText(eventCallsite.ContractVersion, nameof(eventCallsite));
+        ArgumentNullException.ThrowIfNull(eventCallsite.PayloadType, nameof(eventCallsite));
+        return new(
+            DurableTaskFlowDecisionKind.WaitForExternalEvent,
+            FlowNodeOutcome<TContext>.RequireContext(context),
+            FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            eventName,
+            eventCallsite,
+            timeout,
+            null,
+            null,
+            null,
+            null);
+    }
 
     /// <summary>
     /// Creates a complete decision.
@@ -200,6 +259,7 @@ public sealed record DurableTaskFlowDecision<TContext>
             DurableTaskFlowDecisionKind.Complete,
             FlowNodeOutcome<TContext>.RequireContext(context),
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            null,
             null,
             null,
             null,
@@ -231,6 +291,7 @@ public sealed record DurableTaskFlowDecision<TContext>
             null,
             null,
             null,
+            null,
             null);
 
     /// <summary>
@@ -253,6 +314,7 @@ public sealed record DurableTaskFlowDecision<TContext>
             DurableTaskFlowDecisionKind.Fault,
             default,
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            null,
             null,
             null,
             null,
@@ -287,6 +349,7 @@ public sealed record DurableTaskFlowDecision<TContext>
             null,
             null,
             null,
+            null,
             FlowDefinition<object>.RequireText(diagnostic, nameof(diagnostic)),
             null);
 
@@ -312,6 +375,7 @@ public sealed record DurableTaskFlowDecision<TContext>
             DurableTaskFlowDecisionKind.ScheduleActivity,
             activity.Context,
             FlowDefinition<object>.RequireText(nodeId, nameof(nodeId)),
+            null,
             null,
             null,
             null,

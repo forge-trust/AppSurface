@@ -43,8 +43,11 @@ public abstract record FlowNodeOutcome<TContext>
     public static FlowWait<TContext> Wait<TPayload>(
         FlowEventCallsite<TPayload> callsite,
         TContext context,
-        FlowTimeout? timeout = null) =>
-        new(callsite, context, timeout);
+        FlowTimeout? timeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(callsite);
+        return new(callsite, context, timeout);
+    }
 
     /// <summary>
     /// Creates an outcome indicating the node handled a timeout branch.

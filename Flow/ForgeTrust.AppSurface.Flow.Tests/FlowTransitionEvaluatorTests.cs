@@ -153,6 +153,22 @@ public sealed class FlowTransitionEvaluatorTests
     }
 
     [Fact]
+    public async Task EvaluateAsync_MapsTypedWaitContractMetadata()
+    {
+        var callsite = new FlowEventCallsite<TestEvent>("approved", "approval.submitted", "v1");
+
+        var transition = await Evaluate(
+            FlowNodeOutcome<TestState>.Wait(callsite, new TestState("waiting")));
+
+        Assert.Equal(FlowTransitionKind.Wait, transition.Kind);
+        Assert.Equal(callsite.EventName, transition.EventName);
+        Assert.Same(callsite, transition.EventCallsite);
+        Assert.Equal(typeof(TestEvent), transition.EventCallsite?.PayloadType);
+        Assert.Equal(callsite.ContractName, transition.EventCallsite?.ContractName);
+        Assert.Equal(callsite.ContractVersion, transition.EventCallsite?.ContractVersion);
+    }
+
+    [Fact]
     public async Task EvaluateAsync_MapsTimedOutCompleteAndFault()
     {
         var timedOut = await Evaluate(
@@ -267,6 +283,8 @@ public sealed class FlowTransitionEvaluatorTests
     private sealed record TestWork(string ApprovalId);
 
     private sealed record TestResult(string Status);
+
+    private sealed record TestEvent(string ApprovedBy);
 
     private sealed class OutcomeNode : IFlowNode<TestState>
     {

@@ -32,6 +32,8 @@ public sealed class FlowAuthoringGeneratorTests
                         _ = DateTimeOffset.Now;
                         _ = Guid.NewGuid();
                         _ = new Random();
+                        Random random = new();
+                        _ = random;
                         _ = Random.Shared;
                         _ = Stopwatch.GetTimestamp();
                         _ = ApplicationClock.UtcNow;
@@ -54,7 +56,7 @@ public sealed class FlowAuthoringGeneratorTests
             .DistinctBy(diagnostic => (diagnostic.Location.SourceSpan, diagnostic.GetMessage()))
             .ToArray();
 
-        Assert.Equal(6, warnings.Length);
+        Assert.Equal(7, warnings.Length);
         Assert.All(warnings, warning => Assert.Equal(DiagnosticSeverity.Warning, warning.Severity));
         Assert.DoesNotContain(
             warnings,
