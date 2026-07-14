@@ -330,11 +330,11 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.2.md
     order: 70
-    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, health/readiness probes, conventional browser affordances, PWA install metadata, or authenticated config-audit diagnostics before layering on optional UI or docs packages.
-    includes: Base ASP.NET Core hosting, default public `/health` and `/ready` ASP.NET Core health-check probes, pre-routing and endpoint-aware middleware composition, endpoint composition, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/service-worker endpoints, opt-in authenticated config audit diagnostics endpoint mapping, and the core AppSurface web module contract.
-    does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, AppSurface Docs host, browser-specific install prompt UI, broad offline route/app-data caching, automatic diagnostics exposure, or authorization policy definitions.
+    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, health/readiness probes, conventional browser affordances, PWA install metadata or push-worker plumbing, or authenticated config-audit diagnostics before layering on optional UI or docs packages.
+    includes: Base ASP.NET Core hosting, default public `/health` and `/ready` ASP.NET Core health-check probes, pre-routing and endpoint-aware middleware composition, endpoint composition, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/shared-worker endpoints, explicit offline behavior, push-event plumbing, an inert service-worker registration helper, opt-in authenticated config audit diagnostics endpoint mapping, and the core AppSurface web module contract.
+    does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, AppSurface Docs host, browser-specific install or permission UI, push subscription persistence or delivery, broad offline route/app-data caching, automatic diagnostics exposure, or authorization policy definitions.
     start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
-    recipe_summary: Start with `ForgeTrust.AppSurface.Web` for AppSurface ASP.NET Core hosting and default `/health` plus `/ready` platform probes; enable `WebOptions.Pwa` in the same package when the app needs installable PWA metadata and diagnostics, or map config audit diagnostics explicitly when support needs sanitized operator evidence.
+    recipe_summary: Start with `ForgeTrust.AppSurface.Web` for AppSurface ASP.NET Core hosting and default `/health` plus `/ready` platform probes; enable independent `WebOptions.Pwa` install, offline, or push-worker capabilities in the same package, or map config audit diagnostics explicitly when support needs sanitized operator evidence.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Core

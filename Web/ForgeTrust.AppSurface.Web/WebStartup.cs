@@ -347,9 +347,9 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
             _options.StaticFiles.EnableStaticFiles = true;
         }
 
-        if (_options.Pwa.Enabled)
+        PwaOptionsValidator.ThrowIfInvalid(_options.Pwa);
+        if (_options.Pwa.RequiresStaticFileMiddleware)
         {
-            PwaOptionsValidator.ThrowIfInvalid(_options.Pwa);
             _options.StaticFiles.EnableStaticFiles = true;
         }
 
@@ -534,6 +534,12 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
     /// <param name="app">The application builder to configure (middleware, routing, CORS, endpoints, etc.).</param>
     private void InitializeWebApplication(StartupContext context, IApplicationBuilder app)
     {
+        if (_options.StaticFiles.EnableStaticFiles && _options.Pwa.IsWorkerEnabled)
+        {
+            var environment = app.ApplicationServices.GetRequiredService<IWebHostEnvironment>();
+            PwaStaticFileShadowValidator.ThrowIfInvalid(_options.Pwa, environment.WebRootFileProvider);
+        }
+
         if (_options.Errors.ConventionalExceptionPageEnabled && !context.IsDevelopment)
         {
             app.ApplicationServices

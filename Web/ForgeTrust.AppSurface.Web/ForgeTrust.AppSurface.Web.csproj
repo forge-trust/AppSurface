@@ -16,4 +16,9 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App"/>
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets/Pwa/*.js"/>
+    <EmbeddedResource Include="Assets/Pwa/*.json"/>
+    <Content Update="package.json" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never"/>
+  </ItemGroup>
 </Project>

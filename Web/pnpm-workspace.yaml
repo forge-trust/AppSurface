@@ -1,5 +1,6 @@
 packages:
   - ForgeTrust.AppSurface.Docs/assets
+  - ForgeTrust.AppSurface.Web
   - ForgeTrust.RazorWire
 onlyBuiltDependencies:
   - esbuild

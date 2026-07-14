@@ -10,6 +10,25 @@ namespace ForgeTrust.AppSurface.Web;
 /// </remarks>
 public sealed class PwaOfflineOptions
 {
+    private readonly PwaWorkerPathState _pathState;
+
+    /// <summary>
+    /// Initializes a standalone offline options instance with the existing service-worker path default.
+    /// </summary>
+    public PwaOfflineOptions()
+        : this(new PwaWorkerPathState())
+    {
+    }
+
+    /// <summary>
+    /// Initializes offline options backed by shared compatibility-path assignment state.
+    /// </summary>
+    /// <param name="pathState">The shared legacy and current path assignment state.</param>
+    internal PwaOfflineOptions(PwaWorkerPathState pathState)
+    {
+        _pathState = pathState;
+    }
+
     /// <summary>
     /// Gets or sets a value indicating whether AppSurface should map a starter service-worker endpoint.
     /// </summary>
@@ -18,7 +37,16 @@ public sealed class PwaOfflineOptions
     /// <summary>
     /// Gets or sets the app-root-relative service-worker endpoint path.
     /// </summary>
-    public string ServiceWorkerPath { get; set; } = "/service-worker.js";
+    /// <remarks>
+    /// This compatibility property shares its effective value with <see cref="PwaOptions.Worker"/> on the instance
+    /// owned by <see cref="PwaOptions"/>. New code should configure <see cref="PwaWorkerOptions.ServiceWorkerPath"/>.
+    /// Conflicting explicit legacy and current values fail startup.
+    /// </remarks>
+    public string ServiceWorkerPath
+    {
+        get => _pathState.EffectiveValue;
+        set => _pathState.SetLegacyValue(value);
+    }
 
     /// <summary>
     /// Gets or sets the app-root-relative offline fallback page cached by the starter service worker.

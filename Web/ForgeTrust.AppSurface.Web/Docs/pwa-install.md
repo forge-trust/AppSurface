@@ -1,113 +1,202 @@
-# AppSurface Web PWA Install Support
+# AppSurface Web PWA Install and Push-Worker Support
 
-AppSurface Web owns the baseline install contract for Progressive Web Apps: manifest metadata, head tags, diagnostics, and explicit offline fallback wiring. It does not promise that every browser will show an install prompt. Browsers still decide when and how to surface installation.
+AppSurface Web owns a small, composable [Progressive Web App](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps) foundation: install metadata, explicit offline behavior, push-event plumbing, service-worker registration metadata, and privacy-safe diagnostics. Each capability is opt-in. Enabling push does not request notification permission, create a subscription, choose recipients, or send a message.
 
-This first readiness slice is verifier and server-known diagnostics only. It does not include an install CTA helper, icon generation command, push subscription package, badge helper, browser-executed capability reporting, or telemetry pipeline. Those rails need separate APIs because they involve user-facing copy, generated image assets, browser permission state, endpoint custody, safe counts, and product-owned event interpretation.
+Use the [executable PWA example](../../../examples/web-pwa-install/README.md) to see install metadata, offline behavior, push handlers, and explicit browser registration together. Use [`appsurface pwa verify`](../../../Cli/ForgeTrust.AppSurface.Cli/README.md) for server-known readiness evidence.
 
-## Quick Start
+## Quick Starts
 
-Enable PWA metadata from `WebOptions.Pwa`:
+### Install metadata
+
+Configure manifest metadata in `WebOptions.Pwa`, then add `<appsurface:pwa-head />` to an MVC or Razor layout:
 
 ```csharp
-await WebApp<MyRootModule>.RunAsync(
-    args,
-    options =>
-    {
-        options.Mvc = options.Mvc with { MvcSupportLevel = MvcSupport.ControllersWithViews };
-        options.Pwa.Enabled = true;
-        options.Pwa.Name = "Contoso Field Notes";
-        options.Pwa.ShortName = "Field Notes";
-        options.Pwa.ThemeColor = "#2563eb";
-        options.Pwa.BackgroundColor = "#ffffff";
-        options.Pwa.Icons.Add(new PwaIcon { Source = "/icons/app-192.png", Sizes = "192x192", Type = "image/png" });
-        options.Pwa.Icons.Add(new PwaIcon { Source = "/icons/app-512.png", Sizes = "512x512", Type = "image/png" });
-    });
+options.Pwa.Enabled = true;
+options.Pwa.Name = "Contoso Field Notes";
+options.Pwa.ShortName = "Field Notes";
+options.Pwa.ThemeColor = "#2563eb";
+options.Pwa.BackgroundColor = "#ffffff";
+options.Pwa.Icons.Add(new PwaIcon { Source = "/icons/app-192.png", Sizes = "192x192", Type = "image/png" });
+options.Pwa.Icons.Add(new PwaIcon { Source = "/icons/app-512.png", Sizes = "512x512", Type = "image/png" });
 ```
 
-Add the TagHelper to an MVC/Razor layout:
+`Pwa.Enabled` controls install metadata only. It is not a master switch for offline or push behavior.
 
-```cshtml
-<appsurface:pwa-head />
+### Push-only worker
+
+An app that already owns its install experience can map AppSurface's default push handlers without adding a manifest or cache strategy:
+
+```csharp
+options.Pwa.Enabled = false;
+options.Pwa.Scope = "/";
+options.Pwa.Push.Enabled = true;
 ```
 
-Verify a running app:
+Add `<appsurface:pwa-head />` so AppSurface can load the external registration helper, then call it from an application-owned button or other deliberate interaction:
 
-```bash
-appsurface pwa verify --base-url https://app.example.com --entry-path /account/resume
+```javascript
+const registration = await window.AppSurface.Pwa.register();
+if (registration === null) {
+    // This browser does not expose service workers.
+}
 ```
 
-During local development, open `/_appsurface/pwa` for an HTML checklist and `/_appsurface/pwa/status.json` for machine-readable diagnostics.
+The call only invokes [`navigator.serviceWorker.register()`](https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerContainer/register) with the configured worker URL, scope, and `updateViaCache: "none"`. It never calls `Notification.requestPermission()` or `PushManager.subscribe()`.
 
-## API Shape
+### Add push handlers to an existing AppSurface PWA
 
-`WebOptions.Pwa` defaults to disabled. When `Enabled` is `true`, AppSurface validates the install contract during startup and maps the PWA endpoints before application MVC endpoints.
+Keep the existing install and offline configuration, then enable push:
 
-Required values when enabled:
+```csharp
+options.Pwa.Enabled = true;
+options.Pwa.Offline.Enabled = true;
+options.Pwa.Offline.OfflineFallbackPath = "/offline.html";
+options.Pwa.Offline.StaticAssetPaths = ["/offline.html", "/icons/app-192.png", "/icons/app-512.png"];
+options.Pwa.Push.Enabled = true;
+```
 
-| Option | Default | Notes |
-|--------|---------|-------|
-| `Name` | Empty | Full app name used by the manifest and head metadata. |
-| `ShortName` | Empty | Short launcher name. |
-| `StartUrl` | `/` | Must be an app-root-relative URL path and stay within `Scope`. |
-| `Scope` | `/` | Must be an app-root-relative URL path. Keep it at or above `StartUrl`. |
-| `Display` | `Standalone` | Maps to `standalone`, `minimal-ui`, `fullscreen`, or `browser`. |
-| `ThemeColor` | Empty | Hex color emitted to the manifest and `<meta name="theme-color">`. |
-| `BackgroundColor` | Empty | Hex color emitted to the manifest. |
-| `Icons` | Empty | Must include at least one `192x192` icon token and one `512x512` icon token. A single manifest icon can list multiple space-separated sizes when that matches the asset. |
+AppSurface generates one worker containing both capabilities. Push failures are contained independently and do not change offline fetch behavior.
 
-Optional values:
+## Capability and Ownership Boundaries
 
-| Option | Default | Notes |
-|--------|---------|-------|
-| `ManifestPath` | `/manifest.webmanifest` | App-root-relative endpoint for generated manifest JSON. |
-| `DiagnosticsExposure` | `DevelopmentOnly` | `Always`, `DevelopmentOnly`, or `Never` for `/_appsurface/pwa`. |
-| `Offline.Enabled` | `false` | Controls whether AppSurface maps a service worker endpoint. |
-| `Offline.ServiceWorkerPath` | `/service-worker.js` | App-root-relative service worker endpoint. |
+| Capability | AppSurface Web | Application or follow-up package |
+|---|---|---|
+| Install metadata and head tags | Generates and validates them when `Pwa.Enabled` is `true`. | Chooses product identity, icons, and install UX. |
+| Offline fallback | Generates the explicitly configured narrow cache/fetch strategy. | Decides whether private routes or data may ever be cached. |
+| Push worker | Generates default push/click handlers or imports a custom handler. | Chooses whether and when push is appropriate. |
+| Worker registration | Exposes inert `window.AppSurface.Pwa.register()`. | Calls it at an intentional point in the product journey. |
+| Permission | None. | Owns user education, timing, preferences, and `Notification.requestPermission()`. |
+| Subscription | None. | Owns `PushManager.subscribe()`, endpoint custody, reconciliation, identity, and persistence. |
+| Delivery | None. | Owns VAPID keys, recipients, sending, provider results, retries, and abuse controls. |
+| Navigation intent | Default adapter accepts only a safe same-scope destination. | Owns product-specific destinations or a custom handler policy. |
+
+The [push-worker foundation case](https://github.com/forge-trust/AppSurface/issues/631) establishes worker and registration plumbing. [Push delivery](https://github.com/forge-trust/AppSurface/issues/632) owns subscriptions and server-side delivery. [Push verification](https://github.com/forge-trust/AppSurface/issues/633) owns browser compatibility and delivered-notification proof. “Push enabled” in server diagnostics therefore does not mean permission granted, subscription created, or notification delivered.
+
+## API Reference
+
+### Install metadata
+
+`WebOptions.Pwa` is always available. Install requirements are validated only when `Enabled` is `true`.
+
+| Option | Default | Behavior |
+|---|---|---|
+| `Enabled` | `false` | Maps the manifest and emits install metadata. Does not control offline or push. |
+| `Name` | Empty | Required full application name when install metadata is enabled. |
+| `ShortName` | Empty | Required launcher name when install metadata is enabled. |
+| `StartUrl` | `/` | Validated only for install metadata; must remain inside `Scope`. |
+| `Scope` | `/` | Manifest scope and effective worker registration scope. Validated whenever install metadata or a worker capability is active. Active worker scopes reject percent escapes so registration and notification destinations share one unambiguous path spelling. |
+| `Display` | `Standalone` | Emits `standalone`, `minimal-ui`, `fullscreen`, or `browser`. |
+| `ThemeColor` | Empty | Required install color emitted to the manifest and page head. |
+| `BackgroundColor` | Empty | Required install color emitted to the manifest. |
+| `Icons` | Empty | Requires `192x192` and `512x512` size tokens for install metadata. |
+| `ManifestPath` | `/manifest.webmanifest` | Generated manifest endpoint when install metadata is enabled. The PathBase-adjusted value remains validated and reported in diagnostics for additive older-tool compatibility whenever any PWA surface is active. |
+| `DiagnosticsExposure` | `DevelopmentOnly` | `Always`, `DevelopmentOnly`, or `Never` for AppSurface PWA diagnostics. |
+| `DiagnosticsPath` | `/_appsurface/pwa` | Base path for the diagnostics HTML endpoint and its `/status.json` child. The path is adjusted beneath `PathBase` and rejects percent escapes. |
+
+### Shared worker and push
+
+| Option | Default | Behavior |
+|---|---|---|
+| `Worker.ServiceWorkerPath` | `/service-worker.js` | Canonical generated worker endpoint shared by offline and push. Percent escapes are rejected so routing, metadata, and static-shadow checks use one representation. |
+| `Worker.RegistrationHelperPath` | `/_appsurface/pwa/register.js` | External registration-helper endpoint. Emitted in head metadata only when push is enabled. Percent escapes are rejected. |
+| `Push.Enabled` | `false` | Adds push behavior and activates the shared worker independently of install/offline settings. |
+| `Push.HandlerScriptPath` | `null` | Uses the strict AppSurface v1 adapter. A configured same-origin path is loaded with `importScripts()` and replaces the default push/click handlers. |
+
+`Offline.ServiceWorkerPath` remains a compatibility alias for `Worker.ServiceWorkerPath`. Setting either one alone selects the worker path; setting both to the same value is valid. Conflicting explicit values fail startup regardless of assignment or configuration-binding order. New code should use `Worker.ServiceWorkerPath`.
+
+### Offline behavior
+
+| Option | Default | Behavior |
+|---|---|---|
+| `Offline.Enabled` | `false` | Adds the starter cache/fetch strategy and activates the shared worker independently of install/push settings. |
+| `Offline.ServiceWorkerPath` | `/service-worker.js` | Compatibility alias described above. |
 | `Offline.OfflineFallbackPath` | Empty | Required when offline is enabled. |
-| `Offline.StaticAssetPaths` | Empty | Static assets to precache with the offline fallback. |
+| `Offline.StaticAssetPaths` | Empty | Same-origin assets to precache with the fallback. |
 
-All AppSurface-owned endpoint paths must be app-root-relative. Absolute URLs, protocol-relative URLs, backslash paths, traversal segments, query strings, and fragments are rejected before the app starts.
+The starter strategy caches only configured static assets and the fallback, intercepts only the requests documented by that strategy, and never broadens its cache because push is enabled. A configured static-asset pathname is looked up only in the worker-owned cache with the query string ignored, so content-versioned requests such as `/app.css?v=hash` can use the precached `/app.css` while offline. Push-only mode installs no fetch listener, creates no cache, stores no application data, and retires caches previously owned by the AppSurface worker when moving away from offline mode.
 
-## Head Metadata
+Install metadata and offline support preserve AppSurface's existing automatic static-file middleware behavior because they commonly reference web-root assets. A custom `Push.HandlerScriptPath` also enables that middleware so the handler may be deployed from the web root. Default push-only mode serves only generated worker/helper endpoints and does not enable global static-file middleware; enable it explicitly if the application separately needs unrelated web-root content.
 
-`<appsurface:pwa-head />` emits:
+All AppSurface endpoint and asset paths are app-root-relative. Startup rejects schemes, protocol-relative URLs, whitespace, backslashes, controls, route parameters, malformed escapes, recursively encoded traversal, query strings, and fragments where those values are not explicitly supported. Generated manifest, diagnostics, worker, and helper endpoint paths reject all percent escapes so routing, emitted metadata, and static-shadow checks cannot disagree about decoding. Worker, helper, manifest, diagnostics, and fallback routes must be distinct. AppSurface also fails when a generated worker or helper path would be shadowed by a file in the web root; it cannot reliably infer arbitrary application middleware or endpoints registered later.
 
-- `<link rel="manifest" href="/manifest.webmanifest">`
-- `<meta name="theme-color" ...>`
-- `<meta name="application-name" ...>`
-- Apple mobile-web-app capable and title metadata.
-- `<link rel="icon" sizes="..." type="..." href="...">` for each configured icon.
+Browsers match service-worker scopes as raw URL prefixes. `/app` therefore also covers `/application`; use `/app/` when the application intends a path-segment boundary. AppSurface validation, the default click adapter, and CLI scope checks follow those browser prefix semantics.
 
-The helper respects `PathBase` and uses ASP.NET Core file versioning for icon hrefs when static assets provide a versioned path. If PWA support is disabled, it emits no output.
+## Head Metadata and Registration Helper
 
-Minimal API apps, custom layout systems, and non-Razor frontends can copy the equivalent tags from development diagnostics. Keep the manifest link and theme color in the initial HTML response; browsers discover install metadata from the page head.
+`<appsurface:pwa-head />` composes the metadata needed by active capabilities:
 
-## Offline Strategy
+- Install enabled: manifest, theme, application, Apple mobile-web-app, and icon tags.
+- Offline enabled: worker path and scope metadata, without loading the registration helper.
+- Push enabled: a versioned external helper script carrying the PathBase-adjusted worker URL and scope as encoded metadata.
+- Neither active: no output.
 
-Offline support is deliberately opt-in. By default, AppSurface maps no service worker and caches no routes.
+The helper safely claims only a compatible `window.AppSurface.Pwa.register` namespace. It does not overwrite conflicting globals, and duplicate loading with identical metadata is harmless. Frozen objects, proxies, throwing accessors, forged helper brands, and incompatible namespace values are contained instead of escaping an exception into the host page.
 
-The starter offline strategy only precaches the configured static asset list plus the configured offline fallback page. The generated service worker:
+`register()` accepts no arguments and returns `Promise<ServiceWorkerRegistration | null>`. `null` means service workers are unsupported. Registration rejection remains a rejected promise so application UI can show a truthful failure state. The helper contains no permission or subscription behavior.
 
-- Caches only same-origin `GET` requests listed in `Offline.StaticAssetPaths` plus `Offline.OfflineFallbackPath`.
-- Returns the fallback page for failed navigations.
-- Ignores `POST`, `PUT`, `PATCH`, `DELETE`, and other non-GET requests.
-- Ignores cross-origin requests.
-- Does not cache authenticated pages, arbitrary navigation routes, API responses, or app data by default.
+The content-versioned helper URL is cached immutably only when its version matches the served content; unversioned or stale-version requests receive `no-cache`. Per-page script metadata carries the effective worker URL and scope. Under a strict [Content Security Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP), allow the same-origin external helper through `script-src`; keep the application-owned registration interaction in an allowed external script or apply the host's normal nonce/hash policy.
 
-That default is intentionally boring. Authenticated apps, admin tools, docs with release archives, and user-specific dashboards should design their own service worker when they need richer offline behavior. Do not enable broad route caching until the app has reviewed authentication, logout, tenant isolation, cache invalidation, and private data exposure.
+Minimal API apps, custom layouts, and non-Razor frontends can copy the exact tags from development diagnostics. Do not construct the helper metadata by string concatenation.
 
-## Diagnostics
+## Default Push Payload v1
 
-Development diagnostics are available at:
+The default adapter accepts one strict JSON object:
 
-- `/_appsurface/pwa`
-- `/_appsurface/pwa/status.json`
+```json
+{
+  "version": 1,
+  "title": "Field notes are ready",
+  "body": "Open today's notes.",
+  "iconPath": "/icons/app-192.png",
+  "badgePath": "/icons/badge-96.png",
+  "tag": "field-notes-ready",
+  "destinationPath": "/notes/today?source=push"
+}
+```
 
-The status JSON reports stable AppSurface diagnostics for startup-validatable configuration, manifest metadata, head-tag hints, and offline posture. It always includes `configuredServiceWorkerPath` so `appsurface pwa verify` can prove the service-worker endpoint is absent when `offlineEnabled` is `false`; `serviceWorkerPath` and `offlineFallbackPath` are populated only when the offline strategy is enabled. Production hides diagnostics by default; use `PwaDiagnosticEndpointExposure.Always` only for intentionally public readiness checks.
+`version` and `title` are required. Optional properties must be omitted rather than set to `null`; unknown or incorrectly typed fields are rejected. The complete UTF-8 JSON document is limited to 3,993 bytes, the conservative version-1 plaintext ceiling derived from [RFC 8291](https://www.rfc-editor.org/rfc/rfc8291.html). Providers may enforce a smaller limit.
 
-## CLI Verification
+| Field | Limit | Validation |
+|---|---:|---|
+| `version` | Exact integer `1` | Selects this contract. |
+| `title` | 1–256 UTF-16 code units | Required non-empty string. |
+| `body` | 1–2,048 UTF-16 code units | Optional non-empty string. |
+| `iconPath`, `badgePath` | 1–1,024 UTF-16 code units | Optional app-root-relative asset path resolved beneath `PathBase`. |
+| `tag` | 1–128 UTF-16 code units | Optional non-empty notification tag. |
+| `destinationPath` | 1–1,024 UTF-16 code units | Optional app-root-relative path, with at most one query string and no fragment, restricted to the effective worker scope. |
 
-`appsurface pwa verify --url <origin>` checks a running origin. Prefer `--base-url` plus `--entry-path` when the app has a path base or the meaningful install surface is not `/`:
+Invalid payloads are discarded with a value-free diagnostic. The adapter stores only the normalized destination in notification data. On click it closes the notification, independently revalidates that destination, focuses the first exact matching window client, or opens the safe URL. A notification without a destination closes without navigation or an invalid-destination diagnostic. A failed focus receives one open fallback. Payloads and destination values are never logged.
+
+Set `Push.HandlerScriptPath` when the default schema or navigation policy is not appropriate:
+
+```csharp
+options.Pwa.Push.Enabled = true;
+options.Pwa.Push.HandlerScriptPath = "/workers/contoso-push.js";
+```
+
+The generated worker imports that same-origin script instead of installing AppSurface's default push and notification-click listeners. A load or top-level evaluation failure produces only `ASPWAJS030`; shared lifecycle and any offline handlers continue to install. Script evaluation is not transactional: listeners or other top-level side effects created before an exception cannot be rolled back. Validate and initialize first, then register listeners only after the handler is ready. The application script owns payload validation, notification content, click behavior, privacy, and tests. AppSurface still owns shared lifecycle, worker headers, scope, registration metadata, and diagnostics.
+
+## Endpoints, Headers, and PathBase
+
+The worker and helper support `GET` and `HEAD`; `HEAD` returns the same headers without a body.
+
+| Endpoint | Content type | Cache and security behavior |
+|---|---|---|
+| Worker | `text/javascript; charset=utf-8` | `Cache-Control: no-cache`, `X-Content-Type-Options: nosniff`, and `Service-Worker-Allowed` matching the PathBase-adjusted scope. |
+| Registration helper | `text/javascript; charset=utf-8` | Current content-versioned requests receive immutable caching; unversioned or stale-version requests receive `no-cache`. All responses include `X-Content-Type-Options: nosniff`. |
+| Manifest | `application/manifest+json` | Generated only when install metadata is enabled. |
+
+App-root-relative settings do not include `PathBase`. A host mounted at `/tenant-a` turns `/service-worker.js` into `/tenant-a/service-worker.js` and `/` scope into `/tenant-a/`. Validate and verify the externally visible URL; do not configure `/tenant-a` twice.
+
+## Diagnostics and CLI Verification
+
+Development diagnostics are available at `/_appsurface/pwa` and `/_appsurface/pwa/status.json` unless `DiagnosticsExposure` changes that policy. The status JSON distinguishes server-known capabilities with `workerEnabled`, `workerPath`, `pushEnabled`, `workerScope`, and `registrationHelperPath` while preserving `manifestPath`, `offlineEnabled`, `serviceWorkerPath`, `configuredServiceWorkerPath`, and `offlineFallbackPath` for older tools.
+
+- Offline or combined mode keeps the legacy active `serviceWorkerPath` value.
+- Push-only mode reports the active worker through the new worker fields; legacy offline worker fields are `null`.
+- No-worker mode retains `configuredServiceWorkerPath` so compatible CLI versions can prove the endpoint is absent.
+
+New CLI versions continue accepting older status JSON. When push configuration is observed, the verifier reports that registration, permission, subscription, and delivery were not evaluated. It does not turn server configuration into browser proof.
 
 ```bash
 appsurface pwa verify \
@@ -116,54 +205,35 @@ appsurface pwa verify \
   --expect-start-url / \
   --expect-scope / \
   --expect-display standalone \
-  --expect-theme-color '#2563eb' \
-  --expect-background-color '#ffffff' \
   --expect-icon 192x192 \
   --expect-icon 512x512 \
   --json
 ```
 
-The verifier checks:
+Browser diagnostics are stable and value-free:
 
-- HTTPS or localhost install-context acceptability.
-- Entry HTML manifest link presence, with same-origin and same-base-path redirect handling.
-- Manifest route reachability and `application/manifest+json` content type.
-- Manifest fields, display mode, same-origin `start_url`, same-origin `scope`, and `start_url` within `scope`.
-- Required `192x192` and `512x512` icon tokens, plus any repeated `--expect-icon` assertions.
-- Icon reachability, image content type, and decoded PNG dimensions when available.
-- Diagnostic endpoint posture.
-- Service worker reachability when diagnostics report offline enabled.
-- Service worker absence when diagnostics are exposed, offline is disabled, and the configured service-worker path is known.
+| Code | Meaning |
+|---|---|
+| `ASPWAJS001` | Invalid helper metadata. |
+| `ASPWAJS002` | Browser namespace conflict. |
+| `ASPWAJS003` | Service-worker registration rejected. |
+| `ASPWAJS010` | Invalid push payload. |
+| `ASPWAJS011` | Notification display failed. |
+| `ASPWAJS020` | Invalid notification-click destination. |
+| `ASPWAJS021` | Client focus/open failed. |
+| `ASPWAJS030` | A shared lifecycle or custom-handler import failure was contained. |
 
-Use JSON output when integrating the verifier into CI:
+Warnings never include payloads, destination URLs, subscription endpoints, identifiers, or exception text.
 
-```bash
-appsurface pwa verify --url https://app.example.com --json
-```
+## Migration and Pitfalls
 
-The command emits stable diagnostic codes and exits nonzero when install-critical checks fail. JSON output uses `schemaVersion: 2`, keeps the original `passed`, `origin`, `manifestPath`, and `diagnostics` fields, and adds `baseUrl`, entry URL, manifest fields, icon evidence, and diagnostic `subject`/`expected`/`actual`/`fix` details for CI artifacts. `origin` contains only scheme, host, and port; `baseUrl` includes the verified path base.
-
-## Browser Caveats
-
-Installability is a browser policy decision. AppSurface can provide correct metadata, HTTPS/localhost proof, diagnostics, and verification, but it cannot force Chrome, Edge, Safari, Firefox, Android, iOS, or desktop shells to expose the same prompt at the same time.
-
-Common reasons a browser may still hide installation:
-
-- The origin is not HTTPS and is not localhost.
-- The page has not been visited with enough engagement for that browser.
-- The icon asset is unreachable, too small, or not an image.
-- The manifest link is missing from the HTML head.
-- `start_url` or `scope` points outside the current origin.
-- The verified entry path redirects to a different origin, path base, or login shell that does not include the manifest link.
-- The browser requires additional platform-specific signals.
-
-Use AppSurface diagnostics and `appsurface pwa verify` to prove the web contract first, then debug browser-specific prompt behavior from browser DevTools.
-
-## Pitfalls
-
-- Do not add a service worker just to make an app "more PWA." A bad service worker is harder to unwind than a missing one.
-- Do not cache authenticated HTML pages or API data with the starter strategy.
-- Keep `StartUrl` inside `Scope`; otherwise browsers may treat the manifest as inconsistent.
-- Serve icons from stable same-origin paths. Versioned URLs are fine in head metadata, but manifest icon `src` values should remain app-root-relative.
-- Keep diagnostics development-only unless the app deliberately wants public PWA readiness metadata.
-- For apps behind a reverse proxy path base, verify through the externally visible URL and a real entry path, not only the inner Kestrel root.
+- Moving or disabling a registered worker is staged browser-state migration, not only a server setting change. First deploy cleanup code from the currently registered path to unregister or replace the old registration and retire owned caches. Only after clients receive that deployment should you stop mapping or move the old path.
+- Moving from an older or #631 offline worker to push-only at the same worker path is supported: the push-only worker deletes the legacy `appsurface-pwa-v1` cache and caches in that worker's path-derived namespace, then installs no fetch handler.
+- AppSurface does not guess historical custom worker paths. An app that changes a path owns cleanup for registrations at the previous path.
+- Do not cache authenticated HTML, APIs, tenant data, or logout-sensitive content with the starter offline strategy.
+- Keep `StartUrl` inside `Scope`, and keep the worker scope no broader than the application surface that owns its behavior.
+- Use HTTPS or localhost. Service-worker availability and install prompts remain browser policy decisions.
+- Do not call registration “push ready.” Permission, subscription, server delivery, and end-to-end browser evidence are separate capabilities.
+- A custom handler is executable code with the worker's authority. Serve it from a stable same-origin path, review its payload/navigation trust boundaries, and test failure branches.
+- Keep diagnostics development-only unless the app intentionally exposes sanitized readiness metadata.
+- Under reverse-proxy hosting, verify the external `PathBase`, CSP, worker scope, helper URL, and `Service-Worker-Allowed` header together.
