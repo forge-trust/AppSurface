@@ -306,10 +306,16 @@ internal static class AspireDeploymentPipelineAdapter
             throw new InvalidOperationException("ASDEPLOY211: target returned a null deployment artifact set or item.");
         }
 
+        var canonicalIntent = DeploymentArtifact.Create("deployment-intent.v1.json", DeploymentCanonicalJson.Serialize(intent));
         var artifacts = providerResult.Artifacts.OrderBy(artifact => artifact.FileName, StringComparer.Ordinal).ToList();
-        if (!artifacts.Any(artifact => string.Equals(artifact.FileName, "deployment-intent.v1.json", StringComparison.Ordinal)))
+        var providerIntent = artifacts.FirstOrDefault(artifact => string.Equals(artifact.FileName, canonicalIntent.FileName, StringComparison.Ordinal));
+        if (providerIntent is null)
         {
-            artifacts.Insert(0, DeploymentArtifact.Create("deployment-intent.v1.json", DeploymentCanonicalJson.Serialize(intent)));
+            artifacts.Insert(0, canonicalIntent);
+        }
+        else if (!providerIntent.Content.AsSpan().SequenceEqual(canonicalIntent.Content))
+        {
+            throw new InvalidOperationException("ASDEPLOY221: target returned deployment intent that does not match the evaluated Aspire graph.");
         }
 
         artifacts.Sort((left, right) => StringComparer.Ordinal.Compare(left.FileName, right.FileName));

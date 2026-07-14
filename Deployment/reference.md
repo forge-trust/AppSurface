@@ -14,7 +14,9 @@ A migration job contains an immutable `registry/repository@sha256:<64 lowercase 
 
 `IDeploymentTarget.VerifyAsync` receives the freshly rendered result and either `Shadow` or `Owned` parity mode. Verification may inspect deployed state read-only. It must not accept or start an execution or alter traffic.
 
-`DeploymentArtifactBundleWriter` validates the complete file set, rejects portable case collisions and the reserved ownership-marker name, rejects a non-owned or mixed directory, writes to a same-parent staging directory, and swaps the complete bundle only after all bytes have been written. Give each target a dedicated output directory; do not place unrelated files there or edit generated artifacts.
+`DeploymentArtifact.Create` accepts one portable file name only. It rejects directory segments, control characters, Windows-invalid punctuation and device names, and trailing dots or spaces before any filesystem write. `DeploymentArtifactBundleWriter` validates the complete file set, rejects portable case collisions and the reserved ownership-marker name, rejects a non-owned or mixed directory, writes to a same-parent staging directory, and swaps the complete bundle only after all bytes have been written. Give each target a dedicated output directory; do not place unrelated files there or edit generated artifacts.
+
+Migration-job `Environment` entries are serialized into review artifacts and must contain non-secret configuration only. Secret-shaped names, including password, token, credential, connection-string, database-URL, API-key, private-key, and access-key variants, fail with `ASDEPLOY115`; use `SecretBinding` instead. Treat command arguments and environment values as artifact-visible inputs even when their names look harmless.
 
 ## GCP binding profile v1
 
@@ -35,7 +37,7 @@ Unknown, duplicate, secret-bearing, malformed, environment-mismatched, symbolic-
 
 ## Generated artifacts
 
-- `deployment-intent.v1.json` is the portable review contract.
+- `deployment-intent.v1.json` is the portable review contract. The Aspire adapter owns its canonical bytes: a provider may echo the exact artifact or omit it, but a contradictory provider copy is rejected before any bundle is written.
 - `gcp-cloud-run-migration.tf.json` declares only `google_cloud_run_v2_job.appsurface_migration` and references externally provisioned foundations.
 - `gcp-cloud-run-migration.plan.json` records project, region, exact Terraform resource addresses, required capabilities, logical-to-physical mapping, normalized expected parity, source revision, generator version, and hashes linking the intent and Terraform bytes. Verification cross-checks every operational expected field against the hashed Terraform before any cloud command.
 

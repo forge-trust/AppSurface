@@ -16,12 +16,14 @@ Every deployment validation failure uses an `ASDEPLOY1xx` or Aspire-adapter `ASD
 - `ASDEPLOY150`–`ASDEPLOY164`: wrong or incomplete bundle, identity/hash mismatch, missing Job, permission/auth failure, malformed GCP response, unsupported parity mode or capability, missing binding, drift, or forbidden public IAM principal.
 - `ASDEPLOY165`–`ASDEPLOY166`: `gcloud` is unavailable or exceeded the bounded timeout. Publish does not need `gcloud`; only read-only verification does.
 - `ASDEPLOY167`: the Aspire environment cannot be represented as a Google Cloud label. Use at most 63 ASCII letters, digits, underscores, or hyphens.
-- `ASDEPLOY168`: a declared environment setting attempts to replace Cloud Run runtime metadata or application-default credentials. Use the assigned service identity and runtime-owned variables.
+- `ASDEPLOY168`: a declared environment name is invalid for Cloud Run, uses the reserved `X_GOOGLE_` prefix, or attempts to replace runtime metadata. Rename or remove it and use the assigned service identity and runtime-owned variables.
+- `ASDEPLOY169`: a migration container would exceed Cloud Run's 1,000-variable limit after its secret-backed connection setting is included. Keep plaintext settings at 999 or fewer.
 
 ## Aspire adapter diagnostics
 
 - `ASDEPLOY201`–`ASDEPLOY207`: parameters come from another AppHost builder, have the wrong secret classification, duplicate an annotation, or leave required authoring fields unset.
 - `ASDEPLOY208`–`ASDEPLOY213`: unsupported endpoint projection, missing target capability, parity failure, duplicate provider artifact, or missing/non-secret metadata resolution failure.
 - `ASDEPLOY214` and later adapter codes protect output ownership, artifact hashes, binding-path confinement, and explicit target assignment.
+- `ASDEPLOY221`: a provider returned a portable-intent artifact that differs from the evaluated Aspire graph. Providers may echo the canonical bytes or omit the artifact; they may not replace the graph-owned contract.
 
 Start with the code. Correct the cause and rerun the same native Aspire command. Do not bypass a validation by copying sensitive data into a non-secret parameter or by editing generated artifacts.

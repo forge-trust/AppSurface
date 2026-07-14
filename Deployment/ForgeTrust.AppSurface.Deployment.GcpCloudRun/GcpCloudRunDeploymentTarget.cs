@@ -15,6 +15,7 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
     private const string IntentFileName = "deployment-intent.v1.json";
     private const string TerraformFileName = "gcp-cloud-run-migration.tf.json";
     private const string PlanFileName = "gcp-cloud-run-migration.plan.json";
+    private const int MaxCloudRunEnvironmentVariables = 1000;
     private readonly IGcloudCommandRunner _commandRunner;
 
     /// <summary>Initializes the target with the production read-only process runner.</summary>
@@ -154,11 +155,15 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
                 .Distinct()
                 .OrderBy(capability => capability)
                 .ToArray();
+            var portableJobs = intentRoot.GetProperty("migrationJobs")
+                .EnumerateArray()
+                .ToDictionary(job => job.GetProperty("id").GetProperty("value").GetString()!, StringComparer.Ordinal);
             if (!string.Equals(plan.Environment, intentRoot.GetProperty("environment").GetString(), StringComparison.Ordinal)
                 || !string.Equals(plan.SourceRevision, sourceRevision, StringComparison.Ordinal)
                 || !string.Equals(plan.Project, terraformJob.GetProperty("project").GetString(), StringComparison.Ordinal)
                 || !string.Equals(plan.Region, terraformJob.GetProperty("location").GetString(), StringComparison.Ordinal)
                 || jobs.EnumerateObject().Count() != plan.Expected.Count
+                || portableJobs.Count != plan.Expected.Count
                 || !plan.RequiredCapabilities.SequenceEqual(intentCapabilities)
                 || plan.ResourceAddresses.Count != plan.Expected.Count
                 || plan.Expected.Any(expected => !plan.ResourceAddresses.TryGetValue(expected.LogicalId, out var address) || address != $"google_cloud_run_v2_job.appsurface_migration[\"{expected.LogicalId}\"]"))
@@ -172,7 +177,9 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
             var labels = terraformJob.GetProperty("labels");
             return plan.Expected.All(expected =>
             {
-                if (!jobs.TryGetProperty(expected.LogicalId, out var job)) return false;
+                if (!jobs.TryGetProperty(expected.LogicalId, out var job)
+                    || !portableJobs.TryGetValue(expected.LogicalId, out var portableJob)
+                    || !MatchesPortableIntent(expected, portableJob)) return false;
                 var environment = job.GetProperty("environment").EnumerateObject().ToDictionary(item => item.Name, item => item.Value.GetString()!, StringComparer.Ordinal);
                 var fromTerraform = new GcpCloudRunMigrationParity(
                     expected.LogicalId,
@@ -235,9 +242,14 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
             if (!profile.ServiceAccounts.ContainsKey(job.ServiceIdentity.Value)) throw MissingBinding("service account", job.ServiceIdentity.Value);
             if (!profile.Secrets.ContainsKey(job.ConnectionSecret.Id.Value)) throw MissingBinding("secret", job.ConnectionSecret.Id.Value);
             if (!physicalJobs.Add(physicalJobName)) throw Failure("ASDEPLOY158", "Physical Cloud Run Job binding is ambiguous.", $"More than one logical job maps to '{physicalJobName}'.", "Map every logical migration job to a distinct physical Cloud Run Job name.");
-            foreach (var name in job.Environment.Keys.Where(ReservedEnvironmentNames.Contains))
+            if (job.Environment.Count + 1 > MaxCloudRunEnvironmentVariables)
             {
-                throw Failure("ASDEPLOY168", "Reserved Cloud Run environment variable rejected.", $"'{name}' is owned by the runtime or credential mechanism.", "Remove the setting and use the declared service identity and Cloud Run runtime metadata.");
+                throw Failure("ASDEPLOY169", "Cloud Run environment variable limit exceeded.", $"Migration job '{job.Id.Value}' declares {job.Environment.Count} plaintext settings plus one secret-backed setting.", $"Keep the total at or below {MaxCloudRunEnvironmentVariables} variables per container.");
+            }
+
+            foreach (var name in job.Environment.Keys.Where(IsInvalidOrReservedEnvironmentName))
+            {
+                throw Failure("ASDEPLOY168", "Invalid or reserved Cloud Run environment variable rejected.", $"'{name}' is invalid or owned by the runtime or credential mechanism.", "Remove or rename the setting and use the declared service identity and Cloud Run runtime metadata.");
             }
         }
     }
@@ -423,7 +435,18 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
         return label;
     }
 
-    private static string CanonicalEnvironment(IReadOnlyDictionary<string, string> environment) => string.Join('\0', environment.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => item.Key + "=" + item.Value));
+    private static string CanonicalEnvironment(IReadOnlyDictionary<string, string> environment) =>
+        JsonSerializer.Serialize(environment.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => new KeyValuePair<string, string>(item.Key, item.Value)));
+
+    private static bool EnvironmentEquivalent(IReadOnlyDictionary<string, string> expected, IReadOnlyDictionary<string, string> actual) =>
+        expected.Count == actual.Count &&
+        expected.All(pair => actual.TryGetValue(pair.Key, out var value) && string.Equals(pair.Value, value, StringComparison.Ordinal));
+
+    private static bool IsInvalidOrReservedEnvironmentName(string name) =>
+        string.IsNullOrEmpty(name) ||
+        name.Contains('=') ||
+        name.StartsWith("X_GOOGLE_", StringComparison.Ordinal) ||
+        ReservedEnvironmentNames.Contains(name);
 
     private static readonly FrozenSet<string> ReservedEnvironmentNames = new[]
     {
@@ -446,11 +469,29 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
         expected.Command == actual.Command &&
         expected.CommandElements == actual.CommandElements &&
         expected.Arguments.SequenceEqual(actual.Arguments, StringComparer.Ordinal) &&
-        CanonicalEnvironment(expected.Environment) == CanonicalEnvironment(actual.Environment) &&
+        EnvironmentEquivalent(expected.Environment, actual.Environment) &&
         expected.Tasks == actual.Tasks && expected.Parallelism == actual.Parallelism && expected.Retries == actual.Retries && expected.Timeout == actual.Timeout &&
         expected.Network == actual.Network && expected.Subnetwork == actual.Subnetwork && expected.Egress == actual.Egress && expected.CloudSqlInstanceConnectionName == actual.CloudSqlInstanceConnectionName &&
         expected.SecretEnvironmentVariable == actual.SecretEnvironmentVariable && expected.SecretEnvironments == actual.SecretEnvironments && expected.SecretId == actual.SecretId && expected.SecretVersion == actual.SecretVersion && expected.ServiceAccount == actual.ServiceAccount &&
         (!includeProvenance || (expected.EnvironmentLabel == actual.EnvironmentLabel && expected.SourceRevisionLabel == actual.SourceRevisionLabel));
+
+    private static bool MatchesPortableIntent(GcpCloudRunMigrationParity expected, JsonElement job)
+    {
+        var execution = job.GetProperty("execution");
+        var environment = job.GetProperty("environment").EnumerateObject()
+            .ToDictionary(item => item.Name, item => item.Value.GetString()!, StringComparer.Ordinal);
+        return expected.LogicalId == job.GetProperty("id").GetProperty("value").GetString() &&
+        expected.Image == job.GetProperty("image").GetProperty("value").GetString() &&
+        expected.Command == job.GetProperty("command").GetString() &&
+        expected.CommandElements == 1 &&
+        expected.Arguments.SequenceEqual(Strings(job, "arguments"), StringComparer.Ordinal) &&
+        EnvironmentEquivalent(expected.Environment, environment) &&
+        expected.Tasks == execution.GetProperty("tasks").GetInt32() &&
+        expected.Parallelism == execution.GetProperty("parallelism").GetInt32() &&
+        expected.Retries == execution.GetProperty("retries").GetInt32() &&
+        expected.Timeout == FormatDuration(TimeSpan.Parse(execution.GetProperty("timeout").GetString()!, CultureInfo.InvariantCulture)) &&
+        expected.SecretEnvironmentVariable == job.GetProperty("connectionSecret").GetProperty("environmentVariable").GetString();
+    }
     private static DeploymentValidationException Failure(string code, string problem, string cause, string fix) => new(DeploymentDiagnostic.Create(code, problem, cause, fix));
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };

@@ -128,11 +128,19 @@ public sealed class DeploymentIntentTests
     [Theory]
     [InlineData("DATABASE_PASSWORD")]
     [InlineData("apiSecretReference")]
+    [InlineData("API_TOKEN")]
+    [InlineData("API_KEY")]
+    [InlineData("DATABASE_URL")]
+    [InlineData("ConnectionStrings__Default")]
+    [InlineData("GOOGLE_APPLICATION_CREDENTIALS")]
+    [InlineData("PRIVATE_KEY")]
+    [InlineData("AWS_ACCESS_KEY_ID")]
     public void MigrationJobRejectsSecretShapedEnvironment(string name)
     {
-        var error = Assert.Throws<DeploymentValidationException>(() => CreateJob(environment: new Dictionary<string, string> { [name] = "redacted" }));
+        const string marker = "must-not-enter-diagnostics";
+        var error = Assert.Throws<DeploymentValidationException>(() => CreateJob(environment: new Dictionary<string, string> { [name] = marker }));
         Assert.Equal("ASDEPLOY115", error.Diagnostic.Code);
-        Assert.DoesNotContain("redacted", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(marker, error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -279,7 +279,34 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
     }
 
     [Fact]
-    public async Task RenderAndWrite_DoesNotDuplicateProviderOwnedIntentArtifact()
+    public async Task RenderAndWrite_AcceptsProviderIntentThatMatchesEvaluatedGraph()
+    {
+        var output = NewOutputDirectory();
+        try
+        {
+            var graph = CreateAnnotatedGraph(target: new FakeTarget(
+                AllCapabilities,
+                render: request => new DeploymentRenderResult("fake", [
+                    DeploymentArtifact.Create("deployment-intent.v1.json", DeploymentCanonicalJson.Serialize(request.Intent)),
+                ])));
+            graph.Project.WithComputeEnvironment(graph.Target);
+
+            var result = await AspireDeploymentPipelineAdapter.RenderAndWriteAsync(
+                Assert.IsType<AppSurfaceDeploymentTargetResource>(graph.Target.Resource),
+                new DistributedApplicationModel(graph.Builder.Resources),
+                CreateOutputServices(output),
+                CancellationToken.None);
+
+            Assert.Single(result.Artifacts);
+        }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RenderAndWrite_RejectsProviderIntentThatContradictsEvaluatedGraph()
     {
         var output = NewOutputDirectory();
         try
@@ -290,13 +317,15 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
                 render: _ => new DeploymentRenderResult("fake", [intentArtifact])));
             graph.Project.WithComputeEnvironment(graph.Target);
 
-            var result = await AspireDeploymentPipelineAdapter.RenderAndWriteAsync(
-                Assert.IsType<AppSurfaceDeploymentTargetResource>(graph.Target.Resource),
-                new DistributedApplicationModel(graph.Builder.Resources),
-                CreateOutputServices(output),
-                CancellationToken.None);
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                AspireDeploymentPipelineAdapter.RenderAndWriteAsync(
+                    Assert.IsType<AppSurfaceDeploymentTargetResource>(graph.Target.Resource),
+                    new DistributedApplicationModel(graph.Builder.Resources),
+                    CreateOutputServices(output),
+                    CancellationToken.None));
 
-            Assert.Single(result.Artifacts);
+            Assert.Contains("ASDEPLOY221", exception.Message, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(output));
         }
         finally
         {
@@ -617,7 +646,7 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
     public void ResolveBindingProfilePath_RejectsParentEscape(string path, string diagnostic)
     {
         var exception = Assert.Throws<DeploymentValidationException>(() =>
-            AspireDeploymentPipelineAdapter.ResolveBindingProfilePath(Path.Combine(Path.GetTempPath(), "apphost"), path));
+            AspireDeploymentPipelineAdapter.ResolveBindingProfilePath(TestPathUtils.PathUnder(Path.GetTempPath(), "apphost"), path));
 
         Assert.Equal(diagnostic, exception.Diagnostic.Code);
     }
@@ -625,10 +654,10 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
     [Fact]
     public void ResolveBindingProfilePath_RejectsAbsolutePath()
     {
-        var absolute = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "bindings.json");
+        var absolute = Path.Join(Path.GetPathRoot(Path.GetTempPath())!, "bindings.json");
 
         var exception = Assert.Throws<DeploymentValidationException>(() =>
-            AspireDeploymentPipelineAdapter.ResolveBindingProfilePath(Path.Combine(Path.GetTempPath(), "apphost"), absolute));
+            AspireDeploymentPipelineAdapter.ResolveBindingProfilePath(TestPathUtils.PathUnder(Path.GetTempPath(), "apphost"), absolute));
 
         Assert.Equal("ASDEPLOY218", exception.Diagnostic.Code);
     }
@@ -692,7 +721,7 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
         .AddSingleton<IPipelineOutputService>(new TestOutputService(output))
         .BuildServiceProvider();
 
-    private static string NewOutputDirectory() => Path.Combine(Path.GetTempPath(), "appsurface-aspire-tests-" + Guid.NewGuid().ToString("N"));
+    private static string NewOutputDirectory() => TestPathUtils.PathUnder(Path.GetTempPath(), "appsurface-aspire-tests-" + Guid.NewGuid().ToString("N"));
 
     private sealed class FakeTarget(
         IReadOnlySet<DeploymentCapability> capabilities,
@@ -716,9 +745,9 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
 
         public string GetOutputDirectory(IResource resource) => output;
 
-        public string GetTempDirectory() => Path.Combine(output, ".tmp");
+        public string GetTempDirectory() => TestPathUtils.PathUnder(output, ".tmp");
 
-        public string GetTempDirectory(IResource resource) => Path.Combine(output, ".tmp");
+        public string GetTempDirectory(IResource resource) => TestPathUtils.PathUnder(output, ".tmp");
     }
 
     private sealed class OtherComputeEnvironment(string name) : Resource(name), IComputeEnvironmentResource

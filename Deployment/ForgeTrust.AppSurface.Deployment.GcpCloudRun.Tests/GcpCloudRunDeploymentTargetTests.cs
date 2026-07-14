@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Deployment;
@@ -479,6 +480,33 @@ public sealed class GcpCloudRunDeploymentTargetTests : IDisposable
     }
 
     [Fact]
+    public async Task VerifyAsync_RejectsCoordinatedPlanAndTerraformRewriteAgainstIntent()
+    {
+        var runner = new RecordingRunner();
+        var target = new GcpCloudRunDeploymentTarget(runner);
+        var rendered = await target.RenderAsync(Request(await WriteProfileAsync(), Intent()));
+        var artifacts = rendered.Artifacts.ToArray();
+        var terraformIndex = Array.FindIndex(artifacts, item => item.FileName == "gcp-cloud-run-migration.tf.json");
+        var planIndex = Array.FindIndex(artifacts, item => item.FileName == "gcp-cloud-run-migration.plan.json");
+        var originalImage = $"us-docker.pkg.dev/skoolit/jobs/migrations@sha256:{new string('b', 64)}";
+        var rewrittenImage = $"us-docker.pkg.dev/skoolit/jobs/migrations@sha256:{new string('c', 64)}";
+        var priorTerraformHash = artifacts[terraformIndex].Sha256;
+        var rewrittenTerraform = Encoding.UTF8.GetString(artifacts[terraformIndex].Content)
+            .Replace(originalImage, rewrittenImage, StringComparison.Ordinal);
+        artifacts[terraformIndex] = DeploymentArtifact.Create(artifacts[terraformIndex].FileName, Encoding.UTF8.GetBytes(rewrittenTerraform));
+        var rewrittenPlan = Encoding.UTF8.GetString(artifacts[planIndex].Content)
+            .Replace(originalImage, rewrittenImage, StringComparison.Ordinal)
+            .Replace(priorTerraformHash, artifacts[terraformIndex].Sha256, StringComparison.Ordinal);
+        artifacts[planIndex] = DeploymentArtifact.Create(artifacts[planIndex].FileName, Encoding.UTF8.GetBytes(rewrittenPlan));
+
+        var error = await Assert.ThrowsAsync<DeploymentValidationException>(() =>
+            target.VerifyAsync(new DeploymentVerifyRequest(rendered with { Artifacts = artifacts }, DeploymentParityMode.Shadow)));
+
+        Assert.Equal("ASDEPLOY152", error.Diagnostic.Code);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
     public async Task VerifyAsync_RejectsNullPlanAndWrongArtifactNameBeforeCloudCall()
     {
         var runner = new RecordingRunner();
@@ -609,14 +637,42 @@ public sealed class GcpCloudRunDeploymentTargetTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_RejectsRuntimeAndCredentialEnvironmentOverrides()
+    public async Task RenderAsync_RejectsRuntimeEnvironmentOverrides()
     {
         var profile = await WriteProfileAsync();
-        foreach (var name in new[] { "CLOUD_RUN_JOB", "GOOGLE_APPLICATION_CREDENTIALS" })
+        foreach (var name in new[] { "CLOUD_RUN_JOB", "PORT" })
         {
             var error = await Assert.ThrowsAsync<DeploymentValidationException>(() => new GcpCloudRunDeploymentTarget().RenderAsync(Request(profile, Intent(new Dictionary<string, string> { [name] = "override" }))));
             Assert.Equal("ASDEPLOY168", error.Diagnostic.Code);
         }
+    }
+
+    [Theory]
+    [InlineData("NAME=VALUE")]
+    [InlineData("X_GOOGLE_TEST")]
+    public async Task RenderAsync_RejectsProviderInvalidEnvironmentNames(string name)
+    {
+        var error = await Assert.ThrowsAsync<DeploymentValidationException>(async () =>
+            await new GcpCloudRunDeploymentTarget().RenderAsync(Request(
+                await WriteProfileAsync(),
+                Intent(new Dictionary<string, string> { [name] = "value" }))));
+
+        Assert.Equal("ASDEPLOY168", error.Diagnostic.Code);
+    }
+
+    [Fact]
+    public async Task RenderAsync_EnforcesCloudRunEnvironmentVariableLimitIncludingSecret()
+    {
+        var profile = await WriteProfileAsync();
+        var allowed = Enumerable.Range(0, 999).ToDictionary(index => $"SETTING_{index:D4}", index => index.ToString(CultureInfo.InvariantCulture));
+        var rendered = await new GcpCloudRunDeploymentTarget().RenderAsync(Request(profile, Intent(allowed)));
+        Assert.NotNull(rendered);
+
+        var tooMany = new Dictionary<string, string>(allowed, StringComparer.Ordinal) { ["SETTING_1000"] = "1000" };
+        var error = await Assert.ThrowsAsync<DeploymentValidationException>(() =>
+            new GcpCloudRunDeploymentTarget().RenderAsync(Request(profile, Intent(tooMany))));
+
+        Assert.Equal("ASDEPLOY169", error.Diagnostic.Code);
     }
 
     [Fact]

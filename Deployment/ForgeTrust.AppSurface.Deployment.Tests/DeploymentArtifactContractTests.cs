@@ -50,6 +50,19 @@ public sealed class DeploymentArtifactContractTests
     [InlineData("nested\\intent.json")]
     [InlineData(".")]
     [InlineData("..")]
+    [InlineData("C:artifact.json")]
+    [InlineData("artifact?.json")]
+    [InlineData("artifact*.json")]
+    [InlineData("artifact\".json")]
+    [InlineData("artifact<.json")]
+    [InlineData("artifact>.json")]
+    [InlineData("artifact|.json")]
+    [InlineData("artifact.json.")]
+    [InlineData("artifact.json ")]
+    [InlineData("artifact\u0001.json")]
+    [InlineData("CON")]
+    [InlineData("nul.txt")]
+    [InlineData("LPT1.log")]
     public void ArtifactFactoryRejectsUnsafeFileNames(string fileName)
     {
         var error = Assert.Throws<ArgumentException>(() => DeploymentArtifact.Create(fileName, [1]));

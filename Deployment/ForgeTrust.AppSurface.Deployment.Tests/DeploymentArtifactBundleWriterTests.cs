@@ -6,7 +6,7 @@ namespace ForgeTrust.AppSurface.Deployment.Tests;
 
 public sealed class DeploymentArtifactBundleWriterTests : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "AppSurfaceDeploymentTests", Guid.NewGuid().ToString("N"));
+    private readonly string _root = TestPathUtils.PathUnder(Path.GetTempPath(), "AppSurfaceDeploymentTests", Guid.NewGuid().ToString("N"));
 
     [Fact]
     public async Task WriteCreatesOwnedBundleInPreviouslyMissingDirectory()
@@ -14,7 +14,7 @@ public sealed class DeploymentArtifactBundleWriterTests : IDisposable
         var output = OutputPath();
         await DeploymentArtifactBundleWriter.WriteAsync(output, "gcp-staging", [Artifact("intent.json", "first")]);
 
-        Assert.Equal("first", File.ReadAllText(Path.Combine(output, "intent.json")));
+        Assert.Equal("first", File.ReadAllText(TestPathUtils.PathUnder(output, "intent.json")));
         Assert.Equal("gcp-staging\n", File.ReadAllText(TestPathUtils.PathUnder(output, DeploymentArtifactBundleWriter.OwnershipMarkerFileName)));
         Assert.Empty(StageDirectories());
     }
@@ -25,7 +25,7 @@ public sealed class DeploymentArtifactBundleWriterTests : IDisposable
         var output = OutputPath();
         Directory.CreateDirectory(output);
         await DeploymentArtifactBundleWriter.WriteAsync(output, "gcp-staging", [Artifact("intent.json", "first")]);
-        Assert.True(File.Exists(Path.Combine(output, "intent.json")));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(output, "intent.json")));
     }
 
     [Fact]
@@ -42,8 +42,8 @@ public sealed class DeploymentArtifactBundleWriterTests : IDisposable
             "gcp-staging",
             [Artifact("intent.json", "new"), Artifact("plan.json", "new-plan")]);
 
-        Assert.Equal("new", File.ReadAllText(Path.Combine(output, "intent.json")));
-        Assert.Equal("new-plan", File.ReadAllText(Path.Combine(output, "plan.json")));
+        Assert.Equal("new", File.ReadAllText(TestPathUtils.PathUnder(output, "intent.json")));
+        Assert.Equal("new-plan", File.ReadAllText(TestPathUtils.PathUnder(output, "plan.json")));
         Assert.Empty(StageDirectories());
     }
 
@@ -52,14 +52,14 @@ public sealed class DeploymentArtifactBundleWriterTests : IDisposable
     {
         var output = OutputPath();
         Directory.CreateDirectory(output);
-        File.WriteAllText(Path.Combine(output, "user.txt"), "owned by user");
+        File.WriteAllText(TestPathUtils.PathUnder(output, "user.txt"), "owned by user");
 
         var error = await Assert.ThrowsAsync<DeploymentValidationException>(
             () => DeploymentArtifactBundleWriter.WriteAsync(output, "gcp-staging", [Artifact("intent.json", "new")]));
 
         Assert.Equal("ASDEPLOY123", error.Diagnostic.Code);
-        Assert.Equal("owned by user", File.ReadAllText(Path.Combine(output, "user.txt")));
-        Assert.False(File.Exists(Path.Combine(output, "intent.json")));
+        Assert.Equal("owned by user", File.ReadAllText(TestPathUtils.PathUnder(output, "user.txt")));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(output, "intent.json")));
     }
 
     [Fact]
@@ -81,13 +81,13 @@ public sealed class DeploymentArtifactBundleWriterTests : IDisposable
         var output = OutputPath();
         Directory.CreateDirectory(output);
         File.WriteAllText(TestPathUtils.PathUnder(output, DeploymentArtifactBundleWriter.OwnershipMarkerFileName), "gcp-staging\n");
-        File.WriteAllText(Path.Combine(output, "unexpected.txt"), "preserve");
+        File.WriteAllText(TestPathUtils.PathUnder(output, "unexpected.txt"), "preserve");
 
         var error = await Assert.ThrowsAsync<DeploymentValidationException>(
             () => DeploymentArtifactBundleWriter.WriteAsync(output, "gcp-staging", [Artifact("intent.json", "new")]));
 
         Assert.Equal("ASDEPLOY125", error.Diagnostic.Code);
-        Assert.Equal("preserve", File.ReadAllText(Path.Combine(output, "unexpected.txt")));
+        Assert.Equal("preserve", File.ReadAllText(TestPathUtils.PathUnder(output, "unexpected.txt")));
     }
 
     [Fact]
@@ -133,7 +133,7 @@ public sealed class DeploymentArtifactBundleWriterTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => DeploymentArtifactBundleWriter.WriteAsync(output, "gcp-staging", [Artifact("intent.json", "new")], cancellation.Token));
 
-        Assert.Equal("old", File.ReadAllText(Path.Combine(output, "intent.json")));
+        Assert.Equal("old", File.ReadAllText(TestPathUtils.PathUnder(output, "intent.json")));
         Assert.Empty(StageDirectories());
     }
 
@@ -159,6 +159,32 @@ public sealed class DeploymentArtifactBundleWriterTests : IDisposable
         await Assert.ThrowsAsync<ArgumentNullException>(() => DeploymentArtifactBundleWriter.WriteAsync(OutputPath(), "target", null!));
     }
 
+    [Fact]
+    public async Task WriteRejectsFileSystemRootBeforeCreatingArtifacts()
+    {
+        var root = Path.GetPathRoot(Path.GetFullPath(_root))!;
+        var error = await Assert.ThrowsAsync<DeploymentValidationException>(() =>
+            DeploymentArtifactBundleWriter.WriteAsync(root, "target", []));
+
+        Assert.Equal("ASDEPLOY121", error.Diagnostic.Code);
+    }
+
+    [Fact]
+    public async Task WriteRejectsSymbolicLinkOutputWithoutChangingTarget()
+    {
+        Directory.CreateDirectory(_root);
+        var actual = TestPathUtils.PathUnder(_root, "actual");
+        var output = OutputPath();
+        Directory.CreateDirectory(actual);
+        Directory.CreateSymbolicLink(output, actual);
+
+        var error = await Assert.ThrowsAsync<DeploymentValidationException>(() =>
+            DeploymentArtifactBundleWriter.WriteAsync(output, "target", [Artifact("intent.json", "new")]));
+
+        Assert.Equal("ASDEPLOY122", error.Diagnostic.Code);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(actual));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -167,7 +193,7 @@ public sealed class DeploymentArtifactBundleWriterTests : IDisposable
         }
     }
 
-    private string OutputPath() => Path.Combine(_root, "bundle");
+    private string OutputPath() => TestPathUtils.PathUnder(_root, "bundle");
 
     private string[] StageDirectories() => Directory.Exists(_root)
         ? Directory.GetDirectories(_root, ".bundle.appsurface-*", SearchOption.TopDirectoryOnly)

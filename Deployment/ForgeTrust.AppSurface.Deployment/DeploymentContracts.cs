@@ -240,6 +240,19 @@ public sealed record DatabaseBinding
 /// <summary>Portable intent for one explicitly bounded migration job.</summary>
 public sealed record MigrationJobIntent
 {
+    private static readonly string[] SecretNameFragments =
+    [
+        "secret",
+        "password",
+        "token",
+        "credential",
+        "connectionstring",
+        "databaseurl",
+        "apikey",
+        "privatekey",
+        "accesskey",
+    ];
+
     /// <summary>Initializes migration-job intent and validates all cross-field references.</summary>
     /// <param name="id">Canonical logical job id.</param>
     /// <param name="phase">Explicit deployment phase.</param>
@@ -288,8 +301,8 @@ public sealed record MigrationJobIntent
         ServiceIdentity = serviceIdentity;
         RequiredCapabilities = Array.AsReadOnly(new[] { DeploymentCapability.PrivateNetwork, DeploymentCapability.RelationalConnection, DeploymentCapability.RunToCompletionJob });
         RequirePrivateNetwork = requirePrivateNetwork;
+        if (environment?.ContainsKey(connectionSecret.EnvironmentVariable) is true) throw new DeploymentValidationException(DeploymentDiagnostic.Create("ASDEPLOY129", "Environment setting collides with the connection secret.", $"'{connectionSecret.EnvironmentVariable}' is declared as both plaintext and secret-backed configuration.", "Remove the plaintext setting and keep only the logical secret binding."));
         var environmentCopy = CopyEnvironment(environment);
-        if (environmentCopy.ContainsKey(connectionSecret.EnvironmentVariable)) throw new DeploymentValidationException(DeploymentDiagnostic.Create("ASDEPLOY129", "Environment setting collides with the connection secret.", $"'{connectionSecret.EnvironmentVariable}' is declared as both plaintext and secret-backed configuration.", "Remove the plaintext setting and keep only the logical secret binding."));
         Environment = new ReadOnlyDictionary<string, string>(environmentCopy);
     }
 
@@ -326,7 +339,7 @@ public sealed record MigrationJobIntent
     /// <summary>Gets whether private networking is required.</summary>
     public bool RequirePrivateNetwork { get; }
 
-    /// <summary>Gets sorted non-secret environment settings.</summary>
+    /// <summary>Gets sorted artifact-visible environment settings after secret-shaped names are rejected.</summary>
     public IReadOnlyDictionary<string, string> Environment { get; }
 
     private static string RequireArgument(string argument) => argument ?? throw new ArgumentException("ASDEPLOY113: command arguments cannot be null.", nameof(argument));
@@ -337,11 +350,17 @@ public sealed record MigrationJobIntent
         foreach (var pair in source ?? new Dictionary<string, string>())
         {
             if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null) throw new ArgumentException("ASDEPLOY114: environment names and values cannot be null or blank.", nameof(source));
-            if (pair.Key.Contains("secret", StringComparison.OrdinalIgnoreCase) || pair.Key.Contains("password", StringComparison.OrdinalIgnoreCase)) throw new DeploymentValidationException(DeploymentDiagnostic.Create("ASDEPLOY115", "Plaintext secret-shaped environment setting rejected.", "Deployment intent environment is non-secret evidence.", "Use a logical SecretBinding instead."));
+            if (IsSecretShapedName(pair.Key)) throw new DeploymentValidationException(DeploymentDiagnostic.Create("ASDEPLOY115", "Plaintext secret-shaped environment setting rejected.", "Deployment intent environment is non-secret evidence.", "Use a logical SecretBinding instead."));
             copy.Add(pair.Key, pair.Value);
         }
 
         return copy;
+    }
+
+    private static bool IsSecretShapedName(string name)
+    {
+        var normalized = string.Concat(name.Where(char.IsAsciiLetterOrDigit)).ToLowerInvariant();
+        return SecretNameFragments.Any(normalized.Contains);
     }
 }
 
@@ -433,6 +452,13 @@ public static class DeploymentCanonicalJson
 /// <summary>A named deterministic deployment artifact whose content cannot be mutated after creation.</summary>
 public sealed class DeploymentArtifact
 {
+    private static readonly HashSet<string> WindowsReservedFileNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL", "CLOCK$",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    };
+
     private readonly byte[] _content;
 
     private DeploymentArtifact(string fileName, byte[] content, string sha256)
@@ -457,16 +483,31 @@ public sealed class DeploymentArtifact
     /// <returns>An artifact with defensively copied content and its lowercase SHA-256 hash.</returns>
     public static DeploymentArtifact Create(string fileName, byte[] content)
     {
-        if (string.IsNullOrWhiteSpace(fileName) ||
-            fileName is "." or ".." ||
-            fileName.Contains('/') ||
-            fileName.Contains('\\') ||
-            Path.GetFileName(fileName) != fileName)
+        if (!IsPortableFileName(fileName))
         {
             throw new ArgumentException("ASDEPLOY119: artifact name must be one portable safe file name.", nameof(fileName));
         }
         ArgumentNullException.ThrowIfNull(content);
         return new DeploymentArtifact(fileName, content.ToArray(), DeploymentCanonicalJson.Hash(content));
+    }
+
+    private static bool IsPortableFileName(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            fileName is "." or ".." ||
+            fileName.Contains('/') ||
+            fileName.Contains('\\') ||
+            fileName.IndexOfAny([':', '*', '?', '"', '<', '>', '|']) >= 0 ||
+            fileName.Any(char.IsControl) ||
+            fileName.EndsWith('.') ||
+            fileName.EndsWith(' ') ||
+            Path.GetFileName(fileName) != fileName)
+        {
+            return false;
+        }
+
+        var deviceStem = fileName.Split('.', 2)[0];
+        return !WindowsReservedFileNames.Contains(deviceStem);
     }
 }
 
@@ -511,18 +552,18 @@ public static class DeploymentArtifactBundleWriter
         Directory.CreateDirectory(parent);
 
         var suffix = Guid.NewGuid().ToString("N");
-        var staging = Path.Combine(parent, $".{name}.appsurface-stage-{suffix}");
-        var backup = Path.Combine(parent, $".{name}.appsurface-backup-{suffix}");
+        var staging = Path.Join(parent, $".{name}.appsurface-stage-{suffix}");
+        var backup = Path.Join(parent, $".{name}.appsurface-backup-{suffix}");
         try
         {
             Directory.CreateDirectory(staging);
             foreach (var artifact in artifactArray)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await File.WriteAllBytesAsync(Path.Combine(staging, artifact.FileName), artifact.Content, cancellationToken).ConfigureAwait(false);
+                await File.WriteAllBytesAsync(Path.Join(staging, artifact.FileName), artifact.Content, cancellationToken).ConfigureAwait(false);
             }
 
-            await File.WriteAllTextAsync(Path.Combine(staging, OwnershipMarkerFileName), target + "\n", new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
+            await File.WriteAllTextAsync(Path.Join(staging, OwnershipMarkerFileName), target + "\n", new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
 
             var hadExisting = Directory.Exists(output);
@@ -554,7 +595,7 @@ public static class DeploymentArtifactBundleWriter
 
         var entries = directoryInfo.EnumerateFileSystemInfos().ToArray();
         if (entries.Length == 0) return;
-        var marker = Path.Combine(output, OwnershipMarkerFileName);
+        var marker = Path.Join(output, OwnershipMarkerFileName);
         if (!File.Exists(marker)) throw Validation("ASDEPLOY123", "Output directory is not AppSurface-owned.", "The non-empty directory has no AppSurface ownership marker.", "Choose an empty dedicated directory or remove it through its current owner.");
         if (!string.Equals(File.ReadAllText(marker), target + "\n", StringComparison.Ordinal)) throw Validation("ASDEPLOY124", "Output directory belongs to another target.", "The ownership marker does not match this deployment target.", "Give each deployment target a distinct output directory.");
 
