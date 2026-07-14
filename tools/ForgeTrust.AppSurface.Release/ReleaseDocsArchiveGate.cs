@@ -669,7 +669,7 @@ internal static class ReleaseDocsArchiveGate
         var alternateManifestFileName = ReleaseManifestFileName[..^1] + 'N';
         try
         {
-            return fileExists(Path.Combine(fullRootPath, alternateManifestFileName))
+            return fileExists(Path.Join(fullRootPath, alternateManifestFileName))
                 ? StringComparer.OrdinalIgnoreCase
                 : StringComparer.Ordinal;
         }

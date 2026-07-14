@@ -502,7 +502,7 @@ internal abstract class AppSurfaceDocsReleaseArchiveFileSystem
         var alternateManifestFileName = AppSurfaceDocsReleaseArchiveVerifier.FileName[..^1] + 'N';
         try
         {
-            return fileExists(Path.Combine(fullRootPath, alternateManifestFileName))
+            return fileExists(Path.Join(fullRootPath, alternateManifestFileName))
                 ? StringComparer.OrdinalIgnoreCase
                 : StringComparer.Ordinal;
         }
