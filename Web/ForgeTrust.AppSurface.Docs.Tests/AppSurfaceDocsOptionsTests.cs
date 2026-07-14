@@ -681,12 +681,12 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
-    public void AppSurfaceDocsOptions_ShouldDefaultVersioningRewriteLimitToTwoMiB()
+    public void AppSurfaceDocsOptions_ShouldDefaultVersioningRewriteLimitToFourMiB()
     {
         var options = new AppSurfaceDocsOptions();
 
-        Assert.Equal(2_097_152, options.Versioning.MaxRewrittenFileSizeBytes);
-        Assert.Equal(2_097_152, AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes);
+        Assert.Equal(4_194_304, options.Versioning.MaxRewrittenFileSizeBytes);
+        Assert.Equal(4_194_304, AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes);
         Assert.Equal(1, AppSurfaceDocsVersioningOptions.MinMaxRewrittenFileSizeBytes);
         Assert.Equal(33_554_432, AppSurfaceDocsVersioningOptions.MaxMaxRewrittenFileSizeBytes);
     }

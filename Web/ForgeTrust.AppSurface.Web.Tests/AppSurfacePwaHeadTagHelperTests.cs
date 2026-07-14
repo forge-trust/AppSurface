@@ -36,7 +36,8 @@ public sealed class AppSurfacePwaHeadTagHelperTests
         var options = PwaOptionsTests.CreateValidOptions();
         options.Offline.Enabled = true;
         options.Offline.OfflineFallbackPath = "/offline.html";
-        var helper = new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), options)
+        var fileVersionProvider = new StubFileVersionProvider();
+        var helper = new AppSurfacePwaHeadTagHelper(fileVersionProvider, options)
         {
             ViewContext = CreateViewContext("/tenant")
         };
@@ -52,6 +53,53 @@ public sealed class AppSurfacePwaHeadTagHelperTests
         Assert.Contains("href=\"/tenant/icons/app-192.png?v=asset\"", html, StringComparison.Ordinal);
         Assert.Contains("sizes=\"512x512\"", html, StringComparison.Ordinal);
         Assert.Contains("<meta name=\"appsurface:pwa-service-worker\" content=\"/tenant/service-worker.js\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("pwa/register.js", html, StringComparison.Ordinal);
+        Assert.Contains("/tenant/icons/app-192.png", fileVersionProvider.Paths);
+        Assert.Contains("/tenant/icons/app-512.png", fileVersionProvider.Paths);
+    }
+
+    [Fact]
+    public void Process_WhenPushOnly_EmitsWorkerHelperWithoutInstallMetadata()
+    {
+        var options = new PwaOptions();
+        options.Scope = "/workspace/";
+        options.Push.Enabled = true;
+        var helper = new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), options)
+        {
+            ViewContext = CreateViewContext("/tenant")
+        };
+        var output = CreateOutput();
+
+        helper.Process(CreateContext(), output);
+
+        var html = output.Content.GetContent();
+        Assert.DoesNotContain("rel=\"manifest\"", html, StringComparison.Ordinal);
+        Assert.Contains("content=\"/tenant/service-worker.js\"", html, StringComparison.Ordinal);
+        Assert.Contains("content=\"/tenant/workspace/\"", html, StringComparison.Ordinal);
+        Assert.Contains("src=\"/tenant/_appsurface/pwa/register.js?v=", html, StringComparison.Ordinal);
+        Assert.Contains("data-appsurface-pwa-worker=\"/tenant/service-worker.js\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-appsurface-pwa-scope=\"/tenant/workspace/\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Process_PushMetadata_EncodesHostileValues()
+    {
+        var options = new PwaOptions();
+        options.Push.Enabled = true;
+        options.Worker.ServiceWorkerPath = "/worker\"onload=\"bad.js";
+        options.Scope = "/scope\"data-bad=\"x/";
+        var helper = new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), options)
+        {
+            ViewContext = CreateViewContext()
+        };
+        var output = CreateOutput();
+
+        helper.Process(CreateContext(), output);
+
+        var html = output.Content.GetContent();
+        Assert.Contains("/worker&quot;onload=&quot;bad.js", html, StringComparison.Ordinal);
+        Assert.Contains("/scope&quot;data-bad=&quot;x/", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"onload=\"", html, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -107,9 +155,12 @@ public sealed class AppSurfacePwaHeadTagHelperTests
 
     private sealed class StubFileVersionProvider : IFileVersionProvider
     {
+        public IList<string> Paths { get; } = [];
+
         public string AddFileVersionToPath(PathString requestPathBase, string path)
         {
-            return requestPathBase.Add(new PathString(path)).Value + "?v=asset";
+            Paths.Add(path);
+            return path + "?v=asset";
         }
     }
 }
