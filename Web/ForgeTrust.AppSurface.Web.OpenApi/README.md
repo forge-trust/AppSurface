@@ -16,9 +16,9 @@ AppSurface ships as a coordinated package family. Before installing this package
 
 ## OpenAPI.NET Dependency Floor
 
-This package directly requires `Microsoft.OpenApi` 2.7.5 or later to avoid the process-termination vulnerability described by [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc). The direct dependency is intentional: `Microsoft.AspNetCore.OpenApi` 10.0.9 still declares a 2.0.0 minimum, which allows NuGet to select a vulnerable version unless the consuming package supplies a safer floor.
+This package directly requires `Microsoft.OpenApi` 2.7.5 or later to move the default 2.x resolution above the process-termination vulnerability described by [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc). The direct dependency is intentional: `Microsoft.AspNetCore.OpenApi` 10.0.9 still declares a 2.0.0 minimum, which allows NuGet to select a vulnerable 2.x version unless the consuming package supplies a safer floor.
 
-AppSurface itself restores and verifies `Microsoft.OpenApi` 2.7.5 on the 2.x line. The published NuGet dependency is a minimum with no upper bound, so downstream dependency resolution may select a later version. That open-ended range is not a claim that AppSurface has tested or guarantees compatibility with `Microsoft.OpenApi` 3.x; consumers overriding the coordinated dependency graph must run their own OpenAPI generation and endpoint tests.
+AppSurface itself restores and verifies `Microsoft.OpenApi` 2.7.5 on the 2.x line. The published NuGet dependency is a minimum with no upper bound, so downstream dependency resolution may select a later version. The advisory also affects `Microsoft.OpenApi` 3.0.0 through 3.5.3; consumers moving the coordinated graph to 3.x must select 3.5.4 or later and run their own vulnerability audit, OpenAPI generation, and endpoint tests. The open-ended range is not a claim that AppSurface has tested or guarantees compatibility with 3.x.
 
 ## Usage
 
