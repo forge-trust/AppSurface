@@ -5,8 +5,8 @@ namespace ForgeTrust.AppSurface.Web;
 /// </summary>
 /// <remarks>
 /// The matcher centralizes the browser-style prefix contract used by both AppSurface Web startup validation and the
-/// AppSurface CLI verifier. A scope ending in <c>/</c> is a directory prefix and does not include the same path without
-/// that slash; a scope without a trailing slash includes the exact path and child paths separated by <c>/</c>.
+/// AppSurface CLI verifier. Browser service-worker and manifest scopes use raw URL-path prefix matching. Applications
+/// that require a segment boundary should end a non-root scope in <c>/</c>.
 /// </remarks>
 internal static class PwaScopePathMatcher
 {
@@ -23,12 +23,6 @@ internal static class PwaScopePathMatcher
             return true;
         }
 
-        if (scope.EndsWith("/", StringComparison.Ordinal))
-        {
-            return path.StartsWith(scope, StringComparison.Ordinal);
-        }
-
-        return string.Equals(path, scope, StringComparison.Ordinal)
-            || path.StartsWith(scope + "/", StringComparison.Ordinal);
+        return path.StartsWith(scope, StringComparison.Ordinal);
     }
 }

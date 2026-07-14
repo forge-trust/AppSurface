@@ -10,52 +10,65 @@ internal static partial class PwaOptionsValidator
 
         var diagnostics = new List<PwaDiagnostic>();
 
-        if (!options.Enabled)
+        if (options.Worker.HasServiceWorkerPathConflict)
+        {
+            diagnostics.Add(
+                new PwaDiagnostic(
+                    "ASPWA020",
+                    PwaDiagnosticSeverity.Error,
+                    "PwaOptions.Worker.ServiceWorkerPath and the Offline.ServiceWorkerPath compatibility alias cannot be configured with different values."));
+        }
+
+        if (!options.HasAnySurfaceEnabled)
         {
             return diagnostics;
         }
 
-        RequireText(options.Name, "ASPWA001", "PwaOptions.Name is required when PWA support is enabled.", diagnostics);
-        RequireText(options.ShortName, "ASPWA002", "PwaOptions.ShortName is required when PWA support is enabled.", diagnostics);
-        RequireHexColor(options.ThemeColor, "ASPWA003", "PwaOptions.ThemeColor must be a CSS hex color such as #2563eb.", diagnostics);
-        RequireHexColor(options.BackgroundColor, "ASPWA004", "PwaOptions.BackgroundColor must be a CSS hex color such as #ffffff.", diagnostics);
-        RequireLocalPath(options.ManifestPath, "ASPWA005", "PwaOptions.ManifestPath must be an app-root-relative path such as /manifest.webmanifest.", diagnostics);
-        RequireLocalStartUrl(options.StartUrl, "ASPWA006", "PwaOptions.StartUrl must be an app-root-relative URL such as /.", diagnostics);
-        RequireLocalPath(options.Scope, "ASPWA007", "PwaOptions.Scope must be an app-root-relative URL such as /.", diagnostics);
-        RequireLocalPath(options.DiagnosticsPath, "ASPWA008", "PwaOptions.DiagnosticsPath must be an app-root-relative path such as /_appsurface/pwa.", diagnostics);
-        RequireStartUrlWithinScope(options.StartUrl, options.Scope, diagnostics);
-
-        if (!Enum.IsDefined(options.Display))
+        if (options.Enabled)
         {
-            diagnostics.Add(new PwaDiagnostic("ASPWA009", PwaDiagnosticSeverity.Error, "PwaOptions.Display is not a supported display mode."));
-        }
+            RequireText(options.Name, "ASPWA001", "PwaOptions.Name is required when install metadata is enabled.", diagnostics);
+            RequireText(options.ShortName, "ASPWA002", "PwaOptions.ShortName is required when install metadata is enabled.", diagnostics);
+            RequireHexColor(options.ThemeColor, "ASPWA003", "PwaOptions.ThemeColor must be a CSS hex color such as #2563eb.", diagnostics);
+            RequireHexColor(options.BackgroundColor, "ASPWA004", "PwaOptions.BackgroundColor must be a CSS hex color such as #ffffff.", diagnostics);
+            RequireLocalStartUrl(options.StartUrl, "ASPWA006", "PwaOptions.StartUrl must be an app-root-relative URL such as /.", diagnostics);
+            RequireStartUrlWithinScope(options.StartUrl, options.Scope, diagnostics);
 
-        if (!options.Icons.Any(icon => HasIconSizeToken(icon.Sizes, "192x192")))
-        {
-            diagnostics.Add(new PwaDiagnostic("ASPWA010", PwaDiagnosticSeverity.Error, "PWA support requires a declared 192x192 icon."));
-        }
-
-        if (!options.Icons.Any(icon => HasIconSizeToken(icon.Sizes, "512x512")))
-        {
-            diagnostics.Add(new PwaDiagnostic("ASPWA011", PwaDiagnosticSeverity.Error, "PWA support requires a declared 512x512 icon."));
-        }
-
-        for (var i = 0; i < options.Icons.Count; i++)
-        {
-            var icon = options.Icons[i];
-            RequireLocalPath(icon.Source, "ASPWA012", $"PwaOptions.Icons[{i}].Source must be an app-root-relative path.", diagnostics);
-
-            if (!HasValidIconSizeTokens(icon.Sizes))
+            if (!Enum.IsDefined(options.Display))
             {
-                diagnostics.Add(new PwaDiagnostic("ASPWA013", PwaDiagnosticSeverity.Error, $"PwaOptions.Icons[{i}].Sizes must use WIDTHxHEIGHT tokens, for example 192x192 or 192x192 512x512."));
+                diagnostics.Add(new PwaDiagnostic("ASPWA009", PwaDiagnosticSeverity.Error, "PwaOptions.Display is not a supported display mode."));
             }
 
-            RequireText(icon.Type, "ASPWA014", $"PwaOptions.Icons[{i}].Type is required.", diagnostics);
+            if (!options.Icons.Any(icon => HasIconSizeToken(icon.Sizes, "192x192")))
+            {
+                diagnostics.Add(new PwaDiagnostic("ASPWA010", PwaDiagnosticSeverity.Error, "PWA install metadata requires a declared 192x192 icon."));
+            }
+
+            if (!options.Icons.Any(icon => HasIconSizeToken(icon.Sizes, "512x512")))
+            {
+                diagnostics.Add(new PwaDiagnostic("ASPWA011", PwaDiagnosticSeverity.Error, "PWA install metadata requires a declared 512x512 icon."));
+            }
+
+            for (var i = 0; i < options.Icons.Count; i++)
+            {
+                var icon = options.Icons[i];
+                RequireLocalPath(icon.Source, "ASPWA012", $"PwaOptions.Icons[{i}].Source must be an app-root-relative path.", diagnostics);
+
+                if (!HasValidIconSizeTokens(icon.Sizes))
+                {
+                    diagnostics.Add(new PwaDiagnostic("ASPWA013", PwaDiagnosticSeverity.Error, $"PwaOptions.Icons[{i}].Sizes must use WIDTHxHEIGHT tokens, for example 192x192 or 192x192 512x512."));
+                }
+
+                RequireText(icon.Type, "ASPWA014", $"PwaOptions.Icons[{i}].Type is required.", diagnostics);
+            }
         }
+
+        RequireEndpointPath(options.ManifestPath, "ASPWA005", "PwaOptions.ManifestPath must be an app-root-relative endpoint path without percent escapes.", diagnostics);
+        RequireScope(options.Scope, options.IsWorkerEnabled, diagnostics);
+        RequireEndpointPath(options.DiagnosticsPath, "ASPWA008", "PwaOptions.DiagnosticsPath must be an app-root-relative endpoint path without percent escapes.", diagnostics);
+        RequireEndpointPath(options.Worker.ServiceWorkerPath, "ASPWA015", "PwaOptions.Worker.ServiceWorkerPath must be an app-root-relative endpoint path without percent escapes.", diagnostics);
 
         if (options.Offline.Enabled)
         {
-            RequireLocalPath(options.Offline.ServiceWorkerPath, "ASPWA015", "PwaOptions.Offline.ServiceWorkerPath must be an app-root-relative path.", diagnostics);
             RequireLocalPath(options.Offline.OfflineFallbackPath, "ASPWA016", "PwaOptions.Offline.OfflineFallbackPath is required when offline support is enabled.", diagnostics);
 
             for (var i = 0; i < options.Offline.StaticAssetPaths.Length; i++)
@@ -64,7 +77,84 @@ internal static partial class PwaOptionsValidator
             }
         }
 
+        if (options.Push.Enabled)
+        {
+            RequireEndpointPath(options.Worker.RegistrationHelperPath, "ASPWA021", "PwaOptions.Worker.RegistrationHelperPath must be an app-root-relative endpoint path without percent escapes.", diagnostics);
+            if (options.Push.HandlerScriptPath is not null)
+            {
+                RequireLocalPath(options.Push.HandlerScriptPath, "ASPWA022", "PwaOptions.Push.HandlerScriptPath must be an app-root-relative path.", diagnostics);
+            }
+        }
+
+        ValidateKnownRouteCollisions(options, diagnostics);
+
         return diagnostics;
+    }
+
+    private static void ValidateKnownRouteCollisions(PwaOptions options, List<PwaDiagnostic> diagnostics)
+    {
+        var routes = new List<(string Name, string Path)>();
+        if (options.Enabled)
+        {
+            routes.Add(("manifest", options.ManifestPath));
+        }
+
+        if (options.DiagnosticsExposure != PwaDiagnosticEndpointExposure.Never)
+        {
+            routes.Add(("diagnostics", options.DiagnosticsPath));
+            if (!string.IsNullOrWhiteSpace(options.DiagnosticsPath))
+            {
+                routes.Add(("diagnostics status", $"{options.DiagnosticsPath.TrimEnd('/')}/status.json"));
+            }
+        }
+
+        if (options.IsWorkerEnabled)
+        {
+            routes.Add(("service worker", options.Worker.ServiceWorkerPath));
+        }
+
+        if (options.Push.Enabled)
+        {
+            routes.Add(("registration helper", options.Worker.RegistrationHelperPath));
+            if (options.Push.HandlerScriptPath is not null)
+            {
+                routes.Add(("custom push handler", options.Push.HandlerScriptPath));
+            }
+        }
+
+        if (options.Offline.Enabled)
+        {
+            routes.Add(("offline fallback", options.Offline.OfflineFallbackPath));
+        }
+
+        for (var i = 0; i < routes.Count; i++)
+        {
+            if (!IsSafeLocalPath(routes[i].Path))
+            {
+                continue;
+            }
+
+            for (var j = i + 1; j < routes.Count; j++)
+            {
+                if (!IsSafeLocalPath(routes[j].Path)
+                    || !string.Equals(NormalizeRouteIdentity(routes[i].Path), NormalizeRouteIdentity(routes[j].Path), StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                diagnostics.Add(
+                    new PwaDiagnostic(
+                        "ASPWA023",
+                        PwaDiagnosticSeverity.Error,
+                        $"The AppSurface PWA {routes[i].Name} and {routes[j].Name} routes must use different paths."));
+            }
+        }
+    }
+
+    private static string NormalizeRouteIdentity(string path)
+    {
+        var normalized = Uri.UnescapeDataString(path);
+        return normalized.Length > 1 ? normalized.TrimEnd('/') : normalized;
     }
 
     public static void ThrowIfInvalid(PwaOptions options)
@@ -107,9 +197,30 @@ internal static partial class PwaOptionsValidator
 
     private static bool HasTraversalSegment(string path)
     {
-        return path.Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Any(segment => ContainsMalformedEscape(segment)
-                || string.Equals(Uri.UnescapeDataString(segment), "..", StringComparison.Ordinal));
+        var decoded = path;
+        while (true)
+        {
+            if (ContainsMalformedEscape(decoded))
+            {
+                return true;
+            }
+
+            var next = Uri.UnescapeDataString(decoded);
+            if (string.Equals(next, decoded, StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            decoded = next;
+        }
+
+        return decoded.StartsWith("//", StringComparison.Ordinal)
+            || decoded.Contains('\\')
+            || decoded.Contains('?')
+            || decoded.Contains('#')
+            || decoded.Any(ch => char.IsControl(ch) || char.IsWhiteSpace(ch) || ch is '{' or '}')
+            || decoded.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Any(segment => segment is "." or "..");
     }
 
     private static bool ContainsMalformedEscape(string segment)
@@ -168,6 +279,26 @@ internal static partial class PwaOptionsValidator
         }
     }
 
+    private static void RequireScope(string? value, bool workerEnabled, List<PwaDiagnostic> diagnostics)
+    {
+        if (!IsSafeLocalPath(value) || (workerEnabled && value!.Contains('%')))
+        {
+            diagnostics.Add(
+                new PwaDiagnostic(
+                    "ASPWA007",
+                    PwaDiagnosticSeverity.Error,
+                    "PwaOptions.Scope must be an app-root-relative URL such as / and cannot contain percent escapes when a worker capability is enabled."));
+        }
+    }
+
+    private static void RequireEndpointPath(string? value, string code, string message, List<PwaDiagnostic> diagnostics)
+    {
+        if (!IsSafeLocalPath(value) || value!.Contains('%'))
+        {
+            diagnostics.Add(new PwaDiagnostic(code, PwaDiagnosticSeverity.Error, message));
+        }
+    }
+
     private static void RequireLocalStartUrl(string? value, string code, string message, List<PwaDiagnostic> diagnostics)
     {
         if (!IsSafeLocalStartUrl(value))
@@ -176,7 +307,7 @@ internal static partial class PwaOptionsValidator
         }
     }
 
-    private static bool IsSafeLocalStartUrl(string? value)
+    internal static bool IsSafeLocalStartUrl(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -200,6 +331,11 @@ internal static partial class PwaOptionsValidator
         }
 
         var queryStart = startUrl.IndexOf('?');
+        if (queryStart >= 0 && startUrl.IndexOf('?', queryStart + 1) >= 0)
+        {
+            return false;
+        }
+
         var path = queryStart < 0 ? startUrl : startUrl[..queryStart];
         return !HasTraversalSegment(path);
     }

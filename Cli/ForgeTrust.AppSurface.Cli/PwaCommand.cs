@@ -255,6 +255,8 @@ internal sealed partial class PwaVerifier
                 "Pass --entry-path for a real app page that renders the PWA head metadata."));
         }
 
+        await ValidateDiagnosticsAsync(target, diagnostics, cancellationToken);
+
         var manifest = await FetchAsync(target, manifestUri, "manifest", MaxTextResponseBytes, diagnostics, cancellationToken);
         if (manifest.RedirectLimitExceeded)
         {
@@ -383,7 +385,6 @@ internal sealed partial class PwaVerifier
             ValidateExpectedIcons(manifestDocument, iconEvidence, options.ExpectedIcons, diagnostics);
         }
 
-        await ValidateDiagnosticsAsync(target, diagnostics, cancellationToken);
         return BuildReport(target, manifestUri, manifestDocument, iconEvidence, diagnostics);
     }
 
@@ -419,11 +420,20 @@ internal sealed partial class PwaVerifier
         try
         {
             var status = JsonSerializer.Deserialize<PwaStatusProbe>(diagnosticsResponse.Body, JsonOptions);
+            if (status?.PushEnabled == true)
+            {
+                diagnostics.Add(Info(
+                    "ASPWA257",
+                    "Push service-worker configuration was observed. Registration, permission, subscription, and delivery were not evaluated."));
+            }
+
             if (status?.OfflineEnabled == true)
             {
                 await ValidateEnabledOfflineDiagnosticsAsync(target, status, diagnostics, cancellationToken);
             }
-            else if (status is not null && !string.IsNullOrWhiteSpace(status.ConfiguredServiceWorkerPath))
+            else if (status is not null
+                && status.WorkerEnabled is not true
+                && !string.IsNullOrWhiteSpace(status.ConfiguredServiceWorkerPath))
             {
                 await ProveServiceWorkerAbsentAsync(target, status.ConfiguredServiceWorkerPath!, diagnostics, cancellationToken);
             }
@@ -1479,17 +1489,27 @@ internal sealed record PwaIconProbe(
     [property: JsonPropertyName("purpose")] string? Purpose);
 
 /// <summary>
-/// Models the server-known AppSurface PWA diagnostics used for offline posture checks.
+/// Models the server-known AppSurface PWA diagnostics used for install, worker, offline, and push posture checks.
 /// </summary>
 /// <param name="Enabled">Whether AppSurface PWA metadata is enabled.</param>
 /// <param name="OfflineEnabled">Whether the offline strategy is enabled.</param>
 /// <param name="ServiceWorkerPath">The active service-worker path when offline is enabled.</param>
 /// <param name="OfflineFallbackPath">The active offline fallback path when offline is enabled.</param>
 /// <param name="ConfiguredServiceWorkerPath">The configured worker path used to prove absence when offline is disabled.</param>
+/// <param name="WorkerEnabled">Whether either offline or push configuration activates the shared service worker.</param>
+/// <param name="WorkerPath">The active shared service-worker path when a worker capability is enabled.</param>
+/// <param name="PushEnabled">Whether push event handling is enabled in the shared service worker.</param>
+/// <param name="WorkerScope">The effective registration scope for the shared service worker.</param>
+/// <param name="RegistrationHelperPath">The registration-helper path exposed when push is enabled.</param>
 /// <remarks>These server-known values do not prove browser runtime capability or registration state.</remarks>
 internal sealed record PwaStatusProbe(
     bool Enabled,
     bool OfflineEnabled,
     string? ServiceWorkerPath,
     string? OfflineFallbackPath,
-    string? ConfiguredServiceWorkerPath);
+    string? ConfiguredServiceWorkerPath,
+    bool WorkerEnabled = false,
+    string? WorkerPath = null,
+    bool PushEnabled = false,
+    string? WorkerScope = null,
+    string? RegistrationHelperPath = null);

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using CliFx;
 using CliFx.Infrastructure;
 
@@ -7,6 +8,31 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class PwaVerifierTests
 {
+    [Fact]
+    public void StatusProbe_DeserializesWorkerMetadataFromNewServers()
+    {
+        var status = JsonSerializer.Deserialize<PwaStatusProbe>(
+            """
+            {
+              "enabled": false,
+              "offlineEnabled": false,
+              "workerEnabled": true,
+              "workerPath": "/tenant/service-worker.js",
+              "pushEnabled": true,
+              "workerScope": "/tenant/",
+              "registrationHelperPath": "/tenant/_appsurface/pwa/register.js"
+            }
+            """,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.NotNull(status);
+        Assert.True(status.WorkerEnabled);
+        Assert.Equal("/tenant/service-worker.js", status.WorkerPath);
+        Assert.True(status.PushEnabled);
+        Assert.Equal("/tenant/", status.WorkerScope);
+        Assert.Equal("/tenant/_appsurface/pwa/register.js", status.RegistrationHelperPath);
+    }
+
     [Fact]
     public async Task ExecuteAsync_WritesTextReport_WhenVerificationPasses()
     {
@@ -738,6 +764,153 @@ public sealed class PwaVerifierTests
 
         Assert.True(report.Passed);
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA256");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_AcceptsLegacyStatusWithoutWorkerFields()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """{"enabled":true,"offlineEnabled":false,"configuredServiceWorkerPath":"/service-worker.js"}""",
+            "application/json");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.True(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA256");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA257");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_MixedVersionPushStatusDoesNotRunLegacyAbsenceProbe()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """
+            {
+              "enabled": false,
+              "offlineEnabled": false,
+              "serviceWorkerPath": null,
+              "offlineFallbackPath": null,
+              "configuredServiceWorkerPath": "/service-worker.js",
+              "workerEnabled": true,
+              "workerPath": "/service-worker.js",
+              "pushEnabled": true,
+              "workerScope": "/",
+              "registrationHelperPath": "/_appsurface/pwa/register.js"
+            }
+            """,
+            "application/json");
+        http.Add("https://app.example.test/service-worker.js", "js", "text/javascript");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.True(report.Passed);
+        var diagnostic = Assert.Single(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA257");
+        Assert.Equal("info", diagnostic.Severity);
+        Assert.Equal(
+            "Push service-worker configuration was observed. Registration, permission, subscription, and delivery were not evaluated.",
+            diagnostic.Message);
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA240" or "ASPWA256");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_AcceptsExactNewServerPushOnlyStatusShape()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """
+            {
+              "enabled": false,
+              "manifestPath": "/manifest.webmanifest",
+              "offlineEnabled": false,
+              "workerEnabled": true,
+              "workerPath": "/service-worker.js",
+              "pushEnabled": true,
+              "workerScope": "/",
+              "registrationHelperPath": "/_appsurface/pwa/register.js"
+            }
+            """,
+            "application/json");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.True(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA257");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA240" or "ASPWA256");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ReportsPushObservationWhenInstallManifestIsAbsent()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", "<!doctype html><html><head></head><body></body></html>", "text/html");
+        http.Add("https://app.example.test/manifest.webmanifest", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """
+            {
+              "enabled": false,
+              "manifestPath": "/manifest.webmanifest",
+              "offlineEnabled": false,
+              "workerEnabled": true,
+              "workerPath": "/service-worker.js",
+              "pushEnabled": true,
+              "workerScope": "/",
+              "registrationHelperPath": "/_appsurface/pwa/register.js"
+            }
+            """,
+            "application/json");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA257");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA224" or "ASPWA202");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA240" or "ASPWA256");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ReportsPushObservationWhileValidatingCombinedOfflineResources()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """
+            {
+              "enabled": true,
+              "offlineEnabled": true,
+              "serviceWorkerPath": "/service-worker.js",
+              "offlineFallbackPath": "/offline.html",
+              "configuredServiceWorkerPath": "/service-worker.js",
+              "workerEnabled": true,
+              "workerPath": "/service-worker.js",
+              "pushEnabled": true,
+              "workerScope": "/",
+              "registrationHelperPath": "/_appsurface/pwa/register.js"
+            }
+            """,
+            "application/json");
+        http.Add("https://app.example.test/service-worker.js", "js", "text/javascript");
+        http.Add("https://app.example.test/offline.html", "offline", "text/html");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifyAsync(new Uri("https://app.example.test"), CancellationToken.None);
+
+        Assert.True(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA257");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA226" or "ASPWA238");
     }
 
     [Fact]
