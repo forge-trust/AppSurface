@@ -180,6 +180,9 @@ test('view loads the exact proof script as a versioned external asset', async ()
   const view = await readFile(viewPath, 'utf8');
   assert.match(view, /<script src="~\/js\/pwa-registration-proof\.js" asp-append-version="true" defer><\/script>/u);
   assert.doesNotMatch(view, /const setState|navigator\.serviceWorker\.getRegistration/u);
+  assert.match(view, /PwaOptions\.Enabled/u);
+  assert.match(view, /PwaOptions\.Offline\.Enabled/u);
+  assert.match(view, /PwaOptions\.Push\.Enabled/u);
 });
 
 test('initializing remains visible until DOM readiness, then transitions to ready', async () => {

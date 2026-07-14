@@ -31,6 +31,6 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## Migration watch
 
-- Record breaking or behavior-changing guidance here before it moves into the tagged release note.
+- Record-breaking or behavior-changing guidance here before it moves into the tagged release note.
 - `Pwa.Enabled` now controls install metadata only. Apps may activate the shared worker with `Pwa.Offline.Enabled` or `Pwa.Push.Enabled`; existing `Pwa.Offline.ServiceWorkerPath` assignments remain compatible, while new code should use `Pwa.Worker.ServiceWorkerPath`.
 - Do not remove or move an already registered service-worker endpoint in one deployment. First ship unregister/replacement cleanup from the old path, let clients receive it, and only then stop mapping that path. See the [PWA migration guidance](../Web/ForgeTrust.AppSurface.Web/Docs/pwa-install.md#migration-and-pitfalls).

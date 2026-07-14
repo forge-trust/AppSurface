@@ -20,6 +20,10 @@ public sealed class PwaOfflineOptions
     {
     }
 
+    /// <summary>
+    /// Initializes offline options backed by shared compatibility-path assignment state.
+    /// </summary>
+    /// <param name="pathState">The shared legacy and current path assignment state.</param>
     internal PwaOfflineOptions(PwaWorkerPathState pathState)
     {
         _pathState = pathState;

@@ -121,4 +121,16 @@ public sealed class PwaOptions
 
     /// <summary>Gets whether AppSurface should validate and map any PWA surface.</summary>
     internal bool HasAnySurfaceEnabled => Enabled || IsWorkerEnabled;
+
+    /// <summary>
+    /// Gets whether the configured PWA surfaces require AppSurface to enable static-file middleware.
+    /// </summary>
+    /// <remarks>
+    /// Install metadata preserves the existing static-icon behavior, offline support may reference static fallback
+    /// assets, and a custom push handler may be deployed from the web root. The generated default push worker and
+    /// registration helper are endpoints and do not require static-file middleware.
+    /// </remarks>
+    internal bool RequiresStaticFileMiddleware => Enabled
+        || Offline.Enabled
+        || (Push.Enabled && Push.HandlerScriptPath is not null);
 }

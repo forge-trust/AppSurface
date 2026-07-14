@@ -19,6 +19,10 @@ public sealed class PwaWorkerOptions
     {
     }
 
+    /// <summary>
+    /// Initializes worker options backed by shared compatibility-path assignment state.
+    /// </summary>
+    /// <param name="pathState">The shared legacy and current path assignment state.</param>
     internal PwaWorkerOptions(PwaWorkerPathState pathState)
     {
         _pathState = pathState;
@@ -48,5 +52,8 @@ public sealed class PwaWorkerOptions
     /// </remarks>
     public string RegistrationHelperPath { get; set; } = "/_appsurface/pwa/register.js";
 
+    /// <summary>
+    /// Gets a value indicating whether legacy and current worker path properties were assigned conflicting values.
+    /// </summary>
     internal bool HasServiceWorkerPathConflict => _pathState.HasConflict;
 }

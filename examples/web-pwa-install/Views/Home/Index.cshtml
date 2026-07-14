@@ -1,3 +1,4 @@
+@inject ForgeTrust.AppSurface.Web.PwaOptions PwaOptions
 @{
     ViewData["Title"] = "Worker foundation";
     var diagnosticsPath = Url.Content("~/_appsurface/pwa");
@@ -35,9 +36,9 @@
         <p class="eyebrow">Truthful posture</p>
         <h2 id="capabilities-heading">Capability ledger</h2>
         <dl class="capability-ledger">
-            <div><dt>Install metadata</dt><dd><span class="pill configured">Configured</span></dd></div>
-            <div><dt>Offline handlers</dt><dd><span class="pill configured">Configured</span></dd></div>
-            <div><dt>Push handlers</dt><dd><span class="pill configured">Configured</span></dd></div>
+            <div><dt>Install metadata</dt><dd><span class="pill @(PwaOptions.Enabled ? "configured" : "unconfigured")">@(PwaOptions.Enabled ? "Configured" : "Not configured")</span></dd></div>
+            <div><dt>Offline handlers</dt><dd><span class="pill @(PwaOptions.Offline.Enabled ? "configured" : "unconfigured")">@(PwaOptions.Offline.Enabled ? "Configured" : "Not configured")</span></dd></div>
+            <div><dt>Push handlers</dt><dd><span class="pill @(PwaOptions.Push.Enabled ? "configured" : "unconfigured")">@(PwaOptions.Push.Enabled ? "Configured" : "Not configured")</span></dd></div>
             <div><dt>Active worker</dt><dd><span id="worker-capability" class="pill pending">Not proven</span></dd></div>
             <div><dt>Notification permission</dt><dd><span class="pill unconfigured">Not requested</span></dd></div>
             <div><dt>Push subscription</dt><dd><span class="pill unconfigured">Not configured</span></dd></div>

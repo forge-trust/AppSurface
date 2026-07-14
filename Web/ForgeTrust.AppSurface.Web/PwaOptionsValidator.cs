@@ -102,7 +102,10 @@ internal static partial class PwaOptionsValidator
         if (options.DiagnosticsExposure != PwaDiagnosticEndpointExposure.Never)
         {
             routes.Add(("diagnostics", options.DiagnosticsPath));
-            routes.Add(("diagnostics status", $"{options.DiagnosticsPath.TrimEnd('/')}/status.json"));
+            if (!string.IsNullOrWhiteSpace(options.DiagnosticsPath))
+            {
+                routes.Add(("diagnostics status", $"{options.DiagnosticsPath.TrimEnd('/')}/status.json"));
+            }
         }
 
         if (options.IsWorkerEnabled)

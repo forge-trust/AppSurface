@@ -74,13 +74,13 @@ internal static class PwaEndpointMapper
         return new PwaManifestDocument(
             options.Name,
             options.ShortName,
-            AddPathBase(pathBase, options.StartUrl),
-            AddPathBase(pathBase, options.Scope),
+            PwaPathBase.Add(pathBase, options.StartUrl),
+            PwaPathBase.Add(pathBase, options.Scope),
             PwaOptionsValidator.FormatDisplayMode(options.Display),
             options.ThemeColor,
             options.BackgroundColor,
             options.Icons
-                .Select(icon => new PwaManifestIcon(AddPathBase(pathBase, icon.Source), icon.Sizes, icon.Type, icon.Purpose))
+                .Select(icon => new PwaManifestIcon(PwaPathBase.Add(pathBase, icon.Source), icon.Sizes, icon.Type, icon.Purpose))
                 .ToArray());
     }
 
@@ -88,7 +88,7 @@ internal static class PwaEndpointMapper
     {
         var request = httpContext.Request;
         var workerEnabled = options.IsWorkerEnabled;
-        var workerPath = workerEnabled ? AddPathBase(request.PathBase, options.Worker.ServiceWorkerPath) : null;
+        var workerPath = workerEnabled ? PwaPathBase.Add(request.PathBase, options.Worker.ServiceWorkerPath) : null;
         var diagnostics = PwaOptionsValidator.Validate(options).ToList();
         if (!IsSecureInstallContext(request))
         {
@@ -101,16 +101,16 @@ internal static class PwaEndpointMapper
 
         return new PwaDiagnosticsDocument(
             options.Enabled,
-            AddPathBase(request.PathBase, options.ManifestPath),
+            PwaPathBase.Add(request.PathBase, options.ManifestPath),
             options.Offline.Enabled,
-            options.Offline.Enabled || !workerEnabled ? AddPathBase(request.PathBase, options.Worker.ServiceWorkerPath) : null,
+            options.Offline.Enabled || !workerEnabled ? PwaPathBase.Add(request.PathBase, options.Worker.ServiceWorkerPath) : null,
             options.Offline.Enabled ? workerPath : null,
-            options.Offline.Enabled ? AddPathBase(request.PathBase, options.Offline.OfflineFallbackPath) : null,
+            options.Offline.Enabled ? PwaPathBase.Add(request.PathBase, options.Offline.OfflineFallbackPath) : null,
             workerEnabled,
             workerPath,
             options.Push.Enabled,
-            AddPathBase(request.PathBase, options.Scope),
-            options.Push.Enabled ? AddPathBase(request.PathBase, options.Worker.RegistrationHelperPath) : null,
+            PwaPathBase.Add(request.PathBase, options.Scope),
+            options.Push.Enabled ? PwaPathBase.Add(request.PathBase, options.Worker.RegistrationHelperPath) : null,
             diagnostics.Select(diagnostic => new PwaDiagnosticDocument(diagnostic.Code, diagnostic.Severity.ToString().ToLowerInvariant(), diagnostic.Message)).ToArray());
     }
 
@@ -133,15 +133,15 @@ internal static class PwaEndpointMapper
                 ? options.Offline.StaticAssetPaths
                     .Append(options.Offline.OfflineFallbackPath)
                     .Where(path => !string.IsNullOrWhiteSpace(path))
-                    .Select(path => AddPathBase(pathBase, path))
+                    .Select(path => PwaPathBase.Add(pathBase, path))
                     .Distinct(StringComparer.Ordinal)
                     .ToArray()
                 : [],
-            options.Offline.Enabled ? AddPathBase(pathBase, options.Offline.OfflineFallbackPath) : null,
+            options.Offline.Enabled ? PwaPathBase.Add(pathBase, options.Offline.OfflineFallbackPath) : null,
             pathBase.HasValue ? pathBase.Value! : "/",
-            AddPathBase(pathBase, options.Scope),
+            PwaPathBase.Add(pathBase, options.Scope),
             options.Push.Enabled && options.Push.HandlerScriptPath is not null
-                ? AddPathBase(pathBase, options.Push.HandlerScriptPath)
+                ? PwaPathBase.Add(pathBase, options.Push.HandlerScriptPath)
                 : null);
 
         var builder = new StringBuilder();
@@ -206,7 +206,7 @@ internal static class PwaEndpointMapper
         }
 
         var diagnostics = BuildDiagnostics(httpContext, options);
-        var statusPath = AddPathBase(httpContext.Request.PathBase, $"{options.DiagnosticsPath.TrimEnd('/')}/status.json");
+        var statusPath = PwaPathBase.Add(httpContext.Request.PathBase, $"{options.DiagnosticsPath.TrimEnd('/')}/status.json");
         var encodedName = HtmlEncoder.Default.Encode(options.Enabled ? options.Name : "Install metadata disabled");
         var encodedManifest = HtmlEncoder.Default.Encode(diagnostics.ManifestPath);
         var encodedStatusPath = HtmlEncoder.Default.Encode(statusPath);
@@ -263,7 +263,7 @@ internal static class PwaEndpointMapper
         httpContext.Response.ContentType = "text/javascript; charset=utf-8";
         httpContext.Response.Headers.CacheControl = "no-cache";
         httpContext.Response.Headers.XContentTypeOptions = "nosniff";
-        httpContext.Response.Headers["Service-Worker-Allowed"] = AddPathBase(httpContext.Request.PathBase, options.Scope);
+        httpContext.Response.Headers["Service-Worker-Allowed"] = PwaPathBase.Add(httpContext.Request.PathBase, options.Scope);
         if (HttpMethods.IsHead(httpContext.Request.Method))
         {
             return;
@@ -290,12 +290,9 @@ internal static class PwaEndpointMapper
         await httpContext.Response.WriteAsync(PwaScriptAssets.RegistrationHelper, httpContext.RequestAborted);
     }
 
-    private static string AddPathBase(PathString pathBase, string path) =>
-        pathBase.Add(new PathString(path)).Value ?? path;
-
     private static string BuildCacheScopeKey(PathString pathBase, PwaOptions options)
     {
-        var serviceWorkerPath = AddPathBase(pathBase, options.Worker.ServiceWorkerPath);
+        var serviceWorkerPath = PwaPathBase.Add(pathBase, options.Worker.ServiceWorkerPath);
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(serviceWorkerPath));
         return Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant();
     }

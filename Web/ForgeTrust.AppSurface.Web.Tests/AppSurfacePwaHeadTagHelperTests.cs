@@ -36,7 +36,8 @@ public sealed class AppSurfacePwaHeadTagHelperTests
         var options = PwaOptionsTests.CreateValidOptions();
         options.Offline.Enabled = true;
         options.Offline.OfflineFallbackPath = "/offline.html";
-        var helper = new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), options)
+        var fileVersionProvider = new StubFileVersionProvider();
+        var helper = new AppSurfacePwaHeadTagHelper(fileVersionProvider, options)
         {
             ViewContext = CreateViewContext("/tenant")
         };
@@ -53,6 +54,8 @@ public sealed class AppSurfacePwaHeadTagHelperTests
         Assert.Contains("sizes=\"512x512\"", html, StringComparison.Ordinal);
         Assert.Contains("<meta name=\"appsurface:pwa-service-worker\" content=\"/tenant/service-worker.js\"", html, StringComparison.Ordinal);
         Assert.DoesNotContain("pwa/register.js", html, StringComparison.Ordinal);
+        Assert.Contains("/tenant/icons/app-192.png", fileVersionProvider.Paths);
+        Assert.Contains("/tenant/icons/app-512.png", fileVersionProvider.Paths);
     }
 
     [Fact]
@@ -152,9 +155,12 @@ public sealed class AppSurfacePwaHeadTagHelperTests
 
     private sealed class StubFileVersionProvider : IFileVersionProvider
     {
+        public IList<string> Paths { get; } = [];
+
         public string AddFileVersionToPath(PathString requestPathBase, string path)
         {
-            return requestPathBase.Add(new PathString(path)).Value + "?v=asset";
+            Paths.Add(path);
+            return path + "?v=asset";
         }
     }
 }

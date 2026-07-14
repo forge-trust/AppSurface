@@ -26,14 +26,14 @@ internal static class PwaHeadMetadataBuilder
 
         if (options.IsWorkerEnabled)
         {
-            var workerPath = AddPathBase(pathBase, options.Worker.ServiceWorkerPath);
-            var workerScope = AddPathBase(pathBase, options.Scope);
+            var workerPath = PwaPathBase.Add(pathBase, options.Worker.ServiceWorkerPath);
+            var workerScope = PwaPathBase.Add(pathBase, options.Scope);
             AppendMeta(builder, "appsurface:pwa-service-worker", workerPath);
             AppendMeta(builder, "appsurface:pwa-service-worker-scope", workerScope);
 
             if (options.Push.Enabled)
             {
-                var helperPath = AddPathBase(pathBase, options.Worker.RegistrationHelperPath);
+                var helperPath = PwaPathBase.Add(pathBase, options.Worker.RegistrationHelperPath);
                 var separator = helperPath.Contains('?', StringComparison.Ordinal) ? '&' : '?';
                 builder.Append("<script defer src=\"");
                 builder.Append(Escape($"{helperPath}{separator}v={PwaScriptAssets.RegistrationHelperVersion}"));
@@ -55,7 +55,7 @@ internal static class PwaHeadMetadataBuilder
         IFileVersionProvider? fileVersionProvider)
     {
         builder.Append("<link rel=\"manifest\" href=\"");
-        builder.Append(Escape(AddPathBase(pathBase, options.ManifestPath)));
+        builder.Append(Escape(PwaPathBase.Add(pathBase, options.ManifestPath)));
         builder.AppendLine("\" />");
         AppendMeta(builder, "theme-color", options.ThemeColor);
         AppendMeta(builder, "application-name", options.Name);
@@ -67,7 +67,8 @@ internal static class PwaHeadMetadataBuilder
             var href = icon.Source;
             if (PwaOptionsValidator.IsSafeLocalPath(href))
             {
-                href = fileVersionProvider?.AddFileVersionToPath(pathBase, href) ?? AddPathBase(pathBase, href);
+                href = PwaPathBase.Add(pathBase, href);
+                href = fileVersionProvider?.AddFileVersionToPath(pathBase, href) ?? href;
             }
 
             builder.Append("<link rel=\"icon\" href=\"");
@@ -88,9 +89,6 @@ internal static class PwaHeadMetadataBuilder
         builder.Append(Escape(content));
         builder.AppendLine("\" />");
     }
-
-    private static string AddPathBase(PathString pathBase, string path) =>
-        pathBase.Add(new PathString(path)).Value ?? path;
 
     private static string Escape(string value) => HtmlEncoder.Default.Encode(value);
 }

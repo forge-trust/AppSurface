@@ -58,6 +58,28 @@ public sealed class PwaOptionsTests
         Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Severity == PwaDiagnosticSeverity.Error);
     }
 
+    [Theory]
+    [InlineData(false, false, false, null, false)]
+    [InlineData(false, false, true, null, false)]
+    [InlineData(true, false, false, null, true)]
+    [InlineData(false, true, false, null, true)]
+    [InlineData(false, false, true, "/workers/custom-push.js", true)]
+    [InlineData(false, false, false, "/workers/unused-push.js", false)]
+    public void RequiresStaticFileMiddleware_TracksOnlySurfacesThatMayUseWebRootAssets(
+        bool installEnabled,
+        bool offlineEnabled,
+        bool pushEnabled,
+        string? handlerScriptPath,
+        bool expected)
+    {
+        var options = new PwaOptions { Enabled = installEnabled };
+        options.Offline.Enabled = offlineEnabled;
+        options.Push.Enabled = pushEnabled;
+        options.Push.HandlerScriptPath = handlerScriptPath;
+
+        Assert.Equal(expected, options.RequiresStaticFileMiddleware);
+    }
+
     [Fact]
     public void WorkerPath_NewPropertyUpdatesCompatibilityAlias()
     {
@@ -305,6 +327,20 @@ public sealed class PwaOptionsTests
     {
         var options = CreateValidOptions();
         options.DiagnosticsPath = "/_appsurface/%70wa";
+
+        var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Contains("ASPWA008", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ThrowIfInvalid_ReportsInvalidDiagnosticsPathWithoutRouteCollisionFailure(string? diagnosticsPath)
+    {
+        var options = new PwaOptions { Push = { Enabled = true } };
+        options.DiagnosticsPath = diagnosticsPath!;
 
         var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
 

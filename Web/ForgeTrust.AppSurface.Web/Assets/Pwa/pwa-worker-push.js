@@ -201,7 +201,16 @@
         warn("ASPWAJS020");
         return;
       }
-      const destination = validateClickDestination(data && data.appSurfaceDestination);
+      if (data == null) return;
+
+      let rawDestination;
+      try {
+        rawDestination = data.appSurfaceDestination;
+      } catch {
+        warn("ASPWAJS020");
+        return;
+      }
+      const destination = validateClickDestination(rawDestination);
       if (!destination) {
         warn("ASPWAJS020");
         return;

@@ -115,6 +115,8 @@ The [push-worker foundation case](https://github.com/forge-trust/AppSurface/issu
 
 The starter strategy caches only configured static assets and the fallback, intercepts only the requests documented by that strategy, and never broadens its cache because push is enabled. A configured static-asset pathname is looked up only in the worker-owned cache with the query string ignored, so content-versioned requests such as `/app.css?v=hash` can use the precached `/app.css` while offline. Push-only mode installs no fetch listener, creates no cache, stores no application data, and retires caches previously owned by the AppSurface worker when moving away from offline mode.
 
+Install metadata and offline support preserve AppSurface's existing automatic static-file middleware behavior because they commonly reference web-root assets. A custom `Push.HandlerScriptPath` also enables that middleware so the handler may be deployed from the web root. Default push-only mode serves only generated worker/helper endpoints and does not enable global static-file middleware; enable it explicitly if the application separately needs unrelated web-root content.
+
 All AppSurface endpoint and asset paths are app-root-relative. Startup rejects schemes, protocol-relative URLs, whitespace, backslashes, controls, route parameters, malformed escapes, recursively encoded traversal, query strings, and fragments where those values are not explicitly supported. Generated manifest, diagnostics, worker, and helper endpoint paths reject all percent escapes so routing, emitted metadata, and static-shadow checks cannot disagree about decoding. Worker, helper, manifest, diagnostics, and fallback routes must be distinct. AppSurface also fails when a generated worker or helper path would be shadowed by a file in the web root; it cannot reliably infer arbitrary application middleware or endpoints registered later.
 
 Browsers match service-worker scopes as raw URL prefixes. `/app` therefore also covers `/application`; use `/app/` when the application intends a path-segment boundary. AppSurface validation, the default click adapter, and CLI scope checks follow those browser prefix semantics.
@@ -163,7 +165,7 @@ The default adapter accepts one strict JSON object:
 | `tag` | 1–128 UTF-16 code units | Optional non-empty notification tag. |
 | `destinationPath` | 1–1,024 UTF-16 code units | Optional app-root-relative path, with at most one query string and no fragment, restricted to the effective worker scope. |
 
-Invalid payloads are discarded with a value-free diagnostic. The adapter stores only the normalized destination in notification data. On click it closes the notification, independently revalidates that destination, focuses the first exact matching window client, or opens the safe URL. A failed focus receives one open fallback. Payloads and destination values are never logged.
+Invalid payloads are discarded with a value-free diagnostic. The adapter stores only the normalized destination in notification data. On click it closes the notification, independently revalidates that destination, focuses the first exact matching window client, or opens the safe URL. A notification without a destination closes without navigation or an invalid-destination diagnostic. A failed focus receives one open fallback. Payloads and destination values are never logged.
 
 Set `Push.HandlerScriptPath` when the default schema or navigation policy is not appropriate:
 

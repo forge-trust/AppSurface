@@ -346,16 +346,36 @@ test('notification display failure is contained without exception details', asyn
   assert.deepEqual(worker.warnings, ['ASPWAJS011']);
 });
 
-function notificationClick(destination) {
+function notificationClickWithData(data) {
   let closed = false;
   return {
     notification: {
-      data: { appSurfaceDestination: destination },
+      data,
       close() { closed = true; }
     },
     wasClosed: () => closed
   };
 }
+
+function notificationClick(destination) {
+  return notificationClickWithData({ appSurfaceDestination: destination });
+}
+
+test('notification click closes destination-less notifications without navigation diagnostics', async () => {
+  const worker = createWorker();
+  let clientCallCount = 0;
+  worker.context.self.clients.matchAll = async () => { clientCallCount++; return []; };
+  worker.context.self.clients.openWindow = async () => { clientCallCount++; return {}; };
+
+  for (const data of [undefined, null]) {
+    const click = notificationClickWithData(data);
+    await worker.emit('notificationclick', click);
+    assert.equal(click.wasClosed(), true);
+  }
+
+  assert.equal(clientCallCount, 0);
+  assert.deepEqual(worker.warnings, []);
+});
 
 test('notification click opens the exact destination when a client differs by fragment', async () => {
   const worker = createWorker();
@@ -446,4 +466,17 @@ test('notification click contains throwing notification data accessors', async (
   };
   await worker.emit('notificationclick', { notification });
   assert.deepEqual(worker.warnings, ['ASPWAJS020']);
+});
+
+test('notification click contains throwing destination accessors', async () => {
+  const worker = createWorker();
+  const data = {};
+  Object.defineProperty(data, 'appSurfaceDestination', {
+    get() { throw new Error('destination secret'); }
+  });
+
+  await worker.emit('notificationclick', notificationClickWithData(data));
+
+  assert.deepEqual(worker.warnings, ['ASPWAJS020']);
+  assert.equal(worker.warnings.join(' ').includes('destination secret'), false);
 });

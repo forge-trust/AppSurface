@@ -85,6 +85,7 @@ test('invalid metadata and registration failures use stable sanitized InvalidSta
   });
   await assert.rejects(rejected.context.window.AppSurface.Pwa.register(), error =>
     error.name === 'InvalidStateError' && error.message === 'ASPWAJS003' && !error.message.includes('secret'));
+  assert.deepEqual(rejected.errors, []);
 
   const hostileNavigator = runHelper({
     navigator: new Proxy({}, { has() { throw new Error('navigator secret'); } })
