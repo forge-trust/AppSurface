@@ -2793,34 +2793,43 @@ public sealed class ReleaseToolTests : IDisposable
         var caseInsensitive = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
             "/release/archive",
             _ => true,
-            _ => ["/release/archive"]);
+            _ => ["/release/archive/.appsurface-docs-release-manifest.json"]);
         var caseSensitive = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
             "/release/archive",
             _ => false,
-            _ => ["/release/archive"]);
+            _ => ["/release/archive/.appsurface-docs-release-manifest.json"]);
         var uppercaseRoot = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
             "/RELEASE/ARCHIVE",
             _ => false,
-            _ => ["/RELEASE/ARCHIVE"]);
+            _ => ["/RELEASE/ARCHIVE/.appsurface-docs-release-manifest.json"]);
         var numericRoot = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
             "/123/456",
-            _ => throw new InvalidOperationException("A root without letters must not probe another path."),
-            _ => throw new InvalidOperationException("A root without letters must not enumerate another path."));
+            _ => true,
+            _ => ["/123/456/.appsurface-docs-release-manifest.json"]);
         var ambiguousSibling = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
             "/release/archive",
             _ => true,
-            _ => ["/release/archive", "/release/archivE"]);
+            _ =>
+            [
+                "/release/archive/.appsurface-docs-release-manifest.json",
+                "/release/archive/.appsurface-docs-release-manifest.jsoN"
+            ]);
         var unreadableParent = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
             "/release/archive",
             _ => true,
             _ => throw new IOException("Parent enumeration failed."));
+        var unreadableProbe = ReleaseDocsArchiveGate.ResolvePhysicalPathComparer(
+            "/release/archive",
+            _ => throw new IOException("Manifest probe failed."),
+            _ => ["/release/archive/.appsurface-docs-release-manifest.json"]);
 
         Assert.Same(StringComparer.OrdinalIgnoreCase, caseInsensitive);
         Assert.Same(StringComparer.Ordinal, caseSensitive);
         Assert.Same(StringComparer.Ordinal, uppercaseRoot);
-        Assert.Same(StringComparer.Ordinal, numericRoot);
+        Assert.Same(StringComparer.OrdinalIgnoreCase, numericRoot);
         Assert.Same(StringComparer.Ordinal, ambiguousSibling);
         Assert.Same(StringComparer.Ordinal, unreadableParent);
+        Assert.Same(StringComparer.Ordinal, unreadableProbe);
     }
 
     [Fact]

@@ -461,74 +461,55 @@ internal abstract class AppSurfaceDocsReleaseArchiveFileSystem
     /// <returns>The comparer matching the root's physical filesystem casing rules.</returns>
     internal virtual StringComparer GetPathComparer(string rootPath)
     {
-        return ResolvePhysicalPathComparer(rootPath, Directory.Exists, Directory.EnumerateFileSystemEntries);
+        return ResolvePhysicalPathComparer(rootPath, File.Exists, Directory.EnumerateFileSystemEntries);
     }
 
     /// <summary>
     /// Resolves physical filesystem casing behavior without writing probe files into an immutable archive.
     /// </summary>
     /// <param name="rootPath">Existing exact release tree.</param>
-    /// <param name="directoryExists">Directory existence operation used for the read-only case-variant probe.</param>
+    /// <param name="fileExists">File existence operation used for the read-only case-variant probe.</param>
     /// <param name="enumerateFileSystemEntries">Filesystem enumeration used to reject ambiguous case-variant siblings.</param>
     /// <returns>An ordinal comparer matching the archive root's case behavior.</returns>
     internal static StringComparer ResolvePhysicalPathComparer(
         string rootPath,
-        Func<string, bool> directoryExists,
+        Func<string, bool> fileExists,
         Func<string, IEnumerable<string>> enumerateFileSystemEntries)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
-        ArgumentNullException.ThrowIfNull(directoryExists);
+        ArgumentNullException.ThrowIfNull(fileExists);
         ArgumentNullException.ThrowIfNull(enumerateFileSystemEntries);
-        var probePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
-        while (!string.IsNullOrEmpty(probePath))
+        var fullRootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+        int matchingEntryCount;
+        try
         {
-            var segment = Path.GetFileName(probePath);
-            var parentPath = Path.GetDirectoryName(probePath);
-            var letterIndex = -1;
-            for (var index = segment.Length - 1; index >= 0; index--)
-            {
-                if (char.IsAsciiLetter(segment[index]))
-                {
-                    letterIndex = index;
-                    break;
-                }
-            }
+            matchingEntryCount = enumerateFileSystemEntries(fullRootPath)
+                .Select(Path.GetFileName)
+                .Where(entryName => string.Equals(entryName, AppSurfaceDocsReleaseArchiveVerifier.FileName, StringComparison.OrdinalIgnoreCase))
+                .Take(2)
+                .Count();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return StringComparer.Ordinal;
+        }
 
-            if (letterIndex < 0 || string.IsNullOrEmpty(parentPath))
-            {
-                probePath = parentPath ?? string.Empty;
-                continue;
-            }
+        if (matchingEntryCount != 1)
+        {
+            return StringComparer.Ordinal;
+        }
 
-            int matchingEntryCount;
-            try
-            {
-                matchingEntryCount = enumerateFileSystemEntries(parentPath)
-                    .Select(Path.GetFileName)
-                    .Where(entryName => string.Equals(entryName, segment, StringComparison.OrdinalIgnoreCase))
-                    .Take(2)
-                    .Count();
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                return StringComparer.Ordinal;
-            }
-            if (matchingEntryCount != 1)
-            {
-                return StringComparer.Ordinal;
-            }
-
-            var alternateSegmentCharacters = segment.ToCharArray();
-            alternateSegmentCharacters[letterIndex] = char.IsAsciiLetterLower(alternateSegmentCharacters[letterIndex])
-                ? char.ToUpperInvariant(alternateSegmentCharacters[letterIndex])
-                : char.ToLowerInvariant(alternateSegmentCharacters[letterIndex]);
-            var alternateRootPath = Path.Combine(parentPath, new string(alternateSegmentCharacters));
-            return directoryExists(alternateRootPath)
+        var alternateManifestFileName = AppSurfaceDocsReleaseArchiveVerifier.FileName[..^1] + 'N';
+        try
+        {
+            return fileExists(Path.Combine(fullRootPath, alternateManifestFileName))
                 ? StringComparer.OrdinalIgnoreCase
                 : StringComparer.Ordinal;
         }
-
-        return StringComparer.Ordinal;
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return StringComparer.Ordinal;
+        }
     }
 
     /// <summary>
