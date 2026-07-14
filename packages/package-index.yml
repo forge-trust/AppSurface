@@ -136,6 +136,21 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
       - ForgeTrust.AppSurface.Auth
+  - project: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 38
+    use_when: Add this in an Aspire AppHost when package consumers need a real local Keycloak-backed AppSurface OIDC proof without making runtime web apps reference Keycloak or Aspire hosting packages.
+    includes: AddAppSurfaceKeycloak AppHost extension, deterministic local realm/client/user import generation, secret-safe OIDC configuration projection, fixed-port preflight diagnostics, multi-signal readiness probe, disposable-data default, persistent-data opt-in, and ASKEYC diagnostics.
+    does_not_include: Runtime web authentication registration, identity-provider hosting in web apps, production Keycloak administration, social IdP setup, confidential-client secret lifecycle, provider SDK abstractions, tenant mapping, user provisioning, durable app-user mapping, token storage, or runtime dependency on Keycloak packages.
+    start_here_path: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` in AppHost/dev/test projects only when a real local OIDC provider proof should pair with `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc`; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep it separate from DevAuth, OIDC registration, and Auth.Testing.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Aspire
   - project: Auth/ForgeTrust.AppSurface.Auth.Testing/ForgeTrust.AppSurface.Auth.Testing.csproj
     classification: public
     publish_decision: publish

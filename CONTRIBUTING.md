@@ -86,3 +86,6 @@ dotnet build
 dotnet test --no-build
 ./scripts/coverage-solution.sh
 ```
+
+The default script runs both merged coverage and the repository thresholds. It compares local patch
+coverage with `origin/main`; set `COVERAGE_GATE_DIFF_BASE=` when only aggregate coverage is wanted.

@@ -7,6 +7,14 @@ CLI_PROJECT="$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.c
 BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-Debug}"
 export COVERAGE_CALLER_DIRECTORY="${COVERAGE_CALLER_DIRECTORY:-$PWD}"
 
+# An unset value gives contributors the same patch-coverage policy against their
+# tracked main branch. CI sets this explicitly: pull-request merge checkouts use
+# HEAD^1, while baseline builds set it to an empty value and run only the
+# aggregate gate.
+if [[ -z "${COVERAGE_GATE_DIFF_BASE+x}" ]]; then
+  COVERAGE_GATE_DIFF_BASE="origin/main"
+fi
+
 use_legacy=false
 if [[ "$#" -gt 0 ]]; then
   use_legacy=true
@@ -52,7 +60,37 @@ if [[ "$use_legacy" == "false" ]]; then
   )
 
   cd "$ROOT_DIR"
-  exec dotnet "${dotnet_run_args[@]}"
+  dotnet "${dotnet_run_args[@]}"
+
+  coverage_gate_args=(
+    run
+    --project "$CLI_PROJECT"
+    --configuration "$BUILD_CONFIGURATION"
+  )
+
+  if [[ "${BUILD_NO_RESTORE:-false}" == "true" ]]; then
+    coverage_gate_args+=(--no-restore)
+  fi
+
+  coverage_gate_args+=(
+    --
+    coverage
+    gate
+    --coverage "$ROOT_DIR/TestResults/coverage-merged/coverage.cobertura.xml"
+    --min-line 95
+    --min-branch 85
+  )
+
+  if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
+    coverage_gate_args+=(
+      --diff-base "$COVERAGE_GATE_DIFF_BASE"
+      --min-patch-line 95
+      --min-patch-branch 85
+    )
+  fi
+
+  dotnet "${coverage_gate_args[@]}"
+  exit 0
 fi
 
 dotnet_run_args=(
