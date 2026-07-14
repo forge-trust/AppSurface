@@ -100,18 +100,26 @@ internal static class PwaEndpointMapper
         }
 
         return new PwaDiagnosticsDocument(
-            options.Enabled,
-            PwaPathBase.Add(request.PathBase, options.ManifestPath),
-            options.Offline.Enabled,
-            options.Offline.Enabled || !workerEnabled ? PwaPathBase.Add(request.PathBase, options.Worker.ServiceWorkerPath) : null,
-            options.Offline.Enabled ? workerPath : null,
-            options.Offline.Enabled ? PwaPathBase.Add(request.PathBase, options.Offline.OfflineFallbackPath) : null,
-            workerEnabled,
-            workerPath,
-            options.Push.Enabled,
-            PwaPathBase.Add(request.PathBase, options.Scope),
-            options.Push.Enabled ? PwaPathBase.Add(request.PathBase, options.Worker.RegistrationHelperPath) : null,
-            diagnostics.Select(diagnostic => new PwaDiagnosticDocument(diagnostic.Code, diagnostic.Severity.ToString().ToLowerInvariant(), diagnostic.Message)).ToArray());
+            Enabled: options.Enabled,
+            ManifestPath: PwaPathBase.Add(request.PathBase, options.ManifestPath),
+            OfflineEnabled: options.Offline.Enabled,
+            ConfiguredServiceWorkerPath: options.Offline.Enabled || !workerEnabled
+                ? PwaPathBase.Add(request.PathBase, options.Worker.ServiceWorkerPath)
+                : null,
+            ServiceWorkerPath: options.Offline.Enabled ? workerPath : null,
+            OfflineFallbackPath: options.Offline.Enabled
+                ? PwaPathBase.Add(request.PathBase, options.Offline.OfflineFallbackPath)
+                : null,
+            WorkerEnabled: workerEnabled,
+            WorkerPath: workerPath,
+            PushEnabled: options.Push.Enabled,
+            WorkerScope: PwaPathBase.Add(request.PathBase, options.Scope),
+            RegistrationHelperPath: options.Push.Enabled
+                ? PwaPathBase.Add(request.PathBase, options.Worker.RegistrationHelperPath)
+                : null,
+            Diagnostics: diagnostics
+                .Select(diagnostic => new PwaDiagnosticDocument(diagnostic.Code, diagnostic.Severity.ToString().ToLowerInvariant(), diagnostic.Message))
+                .ToArray());
     }
 
     /// <summary>
@@ -318,8 +326,11 @@ internal sealed record PwaManifestIcon(
 /// <param name="Enabled">Whether install metadata is enabled.</param>
 /// <param name="ManifestPath">The configured manifest path after PathBase application.</param>
 /// <param name="OfflineEnabled">Whether the offline capability is enabled.</param>
-/// <param name="ConfiguredServiceWorkerPath">The legacy absence-proof path, omitted for push-only mode.</param>
-/// <param name="ServiceWorkerPath">The legacy active offline worker path.</param>
+/// <param name="ConfiguredServiceWorkerPath">
+/// The legacy configured worker path. It remains populated for offline mode and when both worker capabilities are
+/// disabled so older CLI versions can prove that the configured endpoint is absent; it is omitted for push-only mode.
+/// </param>
+/// <param name="ServiceWorkerPath">The legacy active offline worker path, populated only when offline support is enabled.</param>
 /// <param name="OfflineFallbackPath">The active offline fallback path.</param>
 /// <param name="WorkerEnabled">Whether any worker capability is enabled.</param>
 /// <param name="WorkerPath">The active shared worker path.</param>
