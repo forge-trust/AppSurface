@@ -319,7 +319,7 @@ packages:
     includes: Immutable migration-job deployment intent, typed logical identifiers and bindings, capability validation, stable diagnostics, deterministic JSON serialization, artifact hashing, and provider-neutral render and verification contracts.
     does_not_include: Aspire app-model APIs, cloud SDKs, secret resolution, image builds, infrastructure apply, job execution, traffic promotion, or provider-specific foundations.
     start_here_path: Deployment/ForgeTrust.AppSurface.Deployment/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Deployment` directly only when authoring a deployment provider or inspecting portable deployment intent; normal Aspire consumers receive it transitively.
+    recipe_summary: Add [`ForgeTrust.AppSurface.Deployment`](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) directly only when authoring a deployment provider or inspecting portable deployment intent; normal Aspire consumers receive it transitively.
   - project: Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/ForgeTrust.AppSurface.Deployment.GcpCloudRun.csproj
     classification: public
     publish_decision: publish
@@ -332,7 +332,7 @@ packages:
     includes: Closed GCP binding profiles, deterministic Cloud Run v2 Job Terraform JSON, safe evidence hashes, shadow and owned parity comparison, and bounded read-only gcloud verification.
     does_not_include: Cloud account or foundation provisioning, secret values, image builds or pushes, OpenTofu apply or state ownership, migration execution, schedulers, web revisions, traffic, or rollback.
     start_here_path: Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Deployment.GcpCloudRun` beside the Aspire package when an existing Cloud Run migration job should move from duplicated deployment mapping to deterministic publish artifacts and read-only parity proof.
+    recipe_summary: Add [`ForgeTrust.AppSurface.Deployment.GcpCloudRun`](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) beside the Aspire package when an existing Cloud Run migration job should move from duplicated deployment mapping to deterministic publish artifacts and read-only parity proof.
     depends_on:
       - ForgeTrust.AppSurface.Deployment
     expected_dependency_package_ids:
