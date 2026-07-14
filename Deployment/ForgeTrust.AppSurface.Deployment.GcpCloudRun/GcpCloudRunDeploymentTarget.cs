@@ -551,6 +551,8 @@ public sealed class GcloudCommandRunner : IGcloudCommandRunner
     {
     }
 
+    /// <summary>Initializes a direct, non-shell runner for a trusted executable path used by platform-contract tests.</summary>
+    /// <param name="executable">Trusted executable path or name to launch directly.</param>
     internal GcloudCommandRunner(string executable)
         : this(executable, requiresWindowsCommandInterpreter: false)
     {

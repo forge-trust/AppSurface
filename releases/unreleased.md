@@ -5,7 +5,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ## What is taking shape
 
 - `ForgeTrust.RazorWire` Behavior Kit now exposes root-scoped registrations for DOM enhancement and page-lifecycle registrations for logical browser visits, including Skoolit-style PWA display-mode telemetry without fake body selectors or app-owned Turbo listeners.
-- `ForgeTrust.AppSurface.Deployment` and `ForgeTrust.AppSurface.Deployment.GcpCloudRun` add a provider-neutral deployment-intent boundary and a first Cloud Run migration-job compiler. The existing Aspire package annotates one resource graph and participates in Aspire's native publish pipeline; publishing remains tool-free and non-mutating, while verification is read-only and migration execution, state, apply, promotion, and rollback stay application-owned.
+- [`ForgeTrust.AppSurface.Deployment`](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) and [`ForgeTrust.AppSurface.Deployment.GcpCloudRun`](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) add a provider-neutral deployment-intent boundary and a first Cloud Run migration-job compiler. The existing Aspire package annotates one resource graph and participates in Aspire's native publish pipeline; publishing remains tool-free and non-mutating, while verification is read-only and migration execution, state, apply, promotion, and rollback stay application-owned.
 
 ## Included in the next coordinated version
 

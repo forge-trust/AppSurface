@@ -5,15 +5,16 @@ using ForgeTrust.AppSurface.Deployment;
 
 namespace ForgeTrust.AppSurface.Deployment.GcpCloudRun;
 
-/// <summary>A closed, non-secret mapping from logical deployment ids to externally provisioned GCP resources.</summary>
+/// <summary>Represents the closed, non-secret schema that maps AppSurface logical deployment ids to externally provisioned GCP resources.</summary>
+/// <remarks>Map keys are canonical lowercase AppSurface logical ids. Values are physical resource identifiers only; secret values and unknown properties are rejected by the profile loader.</remarks>
 /// <param name="Environment">Exact Aspire environment selected for rendering.</param>
-/// <param name="Project">Existing Google Cloud project id.</param>
-/// <param name="Region">Existing Cloud Run region.</param>
-/// <param name="Jobs">Logical job ids mapped to distinct physical Cloud Run Job names.</param>
-/// <param name="CloudSqlInstanceConnectionName">Existing Cloud SQL `project:region:instance` name.</param>
-/// <param name="Network">Existing Direct VPC network binding.</param>
-/// <param name="ServiceAccounts">Logical identities mapped to user-managed service-account emails.</param>
-/// <param name="Secrets">Logical secrets mapped to Secret Manager identifiers and version modes.</param>
+/// <param name="Project">Existing 6-30 character lowercase Google Cloud project id.</param>
+/// <param name="Region">Existing canonical Cloud Run region, such as <c>us-central1</c>.</param>
+/// <param name="Jobs">Logical job ids mapped to distinct lowercase Cloud Run Job names of at most 63 characters.</param>
+/// <param name="CloudSqlInstanceConnectionName">Existing canonical Cloud SQL <c>project:region:instance</c> name.</param>
+/// <param name="Network">Existing Direct VPC network and regional subnetwork resource references with an explicit supported egress mode.</param>
+/// <param name="ServiceAccounts">Logical identity ids mapped to canonical user-managed service-account emails.</param>
+/// <param name="Secrets">Logical secret ids mapped only to Secret Manager identifiers and the supported explicit version mode; no secret values are stored.</param>
 public sealed record GcpCloudRunBindingProfile(
     string Environment,
     string Project,

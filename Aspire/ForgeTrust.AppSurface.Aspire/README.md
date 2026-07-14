@@ -180,7 +180,7 @@ builder.AddProject<Projects.Migrations>("migrations")
 await builder.Build().RunAsync();
 ```
 
-`GcpCloudRunDeploymentTarget` comes from `ForgeTrust.AppSurface.Deployment.GcpCloudRun` and remains Aspire-independent; the Aspire adapter owns the non-secret binding-path and source-revision parameters. The binding path must be relative to and remain beneath `builder.AppHostDirectory`. The connection parameter is checked for secret classification and retained only by logical name; its value is never evaluated.
+[`GcpCloudRunDeploymentTarget`](../../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) comes from `ForgeTrust.AppSurface.Deployment.GcpCloudRun` and remains Aspire-independent; the Aspire adapter owns the non-secret binding-path and source-revision parameters. The binding path must be relative to and remain beneath `builder.AppHostDirectory`. The connection parameter is checked for secret classification and retained only by logical name; its value is never evaluated.
 
 ```bash
 aspire publish --environment Staging --output-path ./artifacts/appsurface

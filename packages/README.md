@@ -46,8 +46,8 @@ Release and readiness:
 - Add `ForgeTrust.AppSurface.Workers.DurableTask` after `ForgeTrust.AppSurface.Workers` and `ForgeTrust.AppSurface.Flow.DurableTask` when worker contracts should be driven by Durable Task orchestration decisions.
 - Start with `ForgeTrust.AppSurface.Console` for CLI commands or worker-style processes that should share AppSurface module composition.
 - Add `ForgeTrust.AppSurface.Dependency.Autofac` when your app already uses Autofac and your modules need Autofac-specific registrations.
-- Add `ForgeTrust.AppSurface.Deployment` directly only when authoring a deployment provider or inspecting portable deployment intent; normal Aspire consumers receive it transitively.
-- Add `ForgeTrust.AppSurface.Deployment.GcpCloudRun` beside the Aspire package when an existing Cloud Run migration job should move from duplicated deployment mapping to deterministic publish artifacts and read-only parity proof.
+- Add [`ForgeTrust.AppSurface.Deployment`](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) directly only when authoring a deployment provider or inspecting portable deployment intent; normal Aspire consumers receive it transitively.
+- Add [`ForgeTrust.AppSurface.Deployment.GcpCloudRun`](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) beside the Aspire package when an existing Cloud Run migration job should move from duplicated deployment mapping to deterministic publish artifacts and read-only parity proof.
 - Start with `ForgeTrust.AppSurface.Aspire` for distributed app-model projects and service-default composition; add a provider package when the same AppHost topology should publish deployment artifacts through native Aspire commands.
 - Add `ForgeTrust.AppSurface.Web.Scalar` after `ForgeTrust.AppSurface.Web.OpenApi` when you want a hosted API reference UI.
 - Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, server-rendered islands, lifecycle-safe app-authored root or page-lifecycle behaviors, local declarative form interactions, or passive auth-result UI projection.
