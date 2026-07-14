@@ -17,6 +17,7 @@ public sealed class GcpCloudRunDeploymentTargetTests : IDisposable
     {
         var profile = await GcpCloudRunBindingProfile.LoadAsync(await WriteProfileAsync(), "Staging");
 
+        Assert.Equal("Staging", profile.Environment);
         Assert.Equal("skoolit-staging", profile.Project);
         Assert.Equal("skoolit-migrations-staging", profile.Jobs["skoolit-migrations"]);
         Assert.Equal("latest", profile.Secrets["skoolit-connection"].VersionMode);
@@ -173,6 +174,19 @@ public sealed class GcpCloudRunDeploymentTargetTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAsync_RejectsProfileOutsideTrustedRoot()
+    {
+        var path = await WriteProfileAsync();
+        var appHost = Path.Join(_root, "apphost");
+        Directory.CreateDirectory(appHost);
+
+        var error = await Assert.ThrowsAsync<DeploymentValidationException>(() =>
+            GcpCloudRunBindingProfile.LoadAsync(path, "Staging", appHost));
+
+        Assert.Equal("ASDEPLOY131", error.Diagnostic.Code);
+    }
+
+    [Fact]
     public async Task LoadAsync_RejectsDuplicateProperties()
     {
         var path = await DuplicateProfileAsync();
@@ -220,6 +234,17 @@ public sealed class GcpCloudRunDeploymentTargetTests : IDisposable
         Assert.Equal("f1e05da61922c2d74374208b9df1fdd544426844e725b4f1638b8a7867749188", first.Artifacts.Single(item => item.FileName == "deployment-intent.v1.json").Sha256);
         Assert.Equal("c2b066c8898ea9535dcdc7d3d68d26da1f4fec335bb37aaba3be34fe4fcdd1ae", first.Artifacts.Single(item => item.FileName == "gcp-cloud-run-migration.tf.json").Sha256);
         Assert.Equal("83530265b7d6d0b5d27d58dee6ffadfb60762e87834fe378c3192aeb8025abb0", first.Artifacts.Single(item => item.FileName == "gcp-cloud-run-migration.plan.json").Sha256);
+    }
+
+    [Fact]
+    public async Task RenderAsync_ConfinesProfileToTrustedRoot()
+    {
+        var profile = await WriteProfileAsync();
+        var request = new DeploymentRenderRequest(Intent(), profile, _root, "0.1.0-test", _root);
+
+        var result = await new GcpCloudRunDeploymentTarget(new RecordingRunner()).RenderAsync(request);
+
+        Assert.Equal(3, result.Artifacts.Count);
     }
 
     [Fact]
@@ -432,6 +457,28 @@ public sealed class GcpCloudRunDeploymentTargetTests : IDisposable
     }
 
     [Fact]
+    public async Task VerifyAsync_RejectsMalformedCrossArtifactStructureBeforeCloudCall()
+    {
+        var runner = new RecordingRunner();
+        var target = new GcpCloudRunDeploymentTarget(runner);
+        var rendered = await target.RenderAsync(Request(await WriteProfileAsync(), Intent()));
+        var artifacts = rendered.Artifacts.ToArray();
+        var terraformIndex = Array.FindIndex(artifacts, item => item.FileName == "gcp-cloud-run-migration.tf.json");
+        var planIndex = Array.FindIndex(artifacts, item => item.FileName == "gcp-cloud-run-migration.plan.json");
+        var priorTerraformHash = artifacts[terraformIndex].Sha256;
+        artifacts[terraformIndex] = DeploymentArtifact.Create(artifacts[terraformIndex].FileName, "{}\n"u8.ToArray());
+        var changedPlan = Encoding.UTF8.GetString(artifacts[planIndex].Content)
+            .Replace(priorTerraformHash, artifacts[terraformIndex].Sha256, StringComparison.Ordinal);
+        artifacts[planIndex] = DeploymentArtifact.Create(artifacts[planIndex].FileName, Encoding.UTF8.GetBytes(changedPlan));
+
+        var error = await Assert.ThrowsAsync<DeploymentValidationException>(() =>
+            target.VerifyAsync(new DeploymentVerifyRequest(rendered with { Artifacts = artifacts }, DeploymentParityMode.Shadow)));
+
+        Assert.Equal("ASDEPLOY152", error.Diagnostic.Code);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
     public async Task VerifyAsync_RejectsNullPlanAndWrongArtifactNameBeforeCloudCall()
     {
         var runner = new RecordingRunner();
@@ -500,6 +547,18 @@ public sealed class GcpCloudRunDeploymentTargetTests : IDisposable
     }
 
     [Fact]
+    public async Task VerifyAsync_ClassifiesMissingGcloudErrorText()
+    {
+        var target = new GcpCloudRunDeploymentTarget(new RecordingRunner(new GcloudCommandResult(1, "", null!)));
+        var rendered = await target.RenderAsync(Request(await WriteProfileAsync(), Intent()));
+
+        var error = await Assert.ThrowsAsync<DeploymentValidationException>(() =>
+            target.VerifyAsync(new DeploymentVerifyRequest(rendered, DeploymentParityMode.Shadow)));
+
+        Assert.Equal("ASDEPLOY157", error.Diagnostic.Code);
+    }
+
+    [Fact]
     public async Task VerifyAsync_RejectsMalformedDescribe()
     {
         var target = new GcpCloudRunDeploymentTarget(new RecordingRunner("{}", IamJson()));
@@ -540,10 +599,13 @@ public sealed class GcpCloudRunDeploymentTargetTests : IDisposable
     [Fact]
     public async Task RenderAsync_RejectsEnvironmentThatIsNotAGcpLabel()
     {
-        var invalid = new DeploymentIntent("QA West", new SourceRevision(new string('a', 40)), Intent().MigrationJobs);
         var profile = await WriteProfileAsync();
-        var error = await Assert.ThrowsAsync<DeploymentValidationException>(() => new GcpCloudRunDeploymentTarget().RenderAsync(Request(profile, invalid)));
-        Assert.Equal("ASDEPLOY167", error.Diagnostic.Code);
+        foreach (var environment in new[] { "QA West", new string('a', 64) })
+        {
+            var invalid = new DeploymentIntent(environment, new SourceRevision(new string('a', 40)), Intent().MigrationJobs);
+            var error = await Assert.ThrowsAsync<DeploymentValidationException>(() => new GcpCloudRunDeploymentTarget().RenderAsync(Request(profile, invalid)));
+            Assert.Equal("ASDEPLOY167", error.Diagnostic.Code);
+        }
     }
 
     [Fact]
@@ -644,7 +706,14 @@ public sealed class GcpCloudRunDeploymentTargetTests : IDisposable
     private static string IamJson(string principal = "serviceAccount:ci@example.iam.gserviceaccount.com") => $$"""{"bindings":[{"role":"roles/run.invoker","members":["{{principal}}"]}]}""";
     private static string Text(DeploymentRenderResult result, string name) => Encoding.UTF8.GetString(result.Artifacts.Single(item => item.FileName == name).Content);
 
-    public void Dispose() { try { Directory.Delete(_root, recursive: true); } catch (IOException) { } }
+    public void Dispose()
+    {
+        try { Directory.Delete(_root, recursive: true); }
+        catch (IOException exception)
+        {
+            Console.Error.WriteLine($"Could not delete GCP deployment test directory '{_root}': {exception.GetType().Name} (0x{exception.HResult:x8}).");
+        }
+    }
 
     private sealed class RecordingRunner : IGcloudCommandRunner
     {

@@ -369,7 +369,7 @@ internal static class AspireDeploymentPipelineAdapter
         }
 
         var root = Path.GetFullPath(appHostDirectory);
-        var resolved = Path.GetFullPath(Path.Combine(root, bindingProfilePath));
+        var resolved = Path.GetFullPath(bindingProfilePath, root);
         var relative = Path.GetRelativePath(root, resolved);
         if (Path.IsPathFullyQualified(relative) ||
             string.Equals(relative, "..", StringComparison.Ordinal) ||

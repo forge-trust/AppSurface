@@ -171,6 +171,27 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
     }
 
     [Fact]
+    public async Task BuildIntent_RejectsTargetWithNoMigrationAnnotations()
+    {
+        var builder = DistributedApplication.CreateBuilder([]);
+        var bindings = AddParameter(builder, "bindings", "bindings.json", secret: false);
+        var revision = AddParameter(builder, "revision", Revision, secret: false);
+        var target = builder.AddAppSurfaceDeploymentTarget(
+            "gcp-staging",
+            new FakeTarget(AllCapabilities),
+            bindings,
+            revision);
+
+        var exception = await Assert.ThrowsAsync<DeploymentValidationException>(() =>
+            AspireDeploymentPipelineAdapter.BuildIntentAsync(
+                Assert.IsType<AppSurfaceDeploymentTargetResource>(target.Resource),
+                new DistributedApplicationModel(builder.Resources),
+                CancellationToken.None));
+
+        Assert.Equal("ASDEPLOY118", exception.Diagnostic.Code);
+    }
+
+    [Fact]
     public async Task BuildIntent_RejectsMissingTargetCapability()
     {
         var graph = CreateAnnotatedGraph(capabilities: new HashSet<DeploymentCapability>
@@ -247,8 +268,8 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
                 CancellationToken.None);
 
             Assert.Equal(["deployment-intent.v1.json", "provider.json"], result.Artifacts.Select(item => item.FileName));
-            Assert.True(File.Exists(Path.Combine(output, "deployment-intent.v1.json")));
-            Assert.True(File.Exists(Path.Combine(output, "provider.json")));
+            Assert.True(File.Exists(TestPathUtils.PathUnder(output, "deployment-intent.v1.json")));
+            Assert.True(File.Exists(TestPathUtils.PathUnder(output, "provider.json")));
             Assert.True(File.Exists(TestPathUtils.PathUnder(output, DeploymentArtifactBundleWriter.OwnershipMarkerFileName)));
         }
         finally
@@ -583,11 +604,11 @@ public sealed class AppSurfaceDeploymentBuilderExtensionsTests
     [Fact]
     public void ResolveBindingProfilePath_AcceptsRelativePathInsideAppHost()
     {
-        var root = Path.Combine(Path.GetTempPath(), "appsurface-apphost");
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "appsurface-apphost");
 
-        var result = AspireDeploymentPipelineAdapter.ResolveBindingProfilePath(root, Path.Combine("deployment", "bindings.json"));
+        var result = AspireDeploymentPipelineAdapter.ResolveBindingProfilePath(root, TestPathUtils.RelativePath("deployment", "bindings.json"));
 
-        Assert.Equal(Path.Combine(Path.GetFullPath(root), "deployment", "bindings.json"), result);
+        Assert.Equal(TestPathUtils.PathUnder(root, "deployment", "bindings.json"), result);
     }
 
     [Theory]

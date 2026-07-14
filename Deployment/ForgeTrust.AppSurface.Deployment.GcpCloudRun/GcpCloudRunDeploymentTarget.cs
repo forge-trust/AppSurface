@@ -231,13 +231,13 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
         var physicalJobs = new HashSet<string>(StringComparer.Ordinal);
         foreach (var job in intent.MigrationJobs)
         {
-            if (!profile.Jobs.ContainsKey(job.Id.Value)) throw MissingBinding("job", job.Id.Value);
+            if (!profile.Jobs.TryGetValue(job.Id.Value, out var physicalJobName)) throw MissingBinding("job", job.Id.Value);
             if (!profile.ServiceAccounts.ContainsKey(job.ServiceIdentity.Value)) throw MissingBinding("service account", job.ServiceIdentity.Value);
             if (!profile.Secrets.ContainsKey(job.ConnectionSecret.Id.Value)) throw MissingBinding("secret", job.ConnectionSecret.Id.Value);
-            if (!physicalJobs.Add(profile.Jobs[job.Id.Value])) throw Failure("ASDEPLOY158", "Physical Cloud Run Job binding is ambiguous.", $"More than one logical job maps to '{profile.Jobs[job.Id.Value]}'.", "Map every logical migration job to a distinct physical Cloud Run Job name.");
-            foreach (var name in job.Environment.Keys)
+            if (!physicalJobs.Add(physicalJobName)) throw Failure("ASDEPLOY158", "Physical Cloud Run Job binding is ambiguous.", $"More than one logical job maps to '{physicalJobName}'.", "Map every logical migration job to a distinct physical Cloud Run Job name.");
+            foreach (var name in job.Environment.Keys.Where(ReservedEnvironmentNames.Contains))
             {
-                if (ReservedEnvironmentNames.Contains(name)) throw Failure("ASDEPLOY168", "Reserved Cloud Run environment variable rejected.", $"'{name}' is owned by the runtime or credential mechanism.", "Remove the setting and use the declared service identity and Cloud Run runtime metadata.");
+                throw Failure("ASDEPLOY168", "Reserved Cloud Run environment variable rejected.", $"'{name}' is owned by the runtime or credential mechanism.", "Remove the setting and use the declared service identity and Cloud Run runtime metadata.");
             }
         }
     }
@@ -388,9 +388,9 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
             fields.Add(("sourceRevisionLabel", expected.SourceRevisionLabel, actual.SourceRevisionLabel));
         }
 
-        foreach (var field in fields)
+        foreach (var field in fields.Where(field => !Equals(field.Expected, field.Actual)))
         {
-            if (!Equals(field.Expected, field.Actual)) diagnostics.Add(DeploymentDiagnostic.Create("ASDEPLOY161", "Cloud Run Job parity mismatch.", $"Field '{field.Name}' differs for '{expected.LogicalId}'.", "Reconcile the generated artifact and deployed Job before cutover."));
+            diagnostics.Add(DeploymentDiagnostic.Create("ASDEPLOY161", "Cloud Run Job parity mismatch.", $"Field '{field.Name}' differs for '{expected.LogicalId}'.", "Reconcile the generated artifact and deployed Job before cutover."));
         }
 
         return fields.Count;
@@ -549,9 +549,16 @@ public sealed class GcloudCommandRunner : IGcloudCommandRunner
         return new GcloudCommandResult(process.ExitCode, await stdout, await stderr);
     }
 
+    [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Best-effort process cleanup handles OS timing races after timeout or cancellation; public failure paths are covered.")]
     private static void TryKill(Process process)
     {
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or NotSupportedException) { }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or NotSupportedException)
+        {
+            Trace.TraceWarning(
+                "AppSurface GCP verification could not terminate a timed-out gcloud process. Exception={0}; HResult={1}.",
+                exception.GetType().FullName,
+                exception.HResult);
+        }
     }
 }

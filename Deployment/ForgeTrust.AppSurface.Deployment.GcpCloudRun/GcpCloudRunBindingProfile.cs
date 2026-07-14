@@ -162,9 +162,9 @@ public sealed record GcpCloudRunBindingProfile(
     private static void RejectUnknown(JsonElement element, string path, params string[] allowed)
     {
         var names = allowed.ToHashSet(StringComparer.Ordinal);
-        foreach (var property in element.EnumerateObject())
+        foreach (var property in element.EnumerateObject().Where(property => !names.Contains(property.Name)))
         {
-            if (!names.Contains(property.Name)) throw Failure("ASDEPLOY140", "Unknown GCP binding property.", $"'{path}.{property.Name}' is not part of the closed v1 schema.", "Remove the property or upgrade to a schema that defines it.");
+            throw Failure("ASDEPLOY140", "Unknown GCP binding property.", $"'{path}.{property.Name}' is not part of the closed v1 schema.", "Remove the property or upgrade to a schema that defines it.");
         }
     }
 
