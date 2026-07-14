@@ -244,7 +244,7 @@ The RazorWire MVC example includes a failed-form UX page at `/Reactivity/FormFai
 
 ## Release notes and upgrade policy
 
-AppSurface is preparing to release the entire monorepo in unison. The public release contract now lives in the repository so teams can see what is queued for the next version, how pre-1.0 changes are handled, and where future migration notes will live.
+AppSurface releases the entire monorepo in unison. The public release contract lives in the repository so teams can see what is queued for the next version, how pre-1.0 changes are handled, and where migration notes live.
 
 - [Package chooser](./packages/README.md) - the generated first-install map for web, console, Aspire, and optional package add-ons.
 - [Release hub](./releases/README.md) - start here for the narrative release surface.
