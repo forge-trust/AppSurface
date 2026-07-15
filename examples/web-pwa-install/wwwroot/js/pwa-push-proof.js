@@ -41,7 +41,7 @@
         permission.className = `pill ${value === "granted" ? "configured" : "unconfigured"}`;
     };
 
-    const prepare = async () => {
+    const prepare = async (preserveReadyMessage = false) => {
         preparedHandle = null;
         setBusy(true);
         let result;
@@ -49,7 +49,9 @@
         catch { announce("failed", "The browser client rejected the proof configuration. Check the safe ASPUSHJS code."); setBusy(false); return; }
         if (result.status === "prepared") {
             preparedHandle = result.handle;
-            announce("ready", "Ready. Enable notifications must be clicked directly; no permission prompt has occurred yet.");
+            if (!preserveReadyMessage) {
+                announce("ready", "Ready. Enable notifications must be clicked directly; no permission prompt has occurred yet.");
+            }
         } else if (result.status === "vapid-key-migration-required") {
             announce("failed", "The active VAPID key changed. Disable the old subscription, prepare again, then use a second explicit enable action.");
         } else if (result.status === "unauthorized" || result.status === "forbidden") {
@@ -75,7 +77,7 @@
                 announce("failed", `Subscription returned ${result.status}. The browser subscription may remain for an explicit retry.`);
             }
         }).catch(() => announce("failed", "The subscribe action failed with a safe browser invariant code."))
-            .finally(() => { setBusy(false); void prepare(); });
+            .finally(() => { setBusy(false); void prepare(true); });
     });
 
     disable.addEventListener("click", async () => {
@@ -88,7 +90,7 @@
             } else {
                 announce("failed", `Unsubscribe returned ${result.status}; follow the explicit recovery message.`);
             }
-        } finally { setBusy(false); await prepare(); }
+        } finally { setBusy(false); await prepare(true); }
     });
 
     fakeSend.addEventListener("click", async () => {
