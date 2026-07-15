@@ -1,0 +1,29 @@
+{
+  "assetPaths": [
+    { "value": "/icons/app.png", "valid": true },
+    { "value": "/icons/start%2fnotes.png", "valid": true },
+    { "value": "//cdn.example.test/icon.png", "valid": false },
+    { "value": "/icons/app.png?token=secret", "valid": false },
+    { "value": "/a%2f..%2fb", "valid": false },
+    { "value": "/%2e%2e/secret", "valid": false },
+    { "value": "/%252e%252e/secret", "valid": false },
+    { "value": "/%2e/secret", "valid": false },
+    { "value": "/bad%escape", "valid": false },
+    { "value": "/encoded%00control", "valid": false },
+    { "value": "/encoded%20space", "valid": false },
+    { "value": "/encoded%7Btenant%7D", "valid": false },
+    { "value": "/encoded%3Fquery", "valid": false },
+    { "value": "/encoded%23fragment", "valid": false }
+  ],
+  "destinationPaths": [
+    { "value": "/review", "valid": true },
+    { "value": "/review?source=push", "valid": true },
+    { "value": "/start%2fnotes?source=push", "valid": true },
+    { "value": "/review?one?two", "valid": false },
+    { "value": "/review#fragment", "valid": false },
+    { "value": "/a%2f..%2fb", "valid": false },
+    { "value": "/%252e%252e/secret", "valid": false },
+    { "value": "https://example.test/review", "valid": false },
+    { "value": "/bad%escape", "valid": false }
+  ]
+}

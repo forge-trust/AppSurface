@@ -1092,7 +1092,7 @@ public sealed class AppSurfaceDocsVersioningOptions
     /// <summary>
     /// Gets the default maximum rewritten published-tree input size in bytes.
     /// </summary>
-    public const long DefaultMaxRewrittenFileSizeBytes = 2L * 1024L * 1024L;
+    public const long DefaultMaxRewrittenFileSizeBytes = 4L * 1024L * 1024L;
 
     /// <summary>
     /// Gets the smallest supported rewritten published-tree input size in bytes.

@@ -16,7 +16,7 @@ The CLI also includes public coverage commands for private-by-default CI coverag
 
 `appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, delete keys, and run doctor diagnostics for platform availability.
 
-`appsurface pwa verify` checks the install metadata served by `ForgeTrust.AppSurface.Web`: secure origin posture, manifest discovery and content, icon reachability, same-origin start URL and scope, head link presence, diagnostics exposure, and opt-in offline service worker plus fallback posture.
+`appsurface pwa verify` checks the install metadata served by `ForgeTrust.AppSurface.Web`: secure origin posture, entry-page manifest discovery, redirect boundaries, manifest content, icon reachability and PNG dimensions, same-origin start URL and scope, head link presence, diagnostics exposure, and opt-in offline service worker plus fallback posture. It also recognizes push-worker configuration while keeping browser registration, permission, subscription, and delivery outside the verifier's claims.
 
 Future CLI authentication is design-only today. The [authenticated command design](docs/authenticated-command-design.md) keeps auth centered on protected command execution, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the first protected command wedge, and requires browser/loopback PKCE, RFC 8628 device flow, CI no-prompt behavior, secure token-cache boundaries, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 
@@ -73,10 +73,28 @@ Verify PWA install metadata for a running AppSurface Web app:
 
 ```bash
 appsurface pwa verify --url https://app.example.com
-appsurface pwa verify --url http://localhost:5055 --json
+appsurface pwa verify --base-url http://localhost:5055 --entry-path /account/resume --json
 ```
 
-The verifier accepts HTTPS origins plus localhost, `127.0.0.1`, and `::1` development origins. It reports stable `ASPWA2xx` diagnostics for manifest reachability, required manifest fields, required `192x192` and `512x512` icons, icon content types, root-page manifest links, `start_url`/`scope` consistency, development diagnostics, and offline service worker plus offline fallback reachability when the app enables an offline strategy. JSON output is intended for CI or smoke tests; text output is optimized for local copy-paste debugging.
+The verifier accepts HTTPS origins plus localhost, `127.0.0.1`, and `::1` development origins. Use `--entry-path` for the real HTML page a user lands on after auth, resume, or setup redirects; the path is app-root-relative and is resolved under any path base in `--url` or `--base-url`. The verifier follows same-origin, same-base-path redirects for entry, manifest, diagnostics, icon, service-worker, and offline fallback requests, and fails when a redirect leaves that boundary.
+
+Use explicit assertions when CI should prove a product contract instead of only checking generic installability:
+
+```bash
+appsurface pwa verify \
+  --base-url https://app.example.com \
+  --entry-path /account/resume \
+  --expect-start-url / \
+  --expect-scope / \
+  --expect-display standalone \
+  --expect-theme-color '#2563eb' \
+  --expect-background-color '#ffffff' \
+  --expect-icon 192x192 \
+  --expect-icon 512x512 \
+  --json
+```
+
+The verifier reports stable `ASPWA2xx` diagnostics for manifest reachability, required manifest fields, required `192x192` and `512x512` icon tokens, optional expected icon declarations such as `512x512:maskable`, icon content types, decoded PNG dimensions when available, entry-page manifest links, `start_url`/`scope` consistency, development diagnostics, and offline service worker plus offline fallback reachability when the app enables an offline strategy. When diagnostics expose push configuration, `ASPWA257` records only that a push-capable worker was observed; registration, permission, subscription, and delivery were not evaluated. When no worker capability is enabled, the verifier probes the configured service-worker path and records proof that it is not mapped. JSON output uses `schemaVersion: 2`, preserves legacy `passed`, `origin`, `manifestPath`, and `diagnostics` fields, and adds `baseUrl`, entry URL, manifest fields, icon evidence, and structured diagnostic details for CI evidence. `origin` contains only scheme, host, and port; `baseUrl` includes the verified path base.
 
 ### `appsurface secrets`
 
@@ -182,6 +200,8 @@ appsurface coverage run \
 
 The v1 contract assumes selected test projects are already instrumented with Coverlet. No managed test result export happens by default. Use `--test-results junit` when AppSurface should own top-level JUnit artifacts, and make sure every selected test project references `JunitXml.TestLogger`. `junit` is the only managed test-result format supported in this release; `trx` and TUnit-compatible parsing are reserved for follow-up work. `--logger` remains raw `dotnet test` pass-through and does not create AppSurface-managed artifacts.
 
+The default schedule is input order. For repositories with enough projects for long-tail timing to matter, pass `--schedule longest-first` so non-exclusive projects with longer prior durations start first within each exclusive-project segment. The first run usually has no timing history and keeps unknown projects in input order; later runs can reuse the previous output directory's `timings.json` automatically.
+
 #### Already Has Coverlet
 
 ```bash
@@ -211,6 +231,9 @@ Options:
 - `--output`: Coverage output directory. Defaults to `TestResults/coverage-merged`.
 - `--configuration`: Build/test configuration. Defaults to `Debug`.
 - `--parallelism`: Positive integer for non-exclusive test project concurrency. Defaults to `1`.
+- `--schedule`: Project scheduling mode. Use `input-order` for stable input order or `longest-first` to start longer non-exclusive projects first. Defaults to `input-order`.
+- `--schedule-timings`: Explicit `timings.json` file for `--schedule longest-first`. When omitted, longest-first reads the previous `timings.json` from the current output directory before cleanup.
+- `--priority-test-project`: Repeatable non-exclusive project path or file name to schedule before duration-sorted projects when `--schedule longest-first` is used.
 - `--no-restore`: Passes `--no-restore` to build and test commands.
 - `--build`: Builds the solution once before tests, including explicit-project runs.
 - `--no-build`: Skips the solution build before tests.
@@ -227,11 +250,31 @@ Options:
 - `--no-clean`: Preserves existing AppSurface-owned output instead of cleaning known coverage artifacts first.
 - `--verbosity`: `dotnet test` verbosity. Defaults to `minimal`.
 
+Duration-aware scheduling keeps exclusive projects as barriers. If discovery returns `A.Tests`, `Browser.IntegrationTests`, and `B.Tests`, `B.Tests` never jumps ahead of the exclusive browser project even when it was slower in the previous run. AppSurface sorts only the non-exclusive segment before each barrier and only the non-exclusive segment after it.
+
+```bash
+dotnet tool run appsurface coverage run \
+  --solution ./MyApp.slnx \
+  --parallelism 4 \
+  --schedule longest-first
+```
+
+Use `--schedule-timings` when CI stores the previous run's timings somewhere other than the output directory:
+
+```bash
+dotnet tool run appsurface coverage run \
+  --solution ./MyApp.slnx \
+  --schedule longest-first \
+  --schedule-timings ./artifacts/previous-coverage/timings.json
+```
+
+Use `--priority-test-project` for a known bottleneck that should start first even when its timing is missing or temporarily shorter. Priority projects must match one selected non-exclusive project. Duplicate, unmatched, ambiguous, or exclusive priority values fail before tests run so a typo does not silently change CI behavior.
+
 Artifacts are local and private by default:
 
 - `coverage.cobertura.xml`: Merged Cobertura file consumed by `coverage gate`.
 - `summary.txt`: Human-readable merged line and branch coverage summary.
-- `timings.json`: Machine-readable build, test, merge, managed test-result, diagnostics, artifact, log, and exit-code data.
+- `timings.json`: Machine-readable build, test, merge, schedule, managed test-result, diagnostics, artifact, log, and exit-code data. Per-project entries include both `originalIndex` for stable artifact naming and `executionIndex` for the actual launch order.
 - `reportgenerator-summary.txt`: Text summary from the package-owned ReportGenerator merge when available.
 - `junit-coverage-<index>-<project-name-hash>.xml`: AppSurface-managed JUnit test results when `--test-results junit` or `--slow-test-diagnostics` is used.
 - `slow-test-diagnostics.md` and `slow-test-diagnostics.json`: Slow-test evidence, parser warnings, metadata completeness, and diagnostic overhead when `--slow-test-diagnostics` is used.
@@ -285,7 +328,7 @@ appsurface coverage merge \
   --output ./TestResults/coverage-merged
 ```
 
-Use `coverage merge` when a CI matrix, custom test harness, or non-AppSurface test producer already writes Cobertura files and you only need AppSurface's package-owned fan-in plus `coverage gate` artifacts. Use `coverage run -> coverage gate` for normal package-consuming .NET repositories where AppSurface should discover projects, invoke `dotnet test`, and merge the Coverlet output. In this repository, keep `./scripts/coverage-solution.sh --merge-only` for the legacy grouped contributor flow until that script is retired by a separate coverage-runner cleanup.
+Use `coverage merge` when a CI matrix, custom test harness, or non-AppSurface test producer already writes Cobertura files and you only need AppSurface's package-owned fan-in plus `coverage gate` artifacts. Use `coverage run -> coverage gate` for normal package-consuming .NET repositories where AppSurface should discover projects, invoke `dotnet test`, and merge the Coverlet output. In this repository, the default `./scripts/coverage-solution.sh` lane runs that pair with repository thresholds; its legacy grouped and `--merge-only` modes remain coverage-only until the separate coverage-runner cleanup retires them.
 
 The v1 source contract is intentionally narrow. `--source` must point to an existing directory. The command recursively selects files named exactly `coverage.cobertura.xml`, sorts them by ordinal path, validates that each selected file has a Cobertura `<coverage>` root, and prints the discovered count plus the first few relative paths. A single shard is valid. Files named `Cobertura.xml`, arbitrary `*.xml`, or non-Cobertura XML are not accepted by v1; rename or copy producer artifacts to `coverage.cobertura.xml` before merging.
 

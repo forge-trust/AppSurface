@@ -136,6 +136,21 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
       - ForgeTrust.AppSurface.Auth
+  - project: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 38
+    use_when: Add this in an Aspire AppHost when package consumers need a real local Keycloak-backed AppSurface OIDC proof without making runtime web apps reference Keycloak or Aspire hosting packages.
+    includes: AddAppSurfaceKeycloak AppHost extension, deterministic local realm/client/user import generation, secret-safe OIDC configuration projection, fixed-port preflight diagnostics, multi-signal readiness probe, disposable-data default, persistent-data opt-in, and ASKEYC diagnostics.
+    does_not_include: Runtime web authentication registration, identity-provider hosting in web apps, production Keycloak administration, social IdP setup, confidential-client secret lifecycle, provider SDK abstractions, tenant mapping, user provisioning, durable app-user mapping, token storage, or runtime dependency on Keycloak packages.
+    start_here_path: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` in AppHost/dev/test projects only when a real local OIDC provider proof should pair with `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc`; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep it separate from DevAuth, OIDC registration, and Auth.Testing.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Aspire
   - project: Auth/ForgeTrust.AppSurface.Auth.Testing/ForgeTrust.AppSurface.Auth.Testing.csproj
     classification: public
     publish_decision: publish
@@ -292,21 +307,52 @@ packages:
       - ForgeTrust.AppSurface.Core
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
+  - project: Deployment/ForgeTrust.AppSurface.Deployment/ForgeTrust.AppSurface.Deployment.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 55
+    use_when: Install this directly when authoring a deployment target or consuming portable, schema-versioned deployment intent without taking an Aspire or cloud-provider dependency.
+    includes: Immutable migration-job deployment intent, typed logical identifiers and bindings, capability validation, stable diagnostics, deterministic JSON serialization, artifact hashing, and provider-neutral render and verification contracts.
+    does_not_include: Aspire app-model APIs, cloud SDKs, secret resolution, image builds, infrastructure apply, job execution, traffic promotion, or provider-specific foundations.
+    start_here_path: Deployment/ForgeTrust.AppSurface.Deployment/README.md
+    recipe_summary: Add [`ForgeTrust.AppSurface.Deployment`](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) directly only when authoring a deployment provider or inspecting portable deployment intent; normal Aspire consumers receive it transitively.
+  - project: Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/ForgeTrust.AppSurface.Deployment.GcpCloudRun.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 56
+    use_when: Add this to an Aspire AppHost that should compile an explicitly annotated run-to-completion migration job into reviewable GCP Cloud Run Job artifacts and verify deployed configuration without mutating GCP.
+    includes: Closed GCP binding profiles, deterministic Cloud Run v2 Job Terraform JSON, safe evidence hashes, shadow and owned parity comparison, and bounded read-only gcloud verification.
+    does_not_include: Cloud account or foundation provisioning, secret values, image builds or pushes, OpenTofu apply or state ownership, migration execution, schedulers, web revisions, traffic, or rollback.
+    start_here_path: Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md
+    recipe_summary: Add [`ForgeTrust.AppSurface.Deployment.GcpCloudRun`](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) beside the Aspire package when an existing Cloud Run migration job should move from duplicated deployment mapping to deterministic publish artifacts and read-only parity proof.
+    depends_on:
+      - ForgeTrust.AppSurface.Deployment
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Deployment
   - project: Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj
     classification: public
     publish_decision: publish
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.2.md
+    release_notes_path: releases/unreleased.md
     order: 60
     use_when: Start here for .NET Aspire app-model projects that want AppSurface-style modular composition for service defaults and distributed resources.
-    includes: AspireApp entry points and modular registration for distributed application resources and service defaults.
-    does_not_include: ASP.NET Core web hosting, Razor UI features, or the standalone docs host.
+    includes: AspireApp entry points, modular distributed-resource composition, explicit migration-job deployment annotations, target assignment, and native Aspire publish and named verification pipeline integration.
+    does_not_include: ASP.NET Core web hosting, Razor UI features, cloud-provider compilation, infrastructure apply, job execution, traffic promotion, or the standalone docs host.
     start_here_path: Aspire/ForgeTrust.AppSurface.Aspire/README.md
-    recipe_summary: Start with `ForgeTrust.AppSurface.Aspire` for distributed app-model projects and service-default composition.
+    recipe_summary: Start with `ForgeTrust.AppSurface.Aspire` for distributed app-model projects and service-default composition; add a provider package when the same AppHost topology should publish deployment artifacts through native Aspire commands.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Console
+      - ForgeTrust.AppSurface.Deployment
   - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
     classification: public
     publish_decision: publish
@@ -315,11 +361,11 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.2.md
     order: 70
-    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, health/readiness probes, conventional browser affordances, PWA install metadata, or authenticated config-audit diagnostics before layering on optional UI or docs packages.
-    includes: Base ASP.NET Core hosting, default public `/health` and `/ready` ASP.NET Core health-check probes, pre-routing and endpoint-aware middleware composition, endpoint composition, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/service-worker endpoints, opt-in authenticated config audit diagnostics endpoint mapping, and the core AppSurface web module contract.
-    does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, AppSurface Docs host, browser-specific install prompt UI, broad offline route/app-data caching, automatic diagnostics exposure, or authorization policy definitions.
+    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, health/readiness probes, conventional browser affordances, PWA install metadata or push-worker plumbing, or authenticated config-audit diagnostics before layering on optional UI or docs packages.
+    includes: Base ASP.NET Core hosting, default public `/health` and `/ready` ASP.NET Core health-check probes, pre-routing and endpoint-aware middleware composition, endpoint composition, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/shared-worker endpoints, explicit offline behavior, push-event plumbing, an inert service-worker registration helper, opt-in authenticated config audit diagnostics endpoint mapping, and the core AppSurface web module contract.
+    does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, AppSurface Docs host, browser-specific install or permission UI, push subscription persistence or delivery, broad offline route/app-data caching, automatic diagnostics exposure, or authorization policy definitions.
     start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
-    recipe_summary: Start with `ForgeTrust.AppSurface.Web` for AppSurface ASP.NET Core hosting and default `/health` plus `/ready` platform probes; enable `WebOptions.Pwa` in the same package when the app needs installable PWA metadata and diagnostics, or map config audit diagnostics explicitly when support needs sanitized operator evidence.
+    recipe_summary: Start with `ForgeTrust.AppSurface.Web` for AppSurface ASP.NET Core hosting and default `/health` plus `/ready` platform probes; enable independent `WebOptions.Pwa` install, offline, or push-worker capabilities in the same package, or map config audit diagnostics explicitly when support needs sanitized operator evidence.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Core
@@ -513,11 +559,11 @@ packages:
     order: 120
     tool_command_name: appsurface
     use_when: Install this when you want repository-level AppSurface tooling from a global or local .NET tool command.
-    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, and the `appsurface secrets init`, `set`, `get`, `list --names-only`, `delete`, and `doctor` local-secret workflow.
+    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface pwa verify` install-readiness evidence for AppSurface Web apps, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, and the `appsurface secrets init`, `set`, `get`, `list --names-only`, `delete`, and `doctor` local-secret workflow.
     does_not_include: App runtime packages, hosted coverage dashboards, coverage uploads, coverage trend storage, grouped coverage runs, TRX/TUnit result parsing, RazorWire-specific export workflows, or a replacement for project package references.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README
-    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs` workflows or private `appsurface coverage run`, `coverage merge`, and `coverage gate` commands without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
+    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs` workflows, `appsurface pwa verify` install-readiness evidence, or private `appsurface coverage run`, `coverage merge`, and `coverage gate` commands without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
     classification: excluded
     publish_decision: do_not_publish

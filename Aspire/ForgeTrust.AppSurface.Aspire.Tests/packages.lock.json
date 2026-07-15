@@ -611,8 +611,9 @@
       "forgetrust.appsurface.aspire": {
         "type": "Project",
         "dependencies": {
-          "Aspire.Hosting": "[13.4.3, )",
-          "ForgeTrust.AppSurface.Console": "[0.1.0, )"
+          "Aspire.Hosting": "[13.4.4, )",
+          "ForgeTrust.AppSurface.Console": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Deployment": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.console": {
@@ -630,11 +631,17 @@
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.deployment": {
+        "type": "Project"
+      },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
+      },
       "Aspire.Hosting": {
         "type": "CentralTransitive",
-        "requested": "[13.4.3, )",
-        "resolved": "13.4.3",
-        "contentHash": "X6UgBZNWU/zOp65qkNElsa5BMPbxv0P59E+6D0NcRFi1n5iMY2UN2xnEnghfKBDBKUSwqnEGvUg/cLL9N797zw==",
+        "requested": "[13.4.4, )",
+        "resolved": "13.4.4",
+        "contentHash": "LdE2fAaXU9scaUsSHVZb1DdvjNofZM0Yea9KDBlLUMf1x+6SddQf6A/AtzcMclethZunfhs/Rkj+WFXuehlIMA==",
         "dependencies": {
           "AspNetCore.HealthChecks.Uris": "9.0.0",
           "Google.Protobuf": "3.34.1",

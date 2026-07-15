@@ -6,8 +6,8 @@ namespace WebPwaInstallExample.Controllers;
 /// Serves the root page for the AppSurface PWA install example.
 /// </summary>
 /// <remarks>
-/// The controller is intentionally small: the sample uses the root HTTP GET route to render the default
-/// <c>Index</c> view that displays the generated diagnostics link and verifier command for the running app.
+/// The controller is intentionally small: the sample uses the root HTTP GET route and one route-shaped entry page to
+/// render the default <c>Index</c> view that displays the generated diagnostics link and verifier command.
 /// </remarks>
 [Route("")]
 public sealed class HomeController : Controller
@@ -24,5 +24,15 @@ public sealed class HomeController : Controller
     public IActionResult Index()
     {
         return View();
+    }
+
+    /// <summary>
+    /// Renders a route-shaped entry page so verifier examples can prove non-root manifest discovery.
+    /// </summary>
+    /// <returns>The MVC view result for the sample entry page.</returns>
+    [HttpGet("account/resume")]
+    public IActionResult Resume()
+    {
+        return View("Index");
     }
 }

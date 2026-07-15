@@ -18,15 +18,171 @@
         }
 
         main {
-            max-width: 48rem;
+            max-width: 56rem;
             margin: 0 auto;
             padding: 4rem 1.25rem;
+        }
+
+        h1, h2, p {
+            margin-top: 0;
+        }
+
+        h1 {
+            max-width: 15ch;
+            margin-bottom: 1rem;
+            font-size: clamp(2.25rem, 7vw, 4.5rem);
+            line-height: 0.98;
+            letter-spacing: -0.055em;
+        }
+
+        h2 {
+            margin-bottom: 0.75rem;
+            font-size: clamp(1.4rem, 3vw, 2rem);
+            letter-spacing: -0.025em;
+        }
+
+        section {
+            margin-top: 2rem;
+        }
+
+        a {
+            color: #1d4ed8;
+        }
+
+        a:focus-visible,
+        button:focus-visible {
+            outline: 3px solid #f59e0b;
+            outline-offset: 3px;
+        }
+
+        .hero {
+            padding-bottom: 1.5rem;
+        }
+
+        .eyebrow {
+            margin-bottom: 0.5rem;
+            color: #475569;
+            font-size: 0.75rem;
+            font-weight: 750;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .lede {
+            max-width: 44rem;
+            color: #475569;
+            font-size: 1.125rem;
+            line-height: 1.65;
+        }
+
+        .proof-card,
+        .recovery {
+            border: 1px solid #cbd5e1;
+            border-radius: 1rem;
+            background: #ffffff;
+            box-shadow: 0 1rem 3rem rgba(30, 41, 59, 0.08);
+            padding: clamp(1.25rem, 4vw, 2rem);
+        }
+
+        .status {
+            min-height: 3rem;
+            border-left: 0.25rem solid #64748b;
+            margin: 1rem 0 1.25rem;
+            padding: 0.75rem 1rem;
+            background: #f8fafc;
+            line-height: 1.5;
+        }
+
+        .status[data-state="active"],
+        .status[data-state="already-registered"] {
+            border-color: #15803d;
+            background: #f0fdf4;
+        }
+
+        .status[data-state="failed"],
+        .status[data-state="helper-conflict"] {
+            border-color: #b91c1c;
+            background: #fef2f2;
+        }
+
+        .primary-action {
+            border: 0;
+            border-radius: 0.55rem;
+            padding: 0.8rem 1.1rem;
+            color: #ffffff;
+            background: #1d4ed8;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .primary-action:disabled {
+            color: #64748b;
+            background: #e2e8f0;
+            cursor: not-allowed;
+        }
+
+        .notice {
+            margin-top: 1rem;
+            color: #7f1d1d;
+        }
+
+        .capability-ledger {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+            gap: 0.75rem;
+            margin: 0;
+        }
+
+        .capability-ledger div {
+            border: 1px solid #dbe3ef;
+            border-radius: 0.75rem;
+            padding: 1rem;
+            background: #ffffff;
+        }
+
+        .capability-ledger dt {
+            margin-bottom: 0.6rem;
+            font-weight: 700;
+        }
+
+        .capability-ledger dd {
+            margin: 0;
+        }
+
+        .pill {
+            display: inline-block;
+            border-radius: 999px;
+            padding: 0.25rem 0.55rem;
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+
+        .pill.configured {
+            color: #166534;
+            background: #dcfce7;
+        }
+
+        .pill.pending {
+            color: #854d0e;
+            background: #fef9c3;
+        }
+
+        .pill.unconfigured {
+            color: #475569;
+            background: #e2e8f0;
+        }
+
+        .recovery p:last-child {
+            margin-bottom: 0;
+            line-height: 1.65;
         }
 
         code {
             background: #e8edf7;
             border-radius: 0.25rem;
             padding: 0.125rem 0.25rem;
+            overflow-wrap: anywhere;
         }
     </style>
 </head>

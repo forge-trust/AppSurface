@@ -73,6 +73,24 @@ internal sealed partial class CoverageRunCommand : ICommand
     public int Parallelism { get; set; } = 1;
 
     /// <summary>
+    /// Gets or sets the project scheduling mode.
+    /// </summary>
+    [CommandOption("schedule", Description = "Project scheduling mode: input-order or longest-first. Defaults to input-order.")]
+    public string Schedule { get; set; } = "input-order";
+
+    /// <summary>
+    /// Gets or sets an explicit timings file used by <c>--schedule longest-first</c>.
+    /// </summary>
+    [CommandOption("schedule-timings", Description = "timings.json file used by --schedule longest-first instead of the output directory's previous timings.")]
+    public string? ScheduleTimings { get; set; }
+
+    /// <summary>
+    /// Gets or sets non-exclusive projects that should be scheduled before duration-sorted projects.
+    /// </summary>
+    [CommandOption("priority-test-project", Description = "Repeatable non-exclusive project path or file name to run first when --schedule longest-first is used.")]
+    public string[] PriorityTestProjects { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets a value indicating whether build and test commands should pass <c>--no-restore</c>.
     /// </summary>
     [CommandOption("no-restore", Description = "Pass --no-restore to build and test commands.")]
@@ -213,6 +231,28 @@ internal sealed partial class CoverageRunCommand : ICommand
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
         }
 
+        var scheduleMode = ParseScheduleMode();
+        var priorityTestProjects = PriorityTestProjects.Where(project => !string.IsNullOrWhiteSpace(project)).ToArray();
+        if (scheduleMode == CoverageRunScheduleMode.InputOrder && !string.IsNullOrWhiteSpace(ScheduleTimings))
+        {
+            throw CoverageRunDiagnostics.Create(
+                "ASCOV101",
+                "--schedule-timings requires --schedule longest-first.",
+                "A timings file has no effect when projects run in input order.",
+                "Pass --schedule longest-first with --schedule-timings, or remove --schedule-timings.",
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+        }
+
+        if (scheduleMode == CoverageRunScheduleMode.InputOrder && priorityTestProjects.Length > 0)
+        {
+            throw CoverageRunDiagnostics.Create(
+                "ASCOV101",
+                "--priority-test-project requires --schedule longest-first.",
+                "Priority projects have no effect when projects run in input order.",
+                "Pass --schedule longest-first with --priority-test-project, or remove the priority option.",
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+        }
+
         var testResults = ParseTestResults();
         if (SlowTestDiagnostics && testResults == CoverageRunTestResultFormat.None)
         {
@@ -225,6 +265,9 @@ internal sealed partial class CoverageRunCommand : ICommand
             OutputDirectory,
             Configuration,
             Parallelism,
+            scheduleMode,
+            ScheduleTimings,
+            priorityTestProjects,
             NoRestore,
             Build,
             NoBuild,
@@ -239,6 +282,27 @@ internal sealed partial class CoverageRunCommand : ICommand
             SlowTestDiagnostics,
             !NoClean,
             Verbosity);
+    }
+
+    private CoverageRunScheduleMode ParseScheduleMode()
+    {
+        if (string.IsNullOrWhiteSpace(Schedule)
+            || string.Equals(Schedule, "input-order", StringComparison.OrdinalIgnoreCase))
+        {
+            return CoverageRunScheduleMode.InputOrder;
+        }
+
+        if (string.Equals(Schedule, "longest-first", StringComparison.OrdinalIgnoreCase))
+        {
+            return CoverageRunScheduleMode.LongestFirst;
+        }
+
+        throw CoverageRunDiagnostics.Create(
+            "ASCOV101",
+            "--schedule must be input-order or longest-first.",
+            $"Received '{Schedule}'.",
+            "Use --schedule input-order or --schedule longest-first.",
+            "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
     }
 
     private CoverageRunTestResultFormat ParseTestResults()
@@ -277,6 +341,9 @@ internal sealed partial class CoverageRunCommand : ICommand
 /// <param name="OutputDirectory">Coverage artifact directory. Existing content must be AppSurface-owned unless cleaning is disabled.</param>
 /// <param name="Configuration">Build and test configuration forwarded to <c>dotnet build</c> and <c>dotnet test</c>.</param>
 /// <param name="Parallelism">Maximum concurrent non-exclusive test projects.</param>
+/// <param name="ScheduleMode">Project scheduling mode used before process execution.</param>
+/// <param name="ScheduleTimingsPath">Optional explicit timings file for duration-aware scheduling.</param>
+/// <param name="PriorityTestProjects">Non-exclusive project path or file-name matches scheduled ahead of duration-sorted projects.</param>
 /// <param name="NoRestore">Whether build and test commands should pass <c>--no-restore</c>.</param>
 /// <param name="Build">Whether to build once before tests, including explicit-project runs.</param>
 /// <param name="NoBuild">Whether to skip AppSurface's build phase and forward <c>--no-build</c> to <c>dotnet test</c>.</param>
@@ -297,6 +364,9 @@ internal sealed record CoverageRunRequest(
     string OutputDirectory,
     string Configuration,
     int Parallelism,
+    CoverageRunScheduleMode ScheduleMode,
+    string? ScheduleTimingsPath,
+    IReadOnlyList<string> PriorityTestProjects,
     bool NoRestore,
     bool Build,
     bool NoBuild,
@@ -311,6 +381,22 @@ internal sealed record CoverageRunRequest(
     bool SlowTestDiagnostics,
     bool Clean,
     string Verbosity);
+
+/// <summary>
+/// Scheduling modes supported by <c>coverage run</c>.
+/// </summary>
+internal enum CoverageRunScheduleMode
+{
+    /// <summary>
+    /// Preserve the discovered or explicitly supplied project order.
+    /// </summary>
+    InputOrder,
+
+    /// <summary>
+    /// Use prior timings to start longer non-exclusive projects first within each exclusive barrier segment.
+    /// </summary>
+    LongestFirst,
+}
 
 /// <summary>
 /// Managed test result artifact format for <c>coverage run</c>.
@@ -397,8 +483,9 @@ internal sealed class CoverageRunWorkflow
         var currentDirectory = Path.GetFullPath(Directory.GetCurrentDirectory());
         var resolution = await ResolveProjectsAsync(request, currentDirectory, cancellationToken);
         var outputDirectory = ResolveUserPath(request.OutputDirectory, currentDirectory);
+        var schedulePlan = await CreateSchedulePlanAsync(request, resolution, outputDirectory, currentDirectory, cancellationToken);
 
-        await PrintDiscoveryAsync(console, request, resolution, outputDirectory);
+        await PrintDiscoveryAsync(console, request, resolution, outputDirectory, schedulePlan);
         if (request.DryRun)
         {
             CoverageRunOutputGuard.Validate(outputDirectory, resolution.SolutionDirectory, resolution.Projects);
@@ -408,7 +495,7 @@ internal sealed class CoverageRunWorkflow
         CoverageRunOutputGuard.Prepare(outputDirectory, resolution.SolutionDirectory, resolution.Projects, request.Clean);
         var runStarted = _timeProvider.GetTimestamp();
         var build = await BuildIfNeededAsync(request, resolution, console, cancellationToken);
-        var projectResults = await RunScheduledProjectsAsync(request, resolution, outputDirectory, build.TestsShouldSkipBuild, console, cancellationToken);
+        var projectResults = await RunScheduledProjectsAsync(request, resolution, schedulePlan, outputDirectory, build.TestsShouldSkipBuild, console, cancellationToken);
         await ReplayLogsAsync(projectResults, console, cancellationToken);
 
         var coverageFiles = Directory.Exists(Path.Join(outputDirectory, "projects"))
@@ -479,6 +566,7 @@ internal sealed class CoverageRunWorkflow
             merge.ExitCode,
             coverageFiles.Length,
             projectResults,
+            schedulePlan,
             diagnostics,
             cancellationToken);
 
@@ -681,9 +769,273 @@ internal sealed class CoverageRunWorkflow
 
     private static bool MatchesProject(string candidate, string relativePath, string fullPath)
     {
-        return string.Equals(candidate, relativePath, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(candidate, fullPath, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(candidate, Path.GetFileName(fullPath), StringComparison.OrdinalIgnoreCase);
+        var normalizedCandidate = NormalizeProjectKey(candidate);
+        return string.Equals(normalizedCandidate, NormalizeProjectKey(relativePath), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedCandidate, NormalizeProjectKey(fullPath), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedCandidate, NormalizeProjectKey(Path.GetFileName(fullPath)), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<CoverageRunSchedulePlan> CreateSchedulePlanAsync(
+        CoverageRunRequest request,
+        CoverageProjectResolution resolution,
+        string outputDirectory,
+        string currentDirectory,
+        CancellationToken cancellationToken)
+    {
+        if (request.ScheduleMode == CoverageRunScheduleMode.InputOrder)
+        {
+            var inputEntries = resolution.Projects
+                .Select((project, index) => new CoverageRunScheduleEntry(
+                    OriginalIndex: index,
+                    ExecutionIndex: index,
+                    project,
+                    ScheduledSeconds: null,
+                    DurationSource: "none",
+                    ScheduleReason: "input-order"))
+                .ToArray();
+            return new CoverageRunSchedulePlan(
+                Mode: "input-order",
+                TimingSource: new CoverageRunScheduleTimingSource("none", null, "not-used"),
+                Warnings: [],
+                inputEntries);
+        }
+
+        var priorityRanks = ValidatePriorityProjects(request, resolution);
+        var timingSource = await LoadPriorTimingsAsync(request, outputDirectory, currentDirectory, cancellationToken);
+        var entries = new List<CoverageRunScheduleEntry>(resolution.Projects.Count);
+        var executionIndex = 0;
+        var index = 0;
+        while (index < resolution.Projects.Count)
+        {
+            var project = resolution.Projects[index];
+            if (project.IsExclusive)
+            {
+                entries.Add(new CoverageRunScheduleEntry(
+                    OriginalIndex: index,
+                    ExecutionIndex: executionIndex++,
+                    project,
+                    ScheduledSeconds: null,
+                    DurationSource: "none",
+                    ScheduleReason: "exclusive-barrier"));
+                index++;
+                continue;
+            }
+
+            var segment = new List<CoverageRunIndexedProject>();
+            while (index < resolution.Projects.Count && !resolution.Projects[index].IsExclusive)
+            {
+                segment.Add(new CoverageRunIndexedProject(index, resolution.Projects[index]));
+                index++;
+            }
+
+            foreach (var item in SortScheduleSegment(segment, timingSource.TimingsByProject, priorityRanks))
+            {
+                var hasTiming = timingSource.TimingsByProject.TryGetValue(NormalizeProjectKey(item.Project.RelativePath), out var scheduledSeconds);
+                var isPriority = priorityRanks.ContainsKey(item.OriginalIndex);
+                entries.Add(new CoverageRunScheduleEntry(
+                    item.OriginalIndex,
+                    executionIndex++,
+                    item.Project,
+                    hasTiming ? scheduledSeconds : null,
+                    hasTiming ? timingSource.DurationSource : "none",
+                    isPriority ? "priority" : hasTiming ? "prior-timing" : "unknown-timing"));
+            }
+        }
+
+        return new CoverageRunSchedulePlan(
+            Mode: "longest-first",
+            TimingSource: new CoverageRunScheduleTimingSource(
+                timingSource.Kind,
+                timingSource.Path,
+                timingSource.Status),
+            timingSource.Warnings,
+            entries);
+    }
+
+    private static Dictionary<int, int> ValidatePriorityProjects(
+        CoverageRunRequest request,
+        CoverageProjectResolution resolution)
+    {
+        var priorities = request.PriorityTestProjects
+            .Where(project => !string.IsNullOrWhiteSpace(project))
+            .Select(project => project.Trim())
+            .ToArray();
+        var duplicate = priorities
+            .GroupBy(NormalizeProjectKey, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+        {
+            throw CoverageRunDiagnostics.Create(
+                "ASCOV101",
+                "--priority-test-project contains a duplicate project.",
+                $"Project: {duplicate.First()}.",
+                "Pass each priority project once.",
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+        }
+
+        var ranks = new Dictionary<int, int>();
+        for (var rank = 0; rank < priorities.Length; rank++)
+        {
+            var priority = priorities[rank];
+            var matches = resolution.Projects
+                .Select((project, originalIndex) => new CoverageRunIndexedProject(originalIndex, project))
+                .Where(item => MatchesProject(priority, item.Project.RelativePath, item.Project.FullPath))
+                .ToArray();
+            if (matches.Length == 0)
+            {
+                throw CoverageRunDiagnostics.Create(
+                    "ASCOV101",
+                    "--priority-test-project did not match any selected test project.",
+                    $"Project: {priority}.",
+                    "Pass a selected non-exclusive project path or file name.",
+                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+            }
+
+            if (matches.Any(match => match.Project.IsExclusive))
+            {
+                throw CoverageRunDiagnostics.Create(
+                    "ASCOV101",
+                    "--priority-test-project cannot target an exclusive project.",
+                    $"Project: {priority}.",
+                    "Exclusive projects remain scheduling barriers; remove the priority flag for that project.",
+                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+            }
+
+            if (matches.Length > 1)
+            {
+                throw CoverageRunDiagnostics.Create(
+                    "ASCOV101",
+                    "--priority-test-project matched more than one selected project.",
+                    $"Project: {priority}.",
+                    "Pass the relative path for the intended non-exclusive project.",
+                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+            }
+
+            if (!ranks.TryAdd(matches[0].OriginalIndex, rank))
+            {
+                throw CoverageRunDiagnostics.Create(
+                    "ASCOV101",
+                    "--priority-test-project contains a duplicate project.",
+                    $"Project: {priority}.",
+                    "Pass each priority project once.",
+                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+            }
+
+        }
+
+        return ranks;
+    }
+
+    private static IOrderedEnumerable<CoverageRunIndexedProject> SortScheduleSegment(
+        IReadOnlyList<CoverageRunIndexedProject> segment,
+        IReadOnlyDictionary<string, long> timingsByProject,
+        IReadOnlyDictionary<int, int> priorityRanks)
+    {
+        return segment
+            .OrderBy(item => priorityRanks.TryGetValue(item.OriginalIndex, out var priorityRank) ? priorityRank : int.MaxValue)
+            .ThenBy(item => priorityRanks.ContainsKey(item.OriginalIndex) ? 0 : timingsByProject.ContainsKey(NormalizeProjectKey(item.Project.RelativePath)) ? 1 : 2)
+            .ThenByDescending(item => timingsByProject.TryGetValue(NormalizeProjectKey(item.Project.RelativePath), out var seconds) ? seconds : long.MinValue)
+            .ThenBy(item => item.OriginalIndex);
+    }
+
+    private static async Task<CoverageRunPriorTimingLoad> LoadPriorTimingsAsync(
+        CoverageRunRequest request,
+        string outputDirectory,
+        string currentDirectory,
+        CancellationToken cancellationToken)
+    {
+        var explicitPath = !string.IsNullOrWhiteSpace(request.ScheduleTimingsPath);
+        var path = explicitPath
+            ? ResolveUserPath(request.ScheduleTimingsPath!, currentDirectory)
+            : Path.Join(outputDirectory, "timings.json");
+        var kind = explicitPath ? "explicit" : "inferred";
+
+        if (!File.Exists(path))
+        {
+            if (explicitPath)
+            {
+                throw CoverageRunDiagnostics.Create(
+                    "ASCOV101",
+                    "--schedule-timings file was not found.",
+                    $"Path: {path}.",
+                    "Pass an existing timings.json file or omit --schedule-timings.",
+                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+            }
+
+            return new CoverageRunPriorTimingLoad(
+                kind,
+                path,
+                "missing",
+                "none",
+                new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase),
+                [$"Schedule warning: no prior timings found at {path}; unmeasured projects keep input order."]);
+        }
+
+        try
+        {
+            await using var stream = File.OpenRead(path);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            var timings = ReadPriorTimings(document, explicitPath, path);
+            if (timings.Count == 0)
+            {
+                throw new InvalidDataException("No project timings were found.");
+            }
+
+            return new CoverageRunPriorTimingLoad(kind, path, "loaded", kind, timings, []);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            if (explicitPath)
+            {
+                throw CoverageRunDiagnostics.Create(
+                    "ASCOV101",
+                    "--schedule-timings file could not be read.",
+                    $"{path}: {ex.Message}",
+                    "Pass a valid coverage run timings.json file.",
+                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+            }
+
+            return new CoverageRunPriorTimingLoad(
+                kind,
+                path,
+                "unusable",
+                "none",
+                new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase),
+                [$"Schedule warning: prior timings at {path} were unusable ({ex.Message}); unmeasured projects keep input order."]);
+        }
+    }
+
+    private static Dictionary<string, long> ReadPriorTimings(JsonDocument document, bool failOnDuplicate, string path)
+    {
+        if (!document.RootElement.TryGetProperty("projects", out var projects)
+            || projects.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException("The timings file must contain a projects array.");
+        }
+
+        var timings = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in projects.EnumerateArray())
+        {
+            if (project.ValueKind != JsonValueKind.Object
+                || !project.TryGetProperty("project", out var projectPath)
+                || projectPath.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(projectPath.GetString())
+                || !project.TryGetProperty("seconds", out var secondsElement)
+                || !secondsElement.TryGetInt64(out var seconds))
+            {
+                throw new InvalidDataException("Every project timing must include string project and integer seconds fields.");
+            }
+
+            var key = NormalizeProjectKey(projectPath.GetString()!);
+            if (failOnDuplicate && timings.ContainsKey(key))
+            {
+                throw new InvalidDataException($"Duplicate project timing '{projectPath.GetString()}' in {path}.");
+            }
+
+            timings[key] = seconds;
+        }
+
+        return timings;
     }
 
     private async Task<CoverageRunBuildResult> BuildIfNeededAsync(
@@ -764,6 +1116,7 @@ internal sealed class CoverageRunWorkflow
     private async Task<IReadOnlyList<CoverageProjectRunResult>> RunScheduledProjectsAsync(
         CoverageRunRequest request,
         CoverageProjectResolution resolution,
+        CoverageRunSchedulePlan schedulePlan,
         string outputDirectory,
         bool skipBuildDuringTests,
         IConsole console,
@@ -772,13 +1125,12 @@ internal sealed class CoverageRunWorkflow
         var results = new CoverageProjectRunResult[resolution.Projects.Count];
         var active = new List<Task<CoverageProjectRunResult>>();
 
-        for (var i = 0; i < resolution.Projects.Count; i++)
+        foreach (var entry in schedulePlan.Entries.OrderBy(entry => entry.ExecutionIndex))
         {
-            var project = resolution.Projects[i];
-            if (project.IsExclusive)
+            if (entry.Project.IsExclusive)
             {
                 await DrainActiveAsync(active, results);
-                results[i] = await RunProjectAsync(request, resolution, outputDirectory, project, i, skipBuildDuringTests, console, cancellationToken);
+                results[entry.OriginalIndex] = await RunProjectAsync(request, resolution, outputDirectory, entry, skipBuildDuringTests, console, cancellationToken);
                 continue;
             }
 
@@ -787,7 +1139,7 @@ internal sealed class CoverageRunWorkflow
                 await DrainOneAsync(active, results);
             }
 
-            active.Add(RunProjectAsync(request, resolution, outputDirectory, project, i, skipBuildDuringTests, console, cancellationToken));
+            active.Add(RunProjectAsync(request, resolution, outputDirectory, entry, skipBuildDuringTests, console, cancellationToken));
         }
 
         await DrainActiveAsync(active, results);
@@ -814,19 +1166,20 @@ internal sealed class CoverageRunWorkflow
         CoverageRunRequest request,
         CoverageProjectResolution resolution,
         string outputDirectory,
-        CoverageRunProject project,
-        int index,
+        CoverageRunScheduleEntry entry,
         bool skipBuildDuringTests,
         IConsole console,
         CancellationToken cancellationToken)
     {
+        var project = entry.Project;
+        var index = entry.OriginalIndex;
         var projectOutputDirectory = Path.Join(outputDirectory, "projects", project.Slug);
         Directory.CreateDirectory(projectOutputDirectory);
         var logFile = Path.Join(projectOutputDirectory, "dotnet-test.log");
         var started = _timeProvider.GetTimestamp();
 
         await console.Output.WriteLineAsync(
-            $"[{index + 1}/{resolution.Projects.Count}] starting {project.RelativePath}{(project.IsExclusive ? " (exclusive)" : string.Empty)}");
+            $"[{entry.ExecutionIndex + 1}/{resolution.Projects.Count}] starting {project.RelativePath}{(project.IsExclusive ? " (exclusive)" : string.Empty)}");
 
         var testResults = CreateTestResultArtifacts(request, outputDirectory, project, index);
         var args = CreateTestArguments(request, project, projectOutputDirectory, testResults, skipBuildDuringTests);
@@ -834,13 +1187,23 @@ internal sealed class CoverageRunWorkflow
         var seconds = ElapsedSeconds(started);
 
         await console.Output.WriteLineAsync(
-            $"[{index + 1}/{resolution.Projects.Count}] finished {project.RelativePath} in {seconds}s (exit {processResult.ExitCode})");
+            $"[{entry.ExecutionIndex + 1}/{resolution.Projects.Count}] finished {project.RelativePath} in {seconds}s (exit {processResult.ExitCode})");
         if (processResult.ExitCode != 0)
         {
             await console.Error.WriteLineAsync($"Test run failed for {project.RelativePath}; log: {logFile}");
         }
 
-        return new CoverageProjectRunResult(index, project, seconds, processResult.ExitCode, logFile, testResults);
+        return new CoverageProjectRunResult(
+            index,
+            entry.ExecutionIndex,
+            project,
+            entry.ScheduledSeconds,
+            entry.DurationSource,
+            entry.ScheduleReason,
+            seconds,
+            processResult.ExitCode,
+            logFile,
+            testResults);
     }
 
     private static IReadOnlyList<string> CreateTestArguments(
@@ -966,22 +1329,44 @@ internal sealed class CoverageRunWorkflow
         IConsole console,
         CoverageRunRequest request,
         CoverageProjectResolution resolution,
-        string outputDirectory)
+        string outputDirectory,
+        CoverageRunSchedulePlan schedulePlan)
     {
         await console.Output.WriteLineAsync($"Coverage run inputs");
         await console.Output.WriteLineAsync($"  Solution: {resolution.SolutionPath ?? "(explicit test projects)"}");
         await console.Output.WriteLineAsync($"  Output: {outputDirectory}");
         await console.Output.WriteLineAsync($"  Configuration: {request.Configuration}");
         await console.Output.WriteLineAsync($"  Parallelism: {request.Parallelism.ToString(CultureInfo.InvariantCulture)}");
+        await console.Output.WriteLineAsync($"  Schedule: {schedulePlan.Mode}");
+        if (!string.Equals(schedulePlan.TimingSource.Kind, "none", StringComparison.Ordinal))
+        {
+            await console.Output.WriteLineAsync($"  Schedule timings: {schedulePlan.TimingSource.Status} {schedulePlan.TimingSource.Path}");
+        }
+
         await console.Output.WriteLineAsync($"  Include: {request.IncludeFilter ?? "(Coverlet default)"}");
         await console.Output.WriteLineAsync($"  Exclude: {request.ExcludeFilter}");
         await console.Output.WriteLineAsync($"  Managed test results: {DescribeTestResults(request)}");
         await console.Output.WriteLineAsync($"Discovered {resolution.Projects.Count.ToString(CultureInfo.InvariantCulture)} test project(s).");
 
+        foreach (var warning in schedulePlan.Warnings)
+        {
+            await console.Error.WriteLineAsync(warning);
+        }
+
         foreach (var project in resolution.Projects)
         {
             await console.Output.WriteLineAsync(
                 $"  include {(project.IsExclusive ? "exclusive" : "parallel ")} {project.RelativePath} -> projects/{project.Slug}");
+        }
+
+        await console.Output.WriteLineAsync("Planned execution order:");
+        foreach (var entry in schedulePlan.Entries.OrderBy(entry => entry.ExecutionIndex))
+        {
+            var scheduled = entry.ScheduledSeconds.HasValue
+                ? $" scheduled {entry.ScheduledSeconds.Value.ToString(CultureInfo.InvariantCulture)}s"
+                : string.Empty;
+            await console.Output.WriteLineAsync(
+                $"  execution {entry.ExecutionIndex + 1}: original {entry.OriginalIndex + 1} {(entry.Project.IsExclusive ? "exclusive" : "parallel ")} {entry.Project.RelativePath} ({entry.ScheduleReason}{scheduled})");
         }
 
         foreach (var skipped in resolution.SkippedProjects)
@@ -1062,6 +1447,7 @@ internal sealed class CoverageRunWorkflow
         int mergeExitCode,
         int coverageFileCount,
         IReadOnlyList<CoverageProjectRunResult> projectResults,
+        CoverageRunSchedulePlan schedulePlan,
         CoverageRunSlowTestDiagnosticsRun? diagnostics,
         CancellationToken cancellationToken)
     {
@@ -1080,6 +1466,17 @@ internal sealed class CoverageRunWorkflow
             configuration = request.Configuration,
             buildSolution = buildSeconds > 0,
             parallelism = request.Parallelism,
+            schedule = new
+            {
+                mode = schedulePlan.Mode,
+                timingSource = new
+                {
+                    kind = schedulePlan.TimingSource.Kind,
+                    path = schedulePlan.TimingSource.Path,
+                    status = schedulePlan.TimingSource.Status,
+                },
+                warnings = schedulePlan.Warnings,
+            },
             durations = new
             {
                 solutionBuildSeconds = buildSeconds,
@@ -1131,6 +1528,11 @@ internal sealed class CoverageRunWorkflow
                 {
                     project = result.Project.RelativePath,
                     slug = result.Project.Slug,
+                    originalIndex = result.Index,
+                    executionIndex = result.ExecutionIndex,
+                    scheduledSeconds = result.ScheduledSeconds,
+                    durationSource = result.DurationSource,
+                    scheduleReason = result.ScheduleReason,
                     seconds = result.Seconds,
                     exitCode = result.ExitCode,
                     exclusive = result.Project.IsExclusive,
@@ -1252,8 +1654,81 @@ internal sealed class CoverageRunWorkflow
         return string.IsNullOrWhiteSpace(sanitized) ? "project" : sanitized;
     }
 
+    private static string NormalizeProjectKey(string path)
+    {
+        var normalized = Normalize(path.Trim());
+        while (normalized.StartsWith("./", StringComparison.Ordinal))
+        {
+            normalized = normalized[2..];
+        }
+
+        return normalized.ToUpperInvariant();
+    }
+
     private static string Normalize(string path) => path.Replace('\\', '/');
 }
+
+/// <summary>
+/// Planned project execution order for a coverage run.
+/// </summary>
+/// <param name="Mode">Public scheduling mode name written to console output and timings.</param>
+/// <param name="TimingSource">Source used to load prior project durations.</param>
+/// <param name="Warnings">Non-fatal scheduling warnings.</param>
+/// <param name="Entries">Execution entries in original-index-compatible project space.</param>
+internal sealed record CoverageRunSchedulePlan(
+    string Mode,
+    CoverageRunScheduleTimingSource TimingSource,
+    IReadOnlyList<string> Warnings,
+    IReadOnlyList<CoverageRunScheduleEntry> Entries);
+
+/// <summary>
+/// Prior-duration source used to build a schedule.
+/// </summary>
+/// <param name="Kind">Source kind: none, inferred, or explicit.</param>
+/// <param name="Path">Timings file path when one was considered.</param>
+/// <param name="Status">Read status for the source.</param>
+internal sealed record CoverageRunScheduleTimingSource(string Kind, string? Path, string Status);
+
+/// <summary>
+/// One project's execution slot in the schedule.
+/// </summary>
+/// <param name="OriginalIndex">Project index from discovery or explicit input order.</param>
+/// <param name="ExecutionIndex">Index used to launch the process.</param>
+/// <param name="Project">Project scheduled for this slot.</param>
+/// <param name="ScheduledSeconds">Prior duration used for sorting, when available.</param>
+/// <param name="DurationSource">Where <paramref name="ScheduledSeconds"/> came from.</param>
+/// <param name="ScheduleReason">Human-readable reason for the chosen slot.</param>
+internal sealed record CoverageRunScheduleEntry(
+    int OriginalIndex,
+    int ExecutionIndex,
+    CoverageRunProject Project,
+    long? ScheduledSeconds,
+    string DurationSource,
+    string ScheduleReason);
+
+/// <summary>
+/// Prior timing data loaded before output cleanup.
+/// </summary>
+/// <param name="Kind">Source kind: inferred or explicit.</param>
+/// <param name="Path">Source file path.</param>
+/// <param name="Status">Load status.</param>
+/// <param name="DurationSource">Per-project duration source value.</param>
+/// <param name="TimingsByProject">Project durations keyed by normalized relative project path.</param>
+/// <param name="Warnings">Non-fatal load warnings.</param>
+internal sealed record CoverageRunPriorTimingLoad(
+    string Kind,
+    string Path,
+    string Status,
+    string DurationSource,
+    IReadOnlyDictionary<string, long> TimingsByProject,
+    IReadOnlyList<string> Warnings);
+
+/// <summary>
+/// Project paired with its discovery/input index.
+/// </summary>
+/// <param name="OriginalIndex">Project index from discovery or explicit input order.</param>
+/// <param name="Project">Project metadata.</param>
+internal sealed record CoverageRunIndexedProject(int OriginalIndex, CoverageRunProject Project);
 
 /// <summary>
 /// Resolved project set used by the coverage runner after discovery or explicit selection.
@@ -1291,15 +1766,23 @@ internal sealed record CoverageSkippedProject(string ProjectPath, string Reason)
 /// <summary>
 /// Per-project test execution result.
 /// </summary>
-/// <param name="Index">Original scheduled index.</param>
+/// <param name="Index">Original discovery or explicit input index.</param>
+/// <param name="ExecutionIndex">Project process launch index.</param>
 /// <param name="Project">Project metadata.</param>
+/// <param name="ScheduledSeconds">Prior duration used for scheduling, when available.</param>
+/// <param name="DurationSource">Source used for <paramref name="ScheduledSeconds"/>.</param>
+/// <param name="ScheduleReason">Reason the project received its execution slot.</param>
 /// <param name="Seconds">Elapsed whole seconds for the project test command.</param>
 /// <param name="ExitCode">Test process exit code.</param>
 /// <param name="LogFile">Per-project log file path.</param>
 /// <param name="TestResults">Managed test result artifacts requested for this project.</param>
 internal sealed record CoverageProjectRunResult(
     int Index,
+    int ExecutionIndex,
     CoverageRunProject Project,
+    long? ScheduledSeconds,
+    string DurationSource,
+    string ScheduleReason,
     long Seconds,
     int ExitCode,
     string LogFile,

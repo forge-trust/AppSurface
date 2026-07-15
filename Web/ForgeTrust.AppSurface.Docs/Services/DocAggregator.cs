@@ -257,6 +257,7 @@ public class DocAggregator
     private readonly AppSurfaceDocsLocalizationOptions _localizationOptions;
     private readonly AppSurfaceDocsHarvestPathPolicySnapshotFactory _pathPolicySnapshotFactory;
     private readonly Func<string, CancellationToken, Task<DateTimeOffset?>> _resolveGitLastUpdatedUtcAsync;
+    private readonly Func<TimeSpan, CancellationToken, Task> _testingPreHarvesterDelayAsync;
     private readonly TimeSpan _harvesterTimeout;
     private readonly TimeSpan _contributorFreshnessTimeout;
     private readonly CachePolicy _docsCachePolicy;
@@ -361,6 +362,10 @@ public class DocAggregator
     /// Optional progress reporter used by live docs hosts to publish redacted harvest state. <see langword="null"/>
     /// disables callbacks, which is appropriate for tests or hosts that do not expose the observatory.
     /// </param>
+    /// <param name="testingPreHarvesterDelayAsync">
+    /// Optional test seam for the configured pre-harvester delay. When <see langword="null"/>, the aggregator uses
+    /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.
+    /// </param>
     internal DocAggregator(
         IEnumerable<IDocHarvester> harvesters,
         AppSurfaceDocsOptions options,
@@ -372,7 +377,8 @@ public class DocAggregator
         TimeSpan? harvesterTimeout = null,
         TimeSpan? contributorFreshnessTimeout = null,
         Func<DateTimeOffset>? utcNow = null,
-        AppSurfaceDocsHarvestProgressReporter? harvestProgress = null)
+        AppSurfaceDocsHarvestProgressReporter? harvestProgress = null,
+        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null)
         : this(
             harvesters,
             options,
@@ -385,7 +391,8 @@ public class DocAggregator
             harvesterTimeout,
             contributorFreshnessTimeout,
             utcNow,
-            harvestProgress)
+            harvestProgress,
+            testingPreHarvesterDelayAsync)
     {
     }
 
@@ -458,6 +465,10 @@ public class DocAggregator
     /// Optional progress reporter used by live docs hosts to publish redacted harvest state. <see langword="null"/>
     /// disables callbacks, so cache hits and misses produce no live updates.
     /// </param>
+    /// <param name="testingPreHarvesterDelayAsync">
+    /// Optional test seam for the configured pre-harvester delay. When <see langword="null"/>, the aggregator uses
+    /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.
+    /// </param>
     /// <remarks>
     /// Contributor freshness is resolved during snapshot generation, not during Razor view rendering. Callers that inject
     /// <paramref name="resolveGitLastUpdatedUtcAsync"/> should respect the supplied <see cref="CancellationToken"/>, because
@@ -482,7 +493,8 @@ public class DocAggregator
         TimeSpan? harvesterTimeout = null,
         TimeSpan? contributorFreshnessTimeout = null,
         Func<DateTimeOffset>? utcNow = null,
-        AppSurfaceDocsHarvestProgressReporter? harvestProgress = null)
+        AppSurfaceDocsHarvestProgressReporter? harvestProgress = null,
+        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null)
     {
         ArgumentNullException.ThrowIfNull(harvesters);
         ArgumentNullException.ThrowIfNull(options);
@@ -509,6 +521,7 @@ public class DocAggregator
         _harvesterTimeout = ResolveHarvesterTimeout(harvesterTimeout);
         _contributorFreshnessTimeout = contributorFreshnessTimeout ?? ContributorFreshnessTimeout;
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
+        _testingPreHarvesterDelayAsync = testingPreHarvesterDelayAsync ?? Task.Delay;
         _repositoryRoot = options.Mode switch
         {
             AppSurfaceDocsMode.Source => ResolveRepositoryRoot(
@@ -813,6 +826,7 @@ public class DocAggregator
         var utcNow = _utcNow;
         var localizationOptions = _localizationOptions;
         var harvestProgress = _harvestProgress;
+        var testingPreHarvesterDelayAsync = _testingPreHarvesterDelayAsync;
         var testingPreHarvestDelayMilliseconds = Math.Max(
             0,
             _harvestOptions.TestingPreHarvestDelayMilliseconds);
@@ -844,7 +858,7 @@ public class DocAggregator
                                    $"Waiting {testingPreHarvestDelayMilliseconds} ms before harvesters start.");
                            }
 
-                           await Task.Delay(
+                           await testingPreHarvesterDelayAsync(
                                TimeSpan.FromMilliseconds(testingPreHarvestDelayMilliseconds),
                                CancellationToken.None);
                        }

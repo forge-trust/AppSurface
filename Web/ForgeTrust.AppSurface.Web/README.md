@@ -127,9 +127,9 @@ Important behavior:
 - The product-readiness lab's `/readiness` endpoint is an example-local report endpoint. It is separate from the reusable
   AppSurface Web `/ready` platform probe contract.
 
-### PWA Install Metadata
+### PWA Install and Push-Worker Foundation
 
-AppSurface Web can serve the baseline Progressive Web App install contract from `WebOptions.Pwa`: a manifest endpoint, MVC/Razor head tags, development diagnostics, and an explicit starter offline service worker. PWA support is disabled by default, and offline caching stays off until the app configures an offline strategy.
+AppSurface Web provides independent [PWA install, offline, and push-worker capabilities](Docs/pwa-install.md) from `WebOptions.Pwa`: a manifest endpoint, MVC/Razor head tags, development diagnostics, an explicit starter offline strategy, safe default notification handlers, and an inert registration helper. Every capability is disabled by default. Enabling push does not request permission, create a subscription, choose recipients, or send a notification.
 
 #### 3-minute PWA install path
 
@@ -160,12 +160,12 @@ Add the head helper to your MVC layout:
 Run the app on HTTPS or localhost, then verify the install contract:
 
 ```bash
-appsurface pwa verify --url https://app.example.com
+appsurface pwa verify --base-url https://app.example.com --entry-path /account/resume --expect-display standalone --expect-icon 192x192 --expect-icon 512x512
 ```
 
-AppSurface maps `/manifest.webmanifest` with `application/manifest+json`, exposes development-only diagnostics at `/_appsurface/pwa`, and emits no service worker unless `options.Pwa.Offline.Enabled` is true. Minimal API and custom-layout apps can copy the exact generated tags from `/_appsurface/pwa` instead of using the TagHelper.
+`Pwa.Enabled` controls install metadata only. `Pwa.Offline.Enabled` and `Pwa.Push.Enabled` independently activate one shared worker, so an existing PWA can adopt push handlers without replacing its install experience. Push-only mode installs no fetch listener and creates no cache. When push is enabled, the head helper loads an external script exposing `window.AppSurface.Pwa.register()`; the application decides when to call it.
 
-For the full API shape, browser caveats, offline pitfalls, and CLI proof flow, see [PWA install support](Docs/pwa-install.md). For executable proof, run [examples/web-pwa-install](../../examples/web-pwa-install/README.md).
+For push-only and combined quick starts, the complete option/payload/helper contract, ownership boundaries, migration guidance, browser caveats, and CLI proof flow, see [PWA install and push-worker support](Docs/pwa-install.md). For executable combined proof, run [examples/web-pwa-install](../../examples/web-pwa-install/README.md).
 
 ### Middleware Lifecycle
 

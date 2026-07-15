@@ -4,6 +4,8 @@
     <Project Path="Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" />
   </Folder>
   <Folder Name="/Auth/">
+    <Project Path="Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj" />
+    <Project Path="Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.csproj" />
     <Project Path="Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.Tests/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.Tests.csproj" />
@@ -46,13 +48,23 @@
     <Project Path="Dependency/ForgeTrust.AppSurface.Dependency.Autofac.Tests/ForgeTrust.AppSurface.Dependency.Autofac.Tests.csproj" />
     <Project Path="Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj" />
   </Folder>
+  <Folder Name="/Deployment/">
+    <Project Path="Deployment/ForgeTrust.AppSurface.Deployment/ForgeTrust.AppSurface.Deployment.csproj" />
+    <Project Path="Deployment/ForgeTrust.AppSurface.Deployment.Tests/ForgeTrust.AppSurface.Deployment.Tests.csproj" />
+    <Project Path="Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/ForgeTrust.AppSurface.Deployment.GcpCloudRun.csproj" />
+    <Project Path="Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests.csproj" />
+  </Folder>
   <Folder Name="/Examples/">
+    <Project Path="examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj" />
+    <Project Path="examples/auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" />
+    <Project Path="examples/auth-aspire-keycloak-web/AuthAspireKeycloakWeb.csproj" />
     <Project Path="examples/auth-aspnetcore-dev-auth/AuthAspNetCoreDevAuthExample.csproj" />
     <Project Path="examples/auth-aspnetcore-bridge/AuthAspNetCoreBridgeExample.csproj" />
     <Project Path="examples/auth-aspnetcore-oidc/AuthAspNetCoreOidcExample.csproj" />
     <Project Path="examples/auth-web-razorwire-proof/AuthWebRazorWireProofExample.csproj" />
     <Project Path="examples/auth-web-razorwire-proof.tests/AuthWebRazorWireProofExample.Tests.csproj" />
     <Project Path="examples/aspire-apphost/AspireAppHostExample.csproj" />
+    <Project Path="examples/aspire-deployment-apphost/AspireDeploymentAppHostExample.csproj" />
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
     <Project Path="examples/local-secrets/LocalSecretsExample.csproj" />
