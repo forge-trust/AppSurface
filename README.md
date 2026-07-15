@@ -106,7 +106,12 @@ This approach aims to:
 
 ### [Aspire](./Aspire/README.md)
 
-- [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Local .NET Aspire AppHost composition with AppSurface modules, CLI-selectable profiles, and reusable Aspire components.
+- [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Local .NET Aspire AppHost composition with AppSurface modules, CLI-selectable profiles, reusable Aspire components, and native publish/verification integration for explicitly annotated resources.
+
+### [Deployment](./Deployment/README.md)
+
+- [**ForgeTrust.AppSurface.Deployment**](./Deployment/ForgeTrust.AppSurface.Deployment/README.md) – Portable, schema-versioned deployment intent, validation, diagnostics, deterministic serialization, and provider contracts with no Aspire or cloud dependency.
+- [**ForgeTrust.AppSurface.Deployment.GcpCloudRun**](./Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) – Deterministic Cloud Run migration-job Terraform/evidence compilation and read-only shadow or owned parity verification.
 
 These packages are designed to work together so that features can be shared
 across different application types while maintaining a consistent startup

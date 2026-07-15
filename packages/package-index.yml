@@ -307,21 +307,52 @@ packages:
       - ForgeTrust.AppSurface.Core
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
+  - project: Deployment/ForgeTrust.AppSurface.Deployment/ForgeTrust.AppSurface.Deployment.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 55
+    use_when: Install this directly when authoring a deployment target or consuming portable, schema-versioned deployment intent without taking an Aspire or cloud-provider dependency.
+    includes: Immutable migration-job deployment intent, typed logical identifiers and bindings, capability validation, stable diagnostics, deterministic JSON serialization, artifact hashing, and provider-neutral render and verification contracts.
+    does_not_include: Aspire app-model APIs, cloud SDKs, secret resolution, image builds, infrastructure apply, job execution, traffic promotion, or provider-specific foundations.
+    start_here_path: Deployment/ForgeTrust.AppSurface.Deployment/README.md
+    recipe_summary: Add [`ForgeTrust.AppSurface.Deployment`](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) directly only when authoring a deployment provider or inspecting portable deployment intent; normal Aspire consumers receive it transitively.
+  - project: Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/ForgeTrust.AppSurface.Deployment.GcpCloudRun.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 56
+    use_when: Add this to an Aspire AppHost that should compile an explicitly annotated run-to-completion migration job into reviewable GCP Cloud Run Job artifacts and verify deployed configuration without mutating GCP.
+    includes: Closed GCP binding profiles, deterministic Cloud Run v2 Job Terraform JSON, safe evidence hashes, shadow and owned parity comparison, and bounded read-only gcloud verification.
+    does_not_include: Cloud account or foundation provisioning, secret values, image builds or pushes, OpenTofu apply or state ownership, migration execution, schedulers, web revisions, traffic, or rollback.
+    start_here_path: Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md
+    recipe_summary: Add [`ForgeTrust.AppSurface.Deployment.GcpCloudRun`](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) beside the Aspire package when an existing Cloud Run migration job should move from duplicated deployment mapping to deterministic publish artifacts and read-only parity proof.
+    depends_on:
+      - ForgeTrust.AppSurface.Deployment
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Deployment
   - project: Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj
     classification: public
     publish_decision: publish
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.2.md
+    release_notes_path: releases/unreleased.md
     order: 60
     use_when: Start here for .NET Aspire app-model projects that want AppSurface-style modular composition for service defaults and distributed resources.
-    includes: AspireApp entry points and modular registration for distributed application resources and service defaults.
-    does_not_include: ASP.NET Core web hosting, Razor UI features, or the standalone docs host.
+    includes: AspireApp entry points, modular distributed-resource composition, explicit migration-job deployment annotations, target assignment, and native Aspire publish and named verification pipeline integration.
+    does_not_include: ASP.NET Core web hosting, Razor UI features, cloud-provider compilation, infrastructure apply, job execution, traffic promotion, or the standalone docs host.
     start_here_path: Aspire/ForgeTrust.AppSurface.Aspire/README.md
-    recipe_summary: Start with `ForgeTrust.AppSurface.Aspire` for distributed app-model projects and service-default composition.
+    recipe_summary: Start with `ForgeTrust.AppSurface.Aspire` for distributed app-model projects and service-default composition; add a provider package when the same AppHost topology should publish deployment artifacts through native Aspire commands.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Console
+      - ForgeTrust.AppSurface.Deployment
   - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
     classification: public
     publish_decision: publish

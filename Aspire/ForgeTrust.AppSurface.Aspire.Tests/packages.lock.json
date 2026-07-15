@@ -612,7 +612,8 @@
         "type": "Project",
         "dependencies": {
           "Aspire.Hosting": "[13.4.4, )",
-          "ForgeTrust.AppSurface.Console": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Console": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Deployment": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.console": {
@@ -629,6 +630,12 @@
           "Microsoft.Extensions.Hosting": "[10.0.8, )",
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
         }
+      },
+      "forgetrust.appsurface.deployment": {
+        "type": "Project"
+      },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
       },
       "Aspire.Hosting": {
         "type": "CentralTransitive",

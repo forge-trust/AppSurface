@@ -50,7 +50,7 @@ public abstract class AspireProfile : ICommand
     /// <inheritdoc />
     public async ValueTask ExecuteAsync(IConsole console)
     {
-        var appBuilder = new DistributedApplicationBuilder(PassThroughArgs);
+        var appBuilder = DistributedApplication.CreateBuilder(PassThroughArgs);
         var context = new AspireStartupContext(appBuilder);
 
         foreach (var profile in GetDependencies())

@@ -5,6 +5,7 @@ This is the living release note for the next coordinated AppSurface version afte
 ## What is taking shape
 
 - `ForgeTrust.RazorWire` Behavior Kit now exposes root-scoped registrations for DOM enhancement and page-lifecycle registrations for logical browser visits, including Skoolit-style PWA display-mode telemetry without fake body selectors or app-owned Turbo listeners.
+- [`ForgeTrust.AppSurface.Deployment`](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) and [`ForgeTrust.AppSurface.Deployment.GcpCloudRun`](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) add a provider-neutral deployment-intent boundary and a first Cloud Run migration-job compiler. The existing Aspire package annotates one resource graph and participates in Aspire's native publish pipeline; publishing remains tool-free and non-mutating, while verification is read-only and migration execution, state, apply, promotion, and rollback stay application-owned.
 
 ## Included in the next coordinated version
 
@@ -28,6 +29,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - `ForgeTrust.RazorWire` documents `<rw:scripts behavior-kit="true" />`, the queue-backed `window.RazorWire.behaviors` stub, root `register(...)`, page-lifecycle `registerLifecycle(...)`, stable diagnostics, and guidance for choosing built-in managers, root behaviors, lifecycle behaviors, islands, or app-owned JavaScript.
 - `appsurface pwa verify` now supports route-shaped readiness evidence for real app entry pages. Apps can verify `--base-url` plus `--entry-path`, follow same-origin redirects that stay under the verified path base, assert manifest `start_url`, `scope`, `display`, colors, and icon declarations, decode PNG icon dimensions, write schema v2 JSON evidence, and prove that the configured AppSurface service worker is not reachable when offline support is disabled.
 - AppSurface Web PWA diagnostics now expose the configured service-worker path separately from the active offline service-worker path, so verifier evidence can distinguish "offline disabled and no worker mapped" from "offline enabled with worker/fallback endpoints."
+- AppSurface deployment documentation now covers the two-package Aspire adoption path, explicit resource-to-target assignment, closed non-secret GCP binding profiles, immutable image/source evidence, deterministic artifact ownership, shadow versus owned parity, single-writer cutover, compatibility, diagnostics, and the negative assurance that publish does not call GCP or change infrastructure.
 - [`ForgeTrust.AppSurface.Web` PWA support](../Web/ForgeTrust.AppSurface.Web/Docs/pwa-install.md) now activates one generated service worker from independent offline or push options. Push-only apps get no cache or fetch interception; combined apps retain the narrow offline strategy. The package adds an inert `window.AppSurface.Pwa.register()` helper, a strict versioned notification/click adapter, custom-handler imports, PathBase-safe worker metadata, and value-free browser diagnostics without requesting permission, creating subscriptions, or owning delivery.
 
 ## Migration watch
