@@ -84,6 +84,7 @@ jobs:
       - name: Verify generated Markdown snippets
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Web/ForgeTrust.AppSurface.Web/README.md
 
       - name: Verify web assets
         run: |
