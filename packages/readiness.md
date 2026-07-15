@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 37
-- Evidence status: manifest evidence complete: 27; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 3
-- Product families: AppSurface: 25; Forge Trust: 2; Internal support: 7; RazorWire: 3
+- Packages: 38
+- Evidence status: manifest evidence complete: 27; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 4
+- Product families: AppSurface: 25; Forge Trust: 2; Internal support: 8; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -45,6 +45,7 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Cli` | public | publish | manifest evidence complete | None | None | None | [AppSurface CLI README](../Cli/ForgeTrust.AppSurface.Cli/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | Forge Trust | `ForgeTrust.AppSurface.Docs` | proof host | support publish | proof-host evidence complete | None | None | `ForgeTrust.AppSurface.Auth`<br />`ForgeTrust.AppSurface.Caching`<br />`ForgeTrust.AppSurface.Config`<br />`ForgeTrust.AppSurface.Intelligence`<br />`ForgeTrust.AppSurface.Web.Tailwind`<br />`ForgeTrust.RazorWire` | [AppSurface Docs README](../Web/ForgeTrust.AppSurface.Docs/README.md) | [notes](../releases/unreleased.md) |
 | Forge Trust | `ForgeTrust.AppSurface.Docs.Standalone` | proof host | do not publish | proof-host evidence complete | None | None | None | [Standalone host README](../Web/ForgeTrust.AppSurface.Docs.Standalone/README.md) | [notes](../releases/unreleased.md) |
+| Internal support | `ForgeTrust.AppSurface.Docs.ConsumerFixture` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |

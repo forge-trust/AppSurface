@@ -106,6 +106,7 @@ Swipe to compare package details on narrow screens.
 
 - `ForgeTrust.AppSurface.Flow.Generators`: Private source generator and diagnostics used by `ForgeTrust.AppSurface.Flow`; consume it only through the packed Flow package. Release: excluded; not applicable; [notes](../releases/unreleased.md).
 - `ForgeTrust.AppSurface.Web.Tailwind.Tasks`: Private compiled MSBuild task used by `ForgeTrust.AppSurface.Web.Tailwind`; consume it only through the packed Tailwind package. Release: excluded; not applicable; [notes](../releases/unreleased.md).
+- `ForgeTrust.AppSurface.Docs.ConsumerFixture`: Non-packable ASP.NET Core consumer fixture used by AppSurface Docs HTTP and Playwright regression tests. Release: excluded; not applicable; [notes](../releases/unreleased.md).
 - `ForgeTrust.RazorWire.Cli`: Held out of the direct-install chooser until issue #171 lands real .NET tool packaging and stable install guidance. Release: excluded; not applicable; [notes](../releases/unreleased.md).
 
 ## Maintainer notes
