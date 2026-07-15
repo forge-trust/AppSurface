@@ -195,7 +195,9 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
             "\"Ignored\":{" +
             "\"text\":\"escaped \\\"quote\\\" and unicode \\u0031\"," +
             "\"object\":{\"nested\":true}," +
+            "\"emptyObject\":{}," +
             "\"array\":[false,null,\"text\",-1.25e+3]," +
+            "\"emptyArray\":[]," +
             "\"integer\":0," +
             "\"number\":12.5E-2" +
             "}," +
@@ -256,11 +258,59 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         yield return ["\"\\q\""];
         yield return ["\"\\u0X00\""];
         yield return ["[1 2]"];
+        yield return ["[1,]"];
+        yield return ["{bad:1}"];
         yield return ["{\"nested\" 1}"];
+        yield return ["{\"nested\":1 \"other\":2}"];
+        yield return ["\"control\u0001\""];
         yield return ["truex"];
         yield return ["01"];
         yield return ["1."];
         yield return ["1e+"];
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedRootDocuments))]
+    public void Probe_Should_ReturnInvalidStore_ForMalformedRootDocument(string json)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var store = CreateProbeStore(json);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("{}")]
+    public void Probe_Should_ReturnMissing_ForEmptyStoreDocuments(string json)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var probe = CreateProbeStore(json).Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+    }
+
+    public static IEnumerable<object[]> MalformedRootDocuments()
+    {
+        yield return ["{Ignored:{}}"];
+        yield return ["{\"Ignored\" {}}"];
+        yield return ["{\"Ignored\":{} x}"];
+        yield return ["{\"Ignored\":{}} trailing"];
+        yield return ["{\"unterminated"];
+        yield return ["{\"\\q\":{}}"];
+        yield return ["{\"\\u0X00\":{}}"];
+        yield return ["{\"control\u0001\":{}}"];
+        yield return ["{\"Ignored\":{\"value\":-"];
+        yield return ["{\"Ignored\":{\"value\":\"\\"];
+        yield return ["{\"Ignored\":{\"value\":\"\\u0"];
     }
 
     private static FileAppSurfaceLocalSecretStore CreateProbeStore(string json) =>

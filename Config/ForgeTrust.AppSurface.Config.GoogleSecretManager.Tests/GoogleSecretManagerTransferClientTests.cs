@@ -1,3 +1,4 @@
+using System.Text;
 using Google.Api.Gax.Grpc;
 using Google.Cloud.SecretManager.V1;
 using Google.Protobuf;
@@ -7,6 +8,41 @@ namespace ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests;
 
 public sealed class GoogleSecretManagerTransferClientTests
 {
+    [Fact]
+    public void ExplicitClientConstructor_Should_RejectNullAndUseProvidedClient()
+    {
+        Assert.Throws<ArgumentNullException>(() => new GoogleSecretManagerTransferClientAdapter((SecretManagerServiceClient)null!));
+
+        var serviceClient = new TransferSecretManagerServiceClient();
+        var client = new GoogleSecretManagerTransferClientAdapter(serviceClient);
+
+        Assert.Equal(
+            GoogleSecretManagerTransferStatus.Ready,
+            client.ProbeSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1)).Status);
+    }
+
+    [Theory]
+    [InlineData("rpc")]
+    [InlineData("timeout")]
+    [InlineData("invalid")]
+    public void ProbeSecret_Should_MapClientFailuresValueSafely(string failure)
+    {
+        Exception exception = failure switch
+        {
+            "rpc" => new RpcException(new Status(StatusCode.PermissionDenied, "sentinel-secret")),
+            "timeout" => new TimeoutException("sentinel-secret"),
+            _ => new InvalidOperationException("sentinel-secret")
+        };
+        var client = new GoogleSecretManagerTransferClientAdapter(() => throw exception);
+
+        var result = client.ProbeSecret("projects/project/secrets/api-key", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(
+            failure == "rpc" ? GoogleSecretManagerTransferStatus.AccessDenied : GoogleSecretManagerTransferStatus.Unavailable,
+            result.Status);
+        Assert.DoesNotContain("sentinel-secret", result.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ProbeSecretVersion_Should_ReturnReady_WhenVersionExists()
     {
@@ -129,6 +165,34 @@ public sealed class GoogleSecretManagerTransferClientTests
 
         Assert.Equal(GoogleSecretManagerTransferStatus.ProviderFailed, result.Status);
         Assert.Equal("google-secret-transfer-failed", result.Diagnostic?.Code);
+        Assert.Null(result.Payload);
+    }
+
+    [Fact]
+    public void AccessSecretVersion_Should_ReturnPayload_WhenProviderResponds()
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient());
+
+        var result = client.AccessSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.Ready, result.Status);
+        Assert.Equal("payload", Encoding.UTF8.GetString(result.Payload!.Data));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AccessSecretVersion_Should_MapClientAvailabilityFailures(bool timeout)
+    {
+        var exception = timeout ? (Exception)new TimeoutException() : new InvalidOperationException();
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(accessException: exception));
+
+        var result = client.AccessSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.Unavailable, result.Status);
+        Assert.Equal("google-secret-transfer-unavailable", result.Diagnostic?.Code);
         Assert.Null(result.Payload);
     }
 

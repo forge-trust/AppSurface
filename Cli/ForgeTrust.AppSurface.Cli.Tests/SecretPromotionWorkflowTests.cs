@@ -11,6 +11,51 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class SecretPromotionWorkflowTests
 {
     [Fact]
+    public void ApplicationDefaultProfile_ReturnsInjectedClient()
+    {
+        var client = new FakeGoogleClient();
+        var factory = new DefaultSecretPromotionGoogleClientFactory(client);
+
+        var result = factory.Create(new SecretPromotionEndpoint(
+            "staging",
+            "google",
+            "staging",
+            new SecretPromotionCredential("APPLICATIONDEFAULT", null)));
+
+        Assert.Same(client, result);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("unsupported")]
+    public void GoogleProfile_RequiresAnExplicitSupportedCredentialMode(string? mode)
+    {
+        var factory = new DefaultSecretPromotionGoogleClientFactory(new FakeGoogleClient());
+        var credential = mode is null ? null : new SecretPromotionCredential(mode, null);
+
+        var exception = Assert.Throws<CommandException>(() => factory.Create(
+            new SecretPromotionEndpoint("staging", "google", "staging", credential)));
+
+        Assert.Contains("explicitly select", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CredentialFileProfile_RejectsMissingPathAndDirectory()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var factory = new DefaultSecretPromotionGoogleClientFactory(new FakeGoogleClient());
+
+        var missingPath = Assert.Throws<CommandException>(() => factory.Create(new SecretPromotionEndpoint(
+            "production", "google", "production", new SecretPromotionCredential("credentialFile", null))));
+        var directory = Assert.Throws<CommandException>(() => factory.Create(new SecretPromotionEndpoint(
+            "production", "google", "production", new SecretPromotionCredential("credentialFile", temp.Path))));
+
+        Assert.Contains("requires credential.path", missingPath.Message, StringComparison.Ordinal);
+        Assert.Contains("regular file", directory.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PlanThenApply_LocalToGoogle_UsesMetadataUntilApplyAndNeverSerializesValue()
     {
         using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
@@ -407,6 +452,407 @@ public sealed class SecretPromotionWorkflowTests
         Assert.Equal(1, google.SecretProbeCalls);
     }
 
+    [Fact]
+    public void Plan_LocalSourceWithoutMetadataProbe_FailsValueSafely()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var google = new FakeGoogleClient();
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+
+        var plan = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            temp.WriteFile("promotion.json", LocalToGoogleConfiguration()),
+            "local-to-staging",
+            Path.Join(temp.Path, "plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            CreateContext(new MetadataIncapableStore())));
+
+        Assert.False(plan.Summary.Succeeded);
+        Assert.Equal("local-secret-metadata-unsupported", Assert.Single(plan.Summary.Rows).DiagnosticCode);
+    }
+
+    [Fact]
+    public void Plan_LocalDestinationWithoutMetadataProbe_FailsValueSafely()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel");
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+
+        var plan = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            temp.WriteFile("promotion.json", GoogleToLocalConfiguration()),
+            "staging-to-local",
+            Path.Join(temp.Path, "plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            CreateContext(new MetadataIncapableStore())));
+
+        Assert.False(plan.Summary.Succeeded);
+        Assert.Equal("local-secret-metadata-unsupported", Assert.Single(plan.Summary.Rows).DiagnosticCode);
+    }
+
+    [Theory]
+    [InlineData(GoogleSecretManagerTransferStatus.Missing)]
+    [InlineData(GoogleSecretManagerTransferStatus.AccessDenied)]
+    [InlineData(GoogleSecretManagerTransferStatus.Cancelled)]
+    public void Apply_GoogleSourceAccessFailure_IsValueSafe(GoogleSecretManagerTransferStatus status)
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("promotion.json", GoogleToLocalConfiguration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel");
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        google.AccessOverride = AppSurfaceGoogleSecretAccessResult.Failed(status, "projects/staging/secrets/stripe-api-key/versions/7", FakeGoogleClient.Diagnostic());
+
+        var result = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(result.Succeeded);
+        Assert.DoesNotContain("sentinel", JsonSerializer.Serialize(result), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(GoogleSecretManagerTransferStatus.AccessDenied, "AccessDenied")]
+    [InlineData(GoogleSecretManagerTransferStatus.ProviderFailed, "Failed")]
+    [InlineData(GoogleSecretManagerTransferStatus.Cancelled, "IndeterminateWrite")]
+    public void Apply_GoogleWriteFailure_IsClassifiedValueSafely(GoogleSecretManagerTransferStatus status, string expected)
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(Normalize(context, "Stripe:ApiKey"), "sentinel").Status);
+        var configPath = temp.WriteFile("promotion.json", LocalToGoogleConfiguration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "local-to-staging", planPath, false, TimeSpan.FromMinutes(10), context));
+        google.WriteOverride = AppSurfaceGoogleSecretWriteResult.Failed(status, "projects/staging/secrets/stripe-api-key", FakeGoogleClient.Diagnostic());
+
+        var result = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(expected, Assert.Single(result.Rows).Status);
+        Assert.DoesNotContain("sentinel", JsonSerializer.Serialize(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Apply_LocalSourceDisappearsAfterSuccessfulMetadataPreflight()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new ControlledMetadataStore(LocalSecretResultStatus.Found, LocalSecretResultStatus.Missing, LocalSecretResultStatus.Found);
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("promotion.json", LocalToGoogleConfiguration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "local-to-staging", planPath, false, TimeSpan.FromMinutes(10), context));
+
+        var result = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("ReadLocalSource", Assert.Single(result.Rows).Action);
+        Assert.Empty(google.Writes);
+    }
+
+    [Fact]
+    public void Apply_LocalDestinationWriteFailure_IsValueSafe()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new ControlledMetadataStore(LocalSecretResultStatus.Missing, LocalSecretResultStatus.Missing, LocalSecretResultStatus.ProviderFailed);
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("promotion.json", GoogleToLocalConfiguration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel");
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+
+        var result = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("WriteLocal", Assert.Single(result.Rows).Action);
+        Assert.DoesNotContain("sentinel", JsonSerializer.Serialize(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Plan_ExistingLocalDestination_CapturesPrecondition()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(Normalize(context, "Stripe:ApiKey"), "existing").Status);
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel");
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+
+        var plan = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            temp.WriteFile("promotion.json", GoogleToLocalConfiguration()), "staging-to-local",
+            Path.Join(temp.Path, "plan.json"), false, TimeSpan.FromMinutes(10), context));
+
+        Assert.True(plan.Summary.Succeeded);
+        Assert.Equal("DestinationExists", Assert.Single(plan.Summary.Rows).Status);
+    }
+
+    [Fact]
+    public void Apply_SourceDisappearsDuringPreflight_BlocksBeforePayloadRead()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var identity = Normalize(context, "Stripe:ApiKey");
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(identity, "sentinel").Status);
+        var configPath = temp.WriteFile("promotion.json", LocalToGoogleConfiguration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "local-to-staging", planPath, false, TimeSpan.FromMinutes(10), context));
+        Assert.Equal(LocalSecretResultStatus.Found, store.Delete(identity).Status);
+
+        var result = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("SourceMissing", Assert.Single(result.Rows).Status);
+        Assert.Empty(google.Writes);
+    }
+
+    [Fact]
+    public void Apply_LocalDestinationAppearsDuringPreflight_BlocksBeforePayloadRead()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("promotion.json", GoogleToLocalConfiguration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel");
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(Normalize(context, "Stripe:ApiKey"), "existing").Status);
+
+        var result = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("DestinationChanged", Assert.Single(result.Rows).Status);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void Plan_MissingGoogleDestination_ReturnsProviderFailure()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(Normalize(context, "Stripe:ApiKey"), "sentinel").Status);
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(new FakeGoogleClient()));
+
+        var plan = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            temp.WriteFile("promotion.json", LocalToGoogleConfiguration()), "local-to-staging",
+            Path.Join(temp.Path, "plan.json"), false, TimeSpan.FromMinutes(10), context));
+
+        Assert.False(plan.Summary.Succeeded);
+        Assert.Equal("SourceMissing", Assert.Single(plan.Summary.Rows).Status);
+    }
+
+    [Fact]
+    public void Apply_TamperedPlanRowCount_IsRejected()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(Normalize(context, "Stripe:ApiKey"), "sentinel").Status);
+        var configPath = temp.WriteFile("promotion.json", LocalToGoogleConfiguration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "local-to-staging", planPath, false, TimeSpan.FromMinutes(10), context));
+        var plan = JsonNode.Parse(File.ReadAllText(planPath))!.AsObject();
+        plan["rows"] = new JsonArray();
+        File.WriteAllText(planPath, plan.ToJsonString());
+
+        var exception = Assert.Throws<CommandException>(() => workflow.Apply(
+            new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context)));
+
+        Assert.Contains("plan rows do not match", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Apply_BlockedReceiptWriteFailure_ReturnsUsageDiagnostic()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(Normalize(context, "Stripe:ApiKey"), "sentinel").Status);
+        var configPath = temp.WriteFile("promotion.json", LocalToGoogleConfiguration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "local-to-staging", planPath, false, TimeSpan.FromMinutes(10), context));
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = true;
+
+        var exception = Assert.Throws<CommandException>(() => workflow.Apply(
+            new SecretPromotionApplyRequest(configPath, planPath, true, null, temp.Path, null, context)));
+
+        Assert.Contains("--receipt could not be written", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void Apply_ExpiredAndUnreadyPlans_AreRejectedBeforePayloadReads()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var context = CreateContext(new InMemoryAppSurfaceLocalSecretStore());
+        var configPath = temp.WriteFile("promotion.json", LocalToGoogleConfiguration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "local-to-staging", planPath, false, TimeSpan.FromMinutes(10), context));
+        var plan = JsonNode.Parse(File.ReadAllText(planPath))!.AsObject();
+
+        plan["expiresAtUtc"] = DateTimeOffset.UtcNow.AddMinutes(-1);
+        File.WriteAllText(planPath, plan.ToJsonString());
+        Assert.Contains("expired", Assert.Throws<CommandException>(() => workflow.Apply(
+            new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context))).Message, StringComparison.Ordinal);
+
+        plan["expiresAtUtc"] = DateTimeOffset.UtcNow.AddMinutes(10);
+        plan["ready"] = false;
+        File.WriteAllText(planPath, plan.ToJsonString());
+        Assert.Contains("failed preflight", Assert.Throws<CommandException>(() => workflow.Apply(
+            new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context))).Message, StringComparison.Ordinal);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void PlanAndApply_FileReadFailures_ReturnUsageDiagnostics()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var context = CreateContext(new InMemoryAppSurfaceLocalSecretStore());
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(new FakeGoogleClient()));
+
+        var configFailure = Assert.Throws<CommandException>(() => workflow.CreatePlan(new SecretPromotionPlanRequest(
+            temp.Path, "job", Path.Join(temp.Path, "plan.json"), false, TimeSpan.FromMinutes(10), context)));
+        var planFailure = Assert.Throws<CommandException>(() => workflow.Apply(new SecretPromotionApplyRequest(
+            temp.WriteFile("promotion.json", LocalToGoogleConfiguration()),
+            Path.Join(temp.Path, "missing-plan.json"),
+            true, null, null, null, context)));
+
+        Assert.Contains("--config could not be read", configFailure.Message, StringComparison.Ordinal);
+        Assert.Contains("--plan could not be read", planFailure.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"version\":1,\"jobName\":\"\",\"rows\":[]}")]
+    [InlineData("{\"version\":1,\"jobName\":\"job\",\"rows\":null}")]
+    public void Apply_SemanticallyInvalidPlan_IsRejected(string planJson)
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(new FakeGoogleClient()));
+
+        var exception = Assert.Throws<CommandException>(() => workflow.Apply(new SecretPromotionApplyRequest(
+            temp.WriteFile("promotion.json", LocalToGoogleConfiguration()),
+            temp.WriteFile("plan.json", planJson),
+            true, null, null, null,
+            CreateContext(new InMemoryAppSurfaceLocalSecretStore()))));
+
+        Assert.Contains("version 1", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Plan_NormalizedKeyCollision_IsRejectedBeforeProviderWork()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var configuration = """
+            {"version":1,"endpoints":[{"name":"staging","provider":"google","environment":"staging","credential":{"mode":"applicationDefault"}}],"jobs":[{"name":"job","source":"local","destination":"staging","rows":[{"key":"A__B","destination":"projects/p/secrets/a"},{"key":"A:B","destination":"projects/p/secrets/b"}]}]}
+            """;
+        var google = new FakeGoogleClient();
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+
+        var exception = Assert.Throws<CommandException>(() => workflow.CreatePlan(new SecretPromotionPlanRequest(
+            temp.WriteFile("promotion.json", configuration), "job", Path.Join(temp.Path, "plan.json"), false,
+            TimeSpan.FromMinutes(10), CreateContext(new InMemoryAppSurfaceLocalSecretStore()))));
+
+        Assert.Contains("duplicate normalized", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, google.SecretProbeCalls);
+    }
+
+    [Fact]
+    public void Plan_OutputWriteFailure_ReturnsUsageDiagnostic()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(Normalize(context, "Stripe:ApiKey"), "sentinel").Status);
+        var google = new FakeGoogleClient();
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+
+        var exception = Assert.Throws<CommandException>(() => workflow.CreatePlan(new SecretPromotionPlanRequest(
+            temp.WriteFile("promotion.json", LocalToGoogleConfiguration()), "local-to-staging", temp.Path, false,
+            TimeSpan.FromMinutes(10), context)));
+
+        Assert.Contains("--out could not be written", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Apply_MalformedPlanAndResumeReceipt_ReturnUsageDiagnostics()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(Normalize(context, "Stripe:ApiKey"), "sentinel").Status);
+        var configPath = temp.WriteFile("promotion.json", LocalToGoogleConfiguration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var malformedPath = temp.WriteFile("malformed.json", "{");
+        var google = new FakeGoogleClient();
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+
+        var malformedPlan = Assert.Throws<CommandException>(() => workflow.Apply(new SecretPromotionApplyRequest(
+            configPath, malformedPath, true, null, null, null, context)));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "local-to-staging", planPath, false, TimeSpan.FromMinutes(10), context));
+        var malformedResume = Assert.Throws<CommandException>(() => workflow.Apply(new SecretPromotionApplyRequest(
+            configPath, planPath, true, null, null, malformedPath, context)));
+        var missingResume = Assert.Throws<CommandException>(() => workflow.Apply(new SecretPromotionApplyRequest(
+            configPath, planPath, true, null, null, Path.Join(temp.Path, "missing-receipt.json"), context)));
+
+        Assert.Contains("--plan must be valid", malformedPlan.Message, StringComparison.Ordinal);
+        Assert.Contains("--resume must be a valid", malformedResume.Message, StringComparison.Ordinal);
+        Assert.Contains("--resume could not be read", missingResume.Message, StringComparison.Ordinal);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void Apply_MismatchedResumeReceipt_IsRejectedBeforePayloadRead()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(Normalize(context, "Stripe:ApiKey"), "sentinel").Status);
+        var configPath = temp.WriteFile("promotion.json", LocalToGoogleConfiguration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var resumePath = temp.WriteFile("receipt.json", "{\"planJob\":\"different\",\"configDigest\":\"different\",\"rows\":[]}");
+        var google = new FakeGoogleClient();
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "local-to-staging", planPath, false, TimeSpan.FromMinutes(10), context));
+
+        var exception = Assert.Throws<CommandException>(() => workflow.Apply(new SecretPromotionApplyRequest(
+            configPath, planPath, true, null, null, resumePath, context)));
+
+        Assert.Contains("does not match", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
     [Theory]
     [MemberData(nameof(InvalidPlanConfigurations))]
     public void Plan_InvalidDeclaredConfiguration_ReturnsUsageBeforeAnySecretRead(string configuration, string expectedMessage)
@@ -433,7 +879,12 @@ public sealed class SecretPromotionWorkflowTests
     public static IEnumerable<object[]> InvalidPlanConfigurations()
     {
         yield return ["{", "valid secret-promotion JSON"];
+        yield return ["null", "--config must be"];
         yield return ["{\"version\":2,\"endpoints\":[],\"jobs\":[]}", "--config must be"];
+        yield return ["{\"version\":1,\"endpoints\":null,\"jobs\":[]}", "--config must be"];
+        yield return ["{\"version\":1,\"endpoints\":[],\"jobs\":null}", "--config must be"];
+        yield return ["{\"version\":1,\"endpoints\":[null],\"jobs\":[]}", "--config must be"];
+        yield return ["{\"version\":1,\"endpoints\":[],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"local\",\"rows\":null}]}", "--config must be"];
         yield return ["{\"version\":1,\"endpoints\":[],\"jobs\":[]}", "No declared promotion job"];
         yield return ["{\"version\":1,\"endpoints\":[],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"missing\",\"rows\":[]},{\"name\":\"job\",\"source\":\"local\",\"destination\":\"missing\",\"rows\":[]}]}", "declared more than once"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"destination\":\"projects/p/secrets/s\"}]}]}", "must name source"];
@@ -442,6 +893,33 @@ public sealed class SecretPromotionWorkflowTests
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"production\",\"provider\":\"google\",\"environment\":\"production\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"production\",\"rows\":[{\"key\":\"Key\",\"destination\":\"projects/p/secrets/s\"}]}]}", "allowMutableLocalSource"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}},{\"name\":\"production\",\"provider\":\"google\",\"environment\":\"production\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"staging\",\"destination\":\"production\",\"rows\":[{\"key\":\"Key\",\"source\":\"projects/p/secrets/s/versions/latest\",\"destination\":\"projects/q/secrets/t\"}]}]}", "explicit numeric version"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"source\":\"unexpected\",\"destination\":\"projects/p/secrets/s\"}]}]}", "Local source rows"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"staging\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"source\":\"projects/p/secrets/s/versions/1\",\"destination\":\"projects/p/secrets/t\"}]}]}", "same source and destination"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[]}]}", "at least one row"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"staging\",\"destination\":\"local\",\"rows\":[{\"key\":\"Key\",\"source\":\"bad\"}]}]}", "Google source rows require"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"destination\":\"bad\"}]}]}", "Google destination rows require"];
+        yield return ["{\"version\":1,\"endpoints\":[],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"missing\",\"rows\":[{\"key\":\"Key\",\"destination\":\"projects/p/secrets/s\"}]}]}", "must be declared once"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\"},{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\"}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"destination\":\"projects/p/secrets/s\"}]}]}", "must be declared once"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"remote\",\"provider\":\"local\",\"environment\":\"staging\"}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"remote\",\"rows\":[{\"key\":\"Key\"}]}]}", "supported remote provider"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\"}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"A\",\"destination\":\"projects/p/secrets/s\"},{\"key\":\"B\",\"destination\":\"projects/p/secrets/s\"}]}]}", "duplicate destination"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\"}],\"jobs\":[{\"name\":\"job\",\"source\":\"staging\",\"destination\":\"local\",\"rows\":[{\"key\":\"Key\",\"source\":\"projects/p/secrets/s/versions/1\",\"destination\":\"unexpected\"}]}]}", "Local destination rows"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\"}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Bad\\nKey\",\"destination\":\"projects/p/secrets/s\"}]}]}", "unsupported characters"];
+    }
+
+    [Theory]
+    [InlineData(GoogleSecretManagerTransferStatus.Missing)]
+    [InlineData(GoogleSecretManagerTransferStatus.AccessDenied)]
+    [InlineData(GoogleSecretManagerTransferStatus.Unavailable)]
+    [InlineData(GoogleSecretManagerTransferStatus.Cancelled)]
+    [InlineData(GoogleSecretManagerTransferStatus.InvalidResource)]
+    [InlineData(GoogleSecretManagerTransferStatus.NotEnabled)]
+    [InlineData(GoogleSecretManagerTransferStatus.ProviderFailed)]
+    public void GoogleFailure_MapsEveryProviderStatusValueSafely(GoogleSecretManagerTransferStatus status)
+    {
+        var row = new SecretPromotionPlanRow(1, "Key", "staging", "projects/p/secrets/s/versions/1", "production", "projects/q/secrets/t", "storage", false, null);
+        var result = row.GoogleFailure("ProbeGoogleSource", status, new AppSurfaceGoogleSecretTransferDiagnostic("diagnostic", "Problem", "Cause", "Fix", "docs", false));
+
+        Assert.False(string.IsNullOrWhiteSpace(result.Status));
+        Assert.Equal("ProbeGoogleSource", result.Action);
     }
 
     private static SecretsCommandContext CreateContext(IAppSurfaceLocalSecretStore store) =>
@@ -555,6 +1033,7 @@ public sealed class SecretPromotionWorkflowTests
         public int AccessCalls { get; private set; }
         public int SecretProbeCalls { get; private set; }
         public AppSurfaceGoogleSecretWriteResult? WriteOverride { get; set; }
+        public AppSurfaceGoogleSecretAccessResult? AccessOverride { get; set; }
 
         public AppSurfaceGoogleSecretProbeResult ProbeSecret(string secretResourceName, TimeSpan timeout)
         {
@@ -572,6 +1051,11 @@ public sealed class SecretPromotionWorkflowTests
         public AppSurfaceGoogleSecretAccessResult AccessSecretVersion(string versionResourceName, TimeSpan timeout)
         {
             AccessCalls++;
+            if (AccessOverride is { } result)
+            {
+                return result;
+            }
+
             return Versions.TryGetValue(versionResourceName, out var value)
                 ? AppSurfaceGoogleSecretAccessResult.Accessed(versionResourceName, new AppSurfaceGoogleSecretPayload(value, versionResourceName))
                 : AppSurfaceGoogleSecretAccessResult.Failed(GoogleSecretManagerTransferStatus.Missing, versionResourceName, Diagnostic());
@@ -588,7 +1072,41 @@ public sealed class SecretPromotionWorkflowTests
             return AppSurfaceGoogleSecretWriteResult.Written(secretResourceName, $"{secretResourceName}/versions/{Writes.Count}");
         }
 
-        private static AppSurfaceGoogleSecretTransferDiagnostic Diagnostic() =>
+        public static AppSurfaceGoogleSecretTransferDiagnostic Diagnostic() =>
             new("test", "Test failure.", "Test cause.", "Test fix.", "test", false);
+    }
+
+    private sealed class MetadataIncapableStore : IAppSurfaceLocalSecretStore
+    {
+        public string Name => "metadata-incapable";
+        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) => AppSurfaceLocalSecretResult.Missing(Name);
+        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value) => AppSurfaceLocalSecretResult.Found(string.Empty, Name);
+        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) => AppSurfaceLocalSecretResult.Missing(Name);
+        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) => AppSurfaceLocalSecretListResult.Found([], Name);
+        public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) => AppSurfaceLocalSecretResult.Found(string.Empty, Name);
+    }
+
+    private sealed class ControlledMetadataStore(
+        LocalSecretResultStatus probeStatus,
+        LocalSecretResultStatus getStatus,
+        LocalSecretResultStatus setStatus) : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
+    {
+        public string Name => "controlled";
+        public AppSurfaceLocalSecretResult Probe(AppSurfaceLocalSecretIdentity identity) => Result(probeStatus);
+        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) => Result(getStatus);
+        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value) => Result(setStatus);
+        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) => AppSurfaceLocalSecretResult.Missing(Name);
+        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) => AppSurfaceLocalSecretListResult.Found([], Name);
+        public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) => AppSurfaceLocalSecretResult.Found(string.Empty, Name);
+
+        private AppSurfaceLocalSecretResult Result(LocalSecretResultStatus status) => status switch
+        {
+            LocalSecretResultStatus.Found => AppSurfaceLocalSecretResult.Found("sentinel", Name),
+            LocalSecretResultStatus.Missing => AppSurfaceLocalSecretResult.Missing(Name),
+            _ => AppSurfaceLocalSecretResult.NotFound(
+                status,
+                new AppSurfaceLocalSecretDiagnostic("controlled-failure", "Controlled failure.", "Controlled cause.", "Controlled fix.", "test"),
+                Name)
+        };
     }
 }

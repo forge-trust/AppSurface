@@ -91,6 +91,57 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task SecretsTransferCommands_Should_Plan_DryRun_AndApply_WithValueSafeJsonOutput()
+    {
+        using var temp = TempDirectory.Create("appsurface-transfer-");
+        var storePath = Path.Join(temp.Path, "secrets.json");
+        var configPath = Path.Join(temp.Path, "promotion.json");
+        var planPath = Path.Join(temp.Path, "promotion.plan.json");
+        await File.WriteAllTextAsync(configPath, """
+            {"version":1,"endpoints":[{"name":"staging","provider":"google","environment":"staging","credential":{"mode":"applicationDefault"}}],"jobs":[{"name":"local-to-staging","source":"local","destination":"staging","rows":[{"key":"Stripe:ApiKey","destination":"projects/staging/secrets/stripe-api-key"}]}]}
+            """);
+        var client = new FakeGoogleSecretTransferClient();
+        client.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var shared = new[] { "--app", "MyApp", "--environment", "Development", "--store-file", storePath };
+
+        var set = await InvokeProgramEntryPointAsync(["secrets", "set", "Stripe:ApiKey", "--stdin", .. shared], standardInput: "sentinel-local-secret\n");
+        var plan = await InvokeProgramEntryPointAsync(["secrets", "transfer", "plan", "--config", configPath, "--job", "local-to-staging", "--out", planPath, "--json", .. shared], options => RegisterGoogleTransferClient(options, client));
+        var dryRun = await InvokeProgramEntryPointAsync(["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--json", .. shared], options => RegisterGoogleTransferClient(options, client));
+        var apply = await InvokeProgramEntryPointAsync(["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--apply", "--json", .. shared], options => RegisterGoogleTransferClient(options, client));
+
+        Assert.Equal(0, set.ExitCode);
+        Assert.Equal(0, plan.ExitCode);
+        Assert.Equal(0, dryRun.ExitCode);
+        Assert.Equal(0, apply.ExitCode);
+        Assert.Single(client.Writes);
+        Assert.DoesNotContain("sentinel-local-secret", plan.AllText + dryRun.AllText + apply.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsTransferPlan_Should_RenderValueSafeTextDiagnostics_WhenSourceIsMissing()
+    {
+        using var temp = TempDirectory.Create("appsurface-transfer-");
+        var storePath = Path.Join(temp.Path, "secrets.json");
+        var configPath = Path.Join(temp.Path, "promotion.json");
+        var planPath = Path.Join(temp.Path, "promotion.plan.json");
+        await File.WriteAllTextAsync(configPath, """
+            {"version":1,"endpoints":[{"name":"staging","provider":"google","environment":"staging","credential":{"mode":"applicationDefault"}}],"jobs":[{"name":"local-to-staging","source":"local","destination":"staging","rows":[{"key":"Missing:ApiKey","destination":"projects/staging/secrets/missing-api-key"}]}]}
+            """);
+        var client = new FakeGoogleSecretTransferClient();
+        client.Secrets["projects/staging/secrets/missing-api-key"] = false;
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "plan", "--config", configPath, "--job", "local-to-staging", "--out", planPath, "--app", "MyApp", "--environment", "Development", "--store-file", storePath],
+            options => RegisterGoogleTransferClient(options, client));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Operation: plan; Job: local-to-staging; Mode: dry-run", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("SourceMissing: Missing:ApiKey", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Diagnostic: local-secret-promotion-source-missing", result.AllText, StringComparison.Ordinal);
+        Assert.Empty(client.Writes);
+    }
+
+    [Fact]
     public async Task SecretsCommands_Should_Set_List_Get_And_Delete_Without_PrintingSecretValue()
     {
         using var temp = TempDirectory.Create("appsurface-secrets-");
