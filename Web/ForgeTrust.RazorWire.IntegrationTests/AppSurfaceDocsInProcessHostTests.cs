@@ -38,7 +38,7 @@ public sealed class AppSurfaceDocsInProcessHostTests
         }
 
         Assert.False(host.IsStarted);
-        Assert.Equal("AppSurface Docs standalone host has stopped.", host.Diagnostics);
+        Assert.Equal("AppSurface Docs application host has stopped.", host.Diagnostics);
 
         await host.DisposeAsync();
     }
@@ -95,7 +95,7 @@ public sealed class AppSurfaceDocsInProcessHostTests
             () => AppSurfaceDocsInProcessHost.ResolveBoundBaseUrl([]));
 
         Assert.Equal(
-            "AppSurface Docs standalone host did not publish a listening URL. No addresses were published.",
+            "AppSurface Docs application host did not publish a listening URL. No addresses were published.",
             exception.Message);
     }
 
@@ -106,7 +106,7 @@ public sealed class AppSurfaceDocsInProcessHostTests
             () => AppSurfaceDocsInProcessHost.ResolveBoundBaseUrl(null));
 
         Assert.Equal(
-            "AppSurface Docs standalone host did not publish a listening URL. No addresses were published.",
+            "AppSurface Docs application host did not publish a listening URL. No addresses were published.",
             exception.Message);
     }
 
@@ -117,7 +117,7 @@ public sealed class AppSurfaceDocsInProcessHostTests
             () => AppSurfaceDocsInProcessHost.ResolveBoundBaseUrl(["http://127.0.0.1:5000", "http://127.0.0.1:5001"]));
 
         Assert.Equal(
-            "AppSurface Docs standalone host published 2 listening URLs; expected exactly one. Values: 'http://127.0.0.1:5000', 'http://127.0.0.1:5001'.",
+            "AppSurface Docs application host published 2 listening URLs; expected exactly one. Values: 'http://127.0.0.1:5000', 'http://127.0.0.1:5001'.",
             exception.Message);
     }
 
@@ -128,7 +128,7 @@ public sealed class AppSurfaceDocsInProcessHostTests
             () => AppSurfaceDocsInProcessHost.ResolveBoundBaseUrl(["not-a-url"]));
 
         Assert.Equal(
-            "AppSurface Docs standalone host did not publish a valid listening URL. Value: 'not-a-url'.",
+            "AppSurface Docs application host did not publish a valid listening URL. Value: 'not-a-url'.",
             exception.Message);
     }
 

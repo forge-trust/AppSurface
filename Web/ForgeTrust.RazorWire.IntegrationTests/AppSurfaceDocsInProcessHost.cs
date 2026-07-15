@@ -1,4 +1,5 @@
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Docs.ConsumerFixture;
 using ForgeTrust.AppSurface.Docs.Standalone;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -9,12 +10,13 @@ using Microsoft.Extensions.Hosting;
 namespace ForgeTrust.RazorWire.IntegrationTests;
 
 /// <summary>
-/// Starts the AppSurface Docs standalone executable host in-process for integration tests.
+/// Starts an AppSurface Docs application host in-process for integration tests.
 /// </summary>
 /// <remarks>
-/// The helper always runs the host with <see cref="Environments.Development"/> defaults and a source-backed
-/// AppSurface Docs configuration rooted at the repository checkout. Callers should pass an explicit loopback URL;
-/// using port <c>0</c> lets Kestrel choose an available port that is exposed through <see cref="BaseUrl"/>.
+/// The helper runs either the standalone application or the real consumer fixture with
+/// <see cref="Environments.Development"/> defaults and a source-backed AppSurface Docs configuration rooted at the
+/// repository checkout. Callers should pass an explicit loopback URL; using port <c>0</c> lets Kestrel choose an
+/// available port that is exposed through <see cref="BaseUrl"/>.
 /// </remarks>
 internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
 {
@@ -40,7 +42,7 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
     /// <summary>
     /// Gets a short lifecycle diagnostic describing whether the host is running or stopped.
     /// </summary>
-    public string Diagnostics { get; private set; } = "AppSurface Docs standalone host is running in-process.";
+    public string Diagnostics { get; private set; } = "AppSurface Docs application host is running in-process.";
 
     /// <summary>
     /// Builds and starts the AppSurface Docs standalone host with the requested endpoint.
@@ -54,9 +56,31 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
     {
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         var builder = AppSurfaceDocsStandaloneHost.CreateBuilder(
-            CreateStandaloneArgs(requestedBaseUrl, repoRoot),
+            CreateHostArgs(requestedBaseUrl, repoRoot),
             DevelopmentEnvironmentProvider.Instance);
 
+        return await StartAsync(ConfigureHostBuilder(builder, repoRoot, requestedBaseUrl).Build());
+    }
+
+    /// <summary>
+    /// Builds and starts the AppSurface Docs consumer fixture with the requested endpoint.
+    /// </summary>
+    /// <param name="requestedBaseUrl">
+    /// The URL passed to Kestrel, typically <c>http://127.0.0.1:0</c> so tests use a real listener on an available port.
+    /// </param>
+    /// <returns>A started host wrapper whose <see cref="BaseUrl"/> contains the resolved listener address.</returns>
+    public static async Task<AppSurfaceDocsInProcessHost> StartConsumerAsync(string requestedBaseUrl)
+    {
+        var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        var builder = AppSurfaceDocsConsumerFixtureHost.CreateBuilder(
+            CreateHostArgs(requestedBaseUrl, repoRoot),
+            DevelopmentEnvironmentProvider.Instance);
+
+        return await StartAsync(ConfigureHostBuilder(builder, repoRoot, requestedBaseUrl).Build());
+    }
+
+    private static IHostBuilder ConfigureHostBuilder(IHostBuilder builder, string repoRoot, string requestedBaseUrl)
+    {
         builder.UseContentRoot(repoRoot);
         builder.ConfigureWebHost(webHost =>
         {
@@ -64,7 +88,7 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
             webHost.UseUrls(requestedBaseUrl);
         });
 
-        return await StartAsync(builder.Build());
+        return builder;
     }
 
     /// <summary>
@@ -113,7 +137,7 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
         }
         finally
         {
-            Diagnostics = "AppSurface Docs standalone host has stopped.";
+            Diagnostics = "AppSurface Docs application host has stopped.";
             _host.Dispose();
         }
     }
@@ -142,24 +166,24 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
     {
         if (addresses is null || addresses.Count == 0)
         {
-            throw new InvalidOperationException("AppSurface Docs standalone host did not publish a listening URL. No addresses were published.");
+            throw new InvalidOperationException("AppSurface Docs application host did not publish a listening URL. No addresses were published.");
         }
 
         if (addresses.Count != 1)
         {
-            throw new InvalidOperationException($"AppSurface Docs standalone host published {addresses.Count} listening URLs; expected exactly one. Values: '{string.Join("', '", addresses)}'.");
+            throw new InvalidOperationException($"AppSurface Docs application host published {addresses.Count} listening URLs; expected exactly one. Values: '{string.Join("', '", addresses)}'.");
         }
 
         var baseAddress = addresses.Single();
         if (!Uri.TryCreate(baseAddress, UriKind.Absolute, out var uri))
         {
-            throw new InvalidOperationException($"AppSurface Docs standalone host did not publish a valid listening URL. Value: '{baseAddress}'.");
+            throw new InvalidOperationException($"AppSurface Docs application host did not publish a valid listening URL. Value: '{baseAddress}'.");
         }
 
         return uri.GetLeftPart(UriPartial.Authority);
     }
 
-    private static string[] CreateStandaloneArgs(string baseUrl, string repoRoot)
+    private static string[] CreateHostArgs(string baseUrl, string repoRoot)
     {
         return
         [
