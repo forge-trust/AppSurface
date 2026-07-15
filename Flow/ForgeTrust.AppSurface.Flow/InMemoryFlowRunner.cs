@@ -160,9 +160,9 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
                 case FlowTransitionKind.Complete:
                     return FlowRunResult<TContext>.Completed(currentNodeId, transition.Context!);
                 case FlowTransitionKind.Fault when transition.Fault?.Code is
-                    "flow.next-node-invalid":
+                    FlowTransitionFaultCodes.NextNodeInvalid:
                     throw new FlowDefinitionException(transition.Fault.Message);
-                case FlowTransitionKind.Fault when transition.Fault?.Code is "flow.outcome-unsupported":
+                case FlowTransitionKind.Fault when transition.Fault?.Code is FlowTransitionFaultCodes.OutcomeUnsupported:
                     throw new FlowDefinitionException(transition.Fault.Message);
                 case FlowTransitionKind.Fault:
                     return FlowRunResult<TContext>.Faulted(currentNodeId, transition.Fault!);

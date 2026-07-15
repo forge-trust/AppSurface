@@ -325,8 +325,10 @@ public sealed record FlowActivity<TContext, TWork, TResult> :
     /// <inheritdoc />
     public int ResultContractVersion => Callsite.ResultContractVersion;
 
+    /// <inheritdoc />
     object IFlowActivityRequest<TContext>.Work => Work!;
 
+    /// <inheritdoc />
     FlowActivityWorkResult IFlowActivityRequest<TContext>.CreateResult(object result)
     {
         ArgumentNullException.ThrowIfNull(result);

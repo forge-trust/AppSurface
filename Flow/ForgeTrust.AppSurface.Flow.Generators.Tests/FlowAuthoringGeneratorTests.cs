@@ -75,6 +75,58 @@ public sealed class FlowAuthoringGeneratorTests
     }
 
     [Fact]
+    public void Generator_WithSystemTimeProvider_ReportsOnlyGlobalProviderWarnings()
+    {
+        var source = """
+            using ForgeTrust.AppSurface.Flow;
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            [FlowAuthoring("time-provider")]
+            public partial class TimeProviderFlow
+            {
+                [FlowStart]
+                [FlowNode("start", typeof(FlowState))]
+                [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(FlowState))]
+                public partial class StartNode : IFlowTransformerNode<FlowState, StartNodeOutcomes>
+                {
+                    public ValueTask<StartNodeOutcomes> ExecuteAsync(
+                        FlowTransformerContext<FlowState> context,
+                        CancellationToken cancellationToken = default)
+                    {
+                        _ = TimeProvider.System.GetUtcNow();
+                        _ = TimeProvider.System.GetLocalNow();
+                        _ = TimeProvider.System.GetTimestamp();
+                        _ = nameof(TimeProvider.System);
+                        return ValueTask.FromResult(StartNodeOutcomes.Done(context.State));
+                    }
+
+                    private static void ReadInjectedProvider(TimeProvider provider)
+                    {
+                        _ = provider.GetUtcNow();
+                        _ = provider.GetLocalNow();
+                        _ = provider.GetTimestamp();
+                    }
+                }
+            }
+
+            public sealed record FlowState;
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(source);
+        var warnings = diagnostics
+            .Where(diagnostic => diagnostic.Id == "ASFLOWA007")
+            .DistinctBy(diagnostic => (diagnostic.Location.SourceSpan, diagnostic.GetMessage()))
+            .ToArray();
+
+        Assert.Equal(3, warnings.Length);
+        Assert.All(
+            warnings,
+            warning => Assert.Contains("System.TimeProvider.System", warning.GetMessage(), StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Generator_WithValidGeneratedAuthoring_EmitsEnvelopeOutcomesAndBuilder()
     {
         var source = """

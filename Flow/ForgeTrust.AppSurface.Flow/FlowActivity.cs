@@ -213,18 +213,30 @@ internal static class FlowActivityRequestContract
         }
 
         var callsiteId = FlowDefinition<object>.RequireText(activity.CallsiteId, parameterName);
-        var workType = activity.WorkType ?? throw new ArgumentNullException(parameterName);
-        var workContractVersion = RequirePositiveVersion(activity.WorkContractVersion, parameterName);
-        var resultType = activity.ResultType ?? throw new ArgumentNullException(parameterName);
-        var resultContractVersion = RequirePositiveVersion(activity.ResultContractVersion, parameterName);
-        var work = activity.Work ?? throw new ArgumentNullException(parameterName);
+        var workType = activity.WorkType ?? throw MissingProperty(parameterName, nameof(activity.WorkType));
+        var workContractVersion = RequirePositiveVersion(
+            activity.WorkContractVersion,
+            parameterName,
+            nameof(activity.WorkContractVersion));
+        var resultType = activity.ResultType ?? throw MissingProperty(parameterName, nameof(activity.ResultType));
+        var resultContractVersion = RequirePositiveVersion(
+            activity.ResultContractVersion,
+            parameterName,
+            nameof(activity.ResultContractVersion));
+        var work = activity.Work ?? throw MissingProperty(parameterName, nameof(activity.Work));
         if (!workType.IsInstanceOfType(work))
         {
-            throw new ArgumentException("The activity work value must implement its declared work type.", parameterName);
+            throw new ArgumentException(
+                $"Activity property '{nameof(activity.Work)}' must implement its declared work type.",
+                parameterName);
         }
 
         var context = activity.Context;
-        ArgumentNullException.ThrowIfNull(context, parameterName);
+        if (context is null)
+        {
+            throw MissingProperty(parameterName, nameof(activity.Context));
+        }
+
         return new SnapshotRequest<TContext>(
             callsiteId,
             workType,
@@ -236,11 +248,17 @@ internal static class FlowActivityRequestContract
             activity.CreateResult);
     }
 
-    private static int RequirePositiveVersion(int version, string parameterName)
+    private static ArgumentNullException MissingProperty(string parameterName, string propertyName) =>
+        new(parameterName, $"Activity property '{propertyName}' must not be null.");
+
+    private static int RequirePositiveVersion(int version, string parameterName, string propertyName)
     {
         if (version < 1)
         {
-            throw new ArgumentOutOfRangeException(parameterName, version, "Contract versions must be at least 1.");
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                version,
+                $"Activity property '{propertyName}' must be at least 1.");
         }
 
         return version;

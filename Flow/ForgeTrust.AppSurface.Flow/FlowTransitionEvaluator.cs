@@ -43,6 +43,21 @@ public enum FlowTransitionKind
 }
 
 /// <summary>
+/// Stable fault codes shared by the built-in transition evaluator and runners that translate its decisions.
+/// </summary>
+internal static class FlowTransitionFaultCodes
+{
+    /// <summary>Identifies a request to evaluate a node absent from the selected definition.</summary>
+    internal const string NodeMissing = "flow.node-missing";
+
+    /// <summary>Identifies a Next outcome whose target was not declared by the current node.</summary>
+    internal const string NextNodeInvalid = "flow.next-node-invalid";
+
+    /// <summary>Identifies a node outcome that the shared evaluator cannot translate.</summary>
+    internal const string OutcomeUnsupported = "flow.outcome-unsupported";
+}
+
+/// <summary>
 /// Input for one host-neutral Flow node evaluation.
 /// </summary>
 /// <typeparam name="TContext">Serializable context type carried by the Flow.</typeparam>
@@ -312,7 +327,7 @@ public sealed class FlowTransitionEvaluator<TContext> : IFlowTransitionEvaluator
             return FlowTransition<TContext>.Faulted(
                 input.NodeId,
                 new FlowFault(
-                    "flow.node-missing",
+                    FlowTransitionFaultCodes.NodeMissing,
                     string.Create(
                         CultureInfo.InvariantCulture,
                         $"Flow '{definition.FlowId}' version '{definition.Version}' does not contain node '{input.NodeId}'.")));
@@ -349,7 +364,7 @@ public sealed class FlowTransitionEvaluator<TContext> : IFlowTransitionEvaluator
             _ => FlowTransition<TContext>.Faulted(
                 input.NodeId,
                 new FlowFault(
-                    "flow.outcome-unsupported",
+                    FlowTransitionFaultCodes.OutcomeUnsupported,
                     $"Unsupported flow outcome type '{outcome.GetType().FullName}'.")),
         };
     }
@@ -367,7 +382,7 @@ public sealed class FlowTransitionEvaluator<TContext> : IFlowTransitionEvaluator
         return FlowTransition<TContext>.Faulted(
             executionNode.Descriptor.NodeId,
             new FlowFault(
-                "flow.next-node-invalid",
+                FlowTransitionFaultCodes.NextNodeInvalid,
                 string.Create(
                     CultureInfo.InvariantCulture,
                     $"Flow '{definition.FlowId}' version '{definition.Version}' node '{executionNode.Descriptor.NodeId}' returned invalid target '{next.NodeId}'; it is an undeclared target.")));

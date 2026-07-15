@@ -169,6 +169,20 @@ public sealed class FlowOutcomeTests
             FlowRunResult<TestState>.ActivityPending("review", request));
 
         Assert.Equal("activity", exception.ParamName);
+        var expectedProperty = scenario switch
+        {
+            "work-type" => nameof(request.WorkType),
+            "work-version" => nameof(request.WorkContractVersion),
+            "result-type" => nameof(request.ResultType),
+            "result-version" => nameof(request.ResultContractVersion),
+            "work" or "work-mismatch" => nameof(request.Work),
+            "context" => nameof(request.Context),
+            _ => null,
+        };
+        if (expectedProperty is not null)
+        {
+            Assert.Contains(expectedProperty, exception.Message, StringComparison.Ordinal);
+        }
     }
 
     [Theory]

@@ -733,6 +733,13 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                 api = "System.Random.Shared";
                 return true;
             }
+
+            if (string.Equals(containingType, "System.TimeProvider", StringComparison.Ordinal) &&
+                string.Equals(property.Name, "System", StringComparison.Ordinal))
+            {
+                api = "System.TimeProvider.System";
+                return true;
+            }
         }
 
         if (symbol is IMethodSymbol method)
@@ -758,7 +765,7 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
     }
 
     private static bool IsNondeterministicMemberCandidate(string name) =>
-        name is "Now" or "UtcNow" or "Today" or "Shared" or "NewGuid" or "GetTimestamp";
+        name is "Now" or "UtcNow" or "Today" or "Shared" or "System" or "NewGuid" or "GetTimestamp";
 
     private static bool IsWithinNameOf(SyntaxNode node) =>
         node.AncestorsAndSelf().OfType<InvocationExpressionSyntax>().Any(invocation =>
