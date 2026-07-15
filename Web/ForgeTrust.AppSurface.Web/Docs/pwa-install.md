@@ -2,6 +2,8 @@
 
 AppSurface Web owns a small, composable [Progressive Web App](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps) foundation: install metadata, explicit offline behavior, push-event plumbing, service-worker registration metadata, and privacy-safe diagnostics. Each capability is opt-in. Enabling push does not request notification permission, create a subscription, choose recipients, or send a message.
 
+The base package owns the shared worker and inert registration helper. For protected subscription intake, VAPID rotation, encrypted one-attempt sending, exact push-service origin allowlisting, and 404/410 cleanup, add the optional [`ForgeTrust.AppSurface.Web.Push`](../../ForgeTrust.AppSurface.Web.Push/README.md) safe rail. It reuses this worker and never maps a second worker or chooses recipients, preferences, persistence, scheduling, retry, or notification policy.
+
 Use the [executable PWA example](../../../examples/web-pwa-install/README.md) to see install metadata, offline behavior, push handlers, and explicit browser registration together. Use [`appsurface pwa verify`](../../../Cli/ForgeTrust.AppSurface.Cli/README.md) for server-known readiness evidence.
 
 ## Quick Starts
