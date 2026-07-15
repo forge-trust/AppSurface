@@ -6,7 +6,9 @@ DevAuth is local tooling. It is not production authentication, OIDC, ASP.NET Ide
 
 Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.md) when deciding whether this local persona proof, Auth.Testing, OIDC, or raw ASP.NET Core authentication is the right next step.
 
-The root page renders `AppSurfaceDevAuthMarker` as a persistent in-app overlay without wrapping it in an environment check. The renderer returns an empty string outside allowed environments, so host layouts can call it unconditionally. The overlay starts collapsed to keep the app usable, then expands when you need to select `Local Admin`, `Local Viewer`, or `Clear`. Those controls post to the DevAuth control endpoints and return to the same page, so the fake auth state remains visible while you use the app. Consumers can skin that marker by passing `AppSurfaceDevAuthMarkerOptions`, including `StartExpanded`, `CssClassPrefix`, `AdditionalCssClass`, and `IncludeDefaultStyles = false`.
+The root page renders `AppSurfaceDevAuthMarker` without wrapping it in an environment check. The renderer returns an empty string outside allowed environments, so host layouts can call it unconditionally. With default styles, the marker is a fixed bottom-right overlay above 640 CSS pixels and participates in normal document flow at widths up to and including 640 CSS pixels. It starts collapsed, then expands when you need to select `Local Admin`, `Local Viewer`, or `Clear`. Those controls post to the DevAuth control endpoints and return to the same page, so the fake auth state remains visible while you use the app.
+
+The example supplies the host-owned viewport meta tag and renders the marker after the page header but before `<main>`. That location lets the narrow-screen marker reserve space and push application content instead of covering it. The example also supplies narrow-screen outer margin through `AdditionalCssClass`; AppSurface cannot choose spacing that fits every host layout. Consumers can use the same option for a higher-specificity placement override, or set `IncludeDefaultStyles = false` and own the complete skin and responsive behavior. Fixed, absolutely positioned, clipped, or overriding host containers are outside the default non-obstruction guarantee. See the package's [responsive placement and customization guidance](../../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#responsive-placement-and-customization) for recipes and troubleshooting.
 
 To opt in a host-owned proof environment, configure the package explicitly:
 
@@ -63,3 +65,5 @@ Run the verifier:
 ```bash
 bash examples/auth-aspnetcore-dev-auth/verify.sh
 ```
+
+The verifier checks the viewport tag, the recommended header-marker-main ordering, the package responsive declarations, and the DevAuth persona flow.
