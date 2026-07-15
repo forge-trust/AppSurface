@@ -1118,6 +1118,10 @@ body {
     position: relative;
 }
 
+.docs-content :where(h2, h3, h4, h5, h6)[id] {
+    scroll-margin-top: 2rem;
+}
+
 .docs-breadcrumb-current,
 .docs-detail-title {
     overflow-wrap: anywhere;
@@ -1215,6 +1219,10 @@ body {
         overscroll-behavior: contain;
         -webkit-overflow-scrolling: touch;
     }
+
+    .docs-content :where(h2, h3, h4, h5, h6)[id] {
+        scroll-margin-top: 5rem;
+    }
 }
 
 @media (min-width: 40rem) and (max-width: 79.999rem) {
@@ -1253,6 +1261,10 @@ body {
 @media (max-width: 47.999rem) {
     .docs-outline-shell[data-outline-enhanced="true"] {
         --docs-outline-compact-top: 3.8125rem;
+    }
+
+    .docs-content :where(h2, h3, h4, h5, h6)[id] {
+        scroll-margin-top: 11rem;
     }
 }
 
