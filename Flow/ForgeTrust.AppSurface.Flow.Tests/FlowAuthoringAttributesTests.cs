@@ -69,6 +69,34 @@ public sealed class FlowAuthoringAttributesTests
         Assert.Equal("done", attribute.Name);
         Assert.Equal(FlowOutcomeKind.Complete, attribute.Kind);
         Assert.Equal(typeof(DoneState), attribute.OutputContextType);
+        Assert.Null(attribute.WorkType);
+        Assert.Null(attribute.ResultType);
+        Assert.Null(attribute.CallsiteId);
+        Assert.Equal(1, attribute.WorkContractVersion);
+        Assert.Equal(1, attribute.ResultContractVersion);
+    }
+
+    [Fact]
+    public void FlowOutcomeAttribute_WithActivityContracts_StoresActivityMetadata()
+    {
+        var attribute = new FlowOutcomeAttribute(
+            "send-email",
+            FlowOutcomeKind.Activity,
+            typeof(StartState),
+            typeof(ActivityWork),
+            typeof(ActivityResult))
+        {
+            CallsiteId = "approval.send-email",
+            WorkContractVersion = 2,
+            ResultContractVersion = 3,
+        };
+
+        Assert.Equal(FlowOutcomeKind.Activity, attribute.Kind);
+        Assert.Equal(typeof(ActivityWork), attribute.WorkType);
+        Assert.Equal(typeof(ActivityResult), attribute.ResultType);
+        Assert.Equal("approval.send-email", attribute.CallsiteId);
+        Assert.Equal(2, attribute.WorkContractVersion);
+        Assert.Equal(3, attribute.ResultContractVersion);
     }
 
     [Theory]
@@ -100,6 +128,7 @@ public sealed class FlowAuthoringAttributesTests
         Assert.Equal(2, (int)FlowOutcomeKind.TimedOut);
         Assert.Equal(3, (int)FlowOutcomeKind.Complete);
         Assert.Equal(4, (int)FlowOutcomeKind.Fault);
+        Assert.Equal(5, (int)FlowOutcomeKind.Activity);
     }
 
     [Fact]
@@ -163,9 +192,28 @@ public sealed class FlowAuthoringAttributesTests
         Assert.Equal("start", context.NodeId);
         Assert.Equal(state, context.State);
         Assert.Equal(resumeEvent, context.ResumeEvent);
+        Assert.Null(context.ActivityResult);
+    }
+
+    [Fact]
+    public void FlowTransformerContext_WithActivityResult_StoresTypedResult()
+    {
+        var callsite = new FlowActivityCallsite<ActivityWork, ActivityResult>("send-email");
+        var result = callsite.CreateResult(new ActivityResult("sent"));
+
+        var context = new FlowTransformerContext<StartState>("approval", "1", "start", new StartState())
+        {
+            ActivityResult = result,
+        };
+
+        Assert.Same(result, context.ActivityResult);
     }
 
     private sealed record StartState(string CaseId = "case");
 
     private sealed record DoneState;
+
+    private sealed record ActivityWork(string Id);
+
+    private sealed record ActivityResult(string Status);
 }

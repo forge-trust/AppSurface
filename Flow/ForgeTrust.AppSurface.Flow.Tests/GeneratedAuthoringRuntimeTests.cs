@@ -91,6 +91,50 @@ public partial class GeneratedApprovalFlow
 }
 
 /// <summary>
+/// Generated-authoring fixture that schedules typed work and consumes its typed result on the same node.
+/// </summary>
+[FlowAuthoring("generated-activity", Version = "2026-07-12")]
+public partial class GeneratedActivityFlow
+{
+    /// <summary>
+    /// Schedules one email activity, then completes after the email result resumes the node.
+    /// </summary>
+    [FlowStart]
+    [FlowNode("send", typeof(GeneratedActivityState))]
+    [FlowOutcome(
+        "send-email",
+        FlowOutcomeKind.Activity,
+        typeof(GeneratedActivityState),
+        typeof(GeneratedEmailWork),
+        typeof(GeneratedEmailResult),
+        CallsiteId = "approval.send-email",
+        WorkContractVersion = 2,
+        ResultContractVersion = 3)]
+    [FlowOutcome("done", FlowOutcomeKind.Complete, typeof(GeneratedDoneState))]
+    public partial class SendNode : IFlowTransformerNode<GeneratedActivityState, SendNodeOutcomes>
+    {
+        /// <summary>
+        /// Returns a typed activity on initial evaluation and a completion after activity resumption.
+        /// </summary>
+        public ValueTask<SendNodeOutcomes> ExecuteAsync(
+            FlowTransformerContext<GeneratedActivityState> context,
+            CancellationToken cancellationToken = default)
+        {
+            if (SendNodeOutcomes.SendEmailCallsite.TryGetResult(context.ActivityResult, out var result))
+            {
+                return ValueTask.FromResult<SendNodeOutcomes>(
+                    SendNodeOutcomes.Done(new GeneratedDoneState(result.ProviderMessageId)));
+            }
+
+            return ValueTask.FromResult<SendNodeOutcomes>(
+                SendNodeOutcomes.SendEmail(
+                    new GeneratedEmailWork(context.State.ApprovalId),
+                    context.State with { Status = "activity-pending" }));
+        }
+    }
+}
+
+/// <summary>
 /// Test-only generated flow whose start node intentionally violates the generated outcome contract.
 /// </summary>
 /// <remarks>
@@ -174,6 +218,25 @@ public sealed record GeneratedReviewState(int Count, string Status);
 /// </summary>
 /// <param name="Status">Final status copied from the review state.</param>
 public sealed record GeneratedDoneState(string Status);
+
+/// <summary>
+/// State persisted while the generated email activity executes.
+/// </summary>
+/// <param name="ApprovalId">Approval being processed.</param>
+/// <param name="Status">Current Flow status.</param>
+public sealed record GeneratedActivityState(string ApprovalId, string Status);
+
+/// <summary>
+/// Typed work contract for the generated email activity.
+/// </summary>
+/// <param name="ApprovalId">Approval whose email should be sent.</param>
+public sealed record GeneratedEmailWork(string ApprovalId);
+
+/// <summary>
+/// Typed result contract for the generated email activity.
+/// </summary>
+/// <param name="ProviderMessageId">Safe provider message identifier.</param>
+public sealed record GeneratedEmailResult(string ProviderMessageId);
 
 /// <summary>
 /// Verifies generated authoring definitions through the public in-memory runner.
@@ -345,5 +408,79 @@ public sealed class GeneratedAuthoringRuntimeTests
 
         Assert.Equal(FlowRunStatus.Completed, result.Status);
         Assert.Equal("async:created", result.Context?.GeneratedDoneState?.Status);
+    }
+
+    [Fact]
+    public async Task GeneratedDefinition_LowersTypedActivityAndResumesWithTypedResult()
+    {
+        var definition = GeneratedActivityFlow.BuildDefinition(new GeneratedActivityFlow.SendNode());
+        var runner = new InMemoryFlowRunner<GeneratedActivityFlow.GeneratedActivityFlowContext>(
+            Options.Create(new AppSurfaceFlowOptions()));
+
+        var pending = await runner.RunAsync(
+            definition,
+            GeneratedActivityFlow.CreateStartContext(new GeneratedActivityState("APR-1001", "created")));
+
+        Assert.Equal(FlowRunStatus.ActivityPending, pending.Status);
+        Assert.Equal("approval.send-email", pending.Activity?.CallsiteId);
+        Assert.Equal(typeof(GeneratedEmailWork), pending.Activity?.WorkType);
+        Assert.Equal(2, pending.Activity?.WorkContractVersion);
+        Assert.Equal(typeof(GeneratedEmailResult), pending.Activity?.ResultType);
+        Assert.Equal(3, pending.Activity?.ResultContractVersion);
+        Assert.Equal(new GeneratedEmailWork("APR-1001"), pending.Activity?.Work);
+        Assert.Equal("activity-pending", pending.Context?.GeneratedActivityState?.Status);
+
+        var completed = await runner.ResumeActivityAsync(
+            definition,
+            "send",
+            pending.Context!,
+            GeneratedActivityFlow.SendNodeOutcomes.SendEmailCallsite.CreateResult(
+                new GeneratedEmailResult("provider-123")));
+
+        Assert.Equal(FlowRunStatus.Completed, completed.Status);
+        Assert.Equal("provider-123", completed.Context?.GeneratedDoneState?.Status);
+    }
+
+    [Fact]
+    public async Task GeneratedDefinition_WithExplicitActivityCallsiteAndGraphMapping_UsesStableId()
+    {
+        var definition = GeneratedActivityFlow.BuildDefinition(
+            graph => graph
+                .MarkSendNodeSendEmailTerminal()
+                .MarkSendNodeDoneTerminal(),
+            new GeneratedActivityFlow.SendNode());
+        var runner = new InMemoryFlowRunner<GeneratedActivityFlow.GeneratedActivityFlowContext>(
+            Options.Create(new AppSurfaceFlowOptions()));
+
+        var pending = await runner.RunAsync(
+            definition,
+            GeneratedActivityFlow.CreateStartContext(new GeneratedActivityState("APR-1001", "created")));
+
+        Assert.Equal("approval.send-email", pending.Activity?.CallsiteId);
+    }
+
+    [Theory]
+    [InlineData("factory-work")]
+    [InlineData("factory-context")]
+    [InlineData("constructor-work")]
+    [InlineData("constructor-context")]
+    public void GeneratedActivityOutcome_WithNullContract_ThrowsArgumentNullException(string scenario)
+    {
+        Assert.Throws<ArgumentNullException>(() => scenario switch
+        {
+            "factory-work" => GeneratedActivityFlow.SendNodeOutcomes.SendEmail(
+                null!,
+                new GeneratedActivityState("APR-1001", "created")),
+            "factory-context" => GeneratedActivityFlow.SendNodeOutcomes.SendEmail(
+                new GeneratedEmailWork("APR-1001"),
+                null!),
+            "constructor-work" => new GeneratedActivityFlow.SendNodeOutcomes.SendEmailOutcome(
+                null!,
+                new GeneratedActivityState("APR-1001", "created")),
+            "constructor-context" => new GeneratedActivityFlow.SendNodeOutcomes.SendEmailOutcome(
+                new GeneratedEmailWork("APR-1001"),
+                null!),
+            _ => throw new InvalidOperationException("Unknown activity null scenario."),
+        });
     }
 }

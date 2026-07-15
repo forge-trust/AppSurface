@@ -94,7 +94,8 @@ public sealed class FlowStartAttribute : Attribute
 /// must carry the input context type of exactly one target node. <see cref="FlowOutcomeKind.Wait"/> and
 /// <see cref="FlowOutcomeKind.TimedOut"/> resume the current node, so they must carry that node's input context
 /// type. <see cref="FlowOutcomeKind.Fault"/> must carry <see cref="FlowFault"/>. <see cref="FlowOutcomeKind.Complete"/>
-/// is terminal and does not require a target node.
+/// is terminal and does not require a target node. <see cref="FlowOutcomeKind.Activity"/> uses the five-argument
+/// constructor to declare work and result contracts, and its output context must match the current node input context.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
 public sealed class FlowOutcomeAttribute : Attribute
@@ -108,10 +109,36 @@ public sealed class FlowOutcomeAttribute : Attribute
     /// <exception cref="ArgumentException">Thrown when <paramref name="name"/> is null, empty, or whitespace.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="outputContextType"/> is null.</exception>
     public FlowOutcomeAttribute(string name, FlowOutcomeKind kind, Type outputContextType)
+        : this(name, kind, outputContextType, null, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a generated typed activity outcome declaration.
+    /// </summary>
+    /// <param name="name">Stable outcome name.</param>
+    /// <param name="kind">Outcome kind. Generated validation requires <see cref="FlowOutcomeKind.Activity"/>.</param>
+    /// <param name="outputContextType">Context persisted while the activity runs; it must match the node input.</param>
+    /// <param name="workType">Serializable work contract type.</param>
+    /// <param name="resultType">Serializable result contract type.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="name"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="outputContextType"/> is null.</exception>
+    /// <remarks>
+    /// This overload is append-only generated-authoring metadata. The source generator reports a diagnostic when it is
+    /// used with a non-activity kind or when the work/result declarations are invalid.
+    /// </remarks>
+    public FlowOutcomeAttribute(
+        string name,
+        FlowOutcomeKind kind,
+        Type outputContextType,
+        Type? workType,
+        Type? resultType)
     {
         Name = FlowDefinition<object>.RequireText(name, nameof(name));
         Kind = kind;
         OutputContextType = outputContextType ?? throw new ArgumentNullException(nameof(outputContextType));
+        WorkType = workType;
+        ResultType = resultType;
     }
 
     /// <summary>
@@ -128,6 +155,35 @@ public sealed class FlowOutcomeAttribute : Attribute
     /// Gets the context type carried by this outcome.
     /// </summary>
     public Type OutputContextType { get; }
+
+    /// <summary>
+    /// Gets the activity work contract type, when this is an <see cref="FlowOutcomeKind.Activity"/> declaration.
+    /// </summary>
+    public Type? WorkType { get; }
+
+    /// <summary>
+    /// Gets the activity result contract type, when this is an <see cref="FlowOutcomeKind.Activity"/> declaration.
+    /// </summary>
+    public Type? ResultType { get; }
+
+    /// <summary>
+    /// Gets or sets an explicit stable activity callsite id.
+    /// </summary>
+    /// <remarks>
+    /// When omitted, generated authoring uses <c>&lt;node-id&gt;.&lt;outcome-name&gt;</c>. Either form is a durable
+    /// identifier within a Flow definition and must not change while nonterminal instances reference it.
+    /// </remarks>
+    public string? CallsiteId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the positive serialized activity work contract version. Defaults to one.
+    /// </summary>
+    public int WorkContractVersion { get; set; } = 1;
+
+    /// <summary>
+    /// Gets or sets the positive serialized activity result contract version. Defaults to one.
+    /// </summary>
+    public int ResultContractVersion { get; set; } = 1;
 }
 
 /// <summary>
@@ -209,6 +265,11 @@ public enum FlowOutcomeKind
     /// Fault the flow with a process-level error.
     /// </summary>
     Fault = 4,
+
+    /// <summary>
+    /// Schedule one typed external activity and resume the same node with its result.
+    /// </summary>
+    Activity = 5,
 }
 
 /// <summary>
@@ -219,8 +280,9 @@ public enum FlowOutcomeKind
 /// outcome case. The generated adapter lowers that case into the v1 runtime contract and the runner enforces
 /// the non-null outcome requirement. Exceptions thrown by an implementation propagate to the caller; use
 /// <see cref="FlowOutcomeKind.Fault"/> with <see cref="FlowFault"/> for expected process failures that should be
-/// represented as flow results. Nodes should honor cancellation and should keep externally visible side effects
-/// idempotent or guarded by a host-owned outbox when a durable host may retry or replay work.
+/// represented as flow results. Nodes should honor cancellation and must not perform externally visible side effects;
+/// return <see cref="FlowOutcomeKind.Activity"/> so a durable host can commit the command before executing work. A node
+/// may be evaluated more than once when a process dies before the returned transition commits.
 /// </remarks>
 /// <typeparam name="TInput">Typed input context consumed by the node.</typeparam>
 /// <typeparam name="TOutcome">Generated outcome union type returned by the node.</typeparam>
@@ -246,7 +308,8 @@ public interface IFlowTransformerNode<TInput, TOutcome>
 /// <see cref="FlowId"/>, <see cref="Version"/>, and <see cref="NodeId"/> identify the current definition and node
 /// being executed. <see cref="State"/> is the typed input context unwrapped from the generated envelope; the record
 /// does not validate it, and generated adapters assume it is non-null. <see cref="ResumeEvent"/> is null for initial
-/// execution and non-null when a node resumes after an external event or timeout.
+/// execution and non-null when a node resumes after an external event or timeout. <see cref="ActivityResult"/> is
+/// non-null only when a typed activity resumes the node; runners never populate both resume forms at once.
 /// </remarks>
 /// <typeparam name="TInput">Typed input context consumed by the node.</typeparam>
 /// <param name="FlowId">Stable flow id.</param>
@@ -259,4 +322,14 @@ public sealed record FlowTransformerContext<TInput>(
     string Version,
     string NodeId,
     TInput State,
-    FlowResumeEvent? ResumeEvent = null);
+    FlowResumeEvent? ResumeEvent = null)
+{
+    /// <summary>
+    /// Gets the optional typed activity result that resumed this transformer node.
+    /// </summary>
+    /// <remarks>
+    /// Use the generated outcome callsite's <c>TryGetResult</c> or <c>GetResult</c> method instead of casting
+    /// <see cref="FlowActivityWorkResult.Result"/>. The property is null on initial and external-event execution.
+    /// </remarks>
+    public FlowActivityWorkResult? ActivityResult { get; init; }
+}
