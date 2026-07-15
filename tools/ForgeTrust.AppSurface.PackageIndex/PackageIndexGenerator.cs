@@ -626,9 +626,16 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine(webEntry.Manifest.UseWhen!);
         builder.AppendLine();
-        builder.AppendLine("```bash");
-        builder.AppendLine(webEntry.Metadata.InstallCommand);
-        builder.AppendLine("```");
+        if (IsPublicationBlocked(webEntry.Manifest))
+        {
+            builder.AppendLine(FormatPublicationBlockedMessage(webEntry));
+        }
+        else
+        {
+            builder.AppendLine("```bash");
+            builder.AppendLine(webEntry.Metadata.InstallCommand);
+            builder.AppendLine("```");
+        }
         builder.AppendLine();
         builder.AppendLine($"What you get: {webEntry.Manifest.Includes}");
         builder.AppendLine();
@@ -682,7 +689,9 @@ internal sealed class PackageIndexGenerator
         foreach (var recipeEntry in publicEntries.Where(entry => !string.IsNullOrWhiteSpace(entry.Manifest.RecipeSummary)
                                                                  && !string.Equals(entry.Metadata.PackageId, WebPackageId, StringComparison.OrdinalIgnoreCase)))
         {
-            builder.AppendLine($"- {recipeEntry.Manifest.RecipeSummary}");
+            builder.AppendLine(IsPublicationBlocked(recipeEntry.Manifest)
+                ? $"- {FormatPublicationBlockedMessage(recipeEntry)}"
+                : $"- {recipeEntry.Manifest.RecipeSummary}");
         }
 
         builder.AppendLine();
@@ -699,7 +708,9 @@ internal sealed class PackageIndexGenerator
             builder.Append(" | ");
             builder.Append(EscapeTableCell(entry.Manifest.UseWhen!));
             builder.Append(" | ");
-            builder.Append(EscapeTableCell($"`{entry.Metadata.InstallCommand}`"));
+            builder.Append(EscapeTableCell(IsPublicationBlocked(entry.Manifest)
+                ? $"Publication blocked by {entry.Manifest.ReadinessBlocker}; not currently installable."
+                : $"`{entry.Metadata.InstallCommand}`"));
             builder.Append(" | ");
             builder.Append(EscapeTableCell(entry.Manifest.Includes!));
             builder.Append(" | ");
@@ -1217,6 +1228,11 @@ internal sealed class PackageIndexGenerator
     private static string FormatReleaseCell(PackageIndexRequest request, PackageManifestEntry entry)
     {
         var parts = new List<string>();
+        if (IsPublicationBlocked(entry))
+        {
+            parts.Add($"publication blocked by {entry.ReadinessBlocker}");
+        }
+
         if (entry.ReleaseStatus != PackageReleaseStatus.Unknown)
         {
             parts.Add(FormatEnumLabel(entry.ReleaseStatus));
@@ -1233,6 +1249,17 @@ internal sealed class PackageIndexGenerator
         }
 
         return parts.Count == 0 ? "Not declared" : string.Join("<br />", parts);
+    }
+
+    private static bool IsPublicationBlocked(PackageManifestEntry entry) =>
+        !string.IsNullOrWhiteSpace(entry.ReadinessBlocker);
+
+    private static string FormatPublicationBlockedMessage(ResolvedPackageEntry entry)
+    {
+        var message = $"Publication of `{entry.Metadata.PackageId}` is blocked by {entry.Manifest.ReadinessBlocker}; it is not currently installable.";
+        return string.IsNullOrWhiteSpace(entry.Manifest.ReadinessNote)
+            ? message
+            : $"{message} {entry.Manifest.ReadinessNote}";
     }
 
     private static void AppendReleaseSummary(

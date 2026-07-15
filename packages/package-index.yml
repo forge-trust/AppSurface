@@ -353,6 +353,25 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Console
       - ForgeTrust.AppSurface.Deployment
+  - project: Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    readiness_blocker: "#642"
+    readiness_note: Aspire 13.4.4 leaks its partial host service provider when host construction fails after provider creation; publication remains blocked until the pinned dependency disposes or exposes that state.
+    order: 61
+    use_when: Add this to tests for an AppSurface profile-based AppHost when the resource graph must be created deterministically without invoking the asynchronous AppHost entry point.
+    includes: Typed AppHost, module, and profile selection; shared runtime graph composition; an Aspire-compatible configurable builder; one-build enforcement; and deterministic activation-host cleanup.
+    does_not_include: Native AppHost replacement, CliFx option or positional-parameter binding, cross-assembly profiles, readiness policy, higher-level fixtures, or stable diagnostic codes.
+    start_here_path: Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Aspire.Testing` to tests for profile-based AppHosts; native AppHosts should continue using Aspire's native testing API.
+    depends_on:
+      - ForgeTrust.AppSurface.Aspire
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Aspire
   - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
     classification: public
     publish_decision: publish

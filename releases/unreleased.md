@@ -6,6 +6,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 - `ForgeTrust.RazorWire` Behavior Kit now exposes root-scoped registrations for DOM enhancement and page-lifecycle registrations for logical browser visits, including Skoolit-style PWA display-mode telemetry without fake body selectors or app-owned Turbo listeners.
 - [`ForgeTrust.AppSurface.Deployment`](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) and [`ForgeTrust.AppSurface.Deployment.GcpCloudRun`](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) add a provider-neutral deployment-intent boundary and a first Cloud Run migration-job compiler. The existing Aspire package annotates one resource graph and participates in Aspire's native publish pipeline; publishing remains tool-free and non-mutating, while verification is read-only and migration execution, state, apply, promotion, and rollback stay application-owned.
+- [`ForgeTrust.AppSurface.Aspire.Testing`](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) adds deterministic typed construction of AppSurface profile graphs without invoking the asynchronous AppHost entry point. It preserves Aspire's configurable build, start, readiness, HTTP, and disposal workflow while rejecting unsupported CliFx-bound profile members and keeping test-only Aspire dependencies out of the runtime package. Publication remains blocked because pinned Aspire 13.4.4 leaks partial host state when host construction fails after creating its service provider.
 
 ## Included in the next coordinated version
 

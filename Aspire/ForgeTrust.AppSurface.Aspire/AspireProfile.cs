@@ -47,30 +47,42 @@ public abstract class AspireProfile : ICommand
     /// <returns>An enumerable of Aspire components.</returns>
     public abstract IEnumerable<IAspireComponent> GetComponents();
 
-    /// <inheritdoc />
-    public async ValueTask ExecuteAsync(IConsole console)
+    /// <summary>
+    /// Composes this profile into an Aspire distributed application builder.
+    /// </summary>
+    /// <param name="appBuilder">The builder that receives the profile graph.</param>
+    /// <param name="cancellationToken">A token checked between synchronous composition steps.</param>
+    internal void Compose(IDistributedApplicationBuilder appBuilder, CancellationToken cancellationToken)
     {
-        var appBuilder = DistributedApplication.CreateBuilder(PassThroughArgs);
+        ArgumentNullException.ThrowIfNull(appBuilder);
+
         var context = new AspireStartupContext(appBuilder);
 
         foreach (var profile in GetDependencies())
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             foreach (var component in profile.GetComponents())
             {
-                if (component is IAspireComponent<IResource> typedComponent)
-                {
-                    context.Resolve(typedComponent);
-                }
+                cancellationToken.ThrowIfCancellationRequested();
+                ResolveComponent(context, component);
             }
         }
 
         foreach (var component in GetComponents())
         {
-            if (component is IAspireComponent<IResource> typedComponent)
-            {
-                context.Resolve(typedComponent);
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            ResolveComponent(context, component);
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask ExecuteAsync(IConsole console)
+    {
+        var appBuilder = DistributedApplication.CreateBuilder(PassThroughArgs);
+        Compose(appBuilder, CancellationToken.None);
 
         try
         {
@@ -81,6 +93,14 @@ public abstract class AspireProfile : ICommand
         {
             _logger.LogCritical(ex, "Error initializing Aspire application");
             Environment.ExitCode = -150;
+        }
+    }
+
+    private static void ResolveComponent(AspireStartupContext context, IAspireComponent component)
+    {
+        if (component is IAspireComponent<IResource> typedComponent)
+        {
+            context.Resolve(typedComponent);
         }
     }
 }

@@ -106,6 +106,21 @@ public partial class AspireProfileTests
         A.CallTo(() => dependencyComponent.Generate(A<AspireStartupContext>._, A<IDistributedApplicationBuilder>._)).MustHaveHappenedOnceExactly();
     }
 
+    [Fact]
+    public void Compose_HonorsCancellationBeforeGeneratingComponents()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var component = A.Fake<IAspireComponent<IResource>>();
+        var profile = new TestProfile(A.Fake<ILogger<TestProfile>>(), [], [component]);
+
+        Assert.Throws<OperationCanceledException>(() =>
+            profile.Compose(A.Fake<IDistributedApplicationBuilder>(), cancellation.Token));
+
+        A.CallTo(() => component.Generate(A<AspireStartupContext>._, A<IDistributedApplicationBuilder>._))
+            .MustNotHaveHappened();
+    }
+
     [Command("test-profile")]
     public sealed partial class TestProfile : AspireProfile
     {
