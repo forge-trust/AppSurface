@@ -8,6 +8,14 @@ namespace ForgeTrust.AppSurface.Web.Push.Tests;
 public sealed class GuardedWebPushAdapterTests
 {
     [Fact]
+    public void SharedTransport_ExposesAndDisposesOwnedHandler()
+    {
+        using var transport = new GuardedWebPushTransport();
+
+        Assert.NotNull(transport.Handler);
+    }
+
+    [Fact]
     public async Task SendAsync_UsesAes128GcmVapidAndOneAttempt()
     {
         var handler = new CapturingHandler(HttpStatusCode.TooManyRequests);

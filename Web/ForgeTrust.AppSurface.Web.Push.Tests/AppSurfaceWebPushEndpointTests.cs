@@ -283,6 +283,76 @@ public sealed class AppSurfaceWebPushEndpointTests
         Assert.Equal(0, host.Custody.RegisterCalls);
     }
 
+    [Fact]
+    public async Task BearerWrites_RejectUnauthenticatedRequestsBeforeCustody()
+    {
+        await using var host = await CreateHostAsync(map: true, ambientAdmin: false, bearer: true);
+        using var putContent = new StringContent(CreateSubscriptionWire().Json, Encoding.UTF8, "application/json");
+        using var put = await host.Client.PutAsync("/account/push", putContent);
+        using var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, "/account/push")
+        {
+            Content = new StringContent(
+                JsonSerializer.Serialize(new { schemaVersion = 1, endpoint = "https://push.example.test/send" }),
+                Encoding.UTF8,
+                "application/json"),
+        };
+        using var delete = await host.Client.SendAsync(deleteRequest);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, put.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, delete.StatusCode);
+        Assert.Equal(0, host.Custody.RegisterCalls);
+        Assert.Equal(0, host.Custody.UnregisterCalls);
+    }
+
+    [Fact]
+    public async Task BearerWrites_RejectUnsupportedMediaTypeAndInvalidSchemaTypes()
+    {
+        await using var host = await CreateHostAsync(map: true, ambientAdmin: false, bearer: true);
+        using var unsupportedRequest = new HttpRequestMessage(HttpMethod.Put, "/account/push")
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "text/plain"),
+        };
+        unsupportedRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "admin");
+        using var unsupported = await host.Client.SendAsync(unsupportedRequest);
+        var invalidSchemaJson = JsonSerializer.Serialize(new
+        {
+            schemaVersion = "one",
+            endpoint = "https://push.example.test/send",
+        });
+        using var invalidPut = await SendBearerJsonAsync(
+            host.Client,
+            HttpMethod.Put,
+            "/account/push",
+            invalidSchemaJson);
+        using var invalidDelete = await SendBearerJsonAsync(
+            host.Client,
+            HttpMethod.Delete,
+            "/account/push",
+            invalidSchemaJson);
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, unsupported.StatusCode);
+        Assert.Equal("ASPUSH102", await ReadCodeAsync(unsupported));
+        Assert.Equal(HttpStatusCode.BadRequest, invalidPut.StatusCode);
+        Assert.Equal("ASPUSH100", await ReadCodeAsync(invalidPut));
+        Assert.Equal(HttpStatusCode.BadRequest, invalidDelete.StatusCode);
+        Assert.Equal("ASPUSH100", await ReadCodeAsync(invalidDelete));
+        Assert.Equal(0, host.Custody.RegisterCalls);
+        Assert.Equal(0, host.Custody.UnregisterCalls);
+    }
+
+    [Fact]
+    public async Task BearerDelete_RejectsDisallowedOriginWithoutCustody()
+    {
+        await using var host = await CreateHostAsync(map: true, ambientAdmin: false, bearer: true);
+        var json = JsonSerializer.Serialize(new { schemaVersion = 1, endpoint = "http://push.example.test/send" });
+
+        using var response = await SendBearerJsonAsync(host.Client, HttpMethod.Delete, "/account/push", json);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("ASPUSH101", await ReadCodeAsync(response));
+        Assert.Equal(0, host.Custody.UnregisterCalls);
+    }
+
     [Theory]
     [InlineData(AppSurfaceWebPushRegistrationDisposition.Conflict, HttpStatusCode.Conflict, "ASPUSH106")]
     [InlineData(AppSurfaceWebPushRegistrationDisposition.Rejected, HttpStatusCode.Forbidden, "ASPUSH105")]
@@ -379,6 +449,12 @@ public sealed class AppSurfaceWebPushEndpointTests
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal("ASPUSH107", await ReadCodeAsync(response));
+
+        var deleteJson = JsonSerializer.Serialize(new { schemaVersion = 1, endpoint = "https://push.example.test/send" });
+        using var delete = await SendBearerJsonAsync(host.Client, HttpMethod.Delete, "/account/push", deleteJson);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, delete.StatusCode);
+        Assert.Equal("ASPUSH107", await ReadCodeAsync(delete));
     }
 
     [Fact]

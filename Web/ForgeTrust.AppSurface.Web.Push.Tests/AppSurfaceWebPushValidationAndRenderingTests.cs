@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Rendering;
@@ -163,8 +164,11 @@ public sealed class AppSurfaceWebPushValidationAndRenderingTests
         Assert.Throws<ArgumentNullException>(() => new AppSurfaceWebPushSubscription("endpoint", "p256dh", null!, "primary"));
         Assert.Throws<ArgumentNullException>(() => new AppSurfaceWebPushSubscription("endpoint", "p256dh", "auth", null!));
         Assert.Throws<ArgumentNullException>(() => new AppSurfaceWebPushSubscriptionReference(null!));
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceWebPushSubscriptionWriteContext(null!));
         Assert.Throws<ArgumentNullException>(() => new AppSurfaceWebPushNotification(null!));
 
+        var principal = new ClaimsPrincipal(new ClaimsIdentity());
+        var context = new AppSurfaceWebPushSubscriptionWriteContext(principal);
         var subscription = new AppSurfaceWebPushSubscription("private-endpoint", "private-p256dh", "private-auth", "primary");
         var reference = new AppSurfaceWebPushSubscriptionReference("private-endpoint");
         var key = new AppSurfaceWebPushVapidKeyOptions
@@ -174,6 +178,7 @@ public sealed class AppSurfaceWebPushValidationAndRenderingTests
         };
 
         Assert.Equal("AppSurfaceWebPushSubscription { Redacted = true }", subscription.ToString());
+        Assert.Same(principal, context.Principal);
         Assert.Equal("AppSurfaceWebPushSubscriptionReference { Redacted = true }", reference.ToString());
         Assert.Equal("AppSurfaceWebPushVapidKeyOptions { Redacted = true }", key.ToString());
     }

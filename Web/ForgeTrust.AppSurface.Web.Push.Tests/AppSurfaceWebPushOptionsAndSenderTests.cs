@@ -151,6 +151,8 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
 
         Assert.Equal(expected, result.Outcome);
         Assert.Equal((int)status, result.StatusCode);
+        Assert.Null(result.RetryAfter);
+        Assert.Equal("primary", result.VapidKeyId);
         Assert.Equal(1, handler.Attempts);
         Assert.Equal(AppSurfaceWebPushCleanupState.NotRequired, result.CleanupState);
     }
