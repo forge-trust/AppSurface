@@ -197,6 +197,38 @@ test("a malformed live application key returns a stable stale-key result", async
   assert.equal((await harness.api.subscribe({ prepared: prepared.handle })).status, "vapid-key-stale");
 });
 
+test("hostile endpoint projections return a stable stale-key result", async () => {
+  const returned = {
+    endpoint: "https://push.example.test/send",
+    options: { applicationServerKey: applicationKey },
+    toJSON: () => ({ endpoint: "https://push.example.test/send", keys: {} })
+  };
+  const hostileReturned = {
+    ...returned,
+    get endpoint() { throw new Error("secret returned endpoint getter failure"); }
+  };
+  const hostileLive = {
+    ...returned,
+    get endpoint() { throw new Error("secret live endpoint getter failure"); }
+  };
+  let reads = 0;
+  for (const options of [
+    { subscribePromise: Promise.resolve(hostileReturned) },
+    {
+      subscribePromise: Promise.resolve(returned),
+      getSubscription: async () => ++reads === 1 ? null : hostileLive
+    }
+  ]) {
+    const harness = createHarness(options);
+    const prepared = await harness.api.prepare({ endpoint: "/account/push" });
+
+    const outcome = await harness.api.subscribe({ prepared: prepared.handle });
+
+    assert.equal(outcome.status, "vapid-key-stale");
+    assert.equal(outcome.retryable, true);
+  }
+});
+
 test("a rejected post-subscribe inspection returns a stable browser failure", async () => {
   let reads = 0;
   const harness = createHarness({
@@ -294,6 +326,21 @@ test("408, 429, and 5xx responses are retryable across configuration and custody
     const deleteResult = await failedDelete.api.unsubscribe({ endpoint: "/account/push" });
     assert.equal(deleteResult.status, "custody-failed");
     assert.equal(deleteResult.retryable, true);
+  }
+});
+
+test("mutation-specific HTTP failures do not leak into configuration results", async () => {
+  for (const status of [400, 409, 413, 415]) {
+    const harness = createHarness({
+      responseFor: url => url.endsWith("/configuration")
+        ? { ok: false, status }
+        : null
+    });
+
+    const outcome = await harness.api.prepare({ endpoint: "/account/push" });
+
+    assert.equal(outcome.status, "configuration-failed");
+    assert.equal(outcome.retryable, false);
   }
 });
 

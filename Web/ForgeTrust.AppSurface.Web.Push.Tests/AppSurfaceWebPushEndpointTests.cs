@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Claims;
@@ -7,6 +8,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 using ForgeTrust.AppSurface.Web.Push;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -73,6 +75,56 @@ public sealed class AppSurfaceWebPushEndpointTests
     }
 
     [Fact]
+    public async Task CookieAntiforgeryProviderFailures_ReturnSafeProblems()
+    {
+        await using var host = await CreateHostAsync(
+            map: true,
+            ambientAdmin: true,
+            bearer: false,
+            throwingAntiforgery: true);
+
+        var configuration = await host.Client.GetAsync("/account/push/configuration");
+        var put = await host.Client.PutAsync(
+            "/account/push",
+            new StringContent(CreateSubscriptionWire().Json, Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, configuration.StatusCode);
+        Assert.Equal("ASPUSH104", await ReadCodeAsync(configuration));
+        Assert.DoesNotContain("secret antiforgery detail", await configuration.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, put.StatusCode);
+        Assert.Equal("ASPUSH104", await ReadCodeAsync(put));
+        Assert.DoesNotContain("secret antiforgery detail", await put.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0, host.Custody.RegisterCalls);
+    }
+
+    [Fact]
+    public async Task CookieAntiforgeryCancellation_RemainsCancellation()
+    {
+        await using var host = await CreateHostAsync(
+            map: true,
+            ambientAdmin: true,
+            bearer: false,
+            throwingAntiforgery: true);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => host.Server.SendAsync(context =>
+        {
+            context.Request.Method = HttpMethods.Get;
+            context.Request.Path = "/account/push/configuration";
+            context.Request.Headers["X-Ambient-Admin"] = "true";
+            context.Request.Headers["X-Cancel-Antiforgery"] = "true";
+            context.RequestAborted = new CancellationToken(canceled: true);
+        }));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => host.Server.SendAsync(context =>
+        {
+            context.Request.Method = HttpMethods.Put;
+            context.Request.Path = "/account/push";
+            context.Request.Headers["X-Ambient-Admin"] = "true";
+            context.Request.Headers["X-Cancel-Antiforgery"] = "true";
+            context.RequestAborted = new CancellationToken(canceled: true);
+        }));
+    }
+
+    [Fact]
     public async Task CookiePut_RequiresAntiforgeryThenRegistersValidatedSnapshot()
     {
         await using var host = await CreateHostAsync(map: true, ambientAdmin: true, bearer: false);
@@ -120,6 +172,28 @@ public sealed class AppSurfaceWebPushEndpointTests
         Assert.Equal(HttpStatusCode.OK, explicitBearer.StatusCode);
         Assert.Equal("bearer", json.RootElement.GetProperty("requestProtection").GetString());
         Assert.False(json.RootElement.TryGetProperty("antiforgery", out _));
+    }
+
+    [Fact]
+    public async Task BearerMapping_ReplacesAmbientIdentityForResourceAwareAuthorization()
+    {
+        await using var host = await CreateHostAsync(
+            map: true,
+            ambientAdmin: true,
+            bearer: true,
+            resourceAwarePolicy: true);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/account/push/configuration");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "viewer");
+
+        var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+        using var adminRequest = new HttpRequestMessage(HttpMethod.Get, "/account/push/configuration");
+        adminRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "admin");
+        var adminResponse = await host.Client.SendAsync(adminRequest);
+
+        Assert.Equal(HttpStatusCode.OK, adminResponse.StatusCode);
     }
 
     [Fact]
@@ -210,7 +284,10 @@ public sealed class AppSurfaceWebPushEndpointTests
     [Theory]
     [InlineData(AppSurfaceWebPushRegistrationDisposition.Conflict, HttpStatusCode.Conflict, "ASPUSH106")]
     [InlineData(AppSurfaceWebPushRegistrationDisposition.Rejected, HttpStatusCode.Forbidden, "ASPUSH105")]
+    [InlineData(AppSurfaceWebPushRegistrationDisposition.Created, HttpStatusCode.NoContent, null)]
+    [InlineData(AppSurfaceWebPushRegistrationDisposition.Updated, HttpStatusCode.NoContent, null)]
     [InlineData(AppSurfaceWebPushRegistrationDisposition.Unchanged, HttpStatusCode.NoContent, null)]
+    [InlineData((AppSurfaceWebPushRegistrationDisposition)999, HttpStatusCode.ServiceUnavailable, "ASPUSH107")]
     public async Task BearerPut_MapsCustodyDisposition(
         AppSurfaceWebPushRegistrationDisposition disposition,
         HttpStatusCode expectedStatus,
@@ -231,7 +308,9 @@ public sealed class AppSurfaceWebPushEndpointTests
     [Theory]
     [InlineData(AppSurfaceWebPushUnregistrationDisposition.Conflict, HttpStatusCode.Conflict, "ASPUSH106")]
     [InlineData(AppSurfaceWebPushUnregistrationDisposition.Rejected, HttpStatusCode.Forbidden, "ASPUSH105")]
+    [InlineData(AppSurfaceWebPushUnregistrationDisposition.Removed, HttpStatusCode.NoContent, null)]
     [InlineData(AppSurfaceWebPushUnregistrationDisposition.NotFound, HttpStatusCode.NoContent, null)]
+    [InlineData((AppSurfaceWebPushUnregistrationDisposition)999, HttpStatusCode.ServiceUnavailable, "ASPUSH107")]
     public async Task BearerDelete_MapsCustodyDisposition(
         AppSurfaceWebPushUnregistrationDisposition disposition,
         HttpStatusCode expectedStatus,
@@ -383,6 +462,30 @@ public sealed class AppSurfaceWebPushEndpointTests
             CreateHostAsync(map: true, ambientAdmin: false, bearer: false, basePath: "/_appsurface/push"));
     }
 
+    [Theory]
+    [InlineData("/_AppSurface/push")]
+    [InlineData("/account/{id}")]
+    [InlineData("/account/{**rest}")]
+    [InlineData("/account/*")]
+    [InlineData("/account/../push")]
+    [InlineData("/account/./push")]
+    public async Task Mapping_RejectsNonLiteralBasePaths(string basePath)
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            CreateHostAsync(map: true, ambientAdmin: false, bearer: false, basePath: basePath));
+    }
+
+    [Fact]
+    public async Task Mapping_RejectsCaseOnlyDuplicateBasePaths()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateHostAsync(
+                map: true,
+                ambientAdmin: false,
+                bearer: true,
+                secondaryBasePath: "/ACCOUNT/PUSH"));
+    }
+
     private static async Task<string?> ReadCodeAsync(HttpResponseMessage response)
     {
         var json = JsonDocument.Parse(await response.Content.ReadAsByteArrayAsync());
@@ -413,7 +516,10 @@ public sealed class AppSurfaceWebPushEndpointTests
         bool registerPolicy = true,
         string authenticationScheme = "BearerProof",
         bool registerCustody = true,
-        bool declareCookieScheme = true)
+        bool declareCookieScheme = true,
+        bool resourceAwarePolicy = false,
+        bool throwingAntiforgery = false,
+        string? secondaryBasePath = null)
     {
         var vapid = CreateKeyPair(ECDsa.Create);
         var custody = new RecordingCustody();
@@ -435,10 +541,18 @@ public sealed class AppSurfaceWebPushEndpointTests
                         policy.AddAuthenticationSchemes("AmbientProof");
                     }
 
-                    policy.RequireRole("Admin");
+                    if (resourceAwarePolicy)
+                    {
+                        policy.AddRequirements(new AmbientContextAdminRequirement());
+                    }
+                    else
+                    {
+                        policy.RequireRole("Admin");
+                    }
                 });
             }
         });
+        builder.Services.AddSingleton<IAuthorizationHandler, AmbientContextAdminHandler>();
         if (rateLimiterPolicy is not null)
         {
             builder.Services.AddRateLimiter(options =>
@@ -472,6 +586,10 @@ public sealed class AppSurfaceWebPushEndpointTests
             });
             options.AllowedPushServiceOrigins.Add("https://push.example.test");
         });
+        if (throwingAntiforgery)
+        {
+            builder.Services.AddSingleton<IAntiforgery, ThrowingAntiforgery>();
+        }
 
         var app = builder.Build();
         app.UseAuthentication();
@@ -505,6 +623,14 @@ public sealed class AppSurfaceWebPushEndpointTests
                     "push.manage",
                     authenticationScheme,
                     rateLimiterPolicy);
+                if (secondaryBasePath is not null)
+                {
+                    routes.MapAppSurfaceWebPushBearerSubscriptions(
+                        secondaryBasePath,
+                        "push.manage",
+                        authenticationScheme,
+                        rateLimiterPolicy);
+                }
             }
             else
             {
@@ -657,6 +783,12 @@ public sealed class AppSurfaceWebPushEndpointTests
                 return Task.FromResult(AuthenticateResult.Success(ticket));
             }
 
+            if (Request.Headers.Authorization == "Bearer viewer")
+            {
+                var ticket = new AuthenticationTicket(Principal("bearer-viewer", "Viewer"), Scheme.Name);
+                return Task.FromResult(AuthenticateResult.Success(ticket));
+            }
+
             return Task.FromResult(AuthenticateResult.NoResult());
         }
     }
@@ -693,5 +825,63 @@ public sealed class AppSurfaceWebPushEndpointTests
     {
         protected override Task<AuthenticateResult> HandleAuthenticateAsync() =>
             throw new InvalidOperationException("secret authentication detail");
+    }
+
+    private sealed class ThrowingAntiforgery : IAntiforgery
+    {
+        public AntiforgeryTokenSet GetAndStoreTokens(HttpContext httpContext)
+        {
+            Throw(httpContext);
+            throw new UnreachableException();
+        }
+
+        public AntiforgeryTokenSet GetTokens(HttpContext httpContext)
+        {
+            Throw(httpContext);
+            throw new UnreachableException();
+        }
+
+        public Task<bool> IsRequestValidAsync(HttpContext httpContext)
+        {
+            Throw(httpContext);
+            throw new UnreachableException();
+        }
+
+        public void SetCookieTokenAndHeader(HttpContext httpContext) => Throw(httpContext);
+
+        public Task ValidateRequestAsync(HttpContext httpContext)
+        {
+            Throw(httpContext);
+            throw new UnreachableException();
+        }
+
+        private static void Throw(HttpContext context)
+        {
+            if (context.Request.Headers["X-Cancel-Antiforgery"] == "true")
+            {
+                throw new OperationCanceledException(context.RequestAborted);
+            }
+
+            throw new InvalidOperationException("secret antiforgery detail");
+        }
+    }
+
+    private sealed class AmbientContextAdminRequirement : IAuthorizationRequirement
+    {
+    }
+
+    private sealed class AmbientContextAdminHandler : AuthorizationHandler<AmbientContextAdminRequirement>
+    {
+        protected override Task HandleRequirementAsync(
+            AuthorizationHandlerContext context,
+            AmbientContextAdminRequirement requirement)
+        {
+            if (context.Resource is HttpContext httpContext && httpContext.User.IsInRole("Admin"))
+            {
+                context.Succeed(requirement);
+            }
+
+            return Task.CompletedTask;
+        }
     }
 }

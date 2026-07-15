@@ -41,23 +41,24 @@
         permission.className = `pill ${value === "granted" ? "configured" : "unconfigured"}`;
     };
 
-    const prepare = async (preserveReadyMessage = false) => {
+    const prepare = async (preserveMessage = false) => {
         preparedHandle = null;
         setBusy(true);
+        const announcePreparation = (state, message) => {
+            if (!preserveMessage) announce(state, message);
+        };
         let result;
         try { result = await api().prepare({ endpoint }); }
-        catch { announce("failed", "The browser client rejected the proof configuration. Check the safe ASPUSHJS code."); setBusy(false); return; }
+        catch { announcePreparation("failed", "The browser client rejected the proof configuration. Check the safe ASPUSHJS code."); setBusy(false); return; }
         if (result.status === "prepared") {
             preparedHandle = result.handle;
-            if (!preserveReadyMessage) {
-                announce("ready", "Ready. Enable notifications must be clicked directly; no permission prompt has occurred yet.");
-            }
+            announcePreparation("ready", "Ready. Enable notifications must be clicked directly; no permission prompt has occurred yet.");
         } else if (result.status === "vapid-key-migration-required") {
-            announce("failed", "The active VAPID key changed. Disable the old subscription, prepare again, then use a second explicit enable action.");
+            announcePreparation("failed", "The active VAPID key changed. Disable the old subscription, prepare again, then use a second explicit enable action.");
         } else if (result.status === "unauthorized" || result.status === "forbidden") {
-            announce("failed", "Select the Push Admin DevAuth persona; Viewer is intentionally forbidden.");
+            announcePreparation("failed", "Select the Push Admin DevAuth persona; Viewer is intentionally forbidden.");
         } else {
-            announce("failed", `Preparation returned ${result.status}. Correct the environment and prepare again.`);
+            announcePreparation("failed", `Preparation returned ${result.status}. Correct the environment and prepare again.`);
         }
         setBusy(false);
     };
@@ -66,7 +67,15 @@
         if (!preparedHandle) return;
         setBusy(true);
         // Keep this invocation directly in the click handler; the package calls PushManager.subscribe before its first await.
-        const operation = api().subscribe({ prepared: preparedHandle });
+        let operation;
+        try { operation = api().subscribe({ prepared: preparedHandle }); }
+        catch {
+            preparedHandle = null;
+            announce("failed", "The subscribe action failed with a safe browser invariant code.");
+            setBusy(false);
+            void prepare(true);
+            return;
+        }
         preparedHandle = null;
         operation.then(result => {
             setPermission(result.status);
@@ -84,12 +93,17 @@
         setBusy(true);
         try {
             const result = await api().unsubscribe({ endpoint });
-            if (result.status === "unsubscribed" || result.status === "already-unsubscribed") {
+            if (result.status === "unsubscribed") {
                 setSubscription(false);
-                announce("ready", "Server custody and browser subscription are removed. Prepare again before enabling.");
+                announce("ready", "The server accepted the custody-removal request and the browser subscription was removed. Prepare again before enabling.");
+            } else if (result.status === "already-unsubscribed") {
+                setSubscription(false);
+                announce("ready", "No browser subscription was found. Server custody was not contacted and may still require host cleanup.");
             } else {
                 announce("failed", `Unsubscribe returned ${result.status}; follow the explicit recovery message.`);
             }
+        } catch {
+            announce("failed", "The unsubscribe action failed with a safe browser invariant code.");
         } finally { setBusy(false); await prepare(true); }
     });
 

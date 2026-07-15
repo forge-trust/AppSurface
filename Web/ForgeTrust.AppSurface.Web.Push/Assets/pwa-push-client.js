@@ -51,6 +51,7 @@
     [400, "antiforgery-failed"], [401, "unauthorized"], [403, "forbidden"],
     [409, "custody-conflict"], [413, "custody-failed"], [415, "custody-failed"]
   ]);
+  const configurationStatus = new Map([[401, "unauthorized"], [403, "forbidden"]]);
 
   const abort = signal => {
     if (signal?.aborted) throw new DOMException("ASPUSHJS003", "AbortError");
@@ -124,7 +125,7 @@
       if (error?.safeStatus) return { failure: result(error.safeStatus, true) };
       return { failure: result("network-failed", true) };
     }
-    if (!response.ok) return { failure: result(expectedStatus.get(response.status) || "configuration-failed", isTransientStatus(response.status)) };
+    if (!response.ok) return { failure: result(configurationStatus.get(response.status) || "configuration-failed", isTransientStatus(response.status)) };
     let configuration;
     try { configuration = await response.json(); } catch { return { failure: result("invalid-response") }; }
     if (configuration?.schemaVersion !== 1
@@ -211,9 +212,15 @@
         try { live = await state.registration.pushManager.getSubscription(); }
         catch { return result("browser-subscription-failed", true); }
         let liveApplicationKey;
-        try { liveApplicationKey = live?.options?.applicationServerKey; }
+        let liveEndpoint;
+        let subscriptionEndpoint;
+        try {
+          liveApplicationKey = live?.options?.applicationServerKey;
+          liveEndpoint = live?.endpoint;
+          subscriptionEndpoint = subscription.endpoint;
+        }
         catch { return result("vapid-key-stale", true); }
-        if (!live || live.endpoint !== subscription.endpoint || !liveApplicationKey) {
+        if (!live || liveEndpoint !== subscriptionEndpoint || !liveApplicationKey) {
           return result("vapid-key-stale", true);
         }
         let liveApplicationKeyText;

@@ -68,6 +68,8 @@ app.MapAppSurfaceWebPushBearerSubscriptions(
 
 Both methods return `void`. Every handler requires an authenticated principal and directly evaluates the named policy before configuration, antiforgery, parsing, or custody; inherited `AllowAnonymous` cannot bypass it. The cookie policy must declare exactly one authentication scheme, which the package evaluates before issuing antiforgery tokens or accepting writes. Bearer mapping authenticates only its explicit scheme. Missing or ambiguous policy schemes fail closed with `ASPUSH108`.
 
+The mapped base path must be a literal app-root-relative path. Route parameters, catch-alls, `.` or `..` traversal segments, encoded paths, query strings, and fragments are rejected. Reserved-space and duplicate checks are case-insensitive, matching ASP.NET Core routing; map separate literal rails when a host needs more than one custody boundary.
+
 The optional `rateLimiterPolicy` is a host-owned named ASP.NET Core rate-limiter policy and is applied internally to configuration, PUT, and DELETE. Register the policy with `AddRateLimiter` and enable `UseRateLimiter`; omit the argument when the host deliberately provides no endpoint limiter. Rate-limiter middleware runs before the package's direct handler authentication. Bearer policies must therefore use pre-authentication inputs such as remote address and route, unless the host has already established that exact bearer principal before `UseRateLimiter`. Never partition on subscription material, and do not treat rate limiting as a replacement for authorization or antiforgery.
 
 Render the external CSP-compatible client (`script-src 'self'`) and prepare without prompting:

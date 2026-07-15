@@ -20,7 +20,7 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
 
     /// <summary>Maps cookie-authenticated subscription endpoints with package-owned antiforgery validation.</summary>
     /// <param name="endpoints">The endpoint route builder.</param>
-    /// <param name="path">The app-root-relative base path for configuration, PUT, and DELETE.</param>
+    /// <param name="path">The literal app-root-relative base path for configuration, PUT, and DELETE. Route parameters, catch-alls, and traversal segments are not supported.</param>
     /// <param name="authorizationPolicy">The nonblank host-owned named policy, including exactly one cookie authentication scheme, evaluated directly inside every handler.</param>
     /// <param name="rateLimiterPolicy">An optional host-owned named rate-limiter policy applied to every protected endpoint.</param>
     /// <remarks>
@@ -38,7 +38,7 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
 
     /// <summary>Maps token-only subscription endpoints using one explicit bearer authentication scheme.</summary>
     /// <param name="endpoints">The endpoint route builder.</param>
-    /// <param name="path">The app-root-relative base path for configuration, PUT, and DELETE.</param>
+    /// <param name="path">The literal app-root-relative base path for configuration, PUT, and DELETE. Route parameters, catch-alls, and traversal segments are not supported.</param>
     /// <param name="authorizationPolicy">The nonblank host-owned named policy evaluated directly inside every handler.</param>
     /// <param name="authenticationScheme">The exact bearer authentication scheme; ambient cookies are ignored.</param>
     /// <param name="rateLimiterPolicy">An optional host-owned named rate-limiter policy applied to every protected endpoint.</param>
@@ -129,16 +129,27 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
         if (authenticationScheme is null)
         {
-            var antiforgery = context.RequestServices.GetRequiredService<IAntiforgery>();
-            var tokens = antiforgery.GetAndStoreTokens(context);
-            return Results.Json(new
+            try
             {
-                schemaVersion = 1,
-                vapidKeyId = options.ActiveVapidKeyId,
-                applicationServerKey = activeKey.PublicKey,
-                requestProtection = "antiforgery",
-                antiforgery = new { headerName = tokens.HeaderName, requestToken = tokens.RequestToken },
-            });
+                var antiforgery = context.RequestServices.GetRequiredService<IAntiforgery>();
+                var tokens = antiforgery.GetAndStoreTokens(context);
+                return Results.Json(new
+                {
+                    schemaVersion = 1,
+                    vapidKeyId = options.ActiveVapidKeyId,
+                    applicationServerKey = activeKey.PublicKey,
+                    requestProtection = "antiforgery",
+                    antiforgery = new { headerName = tokens.HeaderName, requestToken = tokens.RequestToken },
+                });
+            }
+            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return Problem(StatusCodes.Status503ServiceUnavailable, "ASPUSH104", "Antiforgery protection is unavailable.");
+            }
         }
 
         return Results.Json(new
@@ -226,11 +237,14 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
                 context.RequestAborted).ConfigureAwait(false);
             return disposition switch
             {
+                AppSurfaceWebPushRegistrationDisposition.Created => Results.NoContent(),
+                AppSurfaceWebPushRegistrationDisposition.Updated => Results.NoContent(),
+                AppSurfaceWebPushRegistrationDisposition.Unchanged => Results.NoContent(),
                 AppSurfaceWebPushRegistrationDisposition.Conflict =>
                     Problem(StatusCodes.Status409Conflict, "ASPUSH106", "The subscription is owned by another principal."),
                 AppSurfaceWebPushRegistrationDisposition.Rejected =>
                     Problem(StatusCodes.Status403Forbidden, "ASPUSH105", "Subscription custody rejected the request."),
-                _ => Results.NoContent(),
+                _ => Problem(StatusCodes.Status503ServiceUnavailable, "ASPUSH107", "Subscription custody returned an unsupported result."),
             };
         }
         catch (Exception) when (!context.RequestAborted.IsCancellationRequested)
@@ -303,11 +317,13 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
                 context.RequestAborted).ConfigureAwait(false);
             return disposition switch
             {
+                AppSurfaceWebPushUnregistrationDisposition.Removed => Results.NoContent(),
+                AppSurfaceWebPushUnregistrationDisposition.NotFound => Results.NoContent(),
                 AppSurfaceWebPushUnregistrationDisposition.Conflict =>
                     Problem(StatusCodes.Status409Conflict, "ASPUSH106", "The subscription is owned by another principal."),
                 AppSurfaceWebPushUnregistrationDisposition.Rejected =>
                     Problem(StatusCodes.Status403Forbidden, "ASPUSH105", "Subscription custody rejected the request."),
-                _ => Results.NoContent(),
+                _ => Problem(StatusCodes.Status503ServiceUnavailable, "ASPUSH107", "Subscription custody returned an unsupported result."),
             };
         }
         catch (Exception) when (!context.RequestAborted.IsCancellationRequested)
@@ -364,6 +380,13 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
                 return new(null, Results.Unauthorized());
             }
 
+            if (authenticationScheme is not null)
+            {
+                // Resource-aware handlers must observe the same explicit bearer principal
+                // that is evaluated below, never an ambient cookie identity.
+                context.User = principal;
+            }
+
             var result = await authorization.AuthorizeAsync(principal, context, policy).ConfigureAwait(false);
             return result.Succeeded
                 ? new(principal, null)
@@ -400,6 +423,14 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
         catch (AntiforgeryValidationException)
         {
             return Problem(StatusCodes.Status400BadRequest, "ASPUSH104", "Antiforgery validation failed.");
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Problem(StatusCodes.Status503ServiceUnavailable, "ASPUSH104", "Antiforgery protection is unavailable.");
         }
     }
 
@@ -468,8 +499,8 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
         if (path != path.Trim()
             || path.Length > 1024
             || path == "/"
-            || path.Equals("/_appsurface", StringComparison.Ordinal)
-            || path.StartsWith("/_appsurface/", StringComparison.Ordinal)
+            || path.Equals("/_appsurface", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/_appsurface/", StringComparison.OrdinalIgnoreCase)
             || !path.StartsWith('/')
             || path.StartsWith("//", StringComparison.Ordinal)
             || path.EndsWith('/')
@@ -477,9 +508,13 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
             || path.Contains('?')
             || path.Contains('#')
             || path.Contains('\\')
+            || path.Contains('{')
+            || path.Contains('}')
+            || path.Contains('*')
+            || path.Split('/').Any(segment => segment is "." or "..")
             || path.Any(character => char.IsControl(character) || char.IsWhiteSpace(character)))
         {
-            throw new ArgumentException("The Web Push base path must be an app-root-relative endpoint path outside AppSurface's reserved route space and without escapes, query, or fragment.", nameof(path));
+            throw new ArgumentException("The Web Push base path must be a literal app-root-relative endpoint path outside AppSurface's reserved route space and without route parameters, traversal segments, escapes, query, or fragment.", nameof(path));
         }
     }
 
@@ -490,7 +525,7 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
 internal sealed class AppSurfaceWebPushRouteRegistry
 {
     private readonly object gate = new();
-    private readonly HashSet<string> paths = new(StringComparer.Ordinal);
+    private readonly HashSet<string> paths = new(StringComparer.OrdinalIgnoreCase);
     private bool assetMapped;
 
     public bool Claim(string path)
