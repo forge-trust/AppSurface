@@ -179,34 +179,32 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
         }
 
         var body = await ReadJsonBodyAsync(context).ConfigureAwait(false);
-        if (body.Failure is not null)
+        if (body is JsonBodyFailure bodyFailure)
         {
-            return body.Failure;
+            return bodyFailure.Result;
         }
+
+        using var document = ((JsonBodySuccess)body).Document;
 
         AppSurfaceWebPushSubscription subscription;
         try
         {
-            if (!HasExactProperties(body.Document!.RootElement, "schemaVersion", "endpoint", "keys", "vapidKeyId")
-                || body.Document.RootElement.GetProperty("schemaVersion").GetInt32() != 1
-                || !HasExactProperties(body.Document.RootElement.GetProperty("keys"), "p256dh", "auth"))
+            if (!HasExactProperties(document.RootElement, "schemaVersion", "endpoint", "keys", "vapidKeyId")
+                || document.RootElement.GetProperty("schemaVersion").GetInt32() != 1
+                || !HasExactProperties(document.RootElement.GetProperty("keys"), "p256dh", "auth"))
             {
                 return Problem(StatusCodes.Status400BadRequest, "ASPUSH100", "The subscription schema is invalid.");
             }
 
             subscription = new AppSurfaceWebPushSubscription(
-                body.Document.RootElement.GetProperty("endpoint").GetString()!,
-                body.Document.RootElement.GetProperty("keys").GetProperty("p256dh").GetString()!,
-                body.Document.RootElement.GetProperty("keys").GetProperty("auth").GetString()!,
-                body.Document.RootElement.GetProperty("vapidKeyId").GetString()!);
+                document.RootElement.GetProperty("endpoint").GetString()!,
+                document.RootElement.GetProperty("keys").GetProperty("p256dh").GetString()!,
+                document.RootElement.GetProperty("keys").GetProperty("auth").GetString()!,
+                document.RootElement.GetProperty("vapidKeyId").GetString()!);
         }
         catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException or ArgumentNullException or FormatException)
         {
             return Problem(StatusCodes.Status400BadRequest, "ASPUSH100", "The subscription schema is invalid.");
-        }
-        finally
-        {
-            body.Document?.Dispose();
         }
 
         var options = context.RequestServices.GetRequiredService<IOptions<AppSurfaceWebPushOptions>>().Value;
@@ -271,30 +269,28 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
         }
 
         var body = await ReadJsonBodyAsync(context).ConfigureAwait(false);
-        if (body.Failure is not null)
+        if (body is JsonBodyFailure bodyFailure)
         {
-            return body.Failure;
+            return bodyFailure.Result;
         }
+
+        using var document = ((JsonBodySuccess)body).Document;
 
         AppSurfaceWebPushSubscriptionReference reference;
         try
         {
-            if (!HasExactProperties(body.Document!.RootElement, "schemaVersion", "endpoint")
-                || body.Document.RootElement.GetProperty("schemaVersion").GetInt32() != 1)
+            if (!HasExactProperties(document.RootElement, "schemaVersion", "endpoint")
+                || document.RootElement.GetProperty("schemaVersion").GetInt32() != 1)
             {
                 return Problem(StatusCodes.Status400BadRequest, "ASPUSH100", "The unregister schema is invalid.");
             }
 
             reference = new AppSurfaceWebPushSubscriptionReference(
-                body.Document.RootElement.GetProperty("endpoint").GetString()!);
+                document.RootElement.GetProperty("endpoint").GetString()!);
         }
         catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException or ArgumentNullException or FormatException)
         {
             return Problem(StatusCodes.Status400BadRequest, "ASPUSH100", "The unregister schema is invalid.");
-        }
-        finally
-        {
-            body.Document?.Dispose();
         }
 
         var options = context.RequestServices.GetRequiredService<IOptions<AppSurfaceWebPushOptions>>().Value;
@@ -439,12 +435,14 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
         if (!MediaTypeHeaderValue.TryParse(context.Request.ContentType, out var contentType)
             || !string.Equals(contentType.MediaType, "application/json", StringComparison.OrdinalIgnoreCase))
         {
-            return new(null, Problem(StatusCodes.Status415UnsupportedMediaType, "ASPUSH102", "Content-Type must be application/json."));
+            return new JsonBodyFailure(
+                Problem(StatusCodes.Status415UnsupportedMediaType, "ASPUSH102", "Content-Type must be application/json."));
         }
 
         if (context.Request.ContentLength > MaximumBodyBytes)
         {
-            return new(null, Problem(StatusCodes.Status413PayloadTooLarge, "ASPUSH103", "The request body exceeds 16 KiB."));
+            return new JsonBodyFailure(
+                Problem(StatusCodes.Status413PayloadTooLarge, "ASPUSH103", "The request body exceeds 16 KiB."));
         }
 
         using var buffer = new MemoryStream();
@@ -459,7 +457,8 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
 
             if (buffer.Length + count > MaximumBodyBytes)
             {
-                return new(null, Problem(StatusCodes.Status413PayloadTooLarge, "ASPUSH103", "The request body exceeds 16 KiB."));
+                return new JsonBodyFailure(
+                    Problem(StatusCodes.Status413PayloadTooLarge, "ASPUSH103", "The request body exceeds 16 KiB."));
             }
 
             buffer.Write(chunk, 0, count);
@@ -467,11 +466,12 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
 
         try
         {
-            return new(JsonDocument.Parse(buffer.ToArray()), null);
+            return new JsonBodySuccess(JsonDocument.Parse(buffer.ToArray()));
         }
         catch (JsonException)
         {
-            return new(null, Problem(StatusCodes.Status400BadRequest, "ASPUSH100", "The JSON body is invalid."));
+            return new JsonBodyFailure(
+                Problem(StatusCodes.Status400BadRequest, "ASPUSH100", "The JSON body is invalid."));
         }
     }
 
@@ -519,7 +519,9 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
     }
 
     private sealed record AuthorizationResult(ClaimsPrincipal? Principal, IResult? Failure);
-    private sealed record JsonBodyResult(JsonDocument? Document, IResult? Failure);
+    private abstract record JsonBodyResult;
+    private sealed record JsonBodySuccess(JsonDocument Document) : JsonBodyResult;
+    private sealed record JsonBodyFailure(IResult Result) : JsonBodyResult;
 }
 
 internal sealed class AppSurfaceWebPushRouteRegistry

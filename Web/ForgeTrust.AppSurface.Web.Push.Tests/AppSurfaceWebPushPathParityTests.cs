@@ -9,7 +9,7 @@ public sealed class AppSurfaceWebPushPathParityTests
     public void SenderValidation_FollowsSharedWorkerPathVectors()
     {
         using var document = JsonDocument.Parse(
-            File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "pwa-path-vectors.json")));
+            File.ReadAllBytes(Path.Join(AppContext.BaseDirectory, "pwa-path-vectors.json")));
 
         AssertVectors(
             document.RootElement.GetProperty("assetPaths"),

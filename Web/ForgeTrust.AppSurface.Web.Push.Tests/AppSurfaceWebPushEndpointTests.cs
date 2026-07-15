@@ -83,10 +83,11 @@ public sealed class AppSurfaceWebPushEndpointTests
             bearer: false,
             throwingAntiforgery: true);
 
-        var configuration = await host.Client.GetAsync("/account/push/configuration");
-        var put = await host.Client.PutAsync(
+        using var configuration = await host.Client.GetAsync("/account/push/configuration");
+        using var content = new StringContent(CreateSubscriptionWire().Json, Encoding.UTF8, "application/json");
+        using var put = await host.Client.PutAsync(
             "/account/push",
-            new StringContent(CreateSubscriptionWire().Json, Encoding.UTF8, "application/json"));
+            content);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, configuration.StatusCode);
         Assert.Equal("ASPUSH104", await ReadCodeAsync(configuration));
@@ -253,10 +254,11 @@ public sealed class AppSurfaceWebPushEndpointTests
             Encoding.UTF8,
             "application/json");
 
-        var response = await host.Client.SendAsync(new HttpRequestMessage(HttpMethod.Delete, "/account/push")
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/account/push")
         {
             Content = missingToken,
-        });
+        };
+        using var response = await host.Client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("ASPUSH104", await ReadCodeAsync(response));

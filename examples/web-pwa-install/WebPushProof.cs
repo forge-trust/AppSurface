@@ -188,9 +188,9 @@ internal sealed class InMemoryPushCustody : IAppSurfaceWebPushSubscriptionCustod
         cancellationToken.ThrowIfCancellationRequested();
         lock (gate)
         {
-            foreach (var pair in subscriptions)
+            foreach (var pair in subscriptions.Where(pair => Same(pair.Value, subscription)).ToList())
             {
-                if (Same(pair.Value, subscription) && subscriptions.Remove(pair.Key))
+                if (subscriptions.Remove(pair.Key))
                 {
                     return ValueTask.FromResult(AppSurfaceWebPushTerminalDisposition.Completed);
                 }
