@@ -48,6 +48,16 @@ public sealed class CoverageProjectExclusionMatcherTests
         Assert.Contains("duplicates an earlier", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void NormalizePatterns_ShouldRejectNullValuesAsEmptyPatterns()
+    {
+        var exception = Assert.Throws<CommandException>(
+            () => CoverageProjectExclusionMatcher.NormalizePatterns([null!]));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("empty or whitespace", exception.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("Browser.Tests.csproj", "tests/e2e/Browser.Tests.csproj")]
     [InlineData("tests/*/Browser.Tests.csproj", "tests/e2e/Browser.Tests.csproj")]
@@ -63,6 +73,7 @@ public sealed class CoverageProjectExclusionMatcherTests
     [InlineData("Browser?.Tests.csproj", "tests/Browser?.Tests.csproj")]
     [InlineData("Browser[1].Tests.csproj", "tests/Browser[1].Tests.csproj")]
     [InlineData("Browser{One}.Tests.csproj", "tests/Browser{One}.Tests.csproj")]
+    [InlineData("tests/**/Browser.Tests.csproj", "././tests/e2e/Browser.Tests.csproj")]
     public void IsMatch_ShouldMatchDocumentedSegmentGrammar(string pattern, string projectPath)
     {
         Assert.True(CoverageProjectExclusionMatcher.IsMatch(pattern, projectPath));
@@ -74,6 +85,7 @@ public sealed class CoverageProjectExclusionMatcherTests
     [InlineData("tests/**/Browser*.Tests.csproj", "src/Browser.csproj")]
     [InlineData("../Shared/*.Tests.csproj", "Shared/Shared.Tests.csproj")]
     [InlineData("tests/**/*Browser*Tests.csproj", "tests/e2e/Browser.csproj")]
+    [InlineData("**/**/Browser.Tests.csproj", "tests/e2e/Worker.Tests.csproj")]
     public void IsMatch_ShouldRejectNonMatches(string pattern, string projectPath)
     {
         Assert.False(CoverageProjectExclusionMatcher.IsMatch(pattern, projectPath));

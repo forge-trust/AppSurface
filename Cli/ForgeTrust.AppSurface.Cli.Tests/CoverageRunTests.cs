@@ -197,6 +197,7 @@ public sealed class CoverageRunTests
         var request = CreateRequest(
             SolutionPath: solution,
             ExcludeTestProjects: ["tests/**/Browser*.Tests.csproj"],
+            PriorityTestProjects: ["   "],
             DryRun: true);
 
         var exception = await Assert.ThrowsAsync<CommandException>(
@@ -312,6 +313,66 @@ public sealed class CoverageRunTests
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
         Assert.Contains("did not match any selected", exception.Message, StringComparison.Ordinal);
         Assert.Single(runner.Commands);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldRejectPrioritySelectorForExcludedProjectWhenAnotherProjectRemains()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var solution = repo.WriteFile("Sample.slnx", "<Solution />");
+        repo.WriteFile("tests/Unit.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            SlnListOutput = """
+                src/App.csproj
+                tests/Unit.Tests.csproj
+                tests/Browser.Tests.csproj
+                """,
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            SolutionPath: solution,
+            ExcludeTestProjects: ["Browser.Tests.csproj"],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            PriorityTestProjects: ["Browser.Tests.csproj"],
+            DryRun: true);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("did not match any selected", exception.Message, StringComparison.Ordinal);
+        Assert.Single(runner.Commands);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldIgnoreBlankExclusiveSelectorWhenCheckingExcludedProjects()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var solution = repo.WriteFile("Sample.slnx", "<Solution />");
+        repo.WriteFile("tests/Unit.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            SlnListOutput = """
+                tests/Unit.Tests.csproj
+                tests/Browser.Tests.csproj
+                """,
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            SolutionPath: solution,
+            ExcludeTestProjects: ["Browser.Tests.csproj"],
+            ExclusiveTestProjects: ["   "],
+            DryRun: true);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("include parallel  tests/Unit.Tests.csproj", console.ReadOutputString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -788,6 +849,27 @@ public sealed class CoverageRunTests
 
         Assert.Contains("ASCOV105", exception.Message, StringComparison.Ordinal);
         Assert.Contains("Skipped 1 non-test project", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldExplainWhenDiscoveryReturnsNoProjectEntries()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var solution = repo.WriteFile("Sample.slnx", "<Solution />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            SlnListOutput = "Project(s)\n----------",
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(SolutionPath: solution);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV105", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("No .csproj entries were returned by discovery", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

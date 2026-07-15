@@ -708,7 +708,7 @@ internal sealed class CoverageRunWorkflow
             }
         }
 
-        if (included.Count == 0 && exclusionPatterns.Count > 0)
+        if (exclusionPatterns.Count > 0)
         {
             var excludedPriority = request.PriorityTestProjects.FirstOrDefault(priority =>
                 !string.IsNullOrWhiteSpace(priority)
@@ -841,7 +841,7 @@ internal sealed class CoverageRunWorkflow
         foreach (var pattern in patterns)
         {
             var matchedProjects = excludedProjects
-                .Where(project => project.ExclusionPatterns?.Contains(pattern, StringComparer.OrdinalIgnoreCase) == true)
+                .Where(project => project.ExclusionPatterns!.Contains(pattern, StringComparer.OrdinalIgnoreCase))
                 .Select(project => project.ProjectPath)
                 .ToArray();
             lines.Add($"  - {pattern}: {matchedProjects.Length.ToString(CultureInfo.InvariantCulture)} match(es): {string.Join(", ", matchedProjects)}");
