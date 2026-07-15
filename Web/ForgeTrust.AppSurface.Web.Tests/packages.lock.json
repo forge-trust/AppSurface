@@ -114,8 +114,7 @@
       "forgetrust.appsurface.config": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
-          "Microsoft.Extensions.Options": "[10.0.8, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.core": {
@@ -131,7 +130,7 @@
           "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
-      "forgetrust.appsurface.web.tests.sharederrorpagesfixture": {
+      "ForgeTrust.AppSurface.Web.SharedErrorPagesFixture.Tests": {
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Core": "[0.1.0, )",
