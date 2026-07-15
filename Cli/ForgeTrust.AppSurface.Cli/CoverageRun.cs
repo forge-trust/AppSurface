@@ -57,7 +57,7 @@ internal sealed partial class CoverageRunCommand : ICommand
     /// <summary>
     /// Gets or sets solution-discovered test project patterns that should not run.
     /// </summary>
-    [CommandOption("exclude-test-project", Description = "Repeatable solution-relative test project glob to exclude from discovery.")]
+    [CommandOption("exclude-test-project", Description = "Repeatable solution-relative test project glob to exclude from coverage execution.")]
     public string[] ExcludeTestProjects { get; set; } = [];
 
     /// <summary>
