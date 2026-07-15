@@ -11,6 +11,7 @@ public sealed class DurableTaskFlowDecisionTests
         Assert.Equal(3, (int)DurableTaskFlowDecisionKind.Fault);
         Assert.Equal(4, (int)DurableTaskFlowDecisionKind.TimedOut);
         Assert.Equal(5, (int)DurableTaskFlowDecisionKind.IgnoreLateEvent);
+        Assert.Equal(6, (int)DurableTaskFlowDecisionKind.ScheduleActivity);
     }
 
     [Fact]
@@ -43,8 +44,78 @@ public sealed class DurableTaskFlowDecisionTests
         Assert.Equal(DurableTaskFlowDecisionKind.WaitForExternalEvent, decision.Kind);
         Assert.Equal("review", decision.NodeId);
         Assert.Equal("approved", decision.EventName);
+        Assert.Null(decision.EventCallsite);
         Assert.Equal(new TestState("waiting"), decision.Context);
         Assert.Same(timeout, decision.Timeout);
+    }
+
+    [Fact]
+    public void WaitForExternalEvent_WithTypedCallsite_CapturesContractMetadata()
+    {
+        var callsite = new FlowEventCallsite<TestEvent>("approved", "approval.submitted", "v1");
+
+        var decision = DurableTaskFlowDecision<TestState>.WaitForExternalEvent(
+            "review",
+            callsite,
+            new TestState("waiting"),
+            null);
+
+        Assert.Equal(DurableTaskFlowDecisionKind.WaitForExternalEvent, decision.Kind);
+        Assert.Equal(callsite.EventName, decision.EventName);
+        Assert.NotSame(callsite, decision.EventCallsite);
+        Assert.Equal(callsite.PayloadType, decision.EventCallsite?.PayloadType);
+        Assert.Equal(callsite.ContractName, decision.EventCallsite?.ContractName);
+        Assert.Equal(callsite.ContractVersion, decision.EventCallsite?.ContractVersion);
+    }
+
+    [Fact]
+    public void WaitForExternalEvent_WithNullCallsite_ThrowsArgumentNullException()
+    {
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            DurableTaskFlowDecision<TestState>.WaitForExternalEvent(
+                "review",
+                (IFlowEventCallsite)null!,
+                new TestState("waiting"),
+                null));
+
+        Assert.Equal("eventCallsite", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData("eventName")]
+    [InlineData("contractName")]
+    [InlineData("contractVersion")]
+    public void WaitForExternalEvent_WithInvalidCallsiteText_ThrowsArgumentException(string invalidProperty)
+    {
+        var callsite = new TestEventCallsite(
+            invalidProperty == "eventName" ? " " : "approved",
+            invalidProperty == "contractName" ? " " : "approval.submitted",
+            invalidProperty == "contractVersion" ? " " : "v1",
+            typeof(TestEvent));
+
+        var exception = Assert.Throws<ArgumentException>(() =>
+            DurableTaskFlowDecision<TestState>.WaitForExternalEvent(
+                "review",
+                callsite,
+                new TestState("waiting"),
+                null));
+
+        Assert.Equal("eventCallsite", exception.ParamName);
+    }
+
+    [Fact]
+    public void WaitForExternalEvent_WithNullPayloadType_ThrowsArgumentNullException()
+    {
+        var callsite = new TestEventCallsite("approved", "approval.submitted", "v1", null!);
+
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            DurableTaskFlowDecision<TestState>.WaitForExternalEvent(
+                "review",
+                callsite,
+                new TestState("waiting"),
+                null));
+
+        Assert.Equal("eventCallsite", exception.ParamName);
     }
 
     [Fact]
@@ -100,6 +171,57 @@ public sealed class DurableTaskFlowDecisionTests
         Assert.Equal("Event was late.", decision.Diagnostic);
     }
 
+    [Fact]
+    public void ScheduleActivity_CapturesTypedRequestWithoutRetryMetadata()
+    {
+        var activity = FlowNodeOutcome<TestState>.Activity(
+            new FlowActivityCallsite<TestWork, TestResult>("send-email", 2, 3),
+            new TestWork("APR-1001"),
+            new TestState("activity-pending"));
+
+        var decision = DurableTaskFlowDecision<TestState>.ScheduleActivity("review", activity);
+
+        Assert.Equal(DurableTaskFlowDecisionKind.ScheduleActivity, decision.Kind);
+        Assert.Equal("review", decision.NodeId);
+        Assert.Equal(activity.CallsiteId, decision.Activity?.CallsiteId);
+        Assert.Same(activity.Work, decision.Activity?.Work);
+        Assert.Same(activity.Context, decision.Context);
+        Assert.Null(decision.RetryPolicy);
+    }
+
+    [Fact]
+    public void ScheduleActivity_WithNullRequest_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            DurableTaskFlowDecision<TestState>.ScheduleActivity("review", null!));
+    }
+
+    [Fact]
+    public void ScheduleActivity_SnapshotsExtensibleRequestMetadata()
+    {
+        var request = new MutableActivityRequest();
+
+        var decision = DurableTaskFlowDecision<TestState>.ScheduleActivity("review", request);
+        request.CallsiteId = "changed";
+        request.WorkContractVersion = 9;
+        request.Context = new TestState("changed");
+
+        Assert.Equal("send-email", decision.Activity?.CallsiteId);
+        Assert.Equal(2, decision.Activity?.WorkContractVersion);
+        Assert.Equal(new TestState("activity-pending"), decision.Context);
+    }
+
+    [Fact]
+    public void ScheduleActivity_WithNullExtensibleContext_ThrowsArgumentNullException()
+    {
+        var request = new MutableActivityRequest { Context = null! };
+
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            DurableTaskFlowDecision<TestState>.ScheduleActivity("review", request));
+
+        Assert.Equal("activity", exception.ParamName);
+    }
+
     [Theory]
     [InlineData("schedule-node")]
     [InlineData("wait-node")]
@@ -111,10 +233,15 @@ public sealed class DurableTaskFlowDecisionTests
     [InlineData("ignore-node")]
     [InlineData("ignore-event")]
     [InlineData("ignore-diagnostic")]
+    [InlineData("activity-node")]
     public void Factories_WithEmptyRequiredText_ThrowArgumentException(string scenario)
     {
         var state = new TestState("ready");
         var fault = new FlowFault("approval.failed", "Approval failed.");
+        var activity = FlowNodeOutcome<TestState>.Activity(
+            new FlowActivityCallsite<TestWork, TestResult>("send-email"),
+            new TestWork("APR-1001"),
+            state);
         var exception = Assert.Throws<ArgumentException>(() => scenario switch
         {
             "schedule-node" => DurableTaskFlowDecision<TestState>.ScheduleNode(" ", state),
@@ -127,6 +254,7 @@ public sealed class DurableTaskFlowDecisionTests
             "ignore-node" => DurableTaskFlowDecision<TestState>.IgnoreLateEvent(" ", "denied", "Event was late."),
             "ignore-event" => DurableTaskFlowDecision<TestState>.IgnoreLateEvent("review", " ", "Event was late."),
             "ignore-diagnostic" => DurableTaskFlowDecision<TestState>.IgnoreLateEvent("review", "denied", " "),
+            "activity-node" => DurableTaskFlowDecision<TestState>.ScheduleActivity(" ", activity),
             _ => throw new InvalidOperationException("Unknown scenario."),
         });
 
@@ -158,4 +286,36 @@ public sealed class DurableTaskFlowDecisionTests
     }
 
     private sealed record TestState(string Status);
+
+    private sealed record TestWork(string ApprovalId);
+
+    private sealed record TestResult(string Status);
+
+    private sealed record TestEvent(string ApprovedBy);
+
+    private sealed record TestEventCallsite(
+        string EventName,
+        string ContractName,
+        string ContractVersion,
+        Type PayloadType) : IFlowEventCallsite;
+
+    private sealed class MutableActivityRequest : IFlowActivityRequest<TestState>
+    {
+        public string CallsiteId { get; set; } = "send-email";
+
+        public Type WorkType { get; set; } = typeof(TestWork);
+
+        public int WorkContractVersion { get; set; } = 2;
+
+        public Type ResultType { get; set; } = typeof(TestResult);
+
+        public int ResultContractVersion { get; set; } = 3;
+
+        public object Work { get; set; } = new TestWork("APR-1001");
+
+        public TestState Context { get; set; } = new("activity-pending");
+
+        public FlowActivityWorkResult CreateResult(object result) =>
+            new FlowActivityCallsite<TestWork, TestResult>("send-email", 2, 3).CreateResult((TestResult)result);
+    }
 }

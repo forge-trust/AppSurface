@@ -62,4 +62,13 @@ public sealed record DurableTaskFlowStep<TContext>
     /// Gets the optional external event or timeout used to resume the node.
     /// </summary>
     public FlowResumeEvent? ResumeEvent { get; }
+
+    /// <summary>
+    /// Gets an optional typed activity result used to resume this node.
+    /// </summary>
+    /// <remarks>
+    /// Set this property when replaying a prior <see cref="DurableTaskFlowDecisionKind.ScheduleActivity"/> decision.
+    /// Do not also supply <see cref="ResumeEvent"/>; the shared evaluator rejects ambiguous resume inputs.
+    /// </remarks>
+    public FlowActivityWorkResult? ActivityResult { get; init; }
 }

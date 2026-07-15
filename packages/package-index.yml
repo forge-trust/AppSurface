@@ -504,6 +504,16 @@ packages:
     note: Thin export host for serving or exporting AppSurface Docs. Treat it as a proof host and example app, not a package you install into another project.
     start_here_path: Web/ForgeTrust.AppSurface.Docs.Standalone/README.md
     start_here_label: Standalone host README
+  - project: Web/ForgeTrust.AppSurface.Docs.ConsumerFixture/ForgeTrust.AppSurface.Docs.ConsumerFixture.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    product_family: internal_support
+    publish_reason: The real consumer fixture exists only to verify Razor Class Library layout precedence and is not a package intended for external installation.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 211
+    note: Non-packable ASP.NET Core consumer fixture used by AppSurface Docs HTTP and Playwright regression tests.
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64.csproj
     classification: support
     publish_decision: support_publish

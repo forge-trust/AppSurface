@@ -8,9 +8,9 @@ namespace ForgeTrust.AppSurface.Flow;
 /// Registers the AppSurface Flow core services.
 /// </summary>
 /// <remarks>
-/// The module is passive: it adds the in-memory runner, definition registry, and options used by local tests and
-/// host-specific adapters. It does not start background workers, create storage, schedule timers, or replace AppSurface
-/// startup composition.
+/// The module is passive: it adds the one-node transition evaluator, in-memory runner, definition registry, and options
+/// used by local tests and host-specific adapters. It does not start background workers, create storage, schedule
+/// timers, execute activities, or replace AppSurface startup composition.
 /// </remarks>
 public sealed class AppSurfaceFlowModule : IAppSurfaceModule
 {
@@ -19,6 +19,7 @@ public sealed class AppSurfaceFlowModule : IAppSurfaceModule
     {
         services.AddOptions<AppSurfaceFlowOptions>();
         services.TryAddSingleton<IFlowDefinitionRegistry, FlowDefinitionRegistry>();
+        services.TryAddSingleton(typeof(IFlowTransitionEvaluator<>), typeof(FlowTransitionEvaluator<>));
         services.TryAddSingleton(typeof(IFlowRunner<>), typeof(InMemoryFlowRunner<>));
     }
 
