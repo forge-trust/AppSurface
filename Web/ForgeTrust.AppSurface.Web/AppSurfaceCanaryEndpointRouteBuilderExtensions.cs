@@ -160,25 +160,14 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
             return;
         }
 
+        AppSurfaceCanaryResult result;
         try
         {
-            var result = await runner.EvaluateAsync(
+            result = await runner.EvaluateAsync(
                 descriptor,
                 marker,
                 freshSince,
                 httpContext.RequestAborted);
-            var statusText = ToWireStatus(result.Status);
-            var statusCode = responseMode == AppSurfaceCanaryCompletedResponseMode.AlwaysOk
-                || result.Status == AppSurfaceCanaryStatus.Pass
-                    ? StatusCodes.Status200OK
-                    : StatusCodes.Status503ServiceUnavailable;
-
-            await Results.Json(
-                    new AppSurfaceCanaryResponse(name, statusText),
-                    options: ResponseJsonOptions,
-                    statusCode: statusCode,
-                    contentType: $"{MediaTypeNames.Application.Json}; charset={Encoding.UTF8.WebName}")
-                .ExecuteAsync(httpContext);
         }
         catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
         {
@@ -203,7 +192,21 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
                     "The evaluator could not be activated, threw, was canceled independently, or returned no result.",
                     "Inspect the evaluator and its dependencies in host-local diagnostics, then retry under caller policy.")
                 .ExecuteAsync(httpContext);
+            return;
         }
+
+        var statusText = ToWireStatus(result.Status);
+        var statusCode = responseMode == AppSurfaceCanaryCompletedResponseMode.AlwaysOk
+            || result.Status == AppSurfaceCanaryStatus.Pass
+                ? StatusCodes.Status200OK
+                : StatusCodes.Status503ServiceUnavailable;
+
+        await Results.Json(
+                new AppSurfaceCanaryResponse(name, statusText),
+                options: ResponseJsonOptions,
+                statusCode: statusCode,
+                contentType: $"{MediaTypeNames.Application.Json}; charset={Encoding.UTF8.WebName}")
+            .ExecuteAsync(httpContext);
     }
 
     internal static bool TryReadMarker(
@@ -328,7 +331,10 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
     };
 
     internal static bool IsNonFatalEvaluationFailure(Exception exception) =>
-        exception is not OutOfMemoryException and not StackOverflowException;
+        exception is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException
+            and not AppDomainUnloadedException;
 
     [GeneratedRegex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,7})?(?:Z|[+-]\\d{2}:\\d{2})$", RegexOptions.CultureInvariant)]
     private static partial Regex FreshSinceRegex();

@@ -151,6 +151,7 @@ authentication scheme or define who an operator is.
 
 Implement one typed evaluator. It inspects existing proof and must not trigger the workflow:
 
+<!-- appsurface:snippet id="appsurface-canary-evaluator" file="Web/ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture/NamedCanaryPublicApiFixture.cs" marker="appsurface-canary-evaluator" lang="csharp" -->
 ```csharp
 using ForgeTrust.AppSurface.Web;
 
@@ -166,9 +167,11 @@ public sealed class ForwardingCanaryEvaluator : IAppSurfaceCanaryEvaluator
     }
 }
 ```
+<!-- /appsurface:snippet -->
 
 Register the evaluator and require the inputs your proof query needs. Registration alone exposes no route:
 
+<!-- appsurface:snippet id="appsurface-canary-registration" file="Web/ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture/NamedCanaryPublicApiFixture.cs" marker="appsurface-canary-registration" lang="csharp" -->
 ```csharp
 public void ConfigureServices(StartupContext context, IServiceCollection services)
 {
@@ -184,9 +187,11 @@ public void ConfigureServices(StartupContext context, IServiceCollection service
         });
 }
 ```
+<!-- /appsurface:snippet -->
 
 Run host-owned authentication and authorization in the endpoint-aware phase, then map the fixed route family explicitly:
 
+<!-- appsurface:snippet id="appsurface-canary-mapping" file="Web/ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture/NamedCanaryPublicApiFixture.cs" marker="appsurface-canary-mapping" lang="csharp" -->
 ```csharp
 public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
 {
@@ -199,6 +204,7 @@ public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder end
     endpoints.MapAppSurfaceCanaries("DeployOperators");
 }
 ```
+<!-- /appsurface:snippet -->
 
 Evaluate one registered name with the dedicated headers and an operator credential:
 
@@ -233,11 +239,16 @@ The default `AppSurfaceCanaryCompletedResponseMode.StatusCode` makes deployment 
 Authenticated diagnostic/reporting consumers can explicitly opt into `AlwaysOk`; they must then parse `status` because
 every completed result returns `200`:
 
+<!-- appsurface:snippet id="appsurface-canary-always-ok" file="Web/ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture/NamedCanaryPublicApiFixture.cs" marker="appsurface-canary-always-ok" lang="csharp" -->
 ```csharp
-endpoints.MapAppSurfaceCanaries(
-    "DeployOperators",
-    options => options.CompletedResponseMode = AppSurfaceCanaryCompletedResponseMode.AlwaysOk);
+public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+{
+    endpoints.MapAppSurfaceCanaries(
+        "DeployOperators",
+        options => options.CompletedResponseMode = AppSurfaceCanaryCompletedResponseMode.AlwaysOk);
+}
 ```
+<!-- /appsurface:snippet -->
 
 This option changes only the HTTP status. It never changes the evaluator contract or JSON. Clients should parse JSON,
 use `status` as the decision field, and ignore unknown properties so the #624 envelope can grow additively.

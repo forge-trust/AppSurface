@@ -290,6 +290,31 @@ public sealed class AppSurfaceCanaryEndpointTests
     }
 
     [Fact]
+    public async Task Endpoint_AlwaysOkMode_DoesNotMaskRequestLookupOrEvaluationFailures()
+    {
+        await using (var unknownNameHost = await StartHostAsync(alwaysOk: true))
+        {
+            using var request = AuthorizedRequest(Route("unknown"));
+            using var response = await unknownNameHost.Client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        await using (var invalidRequestHost = await StartHostAsync(alwaysOk: true, requireHeaders: true))
+        {
+            using var request = AuthorizedRequest(Route(Name));
+            using var response = await invalidRequestHost.Client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        await using (var evaluationFailureHost = await StartHostAsync(alwaysOk: true, throwOnEvaluate: true))
+        {
+            using var request = AuthorizedRequest(Route(Name));
+            using var response = await evaluationFailureHost.Client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task Endpoint_SnapshotsResponseModeAfterMappingCallback()
     {
         AppSurfaceCanaryEndpointOptions? captured = null;
@@ -520,6 +545,8 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.True(AppSurfaceCanaryEndpointRouteBuilderExtensions.IsNonFatalEvaluationFailure(new InvalidOperationException()));
         Assert.False(AppSurfaceCanaryEndpointRouteBuilderExtensions.IsNonFatalEvaluationFailure(new OutOfMemoryException()));
         Assert.False(AppSurfaceCanaryEndpointRouteBuilderExtensions.IsNonFatalEvaluationFailure(new StackOverflowException()));
+        Assert.False(AppSurfaceCanaryEndpointRouteBuilderExtensions.IsNonFatalEvaluationFailure(new AccessViolationException()));
+        Assert.False(AppSurfaceCanaryEndpointRouteBuilderExtensions.IsNonFatalEvaluationFailure(new AppDomainUnloadedException()));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             AppSurfaceCanaryEndpointRouteBuilderExtensions.ToWireStatus((AppSurfaceCanaryStatus)99));
     }
@@ -529,12 +556,44 @@ public sealed class AppSurfaceCanaryEndpointTests
     {
         await using var host = await StartHostAsync(waitForCancellation: true);
         using var request = AuthorizedRequest(Route(Name));
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        using var cancellation = new CancellationTokenSource();
+        var sendTask = host.Client.SendAsync(request, cancellation.Token);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            host.Client.SendAsync(request, cancellation.Token));
+        await host.State.EvaluationStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => sendTask);
 
         Assert.Equal(1, host.State.InvocationCount);
+    }
+
+    [Fact]
+    public async Task Endpoint_DoesNotMisclassifyResponseWriteFailureAsEvaluationFailure()
+    {
+        using var loggerProvider = new RecordingLoggerProvider();
+        var builder = WebApplication.CreateBuilder();
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(loggerProvider);
+        ConfigureAuthorization(builder.Services);
+        var state = new EvaluationState(AppSurfaceCanaryStatus.Pass);
+        builder.Services.AddSingleton(state);
+        builder.Services.AddAppSurfaceCanary<TestEvaluator>(Name);
+        await using var app = builder.Build();
+        app.MapAppSurfaceCanaries(PolicyName);
+        var endpoint = Assert.Single(GetRouteEndpoints(app));
+        await using var scope = app.Services.CreateAsyncScope();
+        var context = new DefaultHttpContext
+        {
+            RequestServices = scope.ServiceProvider,
+        };
+        context.SetEndpoint(endpoint);
+        context.Request.RouteValues["name"] = Name;
+        context.Response.Body = new ThrowingWriteStream();
+
+        await Assert.ThrowsAsync<IOException>(() => endpoint.RequestDelegate!(context));
+
+        Assert.Equal(1, state.InvocationCount);
+        Assert.DoesNotContain(loggerProvider.Entries, entry => entry.EventId.Id == 62301);
     }
 
     [Theory]
@@ -774,11 +833,11 @@ public sealed class AppSurfaceCanaryEndpointTests
         app.UseAuthorization();
         if (mapEndpoint)
         {
-            var endpoint = app.MapAppSurfaceCanaries(
-                PolicyName,
-                options => options.CompletedResponseMode = alwaysOk
-                    ? AppSurfaceCanaryCompletedResponseMode.AlwaysOk
-                    : AppSurfaceCanaryCompletedResponseMode.StatusCode);
+            var endpoint = alwaysOk
+                ? app.MapAppSurfaceCanaries(
+                    PolicyName,
+                    options => options.CompletedResponseMode = AppSurfaceCanaryCompletedResponseMode.AlwaysOk)
+                : app.MapAppSurfaceCanaries(PolicyName);
             if (allowAnonymous)
             {
                 endpoint.AllowAnonymous();
@@ -967,9 +1026,30 @@ public sealed class AppSurfaceCanaryEndpointTests
         Exception? Exception,
         IReadOnlyDictionary<string, object?> State);
 
+    private sealed class ThrowingWriteStream : MemoryStream
+    {
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new IOException("response write failed");
+
+        public override Task WriteAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken) =>
+            Task.FromException(new IOException("response write failed"));
+
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromException(new IOException("response write failed"));
+    }
+
     private sealed class EvaluationState(AppSurfaceCanaryStatus status)
     {
         internal int InvocationCount { get; set; }
+
+        internal TaskCompletionSource<bool> EvaluationStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         internal AppSurfaceCanaryEvaluationContext? Context { get; set; }
 
@@ -991,6 +1071,7 @@ public sealed class AppSurfaceCanaryEndpointTests
             CancellationToken cancellationToken)
         {
             state.InvocationCount++;
+            state.EvaluationStarted.TrySetResult(true);
             state.Context = context;
             if (state.ThrowOnEvaluate)
             {
