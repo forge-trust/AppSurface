@@ -29,7 +29,7 @@ internal interface ICoverageCliConsumerProofWorkflow
 /// <remarks>
 /// <para>
 /// The proof runs before package publication. It selects the already validated CLI <c>.nupkg</c>, installs it with a
-/// local-first NuGet configuration, creates a clean xUnit fixture, and executes <c>coverage run</c>,
+/// local-first NuGet configuration, creates a clean xUnit fixture plus an excluded failing sentinel, and executes <c>coverage run</c>,
 /// <c>coverage merge</c>, a passing <c>coverage gate</c>, and an intentionally failing <c>coverage gate</c>.
 /// </para>
 /// <para>
@@ -143,8 +143,13 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return BuildReport(context, commands, artifacts);
         }
 
+        if (!await RunRequiredAsync(DotNetCommand(context, ["new", "xunit", "-n", "Smoke.Browser.Tests"], "dotnet new xunit sentinel", "creating excluded failing sentinel tests")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
         var solutionPath = ResolveSmokeSolutionPath(fixtureDirectory);
-        if (!await RunRequiredAsync(DotNetCommand(context, ["sln", solutionPath, "add", "Smoke/Smoke.csproj", "Smoke.Tests/Smoke.Tests.csproj"], "dotnet sln add", "adding smoke projects")))
+        if (!await RunRequiredAsync(DotNetCommand(context, ["sln", solutionPath, "add", "Smoke/Smoke.csproj", "Smoke.Tests/Smoke.Tests.csproj", "Smoke.Browser.Tests/Smoke.Browser.Tests.csproj"], "dotnet sln add", "adding smoke projects")))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -198,14 +203,33 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var coverageMergedDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-merged");
         if (!await RunRequiredAsync(ToolCommand(
             context,
-            ["coverage", "run", "--solution", solutionPath, "--include", "[Smoke]*", "--output", coverageMergedDirectory],
+            ["coverage", "run", "--solution", solutionPath, "--exclude-test-project", "**/Smoke.Browser.Tests.csproj", "--include", "[Smoke]*", "--output", coverageMergedDirectory],
             "appsurface coverage run",
             "running packaged coverage CLI")))
         {
             return BuildReport(context, commands, artifacts);
         }
 
+        var coverageRunCommand = commands[^1];
+        var sentinelProjectPath = "Smoke.Browser.Tests/Smoke.Browser.Tests.csproj";
+        var sentinelExclusionPattern = "**/Smoke.Browser.Tests.csproj";
+        var reportedSentinelExclusion = coverageRunCommand.StandardOutput
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Any(line => line.TrimStart().StartsWith("skip ", StringComparison.Ordinal)
+                && line.Contains(sentinelProjectPath, StringComparison.Ordinal)
+                && line.Contains($"'{sentinelExclusionPattern}'", StringComparison.Ordinal));
+        if (!reportedSentinelExclusion)
+        {
+            commands[^1] = coverageRunCommand with
+            {
+                Succeeded = false,
+                FailureReason = $"Coverage run did not report excluded sentinel '{sentinelProjectPath}' with pattern '{sentinelExclusionPattern}'."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
         artifacts.AddRange(CheckCoverageRunArtifacts(coverageMergedDirectory));
+        artifacts.Add(CheckExcludedProjectArtifacts(coverageMergedDirectory, "Smoke.Browser.Tests"));
         if (artifacts.Any(artifact => !artifact.Exists))
         {
             return BuildReport(context, commands, artifacts);
@@ -578,8 +602,10 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
     {
         var libraryDirectory = Path.Join(fixtureDirectory, "Smoke");
         var testDirectory = Path.Join(fixtureDirectory, "Smoke.Tests");
+        var excludedTestDirectory = Path.Join(fixtureDirectory, "Smoke.Browser.Tests");
         Directory.CreateDirectory(libraryDirectory);
         Directory.CreateDirectory(testDirectory);
+        Directory.CreateDirectory(excludedTestDirectory);
 
         await File.WriteAllTextAsync(
             Path.Join(libraryDirectory, "Calculator.cs"),
@@ -593,6 +619,23 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
                 public static string Sign(int value) => value >= 0 ? "non-negative" : "negative";
 
                 public static int Untested(int value) => value * 2;
+            }
+            """,
+            cancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Join(excludedTestDirectory, "UnitTest1.cs"),
+            """
+            using Xunit;
+
+            namespace Smoke.Browser.Tests;
+
+            public sealed class UnitTest1
+            {
+                [Fact]
+                public void ExcludedSentinel_MustNeverRun()
+                {
+                    Assert.Fail("The excluded sentinel test project was executed.");
+                }
             }
             """,
             cancellationToken);
@@ -659,6 +702,20 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             CheckArtifact(Path.Join(coverageFanInDirectory, "timings.json"), "coverage merge timings"),
             CheckGlob(Path.Join(coverageFanInDirectory, "reportgenerator-input"), "*", "coverage.cobertura.xml", "coverage merge staged input")
         ];
+    }
+
+    private static CoverageCliConsumerProofArtifactCheck CheckExcludedProjectArtifacts(
+        string coverageMergedDirectory,
+        string projectName)
+    {
+        var projectsDirectory = Path.Join(coverageMergedDirectory, "projects");
+        var excludedArtifact = Directory.Exists(projectsDirectory)
+            ? Directory.EnumerateDirectories(projectsDirectory, $"{projectName}-*", SearchOption.TopDirectoryOnly).FirstOrDefault()
+            : null;
+        return new CoverageCliConsumerProofArtifactCheck(
+            $"excluded project '{projectName}' produced no coverage artifacts",
+            excludedArtifact ?? Path.Join(projectsDirectory, $"{projectName}-*"),
+            excludedArtifact is null);
     }
 
     private static IReadOnlyList<CoverageCliConsumerProofArtifactCheck> CheckCoverageGateArtifacts(

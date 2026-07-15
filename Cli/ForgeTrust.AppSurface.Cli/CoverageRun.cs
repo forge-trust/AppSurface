@@ -55,6 +55,12 @@ internal sealed partial class CoverageRunCommand : ICommand
     public string[] TestProjects { get; set; } = [];
 
     /// <summary>
+    /// Gets or sets solution-discovered test project patterns that should not run.
+    /// </summary>
+    [CommandOption("exclude-test-project", Description = "Repeatable solution-relative test project glob to exclude from discovery.")]
+    public string[] ExcludeTestProjects { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets the coverage output directory.
     /// </summary>
     [CommandOption("output", Description = "Coverage output directory. Defaults to TestResults/coverage-merged.")]
@@ -231,6 +237,17 @@ internal sealed partial class CoverageRunCommand : ICommand
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
         }
 
+        var excludeTestProjects = CoverageProjectExclusionMatcher.NormalizePatterns(ExcludeTestProjects);
+        if (excludeTestProjects.Count > 0 && TestProjects.Any(project => !string.IsNullOrWhiteSpace(project)))
+        {
+            throw CoverageRunDiagnostics.Create(
+                "ASCOV101",
+                "--exclude-test-project cannot be combined with --test-project.",
+                "Project exclusion applies only to solution discovery, while --test-project is an explicit project selection.",
+                "Use --solution with --exclude-test-project, or remove the exclusion and keep the explicit project list.",
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+        }
+
         var scheduleMode = ParseScheduleMode();
         var priorityTestProjects = PriorityTestProjects.Where(project => !string.IsNullOrWhiteSpace(project)).ToArray();
         if (scheduleMode == CoverageRunScheduleMode.InputOrder && !string.IsNullOrWhiteSpace(ScheduleTimings))
@@ -262,6 +279,7 @@ internal sealed partial class CoverageRunCommand : ICommand
         return new CoverageRunRequest(
             SolutionPath,
             TestProjects,
+            excludeTestProjects,
             OutputDirectory,
             Configuration,
             Parallelism,
@@ -338,6 +356,7 @@ internal sealed partial class CoverageRunCommand : ICommand
 /// </remarks>
 /// <param name="SolutionPath">Optional <c>.sln</c> or <c>.slnx</c> path used for discovery.</param>
 /// <param name="TestProjects">Explicit test project paths. Supplying at least one path skips solution discovery.</param>
+/// <param name="ExcludeTestProjects">Normalized solution-discovered test project glob patterns that should not run.</param>
 /// <param name="OutputDirectory">Coverage artifact directory. Existing content must be AppSurface-owned unless cleaning is disabled.</param>
 /// <param name="Configuration">Build and test configuration forwarded to <c>dotnet build</c> and <c>dotnet test</c>.</param>
 /// <param name="Parallelism">Maximum concurrent non-exclusive test projects.</param>
@@ -361,6 +380,7 @@ internal sealed partial class CoverageRunCommand : ICommand
 internal sealed record CoverageRunRequest(
     string? SolutionPath,
     IReadOnlyList<string> TestProjects,
+    IReadOnlyList<string> ExcludeTestProjects,
     string OutputDirectory,
     string Configuration,
     int Parallelism,
@@ -582,7 +602,19 @@ internal sealed class CoverageRunWorkflow
         string currentDirectory,
         CancellationToken cancellationToken)
     {
+        var exclusionPatterns = CoverageProjectExclusionMatcher.NormalizePatterns(request.ExcludeTestProjects);
         var explicitProjects = request.TestProjects.Where(project => !string.IsNullOrWhiteSpace(project)).ToArray();
+        if (explicitProjects.Length > 0 && exclusionPatterns.Count > 0)
+        {
+            throw CoverageRunDiagnostics.Create(
+                "ASCOV101",
+                "--exclude-test-project cannot be combined with --test-project.",
+                "Project exclusion applies only to solution discovery, while --test-project is an explicit project selection.",
+                "Use --solution with --exclude-test-project, or remove the exclusion and keep the explicit project list.",
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+        }
+
+        request = request with { ExcludeTestProjects = exclusionPatterns };
         if (explicitProjects.Length > 0)
         {
             var explicitProjectModels = await CreateProjectsAsync(
@@ -609,7 +641,11 @@ internal sealed class CoverageRunWorkflow
 
         var included = new List<string>();
         var skipped = new List<CoverageSkippedProject>();
-        foreach (var candidate in list.Output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).Select(line => line.Trim()))
+        var exclusionMatches = exclusionPatterns.ToDictionary(
+            pattern => pattern,
+            _ => new List<string>(),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in list.Output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).Select(line => Normalize(line.Trim())))
         {
             if (!candidate.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
             {
@@ -618,11 +654,74 @@ internal sealed class CoverageRunWorkflow
 
             if (IsDiscoveredTestProject(candidate))
             {
-                included.Add(candidate);
+                var matchedPatterns = exclusionPatterns
+                    .Where(pattern => CoverageProjectExclusionMatcher.IsMatch(pattern, candidate))
+                    .ToArray();
+                if (matchedPatterns.Length == 0)
+                {
+                    included.Add(candidate);
+                    continue;
+                }
+
+                foreach (var pattern in matchedPatterns)
+                {
+                    exclusionMatches[pattern].Add(candidate);
+                }
+
+                skipped.Add(new CoverageSkippedProject(
+                    candidate,
+                    $"matched --exclude-test-project pattern(s): {string.Join(", ", matchedPatterns.Select(pattern => $"'{pattern}'"))}",
+                    matchedPatterns));
             }
             else
             {
                 skipped.Add(new CoverageSkippedProject(candidate, "project name does not match *Tests.csproj or *IntegrationTests.csproj"));
+            }
+        }
+
+        var unmatchedPatterns = exclusionPatterns
+            .Where(pattern => exclusionMatches[pattern].Count == 0)
+            .ToArray();
+        if (unmatchedPatterns.Length > 0)
+        {
+            throw CoverageRunDiagnostics.Create(
+                "ASCOV112",
+                "One or more --exclude-test-project patterns did not match a discovered test project.",
+                string.Join(Environment.NewLine, unmatchedPatterns.Select(pattern => $"  - {pattern}")),
+                "Run with --list-projects, then update or remove each stale exclusion pattern.",
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+        }
+
+        foreach (var excludedProject in skipped.Where(project => project.ExclusionPatterns is not null))
+        {
+            var fullPath = ResolveUserPath(excludedProject.ProjectPath, solutionDirectory);
+            var exclusiveConflict = request.ExclusiveTestProjects.FirstOrDefault(
+                value => !string.IsNullOrWhiteSpace(value) && MatchesProject(value, excludedProject.ProjectPath, fullPath));
+            if (exclusiveConflict is not null)
+            {
+                throw CoverageRunDiagnostics.Create(
+                    "ASCOV101",
+                    "--exclusive-test-project cannot target an excluded test project.",
+                    $"Project: {excludedProject.ProjectPath}. Exclusive selector: {exclusiveConflict}.",
+                    "Remove either the exclusion pattern or the exclusive project selector.",
+                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+            }
+        }
+
+        if (included.Count == 0 && exclusionPatterns.Count > 0)
+        {
+            var excludedPriority = request.PriorityTestProjects.FirstOrDefault(priority =>
+                !string.IsNullOrWhiteSpace(priority)
+                && skipped.Any(project => project.ExclusionPatterns is not null
+                    && MatchesProject(priority, project.ProjectPath, ResolveUserPath(project.ProjectPath, solutionDirectory))));
+            if (excludedPriority is not null)
+            {
+                throw CoverageRunDiagnostics.Create(
+                    "ASCOV101",
+                    "--priority-test-project did not match any selected test project.",
+                    $"Project: {excludedPriority}.",
+                    "Pass a selected non-exclusive project path or file name.",
+                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
             }
         }
 
@@ -690,14 +789,21 @@ internal sealed class CoverageRunWorkflow
     {
         if (projectPaths.Count == 0)
         {
-            var skippedHint = skippedProjects.Count == 0
-                ? "No .csproj entries were returned by discovery."
-                : $"Skipped {skippedProjects.Count.ToString(CultureInfo.InvariantCulture)} non-test project(s).";
+            var excludedProjects = skippedProjects
+                .Where(project => project.ExclusionPatterns is not null)
+                .ToArray();
+            var skippedHint = excludedProjects.Length > 0
+                ? DescribeAllExcludedProjects(request.ExcludeTestProjects, excludedProjects)
+                : skippedProjects.Count == 0
+                    ? "No .csproj entries were returned by discovery."
+                    : $"Skipped {skippedProjects.Count.ToString(CultureInfo.InvariantCulture)} non-test project(s).";
             throw CoverageRunDiagnostics.Create(
                 "ASCOV105",
                 "No test projects were selected.",
                 skippedHint,
-                "Pass one or more --test-project options, or rename test projects to match *Tests.csproj.",
+                excludedProjects.Length > 0
+                    ? "Remove or narrow --exclude-test-project patterns so at least one discovered test project remains."
+                    : "Pass one or more --test-project options, or rename test projects to match *Tests.csproj.",
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
         }
 
@@ -722,6 +828,26 @@ internal sealed class CoverageRunWorkflow
         }
 
         return AllocateProjectSlugs(projects);
+    }
+
+    private static string DescribeAllExcludedProjects(
+        IReadOnlyList<string> patterns,
+        IReadOnlyList<CoverageSkippedProject> excludedProjects)
+    {
+        var lines = new List<string>
+        {
+            $"Excluded {excludedProjects.Count.ToString(CultureInfo.InvariantCulture)} discovered test project(s) using {patterns.Count.ToString(CultureInfo.InvariantCulture)} pattern(s).",
+        };
+        foreach (var pattern in patterns)
+        {
+            var matchedProjects = excludedProjects
+                .Where(project => project.ExclusionPatterns?.Contains(pattern, StringComparer.OrdinalIgnoreCase) == true)
+                .Select(project => project.ProjectPath)
+                .ToArray();
+            lines.Add($"  - {pattern}: {matchedProjects.Length.ToString(CultureInfo.InvariantCulture)} match(es): {string.Join(", ", matchedProjects)}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
     }
 
     private static IReadOnlyList<CoverageRunProject> AllocateProjectSlugs(IReadOnlyList<CoverageRunProject> projects)
@@ -1669,6 +1795,230 @@ internal sealed class CoverageRunWorkflow
 }
 
 /// <summary>
+/// Validates and matches the solution-relative segment globs accepted by
+/// <c>--exclude-test-project</c>.
+/// </summary>
+internal static class CoverageProjectExclusionMatcher
+{
+    /// <summary>
+    /// Validates, normalizes, and de-duplicates exclusion patterns while preserving command-line order.
+    /// </summary>
+    /// <param name="patterns">Raw repeatable command option values.</param>
+    /// <returns>Normalized patterns using forward-slash separators.</returns>
+    public static IReadOnlyList<string> NormalizePatterns(IEnumerable<string> patterns)
+    {
+        ArgumentNullException.ThrowIfNull(patterns);
+        var normalizedPatterns = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in patterns)
+        {
+            var normalized = (value ?? string.Empty).Trim().Replace('\\', '/');
+            ValidatePattern(normalized);
+            if (!seen.Add(normalized))
+            {
+                throw InvalidPattern(
+                    normalized,
+                    "The normalized pattern duplicates an earlier --exclude-test-project value.",
+                    "Pass each exclusion pattern once.");
+            }
+
+            normalizedPatterns.Add(normalized);
+        }
+
+        return normalizedPatterns;
+    }
+
+    /// <summary>
+    /// Gets whether a normalized exclusion pattern matches a solution-relative project path.
+    /// </summary>
+    /// <param name="pattern">Validated normalized pattern.</param>
+    /// <param name="projectPath">Solution-relative path reported by <c>dotnet sln list</c>.</param>
+    /// <returns><see langword="true" /> when the project is excluded by the pattern.</returns>
+    public static bool IsMatch(string pattern, string projectPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pattern);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
+
+        var normalizedProject = projectPath.Trim().Replace('\\', '/');
+        while (normalizedProject.StartsWith("./", StringComparison.Ordinal))
+        {
+            normalizedProject = normalizedProject[2..];
+        }
+
+        var patternSegments = pattern.Split('/');
+        var pathSegments = pattern.Contains('/')
+            ? normalizedProject.Split('/')
+            : [normalizedProject.Split('/')[^1]];
+        var cache = new Dictionary<(int PatternIndex, int PathIndex), bool>();
+        return MatchSegments(patternSegments, 0, pathSegments, 0, cache);
+    }
+
+    private static void ValidatePattern(string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+        {
+            throw InvalidPattern(
+                pattern,
+                "The exclusion pattern is empty or whitespace.",
+                "Pass a solution-relative project path or segment glob.");
+        }
+
+        if (pattern.StartsWith("/", StringComparison.Ordinal)
+            || (pattern.Length >= 2 && char.IsAsciiLetter(pattern[0]) && pattern[1] == ':'))
+        {
+            throw InvalidPattern(
+                pattern,
+                "Rooted, UNC, and drive-qualified exclusion patterns are not allowed.",
+                "Pass a path relative to the solution, such as tests/**/Browser*.Tests.csproj.");
+        }
+
+        if (pattern.EndsWith("/", StringComparison.Ordinal) || pattern.Contains("//", StringComparison.Ordinal))
+        {
+            throw InvalidPattern(
+                pattern,
+                "Leading, trailing, and repeated path separators are not allowed.",
+                "Use one separator between non-empty path segments.");
+        }
+
+        var ordinarySegmentSeen = false;
+        foreach (var segment in pattern.Split('/'))
+        {
+            if (string.Equals(segment, ".", StringComparison.Ordinal))
+            {
+                throw InvalidPattern(
+                    pattern,
+                    "Dot path segments are not allowed.",
+                    "Remove the dot segment and keep the pattern solution-relative.");
+            }
+
+            if (string.Equals(segment, "..", StringComparison.Ordinal))
+            {
+                if (ordinarySegmentSeen)
+                {
+                    throw InvalidPattern(
+                        pattern,
+                        "Parent path segments are allowed only at the start of a pattern.",
+                        "Use leading ../ segments only for projects outside the solution directory.");
+                }
+
+                continue;
+            }
+
+            ordinarySegmentSeen = true;
+            if (segment.Contains("**", StringComparison.Ordinal)
+                && !string.Equals(segment, "**", StringComparison.Ordinal))
+            {
+                throw InvalidPattern(
+                    pattern,
+                    "A double-star wildcard must be a complete path segment.",
+                    "Use segment globs such as tests/**/Browser*.Tests.csproj.");
+            }
+        }
+
+        if (!ordinarySegmentSeen)
+        {
+            throw InvalidPattern(
+                pattern,
+                "A parent-only exclusion pattern does not identify a project.",
+                "Follow leading ../ segments with a project path or segment glob.");
+        }
+    }
+
+    private static bool MatchSegments(
+        IReadOnlyList<string> patternSegments,
+        int patternIndex,
+        IReadOnlyList<string> pathSegments,
+        int pathIndex,
+        IDictionary<(int PatternIndex, int PathIndex), bool> cache)
+    {
+        var key = (patternIndex, pathIndex);
+        if (cache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        bool matches;
+        if (patternIndex == patternSegments.Count)
+        {
+            matches = pathIndex == pathSegments.Count;
+        }
+        else if (string.Equals(patternSegments[patternIndex], "**", StringComparison.Ordinal))
+        {
+            matches = Enumerable.Range(pathIndex, pathSegments.Count - pathIndex + 1)
+                .Any(nextPathIndex => MatchSegments(patternSegments, patternIndex + 1, pathSegments, nextPathIndex, cache));
+        }
+        else
+        {
+            matches = pathIndex < pathSegments.Count
+                && MatchSegment(patternSegments[patternIndex], pathSegments[pathIndex])
+                && MatchSegments(patternSegments, patternIndex + 1, pathSegments, pathIndex + 1, cache);
+        }
+
+        cache[key] = matches;
+        return matches;
+    }
+
+    private static bool MatchSegment(string pattern, string value)
+    {
+        if (!pattern.Contains('*', StringComparison.Ordinal))
+        {
+            return string.Equals(pattern, value, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var chunks = pattern.Split('*', StringSplitOptions.RemoveEmptyEntries);
+        if (chunks.Length == 0)
+        {
+            return true;
+        }
+
+        var chunkIndex = 0;
+        var valueIndex = 0;
+        if (pattern[0] != '*')
+        {
+            if (!value.StartsWith(chunks[0], StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            valueIndex = chunks[0].Length;
+            chunkIndex++;
+        }
+
+        var trailingChunkIndex = pattern[^1] == '*' ? chunks.Length : chunks.Length - 1;
+        for (; chunkIndex < trailingChunkIndex; chunkIndex++)
+        {
+            var matchIndex = value.IndexOf(chunks[chunkIndex], valueIndex, StringComparison.OrdinalIgnoreCase);
+            if (matchIndex < 0)
+            {
+                return false;
+            }
+
+            valueIndex = matchIndex + chunks[chunkIndex].Length;
+        }
+
+        if (pattern[^1] == '*')
+        {
+            return true;
+        }
+
+        var trailingChunk = chunks[^1];
+        return value.Length - trailingChunk.Length >= valueIndex
+            && value.EndsWith(trailingChunk, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static CommandException InvalidPattern(string pattern, string cause, string fix)
+    {
+        var received = string.IsNullOrWhiteSpace(pattern) ? "(empty)" : pattern;
+        return CoverageRunDiagnostics.Create(
+            "ASCOV101",
+            "--exclude-test-project contains an invalid pattern.",
+            $"Pattern: {received}. {cause}",
+            fix,
+            "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+    }
+}
+
+/// <summary>
 /// Planned project execution order for a coverage run.
 /// </summary>
 /// <param name="Mode">Public scheduling mode name written to console output and timings.</param>
@@ -1761,7 +2111,11 @@ internal sealed record CoverageRunProject(
 /// </summary>
 /// <param name="ProjectPath">Path reported by <c>dotnet sln list</c>.</param>
 /// <param name="Reason">Human-readable reason the project was skipped.</param>
-internal sealed record CoverageSkippedProject(string ProjectPath, string Reason);
+/// <param name="ExclusionPatterns">Normalized exclusion patterns that matched this test project, when applicable.</param>
+internal sealed record CoverageSkippedProject(
+    string ProjectPath,
+    string Reason,
+    IReadOnlyList<string>? ExclusionPatterns = null);
 
 /// <summary>
 /// Per-project test execution result.
