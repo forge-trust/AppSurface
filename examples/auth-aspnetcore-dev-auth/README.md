@@ -37,7 +37,7 @@ xdg-open http://127.0.0.1:5058/_appsurface/dev-auth
 Start-Process http://127.0.0.1:5058/_appsurface/dev-auth
 ```
 
-Or start from the app page and use the overlay:
+Or start from the app page and use the marker:
 
 ```text
 http://127.0.0.1:5058/
