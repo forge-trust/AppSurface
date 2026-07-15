@@ -23,6 +23,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - Split stable and prerelease NuGet publish tag triggers so prerelease tags no longer start the stable publish workflow before the prerelease gate.
 - AppSurface DevAuth marker overlays now start collapsed by default while keeping the active fake persona visible, and
   `AppSurfaceDevAuthMarkerOptions.StartExpanded` lets local proof pages opt back into immediate persona controls.
+- [`ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth`](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#responsive-placement-and-customization) now keeps the default marker as a fixed bottom-right overlay above 640 CSS pixels and places it in normal document flow at 640 CSS pixels or below. Hosts retain control of viewport metadata, render location, outer spacing, and custom styling; authentication behavior and the desktop overlay remain unchanged.
 - Add `ForgeTrust.AppSurface.Auth.Aspire.Keycloak`, an AppHost-only real local OIDC proof package that builds on
   the official Aspire Keycloak hosting integration, generates deterministic realm/client/user import JSON, projects
   only safe OIDC settings into a paired `Auth.AspNetCore.Oidc` web proof, adds fixed-port/readiness diagnostics, and
@@ -37,4 +38,5 @@ This is the living release note for the next coordinated AppSurface version afte
 
 - Record-breaking or behavior-changing guidance here before it moves into the tagged release note.
 - `Pwa.Enabled` now controls install metadata only. Apps may activate the shared worker with `Pwa.Offline.Enabled` or `Pwa.Push.Enabled`; existing `Pwa.Offline.ServiceWorkerPath` assignments remain compatible, while new code should use `Pwa.Worker.ServiceWorkerPath`.
+- DevAuth hosts should include `<meta name="viewport" content="width=device-width, initial-scale=1">` and render the default-styled marker after persistent application chrome and before main content. At 640 CSS pixels or below, the marker now occupies that host-owned location instead of the bottom-right viewport overlay; custom-skinned markers with `IncludeDefaultStyles = false` remain fully host-owned.
 - Do not remove or move an already registered service-worker endpoint in one deployment. First ship unregister/replacement cleanup from the old path, let clients receive it, and only then stop mapping that path. See the [PWA migration guidance](../Web/ForgeTrust.AppSurface.Web/Docs/pwa-install.md#migration-and-pitfalls).

@@ -66,9 +66,15 @@ app.MapGet("/", (
         $$"""
         <!doctype html>
         <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Local proof app</title>
+        </head>
         <body>
-          <main>Local proof app</main>
+          <header>Local proof app</header>
           {{AppSurfaceDevAuthMarker.Render(httpContext, environment, devAuthOptions, dataProtectionProvider)}}
+          <main>Protected application content</main>
         </body>
         </html>
         """,
@@ -104,13 +110,15 @@ Open the persona lab:
 /_appsurface/dev-auth
 ```
 
-The control page lets you select a seeded persona, clear the persona cookie, inspect safe local claims, and copy a visible marker such as `DEV AUTH: Local Admin (AppSurface.DevAuth)`. For a persistent in-app indicator, render `AppSurfaceDevAuthMarker` from your local layout or proof page. The renderer returns an empty string when the current environment is not in `AllowedEnvironmentNames`, so layouts do not need their own `environment.IsDevelopment()` guard. The default marker is a bottom overlay that starts collapsed, keeps the active fake persona visible, and expands to POST-only persona controls that return to the current page after selection.
+The control page lets you select a seeded persona, clear the persona cookie, inspect safe local claims, and copy a visible marker such as `DEV AUTH: Local Admin (AppSurface.DevAuth)`. For a persistent in-app indicator, render `AppSurfaceDevAuthMarker` from your local layout or proof page. The renderer returns an empty string when the current environment is not in `AllowedEnvironmentNames`, so layouts do not need their own `environment.IsDevelopment()` guard. With default styles, the marker is a fixed bottom-right overlay above 640 CSS pixels and participates in normal document flow at widths up to and including 640 CSS pixels. It starts collapsed, keeps the active fake persona visible, and expands to POST-only persona controls that return to the current page after selection.
+
+The host must provide `<meta name="viewport" content="width=device-width, initial-scale=1">` so the 640 CSS-pixel breakpoint tracks the device width. Render the marker after persistent application chrome and before `<main>` (or the equivalent primary content container). At narrow widths, that host-owned location becomes the marker's in-flow position, so opening the disclosure pushes following content rather than covering it. The host also owns outer spacing and the containing layout.
 
 ## API Reference
 
 - `AddAppSurfaceDevAuth(IHostEnvironment environment, Action<AppSurfaceDevAuthOptions> configure)` registers the named DevAuth authentication scheme and startup safety validation. The `configure` callback is evaluated once during registration, and the same validated options are used for both scheme registration and runtime DevAuth behavior.
 - `MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)` maps the local-only control page, status JSON, select persona endpoint, and clear persona endpoint. Control and mutation endpoints return not found when the active environment is not allowed; status remains read-only and reports `enabled: false`. The control page root always includes a static-auditable DevAuth control-page marker attribute so static export audits can reject DevAuth UI before it is written to disk.
-- `AppSurfaceDevAuthMarker.Render(HttpContext, IHostEnvironment, IOptions<AppSurfaceDevAuthOptions>, IDataProtectionProvider, Action<AppSurfaceDevAuthMarkerOptions>?)` returns safe HTML for an explicit in-app DevAuth state marker. It returns `string.Empty` when the active environment is not allowed. The marker root always includes a static-auditable DevAuth marker attribute so static export audits can reject DevAuth UI even when the CSS class prefix is customized.
+- `AppSurfaceDevAuthMarker.Render(HttpContext, IHostEnvironment, IOptions<AppSurfaceDevAuthOptions>, IDataProtectionProvider, Action<AppSurfaceDevAuthMarkerOptions>?)` returns safe HTML for an explicit in-app DevAuth state marker. It returns `string.Empty` when the active environment is not allowed. With default styles, the marker is fixed above 640 CSS pixels and in flow at or below 640 CSS pixels. The marker root always includes a static-auditable DevAuth marker attribute so static export audits can reject DevAuth UI even when the CSS class prefix is customized.
 - `AppSurfaceDevAuthDefaults.AuthenticationScheme` is `AppSurface.DevAuth`.
 - `AppSurfaceDevAuthDefaults.PathPrefix` is `/_appsurface/dev-auth`.
 - `AppSurfaceDevAuthDefaults.CookieName` is `.AppSurface.DevAuth.Persona`.
@@ -126,9 +134,9 @@ The control page lets you select a seeded persona, clear the persona cookie, ins
 - `AppSurfaceDevAuthOptions.DisplayClaimTypes` controls which issued claims may appear in the local HTML preview. It defaults to `sub`, `role`, and `tenant`.
 - `AppSurfaceDevAuthMarkerOptions.CssClassPrefix` changes the CSS class prefix for marker elements. The default is the package-owned DevAuth marker prefix.
 - `AppSurfaceDevAuthMarkerOptions.AdditionalCssClass` appends host-owned classes to the marker root.
-- `AppSurfaceDevAuthMarkerOptions.IncludeDefaultStyles` is on by default. Disable it to skin the marker entirely with host CSS.
+- `AppSurfaceDevAuthMarkerOptions.IncludeDefaultStyles` is on by default. Disable it to skin and position the marker entirely with host CSS.
 - `AppSurfaceDevAuthMarkerOptions.ShowPersonaControls` is on by default. Disable it when a page should show state but send persona changes through the full control page.
-- `AppSurfaceDevAuthMarkerOptions.StartExpanded` is off by default so the marker remains visible without covering local app content. Enable it when a proof page should show controls immediately.
+- `AppSurfaceDevAuthMarkerOptions.StartExpanded` is off by default to keep the fixed desktop overlay compact. Enable it when a proof page should show controls immediately; at narrow widths, the default-styled expanded marker remains in flow.
 - `AppSurfaceDevAuthMarkerOptions.ReturnUrl` overrides the local page that marker POSTs return to. When unset, DevAuth returns to the current request path and query.
 
 Persona IDs must be route-safe local identifiers containing only ASCII letters, digits, `.`, `_`, or `-`. The dot-segment IDs `.` and `..` are not allowed, and ids that look like tokens, secrets, passwords, keys, credentials, or emails are rejected. Persona IDs are used in the selection endpoint path and stored as the protected cookie payload.
@@ -138,6 +146,112 @@ Persona state is stored in a protected, HttpOnly, SameSite=Strict cookie that co
 The authentication handler issues every seeded persona claim, but the control page does not display every issued claim. Claims are rendered only when their type is in `DisplayClaimTypes`, their value is short, and neither the type nor the value looks like a token, secret, password, key, credential, or email. Display names and subjects that look sensitive are redacted from HTML and status JSON. Hidden claims are counted without showing their values.
 
 The marker renderer uses the same safe display rules as the control page and status JSON. It does not render arbitrary claims. Marker select and clear buttons call the same POST-only mutation endpoints as the control page and use only safe local return URLs, so external `returnUrl` values do not redirect.
+
+## Responsive Placement And Customization
+
+The package default deliberately changes placement rather than visibility: above 640 CSS pixels the marker remains the existing fixed bottom-right development overlay; at 640 CSS pixels or below it becomes an ordinary in-flow element. The host render location is therefore visually significant on narrow screens. The default non-obstruction guarantee applies when the marker is rendered in an ordinary document-flow container after persistent application chrome and before main content.
+
+The host owns viewport metadata and outer spacing. Add the standard viewport tag to the document `<head>`, then use `AdditionalCssClass` for local spacing or a higher-specificity placement override:
+
+```csharp
+var marker = AppSurfaceDevAuthMarker.Render(
+    httpContext,
+    environment,
+    devAuthOptions,
+    dataProtectionProvider,
+    options => options.AdditionalCssClass = "local-dev-auth");
+```
+
+```css
+@media (max-width: 640px) {
+  body > .local-dev-auth {
+    margin: 12px 16px;
+  }
+}
+```
+
+Use `CssClassPrefix` when integrating the existing hierarchy with host CSS. Set `IncludeDefaultStyles = false` only when the host will provide the complete visual and responsive placement contract; no package CSS is emitted in that mode. Custom CSS can intentionally override package placement, but the host then owns overlap prevention.
+
+For a complete host-owned skin, change the prefix and disable package styles together:
+
+```csharp
+var marker = AppSurfaceDevAuthMarker.Render(
+    httpContext,
+    environment,
+    devAuthOptions,
+    dataProtectionProvider,
+    options =>
+    {
+        options.CssClassPrefix = "local-dev-auth";
+        options.IncludeDefaultStyles = false;
+    });
+```
+
+The host must then style the emitted `local-dev-auth` hierarchy and own both desktop and narrow-screen placement. This minimal starting point keeps the warning visible, preserves the desktop overlay, and reserves mobile layout space:
+
+```css
+.local-dev-auth {
+  color: #111827;
+  background: #fff;
+  border: 2px solid #b91c1c;
+}
+
+@media (min-width: 641px) {
+  .local-dev-auth {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 2147483647;
+    max-width: min(360px, calc(100vw - 32px));
+  }
+}
+
+@media (max-width: 640px) {
+  .local-dev-auth {
+    position: static;
+    max-width: none;
+  }
+
+  .local-dev-auth__actions form,
+  .local-dev-auth__button {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+```
+
+## Marker Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| The marker still behaves like a desktop overlay on a phone. | The host document omits the viewport meta tag, so the browser uses a wider layout viewport. | Add `<meta name="viewport" content="width=device-width, initial-scale=1">` to `<head>`. |
+| The narrow marker covers or clips application content. | The marker is inside a fixed, absolutely positioned, clipped, or otherwise overlapping host container, or host CSS overrides the package placement. | Render it in ordinary flow after persistent application chrome and before main content; remove the conflicting container or own placement with custom CSS. |
+| The marker is below the fold on a narrow screen. | Normal flow reserves space but does not keep the marker pinned to the viewport; its visibility depends on the host render location. | Render it after persistent application chrome and before main content. Use a host-owned fixed or sticky override only when persistent visibility is more important than package-guaranteed non-obstruction. |
+| The in-flow marker touches the viewport or adjacent content. | AppSurface does not choose host-specific outer spacing. | Add a host class with `AdditionalCssClass` and apply narrow-screen margin in host CSS. |
+| A custom-skinned marker does not switch placement at 640 pixels. | `IncludeDefaultStyles = false` removes all package CSS, including the responsive rule. | Add the host's own media query and overlap-prevention behavior, or re-enable package styles. |
+
+## Contributor Test Loop
+
+The fast loop skips browser integration tests:
+
+```bash
+dotnet test Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests.csproj --filter "Category!=Integration"
+```
+
+Run only the responsive browser contract while iterating on marker layout or keyboard behavior:
+
+```bash
+dotnet test Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests.csproj --filter "Category=Integration"
+```
+
+Run the complete focused project before landing:
+
+```bash
+dotnet test Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests.csproj
+```
+
+The integration fixture installs Playwright Chromium automatically. The first integration or full run may download the browser; later runs reuse the installed browser.
 
 Persona mutation endpoints are loopback-only by default and reject cross-site browser POSTs when `Origin`, `Referer`, or Fetch Metadata identifies another origin. This keeps arbitrary websites from silently changing the fake persona in a developer's local browser. Command-line local tooling without browser origin headers can still post to the endpoints from loopback.
 
@@ -187,7 +301,8 @@ Diagnostics, HTML, and status JSON do not include raw tokens, secrets, passwords
 - Call `Subject(...)` for every persona and keep it aligned with `AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim(...))`.
 - Keep the DevAuth marker visible in local sample pages so fake auth is impossible to miss.
 - Prefer `AppSurfaceDevAuthMarker.Render(...)` over copying the generated control-page HTML. Use `StartExpanded = true` when the marker should show controls immediately, and use `IncludeDefaultStyles = false`, `CssClassPrefix`, and `AdditionalCssClass` when the marker needs to match a consumer app.
-- DevAuth does not automatically inject an overlay into arbitrary responses. Add the marker explicitly to the pages or local layout where the fake-auth state should be visible; the renderer self-suppresses outside allowed environments.
+- Include the standard viewport meta tag and render the marker after persistent application chrome and before main content. The package cannot reserve safe space when a host puts the marker inside a fixed, absolute, clipped, or overlapping container.
+- DevAuth does not automatically inject a marker into arbitrary responses. Add it explicitly to the pages or local layout where the fake-auth state should be visible; the renderer self-suppresses outside allowed environments.
 - If persona selection returns a same-origin 403, make sure custom local UI posts from the same scheme, host, and port as the mapped DevAuth endpoints.
 
 ## Upgrade And Removal
