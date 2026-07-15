@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageDescription>Deterministic GCP Cloud Run Job artifacts and read-only parity verification for AppSurface deployment intent.</PackageDescription>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ForgeTrust.AppSurface.Deployment/ForgeTrust.AppSurface.Deployment.csproj" />
+  </ItemGroup>
+
+</Project>

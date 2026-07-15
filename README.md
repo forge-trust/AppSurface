@@ -106,7 +106,12 @@ This approach aims to:
 
 ### [Aspire](./Aspire/README.md)
 
-- [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Local .NET Aspire AppHost composition with AppSurface modules, CLI-selectable profiles, and reusable Aspire components.
+- [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Local .NET Aspire AppHost composition with AppSurface modules, CLI-selectable profiles, reusable Aspire components, and native publish/verification integration for explicitly annotated resources.
+
+### [Deployment](./Deployment/README.md)
+
+- [**ForgeTrust.AppSurface.Deployment**](./Deployment/ForgeTrust.AppSurface.Deployment/README.md) – Portable, schema-versioned deployment intent, validation, diagnostics, deterministic serialization, and provider contracts with no Aspire or cloud dependency.
+- [**ForgeTrust.AppSurface.Deployment.GcpCloudRun**](./Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) – Deterministic Cloud Run migration-job Terraform/evidence compilation and read-only shadow or owned parity verification.
 
 These packages are designed to work together so that features can be shared
 across different application types while maintaining a consistent startup
@@ -244,7 +249,7 @@ The RazorWire MVC example includes a failed-form UX page at `/Reactivity/FormFai
 
 ## Release notes and upgrade policy
 
-AppSurface is preparing to release the entire monorepo in unison. The public release contract now lives in the repository so teams can see what is queued for the next version, how pre-1.0 changes are handled, and where future migration notes will live.
+AppSurface releases the entire monorepo in unison. The public release contract lives in the repository so teams can see what is queued for the next version, how pre-1.0 changes are handled, and where migration notes live.
 
 - [Package chooser](./packages/README.md) - the generated first-install map for web, console, Aspire, and optional package add-ons.
 - [Release hub](./releases/README.md) - start here for the narrative release surface.

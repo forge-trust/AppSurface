@@ -396,7 +396,8 @@ internal static class ReleaseDocsArchiveGate
     private static bool CatalogMatchesEvidence(ReleaseEvidenceDocsArchive docsArchive, ReleaseDocsCatalogEntry catalogEntry)
     {
         return string.Equals(docsArchive.ExactTreePath, catalogEntry.ExactTreePath, StringComparison.Ordinal)
-            && string.Equals(docsArchive.ReleaseManifestSha256, catalogEntry.ReleaseManifestSha256, StringComparison.Ordinal);
+            && (string.Equals(docsArchive.ReleaseManifestSha256, catalogEntry.ReleaseManifestSha256, StringComparison.Ordinal)
+                || string.Equals(docsArchive.ReleaseManifestSha256, ReleaseEvidence.DocsArchiveGeneratedDigest, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -599,8 +600,11 @@ internal static class ReleaseDocsArchiveGate
             return false;
         }
 
+        var physicalManifestPaths = CreatePhysicalManifestPathSet(
+            files.Keys,
+            ResolvePhysicalPathComparer(exactTreePath, File.Exists, Directory.EnumerateFileSystemEntries));
         var unmanifestedServeableFile = serveableFiles
-            .Where(serveableFile => !files.ContainsKey(serveableFile))
+            .Where(serveableFile => !physicalManifestPaths.Contains(serveableFile))
             .FirstOrDefault();
         if (unmanifestedServeableFile is not null)
         {
@@ -610,6 +614,69 @@ internal static class ReleaseDocsArchiveGate
 
         fileCount = files.Count;
         return true;
+    }
+
+    /// <summary>
+    /// Creates the physical-path coverage set for a release manifest under the filesystem's casing rules.
+    /// </summary>
+    /// <param name="manifestPaths">Logical paths recorded by the release manifest.</param>
+    /// <param name="pathComparer">Comparer matching the physical filesystem's case behavior.</param>
+    /// <returns>A set used to match paths returned by physical archive enumeration.</returns>
+    internal static IReadOnlySet<string> CreatePhysicalManifestPathSet(
+        IEnumerable<string> manifestPaths,
+        StringComparer pathComparer)
+    {
+        ArgumentNullException.ThrowIfNull(manifestPaths);
+        ArgumentNullException.ThrowIfNull(pathComparer);
+        return new HashSet<string>(manifestPaths, pathComparer);
+    }
+
+    /// <summary>
+    /// Resolves physical filesystem casing behavior without writing probe files into an immutable archive.
+    /// </summary>
+    /// <param name="rootPath">Existing exact release tree.</param>
+    /// <param name="fileExists">File existence operation used for the read-only case-variant probe.</param>
+    /// <param name="enumerateFileSystemEntries">Filesystem enumeration used to reject ambiguous case-variant siblings.</param>
+    /// <returns>An ordinal comparer matching the archive root's case behavior.</returns>
+    internal static StringComparer ResolvePhysicalPathComparer(
+        string rootPath,
+        Func<string, bool> fileExists,
+        Func<string, IEnumerable<string>> enumerateFileSystemEntries)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        ArgumentNullException.ThrowIfNull(fileExists);
+        ArgumentNullException.ThrowIfNull(enumerateFileSystemEntries);
+        var fullRootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+        int matchingEntryCount;
+        try
+        {
+            matchingEntryCount = enumerateFileSystemEntries(fullRootPath)
+                .Select(Path.GetFileName)
+                .Where(entryName => string.Equals(entryName, ReleaseManifestFileName, StringComparison.OrdinalIgnoreCase))
+                .Take(2)
+                .Count();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return StringComparer.Ordinal;
+        }
+
+        if (matchingEntryCount != 1)
+        {
+            return StringComparer.Ordinal;
+        }
+
+        var alternateManifestFileName = ReleaseManifestFileName[..^1] + 'N';
+        try
+        {
+            return fileExists(Path.Join(fullRootPath, alternateManifestFileName))
+                ? StringComparer.OrdinalIgnoreCase
+                : StringComparer.Ordinal;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return StringComparer.Ordinal;
+        }
     }
 
     private static bool TryEnumerateOrdinaryServeableFiles(

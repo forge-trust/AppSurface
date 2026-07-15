@@ -125,8 +125,12 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
         Assert.Contains("Tagged", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
 
         await page.GotoAsync($"{_fixture.DocsUrl}/releases/v0.1-preview");
-        await WaitForPathAsync(page, "/docs/releases/v0.1.0-rc.4");
-        Assert.Equal("Release 0.1.0-rc.4", (await page.TextContentAsync("h1"))?.Trim());
+        await WaitForPathAsync(page, "/docs/releases/v0.1.0");
+        Assert.Equal("Release 0.1.0", (await page.TextContentAsync("h1"))?.Trim());
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/releases/v0.1.0-rc.4");
+        await WaitForPathAsync(page, "/docs/releases/v0.1.0");
+        Assert.Equal("Release 0.1.0", (await page.TextContentAsync("h1"))?.Trim());
 
         await page.GotoAsync($"{_fixture.DocsUrl}/releases");
         await page.Locator(".docs-content a[href='/docs/releases/unreleased']").First.ClickAsync();
