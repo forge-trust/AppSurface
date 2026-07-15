@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0",
+  "environment": "Staging",
+  "project": "example-project",
+  "region": "us-central1",
+  "jobs": {
+    "example-migrations": "example-migrations-staging"
+  },
+  "cloudSqlInstanceConnectionName": "example-project:us-central1:example-db",
+  "network": {
+    "network": "projects/example-project/global/networks/example-private",
+    "subnetwork": "projects/example-project/regions/us-central1/subnetworks/example-private",
+    "egress": "PRIVATE_RANGES_ONLY"
+  },
+  "serviceAccounts": {
+    "example-migrations": "example-migrations@example-project.iam.gserviceaccount.com"
+  },
+  "secrets": {
+    "example-connection": {
+      "secretId": "example-connection",
+      "versionMode": "latest"
+    }
+  }
+}
