@@ -36,7 +36,15 @@ internal sealed class DefaultSecretPromotionGoogleClientFactory(IAppSurfaceGoogl
             {
                 return GoogleSecretManagerTransferClientAdapter.FromCredentialFile(credentialFilePath);
             }
-            catch (Exception)
+            catch (IOException)
+            {
+                throw SecretPromotionCommandExtensions.Usage("Google credentialFile could not be loaded.");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                throw SecretPromotionCommandExtensions.Usage("Google credentialFile could not be loaded.");
+            }
+            catch (InvalidOperationException)
             {
                 throw SecretPromotionCommandExtensions.Usage("Google credentialFile could not be loaded.");
             }
