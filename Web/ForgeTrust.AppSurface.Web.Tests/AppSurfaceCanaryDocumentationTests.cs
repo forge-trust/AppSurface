@@ -18,8 +18,21 @@ public sealed class AppSurfaceCanaryDocumentationTests
         Assert.Contains("AppSurfaceCanaryCompletedResponseMode.AlwaysOk", readme, StringComparison.Ordinal);
         Assert.Contains("caller triggers synthetic work", readme, StringComparison.Ordinal);
         Assert.Contains("issues/645", readme, StringComparison.Ordinal);
+        Assert.Contains("compile-only evaluator skeleton", readme, StringComparison.Ordinal);
+        Assert.Contains("The placeholder always returns `Pending`", readme, StringComparison.Ordinal);
         Assert.Contains("protected preview named deploy evidence", packageIndex, StringComparison.Ordinal);
         Assert.Contains("protected preview named deploy evidence", generatedChooser, StringComparison.Ordinal);
-        Assert.Contains("preview named canary evaluation", unreleased, StringComparison.Ordinal);
+        Assert.Contains(
+            "[protected preview named deploy evidence](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints)",
+            packageIndex,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[protected preview named deploy evidence](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints)",
+            generatedChooser,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[`ForgeTrust.AppSurface.Web` named canary evaluation](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints)",
+            unreleased,
+            StringComparison.Ordinal);
     }
 }

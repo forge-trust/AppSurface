@@ -9,6 +9,8 @@ namespace ForgeTrust.AppSurface.Web;
 /// </remarks>
 public sealed class AppSurfaceCanaryRegistrationOptions
 {
+    /// <summary>Initializes registration options with the exact canary name as the default display name.</summary>
+    /// <param name="name">The previously validated non-null registration name.</param>
     internal AppSurfaceCanaryRegistrationOptions(string name)
     {
         DisplayName = name;

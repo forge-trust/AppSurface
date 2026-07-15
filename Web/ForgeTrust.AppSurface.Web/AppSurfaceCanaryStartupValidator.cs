@@ -13,11 +13,17 @@ internal sealed class AppSurfaceCanaryStartupValidator : IStartupFilter
     private const string ReservedPrefix = "/_appsurface/canaries";
     private readonly AppSurfaceCanaryMappingState _mappingState;
 
+    /// <summary>Initializes the validator over the process-wide mapping state.</summary>
+    /// <param name="mappingState">The mapping state that exposes captured endpoint data sources after mapping.</param>
     public AppSurfaceCanaryStartupValidator(AppSurfaceCanaryMappingState mappingState)
     {
         _mappingState = mappingState;
     }
 
+    /// <summary>Appends reserved-route validation after the host finishes composing its pipeline.</summary>
+    /// <param name="next">The remaining startup-filter pipeline.</param>
+    /// <returns>A pipeline action that invokes <paramref name="next"/> before validating final endpoints.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="next"/> is <see langword="null"/>.</exception>
     public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
     {
         ArgumentNullException.ThrowIfNull(next);
@@ -29,6 +35,11 @@ internal sealed class AppSurfaceCanaryStartupValidator : IStartupFilter
         };
     }
 
+    /// <summary>
+    /// Validates that the framework route retained its fixed location and that no host route overlaps the reserved
+    /// named-canary namespace. The method is inactive before mapping captures endpoint data sources.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The framework route was relocated or another route overlaps the reserved namespace.</exception>
     internal void Validate()
     {
         var dataSources = _mappingState.DataSources;
@@ -65,6 +76,9 @@ internal sealed class AppSurfaceCanaryStartupValidator : IStartupFilter
         }
     }
 
+    /// <summary>Normalizes a defensive route value for ordinal reserved-namespace comparison.</summary>
+    /// <param name="route">The possibly blank route text.</param>
+    /// <returns>A leading-slash route with trailing slashes removed, or <c>/</c> for a blank value.</returns>
     internal static string Normalize(string? route)
     {
         var value = string.IsNullOrWhiteSpace(route) ? "/" : route.Trim();

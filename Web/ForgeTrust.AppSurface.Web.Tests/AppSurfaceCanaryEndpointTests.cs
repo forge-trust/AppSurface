@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Security.Claims;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
@@ -55,6 +56,111 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.Equal("configure", modeException.ParamName);
         Assert.StartsWith("ASCAN116", modeException.Message, StringComparison.Ordinal);
         Assert.NotNull(invalidMode.MapAppSurfaceCanaries(PolicyName));
+    }
+
+    [Fact]
+    public void MapAppSurfaceCanaries_FallsBackWhenContainerDoesNotExposeServiceProbe()
+    {
+        using var app = BuildUnstartedApp(addCanary: true, addAuthorization: true);
+        var services = new FilteringServiceProvider(
+            app.Services,
+            typeof(IServiceProviderIsService));
+        var endpoints = new TestEndpointRouteBuilder(
+            services,
+            ((IEndpointRouteBuilder)app).DataSources);
+
+        Assert.Null(services.GetService(typeof(IServiceProviderIsService)));
+
+        var builder = endpoints.MapAppSurfaceCanaries(PolicyName);
+
+        Assert.NotNull(builder);
+        Assert.Single(GetRouteEndpoints(endpoints));
+    }
+
+    [Fact]
+    public void MapAppSurfaceCanaries_FallbackRejectsIncompleteAuthorizationServices()
+    {
+        var services = new ServiceCollection();
+        services.AddRouting();
+        ConfigureAuthorization(services);
+        var policyProvider = Assert.Single(
+            services,
+            descriptor => descriptor.ServiceType == typeof(IAuthorizationPolicyProvider));
+        Assert.True(services.Remove(policyProvider));
+        services.AddSingleton(new EvaluationState(AppSurfaceCanaryStatus.Pass));
+        services.AddAppSurfaceCanary<TestEvaluator>(Name);
+        using var provider = services.BuildServiceProvider(
+            new ServiceProviderOptions
+            {
+                ValidateOnBuild = false,
+                ValidateScopes = true,
+            });
+        var filteredProvider = new FilteringServiceProvider(
+            provider,
+            typeof(IServiceProviderIsService));
+        var endpoints = new TestEndpointRouteBuilder(
+            filteredProvider,
+            []);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            endpoints.MapAppSurfaceCanaries(PolicyName));
+
+        Assert.StartsWith("ASCAN113", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(GetRouteEndpoints(endpoints));
+    }
+
+    [Fact]
+    public void MapAppSurfaceCanaries_FallbackFailsClosedWithoutScopeFactoryOrAuthorization()
+    {
+        using var completeApp = BuildUnstartedApp(addCanary: true, addAuthorization: true);
+        var noScopeEndpoints = new TestEndpointRouteBuilder(
+            new FilteringServiceProvider(
+                completeApp.Services,
+                typeof(IServiceProviderIsService),
+                typeof(IServiceScopeFactory)),
+            ((IEndpointRouteBuilder)completeApp).DataSources);
+
+        var noScopeException = Assert.Throws<InvalidOperationException>(() =>
+            noScopeEndpoints.MapAppSurfaceCanaries(PolicyName));
+
+        Assert.StartsWith("ASCAN113", noScopeException.Message, StringComparison.Ordinal);
+        Assert.Empty(GetRouteEndpoints(noScopeEndpoints));
+
+        using var noAuthorizationApp = BuildUnstartedApp(addCanary: true, addAuthorization: false);
+        var noAuthorizationEndpoints = new TestEndpointRouteBuilder(
+            new FilteringServiceProvider(
+                noAuthorizationApp.Services,
+                typeof(IServiceProviderIsService)),
+            ((IEndpointRouteBuilder)noAuthorizationApp).DataSources);
+
+        var noAuthorizationException = Assert.Throws<InvalidOperationException>(() =>
+            noAuthorizationEndpoints.MapAppSurfaceCanaries(PolicyName));
+
+        Assert.StartsWith("ASCAN113", noAuthorizationException.Message, StringComparison.Ordinal);
+        Assert.Empty(GetRouteEndpoints(noAuthorizationEndpoints));
+    }
+
+    [Fact]
+    public void MapAppSurfaceCanaries_FallbackResolvesAuthorizationInsideScope()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.Host.UseDefaultServiceProvider(options => options.ValidateScopes = true);
+        ConfigureAuthorization(builder.Services);
+        builder.Services.AddScoped<IAuthorizationHandler, ScopedAuthorizationHandler>();
+        builder.Services.AddSingleton(new EvaluationState(AppSurfaceCanaryStatus.Pass));
+        builder.Services.AddAppSurfaceCanary<TestEvaluator>(Name);
+        using var app = builder.Build();
+        var services = new FilteringServiceProvider(
+            app.Services,
+            typeof(IServiceProviderIsService));
+        var endpoints = new TestEndpointRouteBuilder(
+            services,
+            ((IEndpointRouteBuilder)app).DataSources);
+
+        var endpoint = endpoints.MapAppSurfaceCanaries(PolicyName);
+
+        Assert.NotNull(endpoint);
+        Assert.Single(GetRouteEndpoints(endpoints));
     }
 
     [Fact]
@@ -488,6 +594,16 @@ public sealed class AppSurfaceCanaryEndpointTests
         var oversized = HeaderContext(AppSurfaceCanaryHeaderNames.Marker, new string('é', 129));
         Assert.False(AppSurfaceCanaryEndpointRouteBuilderExtensions.TryReadMarker(oversized, false, out _, out _));
 
+        var atLimit = HeaderContext(AppSurfaceCanaryHeaderNames.Marker, new string('é', 128));
+        Assert.True(AppSurfaceCanaryEndpointRouteBuilderExtensions.TryReadMarker(
+            atLimit,
+            false,
+            out var atLimitMarker,
+            out var atLimitProblem));
+        Assert.Equal(new string('é', 128), atLimitMarker);
+        Assert.Equal(256, Encoding.UTF8.GetByteCount(atLimitMarker!));
+        Assert.Null(atLimitProblem);
+
         var repeatedFreshness = HeaderContext(
             AppSurfaceCanaryHeaderNames.FreshSince,
             ["2026-07-12T08:09:10Z", "2026-07-12T08:09:11Z"]);
@@ -596,6 +712,33 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.DoesNotContain(loggerProvider.Entries, entry => entry.EventId.Id == 62301);
     }
 
+    [Fact]
+    public async Task Endpoint_FailsClosedWithoutSelectedEndpointOrRouteName()
+    {
+        var builder = WebApplication.CreateBuilder();
+        ConfigureAuthorization(builder.Services);
+        var state = new EvaluationState(AppSurfaceCanaryStatus.Pass);
+        builder.Services.AddSingleton(state);
+        builder.Services.AddAppSurfaceCanary<TestEvaluator>(Name);
+        await using var app = builder.Build();
+        app.MapAppSurfaceCanaries(PolicyName);
+        var endpoint = Assert.Single(GetRouteEndpoints(app));
+        await using var scope = app.Services.CreateAsyncScope();
+
+        var missingEndpoint = CreateHttpContext(scope.ServiceProvider);
+        await endpoint.RequestDelegate!(missingEndpoint);
+        Assert.Equal(StatusCodes.Status500InternalServerError, missingEndpoint.Response.StatusCode);
+        Assert.Contains("ASCAN113", await ReadBodyAsync(missingEndpoint), StringComparison.Ordinal);
+
+        var missingRouteName = CreateHttpContext(scope.ServiceProvider);
+        missingRouteName.SetEndpoint(endpoint);
+        await endpoint.RequestDelegate(missingRouteName);
+        Assert.Equal(StatusCodes.Status404NotFound, missingRouteName.Response.StatusCode);
+        Assert.Contains("ASCAN203", await ReadBodyAsync(missingRouteName), StringComparison.Ordinal);
+
+        Assert.Equal(0, state.InvocationCount);
+    }
+
     [Theory]
     [InlineData("/_appsurface/canaries")]
     [InlineData("/_appsurface/canaries/special")]
@@ -675,7 +818,7 @@ public sealed class AppSurfaceCanaryEndpointTests
     }
 
     [Fact]
-    public async Task StartupValidator_IsInactiveUntilCanaryRouteIsMapped()
+    public void StartupValidator_IsInactiveUntilCanaryRouteIsMapped()
     {
         var validator = new AppSurfaceCanaryStartupValidator(new AppSurfaceCanaryMappingState());
         var nextInvoked = false;
@@ -940,11 +1083,14 @@ public sealed class AppSurfaceCanaryEndpointTests
         return context;
     }
 
-    private static DefaultHttpContext CreateHttpContext()
+    private static DefaultHttpContext CreateHttpContext() =>
+        CreateHttpContext(new ServiceCollection().AddLogging().BuildServiceProvider());
+
+    private static DefaultHttpContext CreateHttpContext(IServiceProvider requestServices)
     {
         var context = new DefaultHttpContext
         {
-            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+            RequestServices = requestServices,
         };
         context.Response.Body = new MemoryStream();
         return context;
@@ -984,6 +1130,27 @@ public sealed class AppSurfaceCanaryEndpointTests
             await host.StopAsync();
             host.Dispose();
         }
+    }
+
+    private sealed class FilteringServiceProvider(
+        IServiceProvider inner,
+        params Type[] hiddenServices) : IServiceProvider
+    {
+        private readonly HashSet<Type> _hiddenServices = hiddenServices.ToHashSet();
+
+        public object? GetService(Type serviceType) =>
+            _hiddenServices.Contains(serviceType) ? null : inner.GetService(serviceType);
+    }
+
+    private sealed class TestEndpointRouteBuilder(
+        IServiceProvider serviceProvider,
+        ICollection<EndpointDataSource> dataSources) : IEndpointRouteBuilder
+    {
+        public IServiceProvider ServiceProvider { get; } = serviceProvider;
+
+        public ICollection<EndpointDataSource> DataSources { get; } = dataSources;
+
+        public IApplicationBuilder CreateApplicationBuilder() => new ApplicationBuilder(ServiceProvider);
     }
 
     private sealed class RecordingLoggerProvider : ILoggerProvider
@@ -1139,6 +1306,11 @@ public sealed class AppSurfaceCanaryEndpointTests
 
         public Task<AuthorizationPolicy?> GetFallbackPolicyAsync() =>
             Task.FromResult<AuthorizationPolicy?>(null);
+    }
+
+    private sealed class ScopedAuthorizationHandler : IAuthorizationHandler
+    {
+        public Task HandleAsync(AuthorizationHandlerContext context) => Task.CompletedTask;
     }
 }
 

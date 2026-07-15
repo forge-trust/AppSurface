@@ -149,7 +149,8 @@ This path assumes the host already has authentication. If it does not, first cho
 the [AppSurface Auth adoption ladder](../../Auth/ForgeTrust.AppSurface.Auth/README.md). Named canaries never install an
 authentication scheme or define who an operator is.
 
-Implement one typed evaluator. It inspects existing proof and must not trigger the workflow:
+Start from this compile-only evaluator skeleton. Replace its placeholder result with an application-owned lookup that
+uses `context.Marker` and `context.FreshSince`; the evaluator must inspect existing proof and must not trigger the workflow:
 
 <!-- appsurface:snippet id="appsurface-canary-evaluator" file="Web/ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture/NamedCanaryPublicApiFixture.cs" marker="appsurface-canary-evaluator" lang="csharp" -->
 ```csharp
@@ -161,13 +162,18 @@ public sealed class ForwardingCanaryEvaluator : IAppSurfaceCanaryEvaluator
         AppSurfaceCanaryEvaluationContext context,
         CancellationToken cancellationToken)
     {
-        // Query application-owned proof using context.Marker and context.FreshSince.
+        // Compile-only placeholder: query application-owned proof using context.Marker and context.FreshSince.
         return ValueTask.FromResult(
             new AppSurfaceCanaryResult(AppSurfaceCanaryStatus.Pending));
     }
 }
 ```
 <!-- /appsurface:snippet -->
+
+The placeholder always returns `Pending` and is not a working deploy proof. Replace it with your application-owned query:
+return `Pass` when matching proof at or after the requested freshness boundary is acceptable, `Pending` while matching proof
+may still arrive, `Fail` for a completed negative outcome, `Stale` for proof older than the boundary, and `NotConfigured` when
+the proof dependency is intentionally unavailable.
 
 Register the evaluator and require the inputs your proof query needs. Registration alone exposes no route:
 

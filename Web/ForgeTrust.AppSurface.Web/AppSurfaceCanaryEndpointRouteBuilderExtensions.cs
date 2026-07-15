@@ -68,10 +68,7 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
                 "ASCAN112: No named canaries are registered. Call AddAppSurfaceCanary<TEvaluator> before mapping the endpoint.");
         }
 
-        var serviceProbe = services.GetService<IServiceProviderIsService>();
-        if (serviceProbe is null
-            || !serviceProbe.IsService(typeof(IAuthorizationService))
-            || !serviceProbe.IsService(typeof(IAuthorizationPolicyProvider)))
+        if (!HasAuthorizationServices(services))
         {
             throw new InvalidOperationException(
                 "ASCAN113: ASP.NET Core authorization services are unavailable. Register authorization and a host-owned policy before mapping named canaries.");
@@ -109,6 +106,33 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
             .RequireAuthorization(authorizationPolicyName);
     }
 
+    private static bool HasAuthorizationServices(IServiceProvider services)
+    {
+        var serviceProbe = services.GetService<IServiceProviderIsService>();
+        if (serviceProbe is not null)
+        {
+            return serviceProbe.IsService(typeof(IAuthorizationService))
+                && serviceProbe.IsService(typeof(IAuthorizationPolicyProvider));
+        }
+
+        var scopeFactory = services.GetService<IServiceScopeFactory>();
+        if (scopeFactory is null)
+        {
+            return false;
+        }
+
+        using var scope = scopeFactory.CreateScope();
+        try
+        {
+            return scope.ServiceProvider.GetService<IAuthorizationService>() is not null
+                && scope.ServiceProvider.GetService<IAuthorizationPolicyProvider>() is not null;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     private static async Task HandleRequestAsync(
         HttpContext httpContext,
         AppSurfaceCanaryCompletedResponseMode responseMode,
@@ -133,7 +157,7 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         }
 
         SetNoStoreHeaders(httpContext);
-        var name = Convert.ToString(httpContext.Request.RouteValues["name"], CultureInfo.InvariantCulture) ?? string.Empty;
+        var name = httpContext.Request.RouteValues["name"] as string ?? string.Empty;
         var runner = httpContext.RequestServices.GetRequiredService<AppSurfaceCanaryEvaluationRunner>();
         if (!runner.TryGetDescriptor(name, out var descriptor))
         {
@@ -209,6 +233,17 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
             .ExecuteAsync(httpContext);
     }
 
+    /// <summary>
+    /// Reads the optional marker header and enforces the named-canary marker profile.
+    /// </summary>
+    /// <param name="httpContext">The request whose marker header is inspected.</param>
+    /// <param name="required">Whether a missing or blank marker is invalid.</param>
+    /// <param name="marker">The single nonblank marker value when one was supplied; otherwise <see langword="null"/>.</param>
+    /// <param name="problem">The safe 400 response when validation fails; otherwise <see langword="null"/>.</param>
+    /// <returns>
+    /// <see langword="true"/> when the optional value is absent or one valid value of at most 256 UTF-8 bytes is
+    /// present; otherwise <see langword="false"/>. Repeated values and control characters are rejected.
+    /// </returns>
     internal static bool TryReadMarker(
         HttpContext httpContext,
         bool required,
@@ -248,6 +283,17 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         return true;
     }
 
+    /// <summary>
+    /// Reads the optional freshness header using the strict named-canary RFC 3339 profile.
+    /// </summary>
+    /// <param name="httpContext">The request whose freshness header is inspected.</param>
+    /// <param name="required">Whether a missing or blank freshness boundary is invalid.</param>
+    /// <param name="freshSince">The parsed timestamp normalized to UTC when supplied; otherwise <see langword="null"/>.</param>
+    /// <param name="problem">The safe 400 response when validation fails; otherwise <see langword="null"/>.</param>
+    /// <returns>
+    /// <see langword="true"/> when the optional value is absent or exactly one strict RFC 3339 timestamp with a
+    /// <c>Z</c> or numeric offset and at most seven fractional digits is present; otherwise <see langword="false"/>.
+    /// </returns>
     internal static bool TryReadFreshSince(
         HttpContext httpContext,
         bool required,
@@ -320,6 +366,10 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         httpContext.Response.Headers.Pragma = "no-cache";
     }
 
+    /// <summary>Maps a defined canary status to its stable lowercase wire value.</summary>
+    /// <param name="status">The status to map.</param>
+    /// <returns>The stable JSON status text.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="status"/> is undefined.</exception>
     internal static string ToWireStatus(AppSurfaceCanaryStatus status) => status switch
     {
         AppSurfaceCanaryStatus.Pass => "pass",
@@ -330,6 +380,9 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, "The AppSurface canary status must be defined."),
     };
 
+    /// <summary>Determines whether an evaluator failure can be converted into a safe package-owned problem response.</summary>
+    /// <param name="exception">The exception raised during evaluator activation or execution.</param>
+    /// <returns><see langword="false"/> for fatal process/runtime exceptions; otherwise <see langword="true"/>.</returns>
     internal static bool IsNonFatalEvaluationFailure(Exception exception) =>
         exception is not OutOfMemoryException
             and not StackOverflowException

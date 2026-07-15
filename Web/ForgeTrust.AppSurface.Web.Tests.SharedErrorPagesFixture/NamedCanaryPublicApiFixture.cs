@@ -18,7 +18,7 @@ public sealed class ForwardingCanaryEvaluator : IAppSurfaceCanaryEvaluator
         AppSurfaceCanaryEvaluationContext context,
         CancellationToken cancellationToken)
     {
-        // Query application-owned proof using context.Marker and context.FreshSince.
+        // Compile-only placeholder: query application-owned proof using context.Marker and context.FreshSince.
         return ValueTask.FromResult(
             new AppSurfaceCanaryResult(AppSurfaceCanaryStatus.Pending));
     }
