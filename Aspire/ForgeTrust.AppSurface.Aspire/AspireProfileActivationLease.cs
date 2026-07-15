@@ -117,14 +117,14 @@ internal static class AspireProfileActivator
             cancellationToken.ThrowIfCancellationRequested();
             return new AspireProfileActivationLease<TProfile>(host, profile);
         }
-        catch (Exception primaryException)
+        catch (Exception primaryException) when (!AspireExceptionUtilities.IsProcessFatal(primaryException))
         {
             ILogger? cleanupLogger = null;
             try
             {
                 cleanupLogger = host.Services.GetService<ILoggerFactory>()?.CreateLogger(typeof(AspireProfileActivator));
             }
-            catch
+            catch (Exception loggingException) when (!AspireExceptionUtilities.IsProcessFatal(loggingException))
             {
                 // Logging is best-effort and must not interfere with cleanup.
             }
@@ -133,7 +133,7 @@ internal static class AspireProfileActivator
             {
                 await AspireProfileActivationLease<TProfile>.DisposeHostAsync(host).ConfigureAwait(false);
             }
-            catch (Exception cleanupException)
+            catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
             {
                 try
                 {
@@ -142,7 +142,7 @@ internal static class AspireProfileActivator
                         "Aspire profile host cleanup failed while preserving {PrimaryExceptionType}.",
                         primaryException.GetType().FullName);
                 }
-                catch
+                catch (Exception loggingException) when (!AspireExceptionUtilities.IsProcessFatal(loggingException))
                 {
                     // Cleanup diagnostics never replace the primary activation or cancellation failure.
                 }

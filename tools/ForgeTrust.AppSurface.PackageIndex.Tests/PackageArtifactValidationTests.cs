@@ -4533,6 +4533,82 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task PackagePublishWorkflow_RejectsReadinessBlockedPackageBeforeReadingOrPushingArtifacts()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                release_status: public_preview
+                commercial_status: commercial_ready
+                release_notes_path: releases/unreleased.md
+                order: 5
+                use_when: Host an AppSurface web application.
+                includes: Web hosting.
+                does_not_include: Aspire profile testing.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                release_status: public_preview
+                commercial_status: commercial_ready
+                release_notes_path: releases/unreleased.md
+                readiness_blocker: "#642"
+                order: 10
+                use_when: Test typed AppSurface Aspire profiles.
+                includes: Typed testing builder.
+                does_not_include: Native AppHost replacement.
+                start_here_path: Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md
+            """);
+        const string projectPath = "Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj";
+        const string webProjectPath = "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj";
+        await WriteFileAsync(projectPath, "<Project />");
+        await WriteFileAsync(webProjectPath, "<Project />");
+        await WriteFileAsync("Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md", "# Aspire Testing");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("releases/unreleased.md", "# Unreleased");
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var commandRunner = new RecordingExternalCommandRunner([]);
+        var workflow = new PackagePublishWorkflow(
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                [projectPath] = CreateMetadata(projectPath, "ForgeTrust.AppSurface.Aspire.Testing"),
+                [webProjectPath] = CreateMetadata(webProjectPath, "ForgeTrust.AppSurface.Web")
+            }),
+            new PackageArtifactManifestReader(),
+            commandRunner,
+            new PackagePublishLedgerRenderer());
+        Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", "secret");
+
+        try
+        {
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() => workflow.RunAsync(
+                new PackagePublishRequest(
+                    _repositoryRoot,
+                    ManifestPath,
+                    artifactDirectory,
+                    CombineSafeChildPath(artifactDirectory, "missing-package-artifact-manifest.json"),
+                    CombineSafeChildPath(artifactDirectory, "publish.md"),
+                    "https://api.nuget.org/v3/index.json",
+                    "PACKAGE_INDEX_TEST_NUGET_API_KEY"),
+                CancellationToken.None));
+
+            Assert.Contains("ForgeTrust.AppSurface.Aspire.Testing (#642)", error.Message, StringComparison.Ordinal);
+            Assert.Contains("readiness_blocker", error.Message, StringComparison.Ordinal);
+            Assert.Empty(commandRunner.Requests);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", null);
+        }
+    }
+
+    [Fact]
     public async Task PackagePublishWorkflow_StopsAfterFirstPublishFailure()
     {
         await WriteFileAsync("packages/package-index.yml",

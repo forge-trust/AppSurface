@@ -69,7 +69,8 @@ internal sealed class PackagePublishPlanResolver
                     entry.Manifest.PublishDecision!.Value,
                     entry.Manifest.ExpectedDependencyPackageIds.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
                     entry.Metadata.IsTool,
-                    entry.Manifest.ToolCommandName ?? string.Empty))
+                    entry.Manifest.ToolCommandName ?? string.Empty,
+                    entry.Manifest.ReadinessBlocker ?? string.Empty))
                 .ToArray());
     }
 
@@ -196,10 +197,15 @@ internal sealed record PackagePublishPlan(IReadOnlyList<PackagePublishPlanEntry>
 /// Validated command shim token from <c>tool_command_name</c>. It is empty for non-tool packages and required for tool
 /// packages so the pack/publish workflow can carry the exact command name into artifact validation and smoke tests.
 /// </param>
+/// <param name="ReadinessBlocker">
+/// Maintainer blocker that prevents publishing the coordinated artifact set while still allowing artifacts to be packed
+/// and validated.
+/// </param>
 internal sealed record PackagePublishPlanEntry(
     string ProjectPath,
     string PackageId,
     PackagePublishDecision Decision,
     IReadOnlyList<string> ExpectedDependencyPackageIds,
     bool IsTool,
-    string ToolCommandName = "");
+    string ToolCommandName = "",
+    string ReadinessBlocker = "");

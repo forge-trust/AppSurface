@@ -738,7 +738,9 @@
       "forgetrust.appsurface.aspire.testing": {
         "type": "Project",
         "dependencies": {
-          "Aspire.Hosting.Testing": "[13.4.4, )",
+          "Aspire.Hosting": "[13.4.4, 13.4.4]",
+          "Aspire.Hosting.AppHost": "[13.4.4, 13.4.4]",
+          "Aspire.Hosting.Testing": "[13.4.4, 13.4.4]",
           "ForgeTrust.AppSurface.Aspire": "[0.1.0, )"
         }
       },

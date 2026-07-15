@@ -306,6 +306,39 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     }
 
     [Fact]
+    public async Task BuildAsync_ProcessFatalCleanupFailurePropagatesAndLeavesTerminalState()
+    {
+        var inner = A.Fake<IDistributedApplicationBuilder>();
+        A.CallTo(() => inner.Build()).Throws(new InvalidOperationException("primary build failure"));
+        var activation = new AsyncOnlyDisposalProbe(new OutOfMemoryException("fatal cleanup failure"));
+        var builder = CreateTestingBuilder(inner, activation);
+
+        var exception = await Assert.ThrowsAsync<OutOfMemoryException>(() => builder.BuildAsync());
+
+        Assert.Equal("fatal cleanup failure", exception.Message);
+        Assert.Equal(1, activation.DisposeCount);
+        await builder.DisposeAsync();
+        Assert.Throws<ObjectDisposedException>(() => _ = builder.Configuration);
+    }
+
+    [Fact]
+    public async Task BuildAsync_ProcessFatalPrimaryFailurePropagatesAndLeavesDisposableTerminalState()
+    {
+        var inner = A.Fake<IDistributedApplicationBuilder>();
+        A.CallTo(() => inner.Build()).Throws(new OutOfMemoryException("fatal build failure"));
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = CreateTestingBuilder(inner, activation);
+
+        var exception = await Assert.ThrowsAsync<OutOfMemoryException>(() => builder.BuildAsync());
+
+        Assert.Equal("fatal build failure", exception.Message);
+        Assert.Equal(0, activation.DisposeCount);
+        await builder.DisposeAsync();
+        Assert.Equal(1, activation.DisposeCount);
+        Assert.Throws<ObjectDisposedException>(() => _ = builder.Configuration);
+    }
+
+    [Fact]
     public async Task BuildAsync_FailureCleanupRemainsInProgressUntilActivationDisposalCompletes()
     {
         var inner = A.Fake<IDistributedApplicationBuilder>();
@@ -352,8 +385,8 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     [Fact]
     public async Task DisposeDuringBuild_IsRejectedUntilBuildFailureSettles()
     {
-        var enteredBuild = new ManualResetEventSlim();
-        var releaseBuild = new ManualResetEventSlim();
+        using var enteredBuild = new ManualResetEventSlim();
+        using var releaseBuild = new ManualResetEventSlim();
         var inner = A.Fake<IDistributedApplicationBuilder>();
         var activation = A.Fake<IAsyncDisposable>();
         A.CallTo(() => inner.Build()).ReturnsLazily(() =>
@@ -418,6 +451,34 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         await Assert.ThrowsAsync<CleanupException>(() => builder.DisposeAsync().AsTask());
         await Assert.ThrowsAsync<CleanupException>(() => builder.DisposeAsync().AsTask());
 
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_ProcessFatalFailurePropagatesAndIsSharedWithRepeatedCallers()
+    {
+        var activation = new AsyncOnlyDisposalProbe(new OutOfMemoryException("fatal disposal failure"));
+        var builder = CreateTestingBuilder(A.Fake<IDistributedApplicationBuilder>(), activation);
+
+        var ownerException = await Assert.ThrowsAsync<OutOfMemoryException>(() => builder.DisposeAsync().AsTask());
+        var repeatedException = await Assert.ThrowsAsync<OutOfMemoryException>(() => builder.DisposeAsync().AsTask());
+
+        Assert.Equal("fatal disposal failure", ownerException.Message);
+        Assert.Equal("fatal disposal failure", repeatedException.Message);
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public void Dispose_ProcessFatalFailurePropagatesAndIsSharedWithRepeatedCallers()
+    {
+        var activation = new AsyncOnlyDisposalProbe(new OutOfMemoryException("fatal disposal failure"));
+        var builder = CreateTestingBuilder(A.Fake<IDistributedApplicationBuilder>(), activation);
+
+        var ownerException = Assert.Throws<OutOfMemoryException>(() => builder.Dispose());
+        var repeatedException = Assert.Throws<OutOfMemoryException>(() => builder.Dispose());
+
+        Assert.Equal("fatal disposal failure", ownerException.Message);
+        Assert.Equal("fatal disposal failure", repeatedException.Message);
         Assert.Equal(1, activation.DisposeCount);
     }
 
@@ -631,7 +692,7 @@ public sealed class MissingDirectoryAppHost
     {
     }
 
-    public static string ProjectPath => Path.Combine(AppContext.BaseDirectory, "missing-apphost-directory");
+    public static string ProjectPath => Path.Join(AppContext.BaseDirectory, "missing-apphost-directory");
 }
 
 public sealed class MissingProjectPathAppHost
@@ -934,11 +995,16 @@ public sealed class DualDisposalProbe : IDisposable, IAsyncDisposable
 
 public sealed class AsyncOnlyDisposalProbe : IAsyncDisposable
 {
-    private readonly bool _throwOnDispose;
+    private readonly Exception? _disposeException;
 
     public AsyncOnlyDisposalProbe(bool throwOnDispose = false)
     {
-        _throwOnDispose = throwOnDispose;
+        _disposeException = throwOnDispose ? new CleanupException() : null;
+    }
+
+    public AsyncOnlyDisposalProbe(Exception disposeException)
+    {
+        _disposeException = disposeException;
     }
 
     public int DisposeCount { get; private set; }
@@ -946,8 +1012,8 @@ public sealed class AsyncOnlyDisposalProbe : IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         DisposeCount++;
-        return _throwOnDispose
-            ? ValueTask.FromException(new CleanupException())
+        return _disposeException is not null
+            ? ValueTask.FromException(_disposeException)
             : ValueTask.CompletedTask;
     }
 }

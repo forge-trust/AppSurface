@@ -122,24 +122,35 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
             Volatile.Write(ref _state, Built);
             return application;
         }
-        catch (Exception primaryException)
+        catch (Exception primaryException) when (!AspireExceptionUtilities.IsProcessFatal(primaryException))
         {
-            if (application is not null)
+            try
             {
-                try
+                if (application is not null)
                 {
-                    await application.DisposeAsync().ConfigureAwait(false);
+                    try
+                    {
+                        await application.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
+                    {
+                        // Non-fatal cleanup must not replace the build or cancellation failure.
+                    }
                 }
-                catch
-                {
-                    // Cleanup must not replace the build or cancellation failure.
-                }
+
+                await DisposeActivationAfterFailureAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                Volatile.Write(ref _state, Faulted);
             }
 
-            await DisposeActivationAfterFailureAsync().ConfigureAwait(false);
-            Volatile.Write(ref _state, Faulted);
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(primaryException).Throw();
             throw new InvalidOperationException("Unreachable exception dispatch path.");
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _state, Faulted, Building);
         }
     }
 
@@ -163,34 +174,50 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         Exception? primaryException = null;
         try
         {
-            var application = Interlocked.Exchange(ref _application, null);
-            if (application is not null)
+            try
             {
-                application.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                var application = Interlocked.Exchange(ref _application, null);
+                if (application is not null)
+                {
+                    application.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+            }
+            catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
+            {
+                primaryException = ex;
+            }
+            catch (Exception ex) when (AspireExceptionUtilities.IsProcessFatal(ex))
+            {
+                primaryException = ex;
+                throw;
+            }
+
+            try
+            {
+                if (activation is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+                else if (activation is not null)
+                {
+                    activation.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+            }
+            catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
+            {
+                primaryException ??= ex;
+            }
+            catch (Exception ex) when (AspireExceptionUtilities.IsProcessFatal(ex))
+            {
+                primaryException ??= ex;
+                throw;
             }
         }
-        catch (Exception ex)
+        finally
         {
-            primaryException = ex;
+            CompleteDispose(primaryException);
         }
 
-        try
-        {
-            if (activation is IDisposable disposable)
-            {
-                disposable.Dispose();
-            }
-            else if (activation is not null)
-            {
-                activation.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            }
-        }
-        catch (Exception ex)
-        {
-            primaryException ??= ex;
-        }
-
-        CompleteDispose(primaryException);
         _disposeCompletion.Task.GetAwaiter().GetResult();
     }
 
@@ -212,30 +239,46 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         Exception? primaryException = null;
         try
         {
-            var application = Interlocked.Exchange(ref _application, null);
-            if (application is not null)
+            try
             {
-                await application.DisposeAsync().ConfigureAwait(false);
+                var application = Interlocked.Exchange(ref _application, null);
+                if (application is not null)
+                {
+                    await application.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
+            {
+                primaryException = ex;
+            }
+            catch (Exception ex) when (AspireExceptionUtilities.IsProcessFatal(ex))
+            {
+                primaryException = ex;
+                throw;
+            }
+
+            try
+            {
+                if (activation is not null)
+                {
+                    await activation.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
+            {
+                primaryException ??= ex;
+            }
+            catch (Exception ex) when (AspireExceptionUtilities.IsProcessFatal(ex))
+            {
+                primaryException ??= ex;
+                throw;
             }
         }
-        catch (Exception ex)
+        finally
         {
-            primaryException = ex;
+            CompleteDispose(primaryException);
         }
 
-        try
-        {
-            if (activation is not null)
-            {
-                await activation.DisposeAsync().ConfigureAwait(false);
-            }
-        }
-        catch (Exception ex)
-        {
-            primaryException ??= ex;
-        }
-
-        CompleteDispose(primaryException);
         await _disposeCompletion.Task.ConfigureAwait(false);
     }
 
@@ -330,7 +373,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
             {
                 await activation.DisposeAsync().ConfigureAwait(false);
             }
-            catch
+            catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
             {
                 // A cleanup failure must not replace the build or cancellation failure.
             }

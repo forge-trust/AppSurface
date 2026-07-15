@@ -51,7 +51,7 @@ public static class AppSurfaceAspireTestingBuilder
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
             {
                 throw new InvalidOperationException(
                     $"Profile activation failed for '{typeof(TProfile).FullName}' using module '{typeof(TModule).FullName}'. " +
@@ -79,7 +79,7 @@ public static class AppSurfaceAspireTestingBuilder
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
             {
                 throw new InvalidOperationException(
                     $"Profile composition failed for '{typeof(TProfile).FullName}'. Inspect its dependencies and components.",
@@ -87,16 +87,14 @@ public static class AppSurfaceAspireTestingBuilder
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            var result = new AppSurfaceAspireProfileTestingBuilder(innerBuilder, activation);
-            activation = null;
-            return result;
+            return new AppSurfaceAspireProfileTestingBuilder(innerBuilder, activation);
         }
         catch (OperationCanceledException)
         {
             await DisposeAfterFailureAsync(activation).ConfigureAwait(false);
             throw;
         }
-        catch
+        catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
         {
             await DisposeAfterFailureAsync(activation).ConfigureAwait(false);
             throw;
@@ -161,7 +159,7 @@ public static class AppSurfaceAspireTestingBuilder
         {
             projectPath = (string?)properties[0].GetValue(null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
         {
             throw new InvalidOperationException(
                 $"AppHost marker validation failed for '{markerType.FullName}' because ProjectPath could not be read.",
@@ -179,7 +177,7 @@ public static class AppSurfaceAspireTestingBuilder
         {
             fullPath = Path.GetFullPath(projectPath.Trim());
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
         {
             throw new InvalidOperationException(
                 $"AppHost marker validation failed for '{markerType.FullName}': ProjectPath is invalid.",
@@ -233,7 +231,7 @@ public static class AppSurfaceAspireTestingBuilder
                 ? loggerFactory.CreateLogger(typeof(AppSurfaceAspireTestingBuilder))
                 : null;
         }
-        catch
+        catch (Exception loggingException) when (!AspireExceptionUtilities.IsProcessFatal(loggingException))
         {
             // Logging is best-effort and must not interfere with cleanup.
         }
@@ -242,7 +240,7 @@ public static class AppSurfaceAspireTestingBuilder
         {
             await activation.DisposeAsync().ConfigureAwait(false);
         }
-        catch (Exception cleanupException)
+        catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
         {
             try
             {
@@ -250,7 +248,7 @@ public static class AppSurfaceAspireTestingBuilder
                     cleanupException,
                     "Aspire profile activation cleanup failed while preserving the primary factory failure.");
             }
-            catch
+            catch (Exception loggingException) when (!AspireExceptionUtilities.IsProcessFatal(loggingException))
             {
                 // Cleanup failures never replace the primary activation or composition failure.
             }

@@ -72,7 +72,7 @@ Typed tests support constructor-injected services, `PassThroughArgs`, `GetDepend
 - `Dispose` and `DisposeAsync` are idempotent, and concurrent calls join the same cleanup. Disposal during an in-flight build is rejected; retry after the build task settles. After a successful build, builder disposal provides a fallback that disposes the application before activation services.
 - Cached `Services`, `Configuration`, or resource collections cannot be invalidated. Mutating cached objects after build or disposal is unsupported caller behavior.
 
-Factory validation, activation, composition, build, and cancellation failures remain the primary exception. Cleanup is attempted without replacing that failure. Explicit disposal without another primary failure propagates its cleanup exception.
+Factory validation, activation, composition, build, and cancellation failures remain the primary exception. Non-fatal cleanup failures do not replace that failure; process-fatal exceptions propagate immediately. Explicit disposal without another primary failure propagates its cleanup exception.
 
 ## Troubleshooting
 

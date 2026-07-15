@@ -9,6 +9,30 @@ using Microsoft.Extensions.Logging;
 public partial class AspireProfileTests
 {
     [Fact]
+    public void ActivationLease_SynchronousDisposeUsesHostFallbackOnce()
+    {
+        var host = A.Fake<Microsoft.Extensions.Hosting.IHost>();
+        var profile = new TestProfile(A.Fake<ILogger<TestProfile>>(), [], []);
+        var activation = new AspireProfileActivationLease<TestProfile>(host, profile);
+
+        activation.Dispose();
+        activation.Dispose();
+
+        A.CallTo(() => host.Dispose()).MustHaveHappenedOnceExactly();
+        Assert.Throws<ObjectDisposedException>(() => _ = activation.Services);
+    }
+
+    [Fact]
+    public async Task ActivationLease_StaticAsyncCleanupUsesSynchronousHostFallback()
+    {
+        var host = A.Fake<Microsoft.Extensions.Hosting.IHost>();
+
+        await AspireProfileActivationLease<TestProfile>.DisposeHostAsync(host);
+
+        A.CallTo(() => host.Dispose()).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
     public void PassThroughArgs_DefaultsToEmpty()
     {
         var profile = new TestProfile(A.Fake<ILogger<TestProfile>>(), [], []);

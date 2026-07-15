@@ -303,6 +303,7 @@ internal sealed class PackagePublishWorkflow
         }
 
         var plan = await _planResolver.ResolveAsync(request.RepositoryRoot, request.ManifestPath, cancellationToken);
+        ThrowIfPublicationBlocked(plan);
         var artifactManifest = await _manifestReader.ReadAsync(request.ArtifactManifestPath, cancellationToken);
         var plannedEntries = PackageArtifactManifestPlanValidator.Validate(
             plan,
@@ -367,6 +368,20 @@ internal sealed class PackagePublishWorkflow
 
         var ledger = new PackagePublishLedger(artifactManifest.PackageVersion, request.Source, ledgerEntries);
         return ledger;
+    }
+
+    private static void ThrowIfPublicationBlocked(PackagePublishPlan plan)
+    {
+        var blockedEntries = plan.Entries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.ReadinessBlocker))
+            .Select(entry => $"{entry.PackageId} ({entry.ReadinessBlocker})")
+            .ToArray();
+        if (blockedEntries.Length > 0)
+        {
+            throw new PackageIndexException(
+                $"Package publication is blocked by unresolved readiness evidence: {string.Join(", ", blockedEntries)}. " +
+                "Clear or transfer each packages/package-index.yml readiness_blocker before publishing.");
+        }
     }
 
     private async Task<ExternalCommandResult> RunPushAsync(
