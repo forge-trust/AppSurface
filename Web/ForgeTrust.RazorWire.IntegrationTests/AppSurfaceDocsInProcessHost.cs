@@ -56,17 +56,10 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
     {
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         var builder = AppSurfaceDocsStandaloneHost.CreateBuilder(
-            CreateStandaloneArgs(requestedBaseUrl, repoRoot),
+            CreateHostArgs(requestedBaseUrl, repoRoot),
             DevelopmentEnvironmentProvider.Instance);
 
-        builder.UseContentRoot(repoRoot);
-        builder.ConfigureWebHost(webHost =>
-        {
-            webHost.UseEnvironment(Environments.Development);
-            webHost.UseUrls(requestedBaseUrl);
-        });
-
-        return await StartAsync(builder.Build());
+        return await StartAsync(ConfigureHostBuilder(builder, repoRoot, requestedBaseUrl).Build());
     }
 
     /// <summary>
@@ -80,9 +73,14 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
     {
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         var builder = AppSurfaceDocsConsumerFixtureHost.CreateBuilder(
-            CreateStandaloneArgs(requestedBaseUrl, repoRoot),
+            CreateHostArgs(requestedBaseUrl, repoRoot),
             DevelopmentEnvironmentProvider.Instance);
 
+        return await StartAsync(ConfigureHostBuilder(builder, repoRoot, requestedBaseUrl).Build());
+    }
+
+    private static IHostBuilder ConfigureHostBuilder(IHostBuilder builder, string repoRoot, string requestedBaseUrl)
+    {
         builder.UseContentRoot(repoRoot);
         builder.ConfigureWebHost(webHost =>
         {
@@ -90,7 +88,7 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
             webHost.UseUrls(requestedBaseUrl);
         });
 
-        return await StartAsync(builder.Build());
+        return builder;
     }
 
     /// <summary>
@@ -185,7 +183,7 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
         return uri.GetLeftPart(UriPartial.Authority);
     }
 
-    private static string[] CreateStandaloneArgs(string baseUrl, string repoRoot)
+    private static string[] CreateHostArgs(string baseUrl, string repoRoot)
     {
         return
         [
