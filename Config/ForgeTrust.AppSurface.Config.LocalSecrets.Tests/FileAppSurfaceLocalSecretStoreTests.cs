@@ -90,6 +90,23 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.DoesNotContain("sk_test_secret", probe.ToString(), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Probe_Should_ReturnMissing_WhenOnlyDifferentPropertyExists(bool matchesStorageNamePrefix)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var propertyName = matchesStorageNamePrefix ? identity.StorageName + "-suffix" : "Ignored";
+        var store = CreateProbeStore("{\"" + propertyName + "\":{}}");
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+        Assert.Null(probe.Value);
+    }
+
     [Fact]
     public void Probe_Should_ReturnInvalidStore_WhenMatchedValueIsMissing()
     {
@@ -254,6 +271,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
     public static IEnumerable<object[]> MalformedSkippedValues()
     {
+        yield return ["]"];
         yield return ["\"unterminated"];
         yield return ["\"\\q\""];
         yield return ["\"\\u0X00\""];
@@ -263,7 +281,9 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         yield return ["{\"nested\" 1}"];
         yield return ["{\"nested\":1 \"other\":2}"];
         yield return ["\"control\u0001\""];
+        yield return ["truX"];
         yield return ["truex"];
+        yield return ["-x"];
         yield return ["01"];
         yield return ["1."];
         yield return ["1e+"];
@@ -286,6 +306,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
     [Theory]
     [InlineData("")]
+    [InlineData(" \r\n\t")]
     [InlineData("{}")]
     public void Probe_Should_ReturnMissing_ForEmptyStoreDocuments(string json)
     {
@@ -300,11 +321,13 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
     public static IEnumerable<object[]> MalformedRootDocuments()
     {
+        yield return ["[]"];
         yield return ["{Ignored:{}}"];
         yield return ["{\"Ignored\" {}}"];
         yield return ["{\"Ignored\":{} x}"];
         yield return ["{\"Ignored\":{}} trailing"];
         yield return ["{\"unterminated"];
+        yield return ["{" + "\"" + "\\"];
         yield return ["{\"\\q\":{}}"];
         yield return ["{\"\\u0X00\":{}}"];
         yield return ["{\"control\u0001\":{}}"];
