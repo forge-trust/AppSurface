@@ -305,7 +305,7 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
 
     private static void ValidateJob(SecretPromotionJob job, ResolvedEndpoints endpoints, bool replace)
     {
-        if (string.IsNullOrWhiteSpace(job.Name) || job.Rows is null || job.Rows.Count == 0)
+        if (string.IsNullOrWhiteSpace(job.Name) || job.Rows.Count == 0)
         {
             throw SecretPromotionCommandExtensions.Usage("A promotion job must have a name and at least one row.");
         }
@@ -760,11 +760,6 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
 
     private static void WriteReceipt(SecretPromotionApplyRequest request, SecretPromotionPlanArtifact plan, SecretPromotionSummary summary)
     {
-        if (!request.Apply && summary.Succeeded)
-        {
-            return;
-        }
-
         var path = request.ReceiptPath ?? $"{request.PlanPath}.receipt.json";
         WriteJson(path, new SecretPromotionReceipt(plan.JobName, plan.ConfigDigest, summary.Rows), "--receipt");
     }

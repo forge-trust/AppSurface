@@ -67,6 +67,16 @@ public sealed class ProgramEntryPointTests
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task SecretsTransfer_Should_PrintDeclaredWorkflowGuidance()
+    {
+        var result = await InvokeProgramEntryPointAsync(["secrets", "transfer"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("secrets transfer plan", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("secrets transfer apply --apply", result.AllText, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("plan", "--out")]
     [InlineData("apply", "--plan")]
@@ -88,6 +98,24 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(2, result.ExitCode);
         Assert.Contains(expectedDiagnostic, result.AllText, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("NaN")]
+    [InlineData("0")]
+    [InlineData("61")]
+    public async Task SecretsTransferPlan_Should_RejectInvalidExpiry(string value)
+    {
+        var result = await InvokeProgramEntryPointAsync([
+            "secrets", "transfer", "plan",
+            "--config", "unused.json",
+            "--job", "unused",
+            "--out", "unused.plan.json",
+            "--expires-minutes", value
+        ]);
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains("finite number greater than 0 and at most 60", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -138,6 +166,38 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("Operation: plan; Job: local-to-staging; Mode: dry-run", result.AllText, StringComparison.Ordinal);
         Assert.Contains("SourceMissing: Missing:ApiKey", result.AllText, StringComparison.Ordinal);
         Assert.Contains("Diagnostic: local-secret-promotion-source-missing", result.AllText, StringComparison.Ordinal);
+        Assert.Empty(client.Writes);
+    }
+
+    [Fact]
+    public async Task SecretsTransferApply_Should_ReturnFailure_WhenApplyPreflightChanges()
+    {
+        using var temp = TempDirectory.Create("appsurface-transfer-");
+        var storePath = Path.Join(temp.Path, "secrets.json");
+        var configPath = Path.Join(temp.Path, "promotion.json");
+        var planPath = Path.Join(temp.Path, "promotion.plan.json");
+        await File.WriteAllTextAsync(configPath, """
+            {"version":1,"endpoints":[{"name":"staging","provider":"google","environment":"staging","credential":{"mode":"applicationDefault"}}],"jobs":[{"name":"local-to-staging","source":"local","destination":"staging","rows":[{"key":"Stripe:ApiKey","destination":"projects/staging/secrets/stripe-api-key"}]}]}
+            """);
+        var client = new FakeGoogleSecretTransferClient();
+        client.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var shared = new[] { "--app", "MyApp", "--environment", "Development", "--store-file", storePath };
+
+        var set = await InvokeProgramEntryPointAsync(["secrets", "set", "Stripe:ApiKey", "--stdin", .. shared], standardInput: "sentinel-local-secret\n");
+        var plan = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "plan", "--config", configPath, "--job", "local-to-staging", "--out", planPath, .. shared],
+            options => RegisterGoogleTransferClient(options, client));
+        client.Secrets.Clear();
+
+        var apply = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--apply", .. shared],
+            options => RegisterGoogleTransferClient(options, client));
+
+        Assert.Equal(0, set.ExitCode);
+        Assert.Equal(0, plan.ExitCode);
+        Assert.Equal(1, apply.ExitCode);
+        Assert.Contains("ProbeGoogleDestination", apply.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sentinel-local-secret", apply.AllText, StringComparison.Ordinal);
         Assert.Empty(client.Writes);
     }
 

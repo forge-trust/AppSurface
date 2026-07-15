@@ -269,6 +269,99 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.DoesNotContain("sentinel-local-secret", probe.ToString(), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Probe_Should_ReturnValueSafeFailure_ForPostureInspectionExceptions(bool unauthorized)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(existingFilePosture: () =>
+            {
+                if (unauthorized)
+                {
+                    throw new UnauthorizedAccessException("sentinel-local-secret");
+                }
+
+                throw new IOException("sentinel-local-secret");
+            }));
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(unauthorized ? LocalSecretResultStatus.Locked : LocalSecretResultStatus.Unavailable, probe.Status);
+        Assert.DoesNotContain("sentinel-local-secret", probe.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Probe_Should_ReturnPostureFailure_WhenExistingFileIsUnsupported()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(existingFilePosture: () => FileSecretPostureResult.Unsupported(
+                "local-secret-test-posture",
+                "Local secret test posture failed.",
+                "The test posture is unsupported.",
+                "Use a supported test posture.")));
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, probe.Status);
+        Assert.Equal("local-secret-test-posture", probe.Diagnostic?.Code);
+    }
+
+    [Theory]
+    [MemberData(nameof(ValidEscapedPropertyDocuments))]
+    public void Probe_Should_AcceptEveryJsonPropertyEscape(string json)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var probe = CreateProbeStore(json).Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+    }
+
+    public static IEnumerable<object[]> ValidEscapedPropertyDocuments()
+    {
+        yield return ["{\"\\\"\":{}}"];
+        yield return ["{\"\\\\\":{}}"];
+        yield return ["{\"\\/\":{}}"];
+        yield return ["{\"\\b\":{}}"];
+        yield return ["{\"\\f\":{}}"];
+        yield return ["{\"\\n\":{}}"];
+        yield return ["{\"\\r\":{}}"];
+        yield return ["{\"\\t\":{}}"];
+        yield return ["{\"\\uABCD\":{}}"];
+        yield return ["{\"\\uabcd\":{}}"];
+    }
+
+    [Fact]
+    public void Probe_Should_SkipAllValidStringEscapesAndNumericBoundaries()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var store = CreateProbeStore(
+            "{\"Ignored\":{" +
+            "\"escapes\":\"\\\"\\\\\\/\\b\\f\\n\\r\\t\\uABCD\"," +
+            "\"fraction\":1.09," +
+            "\"unsignedExponent\":1e09," +
+            "\"positiveExponent\":1e+09," +
+            "\"negativeExponent\":1e-09" +
+            "}}");
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+    }
+
     public static IEnumerable<object[]> MalformedSkippedValues()
     {
         yield return ["]"];
@@ -334,6 +427,12 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         yield return ["{\"Ignored\":{\"value\":-"];
         yield return ["{\"Ignored\":{\"value\":\"\\"];
         yield return ["{\"Ignored\":{\"value\":\"\\u0"];
+        yield return ["{\"\\u0"];
+        yield return ["{\"Ignored\":{\"value\":\"unterminated"];
+        yield return ["{\"Ignored\":{\"value\":"];
+        yield return ["{\"Ignored\":{\"value\":1"];
+        yield return ["{\"Ignored\":{\"value\":1."];
+        yield return ["{\"Ignored\":{\"value\":1e"];
     }
 
     private static FileAppSurfaceLocalSecretStore CreateProbeStore(string json) =>

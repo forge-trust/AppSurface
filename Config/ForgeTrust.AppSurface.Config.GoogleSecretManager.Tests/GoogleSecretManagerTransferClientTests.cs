@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using Google.Api.Gax;
 using Google.Api.Gax.Grpc;
 using Google.Cloud.SecretManager.V1;
 using Google.Protobuf;
@@ -8,6 +11,36 @@ namespace ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests;
 
 public sealed class GoogleSecretManagerTransferClientTests
 {
+    [Fact]
+    public void CredentialFileFactory_Should_CreateIsolatedClientFromValidServiceAccountJson()
+    {
+        var path = Path.Join(Path.GetTempPath(), $"appsurface-google-credential-{Guid.NewGuid():N}.json");
+        try
+        {
+            using var rsa = RSA.Create(2048);
+            var json = JsonSerializer.Serialize(new
+            {
+                type = "service_account",
+                project_id = "project",
+                private_key_id = "test-key",
+                private_key = rsa.ExportPkcs8PrivateKeyPem(),
+                client_email = "appsurface-test@project.iam.gserviceaccount.com",
+                client_id = "123",
+                auth_uri = "https://accounts.google.com/o/oauth2/auth",
+                token_uri = "https://oauth2.googleapis.com/token"
+            });
+            File.WriteAllText(path, json);
+
+            var client = GoogleSecretManagerTransferClientAdapter.FromCredentialFile(path);
+
+            Assert.NotNull(client);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void ExplicitClientConstructor_Should_RejectNullAndUseProvidedClient()
     {
@@ -41,6 +74,31 @@ public sealed class GoogleSecretManagerTransferClientTests
             failure == "rpc" ? GoogleSecretManagerTransferStatus.AccessDenied : GoogleSecretManagerTransferStatus.Unavailable,
             result.Status);
         Assert.DoesNotContain("sentinel-secret", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ProbeSecret_Should_ReturnEnabledVersionAvailability(bool hasEnabledVersions)
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(hasEnabledVersions: hasEnabledVersions));
+
+        var result = client.ProbeSecret("projects/project/secrets/api-key", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.Ready, result.Status);
+        Assert.Equal(hasEnabledVersions, result.HasEnabledVersions);
+    }
+
+    [Fact]
+    public void ProbeSecret_Should_MapNullClientFactoryResultValueSafely()
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(() => null!);
+
+        var result = client.ProbeSecret("projects/project/secrets/api-key", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.Unavailable, result.Status);
+        Assert.Equal("google-secret-transfer-unavailable", result.Diagnostic?.Code);
     }
 
     [Fact]
@@ -83,7 +141,9 @@ public sealed class GoogleSecretManagerTransferClientTests
     [Theory]
     [InlineData(StatusCode.InvalidArgument, GoogleSecretManagerTransferStatus.InvalidResource, "google-secret-transfer-invalid-resource")]
     [InlineData(StatusCode.Cancelled, GoogleSecretManagerTransferStatus.Cancelled, "google-secret-transfer-cancelled")]
+    [InlineData(StatusCode.Unauthenticated, GoogleSecretManagerTransferStatus.AccessDenied, "google-secret-transfer-access-denied")]
     [InlineData(StatusCode.Unavailable, GoogleSecretManagerTransferStatus.Unavailable, "google-secret-transfer-unavailable")]
+    [InlineData(StatusCode.DeadlineExceeded, GoogleSecretManagerTransferStatus.Unavailable, "google-secret-transfer-unavailable")]
     [InlineData(StatusCode.Unknown, GoogleSecretManagerTransferStatus.ProviderFailed, "google-secret-transfer-failed")]
     public void ProbeSecretVersion_Should_MapProviderStatusesValueSafely(
         StatusCode statusCode,
@@ -247,11 +307,27 @@ public sealed class GoogleSecretManagerTransferClientTests
         Exception? exception = null,
         SecretVersion.Types.State versionState = SecretVersion.Types.State.Enabled,
         Exception? accessException = null,
-        bool returnNullPayload = false) : SecretManagerServiceClient
+        bool returnNullPayload = false,
+        bool hasEnabledVersions = true) : SecretManagerServiceClient
     {
         public string? LastAddParent { get; private set; }
 
         public ByteString? LastAddPayload { get; private set; }
+
+        public override Secret GetSecret(GetSecretRequest request, CallSettings? callSettings = null)
+        {
+            if (exception != null)
+            {
+                throw exception;
+            }
+
+            return new Secret { Name = request.Name };
+        }
+
+        public override PagedEnumerable<ListSecretVersionsResponse, SecretVersion> ListSecretVersions(
+            ListSecretVersionsRequest request,
+            CallSettings? callSettings = null) =>
+            new SinglePageSecretVersions(hasEnabledVersions);
 
         public override SecretVersion GetSecretVersion(
             GetSecretVersionRequest request,
@@ -298,6 +374,25 @@ public sealed class GoogleSecretManagerTransferClientTests
             LastAddParent = request.Parent;
             LastAddPayload = request.Payload.Data;
             return new SecretVersion { Name = $"{request.Parent}/versions/1" };
+        }
+    }
+
+    private sealed class SinglePageSecretVersions(bool hasEnabledVersions) :
+        PagedEnumerable<ListSecretVersionsResponse, SecretVersion>
+    {
+        public override IEnumerator<SecretVersion> GetEnumerator() =>
+            AsRawResponses().SelectMany(static response => response.Versions).GetEnumerator();
+
+        public override IEnumerable<ListSecretVersionsResponse> AsRawResponses()
+        {
+            var response = new ListSecretVersionsResponse();
+            response.Versions.Add(new SecretVersion
+            {
+                State = hasEnabledVersions
+                    ? SecretVersion.Types.State.Enabled
+                    : SecretVersion.Types.State.Disabled
+            });
+            yield return response;
         }
     }
 }
