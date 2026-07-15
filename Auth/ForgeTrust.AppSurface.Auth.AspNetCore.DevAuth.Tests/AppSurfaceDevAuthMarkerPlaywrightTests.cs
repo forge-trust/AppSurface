@@ -220,8 +220,9 @@ public sealed class AppSurfaceDevAuthMarkerPlaywrightTests : IClassFixture<AppSu
 
 public sealed class AppSurfaceDevAuthMarkerPlaywrightFixture : IAsyncLifetime
 {
-    private static readonly SemaphoreSlim PlaywrightInstallLock = new(1, 1);
-    private static bool _playwrightInstalled;
+    private static readonly Lazy<int> PlaywrightInstall = new(
+        () => Microsoft.Playwright.Program.Main(["install", "chromium"]),
+        LazyThreadSafetyMode.ExecutionAndPublication);
     private IBrowser? _browser;
     private IPlaywright? _playwright;
 
@@ -229,7 +230,7 @@ public sealed class AppSurfaceDevAuthMarkerPlaywrightFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await EnsurePlaywrightInstalledAsync();
+        EnsurePlaywrightInstalled();
         try
         {
             _playwright = await Playwright.CreateAsync();
@@ -259,32 +260,12 @@ public sealed class AppSurfaceDevAuthMarkerPlaywrightFixture : IAsyncLifetime
         playwright?.Dispose();
     }
 
-    private static async Task EnsurePlaywrightInstalledAsync()
+    private static void EnsurePlaywrightInstalled()
     {
-        if (_playwrightInstalled)
+        var exitCode = PlaywrightInstall.Value;
+        if (exitCode != 0)
         {
-            return;
-        }
-
-        await PlaywrightInstallLock.WaitAsync();
-        try
-        {
-            if (_playwrightInstalled)
-            {
-                return;
-            }
-
-            var exitCode = Microsoft.Playwright.Program.Main(["install", "chromium"]);
-            if (exitCode != 0)
-            {
-                throw new InvalidOperationException($"Playwright browser install failed with exit code {exitCode}.");
-            }
-
-            _playwrightInstalled = true;
-        }
-        finally
-        {
-            PlaywrightInstallLock.Release();
+            throw new InvalidOperationException($"Playwright browser install failed with exit code {exitCode}.");
         }
     }
 }
