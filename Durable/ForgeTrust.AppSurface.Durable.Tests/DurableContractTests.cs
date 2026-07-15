@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using ForgeTrust.AppSurface.Durable;
+using ForgeTrust.AppSurface.Durable.Provider;
 using ForgeTrust.AppSurface.Flow;
 using ForgeTrust.AppSurface.Workers;
 using Microsoft.Extensions.DependencyInjection;
@@ -434,7 +435,7 @@ public sealed class DurableContractTests
         Assert.Equal(new TestResult("done"), resultCodec.Decode(encoded));
         Assert.NotNull(executor.Observed);
         Assert.Equal("activity", executor.Observed.ExecutionIdentity!.ActivityId);
-        Assert.Equal("provider-activity", executor.Observed.ExecutionIdentity.ProviderKey);
+        Assert.Equal("activity", executor.Observed.ExecutionIdentity.ProviderKey);
         Assert.Equal(new TestPayload("safe"), executor.Observed.Payload);
     }
 
@@ -509,35 +510,33 @@ public sealed class DurableContractTests
     }
 
     [Fact]
-    public void Claimed_work_rejects_default_ids_and_nonpositive_fences()
+    public void Execution_context_rejects_default_ids()
     {
         var codec = CreateCodec(_ => true);
-        Assert.Throws<ArgumentException>(() => new DurableClaimedWork(
+        Assert.Throws<ArgumentException>(() => new DurableWorkExecutionContext(
             default,
             new DurableWorkId("work"),
-            "activity",
             "test.work",
             "v1",
             codec.Encode(new TestPayload("safe")),
             DurableProviderSafety.ProviderKeyed,
-            1,
-            1,
-            1,
-            "epoch",
-            "provider"));
-        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableClaimedWork(
+            DurableWorkerExecutionIdentity.CreateInitial("activity", 1, 1, "epoch")));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkExecutionContext(
             new DurableScopeId("scope"),
             new DurableWorkId("work"),
-            "activity",
+            "test.work",
+            "v1",
+            codec.Encode(new TestPayload("safe")),
+            (DurableProviderSafety)99,
+            DurableWorkerExecutionIdentity.CreateInitial("activity", 1, 1, "epoch")));
+        Assert.Throws<ArgumentNullException>(() => new DurableWorkExecutionContext(
+            new DurableScopeId("scope"),
+            new DurableWorkId("work"),
             "test.work",
             "v1",
             codec.Encode(new TestPayload("safe")),
             DurableProviderSafety.ProviderKeyed,
-            0,
-            1,
-            1,
-            "epoch",
-            "provider"));
+            null!));
     }
 
     [Fact]
@@ -567,7 +566,7 @@ public sealed class DurableContractTests
         Assert.True(registration.CanReconcile);
         Assert.Equal(DurableEffectReconciliationKind.Applied, outcome.Kind);
         Assert.Equal(new TestResult("observed"), resultCodec.Decode(outcome.Result!));
-        Assert.Equal("provider-activity", reconciler.Observed!.ExecutionIdentity!.ProviderKey);
+        Assert.Equal("activity", reconciler.Observed!.ExecutionIdentity!.ProviderKey);
     }
 
     [Fact]
@@ -635,6 +634,113 @@ public sealed class DurableContractTests
         Assert.Equal("flow-instance", start.InstanceId.Value);
         Assert.False(string.IsNullOrWhiteSpace(DurableFlowInstanceId.New().Value));
         Assert.False(string.IsNullOrWhiteSpace(DurableFlowEventId.New().Value));
+    }
+
+    [Fact]
+    public void Flow_requests_expose_command_and_audit_values()
+    {
+        var scope = new DurableScopeId("scope");
+        var command = new DurableCommandId("command");
+        var instance = new DurableFlowInstanceId("instance");
+        var eventId = new DurableFlowEventId("event");
+        var context = CreateCodec(_ => true).Encode(new TestPayload("safe"));
+        var start = new DurableFlowStartRequest(scope, command, "retry", instance, "flow", "v1", context);
+        var flowEvent = new DurableFlowEventRequest(scope, command, eventId, instance, "approved", context, 3);
+        var cancel = new DurableFlowCancelRequest(scope, command, instance, "actor", "cancel", 4);
+        var release = new DurableFlowReleaseRequest(scope, command, instance, "operator", "repair", 5);
+
+        Assert.Equal(scope, start.ScopeId);
+        Assert.Equal(command, start.CommandId);
+        Assert.Equal("retry", start.IdempotencyKey);
+        Assert.Equal(instance, start.InstanceId);
+        Assert.Equal("flow", start.FlowId);
+        Assert.Equal("v1", start.FlowVersion);
+        Assert.Same(context, start.Context);
+        Assert.Equal(command, flowEvent.CommandId);
+        Assert.Equal(eventId, flowEvent.EventId);
+        Assert.Equal(instance, flowEvent.InstanceId);
+        Assert.Same(context, flowEvent.Payload);
+        Assert.Equal(scope, cancel.ScopeId);
+        Assert.Equal(command, cancel.CommandId);
+        Assert.Equal(instance, cancel.InstanceId);
+        Assert.Equal("actor", cancel.ActorId);
+        Assert.Equal("cancel", cancel.ReasonCode);
+        Assert.Equal(4, cancel.ExpectedRevision);
+        Assert.Equal(scope, release.ScopeId);
+        Assert.Equal(command, release.CommandId);
+        Assert.Equal(instance, release.InstanceId);
+        Assert.Equal("operator", release.ActorId);
+        Assert.Equal("repair", release.ReasonCode);
+        Assert.Equal(5, release.ExpectedRevision);
+        Assert.Equal("instance", instance.ToString());
+        Assert.Equal("event", eventId.ToString());
+    }
+
+    [Fact]
+    public void Flow_query_contracts_validate_copy_and_normalize()
+    {
+        var scope = new DurableScopeId("scope");
+        var instance = new DurableFlowInstanceId("instance");
+        var get = new DurableFlowGetRequest(scope, instance);
+        var created = new DateTimeOffset(2026, 7, 15, 8, 0, 0, TimeSpan.FromHours(-4));
+        var snapshot = new DurableFlowSnapshot(
+            instance,
+            "flow",
+            "v1",
+            DurableFlowState.Suspended,
+            "wait",
+            7,
+            created,
+            created.AddMinutes(1),
+            created.AddSeconds(10),
+            created.AddMinutes(2),
+            "repair.required",
+            requiresRecoveryRelease: true);
+        var request = new DurableFlowListRequest(
+            scope,
+            DurableFlowState.Suspended,
+            requiresRecoveryRelease: true,
+            pageSize: 25,
+            continuationToken: "next");
+        var source = new List<DurableFlowSnapshot> { snapshot };
+        var result = new DurableFlowListResult(source, "next");
+        source.Clear();
+
+        Assert.Equal(scope, get.ScopeId);
+        Assert.Equal(instance, get.InstanceId);
+        Assert.Equal(scope, request.ScopeId);
+        Assert.Equal(DurableFlowState.Suspended, request.State);
+        Assert.True(request.RequiresRecoveryRelease);
+        Assert.Equal(25, request.PageSize);
+        Assert.Equal("next", request.ContinuationToken);
+        Assert.Single(result.Flows);
+        Assert.Equal("next", result.ContinuationToken);
+        Assert.Equal(instance, snapshot.InstanceId);
+        Assert.Equal("flow", snapshot.FlowId);
+        Assert.Equal("v1", snapshot.FlowVersion);
+        Assert.Equal(DurableFlowState.Suspended, snapshot.State);
+        Assert.Equal("wait", snapshot.CurrentNodeId);
+        Assert.Equal(7, snapshot.Revision);
+        Assert.Equal(TimeSpan.Zero, snapshot.CreatedAtUtc.Offset);
+        Assert.Equal(TimeSpan.Zero, snapshot.UpdatedAtUtc.Offset);
+        Assert.Equal(TimeSpan.Zero, snapshot.CancellationRequestedAtUtc!.Value.Offset);
+        Assert.Equal(TimeSpan.Zero, snapshot.TerminalAtUtc!.Value.Offset);
+        Assert.Equal("repair.required", snapshot.TerminalCode);
+        Assert.True(snapshot.RequiresRecoveryRelease);
+
+        Assert.Throws<ArgumentException>(() => new DurableFlowGetRequest(default, instance));
+        Assert.Throws<ArgumentException>(() => new DurableFlowGetRequest(scope, default));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowListRequest(scope, (DurableFlowState)99));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowListRequest(scope, pageSize: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowListRequest(scope, pageSize: 1_001));
+        Assert.Throws<ArgumentException>(() => new DurableFlowListRequest(scope, continuationToken: " "));
+        Assert.Throws<ArgumentNullException>(() => new DurableFlowListResult(null!, null));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowSnapshot(
+            instance, "flow", "v1", (DurableFlowState)99, "wait", 1, created, created, null, null, null));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowSnapshot(
+            instance, "flow", "v1", DurableFlowState.Ready, "wait", 0, created, created, null, null, null));
+        Assert.Throws<ArgumentException>(() => new DurableFlowSnapshot(
+            instance, "flow", "v1", DurableFlowState.Ready, "wait", 1, created, created, null, null, " "));
     }
 
     [Fact]
@@ -765,6 +871,161 @@ public sealed class DurableContractTests
     }
 
     [Fact]
+    public void Durable_flow_evaluation_contracts_expose_values_and_validate_shapes()
+    {
+        var context = CreateFlowContextCodec().Encode(new FlowTestContext(1));
+        var payload = CreateCodec(_ => true).Encode(new TestPayload("safe"));
+        var eventInput = new DurableFlowEvaluationInput("wait", context, "approved", payload, isTimeout: true);
+        var activityInput = new DurableFlowEvaluationInput(
+            "run", context, activityCallsiteId: "send", activityResult: payload);
+        var activity = new DurableFlowActivityCommand(
+            "send", 1, "work", "v1", DurableProviderSafety.ProviderKeyed, payload);
+        var eventContract = new DurableFlowEventContract(
+            true,
+            payload.ContractName,
+            payload.ContractVersion,
+            payload.Classification,
+            payload.RetentionPolicyId);
+        var result = new DurableFlowEvaluationResult(
+            FlowTransitionKind.Wait,
+            "wait",
+            context,
+            null,
+            "approved",
+            new FlowTimeout(TimeSpan.FromMinutes(5)),
+            null,
+            activity,
+            eventContract);
+
+        Assert.Equal("wait", eventInput.NodeId);
+        Assert.Same(context, eventInput.Context);
+        Assert.Equal("approved", eventInput.ResumeEventName);
+        Assert.Same(payload, eventInput.ResumeEventPayload);
+        Assert.True(eventInput.IsTimeout);
+        Assert.Null(eventInput.ActivityCallsiteId);
+        Assert.Equal("send", activityInput.ActivityCallsiteId);
+        Assert.Same(payload, activityInput.ActivityResult);
+        Assert.Equal("send", activity.CallsiteId);
+        Assert.Equal(1, activity.ResultContractVersion);
+        Assert.Equal("work", activity.WorkName);
+        Assert.Equal("v1", activity.WorkVersion);
+        Assert.Equal(DurableProviderSafety.ProviderKeyed, activity.ProviderSafety);
+        Assert.Same(payload, activity.Work);
+        Assert.True(eventContract.PayloadRequired);
+        Assert.Equal(payload.ContractName, eventContract.ContractName);
+        Assert.Equal(payload.ContractVersion, eventContract.ContractVersion);
+        Assert.Equal(payload.Classification, eventContract.Classification);
+        Assert.Equal(payload.RetentionPolicyId, eventContract.RetentionPolicyId);
+        Assert.Equal(FlowTransitionKind.Wait, result.Kind);
+        Assert.Equal("wait", result.NodeId);
+        Assert.Same(context, result.Context);
+        Assert.Null(result.NextNodeId);
+        Assert.Equal("approved", result.EventName);
+        Assert.NotNull(result.Timeout);
+        Assert.Null(result.Fault);
+        Assert.Same(activity, result.Activity);
+        Assert.Same(eventContract, result.EventContract);
+
+        var noPayload = new DurableFlowEventContract(false);
+        Assert.False(noPayload.PayloadRequired);
+        Assert.Null(noPayload.ContractName);
+        Assert.Null(noPayload.ContractVersion);
+        Assert.Null(noPayload.Classification);
+        Assert.Null(noPayload.RetentionPolicyId);
+        Assert.Throws<ArgumentException>(() => new DurableFlowEventContract(true));
+        Assert.Throws<ArgumentException>(() => new DurableFlowEventContract(
+            false,
+            "event",
+            "v1",
+            DurableDataClassification.Operational,
+            DurableEncodedPayload.DefaultRetentionPolicyId));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowActivityCommand(
+            "send", 0, "work", "v1", DurableProviderSafety.Idempotent, payload));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowActivityCommand(
+            "send", 1, "work", "v1", (DurableProviderSafety)99, payload));
+        Assert.Throws<ArgumentNullException>(() => new DurableFlowActivityCommand(
+            "send", 1, "work", "v1", DurableProviderSafety.Idempotent, null!));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowEvaluationResult(
+            (FlowTransitionKind)99, "wait", null, null, null, null, null, null));
+    }
+
+    [Fact]
+    public async Task Durable_flow_typed_event_binding_is_manifested_and_evaluated()
+    {
+        var contextCodec = CreateFlowContextCodec();
+        var eventCodec = CreateCodec(_ => true);
+        var callsite = new FlowEventCallsite<TestPayload>("approved", eventCodec.ContractName, eventCodec.ContractVersion);
+        var binding = new DurableFlowEventBinding<TestPayload>(callsite, eventCodec);
+        var definition = FlowGraphBuilder<FlowTestContext>
+            .Create("event-flow", "v1")
+            .AddNode("wait", new WaitingFlowNode(callsite))
+            .StartAt("wait")
+            .Build();
+        var registration = new DurableFlowRegistration<FlowTestContext>(
+            definition,
+            contextCodec,
+            "implementation-v1",
+            new FlowTransitionEvaluator<FlowTestContext>(),
+            eventBindings: [binding]);
+        var codecs = new DurablePayloadCodecRegistry([contextCodec, eventCodec]);
+
+        Assert.Same(callsite, binding.Callsite);
+        Assert.Same(eventCodec, binding.PayloadCodec);
+        Assert.Equal("event-flow", registration.FlowId);
+        Assert.Equal("v1", registration.FlowVersion);
+        Assert.Equal("implementation-v1", registration.ImplementationVersion);
+        Assert.Equal("wait", registration.StartNodeId);
+        Assert.Equal(DurableFlowRegistration.CurrentAuthoringModel, registration.AuthoringModel);
+        Assert.Equal(64, registration.DefinitionFingerprint.Length);
+        Assert.Same(contextCodec, registration.ContextCodec);
+        Assert.Same(binding, Assert.Single(registration.EventBindings));
+        Assert.Empty(registration.ActivityWorkRegistrations);
+        var result = await registration.EvaluateAsync(
+            new DurableFlowEvaluationInput("wait", contextCodec.Encode(new FlowTestContext(1))),
+            codecs);
+        Assert.Equal(FlowTransitionKind.Wait, result.Kind);
+        Assert.Equal("approved", result.EventName);
+        Assert.True(result.EventContract!.PayloadRequired);
+
+        var workRegistry = new DurableWorkRegistry([]);
+        Assert.Same(
+            registration,
+            new DurableFlowRegistry([registration], workRegistry, codecs).GetRequired("event-flow", "v1"));
+        Assert.Throws<ArgumentException>(() => new DurableFlowEventBinding<TestPayload>(
+            new FlowEventCallsite<TestPayload>("approved", "other", "v1"),
+            eventCodec));
+        Assert.Throws<ArgumentNullException>(() => new DurableFlowEventBinding<TestPayload>(null!, eventCodec));
+        Assert.Throws<ArgumentNullException>(() => new DurableFlowEventBinding<TestPayload>(callsite, null!));
+
+        var duplicate = new DurableFlowEventBinding<TestPayload>(
+            new FlowEventCallsite<TestPayload>("approved", eventCodec.ContractName, eventCodec.ContractVersion),
+            eventCodec);
+        Assert.Throws<InvalidOperationException>(() => new DurableFlowRegistration<FlowTestContext>(
+            definition,
+            contextCodec,
+            "implementation-v1",
+            new FlowTransitionEvaluator<FlowTestContext>(),
+            eventBindings: [binding, duplicate]));
+
+        var undeclaredCallsite = new FlowEventCallsite<TestPayload>(
+            "rejected", eventCodec.ContractName, eventCodec.ContractVersion);
+        var undeclaredDefinition = FlowGraphBuilder<FlowTestContext>
+            .Create("undeclared-event-flow", "v1")
+            .AddNode("wait", new WaitingFlowNode(undeclaredCallsite))
+            .StartAt("wait")
+            .Build();
+        var undeclared = new DurableFlowRegistration<FlowTestContext>(
+            undeclaredDefinition,
+            contextCodec,
+            "implementation-v1",
+            new FlowTransitionEvaluator<FlowTestContext>(),
+            eventBindings: [binding]);
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await undeclared.EvaluateAsync(
+            new DurableFlowEvaluationInput("wait", contextCodec.Encode(new FlowTestContext(1))),
+            codecs));
+    }
+
+    [Fact]
     public void Durable_flow_registry_rejects_duplicate_or_missing_versions()
     {
         var definition = FlowGraphBuilder<FlowTestContext>
@@ -889,23 +1150,18 @@ public sealed class DurableContractTests
             DurableContractJsonContext.Default.FlowTestContext,
             state => state.Step is >= 0 and <= 100);
 
-    private static DurableClaimedWork CreateClaim(
+    private static DurableWorkExecutionContext CreateClaim(
         IDurablePayloadCodec<TestPayload> codec,
         string workName = "test.work",
         DurableProviderSafety safety = DurableProviderSafety.ProviderKeyed) =>
         new(
             new DurableScopeId("scope"),
             new DurableWorkId("work"),
-            "activity",
             workName,
             "v1",
             codec.Encode(new TestPayload("safe")),
             safety,
-            2,
-            3,
-            4,
-            "epoch",
-            "provider-activity");
+            DurableWorkerExecutionIdentity.CreateInitial("activity", 3, 4, "epoch").Advance(2, 3, 4, "epoch-next"));
 
     private static DurableWorkRetryPolicy CreatePolicy(
         int maximumAttempts = 3,
@@ -987,6 +1243,15 @@ internal sealed class InvalidFaultCodeFlowNode : IFlowNode<FlowTestContext>
         CancellationToken cancellationToken = default) =>
         ValueTask.FromResult<FlowNodeOutcome<FlowTestContext>>(
             FlowNodeOutcome<FlowTestContext>.Fault("approval failed", "The durable fault code is invalid."));
+}
+
+internal sealed class WaitingFlowNode(FlowEventCallsite<TestPayload> callsite) : IFlowNode<FlowTestContext>
+{
+    public ValueTask<FlowNodeOutcome<FlowTestContext>> ExecuteAsync(
+        FlowExecutionContext<FlowTestContext> context,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult<FlowNodeOutcome<FlowTestContext>>(
+            FlowNodeOutcome<FlowTestContext>.Wait(callsite, context.State, new FlowTimeout(TimeSpan.FromMinutes(5))));
 }
 
 internal sealed class CapturingExecutor : IDurableWorkerExecutor<TestPayload, TestResult>

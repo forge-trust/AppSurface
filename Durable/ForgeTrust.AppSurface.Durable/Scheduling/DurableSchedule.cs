@@ -87,7 +87,7 @@ public abstract record DurableSchedule
     /// <summary>
     /// Creates a schedule that runs once after durable acceptance.
     /// </summary>
-    /// <param name="delay">Positive elapsed delay from the database acceptance timestamp.</param>
+    /// <param name="delay">Positive elapsed delay from the authoritative store acceptance timestamp.</param>
     /// <returns>A delayed one-time schedule.</returns>
     public static DurableAfterSchedule After(TimeSpan delay) => new(delay);
 
@@ -110,7 +110,7 @@ public abstract record DurableSchedule
     /// <param name="grammar">Five-field or seconds-inclusive grammar.</param>
     /// <returns>A CronosV1 schedule.</returns>
     /// <remarks>
-    /// The PostgreSQL provider validates the expression and time zone before accepting the schedule. Cronos <c>H</c>
+    /// The selected provider validates the expression and time zone before accepting the schedule. Cronos <c>H</c>
     /// fields are expanded from a stable cryptographic hash of the schedule id.
     /// </remarks>
     public static DurableCronSchedule Cron(
@@ -162,7 +162,7 @@ public sealed record DurableAtSchedule : DurableSchedule
 }
 
 /// <summary>
-/// A one-time delay anchored to the database timestamp of the durable acceptance transaction.
+/// A one-time delay anchored to the authoritative store timestamp of the durable acceptance transaction.
 /// </summary>
 public sealed record DurableAfterSchedule : DurableSchedule
 {
@@ -238,8 +238,8 @@ public sealed record DurableCronSchedule : DurableSchedule
         CronDialect dialect = CronDialect.CronosV1)
         : base(DurableScheduleKind.Cron)
     {
-        Expression = RequireText(expression, nameof(expression));
-        IanaTimeZoneId = RequireText(ianaTimeZoneId, nameof(ianaTimeZoneId));
+        Expression = RequireText(expression, nameof(expression), 512);
+        IanaTimeZoneId = RequireText(ianaTimeZoneId, nameof(ianaTimeZoneId), 128);
 
         if (!Enum.IsDefined(grammar))
         {
@@ -267,11 +267,16 @@ public sealed record DurableCronSchedule : DurableSchedule
     /// <summary>Gets the persisted five- or six-field grammar mode.</summary>
     public CronGrammar Grammar { get; }
 
-    private static string RequireText(string value, string parameterName)
+    private static string RequireText(string value, string parameterName, int maximumLength)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
             throw new ArgumentException("Value must not be empty.", parameterName);
+        }
+
+        if (value.Length > maximumLength)
+        {
+            throw new ArgumentException($"Value must not exceed {maximumLength} characters.", parameterName);
         }
 
         return value;

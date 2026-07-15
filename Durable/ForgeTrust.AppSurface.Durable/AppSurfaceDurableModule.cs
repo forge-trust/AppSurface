@@ -10,7 +10,7 @@ namespace ForgeTrust.AppSurface.Durable;
 /// Registers host-neutral durable contracts and registries without starting storage or workers.
 /// </summary>
 /// <remarks>
-/// Add the PostgreSQL module to select storage and explicitly opt into hosted execution. This module alone performs no
+/// Add a provider module to select storage and explicitly opt into hosted execution. This module alone performs no
 /// network access, schema creation, polling, scheduling, or provider work.
 /// </remarks>
 public sealed class AppSurfaceDurableModule : IAppSurfaceModule

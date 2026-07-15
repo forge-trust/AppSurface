@@ -98,6 +98,13 @@ public sealed record DurableFlowStartRequest
         FlowId = DurableIdentifier.Require(flowId, nameof(flowId), 200);
         FlowVersion = DurableIdentifier.Require(flowVersion, nameof(flowVersion), 100);
         Context = context ?? throw new ArgumentNullException(nameof(context));
+        Fingerprint = DurableCommandFingerprints.Create(
+            "appsurface.durable.flow.start.v1",
+            ScopeId.Value,
+            InstanceId.Value,
+            FlowId,
+            FlowVersion,
+            Context);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -120,6 +127,8 @@ public sealed record DurableFlowStartRequest
 
     /// <summary>Gets the encoded initial context.</summary>
     public DurableEncodedPayload Context { get; }
+    /// <summary>Gets the computed semantic command fingerprint.</summary>
+    public DurableCommandFingerprint Fingerprint { get; }
 }
 
 /// <summary>
@@ -155,6 +164,14 @@ public sealed record DurableFlowEventRequest
         EventName = DurableIdentifier.Require(eventName, nameof(eventName), 200);
         Payload = payload;
         ExpectedRevision = expectedRevision;
+        Fingerprint = DurableCommandFingerprints.Create(
+            "appsurface.durable.flow.event.v1",
+            ScopeId.Value,
+            EventId.Value,
+            InstanceId.Value,
+            EventName,
+            Payload,
+            ExpectedRevision);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -177,6 +194,8 @@ public sealed record DurableFlowEventRequest
 
     /// <summary>Gets an optional optimistic Flow revision.</summary>
     public long? ExpectedRevision { get; }
+    /// <summary>Gets the computed semantic command fingerprint.</summary>
+    public DurableCommandFingerprint Fingerprint { get; }
 }
 
 /// <summary>
@@ -215,6 +234,13 @@ public sealed record DurableFlowCancelRequest
         ActorId = DurableIdentifier.Require(actorId, nameof(actorId), 200);
         ReasonCode = DurableIdentifier.Require(reasonCode, nameof(reasonCode), 120);
         ExpectedRevision = expectedRevision;
+        Fingerprint = DurableCommandFingerprints.Create(
+            "appsurface.durable.flow.cancel.v1",
+            ScopeId.Value,
+            InstanceId.Value,
+            ActorId,
+            ReasonCode,
+            ExpectedRevision);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -234,6 +260,8 @@ public sealed record DurableFlowCancelRequest
 
     /// <summary>Gets the required optimistic Flow revision.</summary>
     public long ExpectedRevision { get; }
+    /// <summary>Gets the computed semantic command fingerprint.</summary>
+    public DurableCommandFingerprint Fingerprint { get; }
 }
 
 /// <summary>
@@ -276,6 +304,13 @@ public sealed record DurableFlowReleaseRequest
         ActorId = DurableIdentifier.Require(actorId, nameof(actorId), 200);
         ReasonCode = DurableIdentifier.Require(reasonCode, nameof(reasonCode), 120);
         ExpectedRevision = expectedRevision;
+        Fingerprint = DurableCommandFingerprints.Create(
+            "appsurface.durable.flow.release.v1",
+            ScopeId.Value,
+            InstanceId.Value,
+            ActorId,
+            ReasonCode,
+            ExpectedRevision);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -295,6 +330,8 @@ public sealed record DurableFlowReleaseRequest
 
     /// <summary>Gets the required Flow revision.</summary>
     public long ExpectedRevision { get; }
+    /// <summary>Gets the computed semantic command fingerprint.</summary>
+    public DurableCommandFingerprint Fingerprint { get; }
 }
 
 /// <summary>Requests a payload-free snapshot of one Flow in an application-authorized scope.</summary>

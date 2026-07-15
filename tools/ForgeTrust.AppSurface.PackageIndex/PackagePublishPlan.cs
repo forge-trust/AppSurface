@@ -93,9 +93,9 @@ internal sealed class PackagePublishPlanResolver
         foreach (var entry in entries)
         {
             if (entry.Manifest.Classification == PackageClassification.Public
-                && entry.Manifest.PublishDecision != PackagePublishDecision.Publish)
+                && entry.Manifest.PublishDecision is not (PackagePublishDecision.Publish or PackagePublishDecision.DoNotPublish))
             {
-                throw new PackageIndexException($"Public manifest entry '{entry.Manifest.Project}' must use publish_decision 'publish'.");
+                throw new PackageIndexException($"Public manifest entry '{entry.Manifest.Project}' must use publish_decision 'publish' or 'do_not_publish'.");
             }
 
             if (entry.Manifest.Classification == PackageClassification.Support

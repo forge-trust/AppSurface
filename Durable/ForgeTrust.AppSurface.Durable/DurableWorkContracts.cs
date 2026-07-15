@@ -188,6 +188,15 @@ public sealed record DurableWorkRequest
         ProviderSafety = providerSafety;
         RetryPolicy = retryPolicy ?? DurableWorkRetryPolicy.Default;
         DueAtUtc = dueAtUtc?.ToUniversalTime();
+        Fingerprint = DurableCommandFingerprints.Create(
+            "appsurface.durable.work.enqueue.v1",
+            ScopeId.Value,
+            WorkName,
+            WorkVersion,
+            Payload,
+            ProviderSafety,
+            RetryPolicy,
+            DueAtUtc);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -216,6 +225,9 @@ public sealed record DurableWorkRequest
 
     /// <summary>Gets the first UTC eligibility time, or immediate eligibility when absent.</summary>
     public DateTimeOffset? DueAtUtc { get; }
+
+    /// <summary>Gets the computed versioned fingerprint of mutation-affecting semantic fields.</summary>
+    public DurableCommandFingerprint Fingerprint { get; }
 }
 
 /// <summary>
@@ -275,7 +287,7 @@ public sealed record DurableWorkAcceptance
     /// <summary>Gets the aggregate revision produced by acceptance.</summary>
     public long Revision { get; }
 
-    /// <summary>Gets the PostgreSQL acceptance time in UTC.</summary>
+    /// <summary>Gets the authoritative store acceptance time in UTC.</summary>
     public DateTimeOffset AcceptedAtUtc { get; }
 }
 
@@ -285,7 +297,7 @@ public sealed record DurableWorkAcceptance
 public interface IDurableWorkClient
 {
     /// <summary>
-    /// Accepts work atomically in a runtime-owned PostgreSQL transaction.
+    /// Accepts work atomically in a runtime-owned authoritative-store transaction.
     /// </summary>
     ValueTask<DurableOperationResult<DurableWorkAcceptance>> EnqueueAsync(
         DurableWorkRequest request,

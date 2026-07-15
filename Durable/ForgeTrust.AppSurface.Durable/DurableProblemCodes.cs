@@ -14,7 +14,7 @@ public static class DurableProblemCodes
     public const string TransactionRequired = "ASDUR101";
     /// <summary>A command or idempotency identity was reused with different semantic bytes.</summary>
     public const string CommandConflict = "ASDUR102";
-    /// <summary>The PostgreSQL store could not accept or process work.</summary>
+    /// <summary>The authoritative durable store could not accept or process work.</summary>
     public const string StoreUnavailable = "ASDUR103";
     /// <summary>Another worker or transition won the expected claim revision.</summary>
     public const string ClaimLost = "ASDUR104";
@@ -72,9 +72,9 @@ public static class DurableProblemCodes
     /// <summary>The suspended Flow wait shape cannot safely restore its recorded state.</summary>
     public const string FlowReleaseStateMismatch = "ASDUR211";
 
-    /// <summary>The durable PostgreSQL schema is not installed.</summary>
+    /// <summary>The durable provider schema is not installed.</summary>
     public const string SchemaMissing = "ASDUR400";
-    /// <summary>The durable PostgreSQL schema requires pending migrations.</summary>
+    /// <summary>The durable provider schema requires pending migrations.</summary>
     public const string SchemaUpgradeRequired = "ASDUR401";
     /// <summary>The installed schema reader/writer range excludes this package.</summary>
     public const string SchemaVersionUnsupported = "ASDUR402";

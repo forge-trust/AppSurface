@@ -277,17 +277,18 @@ packages:
       - ForgeTrust.AppSurface.Flow.DurableTask
   - project: Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj
     classification: public
-    publish_decision: publish
+    publish_decision: do_not_publish
+    publish_reason: Public-preview source contract held until the PostgreSQL provider milestone supplies conformance and restore evidence.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/unreleased.md
     order: 46
-    use_when: Add this when an AppSurface module needs host-neutral durable-work, resumable Flow, or full scheduling contracts while keeping PostgreSQL and worker hosting in a separate integration package.
-    includes: AppSurfaceDurableModule, registered and versioned payload codecs, transactional work and Flow client contracts, reflection-free typed executor and Flow activity registrations, bounded payload-free Work/Flow recovery inventory, bounded runtime-pump, payload-free health and graceful-drain contracts, provider-safety policies, audited status and suspended-work operator recovery, and At/After/Every/Cron schedule contracts with configurable overlap and misfire behavior.
-    does_not_include: PostgreSQL storage, migrations, automatic startup DDL, hosted polling, ASP.NET endpoints, an operator dashboard, runtime metrics/ActivitySource telemetry, automated retention or retirement-blocker queries, deterministic async/await replay, fan-out, child flows, exactly-once provider effects, or a separate workflow control plane.
+    use_when: Add this source-preview contract when an AppSurface module needs host-neutral durable work, resumable Flow, or schedule authoring without installing a runtime.
+    includes: AppSurfaceDurableModule, registered and versioned payload codecs, Work and Flow client contracts, reflection-free typed registrations, command fingerprints, provider-safety declarations, and At/After/Every/Cron schedule contracts.
+    does_not_include: Provider SPI, storage, migrations, hosted polling, health or drain operations, operator recovery, ASP.NET endpoints, telemetry implementation, automated retention, deterministic async/await replay, fan-out, child flows, exactly-once provider effects, or a separate workflow control plane.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Durable` when reusable modules need portable durable contracts; add the PostgreSQL package in the host that owns storage and worker activation.
+    recipe_summary: Reference the source-preview `ForgeTrust.AppSurface.Durable` contract for portable authoring and registration; no runtime starts until a provider is installed explicitly.
     depends_on:
       - ForgeTrust.AppSurface.Flow
       - ForgeTrust.AppSurface.Workers
@@ -295,6 +296,24 @@ packages:
       - ForgeTrust.AppSurface.Core
       - ForgeTrust.AppSurface.Flow
       - ForgeTrust.AppSurface.Workers
+  - project: Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj
+    classification: public
+    publish_decision: do_not_publish
+    publish_reason: Public-preview source contract held until the PostgreSQL provider milestone supplies conformance and restore evidence.
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 47
+    use_when: Implement or host a durable runtime provider against the public provider, operator, health, drain, and recovery SPI.
+    includes: Runtime pump, health, drain, recovery inventory, operator mutation, claimed-work adaptation, and provider command-fingerprint contracts.
+    does_not_include: PostgreSQL storage, migrations, polling implementation, scheduling execution, hosted services, endpoints, telemetry implementation, or provider conformance evidence.
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable.Provider/README.md
+    recipe_summary: Reference the source-preview Provider SPI only when implementing or hosting a durable runtime; applications normally depend on `ForgeTrust.AppSurface.Durable` alone.
+    depends_on:
+      - ForgeTrust.AppSurface.Durable
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Durable
   - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
     classification: public
     publish_decision: publish
@@ -302,7 +321,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.2.md
-    order: 47
+    order: 48
     use_when: Start here for CLI apps and worker-style entry points that should run through the AppSurface startup pipeline with CliFx.
     includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx source-generated command discovery through AppSurface modules.
     does_not_include: ASP.NET Core hosting, OpenAPI surfaces, or Razor-based UI composition.

@@ -1,4 +1,6 @@
-namespace ForgeTrust.AppSurface.Durable;
+using ForgeTrust.AppSurface.Durable;
+
+namespace ForgeTrust.AppSurface.Durable.Provider;
 
 /// <summary>
 /// Requests a privacy-bounded snapshot of one work aggregate in an already authorized scope.
@@ -8,6 +10,8 @@ public sealed record DurableWorkGetRequest
     /// <summary>Initializes a scoped work query.</summary>
     public DurableWorkGetRequest(DurableScopeId scopeId, DurableWorkId workId)
     {
+        ProviderContractValidation.Require(scopeId, nameof(scopeId));
+        ProviderContractValidation.Require(workId, nameof(workId));
         ScopeId = scopeId;
         WorkId = workId;
     }
@@ -43,6 +47,8 @@ public sealed record DurableWorkSnapshot
         string? terminalCode,
         DurableEncodedPayload? result)
     {
+        ProviderContractValidation.Require(scopeId, nameof(scopeId));
+        ProviderContractValidation.Require(workId, nameof(workId));
         if (!Enum.IsDefined(state))
         {
             throw new ArgumentOutOfRangeException(nameof(state));
@@ -65,12 +71,12 @@ public sealed record DurableWorkSnapshot
 
         ScopeId = scopeId;
         WorkId = workId;
-        ActivityId = DurableIdentifier.Require(activityId, nameof(activityId), 200);
-        WorkName = DurableIdentifier.Require(workName, nameof(workName), 200);
-        WorkVersion = DurableIdentifier.Require(workVersion, nameof(workVersion), 100);
+        ActivityId = ProviderContractValidation.Require(activityId, nameof(activityId), 200);
+        WorkName = ProviderContractValidation.Require(workName, nameof(workName), 200);
+        WorkVersion = ProviderContractValidation.Require(workVersion, nameof(workVersion), 100);
         State = state;
         ProviderSafety = providerSafety;
-        ProviderKey = DurableIdentifier.Require(providerKey, nameof(providerKey), 512);
+        ProviderKey = ProviderContractValidation.Require(providerKey, nameof(providerKey), 512);
         AttemptNumber = attemptNumber;
         Revision = revision;
         AcceptedAtUtc = acceptedAtUtc.ToUniversalTime();
@@ -111,7 +117,7 @@ public sealed record DurableWorkSnapshot
     /// <summary>Gets the optimistic-concurrency revision.</summary>
     public long Revision { get; }
 
-    /// <summary>Gets the PostgreSQL acceptance timestamp.</summary>
+    /// <summary>Gets the authoritative store acceptance timestamp.</summary>
     public DateTimeOffset AcceptedAtUtc { get; }
 
     /// <summary>Gets the current eligibility timestamp.</summary>
@@ -148,6 +154,8 @@ public sealed record DurableWorkCancelRequest
         string reasonCode,
         long expectedRevision)
     {
+        ProviderContractValidation.Require(scopeId, nameof(scopeId));
+        ProviderContractValidation.Require(workId, nameof(workId));
         if (expectedRevision < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(expectedRevision));
@@ -155,8 +163,8 @@ public sealed record DurableWorkCancelRequest
 
         ScopeId = scopeId;
         WorkId = workId;
-        ActorId = DurableIdentifier.Require(actorId, nameof(actorId), 200);
-        ReasonCode = DurableIdentifier.Require(reasonCode, nameof(reasonCode), 120);
+        ActorId = ProviderContractValidation.Require(actorId, nameof(actorId), 200);
+        ReasonCode = ProviderContractValidation.Require(reasonCode, nameof(reasonCode), 120);
         ExpectedRevision = expectedRevision;
     }
 
@@ -203,6 +211,7 @@ public sealed record DurableWorkListRequest
         int pageSize = 100,
         string? continuationToken = null)
     {
+        ProviderContractValidation.Require(scopeId, nameof(scopeId));
         if (state is { } requestedState && !Enum.IsDefined(requestedState))
         {
             throw new ArgumentOutOfRangeException(nameof(state));
@@ -219,7 +228,7 @@ public sealed record DurableWorkListRequest
         PageSize = pageSize;
         ContinuationToken = continuationToken is null
             ? null
-            : DurableIdentifier.Require(continuationToken, nameof(continuationToken), 200);
+            : ProviderContractValidation.Require(continuationToken, nameof(continuationToken), 200);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -258,6 +267,7 @@ public sealed record DurableWorkListItem
         bool cancellationRequested,
         bool requiresRecoveryRelease)
     {
+        ProviderContractValidation.Require(workId, nameof(workId));
         if (!Enum.IsDefined(state))
         {
             throw new ArgumentOutOfRangeException(nameof(state));
@@ -279,9 +289,9 @@ public sealed record DurableWorkListItem
         }
 
         WorkId = workId;
-        ActivityId = DurableIdentifier.Require(activityId, nameof(activityId), 200);
-        WorkName = DurableIdentifier.Require(workName, nameof(workName), 200);
-        WorkVersion = DurableIdentifier.Require(workVersion, nameof(workVersion), 100);
+        ActivityId = ProviderContractValidation.Require(activityId, nameof(activityId), 200);
+        WorkName = ProviderContractValidation.Require(workName, nameof(workName), 200);
+        WorkVersion = ProviderContractValidation.Require(workVersion, nameof(workVersion), 100);
         State = state;
         ProviderSafety = providerSafety;
         AttemptNumber = attemptNumber;
@@ -310,7 +320,7 @@ public sealed record DurableWorkListItem
     public int AttemptNumber { get; }
     /// <summary>Gets the current aggregate revision required by operator commands.</summary>
     public long Revision { get; }
-    /// <summary>Gets the PostgreSQL acceptance time.</summary>
+    /// <summary>Gets the authoritative store acceptance time.</summary>
     public DateTimeOffset AcceptedAtUtc { get; }
     /// <summary>Gets the current eligibility time.</summary>
     public DateTimeOffset DueAtUtc { get; }
@@ -330,7 +340,8 @@ public sealed record DurableWorkListResult
     /// <summary>Initializes a Work inventory page.</summary>
     public DurableWorkListResult(IReadOnlyList<DurableWorkListItem> items, string? continuationToken)
     {
-        Items = items ?? throw new ArgumentNullException(nameof(items));
+        ArgumentNullException.ThrowIfNull(items);
+        Items = items.ToArray();
         ContinuationToken = continuationToken;
     }
 
@@ -371,14 +382,15 @@ public sealed record DurableScopeDisableRequest
         string reasonCode,
         long expectedGeneration)
     {
+        ProviderContractValidation.Require(scopeId, nameof(scopeId));
         if (expectedGeneration < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(expectedGeneration));
         }
 
         ScopeId = scopeId;
-        ActorId = DurableIdentifier.Require(actorId, nameof(actorId), 200);
-        ReasonCode = DurableIdentifier.Require(reasonCode, nameof(reasonCode), 120);
+        ActorId = ProviderContractValidation.Require(actorId, nameof(actorId), 200);
+        ReasonCode = ProviderContractValidation.Require(reasonCode, nameof(reasonCode), 120);
         ExpectedGeneration = expectedGeneration;
     }
 
@@ -456,6 +468,9 @@ public sealed record DurableWorkReconcileRequest
         string reasonCode,
         long expectedRevision)
     {
+        ProviderContractValidation.Require(scopeId, nameof(scopeId));
+        ProviderContractValidation.Require(workId, nameof(workId));
+        ProviderContractValidation.Require(commandId, nameof(commandId));
         if (expectedRevision < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(expectedRevision));
@@ -464,9 +479,16 @@ public sealed record DurableWorkReconcileRequest
         ScopeId = scopeId;
         WorkId = workId;
         CommandId = commandId;
-        ActorId = DurableIdentifier.Require(actorId, nameof(actorId), 200);
-        ReasonCode = DurableIdentifier.Require(reasonCode, nameof(reasonCode), 120);
+        ActorId = ProviderContractValidation.Require(actorId, nameof(actorId), 200);
+        ReasonCode = ProviderContractValidation.Require(reasonCode, nameof(reasonCode), 120);
         ExpectedRevision = expectedRevision;
+        Fingerprint = ProviderCommandFingerprints.Create(
+            "appsurface.durable.work.reconcile.v1",
+            ScopeId,
+            WorkId,
+            ActorId,
+            ReasonCode,
+            ExpectedRevision);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -481,6 +503,8 @@ public sealed record DurableWorkReconcileRequest
     public string ReasonCode { get; }
     /// <summary>Gets the expected work revision.</summary>
     public long ExpectedRevision { get; }
+    /// <summary>Gets the computed semantic command fingerprint.</summary>
+    public DurableCommandFingerprint Fingerprint { get; }
 }
 
 /// <summary>Requests an audited resolution for ManualResolution work.</summary>
@@ -497,6 +521,9 @@ public sealed record DurableWorkManualResolutionRequest
         DurableManualResolutionKind resolution,
         DurableEncodedPayload? result = null)
     {
+        ProviderContractValidation.Require(scopeId, nameof(scopeId));
+        ProviderContractValidation.Require(workId, nameof(workId));
+        ProviderContractValidation.Require(commandId, nameof(commandId));
         if (expectedRevision < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(expectedRevision));
@@ -515,11 +542,20 @@ public sealed record DurableWorkManualResolutionRequest
         ScopeId = scopeId;
         WorkId = workId;
         CommandId = commandId;
-        ActorId = DurableIdentifier.Require(actorId, nameof(actorId), 200);
-        ReasonCode = DurableIdentifier.Require(reasonCode, nameof(reasonCode), 120);
+        ActorId = ProviderContractValidation.Require(actorId, nameof(actorId), 200);
+        ReasonCode = ProviderContractValidation.Require(reasonCode, nameof(reasonCode), 120);
         ExpectedRevision = expectedRevision;
         Resolution = resolution;
         Result = result;
+        Fingerprint = ProviderCommandFingerprints.Create(
+            "appsurface.durable.work.manual-resolution.v1",
+            ScopeId,
+            WorkId,
+            ActorId,
+            ReasonCode,
+            ExpectedRevision,
+            Resolution,
+            Result);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -538,6 +574,8 @@ public sealed record DurableWorkManualResolutionRequest
     public DurableManualResolutionKind Resolution { get; }
     /// <summary>Gets the exact registered result when the effect is proven applied.</summary>
     public DurableEncodedPayload? Result { get; }
+    /// <summary>Gets the computed semantic command fingerprint.</summary>
+    public DurableCommandFingerprint Fingerprint { get; }
 }
 
 /// <summary>Requests release of suspended work only when its effect policy proves a retry is safe.</summary>
@@ -552,6 +590,9 @@ public sealed record DurableWorkRetrySafeRequest
         string reasonCode,
         long expectedRevision)
     {
+        ProviderContractValidation.Require(scopeId, nameof(scopeId));
+        ProviderContractValidation.Require(workId, nameof(workId));
+        ProviderContractValidation.Require(commandId, nameof(commandId));
         if (expectedRevision < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(expectedRevision));
@@ -560,9 +601,16 @@ public sealed record DurableWorkRetrySafeRequest
         ScopeId = scopeId;
         WorkId = workId;
         CommandId = commandId;
-        ActorId = DurableIdentifier.Require(actorId, nameof(actorId), 200);
-        ReasonCode = DurableIdentifier.Require(reasonCode, nameof(reasonCode), 120);
+        ActorId = ProviderContractValidation.Require(actorId, nameof(actorId), 200);
+        ReasonCode = ProviderContractValidation.Require(reasonCode, nameof(reasonCode), 120);
         ExpectedRevision = expectedRevision;
+        Fingerprint = ProviderCommandFingerprints.Create(
+            "appsurface.durable.work.retry-safe.v1",
+            ScopeId,
+            WorkId,
+            ActorId,
+            ReasonCode,
+            ExpectedRevision);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -577,6 +625,8 @@ public sealed record DurableWorkRetrySafeRequest
     public string ReasonCode { get; }
     /// <summary>Gets the expected work revision.</summary>
     public long ExpectedRevision { get; }
+    /// <summary>Gets the computed semantic command fingerprint.</summary>
+    public DurableCommandFingerprint Fingerprint { get; }
 }
 
 /// <summary>Requests release of nonterminal work fenced by a rotated restore epoch.</summary>
@@ -591,6 +641,9 @@ public sealed record DurableWorkRecoveryReleaseRequest
         string reasonCode,
         long expectedRevision)
     {
+        ProviderContractValidation.Require(scopeId, nameof(scopeId));
+        ProviderContractValidation.Require(workId, nameof(workId));
+        ProviderContractValidation.Require(commandId, nameof(commandId));
         if (expectedRevision < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(expectedRevision));
@@ -599,9 +652,16 @@ public sealed record DurableWorkRecoveryReleaseRequest
         ScopeId = scopeId;
         WorkId = workId;
         CommandId = commandId;
-        ActorId = DurableIdentifier.Require(actorId, nameof(actorId), 200);
-        ReasonCode = DurableIdentifier.Require(reasonCode, nameof(reasonCode), 120);
+        ActorId = ProviderContractValidation.Require(actorId, nameof(actorId), 200);
+        ReasonCode = ProviderContractValidation.Require(reasonCode, nameof(reasonCode), 120);
         ExpectedRevision = expectedRevision;
+        Fingerprint = ProviderCommandFingerprints.Create(
+            "appsurface.durable.work.recovery-release.v1",
+            ScopeId,
+            WorkId,
+            ActorId,
+            ReasonCode,
+            ExpectedRevision);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -616,6 +676,8 @@ public sealed record DurableWorkRecoveryReleaseRequest
     public string ReasonCode { get; }
     /// <summary>Gets the expected work revision.</summary>
     public long ExpectedRevision { get; }
+    /// <summary>Gets the computed semantic command fingerprint.</summary>
+    public DurableCommandFingerprint Fingerprint { get; }
 }
 
 /// <summary>

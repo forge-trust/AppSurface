@@ -246,7 +246,106 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
-    public async Task PublishPlanResolver_ThrowsWhenPublicEntryIsNotMarkedForPublish()
+    public async Task PublishPlanResolver_OmitsPublicEntryHeldFromPublishing()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: Held until provider conformance evidence is available.
+                order: 10
+                use_when: Install this first.
+                includes: Base web hosting.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        var resolver = CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web")
+        });
+
+        var plan = await resolver.ResolveAsync(_repositoryRoot, ManifestPath, CancellationToken.None);
+
+        Assert.Empty(plan.Entries);
+    }
+
+    [Fact]
+    public async Task DurablePublicationHold_OmitsBothPublicPreviewPackagesFromPublishPlan()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 5
+                use_when: Build a web app.
+                includes: Web host.
+                does_not_include: Durable runtime.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: Held for PostgreSQL provider evidence.
+                order: 10
+                use_when: Author durable contracts.
+                includes: Adopter contracts.
+                does_not_include: Runtime.
+                start_here_path: Durable/ForgeTrust.AppSurface.Durable/README.md
+              - project: Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: Held for PostgreSQL provider evidence.
+                order: 20
+                use_when: Implement a runtime provider.
+                includes: Provider SPI.
+                does_not_include: Storage implementation.
+                start_here_path: Durable/ForgeTrust.AppSurface.Durable.Provider/README.md
+                expected_dependency_package_ids:
+                  - ForgeTrust.AppSurface.Durable
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj", "<Project />");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable/README.md", "# Durable");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj", "<Project />");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable.Provider/README.md", "# Provider");
+        var durableProjectPath = CombineSafeChildPath(
+            _repositoryRoot,
+            "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj");
+        var resolver = CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj"] = CreateMetadata(
+                "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj",
+                "ForgeTrust.AppSurface.Durable"),
+            ["Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj"] = CreateMetadata(
+                "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj",
+                "ForgeTrust.AppSurface.Durable.Provider",
+                projectReferences: [durableProjectPath])
+        });
+
+        var plan = await resolver.ResolveAsync(_repositoryRoot, ManifestPath, CancellationToken.None);
+
+        var published = Assert.Single(plan.Entries);
+        Assert.Equal("ForgeTrust.AppSurface.Web", published.PackageId);
+        Assert.DoesNotContain(plan.Entries, entry => entry.PackageId.StartsWith("ForgeTrust.AppSurface.Durable", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PublishPlanResolver_ThrowsWhenPublicEntryUsesSupportPublish()
     {
         await WriteFileAsync("packages/package-index.yml",
             """

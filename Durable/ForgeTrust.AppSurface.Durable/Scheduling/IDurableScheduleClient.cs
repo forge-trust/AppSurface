@@ -92,6 +92,9 @@ public sealed record DurableScheduleCreateRequest
         DurableScheduleTarget target,
         string? displayName = null)
     {
+        DurableIdentifier.Require(scopeId.Value, nameof(scopeId), 200);
+        DurableIdentifier.Require(commandId.Value, nameof(commandId), 200);
+        DurableIdentifier.Require(scheduleId.Value, nameof(scheduleId), 200);
         ScopeId = scopeId;
         CommandId = commandId;
         IdempotencyKey = DurableIdentifier.Require(idempotencyKey, nameof(idempotencyKey), 200);
@@ -99,6 +102,13 @@ public sealed record DurableScheduleCreateRequest
         Schedule = schedule ?? throw new ArgumentNullException(nameof(schedule));
         Target = target ?? throw new ArgumentNullException(nameof(target));
         DisplayName = displayName is null ? null : DurableIdentifier.RequireSafeLabel(displayName, nameof(displayName), 200);
+        Fingerprint = DurableCommandFingerprints.Create(
+            "appsurface.durable.schedule.create.v1",
+            ScopeId.Value,
+            ScheduleId.Value,
+            Schedule,
+            Target,
+            DisplayName);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -121,6 +131,8 @@ public sealed record DurableScheduleCreateRequest
 
     /// <summary>Gets the optional privacy-safe operator label.</summary>
     public string? DisplayName { get; }
+    /// <summary>Gets the computed semantic command fingerprint.</summary>
+    public DurableCommandFingerprint Fingerprint { get; }
 }
 
 /// <summary>
@@ -143,6 +155,9 @@ public sealed record DurableScheduleUpdateRequest
         string? displayName = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(expectedRevision);
+        DurableIdentifier.Require(scopeId.Value, nameof(scopeId), 200);
+        DurableIdentifier.Require(commandId.Value, nameof(commandId), 200);
+        DurableIdentifier.Require(scheduleId.Value, nameof(scheduleId), 200);
         ScopeId = scopeId;
         CommandId = commandId;
         ScheduleId = scheduleId;
@@ -150,6 +165,14 @@ public sealed record DurableScheduleUpdateRequest
         Schedule = schedule ?? throw new ArgumentNullException(nameof(schedule));
         Target = target ?? throw new ArgumentNullException(nameof(target));
         DisplayName = displayName is null ? null : DurableIdentifier.RequireSafeLabel(displayName, nameof(displayName), 200);
+        Fingerprint = DurableCommandFingerprints.Create(
+            "appsurface.durable.schedule.update.v1",
+            ScopeId.Value,
+            ScheduleId.Value,
+            ExpectedRevision,
+            Schedule,
+            Target,
+            DisplayName);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -172,6 +195,21 @@ public sealed record DurableScheduleUpdateRequest
 
     /// <summary>Gets the replacement optional operator label.</summary>
     public string? DisplayName { get; }
+    /// <summary>Gets the computed semantic command fingerprint.</summary>
+    public DurableCommandFingerprint Fingerprint { get; }
+}
+
+/// <summary>Identifies the operation represented by a shared schedule lifecycle command.</summary>
+public enum DurableScheduleCommandKind
+{
+    /// <summary>Pause occurrence generation and pending starts.</summary>
+    Pause = 0,
+    /// <summary>Resume a paused schedule.</summary>
+    Resume = 1,
+    /// <summary>Delete the schedule.</summary>
+    Delete = 2,
+    /// <summary>Release a restore-fenced schedule against the active runtime epoch.</summary>
+    ReleaseAfterRecovery = 3,
 }
 
 /// <summary>
@@ -181,6 +219,7 @@ public sealed record DurableScheduleCommand
 {
     /// <summary>Initializes a lifecycle command.</summary>
     public DurableScheduleCommand(
+        DurableScheduleCommandKind kind,
         DurableScopeId scopeId,
         DurableCommandId commandId,
         DurableScheduleId scheduleId,
@@ -188,14 +227,41 @@ public sealed record DurableScheduleCommand
         string reasonCode,
         long expectedRevision)
     {
+        if (!Enum.IsDefined(kind))
+        {
+            throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(expectedRevision);
+        DurableIdentifier.Require(scopeId.Value, nameof(scopeId), 200);
+        DurableIdentifier.Require(commandId.Value, nameof(commandId), 200);
+        DurableIdentifier.Require(scheduleId.Value, nameof(scheduleId), 200);
+        Kind = kind;
         ScopeId = scopeId;
         CommandId = commandId;
         ScheduleId = scheduleId;
         ActorId = DurableIdentifier.Require(actorId, nameof(actorId), 200);
         ReasonCode = DurableIdentifier.Require(reasonCode, nameof(reasonCode), 120);
         ExpectedRevision = expectedRevision;
+        var operation = kind switch
+        {
+            DurableScheduleCommandKind.Pause => "pause",
+            DurableScheduleCommandKind.Resume => "resume",
+            DurableScheduleCommandKind.Delete => "delete",
+            DurableScheduleCommandKind.ReleaseAfterRecovery => "recovery-release",
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+        Fingerprint = DurableCommandFingerprints.Create(
+            $"appsurface.durable.schedule.{operation}.v1",
+            ScopeId.Value,
+            ScheduleId.Value,
+            ActorId,
+            ReasonCode,
+            ExpectedRevision);
     }
+
+    /// <summary>Gets the operation whose schema is encoded in the fingerprint.</summary>
+    public DurableScheduleCommandKind Kind { get; }
 
     /// <summary>Gets the trusted owning scope.</summary>
     public DurableScopeId ScopeId { get; }
@@ -214,6 +280,8 @@ public sealed record DurableScheduleCommand
 
     /// <summary>Gets the required authoritative revision.</summary>
     public long ExpectedRevision { get; }
+    /// <summary>Gets the computed operation-specific semantic command fingerprint.</summary>
+    public DurableCommandFingerprint Fingerprint { get; }
 }
 
 /// <summary>
@@ -230,6 +298,8 @@ public sealed record DurableScheduleMutationResult
         long revision,
         DateTimeOffset committedAtUtc)
     {
+        DurableIdentifier.Require(scheduleId.Value, nameof(scheduleId), 200);
+        DurableIdentifier.Require(commandId.Value, nameof(commandId), 200);
         if (!Enum.IsDefined(code))
         {
             throw new ArgumentOutOfRangeException(nameof(code));
@@ -260,7 +330,7 @@ public sealed record DurableScheduleMutationResult
     /// <summary>Gets the authoritative aggregate revision.</summary>
     public long Revision { get; }
 
-    /// <summary>Gets the database commit timestamp in UTC.</summary>
+    /// <summary>Gets the authoritative store commit timestamp in UTC.</summary>
     public DateTimeOffset CommittedAtUtc { get; }
 }
 
@@ -280,6 +350,7 @@ public sealed record DurableScheduleSnapshot
         DurableScheduleTargetSnapshot target,
         DateTimeOffset? nextOccurrenceUtc)
     {
+        DurableIdentifier.Require(scheduleId.Value, nameof(scheduleId), 200);
         if (!Enum.IsDefined(state))
         {
             throw new ArgumentOutOfRangeException(nameof(state));
@@ -393,6 +464,7 @@ public sealed record DurableScheduleListRequest
         DurableScheduleState? state = null,
         bool? requiresRecoveryRelease = null)
     {
+        DurableIdentifier.Require(scopeId.Value, nameof(scopeId), 200);
         if (pageSize is < 1 or > 1_000)
         {
             throw new ArgumentOutOfRangeException(nameof(pageSize));
@@ -448,6 +520,7 @@ public sealed record DurableScheduleListItem
         DateTimeOffset? nextOccurrenceUtc,
         bool requiresRecoveryRelease)
     {
+        DurableIdentifier.Require(scheduleId.Value, nameof(scheduleId), 200);
         if (!Enum.IsDefined(state))
         {
             throw new ArgumentOutOfRangeException(nameof(state));
@@ -566,6 +639,8 @@ public sealed record DurableScheduleExplainRequest
         DateTimeOffset anchorUtc,
         int occurrenceCount = 5)
     {
+        DurableIdentifier.Require(scopeId.Value, nameof(scopeId), 200);
+        DurableIdentifier.Require(scheduleId.Value, nameof(scheduleId), 200);
         if (occurrenceCount is < 1 or > 100)
         {
             throw new ArgumentOutOfRangeException(nameof(occurrenceCount));
@@ -614,6 +689,7 @@ public sealed record DurableScheduleExplanation
         string? timeZoneRulesFingerprint = null,
         IReadOnlyList<string>? notes = null)
     {
+        DurableIdentifier.Require(scheduleId.Value, nameof(scheduleId), 200);
         if (!Enum.IsDefined(kind))
         {
             throw new ArgumentOutOfRangeException(nameof(kind));

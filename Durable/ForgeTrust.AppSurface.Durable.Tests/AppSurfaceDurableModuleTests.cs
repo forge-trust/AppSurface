@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Durable.Tests;
 public sealed class AppSurfaceDurableModuleTests
 {
     [Fact]
-    public void ConfigureServices_registers_only_host_neutral_registries()
+    public void PassiveRegistrationProof_registers_only_host_neutral_registries()
     {
         var services = new ServiceCollection();
 
@@ -21,7 +21,11 @@ public sealed class AppSurfaceDurableModuleTests
         Assert.IsType<DurablePayloadCodecRegistry>(provider.GetRequiredService<IDurablePayloadCodecRegistry>());
         Assert.IsType<DurableWorkRegistry>(provider.GetRequiredService<IDurableWorkRegistry>());
         Assert.IsType<DurableFlowRegistry>(provider.GetRequiredService<IDurableFlowRegistry>());
+        Assert.Null(provider.GetService<IDurableWorkClient>());
+        Assert.Null(provider.GetService<IDurableFlowClient>());
+        Assert.Null(provider.GetService<IDurableScheduleClient>());
         Assert.Empty(provider.GetServices<IHostedService>());
+        Console.WriteLine("contracts registered; no runtime installed");
     }
 
     [Fact]

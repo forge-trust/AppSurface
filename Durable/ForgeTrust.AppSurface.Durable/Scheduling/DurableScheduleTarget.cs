@@ -16,7 +16,7 @@ public enum DurableScheduleTargetKind
 /// Describes the registered durable target started by each schedule occurrence.
 /// </summary>
 /// <remarks>
-/// Targets use typed input values so the runtime can require the registered durable codec. Persisted schedules never
+/// Targets encode typed input values immediately through an explicitly supplied durable codec. Persisted schedules never
 /// serialize executable delegates or resolve a target from a CLR type name.
 /// </remarks>
 public abstract record DurableScheduleTarget
@@ -29,13 +29,14 @@ public abstract record DurableScheduleTarget
     /// <summary>Gets the target subsystem.</summary>
     public DurableScheduleTargetKind Kind { get; }
 
-    internal abstract string RegisteredName { get; }
+    /// <summary>Gets the provider-readable registered Work name or Flow id.</summary>
+    public abstract string RegisteredName { get; }
 
-    internal abstract string RegisteredVersion { get; }
+    /// <summary>Gets the provider-readable immutable Work or Flow version.</summary>
+    public abstract string RegisteredVersion { get; }
 
-    internal abstract Type InputType { get; }
-
-    internal abstract object InputValue { get; }
+    /// <summary>Gets the immutable encoded input a provider persists without inspecting the CLR generic type.</summary>
+    public abstract DurableEncodedPayload EncodedInput { get; }
 
     /// <summary>
     /// Creates a target for a registered durable work type.
@@ -43,10 +44,15 @@ public abstract record DurableScheduleTarget
     /// <typeparam name="TWork">Registered work input type.</typeparam>
     /// <param name="workName">Stable registry name; this is not a CLR assembly-qualified name.</param>
     /// <param name="workVersion">Immutable registered work contract version.</param>
-    /// <param name="input">Typed input encoded with the work type's registered codec.</param>
+    /// <param name="input">Typed input encoded immediately.</param>
+    /// <param name="codec">The exact registered durable codec for the input.</param>
     /// <returns>A typed durable work target.</returns>
-    public static DurableWorkScheduleTarget<TWork> Work<TWork>(string workName, string workVersion, TWork input)
-        where TWork : notnull => new(workName, workVersion, input);
+    public static DurableWorkScheduleTarget<TWork> Work<TWork>(
+        string workName,
+        string workVersion,
+        TWork input,
+        IDurablePayloadCodec<TWork> codec)
+        where TWork : notnull => new(workName, workVersion, input, codec);
 
     /// <summary>
     /// Creates a target for an immutable registered Flow version.
@@ -54,13 +60,15 @@ public abstract record DurableScheduleTarget
     /// <typeparam name="TContext">Registered Flow context type.</typeparam>
     /// <param name="flowId">Stable Flow identifier.</param>
     /// <param name="version">Immutable Flow graph version.</param>
-    /// <param name="initialContext">Typed initial context encoded with the Flow's registered codec.</param>
+    /// <param name="initialContext">Typed initial context encoded immediately.</param>
+    /// <param name="codec">The exact registered durable codec for the context.</param>
     /// <returns>A typed durable Flow target.</returns>
     public static DurableFlowScheduleTarget<TContext> Flow<TContext>(
         string flowId,
         string version,
-        TContext initialContext)
-        where TContext : notnull => new(flowId, version, initialContext);
+        TContext initialContext,
+        IDurablePayloadCodec<TContext> codec)
+        where TContext : notnull => new(flowId, version, initialContext, codec);
 
     private protected static string RequireText(string value, string parameterName)
     {
@@ -86,12 +94,19 @@ public sealed record DurableWorkScheduleTarget<TWork> : DurableScheduleTarget
     /// <param name="workName">Stable work registry name.</param>
     /// <param name="workVersion">Immutable registered work contract version.</param>
     /// <param name="input">Typed work input.</param>
-    public DurableWorkScheduleTarget(string workName, string workVersion, TWork input)
+    /// <param name="codec">The exact registered codec.</param>
+    public DurableWorkScheduleTarget(
+        string workName,
+        string workVersion,
+        TWork input,
+        IDurablePayloadCodec<TWork> codec)
         : base(DurableScheduleTargetKind.Work)
     {
         WorkName = RequireText(workName, nameof(workName));
         WorkVersion = RequireText(workVersion, nameof(workVersion));
-        Input = input ?? throw new ArgumentNullException(nameof(input));
+        ArgumentNullException.ThrowIfNull(input);
+        Codec = codec ?? throw new ArgumentNullException(nameof(codec));
+        EncodedInputPayload = Codec.Encode(input);
     }
 
     /// <summary>Gets the stable registered work name.</summary>
@@ -100,16 +115,20 @@ public sealed record DurableWorkScheduleTarget<TWork> : DurableScheduleTarget
     /// <summary>Gets the immutable registered work contract version.</summary>
     public string WorkVersion { get; }
 
-    /// <summary>Gets the typed input encoded by the registered work codec.</summary>
-    public TWork Input { get; }
+    /// <summary>Gets the exact codec used to encode the immutable target input.</summary>
+    public IDurablePayloadCodec<TWork> Codec { get; }
 
-    internal override string RegisteredName => WorkName;
+    /// <summary>Gets the immutable encoded target input.</summary>
+    public DurableEncodedPayload EncodedInputPayload { get; }
 
-    internal override string RegisteredVersion => WorkVersion;
+    /// <inheritdoc />
+    public override string RegisteredName => WorkName;
 
-    internal override Type InputType => typeof(TWork);
+    /// <inheritdoc />
+    public override string RegisteredVersion => WorkVersion;
 
-    internal override object InputValue => Input;
+    /// <inheritdoc />
+    public override DurableEncodedPayload EncodedInput => EncodedInputPayload;
 }
 
 /// <summary>
@@ -125,12 +144,19 @@ public sealed record DurableFlowScheduleTarget<TContext> : DurableScheduleTarget
     /// <param name="flowId">Stable Flow identifier.</param>
     /// <param name="version">Immutable Flow graph version.</param>
     /// <param name="initialContext">Typed initial context.</param>
-    public DurableFlowScheduleTarget(string flowId, string version, TContext initialContext)
+    /// <param name="codec">The exact registered codec.</param>
+    public DurableFlowScheduleTarget(
+        string flowId,
+        string version,
+        TContext initialContext,
+        IDurablePayloadCodec<TContext> codec)
         : base(DurableScheduleTargetKind.Flow)
     {
         FlowId = RequireText(flowId, nameof(flowId));
         Version = RequireText(version, nameof(version));
-        InitialContext = initialContext ?? throw new ArgumentNullException(nameof(initialContext));
+        ArgumentNullException.ThrowIfNull(initialContext);
+        Codec = codec ?? throw new ArgumentNullException(nameof(codec));
+        EncodedInitialContext = Codec.Encode(initialContext);
     }
 
     /// <summary>Gets the stable Flow identifier.</summary>
@@ -139,14 +165,18 @@ public sealed record DurableFlowScheduleTarget<TContext> : DurableScheduleTarget
     /// <summary>Gets the immutable Flow graph version.</summary>
     public string Version { get; }
 
-    /// <summary>Gets the typed initial context encoded by the registered Flow codec.</summary>
-    public TContext InitialContext { get; }
+    /// <summary>Gets the exact codec used to encode the immutable initial context.</summary>
+    public IDurablePayloadCodec<TContext> Codec { get; }
 
-    internal override string RegisteredName => FlowId;
+    /// <summary>Gets the immutable encoded initial context.</summary>
+    public DurableEncodedPayload EncodedInitialContext { get; }
 
-    internal override string RegisteredVersion => Version;
+    /// <inheritdoc />
+    public override string RegisteredName => FlowId;
 
-    internal override Type InputType => typeof(TContext);
+    /// <inheritdoc />
+    public override string RegisteredVersion => Version;
 
-    internal override object InputValue => InitialContext;
+    /// <inheritdoc />
+    public override DurableEncodedPayload EncodedInput => EncodedInitialContext;
 }

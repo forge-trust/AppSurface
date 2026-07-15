@@ -1,4 +1,4 @@
-namespace ForgeTrust.AppSurface.Durable;
+namespace ForgeTrust.AppSurface.Durable.Provider;
 
 /// <summary>
 /// Selects which durable surfaces a bounded pump pass may process.
@@ -59,7 +59,7 @@ public sealed record DurableRuntimePumpRequest
     /// Gets the wall-clock budget for discovering and beginning additional items.
     /// </summary>
     /// <remarks>
-    /// An already-started provider call or database transaction is allowed to finish past this budget. The runtime does
+    /// An already-started provider call or authoritative-store transaction may finish past this budget. The runtime does
     /// not manufacture an ambiguous external outcome merely to enforce a hard stopwatch deadline.
     /// </remarks>
     public TimeSpan TimeBudget { get; }

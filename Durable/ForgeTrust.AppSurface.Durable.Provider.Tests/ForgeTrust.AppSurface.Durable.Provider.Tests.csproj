@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="../ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt" Link="Durable.PublicAPI.Shipped.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../ForgeTrust.AppSurface.Durable.Provider/PublicAPI.Shipped.txt" Link="Provider.PublicAPI.Shipped.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,7 +31,6 @@
 
   <ItemGroup>
     <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
-    <ProjectReference Include="../ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj" />
   </ItemGroup>
 

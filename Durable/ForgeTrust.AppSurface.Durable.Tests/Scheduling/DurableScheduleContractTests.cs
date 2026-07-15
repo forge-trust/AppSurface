@@ -122,6 +122,34 @@ public sealed class DurableScheduleContractTests
     }
 
     [Fact]
+    public void CronLimits_AcceptsExpressionAtLimit()
+    {
+        var expression = new string('H', 512);
+
+        Assert.Equal(expression, new DurableCronSchedule(expression, "UTC").Expression);
+    }
+
+    [Fact]
+    public void CronLimits_RejectsExpressionOverLimit()
+    {
+        Assert.Throws<ArgumentException>(() => new DurableCronSchedule(new string('H', 513), "UTC"));
+    }
+
+    [Fact]
+    public void CronLimits_AcceptsTimeZoneAtLimit()
+    {
+        var timeZone = new string('A', 128);
+
+        Assert.Equal(timeZone, new DurableCronSchedule("H * * * *", timeZone).IanaTimeZoneId);
+    }
+
+    [Fact]
+    public void CronLimits_RejectsTimeZoneOverLimit()
+    {
+        Assert.Throws<ArgumentException>(() => new DurableCronSchedule("H * * * *", new string('A', 129)));
+    }
+
+    [Fact]
     public void PolicyFactories_ValidateAndExposeBounds()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => ScheduleOverlapPolicy.AllowConcurrent(1));

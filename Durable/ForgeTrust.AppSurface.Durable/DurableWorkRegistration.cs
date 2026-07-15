@@ -5,30 +5,25 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace ForgeTrust.AppSurface.Durable;
 
 /// <summary>
-/// Carries one claimed work item across the storage-to-executor boundary.
+/// Carries one validated work item across the provider-to-application executor boundary.
 /// </summary>
 /// <remarks>
-/// Instances are created only after a scoped, fenced claim succeeds. They are not an authorization token by
-/// themselves; a runtime must record an effect permit against the same identity immediately before provider I/O.
+/// A provider creates this context only after validating its claim and execution fence. It is not an authorization
+/// token by itself; a provider must record an effect permit against the same identity immediately before provider I/O.
 /// </remarks>
-public sealed record DurableClaimedWork
+public sealed record DurableWorkExecutionContext
 {
     /// <summary>
-    /// Initializes a claimed work item.
+    /// Initializes a validated work execution context.
     /// </summary>
-    public DurableClaimedWork(
+    public DurableWorkExecutionContext(
         DurableScopeId scopeId,
         DurableWorkId workId,
-        string activityId,
         string workName,
         string workVersion,
         DurableEncodedPayload payload,
         DurableProviderSafety providerSafety,
-        int attemptNumber,
-        long leaseGeneration,
-        long scopeGeneration,
-        string runtimeEpoch,
-        string providerKey)
+        DurableWorkerExecutionIdentity executionIdentity)
     {
         DurableIdentifier.Require(scopeId.Value, nameof(scopeId), 200);
         DurableIdentifier.Require(workId.Value, nameof(workId), 200);
@@ -37,33 +32,13 @@ public sealed record DurableClaimedWork
             throw new ArgumentOutOfRangeException(nameof(providerSafety));
         }
 
-        if (attemptNumber < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(attemptNumber));
-        }
-
-        if (leaseGeneration < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(leaseGeneration));
-        }
-
-        if (scopeGeneration < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(scopeGeneration));
-        }
-
         ScopeId = scopeId;
         WorkId = workId;
-        ActivityId = DurableIdentifier.Require(activityId, nameof(activityId), 200);
         WorkName = DurableIdentifier.Require(workName, nameof(workName), 200);
         WorkVersion = DurableIdentifier.Require(workVersion, nameof(workVersion), 100);
         Payload = payload ?? throw new ArgumentNullException(nameof(payload));
         ProviderSafety = providerSafety;
-        AttemptNumber = attemptNumber;
-        LeaseGeneration = leaseGeneration;
-        ScopeGeneration = scopeGeneration;
-        RuntimeEpoch = DurableIdentifier.Require(runtimeEpoch, nameof(runtimeEpoch), 200);
-        ProviderKey = DurableIdentifier.Require(providerKey, nameof(providerKey), 512);
+        ExecutionIdentity = executionIdentity ?? throw new ArgumentNullException(nameof(executionIdentity));
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -71,9 +46,6 @@ public sealed record DurableClaimedWork
 
     /// <summary>Gets the immutable work aggregate identifier.</summary>
     public DurableWorkId WorkId { get; }
-
-    /// <summary>Gets the immutable activity identifier.</summary>
-    public string ActivityId { get; }
 
     /// <summary>Gets the registered work name.</summary>
     public string WorkName { get; }
@@ -87,20 +59,8 @@ public sealed record DurableClaimedWork
     /// <summary>Gets the provider ambiguity policy snapshot.</summary>
     public DurableProviderSafety ProviderSafety { get; }
 
-    /// <summary>Gets the monotonically increasing attempt number.</summary>
-    public int AttemptNumber { get; }
-
-    /// <summary>Gets the claim lease generation.</summary>
-    public long LeaseGeneration { get; }
-
-    /// <summary>Gets the owning scope lifecycle generation.</summary>
-    public long ScopeGeneration { get; }
-
-    /// <summary>Gets the out-of-band recovery epoch.</summary>
-    public string RuntimeEpoch { get; }
-
-    /// <summary>Gets the immutable provider idempotency key.</summary>
-    public string ProviderKey { get; }
+    /// <summary>Gets the provider-validated execution identity and authorization fence.</summary>
+    public DurableWorkerExecutionIdentity ExecutionIdentity { get; }
 }
 
 /// <summary>
@@ -110,7 +70,7 @@ public sealed record DurableClaimedWork
 /// Preparation decodes the registered payload and resolves the executor before any permit exists. Calling
 /// <see cref="InvokeAsync"/> is the provider-effect boundary and must happen only after the matching permit commits.
 /// </remarks>
-public abstract class DurablePreparedWorkInvocation
+public abstract class DurablePreparedWork
 {
     /// <summary>Executes the already prepared provider work and returns its encoded terminal result.</summary>
     public abstract ValueTask<DurableEncodedPayload> InvokeAsync(CancellationToken cancellationToken = default);
@@ -164,7 +124,7 @@ public abstract class DurableWorkRegistration
     /// <summary>
     /// Decodes and validates claimed bytes and resolves local executor dependencies without calling a provider.
     /// </summary>
-    public abstract DurablePreparedWorkInvocation Prepare(IServiceProvider services, DurableClaimedWork work);
+    public abstract DurablePreparedWork Prepare(IServiceProvider services, DurableWorkExecutionContext work);
 
     /// <summary>
     /// Invokes the registered executor and encodes its terminal business result.
@@ -175,7 +135,7 @@ public abstract class DurableWorkRegistration
     /// </remarks>
     public abstract ValueTask<DurableEncodedPayload> InvokeAsync(
         IServiceProvider services,
-        DurableClaimedWork work,
+        DurableWorkExecutionContext work,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -183,7 +143,7 @@ public abstract class DurableWorkRegistration
     /// </summary>
     public abstract ValueTask<DurableEncodedEffectReconciliation> ReconcileAsync(
         IServiceProvider services,
-        DurableClaimedWork work,
+        DurableWorkExecutionContext work,
         CancellationToken cancellationToken = default);
 }
 
@@ -230,12 +190,12 @@ public sealed class DurableWorkRegistration<TWork, TResult, TExecutor> : Durable
     /// <inheritdoc />
     public override async ValueTask<DurableEncodedPayload> InvokeAsync(
         IServiceProvider services,
-        DurableClaimedWork work,
+        DurableWorkExecutionContext work,
         CancellationToken cancellationToken = default) =>
         await Prepare(services, work).InvokeAsync(cancellationToken).ConfigureAwait(false);
 
     /// <inheritdoc />
-    public override DurablePreparedWorkInvocation Prepare(IServiceProvider services, DurableClaimedWork work)
+    public override DurablePreparedWork Prepare(IServiceProvider services, DurableWorkExecutionContext work)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(work);
@@ -247,7 +207,7 @@ public sealed class DurableWorkRegistration<TWork, TResult, TExecutor> : Durable
     /// <inheritdoc />
     public override async ValueTask<DurableEncodedEffectReconciliation> ReconcileAsync(
         IServiceProvider services,
-        DurableClaimedWork work,
+        DurableWorkExecutionContext work,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -264,7 +224,7 @@ public sealed class DurableWorkRegistration<TWork, TResult, TExecutor> : Durable
         return new DurableEncodedEffectReconciliation(outcome.Kind, encoded);
     }
 
-    private DurableWorkerEnvelope<TWork> CreateEnvelope(DurableClaimedWork work)
+    private DurableWorkerEnvelope<TWork> CreateEnvelope(DurableWorkExecutionContext work)
     {
         if (!string.Equals(work.WorkName, WorkName, StringComparison.Ordinal)
             || !string.Equals(work.WorkVersion, WorkVersion, StringComparison.Ordinal))
@@ -278,18 +238,12 @@ public sealed class DurableWorkRegistration<TWork, TResult, TExecutor> : Durable
         }
 
         var payload = _workCodec.Decode(work.Payload);
-        var executionIdentity = new DurableWorkerExecutionIdentity(
-            work.ActivityId,
-            work.AttemptNumber,
-            work.LeaseGeneration,
-            work.ScopeGeneration,
-            work.RuntimeEpoch,
-            work.ProviderKey);
+        var executionIdentity = work.ExecutionIdentity;
         var correlation = new DurableWorkerCorrelation(
             WorkName,
             work.WorkId.Value,
-            work.ActivityId,
-            $"{work.AttemptNumber}:{work.LeaseGeneration}");
+            executionIdentity.ActivityId,
+            $"{executionIdentity.AttemptNumber}:{executionIdentity.LeaseGeneration}");
         return new DurableWorkerEnvelope<TWork>(
             DurableWorkerProjectionOutcome.Claimed,
             "durable.claimed",
@@ -302,7 +256,7 @@ public sealed class DurableWorkRegistration<TWork, TResult, TExecutor> : Durable
     private sealed class PreparedInvocation(
         TExecutor executor,
         DurableWorkerEnvelope<TWork> envelope,
-        IDurablePayloadCodec<TResult> resultCodec) : DurablePreparedWorkInvocation
+        IDurablePayloadCodec<TResult> resultCodec) : DurablePreparedWork
     {
         public override async ValueTask<DurableEncodedPayload> InvokeAsync(
             CancellationToken cancellationToken = default)

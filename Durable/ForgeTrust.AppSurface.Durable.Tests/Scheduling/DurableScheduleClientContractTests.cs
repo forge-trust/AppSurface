@@ -1,3 +1,4 @@
+using System.Text;
 using ForgeTrust.AppSurface.Durable;
 
 namespace ForgeTrust.AppSurface.Durable.Tests.Scheduling;
@@ -7,8 +8,10 @@ public sealed class DurableScheduleClientContractTests
     private static readonly DurableScopeId ScopeId = new("household-1");
     private static readonly DurableCommandId CommandId = new("command-1");
     private static readonly DurableScheduleId ScheduleId = new("schedule-1");
+    private static readonly IDurablePayloadCodec<WorkInput> WorkCodec = new TestCodec<WorkInput>("work.input");
+    private static readonly IDurablePayloadCodec<FlowInput> FlowCodec = new TestCodec<FlowInput>("flow.input");
     private static readonly DurableSchedule Schedule = DurableSchedule.Every(TimeSpan.FromHours(1));
-    private static readonly DurableScheduleTarget Target = DurableScheduleTarget.Work("cleanup", "v1", new WorkInput("provider-1"));
+    private static readonly DurableScheduleTarget Target = DurableScheduleTarget.Work("cleanup", "v1", new WorkInput("provider-1"), WorkCodec);
     private static readonly DurableScheduleTargetSnapshot TargetSnapshot = new(
         DurableScheduleTargetKind.Work,
         "cleanup",
@@ -34,28 +37,52 @@ public sealed class DurableScheduleClientContractTests
     [Fact]
     public void TargetFactories_PreserveRegisteredIdentityAndTypedInput()
     {
-        var work = DurableScheduleTarget.Work("cleanup", "v1", new WorkInput("provider-1"));
-        var flow = DurableScheduleTarget.Flow("exit-household", "v2", new FlowInput(42));
+        var work = DurableScheduleTarget.Work("cleanup", "v1", new WorkInput("provider-1"), WorkCodec);
+        var flow = DurableScheduleTarget.Flow("exit-household", "v2", new FlowInput(42), FlowCodec);
 
         Assert.Equal(DurableScheduleTargetKind.Work, work.Kind);
         Assert.Equal("cleanup", work.WorkName);
         Assert.Equal("v1", work.WorkVersion);
-        Assert.Equal("provider-1", work.Input.ProviderId);
+        Assert.Equal("cleanup", ((DurableScheduleTarget)work).RegisteredName);
+        Assert.Equal("v1", ((DurableScheduleTarget)work).RegisteredVersion);
+        Assert.Equal(WorkCodec.Encode(new WorkInput("provider-1")).Sha256, work.EncodedInputPayload.Sha256);
+        Assert.Equal(work.EncodedInputPayload.Sha256, ((DurableScheduleTarget)work).EncodedInput.Sha256);
         Assert.Equal(DurableScheduleTargetKind.Flow, flow.Kind);
         Assert.Equal("exit-household", flow.FlowId);
         Assert.Equal("v2", flow.Version);
-        Assert.Equal(42, flow.InitialContext.Count);
+        Assert.Equal(FlowCodec.Encode(new FlowInput(42)).Sha256, flow.EncodedInitialContext.Sha256);
+        Assert.Equal("exit-household", ((DurableScheduleTarget)flow).RegisteredName);
+        Assert.Equal("v2", ((DurableScheduleTarget)flow).RegisteredVersion);
+        Assert.Equal(flow.EncodedInitialContext.Sha256, ((DurableScheduleTarget)flow).EncodedInput.Sha256);
+    }
+
+    [Fact]
+    public void TargetFactories_EncodeInputAtConstruction()
+    {
+        var input = new MutableInput { Value = "before" };
+        var target = DurableScheduleTarget.Work(
+            "cleanup",
+            "v1",
+            input,
+            new TestCodec<MutableInput>("mutable.input"));
+        var encodedBeforeMutation = target.EncodedInputPayload.Sha256;
+
+        input.Value = "after";
+
+        Assert.Equal(encodedBeforeMutation, target.EncodedInputPayload.Sha256);
     }
 
     [Fact]
     public void Targets_RejectMissingIdentityOrInput()
     {
-        Assert.Throws<ArgumentException>(() => new DurableWorkScheduleTarget<WorkInput>(" ", "v1", new WorkInput("p")));
-        Assert.Throws<ArgumentException>(() => new DurableWorkScheduleTarget<WorkInput>("work", " ", new WorkInput("p")));
-        Assert.Throws<ArgumentNullException>(() => new DurableWorkScheduleTarget<WorkInput>("work", "v1", null!));
-        Assert.Throws<ArgumentException>(() => new DurableFlowScheduleTarget<FlowInput>(" ", "v1", new FlowInput(1)));
-        Assert.Throws<ArgumentException>(() => new DurableFlowScheduleTarget<FlowInput>("flow", " ", new FlowInput(1)));
-        Assert.Throws<ArgumentNullException>(() => new DurableFlowScheduleTarget<FlowInput>("flow", "v1", null!));
+        Assert.Throws<ArgumentException>(() => new DurableWorkScheduleTarget<WorkInput>(" ", "v1", new WorkInput("p"), WorkCodec));
+        Assert.Throws<ArgumentException>(() => new DurableWorkScheduleTarget<WorkInput>("work", " ", new WorkInput("p"), WorkCodec));
+        Assert.Throws<ArgumentNullException>(() => new DurableWorkScheduleTarget<WorkInput>("work", "v1", null!, WorkCodec));
+        Assert.Throws<ArgumentNullException>(() => new DurableWorkScheduleTarget<WorkInput>("work", "v1", new WorkInput("p"), null!));
+        Assert.Throws<ArgumentException>(() => new DurableFlowScheduleTarget<FlowInput>(" ", "v1", new FlowInput(1), FlowCodec));
+        Assert.Throws<ArgumentException>(() => new DurableFlowScheduleTarget<FlowInput>("flow", " ", new FlowInput(1), FlowCodec));
+        Assert.Throws<ArgumentNullException>(() => new DurableFlowScheduleTarget<FlowInput>("flow", "v1", null!, FlowCodec));
+        Assert.Throws<ArgumentNullException>(() => new DurableFlowScheduleTarget<FlowInput>("flow", "v1", new FlowInput(1), null!));
     }
 
     [Fact]
@@ -98,7 +125,9 @@ public sealed class DurableScheduleClientContractTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableScheduleUpdateRequest(
             ScopeId, CommandId, ScheduleId, 0, Schedule, Target));
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableScheduleCommand(
-            ScopeId, CommandId, ScheduleId, "operator-1", "maintenance", 0));
+            DurableScheduleCommandKind.Pause, ScopeId, CommandId, ScheduleId, "operator-1", "maintenance", 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableScheduleCommand(
+            (DurableScheduleCommandKind)99, ScopeId, CommandId, ScheduleId, "operator-1", "maintenance", 1));
     }
 
     [Fact]
@@ -121,7 +150,7 @@ public sealed class DurableScheduleClientContractTests
     public void LifecycleCommand_PreservesOptimisticConcurrencyInputs()
     {
         var command = new DurableScheduleCommand(
-            ScopeId, CommandId, ScheduleId, "operator-1", "maintenance", 7);
+            DurableScheduleCommandKind.Pause, ScopeId, CommandId, ScheduleId, "operator-1", "maintenance", 7);
 
         Assert.Equal(ScopeId, command.ScopeId);
         Assert.Equal(CommandId, command.CommandId);
@@ -129,10 +158,11 @@ public sealed class DurableScheduleClientContractTests
         Assert.Equal("operator-1", command.ActorId);
         Assert.Equal("maintenance", command.ReasonCode);
         Assert.Equal(7, command.ExpectedRevision);
+        Assert.Equal(DurableScheduleCommandKind.Pause, command.Kind);
         Assert.Throws<ArgumentException>(() => new DurableScheduleCommand(
-            ScopeId, CommandId, ScheduleId, " ", "maintenance", 7));
+            DurableScheduleCommandKind.Pause, ScopeId, CommandId, ScheduleId, " ", "maintenance", 7));
         Assert.Throws<ArgumentException>(() => new DurableScheduleCommand(
-            ScopeId, CommandId, ScheduleId, "operator-1", " ", 7));
+            DurableScheduleCommandKind.Pause, ScopeId, CommandId, ScheduleId, "operator-1", " ", 7));
     }
 
     [Fact]
@@ -375,4 +405,30 @@ public sealed class DurableScheduleClientContractTests
     private sealed record WorkInput(string ProviderId);
 
     private sealed record FlowInput(int Count);
+
+    private sealed class MutableInput
+    {
+        public required string Value { get; set; }
+
+        public override string ToString() => Value;
+    }
+
+    private sealed class TestCodec<T>(string contractName) : IDurablePayloadCodec<T>
+        where T : notnull
+    {
+        public Type PayloadType => typeof(T);
+        public string ContractName => contractName;
+        public string ContractVersion => "v1";
+        public DurableDataClassification Classification => DurableDataClassification.Operational;
+        public string RetentionPolicyId => DurableEncodedPayload.DefaultRetentionPolicyId;
+        public DurableEncodedPayload Encode(T value) => new(
+            ContractName,
+            ContractVersion,
+            Classification,
+            Encoding.UTF8.GetBytes(value.ToString()!),
+            RetentionPolicyId);
+        public T Decode(DurableEncodedPayload payload) => throw new NotSupportedException();
+        public DurableEncodedPayload EncodeObject(object value) => Encode((T)value);
+        public object DecodeObject(DurableEncodedPayload payload) => Decode(payload);
+    }
 }

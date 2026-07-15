@@ -55,6 +55,8 @@
     <Project Path="Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests.csproj" />
   </Folder>
   <Folder Name="/Durable/">
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.Provider.Tests/ForgeTrust.AppSurface.Durable.Provider.Tests.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.Tests/ForgeTrust.AppSurface.Durable.Tests.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" />
   </Folder>

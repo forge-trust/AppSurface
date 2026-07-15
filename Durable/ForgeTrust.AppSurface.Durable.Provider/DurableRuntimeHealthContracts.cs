@@ -1,4 +1,4 @@
-namespace ForgeTrust.AppSurface.Durable;
+namespace ForgeTrust.AppSurface.Durable.Provider;
 
 /// <summary>
 /// Describes the safe, low-cardinality liveness state of one configured durable runtime worker.
@@ -144,7 +144,7 @@ public sealed record DurableRuntimeHealthSnapshot
     /// <summary>Gets the surfaces this worker is configured to pump.</summary>
     public DurableRuntimeSurface HostedSurfaces { get; }
 
-    /// <summary>Gets the PostgreSQL observation time.</summary>
+    /// <summary>Gets the authoritative store observation time.</summary>
     public DateTimeOffset ObservedAtUtc { get; }
 
     /// <summary>Gets when the current worker instance first registered.</summary>
@@ -168,12 +168,12 @@ public sealed record DurableRuntimeHealthSnapshot
     /// <summary>Gets the oldest selected-surface available or reclaimable dispatch instant.</summary>
     public DateTimeOffset? OldestDueAtUtc { get; }
 
-    /// <summary>Gets the database-observed age of the oldest overdue dispatch.</summary>
+    /// <summary>Gets the authoritative-store-observed age of the oldest overdue dispatch.</summary>
     public TimeSpan? OldestDueAge { get; }
 }
 
 /// <summary>
-/// Reads the configured worker's PostgreSQL-backed compatibility and liveness snapshot.
+/// Reads the configured worker's provider-backed compatibility and liveness snapshot.
 /// </summary>
 /// <remarks>
 /// This API is safe to expose through an application-owned health endpoint. It contains no payloads or scope and

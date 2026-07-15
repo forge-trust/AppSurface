@@ -445,7 +445,8 @@ public sealed class DurableFlowRegistration<TContext> : DurableFlowRegistration
     private readonly IDurablePayloadCodec<TContext> _contextCodec;
     private readonly IFlowTransitionEvaluator<TContext> _evaluator;
     private readonly IReadOnlyDictionary<string, DurableFlowActivityBinding<TContext>> _activityBindings;
-    private readonly IReadOnlyDictionary<IFlowEventCallsite, DurableFlowEventBinding> _eventBindings;
+    private readonly IReadOnlyDictionary<(string EventName, string ContractName, string ContractVersion), DurableFlowEventBinding>
+        _eventBindings;
     private readonly string _definitionFingerprint;
 
     /// <summary>
@@ -491,21 +492,21 @@ public sealed class DurableFlowRegistration<TContext> : DurableFlowRegistration
         }
 
         _activityBindings = bindings;
-        var events = new Dictionary<IFlowEventCallsite, DurableFlowEventBinding>(ReferenceEqualityComparer.Instance);
+        var events = new Dictionary<(string EventName, string ContractName, string ContractVersion), DurableFlowEventBinding>();
         var eventManifestIdentities = new HashSet<(string EventName, string ContractName, string ContractVersion)>();
         foreach (var binding in eventBindings ?? [])
         {
             ArgumentNullException.ThrowIfNull(binding);
-            if (!events.TryAdd(binding.Callsite, binding))
+            var identity = (
+                binding.Callsite.EventName,
+                binding.Callsite.ContractName,
+                binding.Callsite.ContractVersion);
+            if (!events.TryAdd(identity, binding))
             {
                 throw new InvalidOperationException(
                     $"Flow event callsite '{binding.Callsite.EventName}' is bound more than once.");
             }
 
-            var identity = (
-                binding.Callsite.EventName,
-                binding.Callsite.ContractName,
-                binding.Callsite.ContractVersion);
             if (!eventManifestIdentities.Add(identity))
             {
                 throw new InvalidOperationException(
@@ -655,7 +656,7 @@ public sealed class DurableFlowRegistration<TContext> : DurableFlowRegistration
                 $"Flow '{FlowId}' version '{FlowVersion}' activity callsite '{callsiteId}' is not durably registered.");
 
     private DurableFlowEventBinding GetEventBinding(IFlowEventCallsite callsite) =>
-        _eventBindings.TryGetValue(callsite, out var binding)
+        _eventBindings.TryGetValue((callsite.EventName, callsite.ContractName, callsite.ContractVersion), out var binding)
             ? binding
             : throw new InvalidOperationException(
                 $"Flow '{FlowId}' version '{FlowVersion}' event callsite '{callsite.EventName}' is not declared in its durable implementation manifest.");
