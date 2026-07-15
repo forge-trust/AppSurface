@@ -191,7 +191,7 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
                 .LogError(
                     EvaluationFailureEvent,
                     "Named canary {CanaryName} failed with diagnostic {DiagnosticCode} and exception type {ExceptionType}.",
-                    name,
+                    descriptor.Name,
                     "ASCAN301",
                     exception.GetType().FullName);
 

@@ -24,6 +24,7 @@ public sealed class AppSurfaceCanaryEndpointTests
 {
     private const string Name = "forwarding.alpha-evidence";
     private const string PolicyName = "DeployOperators";
+    private const string WrongPolicyName = "SupportOperators";
 
     [Fact]
     public void MapAppSurfaceCanaries_ValidatesMapTimeContract()
@@ -176,6 +177,22 @@ public sealed class AppSurfaceCanaryEndpointTests
         await using var host = await StartHostAsync(removeAuthorizationMetadata: true);
 
         using var response = await host.Client.GetAsync(Route(Name));
+        var json = await response.Content.ReadAsStringAsync();
+        using var problem = JsonDocument.Parse(json);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal("ASCAN113", problem.RootElement.GetProperty("code").GetString());
+        Assert.Equal(0, host.State.InvocationCount);
+        AssertNoStore(response);
+    }
+
+    [Fact]
+    public async Task Endpoint_FailsClosedWhenRequiredAuthorizationMetadataIsReplaced()
+    {
+        await using var host = await StartHostAsync(replaceAuthorizationMetadata: true);
+        using var request = AuthorizedRequest(Route(Name));
+
+        using var response = await host.Client.SendAsync(request);
         var json = await response.Content.ReadAsStringAsync();
         using var problem = JsonDocument.Parse(json);
 
@@ -385,7 +402,8 @@ public sealed class AppSurfaceCanaryEndpointTests
 
         Assert.True(accepted);
         Assert.NotNull(parsed);
-        Assert.Equal(TimeSpan.Zero, parsed.Value.Offset);
+        var parsedValue = parsed!.Value;
+        Assert.Equal(TimeSpan.Zero, parsedValue.Offset);
         Assert.Null(problem);
     }
 
@@ -705,6 +723,7 @@ public sealed class AppSurfaceCanaryEndpointTests
         bool registerPolicy = true,
         bool allowAnonymous = false,
         bool removeAuthorizationMetadata = false,
+        bool replaceAuthorizationMetadata = false,
         bool alwaysOk = false,
         bool requireHeaders = false,
         bool throwOnEvaluate = false,
@@ -765,7 +784,7 @@ public sealed class AppSurfaceCanaryEndpointTests
                 endpoint.AllowAnonymous();
             }
 
-            if (removeAuthorizationMetadata)
+            if (removeAuthorizationMetadata || replaceAuthorizationMetadata)
             {
                 endpoint.Add(endpointBuilder =>
                 {
@@ -775,6 +794,11 @@ public sealed class AppSurfaceCanaryEndpointTests
                         {
                             endpointBuilder.Metadata.RemoveAt(index);
                         }
+                    }
+
+                    if (replaceAuthorizationMetadata)
+                    {
+                        endpointBuilder.Metadata.Add(new AuthorizeAttribute(WrongPolicyName));
                     }
                 });
             }
@@ -827,6 +851,9 @@ public sealed class AppSurfaceCanaryEndpointTests
                 _ => { });
         services.AddAuthorization(options =>
         {
+            options.AddPolicy(
+                WrongPolicyName,
+                policy => policy.RequireClaim("role", "deploy-operator"));
             if (registerPolicy)
             {
                 options.AddPolicy(
