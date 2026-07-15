@@ -28,3 +28,6 @@ command fingerprints make ambiguity observable and fail closed.
 
 Operational failures use the shared [`ASDURxxx` diagnostics catalog](../troubleshooting/durable-diagnostics.md). Codes
 for provider implementation that does not exist yet are marked reserved there.
+
+The [slice 2 API budget](api-budget.md) records which original public contracts were retained, moved, added,
+internalized, or removed. The package test projects enforce the corresponding member-level API snapshots.

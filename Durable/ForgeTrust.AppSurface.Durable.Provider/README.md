@@ -19,7 +19,8 @@ provide PostgreSQL storage, migrations, polling, schedule execution, hosted serv
 
 ## Public API by audience
 
-Every public type in this package belongs to one of these provider-facing families:
+Every public type in this package belongs to one of these provider-facing families. The
+[member-level API snapshot](PublicAPI.Shipped.txt) is the canonical inventory.
 
 | Audience | Public types | Contract role |
 |---|---|---|
@@ -31,7 +32,8 @@ Every public type in this package belongs to one of these provider-facing famili
 
 The SPI accepts and returns public Durable identifiers and command fingerprints. Collection results defensively copy
 inputs, default identifiers are rejected, timestamps normalize to UTC, page sizes are bounded, and every mutation uses
-revision/generation fencing.
+revision/generation fencing. Provider worker ids, terminal/problem codes, and registered Work names and versions use
+the Durable package's canonical [identifier alphabet and bounds](../ForgeTrust.AppSurface.Durable/README.md#durable-identifier-alphabet-and-bounds).
 
 ## Provider work adaptation
 
@@ -57,6 +59,9 @@ against this SPI. Slice 2 deliberately does not run downstream provider conforma
 
 See the [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md) for currently available contract
 codes and explicitly reserved provider codes.
+
+From the repository root, `./Durable/verify-packed-consumers.sh` packs both held packages and their local dependencies,
+then compiles and runs isolated adopter and provider consumers against only those packages.
 
 ## Release Guidance
 

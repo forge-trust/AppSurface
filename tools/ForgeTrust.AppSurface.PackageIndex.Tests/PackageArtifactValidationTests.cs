@@ -345,6 +345,35 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
+    public async Task DurablePublicationHold_CheckedInManifestHoldsBothPackagesOutOfActualPublishPlan()
+    {
+        var repositoryRoot = GetRepositoryRoot();
+        var manifestPath = CombineSafeChildPath(repositoryRoot, "packages/package-index.yml");
+        var manifest = await new PackageManifestLoader().LoadAsync(manifestPath, CancellationToken.None);
+        var durableEntries = manifest.Packages
+            .Where(entry => entry.Project is
+                "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" or
+                "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj")
+            .ToArray();
+
+        Assert.Equal(2, durableEntries.Length);
+        Assert.All(durableEntries, entry =>
+        {
+            Assert.Equal(PackagePublishDecision.DoNotPublish, entry.PublishDecision);
+            Assert.Contains("PostgreSQL provider milestone", entry.PublishReason, StringComparison.Ordinal);
+        });
+
+        var plan = await new PackagePublishPlanResolver(
+            new PackageProjectScanner(),
+            new DotNetProjectMetadataProvider(),
+            new PackageManifestLoader()).ResolveAsync(repositoryRoot, manifestPath, CancellationToken.None);
+
+        Assert.DoesNotContain(plan.Entries, entry =>
+            entry.PackageId is "ForgeTrust.AppSurface.Durable" or "ForgeTrust.AppSurface.Durable.Provider");
+    }
+
+    [Fact]
     public async Task PublishPlanResolver_ThrowsWhenPublicEntryUsesSupportPublish()
     {
         await WriteFileAsync("packages/package-index.yml",
@@ -5890,18 +5919,22 @@ public sealed class PackageArtifactValidationTests : IDisposable
         };
     }
 
-    private static string GetRepositoryRoot()
+    private static string GetRepositoryRoot(
+        [System.Runtime.CompilerServices.CallerFilePath] string sourcePath = "")
     {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null)
+        foreach (var startingPath in new[] { sourcePath, Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
         {
-            if (File.Exists(CombineSafeChildPath(current.FullName, "ForgeTrust.AppSurface.slnx")) &&
-                Directory.Exists(CombineSafeChildPath(current.FullName, ".github/workflows")))
+            var current = new DirectoryInfo(startingPath);
+            while (current is not null)
             {
-                return current.FullName;
-            }
+                if (File.Exists(CombineSafeChildPath(current.FullName, "ForgeTrust.AppSurface.slnx")) &&
+                    Directory.Exists(CombineSafeChildPath(current.FullName, ".github/workflows")))
+                {
+                    return current.FullName;
+                }
 
-            current = current.Parent;
+                current = current.Parent;
+            }
         }
 
         throw new InvalidOperationException("Could not locate repository root from test base directory.");

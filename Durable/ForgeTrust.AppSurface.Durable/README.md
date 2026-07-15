@@ -24,37 +24,60 @@ message bus, storage, or worker hosting.
 `AppSurfaceDurableModule` registers only payload, Work, and Flow registries. This complete source consumer verifies that
 registration resolves those registries and leaves `IHostedService` empty:
 
+<!-- appsurface:snippet id="durable-passive-registration" file="Durable/ForgeTrust.AppSurface.Durable.Tests/PassiveRegistrationProof.cs" marker="durable-passive-registration" lang="csharp" -->
 ```csharp
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Durable;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-var services = new ServiceCollection();
-new AppSurfaceDurableModule().ConfigureServices(
-    new StartupContext([], new PassiveHostModule()),
-    services);
+namespace ForgeTrust.AppSurface.Durable.Examples;
 
-using var provider = services.BuildServiceProvider();
-_ = provider.GetRequiredService<IDurablePayloadCodecRegistry>();
-_ = provider.GetRequiredService<IDurableWorkRegistry>();
-_ = provider.GetRequiredService<IDurableFlowRegistry>();
-if (provider.GetService<IDurableWorkClient>() is not null
-    || provider.GetService<IDurableFlowClient>() is not null
-    || provider.GetService<IDurableScheduleClient>() is not null
-    || provider.GetServices<IHostedService>().Any())
+internal static class PassiveRegistrationProof
 {
-    throw new InvalidOperationException("Durable contract registration must remain passive.");
-}
+    internal static void Run()
+    {
+        var services = new ServiceCollection();
+        new AppSurfaceDurableModule().ConfigureServices(
+            new StartupContext([], new PassiveHostModule()),
+            services);
 
-sealed class PassiveHostModule : IAppSurfaceHostModule
-{
-    public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder) { }
-    public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder) { }
-    public void ConfigureServices(StartupContext context, IServiceCollection services) { }
-    public void RegisterDependentModules(ModuleDependencyBuilder builder) { }
+        using var provider = services.BuildServiceProvider();
+        _ = provider.GetRequiredService<IDurablePayloadCodecRegistry>();
+        _ = provider.GetRequiredService<IDurableWorkRegistry>();
+        _ = provider.GetRequiredService<IDurableFlowRegistry>();
+        if (provider.GetService<IDurableWorkClient>() is not null
+            || provider.GetService<IDurableFlowClient>() is not null
+            || provider.GetService<IDurableScheduleClient>() is not null
+            || provider.GetServices<IHostedService>().Any())
+        {
+            throw new InvalidOperationException("Durable contract registration must remain passive.");
+        }
+
+        Console.WriteLine("contracts registered; no runtime installed");
+    }
+
+    private sealed class PassiveHostModule : IAppSurfaceHostModule
+    {
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+        }
+    }
 }
 ```
+<!-- /appsurface:snippet -->
 
 From the repository root, the compile-and-run proof is one command:
 
@@ -68,8 +91,9 @@ The proof emits `contracts registered; no runtime installed`.
 
 ## Public API by audience
 
-Every public type in this package belongs to one of these adopter-facing families. The file links are the canonical API
-inventory; public types added to these files inherit the audience and compatibility policy shown here.
+Every public type in this package belongs to one of these adopter-facing families. The
+[member-level API snapshot](PublicAPI.Shipped.txt) is the canonical inventory; public types added to the corresponding
+source families inherit the audience and compatibility policy shown here.
 
 | Audience | Public types | Contract role |
 |---|---|---|
@@ -103,6 +127,19 @@ object afterward cannot change the fingerprint or the bytes a provider receives.
 All request and result constructors reject default opaque identifiers at the public boundary. Collection-bearing
 results defensively copy caller collections. `DurableWorkerExecutionIdentity` can only be created through validated
 factories and advanced through its monotonic transition API; its provider key is the immutable activity id.
+
+### Durable identifier alphabet and bounds
+
+Fields documented as durable identifiers accept only ASCII letters (`A-Z`, `a-z`), digits (`0-9`), hyphens (`-`),
+underscores (`_`), periods (`.`), and colons (`:`). They reject null, empty, or whitespace-only values, control
+characters, and every other character. The shared rule keeps persisted identity values ordinal, privacy-safe, and
+portable across providers.
+
+Work and Flow names and other registered names are limited to 200 characters; immutable Work and Flow versions and
+other registered versions are limited to 100 characters. Provider health and inventory contracts apply the same
+alphabet with a 200-character worker-id limit and 120-character terminal/problem-code limit. These rules apply only to
+fields documented as durable identifiers. Human-readable labels, Cron expressions, time-zone ids, and encoded payloads
+have their own validation rules and must not be inferred from this alphabet.
 
 Cron expression text is limited to 512 characters and the IANA time-zone id to 128 characters. These are contract
 limits, not proof that a string is valid Cronos grammar or a known time zone; a provider performs grammar and zone

@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../PublicApiSnapshot.cs" Link="PublicApiSnapshot.cs" />
     <Content Include="../ForgeTrust.AppSurface.Durable.Provider/PublicAPI.Shipped.txt" Link="Provider.PublicAPI.Shipped.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

@@ -18,6 +18,8 @@ public enum DurableScheduleTargetKind
 /// <remarks>
 /// Targets encode typed input values immediately through an explicitly supplied durable codec. Persisted schedules never
 /// serialize executable delegates or resolve a target from a CLR type name.
+/// Registered names and versions accept only ASCII letters, digits, hyphens, underscores, periods, and colons. Empty,
+/// whitespace-only, control-containing, and other-character values are rejected.
 /// </remarks>
 public abstract record DurableScheduleTarget
 {
@@ -42,8 +44,8 @@ public abstract record DurableScheduleTarget
     /// Creates a target for a registered durable work type.
     /// </summary>
     /// <typeparam name="TWork">Registered work input type.</typeparam>
-    /// <param name="workName">Stable registry name; this is not a CLR assembly-qualified name.</param>
-    /// <param name="workVersion">Immutable registered work contract version.</param>
+    /// <param name="workName">Stable registry name of at most 200 durable-identifier characters; this is not a CLR assembly-qualified name.</param>
+    /// <param name="workVersion">Immutable registered work contract version of at most 100 durable-identifier characters.</param>
     /// <param name="input">Typed input encoded immediately.</param>
     /// <param name="codec">The exact registered durable codec for the input.</param>
     /// <returns>A typed durable work target.</returns>
@@ -58,8 +60,8 @@ public abstract record DurableScheduleTarget
     /// Creates a target for an immutable registered Flow version.
     /// </summary>
     /// <typeparam name="TContext">Registered Flow context type.</typeparam>
-    /// <param name="flowId">Stable Flow identifier.</param>
-    /// <param name="version">Immutable Flow graph version.</param>
+    /// <param name="flowId">Stable Flow identifier of at most 200 durable-identifier characters.</param>
+    /// <param name="version">Immutable Flow graph version of at most 100 durable-identifier characters.</param>
     /// <param name="initialContext">Typed initial context encoded immediately.</param>
     /// <param name="codec">The exact registered durable codec for the context.</param>
     /// <returns>A typed durable Flow target.</returns>
@@ -69,16 +71,6 @@ public abstract record DurableScheduleTarget
         TContext initialContext,
         IDurablePayloadCodec<TContext> codec)
         where TContext : notnull => new(flowId, version, initialContext, codec);
-
-    private protected static string RequireText(string value, string parameterName)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new ArgumentException("Value must not be empty.", parameterName);
-        }
-
-        return value;
-    }
 }
 
 /// <summary>
@@ -91,8 +83,8 @@ public sealed record DurableWorkScheduleTarget<TWork> : DurableScheduleTarget
     /// <summary>
     /// Initializes a typed durable work target.
     /// </summary>
-    /// <param name="workName">Stable work registry name.</param>
-    /// <param name="workVersion">Immutable registered work contract version.</param>
+    /// <param name="workName">Stable work registry name of at most 200 durable-identifier characters.</param>
+    /// <param name="workVersion">Immutable registered work contract version of at most 100 durable-identifier characters.</param>
     /// <param name="input">Typed work input.</param>
     /// <param name="codec">The exact registered codec.</param>
     public DurableWorkScheduleTarget(
@@ -102,17 +94,17 @@ public sealed record DurableWorkScheduleTarget<TWork> : DurableScheduleTarget
         IDurablePayloadCodec<TWork> codec)
         : base(DurableScheduleTargetKind.Work)
     {
-        WorkName = RequireText(workName, nameof(workName));
-        WorkVersion = RequireText(workVersion, nameof(workVersion));
+        WorkName = DurableIdentifier.Require(workName, nameof(workName), 200);
+        WorkVersion = DurableIdentifier.Require(workVersion, nameof(workVersion), 100);
         ArgumentNullException.ThrowIfNull(input);
         Codec = codec ?? throw new ArgumentNullException(nameof(codec));
         EncodedInputPayload = Codec.Encode(input);
     }
 
-    /// <summary>Gets the stable registered work name.</summary>
+    /// <summary>Gets the stable registered work name, limited to 200 durable-identifier characters.</summary>
     public string WorkName { get; }
 
-    /// <summary>Gets the immutable registered work contract version.</summary>
+    /// <summary>Gets the immutable registered work contract version, limited to 100 durable-identifier characters.</summary>
     public string WorkVersion { get; }
 
     /// <summary>Gets the exact codec used to encode the immutable target input.</summary>
@@ -141,8 +133,8 @@ public sealed record DurableFlowScheduleTarget<TContext> : DurableScheduleTarget
     /// <summary>
     /// Initializes a typed durable Flow target.
     /// </summary>
-    /// <param name="flowId">Stable Flow identifier.</param>
-    /// <param name="version">Immutable Flow graph version.</param>
+    /// <param name="flowId">Stable Flow identifier of at most 200 durable-identifier characters.</param>
+    /// <param name="version">Immutable Flow graph version of at most 100 durable-identifier characters.</param>
     /// <param name="initialContext">Typed initial context.</param>
     /// <param name="codec">The exact registered codec.</param>
     public DurableFlowScheduleTarget(
@@ -152,17 +144,17 @@ public sealed record DurableFlowScheduleTarget<TContext> : DurableScheduleTarget
         IDurablePayloadCodec<TContext> codec)
         : base(DurableScheduleTargetKind.Flow)
     {
-        FlowId = RequireText(flowId, nameof(flowId));
-        Version = RequireText(version, nameof(version));
+        FlowId = DurableIdentifier.Require(flowId, nameof(flowId), 200);
+        Version = DurableIdentifier.Require(version, nameof(version), 100);
         ArgumentNullException.ThrowIfNull(initialContext);
         Codec = codec ?? throw new ArgumentNullException(nameof(codec));
         EncodedInitialContext = Codec.Encode(initialContext);
     }
 
-    /// <summary>Gets the stable Flow identifier.</summary>
+    /// <summary>Gets the stable Flow identifier, limited to 200 durable-identifier characters.</summary>
     public string FlowId { get; }
 
-    /// <summary>Gets the immutable Flow graph version.</summary>
+    /// <summary>Gets the immutable Flow graph version, limited to 100 durable-identifier characters.</summary>
     public string Version { get; }
 
     /// <summary>Gets the exact codec used to encode the immutable initial context.</summary>

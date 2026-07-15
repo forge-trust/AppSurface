@@ -24,9 +24,17 @@ public enum DurableRuntimeHealthState
 /// <summary>
 /// Reports compatibility, heartbeat, sweep, drain, and due-dispatch lag without exposing durable payloads.
 /// </summary>
+/// <remarks>
+/// Worker ids and problem codes accept only ASCII letters, digits, hyphens, underscores, periods, and colons. Empty,
+/// whitespace-only, control-containing, and other-character values are rejected; a problem code may instead be null.
+/// </remarks>
 public sealed record DurableRuntimeHealthSnapshot
 {
     /// <summary>Initializes a runtime health snapshot.</summary>
+    /// <remarks>
+    /// <paramref name="problemCode" />, when present, is limited to 120 characters. <paramref name="workerId" /> is
+    /// required and limited to 200 characters. Both use the durable identifier alphabet described on this type.
+    /// </remarks>
     public DurableRuntimeHealthSnapshot(
         DurableRuntimeHealthState state,
         string? problemCode,
@@ -64,11 +72,6 @@ public sealed record DurableRuntimeHealthSnapshot
             throw new ArgumentException("The configured runtime epoch must not be empty.", nameof(configuredRuntimeEpoch));
         }
 
-        if (string.IsNullOrWhiteSpace(workerId) || workerId.Length > 200)
-        {
-            throw new ArgumentException("Worker id must contain 1 to 200 characters.", nameof(workerId));
-        }
-
         if (hostedSurfaces == DurableRuntimeSurface.None || (hostedSurfaces & ~DurableRuntimeSurface.All) != 0)
         {
             throw new ArgumentOutOfRangeException(nameof(hostedSurfaces));
@@ -84,20 +87,17 @@ public sealed record DurableRuntimeHealthSnapshot
             throw new ArgumentOutOfRangeException(nameof(oldestDueAge));
         }
 
-        if (problemCode is not null && (string.IsNullOrWhiteSpace(problemCode) || problemCode.Length > 120))
-        {
-            throw new ArgumentException("Problem code must contain at most 120 characters.", nameof(problemCode));
-        }
-
         State = state;
-        ProblemCode = problemCode;
+        ProblemCode = problemCode is null
+            ? null
+            : ProviderContractValidation.Require(problemCode, nameof(problemCode), 120);
         SchemaCompatible = schemaCompatible;
         EpochCompatible = epochCompatible;
         InstalledSchemaVersion = installedSchemaVersion;
         RequiredSchemaVersion = requiredSchemaVersion;
         ConfiguredRuntimeEpoch = configuredRuntimeEpoch;
         ActiveRuntimeEpoch = activeRuntimeEpoch;
-        WorkerId = workerId;
+        WorkerId = ProviderContractValidation.Require(workerId, nameof(workerId), 200);
         WorkerInstanceId = workerInstanceId;
         HostedSurfaces = hostedSurfaces;
         ObservedAtUtc = observedAtUtc.ToUniversalTime();
@@ -114,7 +114,7 @@ public sealed record DurableRuntimeHealthSnapshot
     /// <summary>Gets the overall liveness verdict.</summary>
     public DurableRuntimeHealthState State { get; }
 
-    /// <summary>Gets the stable diagnostic code for a non-healthy verdict, when one applies.</summary>
+    /// <summary>Gets the stable diagnostic code, limited to 120 durable-identifier characters, for a non-healthy verdict.</summary>
     public string? ProblemCode { get; }
 
     /// <summary>Gets whether installed reader and writer ranges include this package.</summary>
@@ -135,7 +135,7 @@ public sealed record DurableRuntimeHealthSnapshot
     /// <summary>Gets the store-wide active recovery epoch, when readable.</summary>
     public Guid? ActiveRuntimeEpoch { get; }
 
-    /// <summary>Gets the privacy-safe configured worker identity.</summary>
+    /// <summary>Gets the privacy-safe configured worker identity, limited to 200 durable-identifier characters.</summary>
     public string WorkerId { get; }
 
     /// <summary>Gets the process-instance correlation id currently owning the worker identity.</summary>

@@ -493,7 +493,6 @@ public sealed class DurableFlowRegistration<TContext> : DurableFlowRegistration
 
         _activityBindings = bindings;
         var events = new Dictionary<(string EventName, string ContractName, string ContractVersion), DurableFlowEventBinding>();
-        var eventManifestIdentities = new HashSet<(string EventName, string ContractName, string ContractVersion)>();
         foreach (var binding in eventBindings ?? [])
         {
             ArgumentNullException.ThrowIfNull(binding);
@@ -507,11 +506,6 @@ public sealed class DurableFlowRegistration<TContext> : DurableFlowRegistration
                     $"Flow event callsite '{binding.Callsite.EventName}' is bound more than once.");
             }
 
-            if (!eventManifestIdentities.Add(identity))
-            {
-                throw new InvalidOperationException(
-                    $"Flow event contract '{identity.EventName}' / '{identity.ContractName}' / '{identity.ContractVersion}' is declared more than once.");
-            }
         }
 
         _eventBindings = events;

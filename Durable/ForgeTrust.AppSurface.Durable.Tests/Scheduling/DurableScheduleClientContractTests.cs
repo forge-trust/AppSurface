@@ -77,10 +77,16 @@ public sealed class DurableScheduleClientContractTests
     {
         Assert.Throws<ArgumentException>(() => new DurableWorkScheduleTarget<WorkInput>(" ", "v1", new WorkInput("p"), WorkCodec));
         Assert.Throws<ArgumentException>(() => new DurableWorkScheduleTarget<WorkInput>("work", " ", new WorkInput("p"), WorkCodec));
+        Assert.Throws<ArgumentException>(() => new DurableWorkScheduleTarget<WorkInput>(new string('a', 201), "v1", new WorkInput("p"), WorkCodec));
+        Assert.Throws<ArgumentException>(() => new DurableWorkScheduleTarget<WorkInput>("work", new string('a', 101), new WorkInput("p"), WorkCodec));
+        Assert.Throws<ArgumentException>(() => new DurableWorkScheduleTarget<WorkInput>("work\nspoofed", "v1", new WorkInput("p"), WorkCodec));
         Assert.Throws<ArgumentNullException>(() => new DurableWorkScheduleTarget<WorkInput>("work", "v1", null!, WorkCodec));
         Assert.Throws<ArgumentNullException>(() => new DurableWorkScheduleTarget<WorkInput>("work", "v1", new WorkInput("p"), null!));
         Assert.Throws<ArgumentException>(() => new DurableFlowScheduleTarget<FlowInput>(" ", "v1", new FlowInput(1), FlowCodec));
         Assert.Throws<ArgumentException>(() => new DurableFlowScheduleTarget<FlowInput>("flow", " ", new FlowInput(1), FlowCodec));
+        Assert.Throws<ArgumentException>(() => new DurableFlowScheduleTarget<FlowInput>(new string('a', 201), "v1", new FlowInput(1), FlowCodec));
+        Assert.Throws<ArgumentException>(() => new DurableFlowScheduleTarget<FlowInput>("flow", new string('a', 101), new FlowInput(1), FlowCodec));
+        Assert.Throws<ArgumentException>(() => new DurableFlowScheduleTarget<FlowInput>("flow", "v1\nspoofed", new FlowInput(1), FlowCodec));
         Assert.Throws<ArgumentNullException>(() => new DurableFlowScheduleTarget<FlowInput>("flow", "v1", null!, FlowCodec));
         Assert.Throws<ArgumentNullException>(() => new DurableFlowScheduleTarget<FlowInput>("flow", "v1", new FlowInput(1), null!));
     }
@@ -382,6 +388,21 @@ public sealed class DurableScheduleClientContractTests
             ScheduleOverlapPolicy.QueueOne,
             ScheduleMisfirePolicy.RunOnce,
             []));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableScheduleExplanation(
+            ScheduleId,
+            DurableScheduleKind.Cron,
+            ScheduleOverlapPolicy.QueueOne,
+            ScheduleMisfirePolicy.RunOnce,
+            [],
+            (CronDialect)99));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableScheduleExplanation(
+            ScheduleId,
+            DurableScheduleKind.Cron,
+            ScheduleOverlapPolicy.QueueOne,
+            ScheduleMisfirePolicy.RunOnce,
+            [],
+            CronDialect.CronosV1,
+            (CronGrammar)99));
         Assert.Throws<ArgumentNullException>(() => new DurableScheduleExplanation(
             ScheduleId,
             DurableScheduleKind.At,

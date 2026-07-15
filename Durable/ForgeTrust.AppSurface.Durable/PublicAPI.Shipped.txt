@@ -1,95 +1,1028 @@
-ForgeTrust.AppSurface.Durable.AppSurfaceDurableModule
-ForgeTrust.AppSurface.Durable.CronDialect
-ForgeTrust.AppSurface.Durable.CronGrammar
-ForgeTrust.AppSurface.Durable.DurableAfterSchedule
-ForgeTrust.AppSurface.Durable.DurableAtSchedule
-ForgeTrust.AppSurface.Durable.DurableCommandFingerprint
-ForgeTrust.AppSurface.Durable.DurableCommandFingerprintMatch
-ForgeTrust.AppSurface.Durable.DurableCommandId
-ForgeTrust.AppSurface.Durable.DurableCronSchedule
-ForgeTrust.AppSurface.Durable.DurableDataClassification
-ForgeTrust.AppSurface.Durable.DurableEffectReconciliationKind
-ForgeTrust.AppSurface.Durable.DurableEffectReconciliation`1
-ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation
-ForgeTrust.AppSurface.Durable.DurableEncodedPayload
-ForgeTrust.AppSurface.Durable.DurableEverySchedule
-ForgeTrust.AppSurface.Durable.DurableFlowActivityBinding`1
-ForgeTrust.AppSurface.Durable.DurableFlowActivityBinding`3
-ForgeTrust.AppSurface.Durable.DurableFlowActivityCommand
-ForgeTrust.AppSurface.Durable.DurableFlowCancelRequest
-ForgeTrust.AppSurface.Durable.DurableFlowCommandOutcome
-ForgeTrust.AppSurface.Durable.DurableFlowCommandResult
-ForgeTrust.AppSurface.Durable.DurableFlowDeterminismReport
-ForgeTrust.AppSurface.Durable.DurableFlowDeterminismVerifier
-ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput
-ForgeTrust.AppSurface.Durable.DurableFlowEvaluationResult
-ForgeTrust.AppSurface.Durable.DurableFlowEventBinding
-ForgeTrust.AppSurface.Durable.DurableFlowEventBinding`1
-ForgeTrust.AppSurface.Durable.DurableFlowEventContract
-ForgeTrust.AppSurface.Durable.DurableFlowEventId
-ForgeTrust.AppSurface.Durable.DurableFlowEventRequest
-ForgeTrust.AppSurface.Durable.DurableFlowGetRequest
-ForgeTrust.AppSurface.Durable.DurableFlowInstanceId
-ForgeTrust.AppSurface.Durable.DurableFlowListRequest
-ForgeTrust.AppSurface.Durable.DurableFlowListResult
-ForgeTrust.AppSurface.Durable.DurableFlowRegistration
-ForgeTrust.AppSurface.Durable.DurableFlowRegistration`1
-ForgeTrust.AppSurface.Durable.DurableFlowRegistry
-ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest
-ForgeTrust.AppSurface.Durable.DurableFlowScheduleTarget`1
-ForgeTrust.AppSurface.Durable.DurableFlowSnapshot
-ForgeTrust.AppSurface.Durable.DurableFlowStartRequest
-ForgeTrust.AppSurface.Durable.DurableFlowState
-ForgeTrust.AppSurface.Durable.DurableOperationResult`1
-ForgeTrust.AppSurface.Durable.DurablePayloadCodecRegistry
-ForgeTrust.AppSurface.Durable.DurablePreparedWork
-ForgeTrust.AppSurface.Durable.DurableProblem
-ForgeTrust.AppSurface.Durable.DurableProblemCodes
-ForgeTrust.AppSurface.Durable.DurableProviderSafety
-ForgeTrust.AppSurface.Durable.DurableSchedule
-ForgeTrust.AppSurface.Durable.DurableScheduleCommand
-ForgeTrust.AppSurface.Durable.DurableScheduleCommandKind
-ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest
-ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest
-ForgeTrust.AppSurface.Durable.DurableScheduleExplanation
-ForgeTrust.AppSurface.Durable.DurableScheduleId
-ForgeTrust.AppSurface.Durable.DurableScheduleKind
-ForgeTrust.AppSurface.Durable.DurableScheduleListItem
-ForgeTrust.AppSurface.Durable.DurableScheduleListRequest
-ForgeTrust.AppSurface.Durable.DurableScheduleListResult
-ForgeTrust.AppSurface.Durable.DurableScheduleMutationCode
-ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult
-ForgeTrust.AppSurface.Durable.DurableScheduleProblemCodes
-ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot
-ForgeTrust.AppSurface.Durable.DurableScheduleState
-ForgeTrust.AppSurface.Durable.DurableScheduleTarget
-ForgeTrust.AppSurface.Durable.DurableScheduleTargetKind
-ForgeTrust.AppSurface.Durable.DurableScheduleTargetSnapshot
-ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest
-ForgeTrust.AppSurface.Durable.DurableScopeId
-ForgeTrust.AppSurface.Durable.DurableServiceCollectionExtensions
-ForgeTrust.AppSurface.Durable.DurableWorkAcceptance
-ForgeTrust.AppSurface.Durable.DurableWorkAcceptanceKind
-ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext
-ForgeTrust.AppSurface.Durable.DurableWorkId
-ForgeTrust.AppSurface.Durable.DurableWorkRegistration
-ForgeTrust.AppSurface.Durable.DurableWorkRegistration`3
-ForgeTrust.AppSurface.Durable.DurableWorkRegistry
-ForgeTrust.AppSurface.Durable.DurableWorkRequest
-ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy
-ForgeTrust.AppSurface.Durable.DurableWorkScheduleTarget`1
-ForgeTrust.AppSurface.Durable.DurableWorkState
-ForgeTrust.AppSurface.Durable.IDurableEffectReconciler`2
-ForgeTrust.AppSurface.Durable.IDurableFlowClient
-ForgeTrust.AppSurface.Durable.IDurableFlowRegistry
-ForgeTrust.AppSurface.Durable.IDurablePayloadCodec
-ForgeTrust.AppSurface.Durable.IDurablePayloadCodecRegistry
-ForgeTrust.AppSurface.Durable.IDurablePayloadCodec`1
-ForgeTrust.AppSurface.Durable.IDurableScheduleClient
-ForgeTrust.AppSurface.Durable.IDurableWorkClient
-ForgeTrust.AppSurface.Durable.IDurableWorkRegistry
-ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy
-ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicyKind
-ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy
-ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicyKind
-ForgeTrust.AppSurface.Durable.SystemTextJsonDurablePayloadCodec`1
+type public sealed class ForgeTrust.AppSurface.Durable.AppSurfaceDurableModule : ForgeTrust.AppSurface.Core.IAppSurfaceModule
+  constructor public ForgeTrust.AppSurface.Durable.AppSurfaceDurableModule()
+  method public System.Void ConfigureServices(ForgeTrust.AppSurface.Core.StartupContext context, Microsoft.Extensions.DependencyInjection.IServiceCollection services)
+  method public System.Void RegisterDependentModules(ForgeTrust.AppSurface.Core.ModuleDependencyBuilder builder)
+type public enum ForgeTrust.AppSurface.Durable.CronDialect : System.Int32
+  enum-member CronosV1 = 1
+type public enum ForgeTrust.AppSurface.Durable.CronGrammar : System.Int32
+  enum-member IncludeSeconds = 1
+  enum-member Standard = 0
+type public sealed class ForgeTrust.AppSurface.Durable.DurableAfterSchedule : ForgeTrust.AppSurface.Durable.DurableSchedule, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableAfterSchedule>, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableSchedule>
+  constructor public ForgeTrust.AppSurface.Durable.DurableAfterSchedule(System.TimeSpan delay)
+  method protected System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableAfterSchedule? other)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableSchedule? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableAfterSchedule? left, ForgeTrust.AppSurface.Durable.DurableAfterSchedule? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableAfterSchedule? left, ForgeTrust.AppSurface.Durable.DurableAfterSchedule? right)
+  method public virtual ForgeTrust.AppSurface.Durable.DurableAfterSchedule <Clone>$()
+  property protected System.Type EqualityContract { get: protected; }
+  property public System.TimeSpan Delay { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableAtSchedule : ForgeTrust.AppSurface.Durable.DurableSchedule, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableAtSchedule>, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableSchedule>
+  constructor public ForgeTrust.AppSurface.Durable.DurableAtSchedule(System.DateTimeOffset at)
+  method protected System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableAtSchedule? other)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableSchedule? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableAtSchedule? left, ForgeTrust.AppSurface.Durable.DurableAtSchedule? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableAtSchedule? left, ForgeTrust.AppSurface.Durable.DurableAtSchedule? right)
+  method public virtual ForgeTrust.AppSurface.Durable.DurableAtSchedule <Clone>$()
+  property protected System.Type EqualityContract { get: protected; }
+  property public System.DateTimeOffset AtUtc { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableCommandFingerprint : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableCommandFingerprint>
+  constructor public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint(System.String schemaId, System.String sha256)
+  method public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint <Clone>$()
+  method public ForgeTrust.AppSurface.Durable.DurableCommandFingerprintMatch Compare(ForgeTrust.AppSurface.Durable.DurableCommandFingerprint persisted)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableCommandFingerprint? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableCommandFingerprint? left, ForgeTrust.AppSurface.Durable.DurableCommandFingerprint? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableCommandFingerprint? left, ForgeTrust.AppSurface.Durable.DurableCommandFingerprint? right)
+  property public System.String SchemaId { get: public; }
+  property public System.String Sha256 { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.DurableCommandFingerprintMatch : System.Int32
+  enum-member Conflict = 1
+  enum-member Exact = 0
+  enum-member UnsupportedSchema = 2
+type public readonly struct ForgeTrust.AppSurface.Durable.DurableCommandId : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableCommandId>
+  constructor public ForgeTrust.AppSurface.Durable.DurableCommandId(System.String value)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableCommandId other)
+  method public System.Boolean Equals(System.Object obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.DurableCommandId New()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableCommandId left, ForgeTrust.AppSurface.Durable.DurableCommandId right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableCommandId left, ForgeTrust.AppSurface.Durable.DurableCommandId right)
+  property public System.String Value { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableCronSchedule : ForgeTrust.AppSurface.Durable.DurableSchedule, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableCronSchedule>, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableSchedule>
+  constructor public ForgeTrust.AppSurface.Durable.DurableCronSchedule(System.String expression, System.String ianaTimeZoneId, ForgeTrust.AppSurface.Durable.CronGrammar grammar = ForgeTrust.AppSurface.Durable.CronGrammar.Standard, ForgeTrust.AppSurface.Durable.CronDialect dialect = ForgeTrust.AppSurface.Durable.CronDialect.CronosV1)
+  method protected System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableCronSchedule? other)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableSchedule? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableCronSchedule? left, ForgeTrust.AppSurface.Durable.DurableCronSchedule? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableCronSchedule? left, ForgeTrust.AppSurface.Durable.DurableCronSchedule? right)
+  method public virtual ForgeTrust.AppSurface.Durable.DurableCronSchedule <Clone>$()
+  property protected System.Type EqualityContract { get: protected; }
+  property public ForgeTrust.AppSurface.Durable.CronDialect Dialect { get: public; }
+  property public ForgeTrust.AppSurface.Durable.CronGrammar Grammar { get: public; }
+  property public System.String Expression { get: public; }
+  property public System.String IanaTimeZoneId { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.DurableDataClassification : System.Int32
+  enum-member ApprovedApplication = 1
+  enum-member Operational = 0
+type public sealed class ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult> : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult>>
+  method public ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult> <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult>? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult> Applied(TResult result)
+  method public static ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult> NotApplied()
+  method public static ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult> Unknown()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult>? left, ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult>? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult>? left, ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult>? right)
+  property public ForgeTrust.AppSurface.Durable.DurableEffectReconciliationKind Kind { get: public; }
+  property public TResult? Result { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.DurableEffectReconciliationKind : System.Int32
+  enum-member Applied = 0
+  enum-member NotApplied = 1
+  enum-member Unknown = 2
+type public sealed class ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation>
+  constructor public ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation(ForgeTrust.AppSurface.Durable.DurableEffectReconciliationKind kind, ForgeTrust.AppSurface.Durable.DurableEncodedPayload? result)
+  method public ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation? left, ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation? left, ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation? right)
+  property public ForgeTrust.AppSurface.Durable.DurableEffectReconciliationKind Kind { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload? Result { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableEncodedPayload : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableEncodedPayload>
+  constructor public ForgeTrust.AppSurface.Durable.DurableEncodedPayload(System.String contractName, System.String contractVersion, ForgeTrust.AppSurface.Durable.DurableDataClassification classification, System.ReadOnlyMemory<System.Byte> content, System.String retentionPolicyId = "application-default")
+  field public const System.Int32 ProtocolMaximumBytes = 262144
+  field public const System.String DefaultRetentionPolicyId = "application-default"
+  method public ForgeTrust.AppSurface.Durable.DurableEncodedPayload <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableEncodedPayload? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableEncodedPayload? left, ForgeTrust.AppSurface.Durable.DurableEncodedPayload? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableEncodedPayload? left, ForgeTrust.AppSurface.Durable.DurableEncodedPayload? right)
+  property public ForgeTrust.AppSurface.Durable.DurableDataClassification Classification { get: public; }
+  property public System.ReadOnlyMemory<System.Byte> Content { get: public; }
+  property public System.String ContractName { get: public; }
+  property public System.String ContractVersion { get: public; }
+  property public System.String RetentionPolicyId { get: public; }
+  property public System.String Sha256 { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableEverySchedule : ForgeTrust.AppSurface.Durable.DurableSchedule, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableEverySchedule>, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableSchedule>
+  constructor public ForgeTrust.AppSurface.Durable.DurableEverySchedule(System.TimeSpan interval, System.Nullable<System.DateTimeOffset> anchor = null)
+  method protected System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableEverySchedule? other)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableSchedule? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableEverySchedule? left, ForgeTrust.AppSurface.Durable.DurableEverySchedule? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableEverySchedule? left, ForgeTrust.AppSurface.Durable.DurableEverySchedule? right)
+  method public virtual ForgeTrust.AppSurface.Durable.DurableEverySchedule <Clone>$()
+  property protected System.Type EqualityContract { get: protected; }
+  property public System.Nullable<System.DateTimeOffset> AnchorUtc { get: public; }
+  property public System.TimeSpan Interval { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowActivityBinding<TContext, TWork, TResult> : ForgeTrust.AppSurface.Durable.DurableFlowActivityBinding<TContext>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowActivityBinding<TContext, TWork, TResult>(ForgeTrust.AppSurface.Flow.FlowActivityCallsite<TWork, TResult> callsite, ForgeTrust.AppSurface.Durable.DurableWorkRegistration workRegistration, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TWork> workCodec, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TResult> resultCodec)
+  method public ForgeTrust.AppSurface.Durable.DurableEncodedPayload EncodeWork(ForgeTrust.AppSurface.Flow.IFlowActivityRequest<TContext> activity)
+  method public ForgeTrust.AppSurface.Flow.FlowActivityWorkResult DecodeResult(ForgeTrust.AppSurface.Durable.DurableEncodedPayload result)
+  property public System.Int32 ResultContractVersion { get: public; }
+  property public System.Int32 WorkContractVersion { get: public; }
+type public abstract class ForgeTrust.AppSurface.Durable.DurableFlowActivityBinding<TContext>
+  constructor protected ForgeTrust.AppSurface.Durable.DurableFlowActivityBinding<TContext>(System.String callsiteId, ForgeTrust.AppSurface.Durable.DurableWorkRegistration workRegistration)
+  method public abstract ForgeTrust.AppSurface.Durable.DurableEncodedPayload EncodeWork(ForgeTrust.AppSurface.Flow.IFlowActivityRequest<TContext> activity)
+  method public abstract ForgeTrust.AppSurface.Flow.FlowActivityWorkResult DecodeResult(ForgeTrust.AppSurface.Durable.DurableEncodedPayload result)
+  property public ForgeTrust.AppSurface.Durable.DurableWorkRegistration WorkRegistration { get: public; }
+  property public System.String CallsiteId { get: public; }
+  property public abstract System.Int32 ResultContractVersion { get: public; }
+  property public abstract System.Int32 WorkContractVersion { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowActivityCommand : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowActivityCommand>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowActivityCommand(System.String callsiteId, System.Int32 resultContractVersion, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, ForgeTrust.AppSurface.Durable.DurableEncodedPayload work)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowActivityCommand <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowActivityCommand? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowActivityCommand? left, ForgeTrust.AppSurface.Durable.DurableFlowActivityCommand? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowActivityCommand? left, ForgeTrust.AppSurface.Durable.DurableFlowActivityCommand? right)
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload Work { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety { get: public; }
+  property public System.Int32 ResultContractVersion { get: public; }
+  property public System.String CallsiteId { get: public; }
+  property public System.String WorkName { get: public; }
+  property public System.String WorkVersion { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowCancelRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowCancelRequest>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowCancelRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId instanceId, System.String actorId, System.String reasonCode, System.Int64 expectedRevision)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowCancelRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowCancelRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowCancelRequest? left, ForgeTrust.AppSurface.Durable.DurableFlowCancelRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowCancelRequest? left, ForgeTrust.AppSurface.Durable.DurableFlowCancelRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId InstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.Int64 ExpectedRevision { get: public; }
+  property public System.String ActorId { get: public; }
+  property public System.String ReasonCode { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.DurableFlowCommandOutcome : System.Int32
+  enum-member Accepted = 0
+  enum-member AlreadyTerminal = 4
+  enum-member Duplicate = 1
+  enum-member NotWaitingYet = 2
+  enum-member RaceLost = 3
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowCommandResult : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowCommandResult>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowCommandResult(ForgeTrust.AppSurface.Durable.DurableFlowInstanceId instanceId, ForgeTrust.AppSurface.Durable.DurableFlowCommandOutcome outcome, ForgeTrust.AppSurface.Durable.DurableFlowState state, System.Int64 revision)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowCommandResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowCommandResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowCommandResult? left, ForgeTrust.AppSurface.Durable.DurableFlowCommandResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowCommandResult? left, ForgeTrust.AppSurface.Durable.DurableFlowCommandResult? right)
+  property public ForgeTrust.AppSurface.Durable.DurableFlowCommandOutcome Outcome { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId InstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowState State { get: public; }
+  property public System.Int64 Revision { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowDeterminismReport : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowDeterminismReport>
+  method public ForgeTrust.AppSurface.Durable.DurableFlowDeterminismReport <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowDeterminismReport? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowDeterminismReport? left, ForgeTrust.AppSurface.Durable.DurableFlowDeterminismReport? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowDeterminismReport? left, ForgeTrust.AppSurface.Durable.DurableFlowDeterminismReport? right)
+  property public System.Boolean IsDeterministic { get: public; }
+  property public System.String FirstEvaluationSha256 { get: public; }
+  property public System.String SecondEvaluationSha256 { get: public; }
+type public static class ForgeTrust.AppSurface.Durable.DurableFlowDeterminismVerifier
+  method public static System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableFlowDeterminismReport> VerifyAndThrowAsync(ForgeTrust.AppSurface.Durable.DurableFlowRegistration registration, ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput input, ForgeTrust.AppSurface.Durable.IDurablePayloadCodecRegistry payloadCodecs, System.Threading.CancellationToken cancellationToken = default)
+  method public static System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableFlowDeterminismReport> VerifyAsync(ForgeTrust.AppSurface.Durable.DurableFlowRegistration registration, ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput input, ForgeTrust.AppSurface.Durable.IDurablePayloadCodecRegistry payloadCodecs, System.Threading.CancellationToken cancellationToken = default)
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput(System.String nodeId, ForgeTrust.AppSurface.Durable.DurableEncodedPayload context, System.String? resumeEventName = null, ForgeTrust.AppSurface.Durable.DurableEncodedPayload? resumeEventPayload = null, System.Boolean isTimeout = false, System.String? activityCallsiteId = null, ForgeTrust.AppSurface.Durable.DurableEncodedPayload? activityResult = null)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput? left, ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput? left, ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput? right)
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload Context { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload? ActivityResult { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload? ResumeEventPayload { get: public; }
+  property public System.Boolean IsTimeout { get: public; }
+  property public System.String NodeId { get: public; }
+  property public System.String? ActivityCallsiteId { get: public; }
+  property public System.String? ResumeEventName { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowEvaluationResult : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowEvaluationResult>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowEvaluationResult(ForgeTrust.AppSurface.Flow.FlowTransitionKind kind, System.String nodeId, ForgeTrust.AppSurface.Durable.DurableEncodedPayload? context, System.String? nextNodeId, System.String? eventName, ForgeTrust.AppSurface.Flow.FlowTimeout? timeout, ForgeTrust.AppSurface.Flow.FlowFault? fault, ForgeTrust.AppSurface.Durable.DurableFlowActivityCommand? activity, ForgeTrust.AppSurface.Durable.DurableFlowEventContract? eventContract = null)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowEvaluationResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowEvaluationResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowEvaluationResult? left, ForgeTrust.AppSurface.Durable.DurableFlowEvaluationResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowEvaluationResult? left, ForgeTrust.AppSurface.Durable.DurableFlowEvaluationResult? right)
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload? Context { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowActivityCommand? Activity { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowEventContract? EventContract { get: public; }
+  property public ForgeTrust.AppSurface.Flow.FlowFault? Fault { get: public; }
+  property public ForgeTrust.AppSurface.Flow.FlowTimeout? Timeout { get: public; }
+  property public ForgeTrust.AppSurface.Flow.FlowTransitionKind Kind { get: public; }
+  property public System.String NodeId { get: public; }
+  property public System.String? EventName { get: public; }
+  property public System.String? NextNodeId { get: public; }
+type public abstract class ForgeTrust.AppSurface.Durable.DurableFlowEventBinding
+  constructor protected ForgeTrust.AppSurface.Durable.DurableFlowEventBinding(ForgeTrust.AppSurface.Flow.IFlowEventCallsite callsite, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec payloadCodec)
+  property public ForgeTrust.AppSurface.Durable.IDurablePayloadCodec PayloadCodec { get: public; }
+  property public ForgeTrust.AppSurface.Flow.IFlowEventCallsite Callsite { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowEventBinding<TPayload> : ForgeTrust.AppSurface.Durable.DurableFlowEventBinding
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowEventBinding<TPayload>(ForgeTrust.AppSurface.Flow.FlowEventCallsite<TPayload> callsite, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TPayload> payloadCodec)
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowEventContract : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowEventContract>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowEventContract(System.Boolean payloadRequired, System.String? contractName = null, System.String? contractVersion = null, System.Nullable<ForgeTrust.AppSurface.Durable.DurableDataClassification> classification = null, System.String? retentionPolicyId = null)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowEventContract <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowEventContract? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowEventContract? left, ForgeTrust.AppSurface.Durable.DurableFlowEventContract? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowEventContract? left, ForgeTrust.AppSurface.Durable.DurableFlowEventContract? right)
+  property public System.Boolean PayloadRequired { get: public; }
+  property public System.Nullable<ForgeTrust.AppSurface.Durable.DurableDataClassification> Classification { get: public; }
+  property public System.String? ContractName { get: public; }
+  property public System.String? ContractVersion { get: public; }
+  property public System.String? RetentionPolicyId { get: public; }
+type public readonly struct ForgeTrust.AppSurface.Durable.DurableFlowEventId : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowEventId>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowEventId(System.String value)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowEventId other)
+  method public System.Boolean Equals(System.Object obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.DurableFlowEventId New()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowEventId left, ForgeTrust.AppSurface.Durable.DurableFlowEventId right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowEventId left, ForgeTrust.AppSurface.Durable.DurableFlowEventId right)
+  property public System.String Value { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowEventRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowEventRequest>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowEventRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, ForgeTrust.AppSurface.Durable.DurableFlowEventId eventId, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId instanceId, System.String eventName, ForgeTrust.AppSurface.Durable.DurableEncodedPayload? payload = null, System.Nullable<System.Int64> expectedRevision = null)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowEventRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowEventRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowEventRequest? left, ForgeTrust.AppSurface.Durable.DurableFlowEventRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowEventRequest? left, ForgeTrust.AppSurface.Durable.DurableFlowEventRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload? Payload { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowEventId EventId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId InstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.Nullable<System.Int64> ExpectedRevision { get: public; }
+  property public System.String EventName { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowGetRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowGetRequest>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowGetRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId instanceId)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowGetRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowGetRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowGetRequest? left, ForgeTrust.AppSurface.Durable.DurableFlowGetRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowGetRequest? left, ForgeTrust.AppSurface.Durable.DurableFlowGetRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId InstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+type public readonly struct ForgeTrust.AppSurface.Durable.DurableFlowInstanceId : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowInstanceId>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId(System.String value)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowInstanceId other)
+  method public System.Boolean Equals(System.Object obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.DurableFlowInstanceId New()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowInstanceId left, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowInstanceId left, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId right)
+  property public System.String Value { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowListRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowListRequest>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowListRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, System.Nullable<ForgeTrust.AppSurface.Durable.DurableFlowState> state = null, System.Nullable<System.Boolean> requiresRecoveryRelease = null, System.Int32 pageSize = 100, System.String? continuationToken = null)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowListRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowListRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowListRequest? left, ForgeTrust.AppSurface.Durable.DurableFlowListRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowListRequest? left, ForgeTrust.AppSurface.Durable.DurableFlowListRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.Int32 PageSize { get: public; }
+  property public System.Nullable<ForgeTrust.AppSurface.Durable.DurableFlowState> State { get: public; }
+  property public System.Nullable<System.Boolean> RequiresRecoveryRelease { get: public; }
+  property public System.String? ContinuationToken { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowListResult : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowListResult>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowListResult(System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.DurableFlowSnapshot> flows, System.String? continuationToken)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowListResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowListResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowListResult? left, ForgeTrust.AppSurface.Durable.DurableFlowListResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowListResult? left, ForgeTrust.AppSurface.Durable.DurableFlowListResult? right)
+  property public System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.DurableFlowSnapshot> Flows { get: public; }
+  property public System.String? ContinuationToken { get: public; }
+type public abstract class ForgeTrust.AppSurface.Durable.DurableFlowRegistration
+  constructor protected ForgeTrust.AppSurface.Durable.DurableFlowRegistration()
+  field public const System.String CurrentAuthoringModel = "appsurface.flow-transition/v1"
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableFlowEvaluationResult> EvaluateAsync(ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput input, ForgeTrust.AppSurface.Durable.IDurablePayloadCodecRegistry payloadCodecs, System.Threading.CancellationToken cancellationToken = default)
+  property public abstract ForgeTrust.AppSurface.Durable.IDurablePayloadCodec ContextCodec { get: public; }
+  property public abstract System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.DurableFlowEventBinding> EventBindings { get: public; }
+  property public abstract System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.DurableWorkRegistration> ActivityWorkRegistrations { get: public; }
+  property public abstract System.String DefinitionFingerprint { get: public; }
+  property public abstract System.String FlowId { get: public; }
+  property public abstract System.String FlowVersion { get: public; }
+  property public abstract System.String ImplementationVersion { get: public; }
+  property public abstract System.String StartNodeId { get: public; }
+  property public virtual System.String AuthoringModel { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowRegistration<TContext> : ForgeTrust.AppSurface.Durable.DurableFlowRegistration
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowRegistration<TContext>(ForgeTrust.AppSurface.Flow.FlowDefinition<TContext> definition, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TContext> contextCodec, System.String implementationVersion, ForgeTrust.AppSurface.Flow.IFlowTransitionEvaluator<TContext> evaluator, System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableFlowActivityBinding<TContext>>? activityBindings = null, System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableFlowEventBinding>? eventBindings = null)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableFlowEvaluationResult> EvaluateAsync(ForgeTrust.AppSurface.Durable.DurableFlowEvaluationInput input, ForgeTrust.AppSurface.Durable.IDurablePayloadCodecRegistry payloadCodecs, System.Threading.CancellationToken cancellationToken = default)
+  property public ForgeTrust.AppSurface.Durable.IDurablePayloadCodec ContextCodec { get: public; }
+  property public System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.DurableFlowEventBinding> EventBindings { get: public; }
+  property public System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.DurableWorkRegistration> ActivityWorkRegistrations { get: public; }
+  property public System.String DefinitionFingerprint { get: public; }
+  property public System.String FlowId { get: public; }
+  property public System.String FlowVersion { get: public; }
+  property public System.String ImplementationVersion { get: public; }
+  property public System.String StartNodeId { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowRegistry : ForgeTrust.AppSurface.Durable.IDurableFlowRegistry
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowRegistry(System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableFlowRegistration> registrations)
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowRegistry(System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableFlowRegistration> registrations, ForgeTrust.AppSurface.Durable.IDurableWorkRegistry workRegistry)
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowRegistry(System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableFlowRegistration> registrations, ForgeTrust.AppSurface.Durable.IDurableWorkRegistry workRegistry, ForgeTrust.AppSurface.Durable.IDurablePayloadCodecRegistry payloadCodecs)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowRegistration GetRequired(System.String flowId, System.String flowVersion)
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId instanceId, System.String actorId, System.String reasonCode, System.Int64 expectedRevision)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest? left, ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest? left, ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId InstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.Int64 ExpectedRevision { get: public; }
+  property public System.String ActorId { get: public; }
+  property public System.String ReasonCode { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowScheduleTarget<TContext> : ForgeTrust.AppSurface.Durable.DurableScheduleTarget, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowScheduleTarget<TContext>>, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleTarget> where TContext : notnull
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowScheduleTarget<TContext>(System.String flowId, System.String version, TContext initialContext, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TContext> codec)
+  method protected System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowScheduleTarget<TContext>? other)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleTarget? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowScheduleTarget<TContext>? left, ForgeTrust.AppSurface.Durable.DurableFlowScheduleTarget<TContext>? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowScheduleTarget<TContext>? left, ForgeTrust.AppSurface.Durable.DurableFlowScheduleTarget<TContext>? right)
+  method public virtual ForgeTrust.AppSurface.Durable.DurableFlowScheduleTarget<TContext> <Clone>$()
+  property protected System.Type EqualityContract { get: protected; }
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload EncodedInitialContext { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload EncodedInput { get: public; }
+  property public ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TContext> Codec { get: public; }
+  property public System.String FlowId { get: public; }
+  property public System.String RegisteredName { get: public; }
+  property public System.String RegisteredVersion { get: public; }
+  property public System.String Version { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowSnapshot : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowSnapshot>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowSnapshot(ForgeTrust.AppSurface.Durable.DurableFlowInstanceId instanceId, System.String flowId, System.String flowVersion, ForgeTrust.AppSurface.Durable.DurableFlowState state, System.String currentNodeId, System.Int64 revision, System.DateTimeOffset createdAtUtc, System.DateTimeOffset updatedAtUtc, System.Nullable<System.DateTimeOffset> cancellationRequestedAtUtc, System.Nullable<System.DateTimeOffset> terminalAtUtc, System.String? terminalCode, System.Boolean requiresRecoveryRelease = false)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowSnapshot <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowSnapshot? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowSnapshot? left, ForgeTrust.AppSurface.Durable.DurableFlowSnapshot? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowSnapshot? left, ForgeTrust.AppSurface.Durable.DurableFlowSnapshot? right)
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId InstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowState State { get: public; }
+  property public System.Boolean RequiresRecoveryRelease { get: public; }
+  property public System.DateTimeOffset CreatedAtUtc { get: public; }
+  property public System.DateTimeOffset UpdatedAtUtc { get: public; }
+  property public System.Int64 Revision { get: public; }
+  property public System.Nullable<System.DateTimeOffset> CancellationRequestedAtUtc { get: public; }
+  property public System.Nullable<System.DateTimeOffset> TerminalAtUtc { get: public; }
+  property public System.String CurrentNodeId { get: public; }
+  property public System.String FlowId { get: public; }
+  property public System.String FlowVersion { get: public; }
+  property public System.String? TerminalCode { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowStartRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowStartRequest>
+  constructor public ForgeTrust.AppSurface.Durable.DurableFlowStartRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String idempotencyKey, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId instanceId, System.String flowId, System.String flowVersion, ForgeTrust.AppSurface.Durable.DurableEncodedPayload context)
+  method public ForgeTrust.AppSurface.Durable.DurableFlowStartRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableFlowStartRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableFlowStartRequest? left, ForgeTrust.AppSurface.Durable.DurableFlowStartRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableFlowStartRequest? left, ForgeTrust.AppSurface.Durable.DurableFlowStartRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload Context { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId InstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.String FlowId { get: public; }
+  property public System.String FlowVersion { get: public; }
+  property public System.String IdempotencyKey { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.DurableFlowState : System.Int32
+  enum-member CancelPending = 4
+  enum-member Canceled = 7
+  enum-member Completed = 5
+  enum-member Faulted = 6
+  enum-member Ready = 0
+  enum-member Suspended = 8
+  enum-member WaitingForActivity = 3
+  enum-member WaitingForEvent = 1
+  enum-member WaitingForTimer = 2
+type public sealed class ForgeTrust.AppSurface.Durable.DurableOperationResult<T> : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableOperationResult<T>>
+  method public ForgeTrust.AppSurface.Durable.DurableOperationResult<T> <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableOperationResult<T>? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.DurableOperationResult<T> Failure(ForgeTrust.AppSurface.Durable.DurableProblem problem)
+  method public static ForgeTrust.AppSurface.Durable.DurableOperationResult<T> Success(T value)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableOperationResult<T>? left, ForgeTrust.AppSurface.Durable.DurableOperationResult<T>? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableOperationResult<T>? left, ForgeTrust.AppSurface.Durable.DurableOperationResult<T>? right)
+  property public ForgeTrust.AppSurface.Durable.DurableProblem? Problem { get: public; }
+  property public System.Boolean IsSuccess { get: public; }
+  property public T? Value { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurablePayloadCodecRegistry : ForgeTrust.AppSurface.Durable.IDurablePayloadCodecRegistry
+  constructor public ForgeTrust.AppSurface.Durable.DurablePayloadCodecRegistry()
+  constructor public ForgeTrust.AppSurface.Durable.DurablePayloadCodecRegistry(System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.IDurablePayloadCodec> codecs)
+  method public ForgeTrust.AppSurface.Durable.IDurablePayloadCodec GetRequired(System.String contractName, System.String contractVersion)
+  method public ForgeTrust.AppSurface.Durable.IDurablePayloadCodec GetRequired(System.Type payloadType)
+  method public ForgeTrust.AppSurface.Durable.IDurablePayloadCodec GetRequired(System.Type payloadType, System.String contractName, System.String contractVersion)
+  method public System.Void Register(ForgeTrust.AppSurface.Durable.IDurablePayloadCodec codec)
+type public abstract class ForgeTrust.AppSurface.Durable.DurablePreparedWork
+  constructor protected ForgeTrust.AppSurface.Durable.DurablePreparedWork()
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedPayload> InvokeAsync(System.Threading.CancellationToken cancellationToken = default)
+type public sealed class ForgeTrust.AppSurface.Durable.DurableProblem : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableProblem>
+  constructor public ForgeTrust.AppSurface.Durable.DurableProblem(System.String code, System.String problem, System.String cause, System.String fix, System.Uri documentationUrl, System.String correlationId)
+  method public ForgeTrust.AppSurface.Durable.DurableProblem <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableProblem? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableProblem? left, ForgeTrust.AppSurface.Durable.DurableProblem? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableProblem? left, ForgeTrust.AppSurface.Durable.DurableProblem? right)
+  property public System.String Cause { get: public; }
+  property public System.String Code { get: public; }
+  property public System.String CorrelationId { get: public; }
+  property public System.String Fix { get: public; }
+  property public System.String Problem { get: public; }
+  property public System.Uri DocumentationUrl { get: public; }
+type public static class ForgeTrust.AppSurface.Durable.DurableProblemCodes
+  field public const System.String ActivatorStale = "ASDUR404"
+  field public const System.String AlreadyTerminal = "ASDUR110"
+  field public const System.String AmbiguousExternalOutcome = "ASDUR106"
+  field public const System.String ClaimLost = "ASDUR104"
+  field public const System.String CommandConflict = "ASDUR102"
+  field public const System.String FlowAccessDenied = "ASDUR205"
+  field public const System.String FlowCommandConflict = "ASDUR207"
+  field public const System.String FlowDefinitionUnavailable = "ASDUR200"
+  field public const System.String FlowEventContractMismatch = "ASDUR209"
+  field public const System.String FlowEventDuplicate = "ASDUR204"
+  field public const System.String FlowHistoryIncompatible = "ASDUR201"
+  field public const System.String FlowNotFound = "ASDUR208"
+  field public const System.String FlowNotWaitingYet = "ASDUR202"
+  field public const System.String FlowRaceLost = "ASDUR203"
+  field public const System.String FlowReleaseManifestMismatch = "ASDUR210"
+  field public const System.String FlowReleaseStateMismatch = "ASDUR211"
+  field public const System.String FlowStartConflict = "ASDUR206"
+  field public const System.String LeaseLost = "ASDUR105"
+  field public const System.String OperatorCommandInProgress = "ASDUR118"
+  field public const System.String OperatorProofRequired = "ASDUR117"
+  field public const System.String OperatorTransitionRejected = "ASDUR116"
+  field public const System.String RecoveryEpochRequired = "ASDUR108"
+  field public const System.String SchemaInconsistent = "ASDUR403"
+  field public const System.String SchemaMissing = "ASDUR400"
+  field public const System.String SchemaUpgradeRequired = "ASDUR401"
+  field public const System.String SchemaVersionUnsupported = "ASDUR402"
+  field public const System.String ScopeDisabled = "ASDUR107"
+  field public const System.String ScopeGenerationConflict = "ASDUR114"
+  field public const System.String ScopeNotFound = "ASDUR113"
+  field public const System.String StoreIdentityMismatch = "ASDUR115"
+  field public const System.String StoreUnavailable = "ASDUR103"
+  field public const System.String TransactionRequired = "ASDUR101"
+  field public const System.String ValidationFailed = "ASDUR100"
+  field public const System.String WorkContractUnavailable = "ASDUR109"
+  field public const System.String WorkNotFound = "ASDUR111"
+  field public const System.String WorkRevisionConflict = "ASDUR112"
+  field public const System.String WorkerIdentityConflict = "ASDUR405"
+type public enum ForgeTrust.AppSurface.Durable.DurableProviderSafety : System.Int32
+  enum-member Idempotent = 0
+  enum-member ManualResolution = 3
+  enum-member ProviderKeyed = 1
+  enum-member ReconcileBeforeRetry = 2
+type public abstract class ForgeTrust.AppSurface.Durable.DurableSchedule : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableSchedule>
+  constructor protected ForgeTrust.AppSurface.Durable.DurableSchedule(ForgeTrust.AppSurface.Durable.DurableSchedule original)
+  method protected virtual System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public ForgeTrust.AppSurface.Durable.DurableSchedule WithMisfire(ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy policy)
+  method public ForgeTrust.AppSurface.Durable.DurableSchedule WithOverlap(ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy policy)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public abstract ForgeTrust.AppSurface.Durable.DurableSchedule <Clone>$()
+  method public static ForgeTrust.AppSurface.Durable.DurableAfterSchedule After(System.TimeSpan delay)
+  method public static ForgeTrust.AppSurface.Durable.DurableAtSchedule At(System.DateTimeOffset at)
+  method public static ForgeTrust.AppSurface.Durable.DurableCronSchedule Cron(System.String expression, System.String ianaTimeZoneId, ForgeTrust.AppSurface.Durable.CronGrammar grammar = ForgeTrust.AppSurface.Durable.CronGrammar.Standard)
+  method public static ForgeTrust.AppSurface.Durable.DurableEverySchedule Every(System.TimeSpan interval, System.Nullable<System.DateTimeOffset> anchor = null)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableSchedule? left, ForgeTrust.AppSurface.Durable.DurableSchedule? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableSchedule? left, ForgeTrust.AppSurface.Durable.DurableSchedule? right)
+  method public virtual System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableSchedule? other)
+  property protected virtual System.Type EqualityContract { get: protected; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleKind Kind { get: public; }
+  property public ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy MisfirePolicy { get: public; }
+  property public ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy OverlapPolicy { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableScheduleCommand : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleCommand>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScheduleCommand(ForgeTrust.AppSurface.Durable.DurableScheduleCommandKind kind, ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, ForgeTrust.AppSurface.Durable.DurableScheduleId scheduleId, System.String actorId, System.String reasonCode, System.Int64 expectedRevision)
+  method public ForgeTrust.AppSurface.Durable.DurableScheduleCommand <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleCommand? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleCommand? left, ForgeTrust.AppSurface.Durable.DurableScheduleCommand? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleCommand? left, ForgeTrust.AppSurface.Durable.DurableScheduleCommand? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleCommandKind Kind { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleId ScheduleId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.Int64 ExpectedRevision { get: public; }
+  property public System.String ActorId { get: public; }
+  property public System.String ReasonCode { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.DurableScheduleCommandKind : System.Int32
+  enum-member Delete = 2
+  enum-member Pause = 0
+  enum-member ReleaseAfterRecovery = 3
+  enum-member Resume = 1
+type public sealed class ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String idempotencyKey, ForgeTrust.AppSurface.Durable.DurableScheduleId scheduleId, ForgeTrust.AppSurface.Durable.DurableSchedule schedule, ForgeTrust.AppSurface.Durable.DurableScheduleTarget target, System.String? displayName = null)
+  method public ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest? left, ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest? left, ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableSchedule Schedule { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleId ScheduleId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleTarget Target { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.String IdempotencyKey { get: public; }
+  property public System.String? DisplayName { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableScheduleId scheduleId, ForgeTrust.AppSurface.Durable.DurableSchedule schedule, System.DateTimeOffset anchorUtc, System.Int32 occurrenceCount = 5)
+  method public ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest? left, ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest? left, ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableSchedule Schedule { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleId ScheduleId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.DateTimeOffset AnchorUtc { get: public; }
+  property public System.Int32 OccurrenceCount { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableScheduleExplanation : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleExplanation>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScheduleExplanation(ForgeTrust.AppSurface.Durable.DurableScheduleId scheduleId, ForgeTrust.AppSurface.Durable.DurableScheduleKind kind, ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy overlapPolicy, ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy misfirePolicy, System.Collections.Generic.IReadOnlyList<System.DateTimeOffset> nextOccurrencesUtc, System.Nullable<ForgeTrust.AppSurface.Durable.CronDialect> cronDialect = null, System.Nullable<ForgeTrust.AppSurface.Durable.CronGrammar> cronGrammar = null, System.String? ianaTimeZoneId = null, System.String? evaluatorVersion = null, System.Nullable<System.Int32> jitterSeed = null, System.String? timeZoneRulesFingerprint = null, System.Collections.Generic.IReadOnlyList<System.String>? notes = null)
+  method public ForgeTrust.AppSurface.Durable.DurableScheduleExplanation <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleExplanation? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleExplanation? left, ForgeTrust.AppSurface.Durable.DurableScheduleExplanation? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleExplanation? left, ForgeTrust.AppSurface.Durable.DurableScheduleExplanation? right)
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleId ScheduleId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleKind Kind { get: public; }
+  property public ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy MisfirePolicy { get: public; }
+  property public ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy OverlapPolicy { get: public; }
+  property public System.Collections.Generic.IReadOnlyList<System.DateTimeOffset> NextOccurrencesUtc { get: public; }
+  property public System.Collections.Generic.IReadOnlyList<System.String> Notes { get: public; }
+  property public System.Nullable<ForgeTrust.AppSurface.Durable.CronDialect> CronDialect { get: public; }
+  property public System.Nullable<ForgeTrust.AppSurface.Durable.CronGrammar> CronGrammar { get: public; }
+  property public System.Nullable<System.Int32> JitterSeed { get: public; }
+  property public System.String? EvaluatorVersion { get: public; }
+  property public System.String? IanaTimeZoneId { get: public; }
+  property public System.String? TimeZoneRulesFingerprint { get: public; }
+type public readonly struct ForgeTrust.AppSurface.Durable.DurableScheduleId : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleId>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScheduleId(System.String value)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleId other)
+  method public System.Boolean Equals(System.Object obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.DurableScheduleId New()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleId left, ForgeTrust.AppSurface.Durable.DurableScheduleId right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleId left, ForgeTrust.AppSurface.Durable.DurableScheduleId right)
+  property public System.String Value { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.DurableScheduleKind : System.Int32
+  enum-member After = 1
+  enum-member At = 0
+  enum-member Cron = 3
+  enum-member Every = 2
+type public sealed class ForgeTrust.AppSurface.Durable.DurableScheduleListItem : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleListItem>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScheduleListItem(ForgeTrust.AppSurface.Durable.DurableScheduleId scheduleId, System.String? displayName, ForgeTrust.AppSurface.Durable.DurableScheduleState state, System.Int64 generation, System.Int64 revision, ForgeTrust.AppSurface.Durable.DurableScheduleKind scheduleKind, ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy overlapPolicy, ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy misfirePolicy, ForgeTrust.AppSurface.Durable.DurableScheduleTargetKind targetKind, System.String targetName, System.String targetVersion, System.Nullable<ForgeTrust.AppSurface.Durable.DurableProviderSafety> targetProviderSafety, System.Nullable<System.DateTimeOffset> nextOccurrenceUtc, System.Boolean requiresRecoveryRelease)
+  method public ForgeTrust.AppSurface.Durable.DurableScheduleListItem <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleListItem? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleListItem? left, ForgeTrust.AppSurface.Durable.DurableScheduleListItem? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleListItem? left, ForgeTrust.AppSurface.Durable.DurableScheduleListItem? right)
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleId ScheduleId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleKind ScheduleKind { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleState State { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleTargetKind TargetKind { get: public; }
+  property public ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy MisfirePolicy { get: public; }
+  property public ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy OverlapPolicy { get: public; }
+  property public System.Boolean RequiresRecoveryRelease { get: public; }
+  property public System.Int64 Generation { get: public; }
+  property public System.Int64 Revision { get: public; }
+  property public System.Nullable<ForgeTrust.AppSurface.Durable.DurableProviderSafety> TargetProviderSafety { get: public; }
+  property public System.Nullable<System.DateTimeOffset> NextOccurrenceUtc { get: public; }
+  property public System.String TargetName { get: public; }
+  property public System.String TargetVersion { get: public; }
+  property public System.String? DisplayName { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableScheduleListRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleListRequest>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScheduleListRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, System.Int32 pageSize = 100, System.String? continuationToken = null, System.Nullable<ForgeTrust.AppSurface.Durable.DurableScheduleState> state = null, System.Nullable<System.Boolean> requiresRecoveryRelease = null)
+  method public ForgeTrust.AppSurface.Durable.DurableScheduleListRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleListRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleListRequest? left, ForgeTrust.AppSurface.Durable.DurableScheduleListRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleListRequest? left, ForgeTrust.AppSurface.Durable.DurableScheduleListRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.Int32 PageSize { get: public; }
+  property public System.Nullable<ForgeTrust.AppSurface.Durable.DurableScheduleState> State { get: public; }
+  property public System.Nullable<System.Boolean> RequiresRecoveryRelease { get: public; }
+  property public System.String? ContinuationToken { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableScheduleListResult : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleListResult>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScheduleListResult(System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.DurableScheduleListItem> schedules, System.String? continuationToken)
+  method public ForgeTrust.AppSurface.Durable.DurableScheduleListResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleListResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleListResult? left, ForgeTrust.AppSurface.Durable.DurableScheduleListResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleListResult? left, ForgeTrust.AppSurface.Durable.DurableScheduleListResult? right)
+  property public System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.DurableScheduleListItem> Schedules { get: public; }
+  property public System.String? ContinuationToken { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.DurableScheduleMutationCode : System.Int32
+  enum-member Created = 0
+  enum-member Deleted = 5
+  enum-member Duplicate = 1
+  enum-member Paused = 3
+  enum-member RecoveryReleased = 7
+  enum-member Resumed = 4
+  enum-member Unchanged = 6
+  enum-member Updated = 2
+type public sealed class ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult(ForgeTrust.AppSurface.Durable.DurableScheduleId scheduleId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, ForgeTrust.AppSurface.Durable.DurableScheduleMutationCode code, System.Int64 generation, System.Int64 revision, System.DateTimeOffset committedAtUtc)
+  method public ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult? left, ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult? left, ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleId ScheduleId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleMutationCode Code { get: public; }
+  property public System.DateTimeOffset CommittedAtUtc { get: public; }
+  property public System.Int64 Generation { get: public; }
+  property public System.Int64 Revision { get: public; }
+type public static class ForgeTrust.AppSurface.Durable.DurableScheduleProblemCodes
+  field public const System.String AccessDenied = "ASDUR306"
+  field public const System.String CommandConflict = "ASDUR305"
+  field public const System.String DialectUnsupported = "ASDUR302"
+  field public const System.String EvaluationChanged = "ASDUR307"
+  field public const System.String RevisionConflict = "ASDUR304"
+  field public const System.String ScheduleInvalid = "ASDUR301"
+  field public const System.String ScheduleNotFound = "ASDUR303"
+type public sealed class ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot(ForgeTrust.AppSurface.Durable.DurableScheduleId scheduleId, System.String? displayName, ForgeTrust.AppSurface.Durable.DurableScheduleState state, System.Int64 generation, System.Int64 revision, ForgeTrust.AppSurface.Durable.DurableSchedule schedule, ForgeTrust.AppSurface.Durable.DurableScheduleTargetSnapshot target, System.Nullable<System.DateTimeOffset> nextOccurrenceUtc)
+  method public ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot? left, ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot? left, ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot? right)
+  property public ForgeTrust.AppSurface.Durable.DurableSchedule Schedule { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleId ScheduleId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleState State { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleTargetSnapshot Target { get: public; }
+  property public System.Int64 Generation { get: public; }
+  property public System.Int64 Revision { get: public; }
+  property public System.Nullable<System.DateTimeOffset> NextOccurrenceUtc { get: public; }
+  property public System.String? DisplayName { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.DurableScheduleState : System.Int32
+  enum-member Active = 0
+  enum-member Deleted = 2
+  enum-member Paused = 1
+  enum-member Suspended = 3
+type public abstract class ForgeTrust.AppSurface.Durable.DurableScheduleTarget : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleTarget>
+  constructor protected ForgeTrust.AppSurface.Durable.DurableScheduleTarget(ForgeTrust.AppSurface.Durable.DurableScheduleTarget original)
+  method protected virtual System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public abstract ForgeTrust.AppSurface.Durable.DurableScheduleTarget <Clone>$()
+  method public static ForgeTrust.AppSurface.Durable.DurableFlowScheduleTarget<TContext> Flow<TContext>(System.String flowId, System.String version, TContext initialContext, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TContext> codec) where TContext : notnull
+  method public static ForgeTrust.AppSurface.Durable.DurableWorkScheduleTarget<TWork> Work<TWork>(System.String workName, System.String workVersion, TWork input, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TWork> codec) where TWork : notnull
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleTarget? left, ForgeTrust.AppSurface.Durable.DurableScheduleTarget? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleTarget? left, ForgeTrust.AppSurface.Durable.DurableScheduleTarget? right)
+  method public virtual System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleTarget? other)
+  property protected virtual System.Type EqualityContract { get: protected; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleTargetKind Kind { get: public; }
+  property public abstract ForgeTrust.AppSurface.Durable.DurableEncodedPayload EncodedInput { get: public; }
+  property public abstract System.String RegisteredName { get: public; }
+  property public abstract System.String RegisteredVersion { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.DurableScheduleTargetKind : System.Int32
+  enum-member Flow = 1
+  enum-member Work = 0
+type public sealed class ForgeTrust.AppSurface.Durable.DurableScheduleTargetSnapshot : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleTargetSnapshot>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScheduleTargetSnapshot(ForgeTrust.AppSurface.Durable.DurableScheduleTargetKind kind, System.String registeredName, System.String registeredVersion, ForgeTrust.AppSurface.Durable.DurableEncodedPayload input, System.Nullable<ForgeTrust.AppSurface.Durable.DurableProviderSafety> providerSafety = null)
+  method public ForgeTrust.AppSurface.Durable.DurableScheduleTargetSnapshot <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleTargetSnapshot? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleTargetSnapshot? left, ForgeTrust.AppSurface.Durable.DurableScheduleTargetSnapshot? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleTargetSnapshot? left, ForgeTrust.AppSurface.Durable.DurableScheduleTargetSnapshot? right)
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload Input { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleTargetKind Kind { get: public; }
+  property public System.Nullable<ForgeTrust.AppSurface.Durable.DurableProviderSafety> ProviderSafety { get: public; }
+  property public System.String RegisteredName { get: public; }
+  property public System.String RegisteredVersion { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, ForgeTrust.AppSurface.Durable.DurableScheduleId scheduleId, System.Int64 expectedRevision, ForgeTrust.AppSurface.Durable.DurableSchedule schedule, ForgeTrust.AppSurface.Durable.DurableScheduleTarget target, System.String? displayName = null)
+  method public ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest? left, ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest? left, ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableSchedule Schedule { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleId ScheduleId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScheduleTarget Target { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.Int64 ExpectedRevision { get: public; }
+  property public System.String? DisplayName { get: public; }
+type public readonly struct ForgeTrust.AppSurface.Durable.DurableScopeId : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScopeId>
+  constructor public ForgeTrust.AppSurface.Durable.DurableScopeId(System.String value)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScopeId other)
+  method public System.Boolean Equals(System.Object obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableScopeId left, ForgeTrust.AppSurface.Durable.DurableScopeId right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableScopeId left, ForgeTrust.AppSurface.Durable.DurableScopeId right)
+  property public System.String Value { get: public; }
+type public static class ForgeTrust.AppSurface.Durable.DurableServiceCollectionExtensions
+  method public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddDurableFlow<TContext>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, ForgeTrust.AppSurface.Flow.FlowDefinition<TContext> definition, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TContext> contextCodec, System.String implementationVersion, System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableFlowActivityBinding<TContext>>? activityBindings = null, System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableFlowEventBinding>? eventBindings = null, ForgeTrust.AppSurface.Flow.IFlowTransitionEvaluator<TContext>? evaluator = null)
+  method public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddDurableWork<TWork, TResult, TExecutor>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TWork> workCodec, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TResult> resultCodec) where TExecutor : class, ForgeTrust.AppSurface.Workers.IDurableWorkerExecutor<TWork, TResult>
+  method public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddDurableWorkWithReconciler<TWork, TResult, TExecutor, TReconciler>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TWork> workCodec, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TResult> resultCodec) where TExecutor : class, ForgeTrust.AppSurface.Workers.IDurableWorkerExecutor<TWork, TResult> where TReconciler : class, ForgeTrust.AppSurface.Durable.IDurableEffectReconciler<TWork, TResult>
+type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkAcceptance : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableWorkAcceptance>
+  constructor public ForgeTrust.AppSurface.Durable.DurableWorkAcceptance(ForgeTrust.AppSurface.Durable.DurableWorkId workId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, ForgeTrust.AppSurface.Durable.DurableWorkAcceptanceKind kind, System.Int64 revision, System.DateTimeOffset acceptedAtUtc)
+  method public ForgeTrust.AppSurface.Durable.DurableWorkAcceptance <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableWorkAcceptance? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableWorkAcceptance? left, ForgeTrust.AppSurface.Durable.DurableWorkAcceptance? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableWorkAcceptance? left, ForgeTrust.AppSurface.Durable.DurableWorkAcceptance? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkAcceptanceKind Kind { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+  property public System.DateTimeOffset AcceptedAtUtc { get: public; }
+  property public System.Int64 Revision { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.DurableWorkAcceptanceKind : System.Int32
+  enum-member Accepted = 0
+  enum-member Duplicate = 1
+type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext>
+  constructor public ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableEncodedPayload payload, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, ForgeTrust.AppSurface.Workers.DurableWorkerExecutionIdentity executionIdentity)
+  method public ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext? left, ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext? left, ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext? right)
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload Payload { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+  property public ForgeTrust.AppSurface.Workers.DurableWorkerExecutionIdentity ExecutionIdentity { get: public; }
+  property public System.String WorkName { get: public; }
+  property public System.String WorkVersion { get: public; }
+type public readonly struct ForgeTrust.AppSurface.Durable.DurableWorkId : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableWorkId>
+  constructor public ForgeTrust.AppSurface.Durable.DurableWorkId(System.String value)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableWorkId other)
+  method public System.Boolean Equals(System.Object obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.DurableWorkId New()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableWorkId left, ForgeTrust.AppSurface.Durable.DurableWorkId right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableWorkId left, ForgeTrust.AppSurface.Durable.DurableWorkId right)
+  property public System.String Value { get: public; }
+type public abstract class ForgeTrust.AppSurface.Durable.DurableWorkRegistration
+  constructor protected ForgeTrust.AppSurface.Durable.DurableWorkRegistration(System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec workCodec, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec resultCodec)
+  method public abstract ForgeTrust.AppSurface.Durable.DurablePreparedWork Prepare(System.IServiceProvider services, ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext work)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation> ReconcileAsync(System.IServiceProvider services, ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext work, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedPayload> InvokeAsync(System.IServiceProvider services, ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext work, System.Threading.CancellationToken cancellationToken = default)
+  property public ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety { get: public; }
+  property public ForgeTrust.AppSurface.Durable.IDurablePayloadCodec ResultCodec { get: public; }
+  property public ForgeTrust.AppSurface.Durable.IDurablePayloadCodec WorkCodec { get: public; }
+  property public System.String WorkName { get: public; }
+  property public System.String WorkVersion { get: public; }
+  property public abstract System.Boolean CanReconcile { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkRegistration<TWork, TResult, TExecutor> : ForgeTrust.AppSurface.Durable.DurableWorkRegistration where TExecutor : class, ForgeTrust.AppSurface.Workers.IDurableWorkerExecutor<TWork, TResult>
+  constructor public ForgeTrust.AppSurface.Durable.DurableWorkRegistration<TWork, TResult, TExecutor>(System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TWork> workCodec, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TResult> resultCodec, System.Func<System.IServiceProvider, ForgeTrust.AppSurface.Durable.IDurableEffectReconciler<TWork, TResult>>? reconcilerFactory = null)
+  method public ForgeTrust.AppSurface.Durable.DurablePreparedWork Prepare(System.IServiceProvider services, ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext work)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation> ReconcileAsync(System.IServiceProvider services, ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext work, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedPayload> InvokeAsync(System.IServiceProvider services, ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext work, System.Threading.CancellationToken cancellationToken = default)
+  property public System.Boolean CanReconcile { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkRegistry : ForgeTrust.AppSurface.Durable.IDurableWorkRegistry
+  constructor public ForgeTrust.AppSurface.Durable.DurableWorkRegistry(System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableWorkRegistration> registrations)
+  method public ForgeTrust.AppSurface.Durable.DurableWorkRegistration GetRequired(System.String workName, System.String workVersion)
+type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableWorkRequest>
+  constructor public ForgeTrust.AppSurface.Durable.DurableWorkRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String idempotencyKey, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableEncodedPayload payload, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy? retryPolicy = null, System.Nullable<System.DateTimeOffset> dueAtUtc = null)
+  method public ForgeTrust.AppSurface.Durable.DurableWorkRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableWorkRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableWorkRequest? left, ForgeTrust.AppSurface.Durable.DurableWorkRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableWorkRequest? left, ForgeTrust.AppSurface.Durable.DurableWorkRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload Payload { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy RetryPolicy { get: public; }
+  property public System.Nullable<System.DateTimeOffset> DueAtUtc { get: public; }
+  property public System.String IdempotencyKey { get: public; }
+  property public System.String WorkName { get: public; }
+  property public System.String WorkVersion { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy>
+  constructor public ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy(System.Int32 maximumAttempts, System.TimeSpan maximumElapsedTime, System.TimeSpan initialRetryDelay, System.TimeSpan maximumRetryDelay, System.TimeSpan leaseDuration, System.TimeSpan renewalCadence, System.TimeSpan maximumLeaseLifetime, System.String backoffAlgorithm)
+  method public ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy? left, ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy? left, ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy? right)
+  property public System.Int32 MaximumAttempts { get: public; }
+  property public System.String BackoffAlgorithm { get: public; }
+  property public System.TimeSpan InitialRetryDelay { get: public; }
+  property public System.TimeSpan LeaseDuration { get: public; }
+  property public System.TimeSpan MaximumElapsedTime { get: public; }
+  property public System.TimeSpan MaximumLeaseLifetime { get: public; }
+  property public System.TimeSpan MaximumRetryDelay { get: public; }
+  property public System.TimeSpan RenewalCadence { get: public; }
+  property public static ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy Default { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkScheduleTarget<TWork> : ForgeTrust.AppSurface.Durable.DurableScheduleTarget, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableScheduleTarget>, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableWorkScheduleTarget<TWork>> where TWork : notnull
+  constructor public ForgeTrust.AppSurface.Durable.DurableWorkScheduleTarget<TWork>(System.String workName, System.String workVersion, TWork input, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TWork> codec)
+  method protected System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableScheduleTarget? other)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableWorkScheduleTarget<TWork>? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableWorkScheduleTarget<TWork>? left, ForgeTrust.AppSurface.Durable.DurableWorkScheduleTarget<TWork>? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableWorkScheduleTarget<TWork>? left, ForgeTrust.AppSurface.Durable.DurableWorkScheduleTarget<TWork>? right)
+  method public virtual ForgeTrust.AppSurface.Durable.DurableWorkScheduleTarget<TWork> <Clone>$()
+  property protected System.Type EqualityContract { get: protected; }
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload EncodedInput { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload EncodedInputPayload { get: public; }
+  property public ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TWork> Codec { get: public; }
+  property public System.String RegisteredName { get: public; }
+  property public System.String RegisteredVersion { get: public; }
+  property public System.String WorkName { get: public; }
+  property public System.String WorkVersion { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.DurableWorkState : System.Int32
+  enum-member Accepted = 0
+  enum-member CancelPending = 4
+  enum-member CancelRequested = 3
+  enum-member CanceledBeforeEffect = 8
+  enum-member Claimed = 2
+  enum-member FailedTerminal = 7
+  enum-member Ready = 1
+  enum-member Succeeded = 5
+  enum-member SucceededAfterCancelRequested = 6
+  enum-member Suspended = 9
+type public interface ForgeTrust.AppSurface.Durable.IDurableEffectReconciler<TWork, TResult>
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult>> ReconcileAsync(ForgeTrust.AppSurface.Workers.DurableWorkerEnvelope<TWork> work, System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.IDurableFlowClient
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableFlowCommandResult>> CancelAsync(ForgeTrust.AppSurface.Durable.DurableFlowCancelRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableFlowCommandResult>> RaiseEventAsync(ForgeTrust.AppSurface.Durable.DurableFlowEventRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableFlowCommandResult>> ReleaseSuspensionAsync(ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableFlowCommandResult>> StartAsync(ForgeTrust.AppSurface.Durable.DurableFlowStartRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableFlowListResult>> ListAsync(ForgeTrust.AppSurface.Durable.DurableFlowListRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableFlowSnapshot>> GetAsync(ForgeTrust.AppSurface.Durable.DurableFlowGetRequest request, System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.IDurableFlowRegistry
+  method public abstract ForgeTrust.AppSurface.Durable.DurableFlowRegistration GetRequired(System.String flowId, System.String flowVersion)
+type public interface ForgeTrust.AppSurface.Durable.IDurablePayloadCodec
+  method public abstract ForgeTrust.AppSurface.Durable.DurableEncodedPayload EncodeObject(System.Object value)
+  method public abstract System.Object DecodeObject(ForgeTrust.AppSurface.Durable.DurableEncodedPayload payload)
+  property public abstract ForgeTrust.AppSurface.Durable.DurableDataClassification Classification { get: public; }
+  property public abstract System.String ContractName { get: public; }
+  property public abstract System.String ContractVersion { get: public; }
+  property public abstract System.String RetentionPolicyId { get: public; }
+  property public abstract System.Type PayloadType { get: public; }
+type public interface ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<T> : ForgeTrust.AppSurface.Durable.IDurablePayloadCodec
+  method public abstract ForgeTrust.AppSurface.Durable.DurableEncodedPayload Encode(T value)
+  method public abstract T Decode(ForgeTrust.AppSurface.Durable.DurableEncodedPayload payload)
+type public interface ForgeTrust.AppSurface.Durable.IDurablePayloadCodecRegistry
+  method public abstract ForgeTrust.AppSurface.Durable.IDurablePayloadCodec GetRequired(System.String contractName, System.String contractVersion)
+  method public abstract ForgeTrust.AppSurface.Durable.IDurablePayloadCodec GetRequired(System.Type payloadType)
+  method public abstract ForgeTrust.AppSurface.Durable.IDurablePayloadCodec GetRequired(System.Type payloadType, System.String contractName, System.String contractVersion)
+  method public abstract System.Void Register(ForgeTrust.AppSurface.Durable.IDurablePayloadCodec codec)
+type public interface ForgeTrust.AppSurface.Durable.IDurableScheduleClient
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleExplanation>> ExplainNextOccurrencesAsync(ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleListResult>> ListAsync(ForgeTrust.AppSurface.Durable.DurableScheduleListRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> CreateAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> DeleteAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCommand command, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> PauseAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCommand command, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> ReleaseAfterRecoveryAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCommand command, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> ResumeAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCommand command, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> UpdateAsync(ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot>> GetAsync(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableScheduleId scheduleId, System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.IDurableWorkClient
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableWorkAcceptance>> EnqueueAsync(ForgeTrust.AppSurface.Durable.DurableWorkRequest request, System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.IDurableWorkRegistry
+  method public abstract ForgeTrust.AppSurface.Durable.DurableWorkRegistration GetRequired(System.String workName, System.String workVersion)
+type public sealed class ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy : System.IEquatable<ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy>
+  method public ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy CatchUp(System.Int32 maximumOccurrences)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy? left, ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy? left, ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy? right)
+  property public ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicyKind Kind { get: public; }
+  property public System.Int32 MaximumOccurrences { get: public; }
+  property public static ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy RunOnce { get: public; }
+  property public static ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy Skip { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicyKind : System.Int32
+  enum-member CatchUp = 2
+  enum-member RunOnce = 0
+  enum-member Skip = 1
+type public sealed class ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy : System.IEquatable<ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy>
+  method public ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy AllowConcurrent(System.Int32 maximumConcurrentRuns)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy? left, ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy? left, ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy? right)
+  property public ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicyKind Kind { get: public; }
+  property public System.Int32 MaximumConcurrentRuns { get: public; }
+  property public static ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy QueueOne { get: public; }
+  property public static ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicy Skip { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.ScheduleOverlapPolicyKind : System.Int32
+  enum-member AllowConcurrent = 2
+  enum-member QueueOne = 0
+  enum-member Skip = 1
+type public sealed class ForgeTrust.AppSurface.Durable.SystemTextJsonDurablePayloadCodec<T> : ForgeTrust.AppSurface.Durable.IDurablePayloadCodec, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<T>
+  constructor public ForgeTrust.AppSurface.Durable.SystemTextJsonDurablePayloadCodec<T>(System.String contractName, System.String contractVersion, ForgeTrust.AppSurface.Durable.DurableDataClassification classification, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo, System.Func<T, System.Boolean> isApproved, System.Int32 maximumBytes = 262144, System.String retentionPolicyId = "application-default")
+  method public ForgeTrust.AppSurface.Durable.DurableEncodedPayload Encode(T value)
+  method public ForgeTrust.AppSurface.Durable.DurableEncodedPayload EncodeObject(System.Object value)
+  method public System.Object DecodeObject(ForgeTrust.AppSurface.Durable.DurableEncodedPayload payload)
+  method public T Decode(ForgeTrust.AppSurface.Durable.DurableEncodedPayload payload)
+  property public ForgeTrust.AppSurface.Durable.DurableDataClassification Classification { get: public; }
+  property public System.String ContractName { get: public; }
+  property public System.String ContractVersion { get: public; }
+  property public System.String RetentionPolicyId { get: public; }
+  property public System.Type PayloadType { get: public; }

@@ -695,6 +695,16 @@ public sealed record DurableScheduleExplanation
             throw new ArgumentOutOfRangeException(nameof(kind));
         }
 
+        if (cronDialect is { } dialect && !Enum.IsDefined(dialect))
+        {
+            throw new ArgumentOutOfRangeException(nameof(cronDialect));
+        }
+
+        if (cronGrammar is { } grammar && !Enum.IsDefined(grammar))
+        {
+            throw new ArgumentOutOfRangeException(nameof(cronGrammar));
+        }
+
         ScheduleId = scheduleId;
         Kind = kind;
         OverlapPolicy = overlapPolicy ?? throw new ArgumentNullException(nameof(overlapPolicy));

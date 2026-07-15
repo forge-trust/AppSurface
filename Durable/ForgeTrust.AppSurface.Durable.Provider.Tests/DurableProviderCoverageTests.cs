@@ -91,6 +91,37 @@ public sealed class DurableProviderCoverageTests
         Assert.Equal(DurableWorkOperatorOutcome.Duplicate, operatorResult.Outcome);
         Assert.Equal(DurableWorkState.Ready, operatorResult.State);
         Assert.Equal(9, operatorResult.Revision);
+
+        var namedCancelResult = new DurableWorkCancelResult(
+            WorkId: Work,
+            Outcome: DurableWorkCancelOutcome.AlreadyTerminal,
+            State: DurableWorkState.Succeeded,
+            Revision: 10);
+        var (cancelWorkId, cancelOutcome, cancelState, cancelRevision) = namedCancelResult;
+        Assert.Equal(Work, cancelWorkId);
+        Assert.Equal(DurableWorkCancelOutcome.AlreadyTerminal, cancelOutcome);
+        Assert.Equal(DurableWorkState.Succeeded, cancelState);
+        Assert.Equal(10, cancelRevision);
+
+        var namedDisableResult = new DurableScopeDisableResult(
+            ScopeId: Scope,
+            Outcome: DurableScopeDisableOutcome.AlreadyDisabled,
+            Generation: 6);
+        var (disabledScopeId, disableOutcome, disableGeneration) = namedDisableResult;
+        Assert.Equal(Scope, disabledScopeId);
+        Assert.Equal(DurableScopeDisableOutcome.AlreadyDisabled, disableOutcome);
+        Assert.Equal(6, disableGeneration);
+
+        var namedOperatorResult = new DurableWorkOperatorResult(
+            WorkId: Work,
+            Outcome: DurableWorkOperatorOutcome.Applied,
+            State: DurableWorkState.Succeeded,
+            Revision: 10);
+        var (operatorWorkId, operatorOutcome, operatorState, operatorRevision) = namedOperatorResult;
+        Assert.Equal(Work, operatorWorkId);
+        Assert.Equal(DurableWorkOperatorOutcome.Applied, operatorOutcome);
+        Assert.Equal(DurableWorkState.Succeeded, operatorState);
+        Assert.Equal(10, operatorRevision);
     }
 
     [Fact]
@@ -101,8 +132,17 @@ public sealed class DurableProviderCoverageTests
         Assert.Throws<ArgumentOutOfRangeException>(() => CreateSnapshot(safety: (DurableProviderSafety)999));
         Assert.Throws<ArgumentOutOfRangeException>(() => CreateSnapshot(attemptNumber: -1));
         Assert.Throws<ArgumentOutOfRangeException>(() => CreateSnapshot(revision: 0));
+        Assert.Throws<ArgumentException>(() => CreateSnapshot(terminalCode: "line\nbreak"));
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkCancelRequest(Scope, Work, "operator", "reason", 0));
         Assert.Throws<ArgumentException>(() => new DurableWorkCancelRequest(Scope, Work, "bad value", "reason", 1));
+        Assert.Throws<ArgumentException>(() => new DurableWorkCancelResult(
+            default, DurableWorkCancelOutcome.Applied, DurableWorkState.CancelRequested, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkCancelResult(
+            Work, (DurableWorkCancelOutcome)999, DurableWorkState.CancelRequested, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkCancelResult(
+            Work, DurableWorkCancelOutcome.Applied, (DurableWorkState)999, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkCancelResult(
+            Work, DurableWorkCancelOutcome.Applied, DurableWorkState.CancelRequested, 0));
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkListRequest(Scope, (DurableWorkState)999));
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkListRequest(Scope, pageSize: 0));
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkListRequest(Scope, pageSize: 501));
@@ -111,9 +151,24 @@ public sealed class DurableProviderCoverageTests
         Assert.Throws<ArgumentOutOfRangeException>(() => CreateListItem(safety: (DurableProviderSafety)999));
         Assert.Throws<ArgumentOutOfRangeException>(() => CreateListItem(attemptNumber: -1));
         Assert.Throws<ArgumentOutOfRangeException>(() => CreateListItem(revision: 0));
+        Assert.Throws<ArgumentException>(() => CreateListItem(terminalCode: "line\nbreak"));
         Assert.Throws<ArgumentNullException>(() => new DurableWorkListResult(null!, null));
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableScopeDisableRequest(Scope, "operator", "reason", 0));
         Assert.Throws<ArgumentException>(() => new DurableScopeDisableRequest(Scope, "operator", "line\nbreak", 1));
+        Assert.Throws<ArgumentException>(() => new DurableScopeDisableResult(
+            default, DurableScopeDisableOutcome.Applied, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableScopeDisableResult(
+            Scope, (DurableScopeDisableOutcome)999, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableScopeDisableResult(
+            Scope, DurableScopeDisableOutcome.Applied, 0));
+        Assert.Throws<ArgumentException>(() => new DurableWorkOperatorResult(
+            default, DurableWorkOperatorOutcome.Applied, DurableWorkState.Ready, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkOperatorResult(
+            Work, (DurableWorkOperatorOutcome)999, DurableWorkState.Ready, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkOperatorResult(
+            Work, DurableWorkOperatorOutcome.Applied, (DurableWorkState)999, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableWorkOperatorResult(
+            Work, DurableWorkOperatorOutcome.Applied, DurableWorkState.Ready, 0));
     }
 
     [Fact]
@@ -304,12 +359,14 @@ public sealed class DurableProviderCoverageTests
         AssertHealthRejected(configuredRuntimeEpoch: Guid.Empty);
         AssertHealthRejected(workerId: " ");
         AssertHealthRejected(workerId: new string('a', 201));
+        AssertHealthRejected(workerId: "worker\nspoofed");
         AssertHealthRejected(hostedSurfaces: DurableRuntimeSurface.None);
         AssertHealthRejected(hostedSurfaces: (DurableRuntimeSurface)8);
         AssertHealthRejected(dueDispatchCount: -1);
         AssertHealthRejected(oldestDueAge: TimeSpan.FromTicks(-1));
         AssertHealthRejected(problemCode: " ");
         AssertHealthRejected(problemCode: new string('a', 121));
+        AssertHealthRejected(problemCode: "ASDUR501\nspoofed");
     }
 
     [Fact]
@@ -398,7 +455,8 @@ public sealed class DurableProviderCoverageTests
         DurableWorkState state = DurableWorkState.Succeeded,
         DurableProviderSafety safety = DurableProviderSafety.ProviderKeyed,
         int attemptNumber = 2,
-        long revision = 3) =>
+        long revision = 3,
+        string? terminalCode = "completed") =>
         new(
             Scope,
             Work,
@@ -414,14 +472,15 @@ public sealed class DurableProviderCoverageTests
             LocalTime,
             LocalTime,
             LocalTime,
-            "completed",
+            terminalCode,
             Payload);
 
     private static DurableWorkListItem CreateListItem(
         DurableWorkState state = DurableWorkState.Suspended,
         DurableProviderSafety safety = DurableProviderSafety.ReconcileBeforeRetry,
         int attemptNumber = 2,
-        long revision = 3) =>
+        long revision = 3,
+        string? terminalCode = "suspended") =>
         new(
             Work,
             "activity",
@@ -434,7 +493,7 @@ public sealed class DurableProviderCoverageTests
             LocalTime,
             LocalTime,
             LocalTime,
-            "suspended",
+            terminalCode,
             true,
             true);
 

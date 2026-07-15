@@ -26,9 +26,19 @@ public sealed record DurableWorkGetRequest
 /// <summary>
 /// Reports authoritative work state without returning the original work payload or provider diagnostics.
 /// </summary>
+/// <remarks>
+/// Registered names, versions, and terminal codes accept only ASCII letters, digits, hyphens, underscores, periods,
+/// and colons. Empty, whitespace-only, control-containing, and other-character values are rejected; a terminal code
+/// may instead be null.
+/// </remarks>
 public sealed record DurableWorkSnapshot
 {
     /// <summary>Initializes an immutable work snapshot.</summary>
+    /// <remarks>
+    /// <paramref name="workName" /> is limited to 200 characters, <paramref name="workVersion" /> to 100 characters,
+    /// and <paramref name="terminalCode" />, when present, to 120 characters. Each uses the durable identifier
+    /// alphabet described on this type.
+    /// </remarks>
     public DurableWorkSnapshot(
         DurableScopeId scopeId,
         DurableWorkId workId,
@@ -83,7 +93,9 @@ public sealed record DurableWorkSnapshot
         DueAtUtc = dueAtUtc.ToUniversalTime();
         UpdatedAtUtc = updatedAtUtc.ToUniversalTime();
         TerminalAtUtc = terminalAtUtc?.ToUniversalTime();
-        TerminalCode = terminalCode;
+        TerminalCode = terminalCode is null
+            ? null
+            : ProviderContractValidation.Require(terminalCode, nameof(terminalCode), 120);
         Result = result;
     }
 
@@ -96,10 +108,10 @@ public sealed record DurableWorkSnapshot
     /// <summary>Gets the immutable effect activity identity.</summary>
     public string ActivityId { get; }
 
-    /// <summary>Gets the registered work name.</summary>
+    /// <summary>Gets the registered Work name, limited to 200 durable-identifier characters.</summary>
     public string WorkName { get; }
 
-    /// <summary>Gets the registered work version.</summary>
+    /// <summary>Gets the registered Work version, limited to 100 durable-identifier characters.</summary>
     public string WorkVersion { get; }
 
     /// <summary>Gets the current authoritative state.</summary>
@@ -129,7 +141,7 @@ public sealed record DurableWorkSnapshot
     /// <summary>Gets the terminal timestamp when terminal.</summary>
     public DateTimeOffset? TerminalAtUtc { get; }
 
-    /// <summary>Gets the safe terminal or suspension code when one is present.</summary>
+    /// <summary>Gets the safe terminal or suspension code, limited to 120 durable-identifier characters, when present.</summary>
     public string? TerminalCode { get; }
 
     /// <summary>Gets the encoded terminal business result when work succeeded.</summary>
@@ -194,11 +206,55 @@ public enum DurableWorkCancelOutcome
 }
 
 /// <summary>Reports a successful work cancellation command.</summary>
-public sealed record DurableWorkCancelResult(
-    DurableWorkId WorkId,
-    DurableWorkCancelOutcome Outcome,
-    DurableWorkState State,
-    long Revision);
+public sealed record DurableWorkCancelResult
+{
+    /// <summary>Initializes a validated work cancellation result.</summary>
+    public DurableWorkCancelResult(
+        DurableWorkId WorkId,
+        DurableWorkCancelOutcome Outcome,
+        DurableWorkState State,
+        long Revision)
+    {
+        ProviderContractValidation.Require(WorkId, nameof(WorkId));
+        if (!Enum.IsDefined(Outcome))
+        {
+            throw new ArgumentOutOfRangeException(nameof(Outcome));
+        }
+
+        if (!Enum.IsDefined(State))
+        {
+            throw new ArgumentOutOfRangeException(nameof(State));
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(Revision);
+        this.WorkId = WorkId;
+        this.Outcome = Outcome;
+        this.State = State;
+        this.Revision = Revision;
+    }
+
+    /// <summary>Gets the affected Work aggregate.</summary>
+    public DurableWorkId WorkId { get; }
+    /// <summary>Gets the accepted cancellation outcome.</summary>
+    public DurableWorkCancelOutcome Outcome { get; }
+    /// <summary>Gets the resulting authoritative Work state.</summary>
+    public DurableWorkState State { get; }
+    /// <summary>Gets the resulting aggregate revision.</summary>
+    public long Revision { get; }
+
+    /// <summary>Deconstructs the result in its original positional-record field order.</summary>
+    public void Deconstruct(
+        out DurableWorkId WorkId,
+        out DurableWorkCancelOutcome Outcome,
+        out DurableWorkState State,
+        out long Revision)
+    {
+        WorkId = this.WorkId;
+        Outcome = this.Outcome;
+        State = this.State;
+        Revision = this.Revision;
+    }
+}
 
 /// <summary>Requests one bounded, ordered, payload-free page of Work operations in an authorized scope.</summary>
 public sealed record DurableWorkListRequest
@@ -248,9 +304,19 @@ public sealed record DurableWorkListRequest
 }
 
 /// <summary>Reports one payload-free Work inventory item for recovery and operations.</summary>
+/// <remarks>
+/// Registered names, versions, and terminal codes accept only ASCII letters, digits, hyphens, underscores, periods,
+/// and colons. Empty, whitespace-only, control-containing, and other-character values are rejected; a terminal code
+/// may instead be null.
+/// </remarks>
 public sealed record DurableWorkListItem
 {
     /// <summary>Initializes a Work inventory item.</summary>
+    /// <remarks>
+    /// <paramref name="workName" /> is limited to 200 characters, <paramref name="workVersion" /> to 100 characters,
+    /// and <paramref name="terminalCode" />, when present, to 120 characters. Each uses the durable identifier
+    /// alphabet described on this type.
+    /// </remarks>
     public DurableWorkListItem(
         DurableWorkId workId,
         string activityId,
@@ -299,7 +365,9 @@ public sealed record DurableWorkListItem
         AcceptedAtUtc = acceptedAtUtc.ToUniversalTime();
         DueAtUtc = dueAtUtc.ToUniversalTime();
         UpdatedAtUtc = updatedAtUtc.ToUniversalTime();
-        TerminalCode = terminalCode;
+        TerminalCode = terminalCode is null
+            ? null
+            : ProviderContractValidation.Require(terminalCode, nameof(terminalCode), 120);
         CancellationRequested = cancellationRequested;
         RequiresRecoveryRelease = requiresRecoveryRelease;
     }
@@ -308,9 +376,9 @@ public sealed record DurableWorkListItem
     public DurableWorkId WorkId { get; }
     /// <summary>Gets the immutable activity identity used for cross-surface correlation.</summary>
     public string ActivityId { get; }
-    /// <summary>Gets the registered Work name.</summary>
+    /// <summary>Gets the registered Work name, limited to 200 durable-identifier characters.</summary>
     public string WorkName { get; }
-    /// <summary>Gets the immutable Work version.</summary>
+    /// <summary>Gets the immutable Work version, limited to 100 durable-identifier characters.</summary>
     public string WorkVersion { get; }
     /// <summary>Gets the public authoritative state.</summary>
     public DurableWorkState State { get; }
@@ -326,7 +394,7 @@ public sealed record DurableWorkListItem
     public DateTimeOffset DueAtUtc { get; }
     /// <summary>Gets the last authoritative mutation time.</summary>
     public DateTimeOffset UpdatedAtUtc { get; }
-    /// <summary>Gets the safe terminal or suspension code, when present.</summary>
+    /// <summary>Gets the safe terminal or suspension code, limited to 120 durable-identifier characters, when present.</summary>
     public string? TerminalCode { get; }
     /// <summary>Gets whether cancellation intent has been recorded.</summary>
     public bool CancellationRequested { get; }
@@ -417,10 +485,44 @@ public enum DurableScopeDisableOutcome
 }
 
 /// <summary>Reports a successful scope disable command.</summary>
-public sealed record DurableScopeDisableResult(
-    DurableScopeId ScopeId,
-    DurableScopeDisableOutcome Outcome,
-    long Generation);
+public sealed record DurableScopeDisableResult
+{
+    /// <summary>Initializes a validated scope disable result.</summary>
+    public DurableScopeDisableResult(
+        DurableScopeId ScopeId,
+        DurableScopeDisableOutcome Outcome,
+        long Generation)
+    {
+        ProviderContractValidation.Require(ScopeId, nameof(ScopeId));
+        if (!Enum.IsDefined(Outcome))
+        {
+            throw new ArgumentOutOfRangeException(nameof(Outcome));
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(Generation);
+        this.ScopeId = ScopeId;
+        this.Outcome = Outcome;
+        this.Generation = Generation;
+    }
+
+    /// <summary>Gets the disabled owning scope.</summary>
+    public DurableScopeId ScopeId { get; }
+    /// <summary>Gets the accepted disable outcome.</summary>
+    public DurableScopeDisableOutcome Outcome { get; }
+    /// <summary>Gets the resulting scope lifecycle generation.</summary>
+    public long Generation { get; }
+
+    /// <summary>Deconstructs the result in its original positional-record field order.</summary>
+    public void Deconstruct(
+        out DurableScopeId ScopeId,
+        out DurableScopeDisableOutcome Outcome,
+        out long Generation)
+    {
+        ScopeId = this.ScopeId;
+        Outcome = this.Outcome;
+        Generation = this.Generation;
+    }
+}
 
 /// <summary>Provides application-authorized scope lifecycle fencing.</summary>
 public interface IDurableScopeControlClient
@@ -450,11 +552,55 @@ public enum DurableManualResolutionKind
 }
 
 /// <summary>Reports the authoritative result of a work operator command.</summary>
-public sealed record DurableWorkOperatorResult(
-    DurableWorkId WorkId,
-    DurableWorkOperatorOutcome Outcome,
-    DurableWorkState State,
-    long Revision);
+public sealed record DurableWorkOperatorResult
+{
+    /// <summary>Initializes a validated Work operator result.</summary>
+    public DurableWorkOperatorResult(
+        DurableWorkId WorkId,
+        DurableWorkOperatorOutcome Outcome,
+        DurableWorkState State,
+        long Revision)
+    {
+        ProviderContractValidation.Require(WorkId, nameof(WorkId));
+        if (!Enum.IsDefined(Outcome))
+        {
+            throw new ArgumentOutOfRangeException(nameof(Outcome));
+        }
+
+        if (!Enum.IsDefined(State))
+        {
+            throw new ArgumentOutOfRangeException(nameof(State));
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(Revision);
+        this.WorkId = WorkId;
+        this.Outcome = Outcome;
+        this.State = State;
+        this.Revision = Revision;
+    }
+
+    /// <summary>Gets the affected Work aggregate.</summary>
+    public DurableWorkId WorkId { get; }
+    /// <summary>Gets the idempotent operator-command outcome.</summary>
+    public DurableWorkOperatorOutcome Outcome { get; }
+    /// <summary>Gets the resulting authoritative Work state.</summary>
+    public DurableWorkState State { get; }
+    /// <summary>Gets the resulting aggregate revision.</summary>
+    public long Revision { get; }
+
+    /// <summary>Deconstructs the result in its original positional-record field order.</summary>
+    public void Deconstruct(
+        out DurableWorkId WorkId,
+        out DurableWorkOperatorOutcome Outcome,
+        out DurableWorkState State,
+        out long Revision)
+    {
+        WorkId = this.WorkId;
+        Outcome = this.Outcome;
+        State = this.State;
+        Revision = this.Revision;
+    }
+}
 
 /// <summary>Requests side-effect-free reconciliation for suspended ReconcileBeforeRetry work.</summary>
 public sealed record DurableWorkReconcileRequest

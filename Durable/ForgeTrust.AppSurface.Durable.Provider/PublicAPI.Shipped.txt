@@ -1,32 +1,344 @@
-ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork
-ForgeTrust.AppSurface.Durable.Provider.DurableManualResolutionKind
-ForgeTrust.AppSurface.Durable.Provider.DurablePreparedWorkInvocation
-ForgeTrust.AppSurface.Durable.Provider.DurableProviderWorkAdapter
-ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot
-ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthState
-ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest
-ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult
-ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface
-ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableOutcome
-ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableRequest
-ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableResult
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelOutcome
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelRequest
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelResult
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkGetRequest
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkListRequest
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkListResult
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkManualResolutionRequest
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorOutcome
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkReconcileRequest
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkRecoveryReleaseRequest
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkRetrySafeRequest
-ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot
-ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimeDrainControl
-ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimeHealth
-ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimePump
-ForgeTrust.AppSurface.Durable.Provider.IDurableScopeControlClient
-ForgeTrust.AppSurface.Durable.Provider.IDurableWorkControlClient
-ForgeTrust.AppSurface.Durable.Provider.IDurableWorkOperatorClient
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId, System.String activityId, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableEncodedPayload payload, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, System.Int32 attemptNumber, System.Int64 leaseGeneration, System.Int64 scopeGeneration, System.String runtimeEpoch)
+  method public ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext ToExecutionContext()
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork? left, ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork? left, ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork? right)
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload Payload { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+  property public System.Int32 AttemptNumber { get: public; }
+  property public System.Int64 LeaseGeneration { get: public; }
+  property public System.Int64 ScopeGeneration { get: public; }
+  property public System.String ActivityId { get: public; }
+  property public System.String RuntimeEpoch { get: public; }
+  property public System.String WorkName { get: public; }
+  property public System.String WorkVersion { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableManualResolutionKind : System.Int32
+  enum-member Applied = 0
+  enum-member ProvenNotApplied = 1
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurablePreparedWorkInvocation
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedPayload> InvokeAsync(System.Threading.CancellationToken cancellationToken = default)
+type public static class ForgeTrust.AppSurface.Durable.Provider.DurableProviderWorkAdapter
+  method public static ForgeTrust.AppSurface.Durable.Provider.DurablePreparedWorkInvocation Prepare(ForgeTrust.AppSurface.Durable.DurableWorkRegistration registration, System.IServiceProvider services, ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork claim)
+  method public static System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation> ReconcileAsync(ForgeTrust.AppSurface.Durable.DurableWorkRegistration registration, System.IServiceProvider services, ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork claim, System.Threading.CancellationToken cancellationToken = default)
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthState state, System.String? problemCode, System.Boolean schemaCompatible, System.Boolean epochCompatible, System.Int32 installedSchemaVersion, System.Int32 requiredSchemaVersion, System.Guid configuredRuntimeEpoch, System.Nullable<System.Guid> activeRuntimeEpoch, System.String workerId, System.Nullable<System.Guid> workerInstanceId, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface hostedSurfaces, System.DateTimeOffset observedAtUtc, System.Nullable<System.DateTimeOffset> startedAtUtc, System.Nullable<System.DateTimeOffset> lastHeartbeatAtUtc, System.Nullable<System.DateTimeOffset> lastSuccessfulSweepAtUtc, System.Boolean isDraining, System.Boolean isPassActive, System.Int64 dueDispatchCount, System.Nullable<System.DateTimeOffset> oldestDueAtUtc, System.Nullable<System.TimeSpan> oldestDueAge)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot? left, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot? left, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot? right)
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthState State { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface HostedSurfaces { get: public; }
+  property public System.Boolean EpochCompatible { get: public; }
+  property public System.Boolean IsDraining { get: public; }
+  property public System.Boolean IsPassActive { get: public; }
+  property public System.Boolean SchemaCompatible { get: public; }
+  property public System.DateTimeOffset ObservedAtUtc { get: public; }
+  property public System.Guid ConfiguredRuntimeEpoch { get: public; }
+  property public System.Int32 InstalledSchemaVersion { get: public; }
+  property public System.Int32 RequiredSchemaVersion { get: public; }
+  property public System.Int64 DueDispatchCount { get: public; }
+  property public System.Nullable<System.DateTimeOffset> LastHeartbeatAtUtc { get: public; }
+  property public System.Nullable<System.DateTimeOffset> LastSuccessfulSweepAtUtc { get: public; }
+  property public System.Nullable<System.DateTimeOffset> OldestDueAtUtc { get: public; }
+  property public System.Nullable<System.DateTimeOffset> StartedAtUtc { get: public; }
+  property public System.Nullable<System.Guid> ActiveRuntimeEpoch { get: public; }
+  property public System.Nullable<System.Guid> WorkerInstanceId { get: public; }
+  property public System.Nullable<System.TimeSpan> OldestDueAge { get: public; }
+  property public System.String WorkerId { get: public; }
+  property public System.String? ProblemCode { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthState : System.Int32
+  enum-member Draining = 3
+  enum-member Healthy = 0
+  enum-member Incompatible = 4
+  enum-member NotStarted = 1
+  enum-member Stale = 2
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest(System.Int32 maximumItems = 32, System.Nullable<System.TimeSpan> timeBudget = null, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface surfaces = ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface.All)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest? right)
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface Surfaces { get: public; }
+  property public System.Int32 MaximumItems { get: public; }
+  property public System.TimeSpan TimeBudget { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult(System.Int32 discovered, System.Int32 claimed, System.Int32 processed, System.Int32 deferred, System.Int32 failed, System.Boolean hasMore, System.Nullable<System.DateTimeOffset> nextDueAtUtc, System.TimeSpan elapsed)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult? right)
+  property public System.Boolean HasMore { get: public; }
+  property public System.Int32 Claimed { get: public; }
+  property public System.Int32 Deferred { get: public; }
+  property public System.Int32 Discovered { get: public; }
+  property public System.Int32 Failed { get: public; }
+  property public System.Int32 Processed { get: public; }
+  property public System.Nullable<System.DateTimeOffset> NextDueAtUtc { get: public; }
+  property public System.TimeSpan Elapsed { get: public; }
+[System.Flags] type public enum ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface : System.Int32
+  enum-member All = 7
+  enum-member Flow = 2
+  enum-member None = 0
+  enum-member Schedule = 4
+  enum-member Work = 1
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableOutcome : System.Int32
+  enum-member AlreadyDisabled = 1
+  enum-member Applied = 0
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, System.String actorId, System.String reasonCode, System.Int64 expectedGeneration)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.Int64 ExpectedGeneration { get: public; }
+  property public System.String ActorId { get: public; }
+  property public System.String ReasonCode { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableResult : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableResult>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableResult(ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId, ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableOutcome Outcome, System.Int64 Generation)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId, out ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableOutcome Outcome, out System.Int64 Generation)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableResult? right)
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableOutcome Outcome { get: public; }
+  property public System.Int64 Generation { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelOutcome : System.Int32
+  enum-member AlreadyTerminal = 1
+  enum-member Applied = 0
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId, System.String actorId, System.String reasonCode, System.Int64 expectedRevision)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+  property public System.Int64 ExpectedRevision { get: public; }
+  property public System.String ActorId { get: public; }
+  property public System.String ReasonCode { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelResult : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelResult>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelResult(ForgeTrust.AppSurface.Durable.DurableWorkId WorkId, ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelOutcome Outcome, ForgeTrust.AppSurface.Durable.DurableWorkState State, System.Int64 Revision)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out ForgeTrust.AppSurface.Durable.DurableWorkId WorkId, out ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelOutcome Outcome, out ForgeTrust.AppSurface.Durable.DurableWorkState State, out System.Int64 Revision)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelResult? right)
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkState State { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelOutcome Outcome { get: public; }
+  property public System.Int64 Revision { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkGetRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableWorkGetRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableWorkGetRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableWorkGetRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableWorkGetRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkGetRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkGetRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkGetRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkGetRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem(ForgeTrust.AppSurface.Durable.DurableWorkId workId, System.String activityId, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableWorkState state, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, System.Int32 attemptNumber, System.Int64 revision, System.DateTimeOffset acceptedAtUtc, System.DateTimeOffset dueAtUtc, System.DateTimeOffset updatedAtUtc, System.String? terminalCode, System.Boolean cancellationRequested, System.Boolean requiresRecoveryRelease)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem? right)
+  property public ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkState State { get: public; }
+  property public System.Boolean CancellationRequested { get: public; }
+  property public System.Boolean RequiresRecoveryRelease { get: public; }
+  property public System.DateTimeOffset AcceptedAtUtc { get: public; }
+  property public System.DateTimeOffset DueAtUtc { get: public; }
+  property public System.DateTimeOffset UpdatedAtUtc { get: public; }
+  property public System.Int32 AttemptNumber { get: public; }
+  property public System.Int64 Revision { get: public; }
+  property public System.String ActivityId { get: public; }
+  property public System.String WorkName { get: public; }
+  property public System.String WorkVersion { get: public; }
+  property public System.String? TerminalCode { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkListRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableWorkListRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableWorkListRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, System.Nullable<ForgeTrust.AppSurface.Durable.DurableWorkState> state = null, System.Boolean requiresRecoveryReleaseOnly = false, System.Int32 pageSize = 100, System.String? continuationToken = null)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableWorkListRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableWorkListRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkListRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkListRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkListRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkListRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.Boolean RequiresRecoveryReleaseOnly { get: public; }
+  property public System.Int32 PageSize { get: public; }
+  property public System.Nullable<ForgeTrust.AppSurface.Durable.DurableWorkState> State { get: public; }
+  property public System.String? ContinuationToken { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkListResult : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableWorkListResult>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableWorkListResult(System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem> items, System.String? continuationToken)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableWorkListResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableWorkListResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkListResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkListResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkListResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkListResult? right)
+  property public System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem> Items { get: public; }
+  property public System.String? ContinuationToken { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkManualResolutionRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableWorkManualResolutionRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableWorkManualResolutionRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String actorId, System.String reasonCode, System.Int64 expectedRevision, ForgeTrust.AppSurface.Durable.Provider.DurableManualResolutionKind resolution, ForgeTrust.AppSurface.Durable.DurableEncodedPayload? result = null)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableWorkManualResolutionRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableWorkManualResolutionRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkManualResolutionRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkManualResolutionRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkManualResolutionRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkManualResolutionRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload? Result { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableManualResolutionKind Resolution { get: public; }
+  property public System.Int64 ExpectedRevision { get: public; }
+  property public System.String ActorId { get: public; }
+  property public System.String ReasonCode { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorOutcome : System.Int32
+  enum-member Applied = 0
+  enum-member Duplicate = 1
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult(ForgeTrust.AppSurface.Durable.DurableWorkId WorkId, ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorOutcome Outcome, ForgeTrust.AppSurface.Durable.DurableWorkState State, System.Int64 Revision)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out ForgeTrust.AppSurface.Durable.DurableWorkId WorkId, out ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorOutcome Outcome, out ForgeTrust.AppSurface.Durable.DurableWorkState State, out System.Int64 Revision)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult? right)
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkState State { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorOutcome Outcome { get: public; }
+  property public System.Int64 Revision { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkReconcileRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableWorkReconcileRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableWorkReconcileRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String actorId, System.String reasonCode, System.Int64 expectedRevision)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableWorkReconcileRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableWorkReconcileRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkReconcileRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkReconcileRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkReconcileRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkReconcileRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+  property public System.Int64 ExpectedRevision { get: public; }
+  property public System.String ActorId { get: public; }
+  property public System.String ReasonCode { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkRecoveryReleaseRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableWorkRecoveryReleaseRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableWorkRecoveryReleaseRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String actorId, System.String reasonCode, System.Int64 expectedRevision)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableWorkRecoveryReleaseRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableWorkRecoveryReleaseRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkRecoveryReleaseRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkRecoveryReleaseRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkRecoveryReleaseRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkRecoveryReleaseRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+  property public System.Int64 ExpectedRevision { get: public; }
+  property public System.String ActorId { get: public; }
+  property public System.String ReasonCode { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkRetrySafeRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableWorkRetrySafeRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableWorkRetrySafeRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String actorId, System.String reasonCode, System.Int64 expectedRevision)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableWorkRetrySafeRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableWorkRetrySafeRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkRetrySafeRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkRetrySafeRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkRetrySafeRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkRetrySafeRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+  property public System.Int64 ExpectedRevision { get: public; }
+  property public System.String ActorId { get: public; }
+  property public System.String ReasonCode { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId, System.String activityId, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableWorkState state, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, System.String providerKey, System.Int32 attemptNumber, System.Int64 revision, System.DateTimeOffset acceptedAtUtc, System.DateTimeOffset dueAtUtc, System.DateTimeOffset updatedAtUtc, System.Nullable<System.DateTimeOffset> terminalAtUtc, System.String? terminalCode, ForgeTrust.AppSurface.Durable.DurableEncodedPayload? result)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot? right)
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload? Result { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkState State { get: public; }
+  property public System.DateTimeOffset AcceptedAtUtc { get: public; }
+  property public System.DateTimeOffset DueAtUtc { get: public; }
+  property public System.DateTimeOffset UpdatedAtUtc { get: public; }
+  property public System.Int32 AttemptNumber { get: public; }
+  property public System.Int64 Revision { get: public; }
+  property public System.Nullable<System.DateTimeOffset> TerminalAtUtc { get: public; }
+  property public System.String ActivityId { get: public; }
+  property public System.String ProviderKey { get: public; }
+  property public System.String WorkName { get: public; }
+  property public System.String WorkVersion { get: public; }
+  property public System.String? TerminalCode { get: public; }
+type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimeDrainControl
+  method public abstract System.Threading.Tasks.ValueTask BeginDrainAsync(System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask ResumeAsync(System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimeHealth
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot> GetAsync(System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimePump
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult> RunOnceAsync(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest request, System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableScopeControlClient
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableResult>> DisableAsync(ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableRequest request, System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableWorkControlClient
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelResult>> CancelAsync(ForgeTrust.AppSurface.Durable.Provider.DurableWorkCancelRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableWorkListResult>> ListAsync(ForgeTrust.AppSurface.Durable.Provider.DurableWorkListRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot>> GetAsync(ForgeTrust.AppSurface.Durable.Provider.DurableWorkGetRequest request, System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableWorkOperatorClient
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult>> ReconcileAsync(ForgeTrust.AppSurface.Durable.Provider.DurableWorkReconcileRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult>> ReleaseAfterRecoveryAsync(ForgeTrust.AppSurface.Durable.Provider.DurableWorkRecoveryReleaseRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult>> ResolveAsync(ForgeTrust.AppSurface.Durable.Provider.DurableWorkManualResolutionRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult>> RetrySafeAsync(ForgeTrust.AppSurface.Durable.Provider.DurableWorkRetrySafeRequest request, System.Threading.CancellationToken cancellationToken = default)
