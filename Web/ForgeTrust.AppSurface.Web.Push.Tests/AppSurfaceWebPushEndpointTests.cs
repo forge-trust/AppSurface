@@ -179,10 +179,28 @@ public sealed class AppSurfaceWebPushEndpointTests
             bearer: true,
             authenticationScheme: "CookieProof");
 
-        var response = await host.Client.GetAsync("/account/push/configuration");
+        using var response = await host.Client.GetAsync("/account/push/configuration");
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal("ASPUSH108", await ReadCodeAsync(response));
+        Assert.Equal(0, host.Custody.RegisterCalls);
+        Assert.Equal(0, host.Custody.UnregisterCalls);
+    }
+
+    [Fact]
+    public async Task BearerMapping_RejectsNonBearerAmbientAuthenticationScheme()
+    {
+        await using var host = await CreateHostAsync(
+            map: true,
+            ambientAdmin: false,
+            bearer: true,
+            authenticationScheme: "AmbientProof");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/account/push/configuration");
+        request.Headers.TryAddWithoutValidation("X-Ambient-Admin", "true");
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Equal(0, host.Custody.RegisterCalls);
         Assert.Equal(0, host.Custody.UnregisterCalls);
     }
@@ -250,7 +268,9 @@ public sealed class AppSurfaceWebPushEndpointTests
             ambientAdmin: false,
             bearer: true,
             authenticationScheme: "ThrowingProof");
-        var throwingResponse = await throwingScheme.Client.GetAsync("/account/push/configuration");
+        using var throwingRequest = new HttpRequestMessage(HttpMethod.Get, "/account/push/configuration");
+        throwingRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "admin");
+        using var throwingResponse = await throwingScheme.Client.SendAsync(throwingRequest);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, throwingResponse.StatusCode);
         Assert.Equal("ASPUSH108", await ReadCodeAsync(throwingResponse));

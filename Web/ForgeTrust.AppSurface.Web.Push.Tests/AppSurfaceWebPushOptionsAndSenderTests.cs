@@ -383,7 +383,7 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
         }
         finally
         {
-            custody.ReleaseCallback();
+            await custody.ReleaseCallbackAsync();
         }
     }
 
@@ -618,6 +618,7 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
 
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource CallbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CallbackCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public ValueTask<AppSurfaceWebPushRegistrationDisposition> RegisterAsync(
             AppSurfaceWebPushSubscriptionWriteContext context,
@@ -638,17 +639,25 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
         {
             using var registration = cancellationToken.Register(() =>
             {
-                CallbackStarted.TrySetResult();
-                callbackRelease.Wait();
+                try
+                {
+                    CallbackStarted.TrySetResult();
+                    callbackRelease.Wait();
+                }
+                finally
+                {
+                    CallbackCompleted.TrySetResult();
+                }
             });
             Started.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return AppSurfaceWebPushTerminalDisposition.Completed;
         }
 
-        public void ReleaseCallback()
+        public async Task ReleaseCallbackAsync()
         {
             callbackRelease.Set();
+            await CallbackCompleted.Task.WaitAsync(TimeSpan.FromSeconds(1));
             callbackRelease.Dispose();
         }
     }

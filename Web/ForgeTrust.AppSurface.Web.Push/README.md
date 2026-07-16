@@ -70,7 +70,7 @@ Map these fixed application endpoints on the application-root `WebApplication` b
 reject `RouteGroupBuilder` instances because a group prefix would move the package-owned client asset away
 from its documented fixed path.
 
-Both methods return `void`. Every handler requires an authenticated principal and directly evaluates the named policy before configuration, antiforgery, parsing, or custody; inherited `AllowAnonymous` cannot bypass it. The cookie policy must declare exactly one authentication scheme, which the package evaluates before issuing antiforgery tokens or accepting writes. Bearer mapping authenticates only its explicit scheme. Missing or ambiguous policy schemes fail closed with `ASPUSH108`.
+Both methods return `void`. Every handler requires an authenticated principal and directly evaluates the named policy before configuration, antiforgery, parsing, or custody; inherited `AllowAnonymous` cannot bypass it. The cookie policy must declare exactly one authentication scheme, which the package evaluates before issuing antiforgery tokens or accepting writes. Bearer mapping requires a nonblank HTTP `Authorization: Bearer` credential and authenticates only its explicit scheme; ambient or non-bearer credentials cannot enter the antiforgery-free rail. Missing or ambiguous policy schemes fail closed with `ASPUSH108`.
 
 The mapped base path must be a literal app-root-relative path. Route parameters, catch-alls, `.` or `..` traversal segments, encoded paths, query strings, and fragments are rejected. Reserved-space and duplicate checks are case-insensitive, matching ASP.NET Core routing; map separate literal rails when a host needs more than one custody boundary.
 

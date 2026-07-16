@@ -40,7 +40,7 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
     /// <param name="endpoints">The application-root endpoint route builder. Route groups are rejected because they would move the package's fixed client asset.</param>
     /// <param name="path">The literal app-root-relative base path for configuration, PUT, and DELETE. Route parameters, catch-alls, and traversal segments are not supported.</param>
     /// <param name="authorizationPolicy">The nonblank host-owned named policy evaluated directly inside every handler.</param>
-    /// <param name="authenticationScheme">The exact token authentication scheme. Sign-in-capable schemes such as cookies fail closed; ambient identities are ignored.</param>
+    /// <param name="authenticationScheme">The exact bearer-token authentication scheme. Requests must carry a nonblank HTTP <c>Authorization: Bearer</c> credential; sign-in-capable schemes such as cookies fail closed and ambient identities are ignored.</param>
     /// <param name="rateLimiterPolicy">An optional host-owned named rate-limiter policy applied to every protected endpoint.</param>
     /// <exception cref="ArgumentException">The builder is a route group, or the path, authorization policy, scheme, or supplied rate-limiter policy is blank, unsafe, or inside AppSurface's reserved route space.</exception>
     /// <exception cref="InvalidOperationException">The same package base path was already mapped.</exception>
@@ -383,6 +383,13 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
                     return new(null, Problem(StatusCodes.Status503ServiceUnavailable, "ASPUSH108", "The token authentication scheme is unavailable."));
                 }
 
+                if (!AuthenticationHeaderValue.TryParse(context.Request.Headers.Authorization, out var authorizationHeader)
+                    || !string.Equals(authorizationHeader.Scheme, "Bearer", StringComparison.OrdinalIgnoreCase)
+                    || string.IsNullOrWhiteSpace(authorizationHeader.Parameter))
+                {
+                    return new(null, Results.Unauthorized());
+                }
+
                 var authentication = await context.AuthenticateAsync(authenticationScheme).ConfigureAwait(false);
                 principal = authentication.Succeeded ? authentication.Principal : null;
             }
@@ -455,7 +462,7 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
                 Problem(StatusCodes.Status415UnsupportedMediaType, "ASPUSH102", "Content-Type must be application/json."));
         }
 
-        if (context.Request.ContentLength > MaximumBodyBytes)
+        if (context.Request.ContentLength is > MaximumBodyBytes)
         {
             return new JsonBodyFailure(
                 Problem(StatusCodes.Status413PayloadTooLarge, "ASPUSH103", "The request body exceeds 16 KiB."));

@@ -453,6 +453,28 @@ test("cancellation after non-abortable browser awaits rejects with AbortError", 
   }
 
   {
+    const parsing = deferred();
+    const started = deferred();
+    const harness = createHarness({
+      responseFor: (_url, init) => init?.method === "PUT" ? {
+        ok: false,
+        status: 400,
+        json: () => {
+          started.resolve();
+          return parsing.promise;
+        }
+      } : null
+    });
+    const prepared = await harness.api.prepare({ endpoint: "/account/push" });
+    const cancellation = new AbortController();
+    const operation = harness.api.subscribe({ prepared: prepared.handle, signal: cancellation.signal });
+    await started.promise;
+    cancellation.abort();
+    parsing.resolve({ code: "ASPUSH104" });
+    await assertAbort(operation);
+  }
+
+  {
     const pending = deferred();
     const harness = createHarness({ register: () => pending.promise });
     const cancellation = new AbortController();
@@ -485,6 +507,33 @@ test("cancellation after non-abortable browser awaits rejects with AbortError", 
     await new Promise(resolve => setImmediate(resolve));
     cancellation.abort();
     pending.resolve(true);
+    await assertAbort(operation);
+  }
+
+  {
+    const parsing = deferred();
+    const started = deferred();
+    const current = {
+      endpoint: "https://push.example.test/send",
+      options: { applicationServerKey: applicationKey },
+      unsubscribe: async () => true
+    };
+    const harness = createHarness({
+      current,
+      responseFor: (_url, init) => init?.method === "DELETE" ? {
+        ok: false,
+        status: 400,
+        json: () => {
+          started.resolve();
+          return parsing.promise;
+        }
+      } : null
+    });
+    const cancellation = new AbortController();
+    const operation = harness.api.unsubscribe({ endpoint: "/account/push", signal: cancellation.signal });
+    await started.promise;
+    cancellation.abort();
+    parsing.reject(new Error("malformed after abort"));
     await assertAbort(operation);
   }
 });

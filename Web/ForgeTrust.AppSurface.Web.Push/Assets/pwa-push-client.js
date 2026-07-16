@@ -141,11 +141,16 @@
     return { configuration };
   };
 
-  const mutationFailure = async response => {
+  const mutationFailure = async (response, signal) => {
     if (response.status === 400) {
       try {
-        if ((await response.json())?.code === "ASPUSH104") return result("antiforgery-failed");
-      } catch { /* malformed problem details remain a custody failure */ }
+        const problem = await response.json();
+        abort(signal);
+        if (problem?.code === "ASPUSH104") return result("antiforgery-failed");
+      } catch {
+        abort(signal);
+        /* malformed problem details remain a custody failure */
+      }
       return result("custody-failed");
     }
     return result(expectedStatus.get(response.status) || "custody-failed", isTransientStatus(response.status));
@@ -284,7 +289,7 @@
         if (response.status === 409) {
           try { if ((await response.json())?.code === "ASPUSH109") return result("vapid-key-stale", true); } catch { /* safe status below */ }
         }
-        return await mutationFailure(response);
+        return await mutationFailure(response, signal);
       } finally { mutationActive = false; }
     })();
   };
@@ -327,7 +332,7 @@
         abort(signal);
         return result(error?.safeStatus || "network-failed", true);
       }
-      if (response.status !== 204) return await mutationFailure(response);
+      if (response.status !== 204) return await mutationFailure(response, signal);
       try {
         const removed = await current.unsubscribe();
         abort(signal);
