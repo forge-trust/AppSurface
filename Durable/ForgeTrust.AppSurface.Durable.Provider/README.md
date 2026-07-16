@@ -20,7 +20,7 @@ provide PostgreSQL storage, migrations, polling, schedule execution, hosted serv
 ## Public API by audience
 
 Every public type in this package belongs to one of these provider-facing families. The
-[member-level API snapshot](PublicAPI.Shipped.txt) is the canonical inventory.
+[member-level API snapshot](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.Provider/PublicAPI.Shipped.txt) is the canonical inventory.
 
 | Audience | Public types | Contract role |
 |---|---|---|

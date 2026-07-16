@@ -92,7 +92,7 @@ The proof emits `contracts registered; no runtime installed`.
 ## Public API by audience
 
 Every public type in this package belongs to one of these adopter-facing families. The
-[member-level API snapshot](PublicAPI.Shipped.txt) is the canonical inventory; public types added to the corresponding
+[member-level API snapshot](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt) is the canonical inventory; public types added to the corresponding
 source families inherit the audience and compatibility policy shown here.
 
 | Audience | Public types | Contract role |

@@ -62,9 +62,14 @@ public sealed record DurableRuntimeHealthSnapshot
             throw new ArgumentOutOfRangeException(nameof(state));
         }
 
-        if (installedSchemaVersion < 0 || requiredSchemaVersion < 1)
+        if (installedSchemaVersion < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(installedSchemaVersion));
+        }
+
+        if (requiredSchemaVersion < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(requiredSchemaVersion));
         }
 
         if (configuredRuntimeEpoch == Guid.Empty)

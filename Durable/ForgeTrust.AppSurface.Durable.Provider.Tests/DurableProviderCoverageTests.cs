@@ -354,8 +354,8 @@ public sealed class DurableProviderCoverageTests
         Assert.Equal(TimeSpan.FromSeconds(3), snapshot.OldestDueAge);
 
         AssertHealthRejected(state: (DurableRuntimeHealthState)999);
-        AssertHealthRejected(installedSchemaVersion: -1);
-        AssertHealthRejected(requiredSchemaVersion: 0);
+        Assert.Equal("installedSchemaVersion", AssertHealthRejected(installedSchemaVersion: -1).ParamName);
+        Assert.Equal("requiredSchemaVersion", AssertHealthRejected(requiredSchemaVersion: 0).ParamName);
         AssertHealthRejected(configuredRuntimeEpoch: Guid.Empty);
         AssertHealthRejected(workerId: " ");
         AssertHealthRejected(workerId: new string('a', 201));
@@ -566,7 +566,7 @@ public sealed class DurableProviderCoverageTests
             LocalTime,
             oldestDueAge ?? TimeSpan.FromSeconds(3));
 
-    private static void AssertHealthRejected(
+    private static ArgumentException AssertHealthRejected(
         DurableRuntimeHealthState state = DurableRuntimeHealthState.Healthy,
         int installedSchemaVersion = 1,
         int requiredSchemaVersion = 1,
