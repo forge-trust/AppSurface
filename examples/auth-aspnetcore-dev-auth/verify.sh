@@ -65,6 +65,20 @@ assert_body_contains() {
   grep -Fq "$expected" "$work_dir/$name.body" || fail "$name body did not contain '$expected'"
 }
 
+assert_body_order() {
+  local name="$1"
+  shift
+  local previous=0
+  local expected
+  for expected in "$@"; do
+    local line
+    line="$(grep -nF -m1 "$expected" "$work_dir/$name.body" | cut -d: -f1 || true)"
+    [[ -n "$line" ]] || fail "$name body did not contain '$expected'"
+    (( line > previous )) || fail "$name body did not preserve expected order near '$expected'"
+    previous="$line"
+  done
+}
+
 DOTNET_ENVIRONMENT=Development dotnet run --project "$project" -- --urls "$base_url" > "$app_log" 2>&1 &
 app_pid="$!"
 
@@ -77,6 +91,14 @@ done
 
 curl -sS "$base_url/" | grep -Fq "AppSurface DevAuth proof is running." \
   || fail "app did not become ready"
+
+request "root" "GET" "/"
+assert_status "root" "200"
+assert_body_contains "root" '<meta name="viewport" content="width=device-width, initial-scale=1">'
+assert_body_contains "root" '@media(max-width:640px)'
+assert_body_contains "root" 'position:static'
+assert_body_contains "root" '.demo-dev-auth { margin: 12px 16px; }'
+assert_body_order "root" '<header>AppSurface local proof</header>' 'aria-label="AppSurface development authentication state"' '<main>'
 
 request "control" "GET" "/_appsurface/dev-auth/"
 assert_status "control" "200"

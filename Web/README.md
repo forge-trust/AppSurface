@@ -6,7 +6,7 @@ Need install guidance first? Start with the [AppSurface v0.1 package chooser](..
 
 ## Contents
 
-- [**ForgeTrust.AppSurface.Web**](./ForgeTrust.AppSurface.Web/README.md) – The core web bootstrapping library, including conventional browser status pages and opt-in production 500 pages.
+- [**ForgeTrust.AppSurface.Web**](./ForgeTrust.AppSurface.Web/README.md) – The core web bootstrapping library, including [protected preview named deploy canary evaluation](./ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints), conventional browser status pages, and opt-in production 500 pages.
 - [**ForgeTrust.AppSurface.Web.Push**](./ForgeTrust.AppSurface.Web.Push/README.md) – Optional protected Web Push subscription and one-attempt delivery rail with app-owned custody, explicit cookie-antiforgery or bearer mapping, exact push-service origin allowlisting, and safe terminal cleanup.
 - [**ForgeTrust.AppSurface.Web.OpenApi**](./ForgeTrust.AppSurface.Web.OpenApi/README.md) – Modular OpenAPI generation with development-only endpoint exposure by default.
 - [**ForgeTrust.AppSurface.Docs**](./ForgeTrust.AppSurface.Docs/README.md) – Reusable docs package for harvesting and serving repository documentation.

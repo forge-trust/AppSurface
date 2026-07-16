@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- Keep compile-only public API samples on the solution's standard [*.Tests]* coverage exclusion. -->
+    <AssemblyName>ForgeTrust.AppSurface.Web.SharedErrorPagesFixture.Tests</AssemblyName>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AddRazorSupportForMvc>true</AddRazorSupportForMvc>

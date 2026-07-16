@@ -64,7 +64,7 @@ This approach aims to:
 - [**AppSurface Auth adoption ladder**](./start-here/auth-adoption-ladder.md) - Start here when you need to choose between host-owned ASP.NET Core auth, AppSurface Auth contracts, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces.
 - [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, durable external-subject to app-user-id mapping contracts, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) – ASP.NET Core adapter that maps existing host request auth context and named policies into AppSurface auth results without owning schemes, middleware, challenges, forbids, redirects, or identity-provider setup. Run the [Auth Web/RazorWire proof](./examples/auth-web-razorwire-proof/README.md) to see one host policy drive both API and rendered UI state.
-- [**ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) – Development-by-default selectable persona auth for local/proof AppSurface policy proofs, with a visible control page, embeddable state overlay, named fake scheme, startup guard, explicit environment opt-in, and no production identity-provider behavior.
+- [**ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) – Development-by-default selectable persona auth for local/proof AppSurface policy proofs, with a visible control page, an embeddable marker that stays fixed on desktop and flows with narrow layouts, a named fake scheme, a startup guard, explicit environment opt-in, and no production identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore.Oidc**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) – ASP.NET Core cookie + OIDC convenience registration with explicit AppSurface scheme names, conservative token defaults, passive prompt helpers, and safe diagnostics without silent default-scheme takeover or identity-provider ownership.
 - [**ForgeTrust.AppSurface.Auth.Aspire.Keycloak**](./Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) – AppHost-only local Keycloak proof for real AppSurface OIDC sign-in, with deterministic realm import, secret-safe web projection, readiness probes, fixed-port diagnostics, and no runtime web dependency on Keycloak packages.
 - [**ForgeTrust.AppSurface.Auth.Testing**](./Auth/ForgeTrust.AppSurface.Auth.Testing/README.md) – Test-only ASP.NET Core harness for deterministic AppSurface auth personas, WebApplicationFactory integration tests, canonical auth result assertions, and ProblemDetails checks without becoming production authentication or Dev Auth.
@@ -88,7 +88,7 @@ This approach aims to:
 
 ### [Web](./Web/README.md)
 
-- [**ForgeTrust.AppSurface.Web**](./Web/ForgeTrust.AppSurface.Web/README.md) – Bootstraps ASP.NET Core apps, lets modules register pre-routing middleware, endpoint-aware middleware, and endpoints, and includes conventional browser status pages plus opt-in production 500 pages.
+- [**ForgeTrust.AppSurface.Web**](./Web/ForgeTrust.AppSurface.Web/README.md) – Bootstraps ASP.NET Core apps, lets modules register pre-routing middleware, endpoint-aware middleware, and endpoints, and includes [protected preview named deploy canary evaluation](./Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints), conventional browser status pages, and opt-in production 500 pages.
 - [**ForgeTrust.AppSurface.Web.Push**](./Web/ForgeTrust.AppSurface.Web.Push/README.md) – Optional protected Web Push subscription and one-attempt delivery rail with host-owned custody, explicit cookie-antiforgery or bearer mapping, exact push-service origin allowlisting, and safe terminal cleanup.
 - [**ForgeTrust.AppSurface.Web.OpenApi**](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation with development-only endpoint exposure by default.
 - [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps.
@@ -235,6 +235,7 @@ Check out the examples to see how modules are composed in practice:
 
 ```bash
 dotnet run --project examples/auth-aspnetcore-bridge
+dotnet run --project examples/auth-aspnetcore-dev-auth -- --urls http://127.0.0.1:5058
 dotnet run --project examples/auth-web-razorwire-proof/AuthWebRazorWireProofExample.csproj
 dotnet run --project examples/console-app
 dotnet run --project examples/flow-approval-local/FlowApprovalLocalExample.csproj
@@ -272,6 +273,7 @@ The [examples](examples/README.md) directory contains sample applications that d
 how to use this project.
 
 - [Auth ASP.NET Core bridge example](examples/auth-aspnetcore-bridge/README.md) – proves an ASP.NET Core host-owned auth stack can flow named policy results into AppSurface auth contracts.
+- [Auth ASP.NET Core DevAuth example](examples/auth-aspnetcore-dev-auth/README.md) – shows a selectable local persona marker that stays fixed on desktop and reserves layout space on narrow screens.
 - [Auth Web/RazorWire proof](examples/auth-web-razorwire-proof/README.md) – shows one host-owned ASP.NET Core policy driving both a Minimal API response and RazorWire-rendered auth state.
 - [Console app example](examples/console-app/README.md) – builds a simple command line
   application using [CliFx](https://github.com/Tyrrrz/CliFx) source-generated command

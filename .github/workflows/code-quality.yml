@@ -68,7 +68,9 @@ jobs:
         run: dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-build --no-restore -- verify
 
       - name: Verify generated Markdown snippets
-        run: dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-build --no-restore -- verify
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-build --no-restore -- verify
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-build --no-restore -- verify --document Web/ForgeTrust.AppSurface.Web/README.md
 
       - name: Verify formatting
         run: dotnet format ForgeTrust.AppSurface.slnx --verify-no-changes --no-restore --verbosity diagnostic

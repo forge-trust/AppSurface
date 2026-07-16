@@ -43,4 +43,27 @@ public class PublicEnumContractTests
     {
         Assert.Equal(expected, (int)value);
     }
+
+    [Theory]
+    [InlineData(AppSurfaceCanaryStatus.Pass, 0)]
+    [InlineData(AppSurfaceCanaryStatus.Pending, 1)]
+    [InlineData(AppSurfaceCanaryStatus.Fail, 2)]
+    [InlineData(AppSurfaceCanaryStatus.Stale, 3)]
+    [InlineData(AppSurfaceCanaryStatus.NotConfigured, 4)]
+    public void AppSurfaceCanaryStatus_NumericValues_AreStable(
+        AppSurfaceCanaryStatus value,
+        int expected)
+    {
+        Assert.Equal(expected, (int)value);
+    }
+
+    [Theory]
+    [InlineData(AppSurfaceCanaryCompletedResponseMode.StatusCode, 0)]
+    [InlineData(AppSurfaceCanaryCompletedResponseMode.AlwaysOk, 1)]
+    public void AppSurfaceCanaryCompletedResponseMode_NumericValues_AreStable(
+        AppSurfaceCanaryCompletedResponseMode value,
+        int expected)
+    {
+        Assert.Equal(expected, (int)value);
+    }
 }
