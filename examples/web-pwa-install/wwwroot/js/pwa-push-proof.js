@@ -2,9 +2,9 @@
 (() => {
     "use strict";
 
-    const endpoint = "/account/push-subscriptions";
     const status = document.getElementById("push-status");
     const actions = document.getElementById("push-actions");
+    const endpoint = actions?.dataset.endpoint || "/account/push-subscriptions";
     const enable = document.getElementById("enable-push");
     const disable = document.getElementById("disable-push");
     const fakeSend = document.getElementById("fake-push-send");

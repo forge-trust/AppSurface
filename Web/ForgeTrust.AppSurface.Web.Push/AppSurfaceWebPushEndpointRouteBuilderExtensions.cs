@@ -19,7 +19,7 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
     private const int MaximumBodyBytes = 16 * 1024;
 
     /// <summary>Maps cookie-authenticated subscription endpoints with package-owned antiforgery validation.</summary>
-    /// <param name="endpoints">The endpoint route builder.</param>
+    /// <param name="endpoints">The application-root endpoint route builder. Route groups are rejected because they would move the package's fixed client asset.</param>
     /// <param name="path">The literal app-root-relative base path for configuration, PUT, and DELETE. Route parameters, catch-alls, and traversal segments are not supported.</param>
     /// <param name="authorizationPolicy">The nonblank host-owned named policy, including exactly one cookie authentication scheme, evaluated directly inside every handler.</param>
     /// <param name="rateLimiterPolicy">An optional host-owned named rate-limiter policy applied to every protected endpoint.</param>
@@ -27,7 +27,7 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
     /// Mapping is explicit and returns no convention builder, so callers cannot disable the package-owned security
     /// contract. Authorization is evaluated before VAPID configuration, antiforgery, parsing, or custody access.
     /// </remarks>
-    /// <exception cref="ArgumentException">The path, authorization policy, or supplied rate-limiter policy is blank, unsafe, or inside AppSurface's reserved route space.</exception>
+    /// <exception cref="ArgumentException">The builder is a route group, or the path, authorization policy, or supplied rate-limiter policy is blank, unsafe, or inside AppSurface's reserved route space.</exception>
     /// <exception cref="InvalidOperationException">The same package base path was already mapped.</exception>
     public static void MapAppSurfaceWebPushSubscriptions(
         this IEndpointRouteBuilder endpoints,
@@ -37,12 +37,12 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
         Map(endpoints, path, authorizationPolicy, authenticationScheme: null, rateLimiterPolicy);
 
     /// <summary>Maps token-only subscription endpoints using one explicit bearer authentication scheme.</summary>
-    /// <param name="endpoints">The endpoint route builder.</param>
+    /// <param name="endpoints">The application-root endpoint route builder. Route groups are rejected because they would move the package's fixed client asset.</param>
     /// <param name="path">The literal app-root-relative base path for configuration, PUT, and DELETE. Route parameters, catch-alls, and traversal segments are not supported.</param>
     /// <param name="authorizationPolicy">The nonblank host-owned named policy evaluated directly inside every handler.</param>
-    /// <param name="authenticationScheme">The exact bearer authentication scheme; ambient cookies are ignored.</param>
+    /// <param name="authenticationScheme">The exact token authentication scheme. Sign-in-capable schemes such as cookies fail closed; ambient identities are ignored.</param>
     /// <param name="rateLimiterPolicy">An optional host-owned named rate-limiter policy applied to every protected endpoint.</param>
-    /// <exception cref="ArgumentException">The path, authorization policy, scheme, or supplied rate-limiter policy is blank, unsafe, or inside AppSurface's reserved route space.</exception>
+    /// <exception cref="ArgumentException">The builder is a route group, or the path, authorization policy, scheme, or supplied rate-limiter policy is blank, unsafe, or inside AppSurface's reserved route space.</exception>
     /// <exception cref="InvalidOperationException">The same package base path was already mapped.</exception>
     public static void MapAppSurfaceWebPushBearerSubscriptions(
         this IEndpointRouteBuilder endpoints,
@@ -63,6 +63,13 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
         string? rateLimiterPolicy)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
+        if (endpoints is RouteGroupBuilder)
+        {
+            throw new ArgumentException(
+                "AppSurface Web Push must be mapped on the application-root endpoint builder so its fixed client asset remains at the documented path.",
+                nameof(endpoints));
+        }
+
         ArgumentException.ThrowIfNullOrWhiteSpace(authorizationPolicy);
         if (rateLimiterPolicy is not null)
         {
@@ -367,6 +374,15 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
             }
             else
             {
+                var schemeProvider = context.RequestServices.GetService<IAuthenticationSchemeProvider>();
+                var scheme = schemeProvider is null
+                    ? null
+                    : await schemeProvider.GetSchemeAsync(authenticationScheme).ConfigureAwait(false);
+                if (scheme is null || typeof(IAuthenticationSignInHandler).IsAssignableFrom(scheme.HandlerType))
+                {
+                    return new(null, Problem(StatusCodes.Status503ServiceUnavailable, "ASPUSH108", "The token authentication scheme is unavailable."));
+                }
+
                 var authentication = await context.AuthenticateAsync(authenticationScheme).ConfigureAwait(false);
                 principal = authentication.Succeeded ? authentication.Principal : null;
             }
@@ -524,12 +540,18 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
     private sealed record JsonBodyFailure(IResult Result) : JsonBodyResult;
 }
 
+/// <summary>Coordinates route claims across repeated package mapping calls in one application.</summary>
+/// <remarks>Claims are synchronized and compared case-insensitively to match ASP.NET Core route behavior.</remarks>
 internal sealed class AppSurfaceWebPushRouteRegistry
 {
     private readonly object gate = new();
     private readonly HashSet<string> paths = new(StringComparer.OrdinalIgnoreCase);
     private bool assetMapped;
 
+    /// <summary>Claims one base path and reports whether this caller owns the one-time client asset mapping.</summary>
+    /// <param name="path">The previously validated literal base path.</param>
+    /// <returns><see langword="true"/> only for the first successful claim in the application.</returns>
+    /// <exception cref="InvalidOperationException">The path was already claimed, including with different casing.</exception>
     public bool Claim(string path)
     {
         lock (gate)

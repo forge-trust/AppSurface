@@ -133,9 +133,10 @@ internal sealed class AppSurfaceWebPushSender(
         AppSurfaceWebPushSubscription subscription,
         HttpStatusCode statusCode)
     {
-        using var cleanupTimeout = new CancellationTokenSource();
+        CancellationTokenSource? cleanupCancellation = new();
         try
         {
+            var custodyCancellation = cleanupCancellation;
             var cleanup = Task.Run(
                 async () =>
                 {
@@ -151,24 +152,19 @@ internal sealed class AppSurfaceWebPushSender(
                         statusCode == HttpStatusCode.NotFound
                             ? AppSurfaceWebPushTerminalReason.NotFound
                             : AppSurfaceWebPushTerminalReason.Gone,
-                        cleanupTimeout.Token).ConfigureAwait(false);
+                        custodyCancellation.Token).ConfigureAwait(false);
                 },
                 CancellationToken.None);
-            var timeout = Task.Delay(Timeout.InfiniteTimeSpan, cleanupTimeout.Token);
-            cleanupTimeout.CancelAfter(TerminalCleanupTimeout);
+            var timeout = Task.Delay(TerminalCleanupTimeout);
             var completed = await Task.WhenAny(cleanup, timeout).ConfigureAwait(false);
             if (completed != cleanup)
             {
-                _ = cleanup.ContinueWith(
-                    static task => _ = task.Exception,
-                    CancellationToken.None,
-                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-                    TaskScheduler.Default);
+                cleanupCancellation = null;
+                _ = CancelCleanupAndReleaseAsync(custodyCancellation, cleanup);
                 return AppSurfaceWebPushCleanupState.Failed;
             }
 
             var disposition = await cleanup.ConfigureAwait(false);
-            cleanupTimeout.CancelAfter(Timeout.InfiniteTimeSpan);
             return disposition switch
             {
                 AppSurfaceWebPushTerminalDisposition.Completed => AppSurfaceWebPushCleanupState.Completed,
@@ -180,6 +176,29 @@ internal sealed class AppSurfaceWebPushSender(
         catch (Exception)
         {
             return AppSurfaceWebPushCleanupState.Failed;
+        }
+        finally
+        {
+            cleanupCancellation?.Dispose();
+        }
+    }
+
+    private static async Task CancelCleanupAndReleaseAsync(
+        CancellationTokenSource cleanupCancellation,
+        Task cleanup)
+    {
+        try
+        {
+            await Task.Run(cleanupCancellation.Cancel).ConfigureAwait(false);
+            await cleanup.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Timed-out app-owned cleanup is best effort and must never escape the background observer.
+        }
+        finally
+        {
+            cleanupCancellation.Dispose();
         }
     }
 

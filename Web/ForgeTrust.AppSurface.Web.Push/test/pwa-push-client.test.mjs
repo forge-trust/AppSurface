@@ -7,7 +7,17 @@ const source = await readFile(new URL("../Assets/pwa-push-client.js", import.met
 const applicationKey = Uint8Array.from({ length: 65 }, (_, index) => index === 0 ? 4 : index);
 const applicationKeyText = Buffer.from(applicationKey).toString("base64url");
 
-const createHarness = ({ current = null, subscribePromise, onFetch, getSubscription, responseFor } = {}) => {
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+};
+
+const createHarness = ({ current = null, subscribePromise, onFetch, getSubscription, responseFor, register, clock = Date.now } = {}) => {
   const calls = [];
   let subscribeCalled = false;
   let unsubscribeCalled = false;
@@ -35,6 +45,7 @@ const createHarness = ({ current = null, subscribePromise, onFetch, getSubscript
   };
   const context = {
     URL, Headers, DOMException,
+    Date: class extends Date { static now() { return clock(); } },
     Uint8Array,
     atob: value => Buffer.from(value, "base64").toString("binary"),
     btoa: value => Buffer.from(value, "binary").toString("base64"),
@@ -65,7 +76,7 @@ const createHarness = ({ current = null, subscribePromise, onFetch, getSubscript
     },
     window: {
       location: { origin: "https://app.example.test", href: "https://app.example.test/account" },
-      AppSurface: { Pwa: { register: async () => registration } }
+      AppSurface: { Pwa: { register: register || (async () => registration) } }
     }
   };
   context.window.window = context.window;
@@ -91,6 +102,24 @@ test("prepare is non-prompting and returns a five-minute opaque handle", async (
   assert.equal(Object.isFrozen(prepared.handle), true);
   assert.throws(() => JSON.stringify(prepared.handle), error => error?.name === "TypeError");
   assert.equal(harness.subscribeCalled, false);
+});
+
+test("prepared handles expire at the exact five-minute boundary", async () => {
+  let beforeBoundary = 0;
+  const accepted = createHarness({ clock: () => beforeBoundary });
+  const acceptedPreparation = await accepted.api.prepare({ endpoint: "/account/push" });
+  beforeBoundary = 299999;
+
+  assert.equal((await accepted.api.subscribe({ prepared: acceptedPreparation.handle })).status, "subscribed");
+
+  let atBoundary = 0;
+  const expired = createHarness({ clock: () => atBoundary });
+  const expiredPreparation = await expired.api.prepare({ endpoint: "/account/push" });
+  atBoundary = 300000;
+
+  assert.throws(
+    () => expired.api.subscribe({ prepared: expiredPreparation.handle }),
+    error => error?.name === "TypeError");
 });
 
 test("subscribe invokes PushManager synchronously before its first await", async () => {
@@ -341,6 +370,122 @@ test("mutation-specific HTTP failures do not leak into configuration results", a
 
     assert.equal(outcome.status, "configuration-failed");
     assert.equal(outcome.retryable, false);
+  }
+});
+
+test("mutation 400 responses distinguish antiforgery from custody failures", async () => {
+  for (const [code, expected] of [
+    ["ASPUSH104", "antiforgery-failed"],
+    ["ASPUSH100", "custody-failed"],
+    ["ASPUSH101", "custody-failed"],
+    [null, "custody-failed"]
+  ]) {
+    const response = () => ({
+      ok: false,
+      status: 400,
+      json: async () => code === null ? Promise.reject(new Error("malformed")) : { code }
+    });
+    const failedPut = createHarness({
+      responseFor: (_url, init) => init?.method === "PUT" ? response() : null
+    });
+    const prepared = await failedPut.api.prepare({ endpoint: "/account/push" });
+    assert.equal((await failedPut.api.subscribe({ prepared: prepared.handle })).status, expected);
+
+    const current = {
+      endpoint: "https://push.example.test/send",
+      options: { applicationServerKey: applicationKey },
+      unsubscribe: async () => true
+    };
+    const failedDelete = createHarness({
+      current,
+      responseFor: (_url, init) => init?.method === "DELETE" ? response() : null
+    });
+    assert.equal((await failedDelete.api.unsubscribe({ endpoint: "/account/push" })).status, expected);
+  }
+});
+
+test("cancellation after non-abortable browser awaits rejects with AbortError", async () => {
+  const assertAbort = operation => assert.rejects(operation, error => error?.name === "AbortError");
+
+  {
+    const pending = deferred();
+    const harness = createHarness({ register: () => pending.promise });
+    const cancellation = new AbortController();
+    const operation = harness.api.prepare({ endpoint: "/account/push", signal: cancellation.signal });
+    cancellation.abort();
+    pending.resolve(harness.registration);
+    await assertAbort(operation);
+  }
+
+  {
+    const pending = deferred();
+    const harness = createHarness({ getSubscription: () => pending.promise });
+    const cancellation = new AbortController();
+    const operation = harness.api.prepare({ endpoint: "/account/push", signal: cancellation.signal });
+    cancellation.abort();
+    pending.resolve(null);
+    await assertAbort(operation);
+  }
+
+  {
+    const pending = deferred();
+    const harness = createHarness({ subscribePromise: pending.promise });
+    const prepared = await harness.api.prepare({ endpoint: "/account/push" });
+    const cancellation = new AbortController();
+    const operation = harness.api.subscribe({ prepared: prepared.handle, signal: cancellation.signal });
+    cancellation.abort();
+    pending.reject(new Error("browser rejected after abort"));
+    await assertAbort(operation);
+  }
+
+  {
+    const pending = deferred();
+    let reads = 0;
+    const harness = createHarness({
+      getSubscription: () => ++reads === 1 ? Promise.resolve(null) : pending.promise
+    });
+    const prepared = await harness.api.prepare({ endpoint: "/account/push" });
+    const cancellation = new AbortController();
+    const operation = harness.api.subscribe({ prepared: prepared.handle, signal: cancellation.signal });
+    cancellation.abort();
+    pending.resolve(harness.subscription);
+    await assertAbort(operation);
+  }
+
+  {
+    const pending = deferred();
+    const harness = createHarness({ register: () => pending.promise });
+    const cancellation = new AbortController();
+    const operation = harness.api.unsubscribe({ endpoint: "/account/push", signal: cancellation.signal });
+    cancellation.abort();
+    pending.resolve(harness.registration);
+    await assertAbort(operation);
+  }
+
+  {
+    const pending = deferred();
+    const harness = createHarness({ getSubscription: () => pending.promise });
+    const cancellation = new AbortController();
+    const operation = harness.api.unsubscribe({ endpoint: "/account/push", signal: cancellation.signal });
+    cancellation.abort();
+    pending.resolve(harness.subscription);
+    await assertAbort(operation);
+  }
+
+  {
+    const pending = deferred();
+    const current = {
+      endpoint: "https://push.example.test/send",
+      options: { applicationServerKey: applicationKey },
+      unsubscribe: () => pending.promise
+    };
+    const harness = createHarness({ current });
+    const cancellation = new AbortController();
+    const operation = harness.api.unsubscribe({ endpoint: "/account/push", signal: cancellation.signal });
+    await new Promise(resolve => setImmediate(resolve));
+    cancellation.abort();
+    pending.resolve(true);
+    await assertAbort(operation);
   }
 });
 

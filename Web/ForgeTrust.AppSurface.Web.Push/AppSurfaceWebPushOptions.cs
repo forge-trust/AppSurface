@@ -6,9 +6,17 @@ namespace ForgeTrust.AppSurface.Web.Push;
 public sealed class AppSurfaceWebPushOptions
 {
     /// <summary>Gets or sets the safe identifier used for newly created browser subscriptions.</summary>
+    /// <remarks>
+    /// Defaults to <see langword="null"/>. The value must match a retained <see cref="VapidKeys"/> entry and use
+    /// the documented safe-ID alphabet. Startup validation fails closed until an active key is configured.
+    /// </remarks>
     public string? ActiveVapidKeyId { get; set; }
 
     /// <summary>Gets the bounded VAPID key ring. Retain old keys while stored subscriptions still reference them.</summary>
+    /// <remarks>
+    /// The collection starts empty and must contain 1 through 8 valid entries. Add the new key before changing
+    /// <see cref="ActiveVapidKeyId"/>, then retain older entries until no stored subscription references them.
+    /// </remarks>
     public IDictionary<string, AppSurfaceWebPushVapidKeyOptions> VapidKeys { get; } =
         new Dictionary<string, AppSurfaceWebPushVapidKeyOptions>(StringComparer.Ordinal);
 
@@ -16,6 +24,10 @@ public sealed class AppSurfaceWebPushOptions
     /// Gets the exact normalized HTTPS origins allowed to receive push requests, for example
     /// <c>https://updates.push.services.mozilla.com</c>. Wildcards and custom ports are rejected.
     /// </summary>
+    /// <remarks>
+    /// The collection starts empty and must contain 1 through 16 canonical default-port origins. Startup validation
+    /// and delivery fail closed when the allowlist is empty or invalid.
+    /// </remarks>
     public ISet<string> AllowedPushServiceOrigins { get; } = new HashSet<string>(StringComparer.Ordinal);
 }
 

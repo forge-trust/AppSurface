@@ -48,7 +48,7 @@
   const invalidState = () => new DOMException("ASPUSHJS009", "InvalidStateError");
   const isTransientStatus = status => status === 408 || status === 429 || status >= 500;
   const expectedStatus = new Map([
-    [400, "antiforgery-failed"], [401, "unauthorized"], [403, "forbidden"],
+    [401, "unauthorized"], [403, "forbidden"],
     [409, "custody-conflict"], [413, "custody-failed"], [415, "custody-failed"]
   ]);
   const configurationStatus = new Map([[401, "unauthorized"], [403, "forbidden"]]);
@@ -141,6 +141,16 @@
     return { configuration };
   };
 
+  const mutationFailure = async response => {
+    if (response.status === 400) {
+      try {
+        if ((await response.json())?.code === "ASPUSH104") return result("antiforgery-failed");
+      } catch { /* malformed problem details remain a custody failure */ }
+      return result("custody-failed");
+    }
+    return result(expectedStatus.get(response.status) || "custody-failed", isTransientStatus(response.status));
+  };
+
   const prepare = async ({ endpoint, authorization, signal } = {}) => {
     abort(signal);
     const endpointUrl = safeEndpoint(endpoint);
@@ -150,11 +160,23 @@
     const configResult = await fetchConfiguration(endpointUrl, authorization, signal);
     if (configResult.failure) return configResult.failure;
     let registration;
-    try { registration = await pwa.register(); } catch { return result("worker-registration-failed", true); }
+    try {
+      registration = await pwa.register();
+      abort(signal);
+    } catch {
+      abort(signal);
+      return result("worker-registration-failed", true);
+    }
     if (!registration?.pushManager) return result("worker-registration-failed");
 
     let current;
-    try { current = await registration.pushManager.getSubscription(); } catch { return result("browser-subscription-failed", true); }
+    try {
+      current = await registration.pushManager.getSubscription();
+      abort(signal);
+    } catch {
+      abort(signal);
+      return result("browser-subscription-failed", true);
+    }
     const configuration = configResult.configuration;
     if (current) {
       try {
@@ -181,7 +203,7 @@
     abort(signal);
     if (mutationActive) return Promise.resolve(result("operation-in-progress", true));
     const state = handles.get(prepared);
-    if (!state || state.consumed || state.expires < now()) throw new TypeError("ASPUSHJS008");
+    if (!state || state.consumed || state.expires <= now()) throw new TypeError("ASPUSHJS008");
     mutationActive = true;
     state.consumed = true;
 
@@ -203,14 +225,21 @@
       try {
         let subscription;
         try { subscription = await browserPromise; } catch {
+          abort(signal);
           if (Notification.permission === "denied") return result("permission-denied");
           if (Notification.permission === "default") return result("permission-dismissed", true);
           return result("browser-subscription-failed", true);
         }
         abort(signal);
         let live;
-        try { live = await state.registration.pushManager.getSubscription(); }
-        catch { return result("browser-subscription-failed", true); }
+        try {
+          live = await state.registration.pushManager.getSubscription();
+          abort(signal);
+        }
+        catch {
+          abort(signal);
+          return result("browser-subscription-failed", true);
+        }
         let liveApplicationKey;
         let liveEndpoint;
         let subscriptionEndpoint;
@@ -255,7 +284,7 @@
         if (response.status === 409) {
           try { if ((await response.json())?.code === "ASPUSH109") return result("vapid-key-stale", true); } catch { /* safe status below */ }
         }
-        return result(expectedStatus.get(response.status) || "custody-failed", isTransientStatus(response.status));
+        return await mutationFailure(response);
       } finally { mutationActive = false; }
     })();
   };
@@ -270,10 +299,22 @@
       const configResult = await fetchConfiguration(endpointUrl, authorization, signal);
       if (configResult.failure) return configResult.failure;
       let registration;
-      try { registration = await pwa.register(); } catch { return result("worker-registration-failed", true); }
+      try {
+        registration = await pwa.register();
+        abort(signal);
+      } catch {
+        abort(signal);
+        return result("worker-registration-failed", true);
+      }
       let current;
-      try { current = await registration.pushManager.getSubscription(); }
-      catch { return result("browser-unsubscribe-failed", true); }
+      try {
+        current = await registration.pushManager.getSubscription();
+        abort(signal);
+      }
+      catch {
+        abort(signal);
+        return result("browser-unsubscribe-failed", true);
+      }
       if (!current) return result("already-unsubscribed");
 
       let response;
@@ -286,11 +327,15 @@
         abort(signal);
         return result(error?.safeStatus || "network-failed", true);
       }
-      if (response.status !== 204) return result(expectedStatus.get(response.status) || "custody-failed", isTransientStatus(response.status));
+      if (response.status !== 204) return await mutationFailure(response);
       try {
         const removed = await current.unsubscribe();
+        abort(signal);
         return removed ? result("unsubscribed") : result("browser-unsubscribe-failed", true);
-      } catch { return result("browser-unsubscribe-failed", true); }
+      } catch {
+        abort(signal);
+        return result("browser-unsubscribe-failed", true);
+      }
     } finally { mutationActive = false; }
   };
 

@@ -24,7 +24,7 @@ const settle = async () => {
   await new Promise(resolve => setImmediate(resolve));
 };
 
-test("example host action uses a protected POST with the package antiforgery contract", async () => {
+const createHostActionHarness = ({ configurationOk = true, actionOk = true } = {}) => {
   const elements = {
     "push-status": new FakeElement(),
     "push-actions": new FakeElement(),
@@ -33,8 +33,8 @@ test("example host action uses a protected POST with the package antiforgery con
     "fake-push-send": new FakeElement(),
     "push-permission-capability": new FakeElement(),
     "push-subscription-capability": new FakeElement("Enabled"),
-    "push-sender-capability": new FakeElement(),
-    "push-delivery-capability": new FakeElement()
+    "push-sender-capability": new FakeElement("Not run"),
+    "push-delivery-capability": new FakeElement("Not proven")
   };
   const calls = [];
   const context = {
@@ -44,13 +44,13 @@ test("example host action uses a protected POST with the package antiforgery con
       calls.push([String(url), init]);
       if (String(url).endsWith("/configuration")) {
         return {
-          ok: true,
+          ok: configurationOk,
           json: async () => ({ antiforgery: { headerName: "X-CSRF", requestToken: "proof-token" } })
         };
       }
 
       return {
-        ok: true,
+        ok: actionOk,
         json: async () => ({ senderClassification: "Accepted", message: "Safe classification." })
       };
     },
@@ -66,6 +66,11 @@ test("example host action uses a protected POST with the package antiforgery con
   };
 
   vm.runInNewContext(source, context);
+  return { calls, elements };
+};
+
+test("example host action uses a protected POST with the package antiforgery contract", async () => {
+  const { calls, elements } = createHostActionHarness();
   await settle();
   await elements["fake-push-send"].dispatch("click");
 
@@ -75,4 +80,27 @@ test("example host action uses a protected POST with the package antiforgery con
   assert.equal(calls[1][1].method, "POST");
   assert.equal(calls[1][1].credentials, "same-origin");
   assert.equal(calls[1][1].headers["X-CSRF"], "proof-token");
+});
+
+test("example host action reports a rejected configuration without attempting the action", async () => {
+  const { calls, elements } = createHostActionHarness({ configurationOk: false });
+  await settle();
+
+  await elements["fake-push-send"].dispatch("click");
+
+  assert.equal(calls.length, 1);
+  assert.equal(elements["push-status"].dataset.state, "failed");
+  assert.equal(elements["push-sender-capability"].textContent, "Not run");
+});
+
+test("example host action reports a rejected protected action without claiming delivery", async () => {
+  const { calls, elements } = createHostActionHarness({ actionOk: false });
+  await settle();
+
+  await elements["fake-push-send"].dispatch("click");
+
+  assert.equal(calls.length, 2);
+  assert.equal(elements["push-status"].dataset.state, "failed");
+  assert.equal(elements["push-sender-capability"].textContent, "Not run");
+  assert.equal(elements["push-delivery-capability"].textContent, "Not proven");
 });

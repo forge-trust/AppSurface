@@ -66,6 +66,10 @@ app.MapAppSurfaceWebPushBearerSubscriptions(
     rateLimiterPolicy: "push.subscription-writes");
 ```
 
+Map these fixed application endpoints on the application-root `WebApplication` builder. The mapping methods
+reject `RouteGroupBuilder` instances because a group prefix would move the package-owned client asset away
+from its documented fixed path.
+
 Both methods return `void`. Every handler requires an authenticated principal and directly evaluates the named policy before configuration, antiforgery, parsing, or custody; inherited `AllowAnonymous` cannot bypass it. The cookie policy must declare exactly one authentication scheme, which the package evaluates before issuing antiforgery tokens or accepting writes. Bearer mapping authenticates only its explicit scheme. Missing or ambiguous policy schemes fail closed with `ASPUSH108`.
 
 The mapped base path must be a literal app-root-relative path. Route parameters, catch-alls, `.` or `..` traversal segments, encoded paths, query strings, and fragments are rejected. Reserved-space and duplicate checks are case-insensitive, matching ASP.NET Core routing; map separate literal rails when a host needs more than one custody boundary.
@@ -90,6 +94,10 @@ button.addEventListener("click", () => {
   }
 });
 ```
+
+The endpoint is relative to the application root, not the origin root. When the host uses an ASP.NET Core
+`PathBase`, render the value through `Url.Content("~/account/push-subscriptions")` or an equivalent
+server-owned path-base helper before passing it to the client.
 
 Bearer hosts pass the same callback to both preparation and unsubscription; the callback may refresh a token and receives the operation signal:
 

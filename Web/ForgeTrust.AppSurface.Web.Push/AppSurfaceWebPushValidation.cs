@@ -5,11 +5,21 @@ using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Web.Push;
 
+/// <summary>Provides package-internal canonical validation for configuration, routes, and browser subscription material.</summary>
+/// <remarks>Validation methods return <see langword="false"/> for malformed external input and never echo secret key material.</remarks>
 internal static partial class AppSurfaceWebPushValidation
 {
+    /// <summary>Determines whether a key identifier uses 1 through 64 safe ASCII characters and begins alphanumerically.</summary>
+    /// <param name="value">The candidate identifier.</param>
+    /// <returns><see langword="true"/> when the identifier is safe for diagnostics and lookup.</returns>
     public static bool IsSafeKeyId(string? value) =>
         !string.IsNullOrEmpty(value) && KeyIdPattern().IsMatch(value);
 
+    /// <summary>Decodes a canonical unpadded base64url value with an exact decoded length.</summary>
+    /// <param name="value">The candidate base64url text. Padding and noncanonical encodings are rejected.</param>
+    /// <param name="expectedLength">The required decoded byte count.</param>
+    /// <param name="decoded">Receives decoded bytes on success, or an empty array on failure.</param>
+    /// <returns><see langword="true"/> only when decoding, length, alphabet, and canonical round-trip checks pass.</returns>
     public static bool TryDecodeCanonicalBase64Url(string? value, int expectedLength, out byte[] decoded)
     {
         decoded = [];
@@ -33,6 +43,9 @@ internal static partial class AppSurfaceWebPushValidation
         }
     }
 
+    /// <summary>Determines whether a value is a canonical uncompressed NIST P-256 public point.</summary>
+    /// <param name="value">The 65-byte uncompressed point encoded as canonical unpadded base64url.</param>
+    /// <returns><see langword="true"/> when the runtime accepts the point on NIST P-256.</returns>
     public static bool IsValidP256PublicKey(string? value)
     {
         if (!TryDecodeCanonicalBase64Url(value, 65, out var bytes) || bytes[0] != 4)
@@ -55,6 +68,10 @@ internal static partial class AppSurfaceWebPushValidation
         }
     }
 
+    /// <summary>Determines whether canonical P-256 public and private VAPID keys form one key pair.</summary>
+    /// <param name="publicKey">The 65-byte uncompressed public point encoded as canonical base64url.</param>
+    /// <param name="privateKey">The 32-byte private scalar encoded as canonical base64url.</param>
+    /// <returns><see langword="true"/> when the derived public coordinates match in fixed time.</returns>
     public static bool IsMatchingVapidPair(string? publicKey, string? privateKey)
     {
         if (!IsValidP256PublicKey(publicKey)
@@ -81,6 +98,9 @@ internal static partial class AppSurfaceWebPushValidation
         }
     }
 
+    /// <summary>Determines whether a VAPID subject is a canonical contact <c>mailto:</c> or HTTPS URI.</summary>
+    /// <param name="value">The candidate contact URI.</param>
+    /// <returns><see langword="true"/> when the value contains no whitespace, user-info, fragment, or unsupported scheme.</returns>
     public static bool IsValidSubject(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)
@@ -109,6 +129,10 @@ internal static partial class AppSurfaceWebPushValidation
             && !string.IsNullOrEmpty(uri.Host);
     }
 
+    /// <summary>Normalizes and validates one exact HTTPS default-port push-service origin.</summary>
+    /// <param name="value">The candidate origin without credentials, path, query, fragment, wildcard, or custom port.</param>
+    /// <param name="origin">Receives the canonical authority on success, or an empty string on failure.</param>
+    /// <returns><see langword="true"/> only when the input already equals its canonical origin.</returns>
     public static bool TryNormalizeAllowedOrigin(string? value, out string origin)
     {
         origin = string.Empty;
@@ -131,6 +155,11 @@ internal static partial class AppSurfaceWebPushValidation
         return string.Equals(value, origin, StringComparison.Ordinal);
     }
 
+    /// <summary>Validates a push subscription endpoint against the exact allowed-origin set.</summary>
+    /// <param name="value">The absolute HTTPS default-port endpoint, limited to 4,096 characters.</param>
+    /// <param name="allowedOrigins">Canonical origins accepted by the host.</param>
+    /// <param name="origin">Receives the endpoint authority when its URL shape is valid, even if it is not allowed.</param>
+    /// <returns><see langword="true"/> when the endpoint shape is valid and its authority is allowlisted.</returns>
     public static bool TryValidateEndpoint(string? value, ISet<string> allowedOrigins, out string origin)
     {
         origin = string.Empty;
@@ -150,13 +179,25 @@ internal static partial class AppSurfaceWebPushValidation
         return allowedOrigins.Contains(origin);
     }
 
+    /// <summary>Determines whether a local asset path is literal, app-root-relative, and free of query or traversal syntax.</summary>
+    /// <param name="value">The candidate path.</param>
+    /// <returns><see langword="true"/> when raw and repeatedly decoded forms remain safe.</returns>
     public static bool IsValidAssetPath(string? value) => IsValidPath(value, allowQuery: false);
 
+    /// <summary>Determines whether a local destination path is safe, allowing at most one query separator.</summary>
+    /// <param name="value">The candidate path and optional query.</param>
+    /// <returns><see langword="true"/> when raw and repeatedly decoded path forms remain app-root-relative and traversal-free.</returns>
     public static bool IsValidDestinationPath(string? value) => IsValidPath(value, allowQuery: true);
 
+    /// <summary>Determines whether an optional Web Push topic uses 1 through 32 URL-safe characters.</summary>
+    /// <param name="value">The topic, or <see langword="null"/> when no topic is requested.</param>
+    /// <returns><see langword="true"/> for a missing or valid topic.</returns>
     public static bool IsValidTopic(string? value) =>
         value is null || TopicPattern().IsMatch(value);
 
+    /// <summary>Encodes bytes as canonical unpadded base64url text.</summary>
+    /// <param name="value">The bytes to encode.</param>
+    /// <returns>The canonical base64url representation without padding.</returns>
     public static string Base64UrlEncode(ReadOnlySpan<byte> value) =>
         Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
@@ -243,8 +284,10 @@ internal static partial class AppSurfaceWebPushValidation
     private static partial Regex TopicPattern();
 }
 
+/// <summary>Validates the bounded VAPID key ring and exact push-service origin allowlist at startup.</summary>
 internal sealed class AppSurfaceWebPushOptionsValidator : IValidateOptions<AppSurfaceWebPushOptions>
 {
+    /// <inheritdoc />
     public ValidateOptionsResult Validate(string? name, AppSurfaceWebPushOptions options)
     {
         var failures = new List<string>();

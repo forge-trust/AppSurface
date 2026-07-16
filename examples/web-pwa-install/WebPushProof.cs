@@ -5,10 +5,18 @@ using ForgeTrust.AppSurface.Web.Push;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 
+/// <summary>Configures the Development-only Web Push package proof when a complete safe configuration is present.</summary>
+/// <remarks>
+/// The proof requires public/private VAPID keys and one allowed push-service origin under <c>WebPush</c> configuration.
+/// It uses deterministic local transport and never proves network delivery.
+/// </remarks>
 internal static class WebPushProof
 {
     private const string PolicyName = "push.manage";
 
+    /// <summary>Registers proof state, authorization, DevAuth personas, custody, and guarded transport.</summary>
+    /// <param name="context">The AppSurface startup context used to enforce Development-only registration.</param>
+    /// <param name="builder">The host builder that receives proof services.</param>
     public static void ConfigureHost(StartupContext context, IHostBuilder builder)
     {
         if (!context.IsDevelopment)
@@ -68,6 +76,13 @@ internal static class WebPushProof
         });
     }
 
+    /// <summary>Maps DevAuth before the protected package rail and its non-delivery host-action proof.</summary>
+    /// <param name="context">The AppSurface startup context used to reject non-Development mapping.</param>
+    /// <param name="endpoints">The application-root endpoint builder.</param>
+    /// <remarks>
+    /// Package endpoints evaluate the named admin policy and package antiforgery contract. The host action repeats
+    /// antiforgery validation, requires an app-owned stored subscription, and returns sender classification only.
+    /// </remarks>
     public static void MapEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
     {
         if (!context.IsDevelopment)
@@ -126,18 +141,30 @@ internal static class WebPushProof
     }
 }
 
+/// <summary>Records whether the complete Development-only Web Push proof configuration was registered.</summary>
+/// <param name="Enabled">Whether protected proof endpoints and UI should be exposed.</param>
 internal sealed record WebPushProofState(bool Enabled);
 
+/// <summary>Stores one Web Push subscription per stable local proof subject.</summary>
+/// <remarks>
+/// A lock makes ownership checks and mutations atomic. Endpoints are unique across owners, conflicting ownership is
+/// rejected, and terminal cleanup removes only a complete matching subscription snapshot.
+/// </remarks>
 internal sealed class InMemoryPushCustody : IAppSurfaceWebPushSubscriptionCustody
 {
     private readonly object gate = new();
     private readonly Dictionary<string, AppSurfaceWebPushSubscription> subscriptions = new(StringComparer.Ordinal);
 
+    /// <summary>Retrieves the subscription owned by the supplied proof principal.</summary>
+    /// <param name="principal">A principal with a stable <c>sub</c> or name.</param>
+    /// <param name="subscription">Receives the owned subscription when present.</param>
+    /// <returns><see langword="true"/> when custody contains a subscription for the owner.</returns>
     public bool TryGetSubscription(
         ClaimsPrincipal principal,
         out AppSurfaceWebPushSubscription subscription) =>
         TryGetSubscriptionCore(Owner(principal), out subscription);
 
+    /// <inheritdoc />
     public ValueTask<AppSurfaceWebPushRegistrationDisposition> RegisterAsync(
         AppSurfaceWebPushSubscriptionWriteContext context,
         AppSurfaceWebPushSubscription subscription,
@@ -162,6 +189,7 @@ internal sealed class InMemoryPushCustody : IAppSurfaceWebPushSubscriptionCustod
         }
     }
 
+    /// <inheritdoc />
     public ValueTask<AppSurfaceWebPushUnregistrationDisposition> UnregisterAsync(
         AppSurfaceWebPushSubscriptionWriteContext context,
         AppSurfaceWebPushSubscriptionReference subscription,
@@ -180,6 +208,7 @@ internal sealed class InMemoryPushCustody : IAppSurfaceWebPushSubscriptionCustod
         }
     }
 
+    /// <inheritdoc />
     public ValueTask<AppSurfaceWebPushTerminalDisposition> MarkTerminalAsync(
         AppSurfaceWebPushSubscription subscription,
         AppSurfaceWebPushTerminalReason reason,

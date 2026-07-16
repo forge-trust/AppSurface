@@ -64,7 +64,7 @@ internal sealed class GuardedWebPushAdapter(HttpMessageHandler transport)
         {
             throw;
         }
-        catch (Exception) when (recorder.StatusCode.HasValue)
+        catch (PushServiceClientException) when (recorder.StatusCode.HasValue)
         {
             // The dependency throws on non-success responses after reading the sanitized empty body.
             // Only the package-owned safe record crosses this boundary.

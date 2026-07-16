@@ -366,6 +366,27 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
         await custody.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(1));
     }
 
+    [Fact]
+    public async Task Sender_HardTimeoutDoesNotWaitForBlockingCancellationCallback()
+    {
+        var custody = new BlockingCancellationCustody();
+        var sender = CreateSender(new StatusHandler(HttpStatusCode.Gone), CreateOptions(), custody);
+        var send = sender.SendAsync(CreateSendRequest(CreateSubscription())).AsTask();
+        await custody.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        try
+        {
+            var result = await send.WaitAsync(TimeSpan.FromSeconds(7));
+
+            Assert.Equal(AppSurfaceWebPushCleanupState.Failed, result.CleanupState);
+            await custody.CallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        }
+        finally
+        {
+            custody.ReleaseCallback();
+        }
+    }
+
     private static AppSurfaceWebPushSender CreateSender(
         HttpMessageHandler handler,
         AppSurfaceWebPushOptions options,
@@ -588,6 +609,47 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
         {
             Disposed.TrySetResult();
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class BlockingCancellationCustody : IAppSurfaceWebPushSubscriptionCustody
+    {
+        private readonly ManualResetEventSlim callbackRelease = new(initialState: false);
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CallbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask<AppSurfaceWebPushRegistrationDisposition> RegisterAsync(
+            AppSurfaceWebPushSubscriptionWriteContext context,
+            AppSurfaceWebPushSubscription subscription,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult(AppSurfaceWebPushRegistrationDisposition.Created);
+
+        public ValueTask<AppSurfaceWebPushUnregistrationDisposition> UnregisterAsync(
+            AppSurfaceWebPushSubscriptionWriteContext context,
+            AppSurfaceWebPushSubscriptionReference subscription,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult(AppSurfaceWebPushUnregistrationDisposition.Removed);
+
+        public async ValueTask<AppSurfaceWebPushTerminalDisposition> MarkTerminalAsync(
+            AppSurfaceWebPushSubscription subscription,
+            AppSurfaceWebPushTerminalReason reason,
+            CancellationToken cancellationToken)
+        {
+            using var registration = cancellationToken.Register(() =>
+            {
+                CallbackStarted.TrySetResult();
+                callbackRelease.Wait();
+            });
+            Started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return AppSurfaceWebPushTerminalDisposition.Completed;
+        }
+
+        public void ReleaseCallback()
+        {
+            callbackRelease.Set();
+            callbackRelease.Dispose();
         }
     }
 }

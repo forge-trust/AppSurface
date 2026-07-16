@@ -34,15 +34,10 @@ public sealed class AppSurfaceWebPushEndpointTests
     }
 
     [Fact]
-    public async Task DirectAuthorization_OverridesInheritedAllowAnonymousBeforeCustody()
+    public async Task Mapping_RejectsRouteGroupsBeforeRegisteringEndpoints()
     {
-        await using var host = await CreateHostAsync(map: true, ambientAdmin: false, bearer: false, allowAnonymousGroup: true);
-
-        var response = await host.Client.GetAsync("/account/push/configuration");
-
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Equal(0, host.Custody.RegisterCalls);
-        Assert.Equal(0, host.Custody.UnregisterCalls);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            CreateHostAsync(map: true, ambientAdmin: false, bearer: false, allowAnonymousGroup: true));
     }
 
     [Fact]
@@ -173,6 +168,23 @@ public sealed class AppSurfaceWebPushEndpointTests
         Assert.Equal(HttpStatusCode.OK, explicitBearer.StatusCode);
         Assert.Equal("bearer", json.RootElement.GetProperty("requestProtection").GetString());
         Assert.False(json.RootElement.TryGetProperty("antiforgery", out _));
+    }
+
+    [Fact]
+    public async Task BearerMapping_RejectsSignInCapableAuthenticationScheme()
+    {
+        await using var host = await CreateHostAsync(
+            map: true,
+            ambientAdmin: false,
+            bearer: true,
+            authenticationScheme: "CookieProof");
+
+        var response = await host.Client.GetAsync("/account/push/configuration");
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("ASPUSH108", await ReadCodeAsync(response));
+        Assert.Equal(0, host.Custody.RegisterCalls);
+        Assert.Equal(0, host.Custody.UnregisterCalls);
     }
 
     [Fact]
@@ -607,7 +619,8 @@ public sealed class AppSurfaceWebPushEndpointTests
             .AddScheme<AuthenticationSchemeOptions, NoopAuthenticationHandler>("None", _ => { })
             .AddScheme<AuthenticationSchemeOptions, AmbientProofAuthenticationHandler>("AmbientProof", _ => { })
             .AddScheme<AuthenticationSchemeOptions, ThrowingAuthenticationHandler>("ThrowingProof", _ => { })
-            .AddScheme<AuthenticationSchemeOptions, BearerProofAuthenticationHandler>("BearerProof", _ => { });
+            .AddScheme<AuthenticationSchemeOptions, BearerProofAuthenticationHandler>("BearerProof", _ => { })
+            .AddCookie("CookieProof");
         builder.Services.AddAuthorization(options =>
         {
             if (registerPolicy)

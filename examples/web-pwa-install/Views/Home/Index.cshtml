@@ -3,6 +3,7 @@
 @{
     ViewData["Title"] = "Worker foundation";
     var diagnosticsPath = Url.Content("~/_appsurface/pwa");
+    var devAuthPath = Url.Content("~/_appsurface/dev-auth/");
     var verifierUrl = $"{Context.Request.Scheme}://{Context.Request.Host}{Context.Request.PathBase}";
 }
 
@@ -41,15 +42,15 @@
                 <h2 id="push-heading">Push subscription proof</h2>
             </div>
             <p>
-                Select the <a href="/_appsurface/dev-auth/">Push Admin DevAuth persona</a>, then use an explicit action.
+                Select the <a href="@devAuthPath">Push Admin DevAuth persona</a>, then use an explicit action.
                 Preparation does not request permission. The Viewer persona is intentionally forbidden.
             </p>
             <p id="push-status" class="status" data-state="initializing" role="status" aria-live="polite" aria-atomic="true">
                 Preparing the protected subscription rail without prompting…
             </p>
-            <div class="action-row" aria-busy="false" id="push-actions">
+            <div class="action-row" aria-busy="false" id="push-actions" data-endpoint="@Url.Content("~/account/push-subscriptions")">
                 <button id="enable-push" class="primary-action" type="button" disabled>Enable notifications</button>
-                <button id="disable-push" class="secondary-action" type="button">Disable notifications</button>
+                <button id="disable-push" class="secondary-action" type="button">Unsubscribe</button>
                 <button id="fake-push-send" class="secondary-action" type="button" disabled>Run protected host-action proof</button>
             </div>
         </section>
