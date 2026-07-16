@@ -133,10 +133,10 @@ internal sealed class AppSurfaceWebPushSender(
         AppSurfaceWebPushSubscription subscription,
         HttpStatusCode statusCode)
     {
-        CancellationTokenSource? cleanupCancellation = new();
+        using var cleanupOwnership = new CleanupCancellationOwnership();
         try
         {
-            var custodyCancellation = cleanupCancellation;
+            var custodyCancellation = cleanupOwnership.Source;
             var cleanup = Task.Run(
                 async () =>
                 {
@@ -159,8 +159,7 @@ internal sealed class AppSurfaceWebPushSender(
             var completed = await Task.WhenAny(cleanup, timeout).ConfigureAwait(false);
             if (completed != cleanup)
             {
-                cleanupCancellation = null;
-                _ = CancelCleanupAndReleaseAsync(custodyCancellation, cleanup);
+                _ = CancelCleanupAndReleaseAsync(cleanupOwnership.Transfer(), cleanup);
                 return AppSurfaceWebPushCleanupState.Failed;
             }
 
@@ -177,28 +176,43 @@ internal sealed class AppSurfaceWebPushSender(
         {
             return AppSurfaceWebPushCleanupState.Failed;
         }
-        finally
-        {
-            cleanupCancellation?.Dispose();
-        }
     }
 
     private static async Task CancelCleanupAndReleaseAsync(
         CancellationTokenSource cleanupCancellation,
         Task cleanup)
     {
+        using var cancellation = cleanupCancellation;
         try
         {
-            await Task.Run(cleanupCancellation.Cancel).ConfigureAwait(false);
+            await Task.Run(cancellation.Cancel).ConfigureAwait(false);
             await cleanup.ConfigureAwait(false);
         }
         catch (Exception)
         {
             // Timed-out app-owned cleanup is best effort and must never escape the background observer.
         }
-        finally
+    }
+
+    private sealed class CleanupCancellationOwnership : IDisposable
+    {
+        private readonly CancellationTokenSource source = new();
+        private bool transferred;
+
+        public CancellationTokenSource Source => source;
+
+        public CancellationTokenSource Transfer()
         {
-            cleanupCancellation.Dispose();
+            transferred = true;
+            return source;
+        }
+
+        public void Dispose()
+        {
+            if (!transferred)
+            {
+                source.Dispose();
+            }
         }
     }
 
