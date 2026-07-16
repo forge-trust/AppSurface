@@ -11,7 +11,7 @@ public sealed class PackedPackageConsumerTests
     public async Task PackedPackage_PinsAspireAndCompilesDocumentedConsumer()
     {
         var repositoryRoot = GetRepositoryRoot();
-        var workDirectory = Path.Join(Path.GetTempPath(), $"appsurface-aspire-testing-consumer-{Guid.NewGuid():N}");
+        var workDirectory = Path.Join(Path.GetTempPath(), $"appsurface-aspire-testing-consumer-&-{Guid.NewGuid():N}");
         var feedDirectory = Path.Join(workDirectory, "feed");
         var consumerDirectory = Path.Join(workDirectory, "consumer");
         Directory.CreateDirectory(feedDirectory);
@@ -52,18 +52,28 @@ public sealed class PackedPackageConsumerTests
             var packedPackageVersion = AssertExactAspireDependencies(packagePath);
 
             var nugetConfigPath = Path.Join(consumerDirectory, "NuGet.config");
-            await File.WriteAllTextAsync(
-                nugetConfigPath,
-                $$"""
-                <?xml version="1.0" encoding="utf-8"?>
-                <configuration>
-                  <packageSources>
-                    <clear />
-                    <add key="consumer-proof" value="{{feedDirectory}}" />
-                    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
-                  </packageSources>
-                </configuration>
-                """);
+            var nugetConfiguration = new XDocument(
+                new XDeclaration("1.0", "utf-8", null),
+                new XElement(
+                    "configuration",
+                    new XElement(
+                        "packageSources",
+                        new XElement("clear"),
+                        new XElement(
+                            "add",
+                            new XAttribute("key", "consumer-proof"),
+                            new XAttribute("value", feedDirectory)),
+                        new XElement(
+                            "add",
+                            new XAttribute("key", "nuget.org"),
+                            new XAttribute("value", "https://api.nuget.org/v3/index.json")))));
+            await using (var nugetConfigStream = File.Create(nugetConfigPath))
+            {
+                await nugetConfiguration.SaveAsync(
+                    nugetConfigStream,
+                    SaveOptions.None,
+                    CancellationToken.None);
+            }
             await File.WriteAllTextAsync(
                 Path.Join(consumerDirectory, "Consumer.csproj"),
                 $$"""
@@ -171,7 +181,29 @@ public sealed class PackedPackageConsumerTests
         var standardOutput = process.StandardOutput.ReadToEndAsync();
         var standardError = process.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        await process.WaitForExitAsync(timeout.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch (InvalidOperationException) when (process.HasExited)
+            {
+                // The process exited between the state check and the kill request.
+            }
+
+            await process.WaitForExitAsync(CancellationToken.None);
+            await Task.WhenAll(standardOutput, standardError);
+            throw;
+        }
+
         var output = string.Join(Environment.NewLine, await standardOutput, await standardError);
 
         Assert.True(

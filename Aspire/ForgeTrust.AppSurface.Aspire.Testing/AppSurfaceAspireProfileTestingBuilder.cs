@@ -182,14 +182,9 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
                     application.DisposeAsync().AsTask().GetAwaiter().GetResult();
                 }
             }
-            catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
+            catch (Exception ex)
             {
                 primaryException = ex;
-            }
-            catch (Exception ex) when (AspireExceptionUtilities.IsProcessFatal(ex))
-            {
-                primaryException = ex;
-                throw;
             }
 
             try
@@ -203,14 +198,9 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
                     activation.DisposeAsync().AsTask().GetAwaiter().GetResult();
                 }
             }
-            catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
+            catch (Exception ex)
             {
                 primaryException ??= ex;
-            }
-            catch (Exception ex) when (AspireExceptionUtilities.IsProcessFatal(ex))
-            {
-                primaryException ??= ex;
-                throw;
             }
         }
         finally
@@ -247,14 +237,9 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
                     await application.DisposeAsync().ConfigureAwait(false);
                 }
             }
-            catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
+            catch (Exception ex)
             {
                 primaryException = ex;
-            }
-            catch (Exception ex) when (AspireExceptionUtilities.IsProcessFatal(ex))
-            {
-                primaryException = ex;
-                throw;
             }
 
             try
@@ -264,14 +249,9 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
                     await activation.DisposeAsync().ConfigureAwait(false);
                 }
             }
-            catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
+            catch (Exception ex)
             {
                 primaryException ??= ex;
-            }
-            catch (Exception ex) when (AspireExceptionUtilities.IsProcessFatal(ex))
-            {
-                primaryException ??= ex;
-                throw;
             }
         }
         finally

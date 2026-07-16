@@ -1,12 +1,17 @@
 namespace ForgeTrust.AppSurface.Aspire;
 
 /// <summary>
-/// Classifies exceptions that indicate process-level failure and must not be intercepted by recovery or cleanup paths.
+/// Classifies the process-fatal exception families used by Aspire profile activation and testing cleanup paths.
 /// </summary>
+/// <remarks>
+/// This deliberately narrow helper recognizes <see cref="OutOfMemoryException"/>, <see cref="StackOverflowException"/>,
+/// and <see cref="AccessViolationException"/>. It is not a general exception-handling policy for AppSurface callers.
+/// </remarks>
 internal static class AspireExceptionUtilities
 {
     /// <summary>
-    /// Determines whether an exception represents a process-level failure that should propagate immediately.
+    /// Determines whether an exception is an <see cref="OutOfMemoryException"/>, <see cref="StackOverflowException"/>,
+    /// or <see cref="AccessViolationException"/> that should propagate immediately.
     /// </summary>
     /// <param name="exception">The exception to classify.</param>
     /// <returns><see langword="true"/> for process-fatal exception types; otherwise <see langword="false"/>.</returns>

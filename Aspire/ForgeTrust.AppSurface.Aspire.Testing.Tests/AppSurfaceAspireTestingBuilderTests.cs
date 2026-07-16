@@ -197,6 +197,18 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateAsync_ProcessFatalCompositionFailureDisposesActivation()
+    {
+        TestModule.LastProbe = null;
+
+        var exception = await Assert.ThrowsAsync<OutOfMemoryException>(() =>
+            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, TestModule, FatalThrowingProfile>());
+
+        Assert.Equal("fatal composition failure", exception.Message);
+        Assert.True(Assert.IsType<DisposalProbe>(TestModule.LastProbe).IsDisposed);
+    }
+
+    [Fact]
     public async Task CreateAsync_CancellationDuringCompositionDisposesActivation()
     {
         using var cancellation = new CancellationTokenSource();
@@ -240,6 +252,18 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateAsync_ProcessFatalCleanupFailureDoesNotReplaceCompositionFailure()
+    {
+        FatalCleanupModule.LastProbe = null;
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, FatalCleanupModule, FatalCleanupProfile>());
+
+        Assert.IsType<CompositionException>(exception.InnerException);
+        Assert.Equal(1, Assert.IsType<FatalThrowingDisposalProbe>(FatalCleanupModule.LastProbe).DisposeCount);
+    }
+
+    [Fact]
     public async Task CreateAsync_CleanupFailureDoesNotReplaceActivationFailure()
     {
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -251,6 +275,18 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.Contains("Profile activation failed", exception.Message, StringComparison.Ordinal);
         Assert.IsType<ActivationException>(exception.InnerException);
         Assert.Equal(1, Assert.IsType<ThrowingDisposalProbe>(ThrowingActivationCleanupModule.LastProbe).DisposeCount);
+    }
+
+    [Fact]
+    public async Task CreateAsync_ProcessFatalActivationFailureDisposesBuiltHost()
+    {
+        FatalActivationModule.LastProbe = null;
+
+        var exception = await Assert.ThrowsAsync<OutOfMemoryException>(() =>
+            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, FatalActivationModule, FatalActivationProfile>());
+
+        Assert.Equal("fatal activation failure", exception.Message);
+        Assert.True(Assert.IsType<DisposalProbe>(FatalActivationModule.LastProbe).IsDisposed);
     }
 
     [Fact]
@@ -505,6 +541,32 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     }
 
     [Fact]
+    public async Task DisposeAsync_ProcessFatalApplicationFailureStillDisposesActivationAndRemainsShared()
+    {
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        actualBuilder.Services.AddSingleton<ThrowingAsyncApplicationDisposalProbe>(_ =>
+            new ThrowingAsyncApplicationDisposalProbe(
+                new OutOfMemoryException("fatal application disposal failure")));
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = new AppSurfaceAspireProfileTestingBuilder(actualBuilder, activation);
+        var application = await builder.BuildAsync();
+        _ = application.Services.GetRequiredService<ThrowingAsyncApplicationDisposalProbe>();
+
+        var ownerException = await Assert.ThrowsAsync<OutOfMemoryException>(() => builder.DisposeAsync().AsTask());
+        var repeatedException = await Assert.ThrowsAsync<OutOfMemoryException>(() => builder.DisposeAsync().AsTask());
+
+        Assert.Equal("fatal application disposal failure", ownerException.Message);
+        Assert.Equal("fatal application disposal failure", repeatedException.Message);
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
     public async Task BuildAsync_PreCancellationIsTerminalAndCleansUp()
     {
         using var cancellation = new CancellationTokenSource();
@@ -632,6 +694,33 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.Throws<CleanupException>(() => builder.Dispose());
 
         Assert.Equal(1, activation.SyncDisposeCount);
+    }
+
+    [Fact]
+    public async Task Dispose_ProcessFatalApplicationFailureStillDisposesActivationAndRemainsShared()
+    {
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        actualBuilder.Services.AddSingleton<ThrowingAsyncApplicationDisposalProbe>(_ =>
+            new ThrowingAsyncApplicationDisposalProbe(
+                new OutOfMemoryException("fatal application disposal failure")));
+        var activation = new DualDisposalProbe();
+        var builder = new AppSurfaceAspireProfileTestingBuilder(actualBuilder, activation);
+        var application = await builder.BuildAsync();
+        _ = application.Services.GetRequiredService<ThrowingAsyncApplicationDisposalProbe>();
+
+        var ownerException = Assert.Throws<OutOfMemoryException>(() => builder.Dispose());
+        var repeatedException = Assert.Throws<OutOfMemoryException>(() => builder.Dispose());
+
+        Assert.Equal("fatal application disposal failure", ownerException.Message);
+        Assert.Equal("fatal application disposal failure", repeatedException.Message);
+        Assert.Equal(1, activation.SyncDisposeCount);
+        Assert.Equal(0, activation.AsyncDisposeCount);
     }
 
     private static AppSurfaceAspireProfileTestingBuilder CreateTestingBuilder(
@@ -842,6 +931,65 @@ public sealed class ThrowingActivationCleanupModule : IAppSurfaceHostModule
     }
 }
 
+public sealed class FatalCleanupModule : IAppSurfaceHostModule
+{
+    public static FatalThrowingDisposalProbe? LastProbe { get; set; }
+
+    public void ConfigureServices(StartupContext context, IServiceCollection services)
+    {
+        services.AddSingleton(_ =>
+        {
+            var probe = new FatalThrowingDisposalProbe();
+            LastProbe = probe;
+            return probe;
+        });
+    }
+
+    public void RegisterDependentModules(ModuleDependencyBuilder builder)
+    {
+    }
+
+    public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+    {
+    }
+
+    public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+    {
+    }
+}
+
+public sealed class FatalActivationModule : IAppSurfaceHostModule
+{
+    public static DisposalProbe? LastProbe { get; set; }
+
+    public void ConfigureServices(StartupContext context, IServiceCollection services)
+    {
+        services.AddSingleton(_ =>
+        {
+            var probe = new DisposalProbe();
+            LastProbe = probe;
+            return probe;
+        });
+        services.AddSingleton<FatalActivationProfile>(serviceProvider =>
+        {
+            _ = serviceProvider.GetRequiredService<DisposalProbe>();
+            throw new OutOfMemoryException("fatal activation failure");
+        });
+    }
+
+    public void RegisterDependentModules(ModuleDependencyBuilder builder)
+    {
+    }
+
+    public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+    {
+    }
+
+    public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+    {
+    }
+}
+
 public sealed class AsyncActivationModule : IAppSurfaceHostModule
 {
     public static AsyncActivationDisposalProbe? LastProbe { get; set; }
@@ -901,6 +1049,17 @@ public sealed class ThrowingDisposalProbe : IDisposable
     {
         DisposeCount++;
         throw new CleanupException();
+    }
+}
+
+public sealed class FatalThrowingDisposalProbe : IDisposable
+{
+    public int DisposeCount { get; private set; }
+
+    public void Dispose()
+    {
+        DisposeCount++;
+        throw new OutOfMemoryException("fatal cleanup failure");
     }
 }
 
@@ -975,7 +1134,19 @@ public sealed class AsyncActivationDisposalProbe : IAsyncDisposable
 
 public sealed class ThrowingAsyncApplicationDisposalProbe : IAsyncDisposable
 {
-    public ValueTask DisposeAsync() => ValueTask.FromException(new CleanupException());
+    private readonly Exception _exception;
+
+    public ThrowingAsyncApplicationDisposalProbe()
+        : this(new CleanupException())
+    {
+    }
+
+    public ThrowingAsyncApplicationDisposalProbe(Exception exception)
+    {
+        _exception = exception;
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.FromException(_exception);
 }
 
 public sealed class DualDisposalProbe : IDisposable, IAsyncDisposable
@@ -1060,6 +1231,14 @@ public sealed class ThrowingComponent : IAspireComponent<ParameterResource>
         AspireStartupContext context,
         IDistributedApplicationBuilder appBuilder) =>
         throw new CompositionException();
+}
+
+public sealed class FatalThrowingComponent : IAspireComponent<ParameterResource>
+{
+    public IResourceBuilder<ParameterResource> Generate(
+        AspireStartupContext context,
+        IDistributedApplicationBuilder appBuilder) =>
+        throw new OutOfMemoryException("fatal composition failure");
 }
 
 public sealed class CompositionException : Exception
@@ -1172,6 +1351,26 @@ public sealed partial class ThrowingProfile : AspireProfile
     }
 }
 
+[Command("fatal-throwing")]
+public sealed partial class FatalThrowingProfile : AspireProfile
+{
+    private readonly FatalThrowingComponent _component;
+
+    public FatalThrowingProfile(
+        FatalThrowingComponent component,
+        DisposalProbe probe,
+        ILogger<FatalThrowingProfile> logger)
+        : base(logger)
+    {
+        _component = component;
+    }
+
+    public override IEnumerable<IAspireComponent> GetComponents()
+    {
+        yield return _component;
+    }
+}
+
 [Command("cancel")]
 public sealed partial class CancellationProfile : AspireProfile
 {
@@ -1236,6 +1435,37 @@ public sealed partial class ThrowingCleanupProfile : AspireProfile
 public sealed partial class ThrowingActivationProfile : AspireProfile
 {
     public ThrowingActivationProfile(ILogger<ThrowingActivationProfile> logger)
+        : base(logger)
+    {
+    }
+
+    public override IEnumerable<IAspireComponent> GetComponents() => [];
+}
+
+[Command("fatal-cleanup")]
+public sealed partial class FatalCleanupProfile : AspireProfile
+{
+    private readonly ThrowingComponent _component;
+
+    public FatalCleanupProfile(
+        ThrowingComponent component,
+        FatalThrowingDisposalProbe probe,
+        ILogger<FatalCleanupProfile> logger)
+        : base(logger)
+    {
+        _component = component;
+    }
+
+    public override IEnumerable<IAspireComponent> GetComponents()
+    {
+        yield return _component;
+    }
+}
+
+[Command("fatal-activation")]
+public sealed partial class FatalActivationProfile : AspireProfile
+{
+    public FatalActivationProfile(ILogger<FatalActivationProfile> logger)
         : base(logger)
     {
     }

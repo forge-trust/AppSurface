@@ -51,25 +51,45 @@ public abstract class AspireProfile : ICommand
     /// Composes this profile into an Aspire distributed application builder.
     /// </summary>
     /// <param name="appBuilder">The builder that receives the profile graph.</param>
-    /// <param name="cancellationToken">A token checked between synchronous composition steps.</param>
+    /// <param name="cancellationToken">
+    /// A token checked before profile enumeration begins and between synchronous composition steps.
+    /// </param>
+    /// <remarks>
+    /// Components from each profile returned by <see cref="GetDependencies"/> are resolved in dependency and component
+    /// enumeration order before this profile's direct <see cref="GetComponents"/> results. Composition includes only
+    /// those direct dependencies; it does not recursively traverse their dependencies. Values that do not implement
+    /// <see cref="IAspireComponent{TResource}"/> for <see cref="IResource"/> are ignored. Cancellation is cooperative
+    /// at the documented checkpoints, and cancellation or another failure does not roll back resources already added
+    /// to <paramref name="appBuilder"/>.
+    /// </remarks>
     internal void Compose(IDistributedApplicationBuilder appBuilder, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(appBuilder);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var context = new AspireStartupContext(appBuilder);
+        cancellationToken.ThrowIfCancellationRequested();
+        var dependencies = GetDependencies();
+        cancellationToken.ThrowIfCancellationRequested();
 
-        foreach (var profile in GetDependencies())
+        foreach (var profile in dependencies)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var dependencyComponents = profile.GetComponents();
+            cancellationToken.ThrowIfCancellationRequested();
 
-            foreach (var component in profile.GetComponents())
+            foreach (var component in dependencyComponents)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ResolveComponent(context, component);
             }
         }
 
-        foreach (var component in GetComponents())
+        cancellationToken.ThrowIfCancellationRequested();
+        var components = GetComponents();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        foreach (var component in components)
         {
             cancellationToken.ThrowIfCancellationRequested();
             ResolveComponent(context, component);

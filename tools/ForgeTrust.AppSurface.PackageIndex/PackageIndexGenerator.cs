@@ -628,7 +628,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         if (IsPublicationBlocked(webEntry.Manifest))
         {
-            builder.AppendLine(FormatPublicationBlockedMessage(webEntry));
+            builder.AppendLine(FormatPublicationBlockedMessage(request, webEntry));
         }
         else
         {
@@ -690,7 +690,7 @@ internal sealed class PackageIndexGenerator
                                                                  && !string.Equals(entry.Metadata.PackageId, WebPackageId, StringComparison.OrdinalIgnoreCase)))
         {
             builder.AppendLine(IsPublicationBlocked(recipeEntry.Manifest)
-                ? $"- {FormatPublicationBlockedMessage(recipeEntry)}"
+                ? $"- {FormatPublicationBlockedMessage(request, recipeEntry)}"
                 : $"- {recipeEntry.Manifest.RecipeSummary}");
         }
 
@@ -1254,9 +1254,14 @@ internal sealed class PackageIndexGenerator
     private static bool IsPublicationBlocked(PackageManifestEntry entry) =>
         !string.IsNullOrWhiteSpace(entry.ReadinessBlocker);
 
-    private static string FormatPublicationBlockedMessage(ResolvedPackageEntry entry)
+    private static string FormatPublicationBlockedMessage(
+        PackageIndexRequest request,
+        ResolvedPackageEntry entry)
     {
-        var message = $"Publication of `{entry.Metadata.PackageId}` is blocked by {entry.Manifest.ReadinessBlocker}; it is not currently installable.";
+        var packageName = FormatMarkdownLink(
+            $"`{entry.Metadata.PackageId}`",
+            GetRelativeDocPath(request, entry.Manifest.StartHerePath!));
+        var message = $"Publication of {packageName} is blocked by {entry.Manifest.ReadinessBlocker}; it is not currently installable.";
         return string.IsNullOrWhiteSpace(entry.Manifest.ReadinessNote)
             ? message
             : $"{message} {entry.Manifest.ReadinessNote}";

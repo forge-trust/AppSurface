@@ -16,7 +16,7 @@ Use this package when you want:
 Deployment support does not provision foundations, resolve secret values, apply infrastructure, execute jobs, or change traffic. It publishes deterministic evidence and delegates read-only parity inspection to the selected provider target. Local profiles still do not automatically forward arbitrary Aspire CLI arguments.
 It also does not configure application-side OpenTelemetry exporters. Use [`ForgeTrust.AppSurface.Observability`](../../Observability/ForgeTrust.AppSurface.Observability/README.md) in each app project that should publish logs, traces, and metrics to Aspire or another OTLP collector.
 
-For deterministic tests of profile-based AppHosts, use [`ForgeTrust.AppSurface.Aspire.Testing`](../ForgeTrust.AppSurface.Aspire.Testing/README.md). Native AppHosts that build directly from `DistributedApplication.CreateBuilder(args)` should continue using Aspire's native testing API.
+For deterministic tests of profile-based AppHosts, use [`ForgeTrust.AppSurface.Aspire.Testing`](../ForgeTrust.AppSurface.Aspire.Testing/README.md). Native AppHosts that build directly from [`DistributedApplication.CreateBuilder(args)`](https://learn.microsoft.com/dotnet/api/aspire.hosting.distributedapplication.createbuilder) should continue using [Aspire's native testing API](https://learn.microsoft.com/dotnet/aspire/testing/overview).
 
 ## Release Guidance
 
@@ -216,7 +216,7 @@ For reusable package-owned components, expose them through an app-local profile 
 | `The type or namespace name 'Projects' could not be found` | The AppHost SDK did not generate project metadata, or the project reference is marked as `IsAspireProjectResource=false`. | Build the AppHost project and keep `IsAspireProjectResource=false` only on library references such as `ForgeTrust.AppSurface.Aspire`. |
 | Duplicate resource name error | Two different component instances generated the same Aspire resource name. | Constructor-inject shared concrete components and resolve dependencies through `AspireStartupContext.Resolve(...)` instead of manually creating components. |
 | Unknown deployment argument does not reach Aspire | The AppHost routed deployment through the local `AspireProfile`/CliFx command path. | Use a native deployment entry point that calls `DistributedApplication.CreateBuilder(args)`; keep profiles for local compatibility. |
-| Aspire's entry-point testing factory reports that the AppHost exited without building | The AppHost builds only after asynchronous AppSurface/CliFx profile dispatch. | Select the profile by type with [`ForgeTrust.AppSurface.Aspire.Testing`](../ForgeTrust.AppSurface.Aspire.Testing/README.md) instead of invoking the entry point. |
+| [`DistributedApplicationTestingBuilder.CreateAsync<TEntryPoint>()`](https://learn.microsoft.com/dotnet/api/aspire.hosting.testing.distributedapplicationtestingbuilder) reports that the AppHost exited without building | The AppHost builds only after asynchronous AppSurface/CliFx profile dispatch. | Select the profile by type with [`ForgeTrust.AppSurface.Aspire.Testing`](../ForgeTrust.AppSurface.Aspire.Testing/README.md) instead of invoking the entry point. |
 
 ## Pitfalls
 

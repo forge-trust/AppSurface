@@ -8,6 +8,12 @@ namespace ForgeTrust.AppSurface.Aspire;
 /// <summary>
 /// Owns the unstarted AppSurface host used to activate one typed Aspire profile.
 /// </summary>
+/// <remarks>
+/// Construction transfers ownership of the supplied host to the lease. Callers may use <see cref="Profile"/> and
+/// <see cref="Services"/> only while the lease is active; profile dependencies may come from the owned service
+/// provider. Disposal is idempotent, chooses asynchronous host disposal when available, and invalidates service access.
+/// Callers must not dispose the owned host separately or use the profile after lease disposal begins.
+/// </remarks>
 /// <typeparam name="TProfile">The activated profile type.</typeparam>
 internal sealed class AspireProfileActivationLease<TProfile> : IDisposable, IAsyncDisposable
     where TProfile : AspireProfile
@@ -16,16 +22,29 @@ internal sealed class AspireProfileActivationLease<TProfile> : IDisposable, IAsy
     private IHost? _host;
     private Task? _disposeTask;
 
+    /// <summary>
+    /// Initializes a lease and transfers ownership of the activation host to it.
+    /// </summary>
+    /// <param name="host">The unstarted AppSurface host that owns the profile's service provider.</param>
+    /// <param name="profile">The profile resolved from <paramref name="host"/>.</param>
     internal AspireProfileActivationLease(IHost host, TProfile profile)
     {
         _host = host;
         Profile = profile;
     }
 
+    /// <summary>
+    /// Gets the activated profile while the lease and its constructor-injected services remain valid.
+    /// </summary>
     internal TProfile Profile { get; }
 
+    /// <summary>
+    /// Gets the owned activation host's service provider before disposal begins.
+    /// </summary>
+    /// <exception cref="ObjectDisposedException">The lease is disposing or has been disposed.</exception>
     internal IServiceProvider Services =>
-        _host?.Services ?? throw new ObjectDisposedException(nameof(AspireProfileActivationLease<TProfile>));
+        Volatile.Read(ref _host)?.Services ??
+        throw new ObjectDisposedException(nameof(AspireProfileActivationLease<TProfile>));
 
     /// <inheritdoc />
     public void Dispose()
@@ -59,21 +78,14 @@ internal sealed class AspireProfileActivationLease<TProfile> : IDisposable, IAsy
 
     private async Task DisposeOwnedHostAsync()
     {
-        var host = _host;
-        try
+        var host = Interlocked.Exchange(ref _host, null);
+        if (host is IAsyncDisposable asyncDisposable)
         {
-            if (host is IAsyncDisposable asyncDisposable)
-            {
-                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
-            }
-            else
-            {
-                host?.Dispose();
-            }
+            await asyncDisposable.DisposeAsync().ConfigureAwait(false);
         }
-        finally
+        else
         {
-            _host = null;
+            host?.Dispose();
         }
     }
 
@@ -95,6 +107,24 @@ internal sealed class AspireProfileActivationLease<TProfile> : IDisposable, IAsy
 /// </summary>
 internal static class AspireProfileActivator
 {
+    /// <summary>
+    /// Builds an unstarted AppSurface host for <typeparamref name="TAppHost"/> and resolves one typed Aspire profile.
+    /// </summary>
+    /// <typeparam name="TAppHost">
+    /// The public generated AppHost marker type whose assembly supplies activation identity.
+    /// </typeparam>
+    /// <typeparam name="TModule">The public AppSurface module used to compose the activation host.</typeparam>
+    /// <typeparam name="TProfile">The public concrete Aspire profile resolved from the activation host.</typeparam>
+    /// <param name="cancellationToken">A token observed before host creation and around profile resolution.</param>
+    /// <returns>
+    /// A lease that owns the unstarted host, profile, and service provider. The caller must dispose the returned lease.
+    /// </returns>
+    /// <remarks>
+    /// Activation uses empty command-line arguments and pins the entry-point assembly to <typeparamref name="TAppHost"/>.
+    /// The host is never started. If activation or cancellation prevents ownership from being returned, the method
+    /// disposes the host before propagating the primary failure.
+    /// </remarks>
+    /// <exception cref="OperationCanceledException">Cancellation is requested before activation completes.</exception>
     internal static async Task<AspireProfileActivationLease<TProfile>> ActivateAsync<TAppHost, TModule, TProfile>(
         CancellationToken cancellationToken)
         where TAppHost : class
@@ -117,14 +147,14 @@ internal static class AspireProfileActivator
             cancellationToken.ThrowIfCancellationRequested();
             return new AspireProfileActivationLease<TProfile>(host, profile);
         }
-        catch (Exception primaryException) when (!AspireExceptionUtilities.IsProcessFatal(primaryException))
+        catch (Exception primaryException)
         {
             ILogger? cleanupLogger = null;
             try
             {
                 cleanupLogger = host.Services.GetService<ILoggerFactory>()?.CreateLogger(typeof(AspireProfileActivator));
             }
-            catch (Exception loggingException) when (!AspireExceptionUtilities.IsProcessFatal(loggingException))
+            catch (Exception)
             {
                 // Logging is best-effort and must not interfere with cleanup.
             }
@@ -133,7 +163,7 @@ internal static class AspireProfileActivator
             {
                 await AspireProfileActivationLease<TProfile>.DisposeHostAsync(host).ConfigureAwait(false);
             }
-            catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
+            catch (Exception cleanupException)
             {
                 try
                 {
@@ -142,7 +172,7 @@ internal static class AspireProfileActivator
                         "Aspire profile host cleanup failed while preserving {PrimaryExceptionType}.",
                         primaryException.GetType().FullName);
                 }
-                catch (Exception loggingException) when (!AspireExceptionUtilities.IsProcessFatal(loggingException))
+                catch (Exception)
                 {
                     // Cleanup diagnostics never replace the primary activation or cancellation failure.
                 }

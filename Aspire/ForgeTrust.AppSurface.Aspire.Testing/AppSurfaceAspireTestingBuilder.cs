@@ -87,17 +87,13 @@ public static class AppSurfaceAspireTestingBuilder
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            return new AppSurfaceAspireProfileTestingBuilder(innerBuilder, activation);
+            var result = new AppSurfaceAspireProfileTestingBuilder(innerBuilder, activation);
+            activation = null;
+            return result;
         }
-        catch (OperationCanceledException)
+        finally
         {
             await DisposeAfterFailureAsync(activation).ConfigureAwait(false);
-            throw;
-        }
-        catch (Exception ex) when (!AspireExceptionUtilities.IsProcessFatal(ex))
-        {
-            await DisposeAfterFailureAsync(activation).ConfigureAwait(false);
-            throw;
         }
     }
 
@@ -231,7 +227,7 @@ public static class AppSurfaceAspireTestingBuilder
                 ? loggerFactory.CreateLogger(typeof(AppSurfaceAspireTestingBuilder))
                 : null;
         }
-        catch (Exception loggingException) when (!AspireExceptionUtilities.IsProcessFatal(loggingException))
+        catch (Exception)
         {
             // Logging is best-effort and must not interfere with cleanup.
         }
@@ -240,7 +236,7 @@ public static class AppSurfaceAspireTestingBuilder
         {
             await activation.DisposeAsync().ConfigureAwait(false);
         }
-        catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
+        catch (Exception cleanupException)
         {
             try
             {
@@ -248,7 +244,7 @@ public static class AppSurfaceAspireTestingBuilder
                     cleanupException,
                     "Aspire profile activation cleanup failed while preserving the primary factory failure.");
             }
-            catch (Exception loggingException) when (!AspireExceptionUtilities.IsProcessFatal(loggingException))
+            catch (Exception)
             {
                 // Cleanup failures never replace the primary activation or composition failure.
             }

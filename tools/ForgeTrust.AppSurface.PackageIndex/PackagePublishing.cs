@@ -380,7 +380,8 @@ internal sealed class PackagePublishWorkflow
         {
             throw new PackageIndexException(
                 $"Package publication is blocked by unresolved readiness evidence: {string.Join(", ", blockedEntries)}. " +
-                "Clear or transfer each packages/package-index.yml readiness_blocker before publishing.");
+                "Clear each blocked package's readiness_blocker in packages/package-index.yml, or transfer the blocker " +
+                "to its replacement package entry, before publishing.");
         }
     }
 

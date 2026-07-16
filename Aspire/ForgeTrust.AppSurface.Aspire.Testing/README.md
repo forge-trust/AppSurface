@@ -4,9 +4,9 @@ Deterministic typed testing for AppSurface Aspire profiles.
 
 ## Choose This Package
 
-Use this package when an AppHost enters through `AspireApp<TModule>.RunAsync(args)` and an `AspireProfile` selects the resource graph after asynchronous CliFx dispatch. The package resolves that profile through the same AppSurface module and component path used at runtime, then returns a normal configurable Aspire testing builder without invoking the AppHost entry point.
+Use this package when an AppHost enters through [`AspireApp<TModule>.RunAsync(args)`](../ForgeTrust.AppSurface.Aspire/README.md#minimal-shape) and an [`AspireProfile`](../ForgeTrust.AppSurface.Aspire/README.md#minimal-shape) selects the resource graph after asynchronous [CliFx](https://github.com/Tyrrrz/CliFx) dispatch. The package resolves that profile through the same AppSurface module and component path used at runtime, then returns a normal configurable Aspire testing builder without invoking the AppHost entry point.
 
-Do not use it as a replacement for Aspire's native testing API. If an AppHost calls `DistributedApplication.CreateBuilder(args)` directly, use `DistributedApplicationTestingBuilder.CreateAsync<TAppHost>()` instead.
+Do not use it as a replacement for [Aspire's native testing API](https://learn.microsoft.com/dotnet/aspire/testing/overview). If an AppHost calls [`DistributedApplication.CreateBuilder(args)`](https://learn.microsoft.com/dotnet/api/aspire.hosting.distributedapplication.createbuilder) directly, use [`DistributedApplicationTestingBuilder.CreateAsync<TAppHost>()`](https://learn.microsoft.com/dotnet/api/aspire.hosting.testing.distributedapplicationtestingbuilder) instead.
 
 ## Compatibility
 
@@ -23,7 +23,7 @@ AppSurface ships as a coordinated package family. Before installing this package
 After the publication blocker above is cleared, install the coordinated package with:
 
 ```bash
-dotnet add package ForgeTrust.AppSurface.Aspire.Testing
+dotnet add package ForgeTrust.AppSurface.Aspire.Testing --prerelease
 ```
 
 The test project must also reference the AppHost project so its generated `Projects.*` marker, public module, and public profile types are available.
