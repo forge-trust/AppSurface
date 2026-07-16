@@ -85,6 +85,7 @@ jobs:
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/ForgeTrust.AppSurface.Durable/README.md
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Web/ForgeTrust.AppSurface.Web/README.md
 
       - name: Verify packed Durable consumers
         run: ./Durable/verify-packed-consumers.sh
