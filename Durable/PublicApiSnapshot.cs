@@ -536,9 +536,8 @@ internal static class PublicApiSnapshot
 
     private static byte[] ReadNullableFlags(MetadataReader metadata, CustomAttributeHandleCollection attributes)
     {
-        foreach (var handle in attributes)
+        foreach (var attribute in attributes.Select(metadata.GetCustomAttribute))
         {
-            var attribute = metadata.GetCustomAttribute(handle);
             if (!string.Equals(GetAttributeTypeName(metadata, attribute.Constructor), "System.Runtime.CompilerServices.NullableAttribute", StringComparison.Ordinal))
             {
                 continue;
