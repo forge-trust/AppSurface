@@ -125,18 +125,26 @@ test('hostile TypeError constructor cannot expose invalid input', async () => {
     error => error.name === 'TypeError' && error.message === 'ASPWAJS040' && !String(error).includes('secret'));
 });
 
-test('hostile error constructors cannot return unsanitized replacements', async () => {
+test('hostile error constructors cannot return matching unsanitized replacements', async () => {
   const nativeTarget = {};
   Object.defineProperty(nativeTarget, 'setAppBadge', { get() { throw new Error('native getter secret'); } });
   const invalidState = install({
     nativeTarget,
-    DOMExceptionValue: function HostileDOMException() { return new Error('DOMException replacement secret'); },
+    DOMExceptionValue: function HostileDOMException() {
+      this.secret = 'DOMException replacement secret';
+    },
     ErrorValue: function HostileError() { return new Error('Error replacement secret'); }
   });
   const invalidCount = install({
-    TypeErrorValue: function HostileTypeError() { return new Error('TypeError replacement secret'); },
+    TypeErrorValue: function HostileTypeError() {
+      this.secret = 'TypeError replacement secret';
+    },
     ErrorValue: function HostileError() { return new Error('Error replacement secret'); }
   });
+  invalidState.context.DOMException.prototype.name = 'InvalidStateError';
+  invalidState.context.DOMException.prototype.message = 'ASPWAJS041';
+  invalidCount.context.TypeError.prototype.name = 'TypeError';
+  invalidCount.context.TypeError.prototype.message = 'ASPWAJS040';
 
   await assert.rejects(
     invalidState.api.set(9),
@@ -144,6 +152,18 @@ test('hostile error constructors cannot return unsanitized replacements', async 
   await assert.rejects(
     invalidCount.api.set(-1),
     error => error.name === 'TypeError' && error.message === 'ASPWAJS040' && !String(error).includes('secret'));
+});
+
+test('mutable Number global cannot influence count validation', async () => {
+  const calls = [];
+  const result = install({ nativeTarget: { async setAppBadge(value) { calls.push(value); } } });
+  vm.runInContext('Number = { isSafeInteger() { throw new Error("number global secret"); } };', result.context);
+
+  assert.equal(await result.api.set(4), 'accepted');
+  await assert.rejects(
+    result.api.set(-1),
+    error => error.name === 'TypeError' && error.message === 'ASPWAJS040' && !String(error).includes('secret'));
+  assert.deepEqual(calls, [4]);
 });
 
 test('API is frozen, branded, non-enumerable, and compatible duplicate load is a no-op', () => {
@@ -175,6 +195,19 @@ test('forged duplicate brands are rejected without replacing the occupied API', 
 
   assert.equal(result.root.AppSurface.Pwa.badging, forged);
   assert.deepEqual(result.errors, ['ASPWAJS002']);
+
+  const extraApiProperty = {};
+  Object.defineProperties(extraApiProperty, {
+    set: { value: async () => 'accepted' },
+    clear: { value: async () => 'accepted' },
+    extra: { value: 'hidden' },
+    [brandKey]: { value: Object.freeze({ version: 1 }) }
+  });
+  Object.freeze(extraApiProperty);
+  const extraPropertyResult = install({ root: { AppSurface: { Pwa: { badging: extraApiProperty } } } });
+
+  assert.equal(extraPropertyResult.root.AppSurface.Pwa.badging, extraApiProperty);
+  assert.deepEqual(extraPropertyResult.errors, ['ASPWAJS002']);
 });
 
 test('adapter preserves registration helper in either load order', () => {
@@ -203,6 +236,21 @@ test('conflicting, inherited, accessor, frozen, and hostile namespaces are conta
   const accessorRoot = {};
   Object.defineProperty(accessorRoot, 'AppSurface', { get() { throw new Error('secret accessor'); } });
   assert.deepEqual(install({ root: accessorRoot }).errors, ['ASPWAJS002']);
+
+  const ignoredRootWrites = {};
+  const lyingRoot = new Proxy(ignoredRootWrites, { defineProperty: () => true });
+  assert.deepEqual(install({ root: lyingRoot }).errors, ['ASPWAJS002']);
+  assert.equal(Object.hasOwn(ignoredRootWrites, 'AppSurface'), false);
+
+  const ignoredPwaWrites = {};
+  const lyingAppSurface = new Proxy(ignoredPwaWrites, { defineProperty: () => true });
+  assert.deepEqual(install({ root: { AppSurface: lyingAppSurface } }).errors, ['ASPWAJS002']);
+  assert.equal(Object.hasOwn(ignoredPwaWrites, 'Pwa'), false);
+
+  const ignoredBadgingWrites = {};
+  const lyingPwa = new Proxy(ignoredBadgingWrites, { defineProperty: () => true });
+  assert.deepEqual(install({ root: { AppSurface: { Pwa: lyingPwa } } }).errors, ['ASPWAJS002']);
+  assert.equal(Object.hasOwn(ignoredBadgingWrites, 'badging'), false);
 
   const frozen = install({ root: { AppSurface: { Pwa: Object.freeze({}) } } });
   assert.deepEqual(frozen.errors, ['ASPWAJS002']);

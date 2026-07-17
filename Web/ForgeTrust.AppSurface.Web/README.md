@@ -45,7 +45,7 @@ AppSurface Web includes a default-off, privacy-safe browser rail for application
 options.Pwa.Badging.Enabled = true;
 ```
 
-With `<appsurface:pwa-head />` in the page head, applications can call `AppSurface.Pwa.badging.set(count)` or `.clear()`. Both resolve to `"accepted"` or `"unsupported"`; accepted means only that the native request resolved and never proves a visible icon badge. When offline or push already activates the shared worker, the same API is installed in that worker after normal service-worker activation. Badging alone does not create a worker, own an attention count, request permission, change the push payload, or add CLI verification.
+With `<appsurface:pwa-head />` in the page head, applications can call `AppSurface.Pwa.badging.set(count)` or `.clear()`. Successful calls resolve to `"accepted"` or `"unsupported"`; invalid counts and native failures reject with sanitized `ASPWAJS040`–`ASPWAJS042` errors. `"accepted"` means only that the native request resolved and never proves a visible icon badge. When offline or push already activates the shared worker, the same API is installed in that worker after normal service-worker activation. Badging alone does not create a worker, own an attention count, request permission, change the push payload, or add CLI verification.
 
 Start with the [PWA badging quick start](Docs/pwa-install.md#badging-only), then use the [executable accessible proof](../../examples/web-pwa-install/README.md). The full guide documents configuration, sanitized `ASPWAJS040`–`042` failures, PathBase, activation lag, privacy boundaries, and unsupported-browser behavior.
 

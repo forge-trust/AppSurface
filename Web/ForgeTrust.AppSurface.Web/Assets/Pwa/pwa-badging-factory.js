@@ -22,12 +22,15 @@
     return error;
   };
 
-  const hasExpectedErrorIdentity = (error, code, name) => {
+  const hasExpectedErrorIdentity = (error, code, name, constructor) => {
     try {
+      const ownKeys = Reflect.ownKeys(error);
       return error !== null
         && (typeof error === "object" || typeof error === "function")
+        && error instanceof constructor
         && error.message === code
-        && error.name === name;
+        && error.name === name
+        && ownKeys.every(key => key === "message" || key === "stack");
     } catch {
       return false;
     }
@@ -36,7 +39,7 @@
   const invalidState = code => {
     try {
       const error = new DOMException(code, "InvalidStateError");
-      if (hasExpectedErrorIdentity(error, code, "InvalidStateError")) return error;
+      if (hasExpectedErrorIdentity(error, code, "InvalidStateError", DOMException)) return error;
     } catch {
       // Fall through to the constructor-independent bounded throwable.
     }
@@ -46,7 +49,7 @@
   const invalidCount = () => {
     try {
       const error = new TypeError("ASPWAJS040");
-      if (hasExpectedErrorIdentity(error, "ASPWAJS040", "TypeError")) return error;
+      if (hasExpectedErrorIdentity(error, "ASPWAJS040", "TypeError", TypeError)) return error;
     } catch {
       // Fall through to the constructor-independent bounded throwable.
     }
@@ -65,7 +68,8 @@
 
   const isCompatibleApi = (value, brandKey) => {
     try {
-      if (!isPlainObject(value) || !Object.isFrozen(value) || Object.keys(value).length !== 0) return false;
+      if (!isPlainObject(value) || !Object.isFrozen(value)) return false;
+      const apiKeys = Reflect.ownKeys(value);
       const brandDescriptor = Object.getOwnPropertyDescriptor(value, brandKey);
       const setDescriptor = Object.getOwnPropertyDescriptor(value, "set");
       const clearDescriptor = Object.getOwnPropertyDescriptor(value, "clear");
@@ -73,7 +77,11 @@
       const brandKeys = brand && Reflect.ownKeys(brand);
       const versionDescriptor = brand && Object.getOwnPropertyDescriptor(brand, "version");
       return Boolean(
-        brandDescriptor
+        apiKeys.length === 3
+        && apiKeys.includes("set")
+        && apiKeys.includes("clear")
+        && apiKeys.includes(brandKey)
+        && brandDescriptor
         && brandDescriptor.enumerable === false
         && brandDescriptor.writable === false
         && brandDescriptor.configurable === false
@@ -96,6 +104,22 @@
         && clearDescriptor.writable === false
         && clearDescriptor.configurable === false
         && typeof clearDescriptor.value === "function");
+    } catch {
+      return false;
+    }
+  };
+
+  const defineOwnValue = (target, key, value, writable, configurable) => {
+    try {
+      Object.defineProperty(target, key, { value, writable, configurable });
+      const descriptor = Object.getOwnPropertyDescriptor(target, key);
+      return Boolean(
+        descriptor
+        && "value" in descriptor
+        && descriptor.value === value
+        && descriptor.enumerable === false
+        && descriptor.writable === writable
+        && descriptor.configurable === configurable);
     } catch {
       return false;
     }
@@ -124,9 +148,7 @@
 
     if (!appSurfacePresent) {
       appSurface = {};
-      try {
-        Object.defineProperty(root, "AppSurface", { value: appSurface, writable: true, configurable: true });
-      } catch {
+      if (!defineOwnValue(root, "AppSurface", appSurface, true, true)) {
         reportConflict();
         return;
       }
@@ -154,9 +176,7 @@
 
     if (!pwaPresent) {
       pwa = {};
-      try {
-        Object.defineProperty(appSurface, "Pwa", { value: pwa, writable: true, configurable: true });
-      } catch {
+      if (!defineOwnValue(appSurface, "Pwa", pwa, true, true)) {
         reportConflict();
         return;
       }
@@ -209,7 +229,11 @@
     };
 
     const set = async count => {
-      if (!Number.isSafeInteger(count) || count < 0) throw invalidCount();
+      if (typeof count !== "number"
+        || count !== count
+        || count < 0
+        || count > 9007199254740991
+        || count % 1 !== 0) throw invalidCount();
       if (count === 0) return clear();
 
       let method;
@@ -235,9 +259,7 @@
     });
     Object.freeze(api);
 
-    try {
-      Object.defineProperty(pwa, "badging", { value: api, writable: false, configurable: false });
-    } catch {
+    if (!defineOwnValue(pwa, "badging", api, false, false)) {
       reportConflict();
     }
   } catch {

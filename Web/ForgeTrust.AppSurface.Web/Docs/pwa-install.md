@@ -42,10 +42,16 @@ const run = async () => {
     }
 };
 
+const runSafely = () => {
+    void run().catch(() => {
+        // Keep the in-app attention state available; add bounded failure UI here.
+    });
+};
+
 if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", run, { once: true });
+    document.addEventListener("DOMContentLoaded", runSafely, { once: true });
 } else {
-    void run();
+    runSafely();
 }
 ```
 
@@ -158,7 +164,14 @@ Invalid counts reject with `TypeError("ASPWAJS040")`. Native set failures reject
 try {
     await window.AppSurface.Pwa.badging.set(authoritativeCount);
 } catch (error) {
-    const code = error instanceof Error ? error.message : "ASPWAJS041";
+    let code = "ASPWAJS041";
+    try {
+        if (["ASPWAJS040", "ASPWAJS041", "ASPWAJS042"].includes(error?.message)) {
+            code = error.message;
+        }
+    } catch {
+        // Keep the bounded fallback when a foreign throwable resists inspection.
+    }
     showBadgingFailure(code);
 }
 ```

@@ -263,7 +263,7 @@ internal static class PwaEndpointMapper
                 ? "<p>The registration helper is not emitted for this offline-only worker.</p>"
                 : "<p>No worker capability or registration helper is active.</p>";
         var badgingGuidance = options.Badging.Enabled
-            ? "<p>App badging: enabled. The helper reports only whether a native request was accepted or unsupported; installation, permission, operating-system settings, visibility, and displayed value were not evaluated.</p>"
+            ? "<p>App badging: enabled. The helper reports accepted or unsupported outcomes and sanitized ASPWAJS041/ASPWAJS042 request failures; installation, permission, operating-system settings, visibility, and displayed value were not evaluated.</p>"
             : "<p>App badging: disabled.</p>";
         await httpContext.Response.WriteAsync(
             $$"""

@@ -159,6 +159,7 @@ public sealed class PwaEndpointTests
         Assert.Contains("\"badgingEnabled\": true", statusJson, StringComparison.Ordinal);
         Assert.Contains("\"badgingHelperPath\": \"/tenant/runtime/badging.js\"", statusJson, StringComparison.Ordinal);
         Assert.Contains("Badging helper: enabled", diagnosticsHtml, StringComparison.Ordinal);
+        Assert.Contains("sanitized ASPWAJS041/ASPWAJS042 request failures", diagnosticsHtml, StringComparison.Ordinal);
         Assert.Contains("visibility, and displayed value were not evaluated", diagnosticsHtml, StringComparison.Ordinal);
         Assert.Contains(
             $"src=&quot;/tenant/runtime/badging.js?v={PwaScriptAssets.BadgingHelperVersion}&quot;",
