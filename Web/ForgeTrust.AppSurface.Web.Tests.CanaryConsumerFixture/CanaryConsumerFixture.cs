@@ -132,6 +132,9 @@ public sealed class StatusOnlyCanaryEvaluator(CanaryFixtureScenario scenario) : 
 /// <param name="scenario">The evaluation scenario.</param>
 public sealed class ForwardingProofCanaryEvaluator(CanaryFixtureScenario scenario) : IAppSurfaceCanaryEvaluator
 {
+    /// <summary>The application-owned detail key used for the forwarding proof kind.</summary>
+    public const string ProofKindDetailKey = "proof.kind";
+
     /// <inheritdoc />
     public ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
         AppSurfaceCanaryEvaluationContext context,
@@ -150,7 +153,7 @@ public sealed class ForwardingProofCanaryEvaluator(CanaryFixtureScenario scenari
                         ? "Multiple matching forwarding proofs require operator review."
                         : "Forwarding proof evaluation completed.";
                     options.CorrelationId = "deploy-20260716-004006";
-                    options.AddDetail("proof.kind", "forwarding");
+                    options.AddDetail(ProofKindDetailKey, "forwarding");
                 }));
 
     private static string ReasonFor(AppSurfaceCanaryStatus status) => status switch
@@ -168,6 +171,9 @@ public sealed class ForwardingProofCanaryEvaluator(CanaryFixtureScenario scenari
 /// <param name="scenario">The evaluation scenario.</param>
 public sealed class MigrationCompletionCanaryEvaluator(CanaryFixtureScenario scenario) : IAppSurfaceCanaryEvaluator
 {
+    /// <summary>The application-owned detail key used for the migration kind.</summary>
+    public const string MigrationKindDetailKey = "migration.kind";
+
     /// <inheritdoc />
     public ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
         AppSurfaceCanaryEvaluationContext context,
@@ -180,7 +186,7 @@ public sealed class MigrationCompletionCanaryEvaluator(CanaryFixtureScenario sce
                     options.MatchedCount = scenario.Status == AppSurfaceCanaryStatus.Pass ? 24 : 0;
                     options.ReasonCode = ReasonFor(scenario.Status);
                     options.Summary = "Migration checkpoint evaluation completed.";
-                    options.AddDetail("migration.kind", "schema");
+                    options.AddDetail(MigrationKindDetailKey, "schema");
                 }));
 
     private static string ReasonFor(AppSurfaceCanaryStatus status) => status switch

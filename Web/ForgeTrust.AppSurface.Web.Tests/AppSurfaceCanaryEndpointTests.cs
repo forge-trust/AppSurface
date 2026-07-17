@@ -1013,7 +1013,7 @@ public sealed class AppSurfaceCanaryEndpointTests
         await using var host = await StartConsumerHostAsync<ForwardingProofCanaryEvaluator>(
             "forwarding.consumer-proof",
             new CanaryFixtureScenario(AppSurfaceCanaryStatus.Fail, Ambiguous: true),
-            "proof.kind");
+            ForwardingProofCanaryEvaluator.ProofKindDetailKey);
         using var request = AuthorizedRequest(Route("forwarding.consumer-proof"));
 
         using var response = await host.Client.SendAsync(request);
@@ -1034,7 +1034,7 @@ public sealed class AppSurfaceCanaryEndpointTests
         await using var host = await StartConsumerHostAsync<MigrationCompletionCanaryEvaluator>(
             "migration.consumer-proof",
             new CanaryFixtureScenario(AppSurfaceCanaryStatus.Fail),
-            "migration.kind");
+            MigrationCompletionCanaryEvaluator.MigrationKindDetailKey);
         using var request = AuthorizedRequest(Route("migration.consumer-proof"));
 
         using var response = await host.Client.SendAsync(request);
@@ -1043,6 +1043,73 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal("checksum-mismatch", parsed.ReasonCode);
         Assert.Equal(CanaryOperatorAction.RollBack, parsed.Action);
+    }
+
+    [Theory]
+    [InlineData(AppSurfaceCanaryStatus.Pass, HttpStatusCode.OK, CanaryOperatorAction.Continue)]
+    [InlineData(AppSurfaceCanaryStatus.Pending, HttpStatusCode.ServiceUnavailable, CanaryOperatorAction.Wait)]
+    [InlineData(AppSurfaceCanaryStatus.Fail, HttpStatusCode.ServiceUnavailable, CanaryOperatorAction.Investigate)]
+    [InlineData(AppSurfaceCanaryStatus.Stale, HttpStatusCode.ServiceUnavailable, CanaryOperatorAction.Refresh)]
+    [InlineData(AppSurfaceCanaryStatus.NotConfigured, HttpStatusCode.ServiceUnavailable, CanaryOperatorAction.Configure)]
+    public async Task PublicForwardingFixture_MapsEveryStatusThroughEndpoint(
+        AppSurfaceCanaryStatus status,
+        HttpStatusCode expectedStatusCode,
+        CanaryOperatorAction expectedAction)
+    {
+        await using var host = await StartConsumerHostAsync<ForwardingProofCanaryEvaluator>(
+            "forwarding.status-matrix",
+            new CanaryFixtureScenario(status),
+            ForwardingProofCanaryEvaluator.ProofKindDetailKey);
+        using var request = AuthorizedRequest(Route("forwarding.status-matrix"));
+
+        using var response = await host.Client.SendAsync(request);
+        var parsed = CanaryEnvelopeConsumer.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(expectedStatusCode, response.StatusCode);
+        Assert.Equal(expectedAction, parsed.Action);
+    }
+
+    [Theory]
+    [InlineData(AppSurfaceCanaryStatus.Pass, HttpStatusCode.OK, CanaryOperatorAction.Continue)]
+    [InlineData(AppSurfaceCanaryStatus.Pending, HttpStatusCode.ServiceUnavailable, CanaryOperatorAction.Wait)]
+    [InlineData(AppSurfaceCanaryStatus.Fail, HttpStatusCode.ServiceUnavailable, CanaryOperatorAction.RollBack)]
+    [InlineData(AppSurfaceCanaryStatus.Stale, HttpStatusCode.ServiceUnavailable, CanaryOperatorAction.Refresh)]
+    [InlineData(AppSurfaceCanaryStatus.NotConfigured, HttpStatusCode.ServiceUnavailable, CanaryOperatorAction.Configure)]
+    public async Task PublicMigrationFixture_MapsEveryStatusThroughEndpoint(
+        AppSurfaceCanaryStatus status,
+        HttpStatusCode expectedStatusCode,
+        CanaryOperatorAction expectedAction)
+    {
+        await using var host = await StartConsumerHostAsync<MigrationCompletionCanaryEvaluator>(
+            "migration.status-matrix",
+            new CanaryFixtureScenario(status),
+            MigrationCompletionCanaryEvaluator.MigrationKindDetailKey);
+        using var request = AuthorizedRequest(Route("migration.status-matrix"));
+
+        using var response = await host.Client.SendAsync(request);
+        var parsed = CanaryEnvelopeConsumer.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(expectedStatusCode, response.StatusCode);
+        Assert.Equal(expectedAction, parsed.Action);
+    }
+
+    [Fact]
+    public async Task PublicStatusOnlyFixture_ProducesCompatibilityEnvelopeThroughEndpoint()
+    {
+        await using var host = await StartConsumerHostAsync<StatusOnlyCanaryEvaluator>(
+            "status-only.consumer-proof",
+            new CanaryFixtureScenario(AppSurfaceCanaryStatus.Pass),
+            "unused.detail");
+        using var request = AuthorizedRequest(Route("status-only.consumer-proof"));
+
+        using var response = await host.Client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+        var parsed = CanaryEnvelopeConsumer.Parse(body);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(CanaryOperatorAction.Continue, parsed.Action);
+        Assert.DoesNotContain("reasonCode", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("details", body, StringComparison.Ordinal);
     }
 
     [Theory]
