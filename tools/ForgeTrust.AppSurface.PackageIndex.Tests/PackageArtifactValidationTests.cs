@@ -3211,6 +3211,16 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface coverage run" or "appsurface coverage merge" or "appsurface coverage gate")
                 .Select(request => request.OperationName)
                 .ToArray());
+        var coverageRunRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run");
+        Assert.Contains("--exclude-test-project", coverageRunRequest.Arguments);
+        Assert.Contains("**/Smoke.Browser.Tests.csproj", coverageRunRequest.Arguments);
+        Assert.Contains(
+            "Smoke.Browser.Tests/Smoke.Browser.Tests.csproj",
+            report.Commands.Single(command => command.OperationName == "appsurface coverage run").StandardOutput,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            report.Artifacts,
+            artifact => artifact.Description == "excluded project 'Smoke.Browser.Tests' produced no coverage artifacts" && artifact.Exists);
         var addPackageRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet add package");
         Assert.DoesNotContain("--configfile", addPackageRequest.Arguments);
         Assert.True(File.Exists(CombineSafeChildPath(report.WorkDirectory, "consumer/NuGet.config")));
@@ -3390,6 +3400,62 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenCoverageRunDoesNotReportSentinelExclusion()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            emitCoverageRunExclusionEvidence: false);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("did not report excluded sentinel", report.FirstFailure, StringComparison.Ordinal);
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage merge");
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenExcludedProjectWritesCoverageArtifacts()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            createExcludedProjectArtifacts: true);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("excluded project 'Smoke.Browser.Tests' produced no coverage artifacts", report.FirstFailure, StringComparison.Ordinal);
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage merge");
+    }
+
+    [Fact]
     public async Task CoverageCliConsumerProofWorkflow_FailsWhenCoverageMergeArtifactsAreMissing()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -3456,6 +3522,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Theory]
     [InlineData("dotnet new classlib", null)]
     [InlineData("dotnet new xunit", null)]
+    [InlineData("dotnet new xunit sentinel", null)]
     [InlineData("dotnet sln add", null)]
     [InlineData("dotnet add reference", null)]
     [InlineData("dotnet add package", null)]
@@ -6017,6 +6084,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         private readonly string? _failOperationName;
         private readonly string? _failTimeoutDescriptionContains;
         private readonly bool _intentionallyFailingGateExitsNonZero;
+        private readonly bool _emitCoverageRunExclusionEvidence;
+        private readonly bool _createExcludedProjectArtifacts;
 
         public CoverageProofRecordingCommandRunner(
             string packageVersion,
@@ -6026,7 +6095,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
             bool createPassingGateReports = true,
             string? failOperationName = null,
             string? failTimeoutDescriptionContains = null,
-            bool intentionallyFailingGateExitsNonZero = true)
+            bool intentionallyFailingGateExitsNonZero = true,
+            bool emitCoverageRunExclusionEvidence = true,
+            bool createExcludedProjectArtifacts = false)
         {
             _packageVersion = packageVersion;
             _createFailingGateReports = createFailingGateReports;
@@ -6036,6 +6107,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _failOperationName = failOperationName;
             _failTimeoutDescriptionContains = failTimeoutDescriptionContains;
             _intentionallyFailingGateExitsNonZero = intentionallyFailingGateExitsNonZero;
+            _emitCoverageRunExclusionEvidence = emitCoverageRunExclusionEvidence;
+            _createExcludedProjectArtifacts = createExcludedProjectArtifacts;
         }
 
         public List<ExternalCommandRequest> Requests { get; } = [];
@@ -6062,10 +6135,18 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 var outputDirectory = ReadOption(request.Arguments, "--output");
                 if (_createCoverageRunArtifacts)
                 {
-                    CreateCoverageRunArtifacts(outputDirectory);
+                    CreateCoverageRunArtifacts(outputDirectory, _createExcludedProjectArtifacts);
                 }
 
-                return Task.FromResult(new ExternalCommandResult(0, "coverage run passed", string.Empty));
+                return Task.FromResult(new ExternalCommandResult(
+                    0,
+                    _emitCoverageRunExclusionEvidence
+                        ? """
+                          coverage run passed
+                            skip Smoke.Browser.Tests/Smoke.Browser.Tests.csproj: matched --exclude-test-project pattern(s): '**/Smoke.Browser.Tests.csproj'
+                          """
+                        : "coverage run passed",
+                    string.Empty));
             }
 
             if (request.OperationName == "appsurface coverage merge")
@@ -6111,10 +6192,14 @@ public sealed class PackageArtifactValidationTests : IDisposable
             return arguments[index + 1];
         }
 
-        private static void CreateCoverageRunArtifacts(string outputDirectory)
+        private static void CreateCoverageRunArtifacts(string outputDirectory, bool createExcludedProjectArtifacts)
         {
             var projectDirectory = CombineSafeChildPath(outputDirectory, "projects/Smoke.Tests-123");
             Directory.CreateDirectory(projectDirectory);
+            if (createExcludedProjectArtifacts)
+            {
+                Directory.CreateDirectory(CombineSafeChildPath(outputDirectory, "projects/Smoke.Browser.Tests-456"));
+            }
             File.WriteAllText(CombineSafeChildPath(outputDirectory, "coverage.cobertura.xml"), "<coverage />", Encoding.UTF8);
             File.WriteAllText(CombineSafeChildPath(outputDirectory, "summary.txt"), "summary", Encoding.UTF8);
             File.WriteAllText(CombineSafeChildPath(outputDirectory, "timings.json"), "{}", Encoding.UTF8);
