@@ -13,8 +13,13 @@ public sealed class DurableContractTests
     public void Identifiers_preserve_ordinal_values_and_generate_nonempty_ids()
     {
         var scope = new DurableScopeId("Tenant-A");
+        var work = new DurableWorkId("work-a");
+        var command = new DurableCommandId("command-a");
 
         Assert.Equal("Tenant-A", scope.Value);
+        Assert.Equal(scope.Value, scope.ToString());
+        Assert.Equal(work.Value, work.ToString());
+        Assert.Equal(command.Value, command.ToString());
         Assert.False(string.IsNullOrWhiteSpace(DurableWorkId.New().Value));
         Assert.False(string.IsNullOrWhiteSpace(DurableCommandId.New().Value));
     }
