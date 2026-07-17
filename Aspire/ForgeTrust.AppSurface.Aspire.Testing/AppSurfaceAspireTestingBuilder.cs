@@ -2,6 +2,7 @@ using System.Reflection;
 using Aspire.Hosting;
 using CliFx.Binding;
 using ForgeTrust.AppSurface.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.AppSurface.Aspire.Testing;
@@ -223,9 +224,9 @@ public static class AppSurfaceAspireTestingBuilder
         ILogger? cleanupLogger = null;
         try
         {
-            cleanupLogger = activation.Services.GetService(typeof(ILoggerFactory)) is ILoggerFactory loggerFactory
-                ? loggerFactory.CreateLogger(typeof(AppSurfaceAspireTestingBuilder))
-                : null;
+            cleanupLogger = activation.Services
+                .GetRequiredService<ILoggerFactory>()
+                .CreateLogger(typeof(AppSurfaceAspireTestingBuilder));
         }
         catch (Exception)
         {

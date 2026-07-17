@@ -42,9 +42,19 @@ internal sealed class AspireProfileActivationLease<TProfile> : IDisposable, IAsy
     /// Gets the owned activation host's service provider before disposal begins.
     /// </summary>
     /// <exception cref="ObjectDisposedException">The lease is disposing or has been disposed.</exception>
-    internal IServiceProvider Services =>
-        Volatile.Read(ref _host)?.Services ??
-        throw new ObjectDisposedException(nameof(AspireProfileActivationLease<TProfile>));
+    internal IServiceProvider Services
+    {
+        get
+        {
+            var host = Volatile.Read(ref _host);
+            if (host is null)
+            {
+                throw new ObjectDisposedException(nameof(AspireProfileActivationLease<TProfile>));
+            }
+
+            return host.Services;
+        }
+    }
 
     /// <inheritdoc />
     public void Dispose()
@@ -152,7 +162,9 @@ internal static class AspireProfileActivator
             ILogger? cleanupLogger = null;
             try
             {
-                cleanupLogger = host.Services.GetService<ILoggerFactory>()?.CreateLogger(typeof(AspireProfileActivator));
+                cleanupLogger = host.Services
+                    .GetRequiredService<ILoggerFactory>()
+                    .CreateLogger(typeof(AspireProfileActivator));
             }
             catch (Exception)
             {

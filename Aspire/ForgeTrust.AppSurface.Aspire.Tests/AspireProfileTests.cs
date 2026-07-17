@@ -34,6 +34,19 @@ public partial class AspireProfileTests
     }
 
     [Fact]
+    public async Task ActivationLease_StaticAsyncCleanupUsesAsynchronousHostDisposal()
+    {
+        var host = new GatedAsyncHost();
+
+        var disposal = AspireProfileActivationLease<TestProfile>.DisposeHostAsync(host);
+        await host.DisposalEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        host.ReleaseDisposal.SetResult();
+        await disposal;
+
+        Assert.Equal(1, host.DisposeCount);
+    }
+
+    [Fact]
     public async Task ActivationLease_DetachesHostBeforeAsynchronousDisposalCompletes()
     {
         var host = new GatedAsyncHost();

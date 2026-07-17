@@ -115,7 +115,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var inner = _innerBuilder ?? throw new InvalidOperationException("The Aspire builder is no longer available.");
+            var inner = _innerBuilder!;
             application = inner.Build();
             cancellationToken.ThrowIfCancellationRequested();
             _application = application;
@@ -145,8 +145,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
                 Volatile.Write(ref _state, Faulted);
             }
 
-            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(primaryException).Throw();
-            throw new InvalidOperationException("Unreachable exception dispatch path.");
+            throw;
         }
         finally
         {
@@ -287,7 +286,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
                 "The Aspire testing builder is inaccessible while its single BuildAsync call is in progress.");
         }
 
-        return _innerBuilder ?? throw new InvalidOperationException("The Aspire builder is no longer available.");
+        return _innerBuilder!;
     }
 
     private void EnsureMutable()

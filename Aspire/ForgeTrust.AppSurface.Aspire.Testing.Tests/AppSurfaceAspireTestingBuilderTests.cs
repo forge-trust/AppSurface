@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 [Collection(AspireEnvironmentCollection.Name)]
 public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
 {
+    private const string AspireProfileActivatorCategory = "ForgeTrust.AppSurface.Aspire.AspireProfileActivator";
     private readonly string? _originalDcpPath = Environment.GetEnvironmentVariable("ASPIRE_DCP_PATH");
     private readonly string? _originalDashboardPath = Environment.GetEnvironmentVariable("ASPIRE_DASHBOARD_PATH");
 
@@ -23,6 +24,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         TestModule.LastProbe = null;
         TestModule.LastActivationArgs = null;
         CancellationTriggerComponent.Source = null;
+        SelectiveFailureLoggerFactory.Reset();
     }
 
     [Fact]
@@ -275,6 +277,64 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.Contains("Profile activation failed", exception.Message, StringComparison.Ordinal);
         Assert.IsType<ActivationException>(exception.InnerException);
         Assert.Equal(1, Assert.IsType<ThrowingDisposalProbe>(ThrowingActivationCleanupModule.LastProbe).DisposeCount);
+    }
+
+    [Fact]
+    public async Task CreateAsync_LoggerAcquisitionFailureDoesNotReplaceActivationFailure()
+    {
+        SelectiveFailureLoggerFactory.CreateFailureCategory = AspireProfileActivatorCategory;
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AppSurfaceAspireTestingBuilder.CreateAsync<
+                TestAppHost,
+                ThrowingActivationCleanupModule,
+                ThrowingActivationProfile>());
+
+        Assert.IsType<ActivationException>(exception.InnerException);
+        Assert.Equal(1, SelectiveFailureLoggerFactory.CreateFailureCount);
+        Assert.Equal(1, Assert.IsType<ThrowingDisposalProbe>(ThrowingActivationCleanupModule.LastProbe).DisposeCount);
+    }
+
+    [Fact]
+    public async Task CreateAsync_LoggerFailureDoesNotReplaceActivationFailure()
+    {
+        SelectiveFailureLoggerFactory.LogFailureCategory = AspireProfileActivatorCategory;
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AppSurfaceAspireTestingBuilder.CreateAsync<
+                TestAppHost,
+                ThrowingActivationCleanupModule,
+                ThrowingActivationProfile>());
+
+        Assert.IsType<ActivationException>(exception.InnerException);
+        Assert.Equal(1, SelectiveFailureLoggerFactory.LogFailureCount);
+        Assert.Equal(1, Assert.IsType<ThrowingDisposalProbe>(ThrowingActivationCleanupModule.LastProbe).DisposeCount);
+    }
+
+    [Fact]
+    public async Task CreateAsync_LoggerAcquisitionFailureDoesNotReplaceCompositionFailure()
+    {
+        SelectiveFailureLoggerFactory.CreateFailureCategory = typeof(AppSurfaceAspireTestingBuilder).FullName;
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, ThrowingCleanupModule, ThrowingCleanupProfile>());
+
+        Assert.IsType<CompositionException>(exception.InnerException);
+        Assert.Equal(1, SelectiveFailureLoggerFactory.CreateFailureCount);
+        Assert.Equal(1, Assert.IsType<ThrowingDisposalProbe>(ThrowingCleanupModule.LastProbe).DisposeCount);
+    }
+
+    [Fact]
+    public async Task CreateAsync_LoggerFailureDoesNotReplaceCompositionFailure()
+    {
+        SelectiveFailureLoggerFactory.LogFailureCategory = typeof(AppSurfaceAspireTestingBuilder).FullName;
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, ThrowingCleanupModule, ThrowingCleanupProfile>());
+
+        Assert.IsType<CompositionException>(exception.InnerException);
+        Assert.Equal(1, SelectiveFailureLoggerFactory.LogFailureCount);
+        Assert.Equal(1, Assert.IsType<ThrowingDisposalProbe>(ThrowingCleanupModule.LastProbe).DisposeCount);
     }
 
     [Fact]
@@ -612,6 +672,34 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     }
 
     [Fact]
+    public async Task BuildAsync_ApplicationCleanupFailureDoesNotReplacePostBuildCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        actualBuilder.Services.AddSingleton<ThrowingAsyncApplicationDisposalProbe>();
+        var inner = A.Fake<IDistributedApplicationBuilder>();
+        A.CallTo(() => inner.Build()).ReturnsLazily(() =>
+        {
+            var application = actualBuilder.Build();
+            _ = application.Services.GetRequiredService<ThrowingAsyncApplicationDisposalProbe>();
+            cancellation.Cancel();
+            return application;
+        });
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = CreateTestingBuilder(inner, activation, actualBuilder.Services);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => builder.BuildAsync(cancellation.Token));
+
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
     public async Task ExplicitInterfaceBuild_UsesOneBuildContract()
     {
         await using var builder = await AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, TestModule, EmptyProfile>();
@@ -744,6 +832,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         ThrowingActivationCleanupModule.LastProbe = null;
         AsyncActivationModule.LastProbe = null;
         CancellationTriggerComponent.Source = null;
+        SelectiveFailureLoggerFactory.Reset();
     }
 
     private sealed class NonPublicModule : IAppSurfaceHostModule
@@ -878,6 +967,7 @@ public sealed class ThrowingCleanupModule : IAppSurfaceHostModule
 
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
+        services.AddSingleton<ILoggerFactory, SelectiveFailureLoggerFactory>();
         services.AddSingleton(_ =>
         {
             var probe = new ThrowingDisposalProbe();
@@ -905,6 +995,7 @@ public sealed class ThrowingActivationCleanupModule : IAppSurfaceHostModule
 
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
+        services.AddSingleton<ILoggerFactory, SelectiveFailureLoggerFactory>();
         services.AddSingleton(_ =>
         {
             var probe = new ThrowingDisposalProbe();
@@ -1207,6 +1298,77 @@ public sealed class GatedAsyncDisposalProbe : IAsyncDisposable
 
 public sealed class CleanupException : Exception
 {
+}
+
+public sealed class CleanupDiagnosticsException : Exception
+{
+}
+
+public sealed class SelectiveFailureLoggerFactory : ILoggerFactory
+{
+    public static string? CreateFailureCategory { get; set; }
+
+    public static string? LogFailureCategory { get; set; }
+
+    public static int CreateFailureCount { get; private set; }
+
+    public static int LogFailureCount { get; private set; }
+
+    public void AddProvider(ILoggerProvider provider)
+    {
+    }
+
+    public ILogger CreateLogger(string categoryName)
+    {
+        if (string.Equals(categoryName, CreateFailureCategory, StringComparison.Ordinal))
+        {
+            CreateFailureCount++;
+            throw new CleanupDiagnosticsException();
+        }
+
+        return new SelectiveFailureLogger(categoryName);
+    }
+
+    public void Dispose()
+    {
+    }
+
+    public static void Reset()
+    {
+        CreateFailureCategory = null;
+        LogFailureCategory = null;
+        CreateFailureCount = 0;
+        LogFailureCount = 0;
+    }
+
+    private sealed class SelectiveFailureLogger : ILogger
+    {
+        private readonly string _categoryName;
+
+        public SelectiveFailureLogger(string categoryName)
+        {
+            _categoryName = categoryName;
+        }
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (string.Equals(_categoryName, LogFailureCategory, StringComparison.Ordinal))
+            {
+                LogFailureCount++;
+                throw new CleanupDiagnosticsException();
+            }
+        }
+    }
 }
 
 public sealed class ActivationException : Exception
