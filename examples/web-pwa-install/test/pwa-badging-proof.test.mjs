@@ -35,7 +35,17 @@ class FakeElement {
   getAttribute(name) { return this.attributes.get(name) ?? null; }
 }
 
-function createHarness({ badging, readyState = 'complete', helperAccessError = false } = {}) {
+function brandedHelper(value) {
+  const helper = {};
+  Object.defineProperties(helper, {
+    set: { value: value.set },
+    clear: { value: value.clear },
+    [Symbol.for('ForgeTrust.AppSurface.Pwa.badging')]: { value: Object.freeze({ version: 1 }) }
+  });
+  return Object.freeze(helper);
+}
+
+function createHarness({ badging, readyState = 'complete', helperAccessError = false, rawBadging = false } = {}) {
   const elements = {
     'badge-count': new FakeElement({ value: '3' }),
     'badge-count-error': new FakeElement(),
@@ -62,13 +72,17 @@ function createHarness({ badging, readyState = 'complete', helperAccessError = f
   if (helperAccessError) {
     Object.defineProperty(window, 'AppSurface', { get() { throw new Error('secret'); } });
   } else if (badging !== null) {
-    window.AppSurface = { Pwa: { badging: badging ?? {
+    const candidate = badging ?? {
       async set() { return 'accepted'; },
       async clear() { return 'accepted'; }
-    } } };
+    };
+    window.AppSurface = { Pwa: { badging: rawBadging ? candidate : brandedHelper(candidate) } };
   }
 
-  vm.runInNewContext(script, { document, window, Number, Promise }, { filename: 'pwa-badging-proof.js' });
+  vm.runInNewContext(
+    script,
+    { document, window, Number, Object, Promise, Reflect, Symbol },
+    { filename: 'pwa-badging-proof.js' });
   return { document, elements, window };
 }
 
@@ -197,7 +211,20 @@ test('set and clear rejection preserve the newly authoritative in-app state', as
 });
 
 test('missing or hostile helper stays disabled with value-free recovery guidance', () => {
-  for (const options of [{ badging: null }, { helperAccessError: true }]) {
+  const customPrototypeHelper = Object.create({ forged: true });
+  Object.defineProperties(customPrototypeHelper, {
+    set: { value: async () => 'accepted' },
+    clear: { value: async () => 'accepted' },
+    [Symbol.for('ForgeTrust.AppSurface.Pwa.badging')]: { value: Object.freeze({ version: 1 }) }
+  });
+  Object.freeze(customPrototypeHelper);
+
+  for (const options of [
+    { badging: null },
+    { helperAccessError: true },
+    { badging: { async set() { return 'accepted'; }, async clear() { return 'accepted'; } }, rawBadging: true },
+    { badging: customPrototypeHelper, rawBadging: true }
+  ]) {
     const harness = createHarness(options);
     assert.equal(harness.elements['badging-status'].dataset.state, 'helper-conflict');
     assert.equal(harness.elements['set-badge'].disabled, true);

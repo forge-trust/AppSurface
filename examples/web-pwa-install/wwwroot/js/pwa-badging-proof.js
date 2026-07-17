@@ -8,15 +8,62 @@
     const clearButton = document.getElementById("clear-badge");
     const attentionCount = document.getElementById("attention-count");
     const status = document.getElementById("badging-status");
+    const brandKey = Symbol.for("ForgeTrust.AppSurface.Pwa.badging");
+
+    const isPlainObject = value => {
+        if (!value || typeof value !== "object") return false;
+        try {
+            const prototype = Object.getPrototypeOf(value);
+            return prototype === null || prototype === Object.prototype;
+        } catch {
+            return false;
+        }
+    };
+
+    const hasCanonicalShape = value => {
+        try {
+            if (!isPlainObject(value) || !Object.isFrozen(value) || Object.keys(value).length !== 0) return false;
+            const ownKeys = Reflect.ownKeys(value);
+            const brandDescriptor = Object.getOwnPropertyDescriptor(value, brandKey);
+            const setDescriptor = Object.getOwnPropertyDescriptor(value, "set");
+            const clearDescriptor = Object.getOwnPropertyDescriptor(value, "clear");
+            const brand = brandDescriptor && brandDescriptor.value;
+            const brandKeys = brand && Reflect.ownKeys(brand);
+            const versionDescriptor = brand && Object.getOwnPropertyDescriptor(brand, "version");
+            return ownKeys.length === 3
+                && ownKeys.includes("set")
+                && ownKeys.includes("clear")
+                && ownKeys.includes(brandKey)
+                && brandDescriptor.enumerable === false
+                && brandDescriptor.writable === false
+                && brandDescriptor.configurable === false
+                && isPlainObject(brand)
+                && Object.isFrozen(brand)
+                && brandKeys.length === 1
+                && brandKeys[0] === "version"
+                && versionDescriptor.value === 1
+                && versionDescriptor.enumerable === true
+                && versionDescriptor.writable === false
+                && versionDescriptor.configurable === false
+                && setDescriptor.enumerable === false
+                && setDescriptor.writable === false
+                && setDescriptor.configurable === false
+                && typeof setDescriptor.value === "function"
+                && clearDescriptor.enumerable === false
+                && clearDescriptor.writable === false
+                && clearDescriptor.configurable === false
+                && typeof clearDescriptor.value === "function";
+        } catch {
+            return false;
+        }
+    };
 
     const helper = () => {
         try {
             const appSurface = window.AppSurface;
             const pwa = appSurface && appSurface.Pwa;
             const badging = pwa && pwa.badging;
-            return badging && typeof badging.set === "function" && typeof badging.clear === "function"
-                ? badging
-                : null;
+            return hasCanonicalShape(badging) ? badging : null;
         } catch {
             return null;
         }

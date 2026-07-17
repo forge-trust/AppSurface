@@ -25,10 +25,10 @@ internal static class PwaScriptAssets
     public static string BadgingFactory { get; } = Read("pwa-badging-factory.js").Trim();
 
     /// <summary>Gets the inert browser badging-helper source.</summary>
-    public static string BadgingHelper { get; } = BuildBadgingWrapper("window", "window.navigator");
+    public static string BadgingHelper { get; } = BuildBadgingWrapper("window");
 
     /// <summary>Gets the generated-worker badging adapter source.</summary>
-    public static string WorkerBadging { get; } = BuildBadgingWrapper("self", "self.navigator");
+    public static string WorkerBadging { get; } = BuildBadgingWrapper("self");
 
     /// <summary>Gets the shared C# and JavaScript path-validation vectors.</summary>
     public static string PathValidationVectors { get; } = Read("pwa-path-vectors.json");
@@ -67,19 +67,27 @@ internal static class PwaScriptAssets
         return Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant();
     }
 
-    private static string BuildBadgingWrapper(string root, string navigator) =>
+    private static string BuildBadgingWrapper(string root) =>
         $$"""
         // AppSurface PWA application-icon badging adapter.
         (() => {
           "use strict";
           const install = {{BadgingFactory}};
-          install({{root}}, {{navigator}}, () => {
+          const reportConflict = () => {
             try {
               console.error("ASPWAJS002");
             } catch {
               // A hostile console must not make namespace containment observable through throws.
             }
-          });
+          };
+          let nativeTarget;
+          try {
+            nativeTarget = {{root}}.navigator;
+          } catch {
+            reportConflict();
+            return;
+          }
+          install({{root}}, nativeTarget, reportConflict);
         })();
         """;
 }

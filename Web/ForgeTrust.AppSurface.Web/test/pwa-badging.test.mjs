@@ -133,6 +133,21 @@ test('API is frozen, branded, non-enumerable, and compatible duplicate load is a
   assert.deepEqual(first.errors, []);
 });
 
+test('forged duplicate brands are rejected without replacing the occupied API', () => {
+  const brandKey = Symbol.for('ForgeTrust.AppSurface.Pwa.badging');
+  const forged = {};
+  Object.defineProperties(forged, {
+    set: { value: async () => 'accepted' },
+    clear: { value: async () => 'accepted' },
+    [brandKey]: { value: Object.freeze({ version: 1, forged: true }) }
+  });
+  Object.freeze(forged);
+  const result = install({ root: { AppSurface: { Pwa: { badging: forged } } } });
+
+  assert.equal(result.root.AppSurface.Pwa.badging, forged);
+  assert.deepEqual(result.errors, ['ASPWAJS002']);
+});
+
 test('adapter preserves registration helper in either load order', () => {
   const registrationFirst = install({ setup: 'window.AppSurface = { Pwa: { register: () => "kept" } };' });
   assert.equal(registrationFirst.root.AppSurface.Pwa.register(), 'kept');

@@ -352,6 +352,22 @@ public sealed class PwaEndpointTests
     }
 
     [Fact]
+    public void BadgingWrappers_ReadNativeTargetInsideTheConflictBoundary()
+    {
+        Assert.Contains("nativeTarget = window.navigator;", PwaScriptAssets.BadgingHelper, StringComparison.Ordinal);
+        Assert.Contains("nativeTarget = self.navigator;", PwaScriptAssets.WorkerBadging, StringComparison.Ordinal);
+        Assert.DoesNotContain("install(window, window.navigator", PwaScriptAssets.BadgingHelper, StringComparison.Ordinal);
+        Assert.DoesNotContain("install(self, self.navigator", PwaScriptAssets.WorkerBadging, StringComparison.Ordinal);
+
+        var pageRead = PwaScriptAssets.BadgingHelper.IndexOf("nativeTarget = window.navigator;", StringComparison.Ordinal);
+        var pageInstall = PwaScriptAssets.BadgingHelper.IndexOf("install(window, nativeTarget", StringComparison.Ordinal);
+        var workerRead = PwaScriptAssets.WorkerBadging.IndexOf("nativeTarget = self.navigator;", StringComparison.Ordinal);
+        var workerInstall = PwaScriptAssets.WorkerBadging.IndexOf("install(self, nativeTarget", StringComparison.Ordinal);
+        Assert.True(pageRead >= 0 && pageInstall > pageRead);
+        Assert.True(workerRead >= 0 && workerInstall > workerRead);
+    }
+
+    [Fact]
     public async Task WorkerBadging_PrecedesCapabilityFragmentsWithoutChangingDefaultPushPayload()
     {
         await using var app = await StartHostAsync(options =>

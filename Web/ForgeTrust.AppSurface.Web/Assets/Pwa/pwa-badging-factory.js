@@ -65,6 +65,8 @@
       const setDescriptor = Object.getOwnPropertyDescriptor(value, "set");
       const clearDescriptor = Object.getOwnPropertyDescriptor(value, "clear");
       const brand = brandDescriptor && brandDescriptor.value;
+      const brandKeys = brand && Reflect.ownKeys(brand);
+      const versionDescriptor = brand && Object.getOwnPropertyDescriptor(brand, "version");
       return Boolean(
         brandDescriptor
         && brandDescriptor.enumerable === false
@@ -72,7 +74,13 @@
         && brandDescriptor.configurable === false
         && isPlainObject(brand)
         && Object.isFrozen(brand)
-        && brand.version === 1
+        && brandKeys.length === 1
+        && brandKeys[0] === "version"
+        && versionDescriptor
+        && versionDescriptor.value === 1
+        && versionDescriptor.enumerable === true
+        && versionDescriptor.writable === false
+        && versionDescriptor.configurable === false
         && setDescriptor
         && setDescriptor.enumerable === false
         && setDescriptor.writable === false
