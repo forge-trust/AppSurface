@@ -20,15 +20,11 @@
         "resolved": "8.0.0",
         "contentHash": "rO2ugKcbVy8SHNKeqfX/DshUcTtolnEUwMKehVB6gh5/YoL+U07zoACCyGRvgMtzq7fr9o6GLkXOmVj9WMgx+w=="
       },
-      "Microsoft.AspNetCore.Mvc.Testing": {
+      "Microsoft.AspNetCore.TestHost": {
         "type": "Direct",
         "requested": "[10.0.2, )",
         "resolved": "10.0.2",
-        "contentHash": "wXZUGX1hphnKUKEoi7nBuMjT6UOWJmkw4n424O44WSS20QPFYI9D/UiTkgog6S1N6sKFevGF2JmlcSGvKJH2ng==",
-        "dependencies": {
-          "Microsoft.AspNetCore.TestHost": "10.0.2",
-          "Microsoft.Extensions.DependencyModel": "10.0.2"
-        }
+        "contentHash": "LhgZh1EiJ8crslosaxgWUK4pA0xwwGsptYmmxFtZixNpTvkby4pjR1jVBt8vqGKkDeI91SLs051xowFg96+cgw=="
       },
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
@@ -56,6 +52,11 @@
         "requested": "[3.1.5, )",
         "resolved": "3.1.5",
         "contentHash": "tKi7dSTwP4m5m9eXPM2Ime4Kn7xNf4x4zT9sdLO/G4hZVnQCRiMTWoSZqI/pYTVeI27oPPqHBKYI/DjJ9GsYgA=="
+      },
+      "Lib.Net.Http.EncryptedContentEncoding": {
+        "type": "Transitive",
+        "resolved": "2.1.1",
+        "contentHash": "n+CuGyBCZ9zLT3p39sab1bSL2FRCoXHXUM/T7jXwZlibOE+mASOqXcKD9LzNjH+VZTdA0mn02EdBww06DzD9IA=="
       },
       "Microsoft.CodeCoverage": {
         "type": "Transitive",
@@ -121,24 +122,10 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
-      "forgetrust.appsurface.auth": {
+      "forgetrust.appsurface.config": {
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Core": "[0.1.0, )"
-        }
-      },
-      "forgetrust.appsurface.auth.aspnetcore": {
-        "type": "Project",
-        "dependencies": {
-          "ForgeTrust.AppSurface.Auth": "[0.1.0, )"
-        }
-      },
-      "forgetrust.appsurface.auth.testing": {
-        "type": "Project",
-        "dependencies": {
-          "ForgeTrust.AppSurface.Auth": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Auth.AspNetCore": "[0.1.0, )",
-          "Microsoft.AspNetCore.Mvc.Testing": "[10.0.2, )"
         }
       },
       "forgetrust.appsurface.core": {
@@ -147,23 +134,34 @@
           "CliWrap": "[3.10.1, )"
         }
       },
+      "forgetrust.appsurface.web": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Config": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.web.push": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Web": "[0.1.0, )",
+          "Lib.Net.Http.WebPush": "[3.3.1, )"
+        }
+      },
       "CliWrap": {
         "type": "CentralTransitive",
         "requested": "[3.10.1, )",
         "resolved": "3.10.1",
         "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
       },
-      "Microsoft.AspNetCore.TestHost": {
+      "Lib.Net.Http.WebPush": {
         "type": "CentralTransitive",
-        "requested": "[10.0.2, )",
-        "resolved": "10.0.2",
-        "contentHash": "LhgZh1EiJ8crslosaxgWUK4pA0xwwGsptYmmxFtZixNpTvkby4pjR1jVBt8vqGKkDeI91SLs051xowFg96+cgw=="
-      },
-      "Microsoft.Extensions.DependencyModel": {
-        "type": "CentralTransitive",
-        "requested": "[10.0.2, )",
-        "resolved": "10.0.2",
-        "contentHash": "DHXzj/FKmUDmhzw7AHbMXbNNcgO8Cb9PDbYOUDICjFAdIALy2WbC6pm+dFKiAUNtcYMucZu2iMVw1ef/sdcZFw=="
+        "requested": "[3.3.1, )",
+        "resolved": "3.3.1",
+        "contentHash": "5ByiHRcY3lF/4LA7ZbgzBEUmX6oYlPTS1NzXEom3uvT7wFHeZ8Q9DOQcPG6awFqS8yGUuyTvxrHyBzTOwe8Fpg==",
+        "dependencies": {
+          "Lib.Net.Http.EncryptedContentEncoding": "2.1.1"
+        }
       }
     }
   }

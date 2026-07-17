@@ -1,7 +1,9 @@
 @inject ForgeTrust.AppSurface.Web.PwaOptions PwaOptions
+@inject WebPushProofState WebPushProof
 @{
     ViewData["Title"] = "Worker foundation";
     var diagnosticsPath = Url.Content("~/_appsurface/pwa");
+    var devAuthPath = Url.Content("~/_appsurface/dev-auth/");
     var verifierUrl = $"{Context.Request.Scheme}://{Context.Request.Host}{Context.Request.PathBase}";
 }
 
@@ -11,8 +13,8 @@
         <h1>AppSurface PWA worker foundation</h1>
         <p class="lede">
             This page combines install metadata, the starter offline strategy, push event handlers,
-            and explicit service-worker registration. It does not request notification permission,
-            create a push subscription, or send a notification.
+            and explicit service-worker registration. It never prompts or creates a push subscription on load;
+            when the development-only safe rail is configured, only the labeled user action can do so.
         </p>
     </header>
 
@@ -32,6 +34,28 @@
         </noscript>
     </section>
 
+    @if (WebPushProof.Enabled)
+    {
+        <section class="proof-card" aria-labelledby="push-heading">
+            <div>
+                <p class="eyebrow">Development-only safe rail</p>
+                <h2 id="push-heading">Push subscription proof</h2>
+            </div>
+            <p>
+                Select the <a href="@devAuthPath">Push Admin DevAuth persona</a>, then use an explicit action.
+                Preparation does not request permission. The Viewer persona is intentionally forbidden.
+            </p>
+            <p id="push-status" class="status" data-state="initializing" role="status" aria-live="polite" aria-atomic="true">
+                Preparing the protected subscription rail without prompting…
+            </p>
+            <div class="action-row" aria-busy="false" id="push-actions" data-endpoint="@Url.Content("~/account/push-subscriptions")">
+                <button id="enable-push" class="primary-action" type="button" disabled>Enable notifications</button>
+                <button id="disable-push" class="secondary-action" type="button">Unsubscribe</button>
+                <button id="fake-push-send" class="secondary-action" type="button" disabled>Run protected host-action proof</button>
+            </div>
+        </section>
+    }
+
     <section aria-labelledby="capabilities-heading">
         <p class="eyebrow">Truthful posture</p>
         <h2 id="capabilities-heading">Capability ledger</h2>
@@ -40,9 +64,10 @@
             <div><dt>Offline handlers</dt><dd><span class="pill @(PwaOptions.Offline.Enabled ? "configured" : "unconfigured")">@(PwaOptions.Offline.Enabled ? "Configured" : "Not configured")</span></dd></div>
             <div><dt>Push handlers</dt><dd><span class="pill @(PwaOptions.Push.Enabled ? "configured" : "unconfigured")">@(PwaOptions.Push.Enabled ? "Configured" : "Not configured")</span></dd></div>
             <div><dt>Active worker</dt><dd><span id="worker-capability" class="pill pending">Not proven</span></dd></div>
-            <div><dt>Notification permission</dt><dd><span class="pill unconfigured">Not requested</span></dd></div>
-            <div><dt>Push subscription</dt><dd><span class="pill unconfigured">Not configured</span></dd></div>
-            <div><dt>Push delivery</dt><dd><span class="pill unconfigured">Not configured</span></dd></div>
+            <div><dt>Notification permission</dt><dd><span id="push-permission-capability" class="pill unconfigured">Not requested</span></dd></div>
+            <div><dt>Push subscription</dt><dd><span id="push-subscription-capability" class="pill unconfigured">Not configured</span></dd></div>
+            <div><dt>Host action</dt><dd><span id="push-sender-capability" class="pill pending">Not run</span></dd></div>
+            <div><dt>Push delivery</dt><dd><span id="push-delivery-capability" class="pill unconfigured">Not proven</span></dd></div>
         </dl>
     </section>
 
@@ -59,3 +84,8 @@
 </main>
 
 <script src="~/js/pwa-registration-proof.js" asp-append-version="true" defer></script>
+@if (WebPushProof.Enabled)
+{
+    <appsurface:web-push-client />
+    <script src="~/js/pwa-push-proof.js" asp-append-version="true" defer></script>
+}

@@ -321,7 +321,7 @@ stable event, canary name, diagnostic code, and exception type.
 
 ### PWA Install and Push-Worker Foundation
 
-AppSurface Web provides independent [PWA install, offline, and push-worker capabilities](Docs/pwa-install.md) from `WebOptions.Pwa`: a manifest endpoint, MVC/Razor head tags, development diagnostics, an explicit starter offline strategy, safe default notification handlers, and an inert registration helper. Every capability is disabled by default. Enabling push does not request permission, create a subscription, choose recipients, or send a notification.
+AppSurface Web provides independent [PWA install, offline, and push-worker capabilities](Docs/pwa-install.md) from `WebOptions.Pwa`: a manifest endpoint, MVC/Razor head tags, development diagnostics, an explicit starter offline strategy, safe default notification handlers, and an inert registration helper. Every capability is disabled by default. Enabling push does not request permission, create a subscription, choose recipients, or send a notification. Add the optional [`ForgeTrust.AppSurface.Web.Push`](../ForgeTrust.AppSurface.Web.Push/README.md) package for protected subscription intake, VAPID, encrypted one-attempt sending, and stale-subscription cleanup while retaining app-owned custody and product policy.
 
 #### 3-minute PWA install path
 
