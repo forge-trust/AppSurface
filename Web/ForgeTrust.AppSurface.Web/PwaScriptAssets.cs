@@ -21,11 +21,23 @@ internal static class PwaScriptAssets
     /// <summary>Gets the inert browser registration-helper source.</summary>
     public static string RegistrationHelper { get; } = Read("pwa-register.js");
 
+    /// <summary>Gets the canonical badging installer factory shared by page and worker wrappers.</summary>
+    public static string BadgingFactory { get; } = Read("pwa-badging-factory.js").Trim();
+
+    /// <summary>Gets the inert browser badging-helper source.</summary>
+    public static string BadgingHelper { get; } = BuildBadgingWrapper("window");
+
+    /// <summary>Gets the generated-worker badging adapter source.</summary>
+    public static string WorkerBadging { get; } = BuildBadgingWrapper("self");
+
     /// <summary>Gets the shared C# and JavaScript path-validation vectors.</summary>
     public static string PathValidationVectors { get; } = Read("pwa-path-vectors.json");
 
     /// <summary>Gets the content-derived cache version for the registration helper.</summary>
     public static string RegistrationHelperVersion { get; } = BuildVersion(RegistrationHelper);
+
+    /// <summary>Gets the content-derived cache version for the badging page helper.</summary>
+    public static string BadgingHelperVersion { get; } = BuildVersion(BadgingHelper);
 
     private static string Read(string fileName) => Read(typeof(PwaScriptAssets).Assembly, fileName);
 
@@ -54,4 +66,28 @@ internal static class PwaScriptAssets
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(script));
         return Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant();
     }
+
+    private static string BuildBadgingWrapper(string root) =>
+        $$"""
+        // AppSurface PWA application-icon badging adapter.
+        (() => {
+          "use strict";
+          const install = {{BadgingFactory}};
+          const reportConflict = () => {
+            try {
+              console.error("ASPWAJS002");
+            } catch {
+              // A hostile console must not make namespace containment observable through throws.
+            }
+          };
+          let nativeTarget;
+          try {
+            nativeTarget = {{root}}.navigator;
+          } catch {
+            reportConflict();
+            return;
+          }
+          install({{root}}, nativeTarget, reportConflict);
+        })();
+        """;
 }

@@ -9,6 +9,7 @@
   <ItemGroup>
     <PackageVersion Include="Aspire.Hosting" Version="13.4.4" />
     <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.4.4" />
+    <PackageVersion Include="Aspire.Hosting.Testing" Version="13.4.4" />
     <PackageVersion Include="Aspire.Hosting.Keycloak" Version="13.4.4-preview.1.26314.3" />
     <!-- Acornima 1.6.2 is an intentional SemVer-stable NuGet pin for AppSurface Docs JavaScript API harvesting. -->
     <PackageVersion Include="Acornima" Version="1.6.2" />

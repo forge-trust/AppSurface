@@ -32,6 +32,19 @@ public sealed class PwaStaticFileShadowValidatorTests
     }
 
     [Fact]
+    public void ThrowIfInvalid_WhenBadgingOnlyHelperStaticFileExists_RejectsStartup()
+    {
+        var options = new PwaOptions();
+        options.Badging.Enabled = true;
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => PwaStaticFileShadowValidator.ThrowIfInvalid(options, new StubFileProvider("_appsurface/pwa/badging.js")));
+
+        Assert.Contains("ASPWA024", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("badging helper", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ThrowIfInvalid_WhenWorkerIsInactive_DoesNotInspectStaticFiles()
     {
         var options = new PwaOptions();
@@ -60,11 +73,12 @@ public sealed class PwaStaticFileShadowValidatorTests
     {
         var options = new PwaOptions();
         options.Push.Enabled = true;
+        options.Badging.Enabled = true;
 
         var exception = Record.Exception(
             () => PwaStaticFileShadowValidator.ThrowIfInvalid(
                 options,
-                new StubFileProvider(isDirectory: true, "service-worker.js", "_appsurface/pwa/register.js")));
+                new StubFileProvider(isDirectory: true, "service-worker.js", "_appsurface/pwa/register.js", "_appsurface/pwa/badging.js")));
 
         Assert.Null(exception);
     }

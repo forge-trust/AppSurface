@@ -627,7 +627,11 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine(webEntry.Manifest.UseWhen!);
         builder.AppendLine();
-        if (webEntry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)
+        if (IsPublicationBlocked(webEntry.Manifest))
+        {
+            builder.AppendLine(FormatPublicationBlockedMessage(request, webEntry));
+        }
+        else if (webEntry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)
         {
             builder.AppendLine("Source only - publication held");
         }
@@ -690,7 +694,9 @@ internal sealed class PackageIndexGenerator
         foreach (var recipeEntry in publicEntries.Where(entry => !string.IsNullOrWhiteSpace(entry.Manifest.RecipeSummary)
                                                                  && !string.Equals(entry.Metadata.PackageId, WebPackageId, StringComparison.OrdinalIgnoreCase)))
         {
-            builder.AppendLine($"- {recipeEntry.Manifest.RecipeSummary}");
+            builder.AppendLine(IsPublicationBlocked(recipeEntry.Manifest)
+                ? $"- {FormatPublicationBlockedMessage(request, recipeEntry)}"
+                : $"- {recipeEntry.Manifest.RecipeSummary}");
         }
 
         builder.AppendLine();
@@ -1225,7 +1231,11 @@ internal sealed class PackageIndexGenerator
     private static string FormatReleaseCell(PackageIndexRequest request, PackageManifestEntry entry)
     {
         var parts = new List<string>();
-        if (entry.PublishDecision == PackagePublishDecision.DoNotPublish)
+        if (IsPublicationBlocked(entry))
+        {
+            parts.Add($"publication blocked by {entry.ReadinessBlocker}");
+        }
+        else if (entry.PublishDecision == PackagePublishDecision.DoNotPublish)
         {
             parts.Add("publication held");
         }
@@ -1248,8 +1258,29 @@ internal sealed class PackageIndexGenerator
         return parts.Count == 0 ? "Not declared" : string.Join("<br />", parts);
     }
 
+    private static bool IsPublicationBlocked(PackageManifestEntry entry) =>
+        !string.IsNullOrWhiteSpace(entry.ReadinessBlocker);
+
+    private static string FormatPublicationBlockedMessage(
+        PackageIndexRequest request,
+        ResolvedPackageEntry entry)
+    {
+        var packageName = FormatMarkdownLink(
+            $"`{entry.Metadata.PackageId}`",
+            GetRelativeDocPath(request, entry.Manifest.StartHerePath!));
+        var message = $"Publication of {packageName} is blocked by {entry.Manifest.ReadinessBlocker}; it is not currently installable.";
+        return string.IsNullOrWhiteSpace(entry.Manifest.ReadinessNote)
+            ? message
+            : $"{message} {entry.Manifest.ReadinessNote}";
+    }
+
     private static string FormatInstallCell(ResolvedPackageEntry entry)
     {
+        if (IsPublicationBlocked(entry.Manifest))
+        {
+            return $"Publication blocked by {entry.Manifest.ReadinessBlocker}; not currently installable.";
+        }
+
         return entry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish
             ? "Source only - publication held"
             : $"`{entry.Metadata.InstallCommand}`";
