@@ -10,42 +10,47 @@
   };
 
   const fallbackError = (code, name) => {
-    let error;
-    try {
-      error = new Error(code);
-    } catch {
-      try {
-        const unreachable = null;
-        unreachable.AppSurface;
-      } catch (intrinsicError) {
-        error = intrinsicError;
-      }
-    }
+    const error = { message: code, name };
     try {
       Object.defineProperties(error, {
         message: { value: code, configurable: true },
         name: { value: name, configurable: true }
       });
     } catch {
-      // The engine-created fallback remains value-free even if it cannot be relabeled.
+      // The bounded fallback remains sanitized even if its descriptors cannot be hardened.
     }
     return error;
   };
 
+  const hasExpectedErrorIdentity = (error, code, name) => {
+    try {
+      return error !== null
+        && (typeof error === "object" || typeof error === "function")
+        && error.message === code
+        && error.name === name;
+    } catch {
+      return false;
+    }
+  };
+
   const invalidState = code => {
     try {
-      return new DOMException(code, "InvalidStateError");
+      const error = new DOMException(code, "InvalidStateError");
+      if (hasExpectedErrorIdentity(error, code, "InvalidStateError")) return error;
     } catch {
-      return fallbackError(code, "InvalidStateError");
+      // Fall through to the constructor-independent bounded throwable.
     }
+    return fallbackError(code, "InvalidStateError");
   };
 
   const invalidCount = () => {
     try {
-      return new TypeError("ASPWAJS040");
+      const error = new TypeError("ASPWAJS040");
+      if (hasExpectedErrorIdentity(error, "ASPWAJS040", "TypeError")) return error;
     } catch {
-      return fallbackError("ASPWAJS040", "TypeError");
+      // Fall through to the constructor-independent bounded throwable.
     }
+    return fallbackError("ASPWAJS040", "TypeError");
   };
 
   const isPlainObject = value => {

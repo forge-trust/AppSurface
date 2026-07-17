@@ -7,14 +7,22 @@ const asset = name => readFileSync(new URL(`../Assets/Pwa/${name}`, import.meta.
 const factorySource = asset('pwa-badging-factory.js').trim();
 const registrationSource = asset('pwa-register.js');
 
-function install({ realm = 'page', nativeTarget = {}, root = {}, setup, DOMExceptionValue = DOMException, ErrorValue = Error } = {}) {
+function install({
+  realm = 'page',
+  nativeTarget = {},
+  root = {},
+  setup,
+  DOMExceptionValue = DOMException,
+  ErrorValue = Error,
+  TypeErrorValue = TypeError
+} = {}) {
   const errors = [];
   const context = {
     root,
     nativeTarget,
     DOMException: DOMExceptionValue,
     Error: ErrorValue,
-    TypeError,
+    TypeError: TypeErrorValue,
     console: { error: value => errors.push(value) }
   };
   if (realm === 'page') {
@@ -114,6 +122,27 @@ test('hostile TypeError constructor cannot expose invalid input', async () => {
 
   await assert.rejects(
     result.api.set(-1),
+    error => error.name === 'TypeError' && error.message === 'ASPWAJS040' && !String(error).includes('secret'));
+});
+
+test('hostile error constructors cannot return unsanitized replacements', async () => {
+  const nativeTarget = {};
+  Object.defineProperty(nativeTarget, 'setAppBadge', { get() { throw new Error('native getter secret'); } });
+  const invalidState = install({
+    nativeTarget,
+    DOMExceptionValue: function HostileDOMException() { return new Error('DOMException replacement secret'); },
+    ErrorValue: function HostileError() { return new Error('Error replacement secret'); }
+  });
+  const invalidCount = install({
+    TypeErrorValue: function HostileTypeError() { return new Error('TypeError replacement secret'); },
+    ErrorValue: function HostileError() { return new Error('Error replacement secret'); }
+  });
+
+  await assert.rejects(
+    invalidState.api.set(9),
+    error => error.name === 'InvalidStateError' && error.message === 'ASPWAJS041' && !String(error).includes('secret'));
+  await assert.rejects(
+    invalidCount.api.set(-1),
     error => error.name === 'TypeError' && error.message === 'ASPWAJS040' && !String(error).includes('secret'));
 });
 

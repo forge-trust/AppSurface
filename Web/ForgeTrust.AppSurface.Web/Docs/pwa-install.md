@@ -152,7 +152,7 @@ The [push-worker foundation case](https://github.com/forge-trust/AppSurface/issu
 | Badging + default or custom push | Yes | Yes, before push handlers are installed. |
 | Badging disabled | No | No; existing generated worker behavior is unchanged. |
 
-Invalid counts reject with `TypeError("ASPWAJS040")`. Native set failures reject with sanitized `DOMException("ASPWAJS041", "InvalidStateError")`; clear failures use `ASPWAJS042`. A value-free `Error` is used when `DOMException` cannot be constructed. Branch on the bounded `error.message` when product UI needs to distinguish these outcomes; do not log the complete native exception:
+Invalid counts reject with `TypeError("ASPWAJS040")`. Native set failures reject with sanitized `DOMException("ASPWAJS041", "InvalidStateError")`; clear failures use `ASPWAJS042`. A bounded throwable containing only the sanitized name and code is used when the platform error constructors cannot be constructed. Branch on the bounded `error.message` when product UI needs to distinguish these outcomes; do not log the complete native exception:
 
 ```javascript
 try {

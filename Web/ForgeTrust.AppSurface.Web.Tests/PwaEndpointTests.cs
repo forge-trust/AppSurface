@@ -182,6 +182,26 @@ public sealed class PwaEndpointTests
         Assert.DoesNotContain("\"code\": \"ASPWA018\"", json, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void BadgingWithInstallOrWorker_InsecureDiagnosticsUseGeneralWarning(
+        bool installEnabled,
+        bool workerEnabled)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Scheme = "http";
+        context.Request.Host = new HostString("app.example.test");
+        var options = new PwaOptions { Enabled = installEnabled };
+        options.Badging.Enabled = true;
+        options.Offline.Enabled = workerEnabled;
+
+        var diagnostics = PwaEndpointMapper.BuildDiagnostics(context, options);
+
+        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.Code == "ASPWA018");
+        Assert.DoesNotContain(diagnostics.Diagnostics, diagnostic => diagnostic.Code == "ASPWA026");
+    }
+
     [Fact]
     public async Task ProductionDiagnostics_AreHiddenByDefault()
     {
