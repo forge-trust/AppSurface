@@ -1,3 +1,4 @@
+// docs:snippet appsurface-canary-consumer:start
 using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture;
@@ -59,6 +60,10 @@ public static class CanaryEnvelopeConsumer
         ArgumentNullException.ThrowIfNull(json);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("The named-canary envelope must be a JSON object.");
+        }
 
         var name = ReadRequiredString(root, "name");
         var status = ReadRequiredString(root, "status");
@@ -111,6 +116,7 @@ public static class CanaryEnvelopeConsumer
         _ => throw new JsonException("The named-canary status is not recognized."),
     };
 }
+// docs:snippet appsurface-canary-consumer:end
 
 /// <summary>Configures one public consumer-fixture evaluation.</summary>
 /// <param name="Status">The result status returned by the evaluator.</param>
@@ -199,3 +205,64 @@ public sealed class MigrationCompletionCanaryEvaluator(CanaryFixtureScenario sce
         _ => throw new ArgumentOutOfRangeException(nameof(status)),
     };
 }
+
+// docs:snippet appsurface-canary-forwarding-complete:start
+/// <summary>Describes application-owned forwarding proof returned by a protected proof store.</summary>
+/// <param name="Status">The named-canary status derived by the application.</param>
+/// <param name="ObservedAt">The time the proof was observed, when meaningful.</param>
+/// <param name="MatchedCount">The number of matching proof records.</param>
+/// <param name="ReasonCode">The stable, operator-safe reason code.</param>
+/// <param name="Summary">The bounded, operator-safe summary.</param>
+/// <param name="CorrelationId">The non-secret application correlation identifier.</param>
+public sealed record ForwardingProofSnapshot(
+    AppSurfaceCanaryStatus Status,
+    DateTimeOffset? ObservedAt,
+    int MatchedCount,
+    string ReasonCode,
+    string Summary,
+    string CorrelationId);
+
+/// <summary>Reads existing forwarding proof without triggering the workflow under evaluation.</summary>
+public interface IForwardingProofReader
+{
+    /// <summary>Finds proof for the exact marker and freshness boundary supplied by the deploy caller.</summary>
+    /// <param name="marker">The required opaque, non-secret deploy marker.</param>
+    /// <param name="freshSince">The required proof freshness boundary.</param>
+    /// <param name="cancellationToken">The request cancellation token.</param>
+    /// <returns>The application-owned proof decision and bounded evidence.</returns>
+    ValueTask<ForwardingProofSnapshot> ReadAsync(
+        string marker,
+        DateTimeOffset freshSince,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>Evaluates existing forwarding proof without triggering forwarding itself.</summary>
+public sealed class CompleteForwardingCanaryEvaluator(IForwardingProofReader proofReader) : IAppSurfaceCanaryEvaluator
+{
+    /// <summary>The application-owned detail key shared by registration and result construction.</summary>
+    public const string ProofKindDetailKey = "proof.kind";
+
+    /// <inheritdoc />
+    public async ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
+        AppSurfaceCanaryEvaluationContext context,
+        CancellationToken cancellationToken)
+    {
+        var proof = await proofReader.ReadAsync(
+            context.Marker!,
+            context.FreshSince!.Value,
+            cancellationToken);
+
+        return new AppSurfaceCanaryResult(
+            proof.Status,
+            result =>
+            {
+                result.ObservedAt = proof.ObservedAt;
+                result.MatchedCount = proof.MatchedCount;
+                result.ReasonCode = proof.ReasonCode;
+                result.Summary = proof.Summary;
+                result.CorrelationId = proof.CorrelationId;
+                result.AddDetail(ProofKindDetailKey, "forwarding");
+            });
+    }
+}
+// docs:snippet appsurface-canary-forwarding-complete:end

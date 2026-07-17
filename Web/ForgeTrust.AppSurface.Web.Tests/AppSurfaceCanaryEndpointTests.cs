@@ -1002,6 +1002,9 @@ public sealed class AppSurfaceCanaryEndpointTests
     [InlineData("{\"name\":\"proof\",\"ready\":false,\"status\":null}")]
     [InlineData("{\"name\":\"proof\",\"ready\":false,\"status\":\"future\"}")]
     [InlineData("{\"name\":\"proof\",\"ready\":true,\"status\":\"pending\"}")]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("\"text\"")]
     public void PublicConsumer_RejectsMissingInvalidOrInconsistentRequiredCore(string json)
     {
         Assert.Throws<JsonException>(() => CanaryEnvelopeConsumer.Parse(json));
@@ -1110,6 +1113,40 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.Equal(CanaryOperatorAction.Continue, parsed.Action);
         Assert.DoesNotContain("reasonCode", body, StringComparison.Ordinal);
         Assert.DoesNotContain("details", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CompleteForwardingFixture_TranslatesApplicationProofThroughPublicApi()
+    {
+        var observedAt = new DateTimeOffset(2026, 7, 16, 8, 31, 2, TimeSpan.Zero);
+        var freshSince = new DateTimeOffset(2026, 7, 16, 8, 30, 0, TimeSpan.Zero);
+        var reader = new RecordingForwardingProofReader(
+            new ForwardingProofSnapshot(
+                AppSurfaceCanaryStatus.Pass,
+                observedAt,
+                1,
+                "proof-observed",
+                "Forwarding proof evaluation completed.",
+                "deploy-20260716-004006"));
+        var evaluator = new CompleteForwardingCanaryEvaluator(reader);
+        var context = new AppSurfaceCanaryEvaluationContext(
+            "forwarding.complete-example",
+            "deploy-42",
+            freshSince);
+
+        using var cancellationSource = new CancellationTokenSource();
+        var result = await evaluator.EvaluateAsync(context, cancellationSource.Token);
+
+        Assert.Equal("deploy-42", reader.Marker);
+        Assert.Equal(freshSince, reader.FreshSince);
+        Assert.Equal(cancellationSource.Token, reader.CancellationToken);
+        Assert.Equal(AppSurfaceCanaryStatus.Pass, result.Status);
+        Assert.Equal(observedAt, result.ObservedAt);
+        Assert.Equal(1, result.MatchedCount);
+        Assert.Equal("proof-observed", result.ReasonCode);
+        Assert.Equal("Forwarding proof evaluation completed.", result.Summary);
+        Assert.Equal("deploy-20260716-004006", result.CorrelationId);
+        Assert.Equal("forwarding", result.Details[CompleteForwardingCanaryEvaluator.ProofKindDetailKey]);
     }
 
     [Theory]
@@ -1679,6 +1716,26 @@ public sealed class AppSurfaceCanaryEndpointTests
         internal bool ReturnNull { get; init; }
 
         internal Func<AppSurfaceCanaryResult>? ResultFactory { get; init; }
+    }
+
+    private sealed class RecordingForwardingProofReader(ForwardingProofSnapshot snapshot) : IForwardingProofReader
+    {
+        internal string? Marker { get; private set; }
+
+        internal DateTimeOffset? FreshSince { get; private set; }
+
+        internal CancellationToken CancellationToken { get; private set; }
+
+        public ValueTask<ForwardingProofSnapshot> ReadAsync(
+            string marker,
+            DateTimeOffset freshSince,
+            CancellationToken cancellationToken)
+        {
+            Marker = marker;
+            FreshSince = freshSince;
+            CancellationToken = cancellationToken;
+            return ValueTask.FromResult(snapshot);
+        }
     }
 
     private sealed class TestEvaluator(EvaluationState state) : IAppSurfaceCanaryEvaluator

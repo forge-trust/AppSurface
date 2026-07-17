@@ -60,7 +60,7 @@ internal sealed class AppSurfaceCanaryEvaluationRunner
     /// <param name="marker">The optional opaque marker.</param>
     /// <param name="freshSince">The optional freshness boundary.</param>
     /// <param name="cancellationToken">The evaluation cancellation token.</param>
-    /// <returns>The non-null status-only evaluator result.</returns>
+    /// <returns>The non-null evaluator result, including any validated optional evidence.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="descriptor"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">The evaluator returns <see langword="null"/>.</exception>
     internal async ValueTask<AppSurfaceCanaryResult> EvaluateAsync(

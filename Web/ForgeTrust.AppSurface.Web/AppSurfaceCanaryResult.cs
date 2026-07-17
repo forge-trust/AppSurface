@@ -60,15 +60,28 @@ public sealed class AppSurfaceCanaryResult
     /// <summary>Gets the optional non-negative count of matching proofs.</summary>
     public int? MatchedCount { get; }
 
-    /// <summary>Gets the optional stable machine-readable response reason.</summary>
+    /// <summary>
+    /// Gets the optional stable machine-readable response reason: 1-64 lowercase ASCII letters or digits separated by
+    /// internal hyphens, with an alphanumeric first and last character.
+    /// </summary>
     public string? ReasonCode { get; }
 
-    /// <summary>Gets optional response-only operator-safe explanatory text.</summary>
+    /// <summary>
+    /// Gets optional response-only operator-safe explanatory text that is nonblank, at most 256 UTF-8 bytes,
+    /// well-formed Unicode, and free of Unicode control (<c>Cc</c>) scalars.
+    /// </summary>
     public string? Summary { get; }
 
-    /// <summary>Gets the optional response-only non-secret correlation identifier.</summary>
+    /// <summary>
+    /// Gets the optional response-only non-secret correlation identifier: 1-128 ASCII letters, digits, periods,
+    /// underscores, colons, or hyphens, with an alphanumeric first and last character.
+    /// </summary>
     public string? CorrelationId { get; }
 
-    /// <summary>Gets the immutable ordinal-sorted response-only details.</summary>
+    /// <summary>
+    /// Gets up to 16 immutable, ordinal-sorted response-only details. Keys use 1-64 character lowercase dot-separated
+    /// segments; values are nonblank, at most 128 UTF-8 bytes, well-formed Unicode, and free of Unicode control
+    /// (<c>Cc</c>) scalars.
+    /// </summary>
     public IReadOnlyDictionary<string, string> Details { get; }
 }

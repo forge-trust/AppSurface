@@ -20,6 +20,9 @@ This is the living release note for the next coordinated AppSurface version afte
   Existing `AppSurfaceCanaryResult(status)` construction remains source-compatible. Consumers must tolerate optional
   omissions, unknown fields, and property reordering; the contract remains preview until the
   [#625 caller](https://github.com/forge-trust/AppSurface/issues/625) proves polling and operator actions.
+  The canonical guide includes a complete forwarding evaluator, a contrasting migration fixture, copyable
+  `System.Text.Json` and `jq` consumers, the #623-to-#624 upgrade contract, and separate under-5-minute authenticated-host
+  and under-15-minute cold-path onboarding targets.
   The package emits fixed completion event `62401` with typed evaluation and host facts only; marker, reason, summary,
   correlation, and custom detail values remain response-only. Bounds and declarations constrain shape but do not classify
   or redact application-authored text. The default adapter still returns `200` only for `pass` and `503` for completed
