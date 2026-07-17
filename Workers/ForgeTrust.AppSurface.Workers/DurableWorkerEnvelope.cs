@@ -11,15 +11,20 @@ namespace ForgeTrust.AppSurface.Workers;
 public sealed record DurableWorkerEnvelope<TPayload>
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="DurableWorkerEnvelope{TPayload}"/> class.
+    /// Initializes the original projection-compatible envelope shape without native runtime execution identity.
     /// </summary>
     /// <param name="outcome">Defined observable worker outcome.</param>
-    /// <param name="reasonCode">Stable machine-readable reason code that is sanitized with diagnostic-text safety rules.</param>
-    /// <param name="retryability">Defined retry classification for the outcome.</param>
+    /// <param name="reasonCode">Stable machine-readable safe reason code.</param>
+    /// <param name="retryability">Defined retry classification.</param>
     /// <param name="correlation">Correlation identifiers for the operation.</param>
-    /// <param name="payload">Optional typed payload associated with the outcome.</param>
-    /// <param name="metadata">Optional safe metadata values.</param>
-    /// <param name="diagnostic">Optional safe diagnostic details.</param>
+    /// <param name="payload">Optional typed payload.</param>
+    /// <param name="metadata">Optional privacy-safe metadata.</param>
+    /// <param name="diagnostic">Optional safe diagnostic.</param>
+    /// <remarks>
+    /// This exact seven-parameter constructor is retained for already-compiled adapters. Native runtimes use
+    /// <see cref="CreateNative"/> to supply <see cref="DurableWorkerExecutionIdentity"/> without creating an ambiguous
+    /// constructor overload for source consumers.
+    /// </remarks>
     /// <exception cref="ArgumentException">Thrown when required text or metadata is invalid.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="correlation"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="outcome"/> or <paramref name="retryability"/> is not defined.</exception>
@@ -32,7 +37,58 @@ public sealed record DurableWorkerEnvelope<TPayload>
         TPayload? payload = default,
         IReadOnlyDictionary<string, string>? metadata = null,
         DurableWorkerDiagnostic? diagnostic = null)
+        : this(outcome, reasonCode, retryability, correlation, payload, metadata, diagnostic, executionIdentity: null, initialize: true)
     {
+    }
+
+    /// <summary>
+    /// Creates a native-runtime envelope with required execution and fencing identity.
+    /// </summary>
+    /// <param name="outcome">Defined observable worker outcome.</param>
+    /// <param name="reasonCode">Stable machine-readable reason code that is sanitized with diagnostic-text safety rules.</param>
+    /// <param name="retryability">Defined retry classification for the outcome.</param>
+    /// <param name="correlation">Correlation identifiers for the operation.</param>
+    /// <param name="executionIdentity">Required native-runtime execution and fencing identity.</param>
+    /// <param name="payload">Optional typed payload associated with the outcome.</param>
+    /// <param name="metadata">Optional safe metadata values.</param>
+    /// <param name="diagnostic">Optional safe diagnostic details.</param>
+    /// <returns>A validated native-runtime envelope.</returns>
+    /// <exception cref="ArgumentException">Thrown when required text or metadata is invalid.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="correlation"/> or <paramref name="executionIdentity"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="outcome"/> or <paramref name="retryability"/> is not defined.</exception>
+    /// <exception cref="DurableWorkerUnsafeMetadataException">Thrown when metadata appears unsafe.</exception>
+    public static DurableWorkerEnvelope<TPayload> CreateNative(
+        DurableWorkerProjectionOutcome outcome,
+        string reasonCode,
+        DurableWorkerRetryability retryability,
+        DurableWorkerCorrelation correlation,
+        DurableWorkerExecutionIdentity executionIdentity,
+        TPayload? payload = default,
+        IReadOnlyDictionary<string, string>? metadata = null,
+        DurableWorkerDiagnostic? diagnostic = null) =>
+        new(
+            outcome,
+            reasonCode,
+            retryability,
+            correlation,
+            payload,
+            metadata,
+            diagnostic,
+            executionIdentity ?? throw new ArgumentNullException(nameof(executionIdentity)),
+            initialize: true);
+
+    private DurableWorkerEnvelope(
+        DurableWorkerProjectionOutcome outcome,
+        string reasonCode,
+        DurableWorkerRetryability retryability,
+        DurableWorkerCorrelation correlation,
+        TPayload? payload,
+        IReadOnlyDictionary<string, string>? metadata,
+        DurableWorkerDiagnostic? diagnostic,
+        DurableWorkerExecutionIdentity? executionIdentity,
+        bool initialize)
+    {
+        _ = initialize;
         if (!Enum.IsDefined(outcome))
         {
             throw new ArgumentOutOfRangeException(nameof(outcome), "Durable worker outcome must be defined.");
@@ -50,6 +106,7 @@ public sealed record DurableWorkerEnvelope<TPayload>
         Payload = payload;
         Metadata = DurableWorkerMetadataSafety.CopySafe(metadata);
         Diagnostic = diagnostic;
+        ExecutionIdentity = executionIdentity;
     }
 
     /// <summary>
@@ -86,4 +143,13 @@ public sealed record DurableWorkerEnvelope<TPayload>
     /// Gets optional sanitized diagnostic details.
     /// </summary>
     public DurableWorkerDiagnostic? Diagnostic { get; }
+
+    /// <summary>
+    /// Gets the native durable execution identity when the envelope was created by a fencing-aware runtime.
+    /// </summary>
+    /// <remarks>
+    /// Legacy adapters may leave this value <see langword="null"/>. Native runtimes must populate it before invoking a
+    /// provider executor; projection repair must not use it as authority to repeat an external effect.
+    /// </remarks>
+    public DurableWorkerExecutionIdentity? ExecutionIdentity { get; }
 }
