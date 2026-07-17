@@ -121,12 +121,18 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("--schedule longest-first", readme, StringComparison.Ordinal);
         Assert.Contains("--schedule-timings ./artifacts/previous-coverage/timings.json", readme, StringComparison.Ordinal);
         Assert.Contains("--priority-test-project", readme, StringComparison.Ordinal);
+        Assert.Contains("#### Exclude Discovered Test Projects", readme, StringComparison.Ordinal);
+        Assert.Contains("--exclude-test-project \"**/MyApp.Browser.Tests.csproj\"", readme, StringComparison.Ordinal);
+        Assert.Contains("matching is case-insensitive on every operating system", readme, StringComparison.Ordinal);
+        Assert.Contains("This option controls test execution, not the build graph.", readme, StringComparison.Ordinal);
+        Assert.Contains("Do not confuse `--exclude-test-project` with Coverlet's `--exclude`", readme, StringComparison.Ordinal);
         Assert.Contains("originalIndex", readme, StringComparison.Ordinal);
         Assert.Contains("executionIndex", readme, StringComparison.Ordinal);
         Assert.Contains("`.appsurface-coverage-output`", readme, StringComparison.Ordinal);
         Assert.Contains("Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs anchor, and a log path", readme, StringComparison.Ordinal);
         Assert.Contains("Every merge diagnostic uses the `ASCOV130` through `ASCOV139` range", readme, StringComparison.Ordinal);
         Assert.Contains("| `ASCOV103` | No Coverlet Cobertura files were produced.", readme, StringComparison.Ordinal);
+        Assert.Contains("| `ASCOV112` | An exclusion pattern matched no discovered test project.", readme, StringComparison.Ordinal);
         Assert.Contains("| `ASCOV131` | No `coverage.cobertura.xml` files were found.", readme, StringComparison.Ordinal);
         Assert.Contains("- run: dotnet restore ./MyApp.slnx", readme, StringComparison.Ordinal);
         Assert.Contains("dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore", readme, StringComparison.Ordinal);
