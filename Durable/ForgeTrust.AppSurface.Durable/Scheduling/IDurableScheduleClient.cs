@@ -611,9 +611,17 @@ public sealed record DurableScheduleListItem
 /// </summary>
 public sealed record DurableScheduleListResult
 {
-    /// <summary>Initializes a list result.</summary>
+    /// <summary>Initializes one bounded schedule-list page and its optional continuation token.</summary>
+    /// <param name="schedules">Payload-free schedules in the current authorized page.</param>
+    /// <param name="continuationToken">
+    /// Opaque provider-issued token for the next page, or <see langword="null"/> when this is the last page.
+    /// </param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="continuationToken"/> is invalid.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="schedules"/> is null.</exception>
+    /// <remarks>
+    /// Providers must emit a token that can be supplied to <see cref="DurableScheduleListRequest"/>. Callers must not
+    /// parse, normalize, or modify a non-null token; pass it back unchanged when requesting the next page.
+    /// </remarks>
     public DurableScheduleListResult(IReadOnlyList<DurableScheduleListItem> schedules, string? continuationToken)
     {
         ArgumentNullException.ThrowIfNull(schedules);
@@ -626,7 +634,10 @@ public sealed record DurableScheduleListResult
     /// <summary>Gets the immutable page of payload-free schedule inventory items.</summary>
     public IReadOnlyList<DurableScheduleListItem> Schedules { get; }
 
-    /// <summary>Gets the next opaque continuation token, or <see langword="null"/> when this is the last page.</summary>
+    /// <summary>
+    /// Gets the next opaque continuation token to return unchanged in a subsequent
+    /// <see cref="DurableScheduleListRequest"/>, or <see langword="null"/> when this is the last page.
+    /// </summary>
     public string? ContinuationToken { get; }
 }
 
@@ -676,6 +687,12 @@ public sealed record DurableScheduleExplainRequest
 /// <summary>
 /// Describes a side-effect-free evaluated schedule in operationally useful terms.
 /// </summary>
+/// <remarks>
+/// Cron explanations form a discriminated union with <see cref="Kind"/>: when the kind is
+/// <see cref="DurableScheduleKind.Cron"/>, callers must supply <see cref="CronDialect"/>,
+/// <see cref="CronGrammar"/>, and <see cref="IanaTimeZoneId"/> together. For every non-Cron kind, callers must omit all
+/// three values. Partial Cron metadata and Cron metadata attached to a non-Cron explanation are invalid.
+/// </remarks>
 public sealed record DurableScheduleExplanation
 {
     /// <summary>Initializes a schedule explanation.</summary>
@@ -750,13 +767,13 @@ public sealed record DurableScheduleExplanation
     /// <summary>Gets upcoming evaluated instants normalized to UTC.</summary>
     public IReadOnlyList<DateTimeOffset> NextOccurrencesUtc { get; }
 
-    /// <summary>Gets the cron dialect when this is a cron schedule.</summary>
+    /// <summary>Gets the required Cron dialect for a Cron explanation, or <see langword="null"/> otherwise.</summary>
     public CronDialect? CronDialect { get; }
 
-    /// <summary>Gets the cron grammar when this is a cron schedule.</summary>
+    /// <summary>Gets the required Cron grammar for a Cron explanation, or <see langword="null"/> otherwise.</summary>
     public CronGrammar? CronGrammar { get; }
 
-    /// <summary>Gets the IANA time zone when this is a cron schedule.</summary>
+    /// <summary>Gets the required IANA time zone for a Cron explanation, or <see langword="null"/> otherwise.</summary>
     public string? IanaTimeZoneId { get; }
 
     /// <summary>Gets the pinned evaluator package version when applicable.</summary>

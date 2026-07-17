@@ -89,10 +89,7 @@ public sealed record DurableEncodedPayload
         hash.Add(ContractVersion, StringComparer.Ordinal);
         hash.Add(Classification);
         hash.Add(RetentionPolicyId, StringComparer.Ordinal);
-        foreach (var value in _content)
-        {
-            hash.Add(value);
-        }
+        hash.Add(Sha256, StringComparer.Ordinal);
 
         return hash.ToHashCode();
     }

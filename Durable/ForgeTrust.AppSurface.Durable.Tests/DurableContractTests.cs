@@ -469,8 +469,7 @@ public sealed class DurableContractTests
 
         Assert.Equal(new TestResult("done"), resultCodec.Decode(encoded));
         Assert.NotNull(executor.Observed);
-        Assert.Equal("activity", executor.Observed.ExecutionIdentity!.ActivityId);
-        Assert.Equal("activity", executor.Observed.ExecutionIdentity.ProviderKey);
+        Assert.Equal(claim.ExecutionIdentity, executor.Observed.ExecutionIdentity);
         Assert.Equal(new TestPayload("safe"), executor.Observed.Payload);
     }
 
