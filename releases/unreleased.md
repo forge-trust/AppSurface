@@ -28,6 +28,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface DevAuth now centralizes its environment activation policy. DevAuth remains Development-by-default, but
   package consumers can explicitly add local/proof environment names through `AllowedEnvironmentNames`; the marker
   self-suppresses outside allowed environments and mapped control/mutation endpoints stay fail-closed.
+- [`ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth`](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#return-to-the-host-page) control pages now preserve an explicitly supplied safe local `returnUrl` through every select-persona and clear-persona form, returning local proof workflows to the page under test. Missing or rejected targets remain omitted, while endpoint names, options, validation, cookies, loopback and same-origin guards, and local-redirect policy remain unchanged; no consumer migration is required.
 - Split stable and prerelease NuGet publish tag triggers so prerelease tags no longer start the stable publish workflow before the prerelease gate.
 - AppSurface DevAuth marker overlays now start collapsed by default while keeping the active fake persona visible, and
   `AppSurfaceDevAuthMarkerOptions.StartExpanded` lets local proof pages opt back into immediate persona controls.
