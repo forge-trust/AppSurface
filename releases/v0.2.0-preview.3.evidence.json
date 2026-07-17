@@ -15,7 +15,7 @@
     {
       "path": "releases/v0.2.0-preview.3.md",
       "algorithm": "sha256",
-      "value": "c20c51fc2f5551b1ac1dd88615b82cb989711e465efb14964e5d7d412a3df2f7"
+      "value": "e58e2c49b483ef505c2dad7ba8edb72f67e71ba117ba82f3758f0d5bd450b2b9"
     },
     {
       "path": "releases/v0.2.0-preview.3.md.yml",
@@ -167,10 +167,10 @@
   "generatedBy": {
     "tool": "./eng/release"
   },
-  "generatedAtUtc": "2026-07-17T05:31:43.3428330Z",
+  "generatedAtUtc": "2026-07-17T05:53:12.1167340Z",
   "subject": {
     "name": "releases/v0.2.0-preview.3.evidence.json",
-    "sha256": "89f69b598e3cc920f3df1b4546444c9f3bc997b39a35aaa7ba46f79a68206659"
+    "sha256": "5527702aea249f6823026737beb1081ae19a41ba1e52c80bbbebdea685e525b3"
   },
   "attestation": null
 }
