@@ -34,6 +34,7 @@ public sealed class AppSurfaceWebPushValidationAndRenderingTests
         Assert.False(AppSurfaceWebPushValidation.TryDecodeCanonicalBase64Url(canonical + "+", 16, out _));
         Assert.False(AppSurfaceWebPushValidation.TryDecodeCanonicalBase64Url(canonical, 15, out _));
         Assert.False(AppSurfaceWebPushValidation.TryDecodeCanonicalBase64Url(string.Empty, 0, out _));
+        Assert.False(AppSurfaceWebPushValidation.TryDecodeCanonicalBase64Url("A", 1, out _));
     }
 
     [Fact]
@@ -46,6 +47,11 @@ public sealed class AppSurfaceWebPushValidationAndRenderingTests
 
         Assert.True(AppSurfaceWebPushValidation.IsValidP256PublicKey(first.PublicKey));
         Assert.True(AppSurfaceWebPushValidation.IsMatchingVapidPair(first.PublicKey, first.PrivateKey));
+        Assert.False(AppSurfaceWebPushValidation.IsMatchingVapidPair(null, first.PrivateKey));
+        Assert.False(AppSurfaceWebPushValidation.IsMatchingVapidPair(first.PublicKey, null));
+        Assert.False(AppSurfaceWebPushValidation.IsMatchingVapidPair(
+            first.PublicKey,
+            AppSurfaceWebPushValidation.Base64UrlEncode(new byte[32])));
         Assert.False(AppSurfaceWebPushValidation.IsMatchingVapidPair(first.PublicKey, second.PrivateKey));
         Assert.False(AppSurfaceWebPushValidation.IsValidP256PublicKey(
             AppSurfaceWebPushValidation.Base64UrlEncode(invalidPoint)));
@@ -61,6 +67,7 @@ public sealed class AppSurfaceWebPushValidationAndRenderingTests
     [InlineData("mailto:local-only", false)]
     [InlineData("mailto:push @example.test", false)]
     [InlineData("mailto:push@example.test\r\n", false)]
+    [InlineData("mailto:push\u0001@example.test", false)]
     [InlineData("mailto:push%20alerts@example.test", false)]
     [InlineData("mailto:push@example.test?subject=hello", false)]
     [InlineData("mailto:push@example.test#team", false)]
@@ -135,6 +142,8 @@ public sealed class AppSurfaceWebPushValidationAndRenderingTests
     [InlineData("/account/%GG", false, false)]
     [InlineData("/account\\admin", false, false)]
     [InlineData("/account/{id}", false, false)]
+    [InlineData("/account/push path", false, false)]
+    [InlineData("/account/\u0001path", false, false)]
     [InlineData("/account/push#fragment", false, false)]
     [InlineData("relative/path", false, false)]
     public void AppRelativePaths_RejectEscapesTraversalAndAuthorityForms(

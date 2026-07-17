@@ -77,6 +77,18 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
     }
 
     [Fact]
+    public void OptionsValidator_RejectsInvalidSubject()
+    {
+        var options = CreateOptions();
+        options.VapidKeys["primary"].Subject = "mailto:";
+
+        var result = new AppSurfaceWebPushOptionsValidator().Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, failure => failure.StartsWith("ASPUSHCFG004", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void SensitiveModels_RedactStringRepresentations()
     {
         var subscription = CreateSubscription();
