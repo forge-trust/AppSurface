@@ -11,9 +11,10 @@ namespace ForgeTrust.AppSurface.Web.TagHelpers;
 /// <remarks>
 /// Render <c>&lt;appsurface:pwa-head /&gt;</c> inside the document <c>&lt;head&gt;</c> after enabling
 /// <see cref="PwaOptions"/>. The helper emits install metadata only when <see cref="PwaOptions.Enabled"/> is enabled,
-/// emits inert worker path/scope metadata for active worker capabilities, and loads the inert registration helper only
-/// when push is enabled. It never registers a worker, displays an install prompt, requests notification permission, or
-/// creates a push subscription; the application invokes registration deliberately.
+/// emits inert worker path/scope metadata for active worker capabilities, loads the inert registration helper only when
+/// push is enabled, and loads the independent badging helper only when <see cref="PwaBadgingOptions.Enabled"/> is enabled.
+/// It never registers a worker, displays an install prompt, requests notification permission, creates a push subscription,
+/// owns an attention count, or claims that an operating system displayed a badge.
 /// </remarks>
 [HtmlTargetElement("appsurface:pwa-head")]
 public sealed class AppSurfacePwaHeadTagHelper : TagHelper

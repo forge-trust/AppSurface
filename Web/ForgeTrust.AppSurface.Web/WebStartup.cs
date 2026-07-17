@@ -534,7 +534,7 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
     /// <param name="app">The application builder to configure (middleware, routing, CORS, endpoints, etc.).</param>
     private void InitializeWebApplication(StartupContext context, IApplicationBuilder app)
     {
-        if (_options.StaticFiles.EnableStaticFiles && _options.Pwa.IsWorkerEnabled)
+        if (_options.StaticFiles.EnableStaticFiles && _options.Pwa.HasAnyGeneratedScriptRoute)
         {
             var environment = app.ApplicationServices.GetRequiredService<IWebHostEnvironment>();
             PwaStaticFileShadowValidator.ThrowIfInvalid(_options.Pwa, environment.WebRootFileProvider);
