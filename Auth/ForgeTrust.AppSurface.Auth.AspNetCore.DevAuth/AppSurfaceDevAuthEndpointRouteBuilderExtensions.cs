@@ -35,7 +35,9 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
     /// the same materialized options used by the authentication handler, reserves the configured path prefix, and rejects
     /// existing endpoints whose route templates are equivalent to DevAuth control routes even when parameter names differ.
     /// Control endpoints stay loopback-only by default, honor <see cref="AppSurfaceDevAuthOptions.AllowedEnvironmentNames"/>,
-    /// and set no-store headers on every response.
+    /// and set no-store headers on every response. The control-page GET accepts an optional <c>returnUrl</c> query value.
+    /// A safe rooted local value is propagated to every select and clear form action, and successful mutations return
+    /// through a local redirect. Missing or rejected values are omitted, so mutations render the control page normally.
     /// </remarks>
     public static IEndpointRouteBuilder MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)
     {
@@ -144,7 +146,10 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             return Results.NotFound();
         }
 
-        return Results.Content(RenderControlPage(status, options.Value), MediaTypeNames.Text.Html, Encoding.UTF8);
+        var returnUrl = TryGetSafeReturnUrl(httpContext, out var safeReturnUrl)
+            ? safeReturnUrl
+            : null;
+        return Results.Content(RenderControlPage(status, options.Value, returnUrl), MediaTypeNames.Text.Html, Encoding.UTF8);
     }
 
     private static IResult RenderStatusAsync(
@@ -211,7 +216,7 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             IsAnonymous: false,
             Warnings: []);
 
-        return Results.Content(RenderControlPage(status, devAuthOptions), MediaTypeNames.Text.Html, Encoding.UTF8);
+        return Results.Content(RenderControlPage(status, devAuthOptions, returnUrl: null), MediaTypeNames.Text.Html, Encoding.UTF8);
     }
 
     private static IResult CreateInvalidPersonaResult()
@@ -261,7 +266,7 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             IsAnonymous: true,
             Warnings: []);
 
-        return Results.Content(RenderControlPage(status, devAuthOptions), MediaTypeNames.Text.Html, Encoding.UTF8);
+        return Results.Content(RenderControlPage(status, devAuthOptions, returnUrl: null), MediaTypeNames.Text.Html, Encoding.UTF8);
     }
 
     private static CookieOptions CreatePersonaCookieOptions(HttpRequest request)
@@ -321,7 +326,10 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             Warnings: warnings);
     }
 
-    private static string RenderControlPage(AppSurfaceDevAuthStatus status, AppSurfaceDevAuthOptions options)
+    private static string RenderControlPage(
+        AppSurfaceDevAuthStatus status,
+        AppSurfaceDevAuthOptions options,
+        string? returnUrl)
     {
         var html = HtmlEncoder.Default;
         var builder = new StringBuilder();
@@ -351,10 +359,12 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         foreach (var persona in options.Users.Personas.Values)
         {
             var selected = string.Equals(status.PersonaId, persona.Id, StringComparison.Ordinal);
-            builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(options.PathPrefix)}/select/{html.Encode(persona.Id)}\"><button class=\"{(selected ? "selected" : string.Empty)}\" aria-current=\"{(selected ? "true" : "false")}\">{html.Encode(DisplayPersonaName(persona))}</button></form>");
+            var action = BuildMutationUrl(options.PathPrefix, "select/" + persona.Id, returnUrl);
+            builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(action)}\"><button class=\"{(selected ? "selected" : string.Empty)}\" aria-current=\"{(selected ? "true" : "false")}\">{html.Encode(DisplayPersonaName(persona))}</button></form>");
         }
 
-        builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(options.PathPrefix)}/clear\"><button>Clear persona</button></form>");
+        var clearAction = BuildMutationUrl(options.PathPrefix, "clear", returnUrl);
+        builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(clearAction)}\"><button>Clear persona</button></form>");
         builder.AppendLine("</div></section>");
         builder.AppendLine("<section class=\"panel\" aria-label=\"Claims preview\"><h2>Claims preview</h2>");
         if (status.PersonaId is not null && options.Users.Personas.TryGetValue(status.PersonaId, out var current))
@@ -510,6 +520,27 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         returnUrl = NormalizeLocalReturnUrl(httpContext.Request.Query["returnUrl"].ToString());
         return !string.Equals(returnUrl, "/", StringComparison.Ordinal) ||
             string.Equals(httpContext.Request.Query["returnUrl"].ToString(), "/", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Builds a DevAuth mutation action URL and optionally appends a URI-escaped return URL.
+    /// </summary>
+    /// <param name="pathPrefix">Validated DevAuth path prefix without a trailing slash.</param>
+    /// <param name="action">Mutation action path relative to <paramref name="pathPrefix"/>.</param>
+    /// <param name="returnUrl">
+    /// Optional return URL that the caller has already validated or normalized. This method does not determine whether
+    /// the target is local or safe.
+    /// </param>
+    /// <returns>
+    /// The bare mutation action when <paramref name="returnUrl"/> is <see langword="null"/>; otherwise the mutation
+    /// action with one URI-escaped <c>returnUrl</c> query value.
+    /// </returns>
+    internal static string BuildMutationUrl(string pathPrefix, string action, string? returnUrl)
+    {
+        var mutationUrl = string.Concat(pathPrefix, "/", action);
+        return returnUrl is null
+            ? mutationUrl
+            : string.Concat(mutationUrl, "?returnUrl=", Uri.EscapeDataString(returnUrl));
     }
 
     /// <summary>
