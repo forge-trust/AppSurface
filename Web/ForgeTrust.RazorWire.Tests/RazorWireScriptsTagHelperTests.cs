@@ -53,6 +53,10 @@ public class RazorWireScriptsTagHelperTests
         // Arrange
         A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
                 "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js?v=turbo");
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
                 "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js"))
             .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.js?v=123");
 
@@ -89,12 +93,14 @@ public class RazorWireScriptsTagHelperTests
 
         var content = _output.Content.GetContent();
         Assert.Contains(
-            "src=\"https://cdn.jsdelivr.net/npm/@hotwired/turbo@8.0.12/dist/turbo.es2017-umd.js\"",
+            "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js?v=turbo\"",
             content);
-        Assert.Contains(
-            "integrity=\"sha256-1evN/OxCRDJtuVCzQ3gklVq8LzN6qhCm7x/sbawknOk=\"",
-            content);
-        Assert.Contains("crossorigin=\"anonymous\"", content);
+        Assert.DoesNotContain("cdn.jsdelivr.net", content);
+        Assert.DoesNotContain("integrity=", content);
+        Assert.DoesNotContain("crossorigin=", content);
+        Assert.True(
+            content.IndexOf("turbo.es2017-umd.js", StringComparison.Ordinal)
+            < content.IndexOf("razorwire.js", StringComparison.Ordinal));
         Assert.Contains(
             "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.js?v=123\"",
             content);
@@ -119,6 +125,94 @@ public class RazorWireScriptsTagHelperTests
         Assert.DoesNotContain("data-rw-behavior-kit-runtime", content);
         Assert.DoesNotContain("data-rw-behavior", content);
         Assert.Contains("turbo:frame-load", content);
+    }
+
+    [Fact]
+    public void Process_WithCustomTurbo_EmitsVersionedSameOriginScriptFirst()
+    {
+        var options = new RazorWireOptions();
+        options.Turbo.RuntimeMode = RazorWireTurboRuntimeMode.Custom;
+        options.Turbo.CustomPath = "/assets/turbo.js";
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider, options) { ViewContext = _viewContext };
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath("/my-app", "/assets/turbo.js"))
+            .Returns("/my-app/assets/turbo.js?v=custom");
+
+        helper.Process(_context, _output);
+
+        var content = _output.Content.GetContent();
+        Assert.Contains("<script src=\"/my-app/assets/turbo.js?v=custom\"></script>", content);
+        Assert.True(
+            content.IndexOf("/my-app/assets/turbo.js?v=custom", StringComparison.Ordinal)
+            < content.IndexOf("razorwire.js", StringComparison.Ordinal));
+        Assert.DoesNotContain("turbo.es2017-umd.js", content);
+    }
+
+    [Fact]
+    public void Process_WithCustomTurbo_HtmlEncodesVersionProviderResult()
+    {
+        var options = new RazorWireOptions();
+        options.Turbo.RuntimeMode = RazorWireTurboRuntimeMode.Custom;
+        options.Turbo.CustomPath = "/assets/turbo.js";
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider, options) { ViewContext = _viewContext };
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath("/my-app", "/assets/turbo.js"))
+            .Returns("/assets/turbo.js?value=\"<&");
+
+        helper.Process(_context, _output);
+
+        var content = _output.Content.GetContent();
+        Assert.Contains("src=\"/assets/turbo.js?value=&quot;&lt;&amp;\"", content);
+        Assert.DoesNotContain("value=\"<&", content);
+    }
+
+    [Fact]
+    public void Process_WithHostManagedTurbo_OmitsTurboScript()
+    {
+        var options = new RazorWireOptions();
+        options.Turbo.RuntimeMode = RazorWireTurboRuntimeMode.HostManaged;
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider, options) { ViewContext = _viewContext };
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+
+        helper.Process(_context, _output);
+
+        var content = _output.Content.GetContent();
+        Assert.DoesNotContain("turbo.es2017-umd.js", content);
+        Assert.DoesNotContain("cdn.jsdelivr.net", content);
+        Assert.Contains("razorwire.js", content);
+    }
+
+    [Fact]
+    public void Process_WithUndefinedTurboMode_ThrowsActionableInvalidOperationException()
+    {
+        var options = new RazorWireOptions();
+        options.Turbo.RuntimeMode = (RazorWireTurboRuntimeMode)42;
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider, options) { ViewContext = _viewContext };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => helper.Process(_context, _output));
+
+        Assert.Contains("RazorWireOptions.Turbo.RuntimeMode", exception.Message);
+        Assert.Contains("Bundled, Custom, or HostManaged", exception.Message);
+        Assert.Contains("42", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("https://cdn.example.com/turbo.js")]
+    public void Process_WithInvalidCustomTurboPath_ThrowsActionableInvalidOperationException(string? customPath)
+    {
+        var options = new RazorWireOptions();
+        options.Turbo.RuntimeMode = RazorWireTurboRuntimeMode.Custom;
+        options.Turbo.CustomPath = customPath;
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider, options) { ViewContext = _viewContext };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => helper.Process(_context, _output));
+
+        Assert.Contains("RazorWireOptions.Turbo.CustomPath", exception.Message);
+        Assert.Contains("exactly one '/'", exception.Message);
     }
 
     [Fact]

@@ -1,5 +1,28 @@
 schema_version: 1
 notices:
+  - id: razorwire-hotwired-turbo-runtime
+    package_id: ForgeTrust.RazorWire
+    component: Hotwire Turbo
+    version: 8.0.12
+    license: MIT
+    source_url: https://github.com/hotwired/turbo
+    payload_patterns:
+      - lib/**/ForgeTrust.RazorWire.dll
+      - staticwebassets/razorwire/turbo.es2017-umd.js
+    notice_paths:
+      - THIRD-PARTY-NOTICES.md
+    markers:
+      - Hotwire Turbo
+      - 8.0.12
+      - MIT
+    source_paths:
+      - Web/ForgeTrust.RazorWire/package.json
+      - Web/pnpm-lock.yaml
+      - Web/ForgeTrust.RazorWire/THIRD-PARTY-NOTICES.md
+      - Web/ForgeTrust.RazorWire/assets/scripts/build.mjs
+      - Web/ForgeTrust.RazorWire/wwwroot/razorwire/turbo.es2017-umd.js
+    version_source_path: Web/ForgeTrust.RazorWire/package.json
+    version_source_contains: '"@hotwired/turbo": "8.0.12"'
   - id: cli-reportgenerator-tool-payload
     package_id: ForgeTrust.AppSurface.Cli
     component: ReportGenerator
@@ -175,7 +198,12 @@ audits:
   - id: razorwire-generated-browser-assets
     package_id: ForgeTrust.RazorWire
     applies_to:
-      - lib/**/ForgeTrust.RazorWire.dll
+      - staticwebassets/razorwire/razorwire.js
+      - staticwebassets/razorwire/razorwire.islands.js
+      - staticwebassets/razorwire/behavior-kit.js
+      - staticwebassets/razorwire/page-navigation.js
+      - staticwebassets/razorwire/section-copy.js
+      - staticwebassets/razorwire/form-interactions.js
     matched_rule: embedded generated browser assets
     evidence_kind: generated_first_party
     source_paths:

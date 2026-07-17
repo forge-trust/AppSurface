@@ -108,16 +108,23 @@ public class RazorWireScriptsTagHelper : TagHelper
     /// Use
     /// <see cref="RazorWireHybridCredentialsMode.Auto"/> to include credentials automatically when a live origin is
     /// configured; use explicit include or omit only when the live endpoint contract requires it.
+    /// Turbo is emitted first according to <see cref="RazorWireOptions.Turbo"/>. Bundled and custom modes preserve the
+    /// current request path base and static-asset versioning. Host-managed mode emits no Turbo tag and requires the host
+    /// to finish loading a compatible Turbo runtime before this output executes.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// Thrown when <see cref="RazorWireOptions.Hybrid"/>.<see cref="RazorWireHybridOptions.LiveOrigin"/> is not an
     /// absolute HTTP(S) origin or includes a path, query string, fragment, or userinfo.
+    /// Also thrown when <see cref="RazorWireTurboOptions.RuntimeMode"/> contains an undefined value. Normal dependency
+    /// injection validates this at startup; the renderer repeats the check for callers that construct it directly.
     /// </exception>
     public override void Process(TagHelperContext context, TagHelperOutput output)
     {
         output.TagName = null; // No wrapper tag
 
         var pathBase = ViewContext.HttpContext.Request.PathBase;
+
+        var turboScript = BuildTurboScript(pathBase);
 
         var razorwireJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
@@ -161,9 +168,9 @@ public class RazorWireScriptsTagHelper : TagHelper
         var antiforgeryEndpoint = HtmlEncoder.Default.Encode(
             pathBase.Add(new PathString(_options.Forms.Antiforgery.TokenEndpointPath)).Value!);
 
-        // This includes Turbo.js and the custom RazorWire island loader.
+        // Turbo, when package-ordered, precedes the custom RazorWire island loader.
         var scripts = $@"
-<script src=""https://cdn.jsdelivr.net/npm/@hotwired/turbo@8.0.12/dist/turbo.es2017-umd.js"" integrity=""sha256-1evN/OxCRDJtuVCzQ3gklVq8LzN6qhCm7x/sbawknOk="" crossorigin=""anonymous""></script>
+{turboScript}
 <script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}"" data-rw-live-origin=""{liveOrigin}"" data-rw-hybrid-credentials=""{credentialsMode}"" data-rw-antiforgery-endpoint=""{antiforgeryEndpoint}"" data-rw-product-intelligence-enabled=""{productIntelligenceEnabled}""></script>
 <script src=""{islandsJs}""></script>
 ";
@@ -217,6 +224,41 @@ public class RazorWireScriptsTagHelper : TagHelper
         }
 
         output.Content.SetHtmlContent(scripts);
+    }
+
+    private string BuildTurboScript(PathString pathBase)
+    {
+        string? path = _options.Turbo.RuntimeMode switch
+        {
+            RazorWireTurboRuntimeMode.Bundled =>
+                "/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js",
+            RazorWireTurboRuntimeMode.Custom => GetCustomTurboPathOrThrow(),
+            RazorWireTurboRuntimeMode.HostManaged => null,
+            _ => throw new InvalidOperationException(
+                $"RazorWireOptions.Turbo.RuntimeMode must be Bundled, Custom, or HostManaged " +
+                $"(received '{_options.Turbo.RuntimeMode}').")
+        };
+
+        if (path is null)
+        {
+            return string.Empty;
+        }
+
+        var versionedPath = _fileVersionProvider.AddFileVersionToPath(pathBase, path);
+        return $"<script src=\"{HtmlEncoder.Default.Encode(versionedPath)}\"></script>";
+    }
+
+    private string GetCustomTurboPathOrThrow()
+    {
+        var customPath = _options.Turbo.CustomPath;
+        if (string.IsNullOrEmpty(customPath) || !RazorWireOptionsValidator.IsValidCustomTurboPath(customPath))
+        {
+            throw new InvalidOperationException(
+                "RazorWireOptions.Turbo.CustomPath must begin with exactly one '/' and contain only ASCII letters, " +
+                "digits, '/', '.', '_', '-', or '~', with no '.' or '..' path segments when RuntimeMode is Custom.");
+        }
+
+        return customPath;
     }
 
     private static string BuildAutoloadScript(

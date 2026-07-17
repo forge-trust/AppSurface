@@ -4,6 +4,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
+- `ForgeTrust.RazorWire` now owns a deterministic Turbo 8.0.12 default: `<rw:scripts />` emits an exact package-carried, same-origin runtime before RazorWire, while explicit custom and host-managed policies cover app-owned same-origin files or fully host-owned URL, integrity, CSP, and load-order requirements.
 - `ForgeTrust.RazorWire` Behavior Kit now exposes root-scoped registrations for DOM enhancement and page-lifecycle registrations for logical browser visits, including Skoolit-style PWA display-mode telemetry without fake body selectors or app-owned Turbo listeners.
 - [`ForgeTrust.AppSurface.Deployment`](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) and [`ForgeTrust.AppSurface.Deployment.GcpCloudRun`](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) add a provider-neutral deployment-intent boundary and a first Cloud Run migration-job compiler. The existing Aspire package annotates one resource graph and participates in Aspire's native publish pipeline; publishing remains tool-free and non-mutating, while verification is read-only and migration execution, state, apply, promotion, and rollback stay application-owned.
 
@@ -11,6 +12,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- [`ForgeTrust.RazorWire`](../Web/ForgeTrust.RazorWire/README.md#choose-who-supplies-turbo) replaces its implicit CDN dependency with a packaged Turbo 8.0.12 UMD asset served through Razor Class Library static assets and embedded fallbacks. `RazorWireOptions.Turbo` defaults to `Bundled`, supports a strictly validated same-origin `CustomPath`, and offers `HostManaged` for hosts that own cross-origin sourcing, integrity, CSP metadata, and parser-blocking order. Static CDN and hybrid exports materialize the bundled runtime instead of leaving a network dependency behind.
 - `ForgeTrust.AppSurface.Web.OpenApi` now uses `Microsoft.AspNetCore.OpenApi` 10.0.9 and directly requires `Microsoft.OpenApi` in the range `[2.7.5, 3.0.0)`, keeping .NET 10 consumers on the supported 2.x line above the range affected by [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc) while preserving existing OpenAPI and Scalar APIs and endpoint behavior.
 - [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) can now start long-running non-exclusive test projects earlier with `--schedule longest-first`. It reuses prior `timings.json` data when available, preserves integration and Playwright projects as exclusive barriers, supports explicit priority projects, fails invalid explicit timing or priority input before tests run, warns and preserves input order for unmeasured projects when inferred prior timings are missing or unusable, and keeps artifact names stable.
 - [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#exclude-discovered-test-projects) now supports repeatable `--exclude-test-project` segment globs for solution-discovered tests. Exclusions are normalized and case-insensitive, reject stale or malformed patterns before side effects, remain visible in list and dry-run output, preserve solution compilation, and are proven through the packaged CLI consumer with an excluded failing sentinel project.
@@ -42,6 +44,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## Migration watch
 
+- Remove any app-authored duplicate Turbo tag when adopting the new bundled default. CSP policies can replace the former jsDelivr allowance with `'self'`. Hosts that intentionally retain their own tag must set `RazorWireOptions.Turbo.RuntimeMode` to `HostManaged`, load Turbo before `<rw:scripts />` without `async` or `defer`, and treat versions other than 8.0.12 as host-tested compatibility choices.
 - Record-breaking or behavior-changing guidance here before it moves into the tagged release note.
 - `Pwa.Enabled` now controls install metadata only. Apps may activate the shared worker with `Pwa.Offline.Enabled` or `Pwa.Push.Enabled`; existing `Pwa.Offline.ServiceWorkerPath` assignments remain compatible, while new code should use `Pwa.Worker.ServiceWorkerPath`.
 - DevAuth hosts should include `<meta name="viewport" content="width=device-width, initial-scale=1">` and render the default-styled marker after persistent application chrome and before main content. At 640 CSS pixels or below, the marker now occupies that host-owned location instead of the bottom-right viewport overlay; custom-skinned markers with `IncludeDefaultStyles = false` remain fully host-owned.

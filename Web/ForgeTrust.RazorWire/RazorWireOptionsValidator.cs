@@ -9,6 +9,7 @@ internal sealed class RazorWireOptionsValidator : IValidateOptions<RazorWireOpti
         var failures = new List<string>();
         var streams = options.Streams;
 
+        ValidateTurbo(options.Turbo, failures);
         ValidateBasePath(streams.BasePath, failures);
         ValidatePositive(
             streams.MaxChannelNameLength,
@@ -34,6 +35,64 @@ internal sealed class RazorWireOptionsValidator : IValidateOptions<RazorWireOpti
         return failures.Count == 0
             ? ValidateOptionsResult.Success
             : ValidateOptionsResult.Fail(failures);
+    }
+
+    private static void ValidateTurbo(RazorWireTurboOptions turbo, ICollection<string> failures)
+    {
+        if (!Enum.IsDefined(turbo.RuntimeMode))
+        {
+            failures.Add(
+                "RazorWireOptions.Turbo.RuntimeMode must be Bundled, Custom, or HostManaged " +
+                $"(received '{turbo.RuntimeMode}').");
+            return;
+        }
+
+        if (turbo.RuntimeMode is not RazorWireTurboRuntimeMode.Custom)
+        {
+            if (turbo.CustomPath is not null)
+            {
+                failures.Add(
+                    $"RazorWireOptions.Turbo.CustomPath must be null when RuntimeMode is {turbo.RuntimeMode}; " +
+                    "set RuntimeMode to Custom to use a package-ordered same-origin runtime.");
+            }
+
+            return;
+        }
+
+        if (string.IsNullOrEmpty(turbo.CustomPath))
+        {
+            failures.Add("RazorWireOptions.Turbo.CustomPath is required when RuntimeMode is Custom.");
+            return;
+        }
+
+        if (!IsValidCustomTurboPath(turbo.CustomPath))
+        {
+            failures.Add(
+                "RazorWireOptions.Turbo.CustomPath must begin with exactly one '/' and contain only ASCII letters, digits, " +
+                "'/', '.', '_', '-', or '~', with no '.' or '..' path segments.");
+        }
+    }
+
+    internal static bool IsValidCustomTurboPath(string path)
+    {
+        if (path[0] != '/' || (path.Length > 1 && path[1] == '/'))
+        {
+            return false;
+        }
+
+        for (var index = 1; index < path.Length; index++)
+        {
+            var character = path[index];
+            if (!((character >= 'a' && character <= 'z')
+                  || (character >= 'A' && character <= 'Z')
+                  || (character >= '0' && character <= '9')
+                  || character is '/' or '.' or '_' or '-' or '~'))
+            {
+                return false;
+            }
+        }
+
+        return !path[1..].Split('/').Any(segment => segment is "." or "..");
     }
 
     private static void ValidateBasePath(string? basePath, ICollection<string> failures)

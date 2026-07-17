@@ -37,6 +37,7 @@ The root `assets:typecheck`, `assets:test`, `assets:build`, and `assets:verify` 
 - `assets/src/form-interactions.ts` is the authored source for the lazy form-interactions runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js`.
 - `assets/src/behavior-kit.ts` is the authored source for the eager native behavior-kit runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js`.
 - `wwwroot/razorwire/razorwire.js`, `wwwroot/razorwire/razorwire.islands.js`, `wwwroot/razorwire/page-navigation.js`, `wwwroot/razorwire/section-copy.js`, `wwwroot/razorwire/form-interactions.js`, and `wwwroot/razorwire/behavior-kit.js` are generated, minified, committed package outputs. Do not edit them by hand.
+- `node_modules/@hotwired/turbo/dist/turbo.es2017-umd.js` from the exact `@hotwired/turbo` 8.0.12 dependency is the upstream source for `wwwroot/razorwire/turbo.es2017-umd.js`. The build verifies the package name, version, `main` entry, and approved SHA-256 digest before making a byte-for-byte copy. It is a copied third-party output, not an esbuild-generated first-party bundle; do not edit or re-minify it.
 - `assets/contracts/razorwire-public-contracts.js` is a docs-only manifest for AppSurface Docs JavaScript API harvesting. It documents browser contracts without forcing the harvester to parse generated runtime bundles.
 - `wwwroot/razorwire/exampleJsInterop.js` remains hand-authored, demo-only JavaScript. It is not part of the generated runtime pipeline.
 
@@ -75,6 +76,7 @@ Current diagnostics:
 - `RWASSET001`: Node.js could not start the asset verifier.
 - `RWASSET002`: a generated asset exceeded its raw or gzip budget.
 - `RWASSET003`: generated package outputs changed when rebuilt from `assets/src`.
+- `RWASSET004`: the pinned Turbo package, declared UMD entry, approved digest, copy operation, or committed copied output failed custody verification.
 - `RWPACK001`: `dotnet pack` refused to embed stale or unverifiable generated runtime assets.
 
 ## Pack Guard
@@ -92,6 +94,7 @@ Treat that property as an incident escape hatch. Re-run the asset verifier and r
 ## Pitfalls
 
 - Do not commit TypeScript source changes without regenerated `wwwroot/razorwire/*.js` outputs.
+- Do not edit, banner, minify, or otherwise transform `turbo.es2017-umd.js`; update its pinned dependency, digest, notice, and custody tests together when upgrading Turbo.
 - Do not change public strategy taxonomy from `only` to `immediate`; existing docs and generated UI use `only`.
 - Do not enable source maps by default. Package consumers should receive compact runtime assets without source-map sidecars.
 - Do not move AppSurface Docs harvesting back to minified runtime outputs. Update `assets/contracts/razorwire-public-contracts.js` when the public JavaScript contract changes.

@@ -57,6 +57,20 @@ public class ReactivityController : Controller
     }
 
     /// <summary>
+    /// Renders a dependency-free browser proof for RazorWire's bundled Turbo runtime.
+    /// </summary>
+    /// <param name="state">The proof state. Only <c>second</c> selects the second state; every other value selects the first.</param>
+    /// <returns>The deterministic runtime proof view.</returns>
+    public IActionResult DeterministicRuntime(string state = "first")
+    {
+        ViewData["DeterministicRuntimeState"] = string.Equals(state, "second", StringComparison.Ordinal)
+            ? "second"
+            : "first";
+
+        return View();
+    }
+
+    /// <summary>
     /// Renders the sidebar inside a RazorWire frame with the ID "permanent-island".
     /// </summary>
     /// <returns>An <see cref="IActionResult"/> that produces the RazorWire frame containing the sidebar content.</returns>
