@@ -269,7 +269,12 @@ public sealed class DurableScheduleClientContractTests
 
         Assert.Empty(result.Schedules);
         Assert.Equal("next", result.ContinuationToken);
+        Assert.Null(new DurableScheduleListResult([], null).ContinuationToken);
         Assert.Throws<ArgumentNullException>(() => new DurableScheduleListResult(null!, null));
+        Assert.Throws<ArgumentException>(() => new DurableScheduleListResult([], "bad token"));
+
+        var nextRequest = new DurableScheduleListRequest(ScopeId, continuationToken: result.ContinuationToken);
+        Assert.Equal(result.ContinuationToken, nextRequest.ContinuationToken);
     }
 
     [Fact]
@@ -444,6 +449,27 @@ public sealed class DurableScheduleClientContractTests
             CronDialect.CronosV1,
             CronGrammar.Standard,
             "UTC"));
+        Assert.Throws<ArgumentException>(() => new DurableScheduleExplanation(
+            ScheduleId,
+            DurableScheduleKind.At,
+            ScheduleOverlapPolicy.QueueOne,
+            ScheduleMisfirePolicy.RunOnce,
+            [],
+            cronDialect: CronDialect.CronosV1));
+        Assert.Throws<ArgumentException>(() => new DurableScheduleExplanation(
+            ScheduleId,
+            DurableScheduleKind.At,
+            ScheduleOverlapPolicy.QueueOne,
+            ScheduleMisfirePolicy.RunOnce,
+            [],
+            cronGrammar: CronGrammar.Standard));
+        Assert.Throws<ArgumentException>(() => new DurableScheduleExplanation(
+            ScheduleId,
+            DurableScheduleKind.At,
+            ScheduleOverlapPolicy.QueueOne,
+            ScheduleMisfirePolicy.RunOnce,
+            [],
+            ianaTimeZoneId: "UTC"));
         Assert.Throws<ArgumentNullException>(() => new DurableScheduleExplanation(
             ScheduleId,
             DurableScheduleKind.At,

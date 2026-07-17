@@ -67,7 +67,7 @@ internal static class DurableCommandFingerprints
     /// new <paramref name="schemaId"/> so persisted fingerprints are never compared under incompatible semantics.
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when <paramref name="schemaId"/> is invalid.</exception>
-    /// <exception cref="NotSupportedException">Thrown when a value type has no canonical encoding.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when a value type has no canonical encoding.</exception>
     internal static DurableCommandFingerprint Create(string schemaId, params object?[] values)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);

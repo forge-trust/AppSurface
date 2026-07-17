@@ -612,11 +612,15 @@ public sealed record DurableScheduleListItem
 public sealed record DurableScheduleListResult
 {
     /// <summary>Initializes a list result.</summary>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="continuationToken"/> is invalid.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="schedules"/> is null.</exception>
     public DurableScheduleListResult(IReadOnlyList<DurableScheduleListItem> schedules, string? continuationToken)
     {
         ArgumentNullException.ThrowIfNull(schedules);
         Schedules = Array.AsReadOnly(schedules.ToArray());
-        ContinuationToken = continuationToken;
+        ContinuationToken = continuationToken is null
+            ? null
+            : DurableIdentifier.Require(continuationToken, nameof(continuationToken), 200);
     }
 
     /// <summary>Gets the immutable page of payload-free schedule inventory items.</summary>
@@ -705,8 +709,10 @@ public sealed record DurableScheduleExplanation
             throw new ArgumentOutOfRangeException(nameof(cronGrammar));
         }
 
+        var hasAnyCronMetadata = cronDialect is not null || cronGrammar is not null || ianaTimeZoneId is not null;
         var hasCompleteCronMetadata = cronDialect is not null && cronGrammar is not null && ianaTimeZoneId is not null;
-        if ((kind == DurableScheduleKind.Cron) != hasCompleteCronMetadata)
+        if ((kind == DurableScheduleKind.Cron && !hasCompleteCronMetadata)
+            || (kind != DurableScheduleKind.Cron && hasAnyCronMetadata))
         {
             throw new ArgumentException(
                 "Cron explanations require dialect, grammar, and IANA time zone metadata; non-cron explanations must omit them.");

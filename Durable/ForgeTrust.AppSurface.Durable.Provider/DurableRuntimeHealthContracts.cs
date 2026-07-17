@@ -55,7 +55,7 @@ public sealed record DurableRuntimeHealthSnapshot
     /// <paramref name="problemCode" />, when present, is limited to 120 characters. <paramref name="workerId" /> is
     /// required and limited to 200 characters. Both use the durable identifier alphabet described on this type.
     /// </remarks>
-    /// <exception cref="ArgumentException">Thrown when identifiers, epochs, surfaces, or due-state fields are incoherent.</exception>
+    /// <exception cref="ArgumentException">Thrown when identifiers or epochs are invalid.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when an enum, version, count, or age is invalid.</exception>
     public DurableRuntimeHealthSnapshot(
         DurableRuntimeHealthState state,

@@ -68,15 +68,23 @@ public sealed class DurableWorkerExecutionIdentityTests
             correlation,
             "result");
         var identity = DurableWorkerExecutionIdentity.CreateInitial("activity", 1, 1, "epoch");
-        var native = new DurableWorkerEnvelope<string>(
+        var legacyWithExplicitNullMetadata = new DurableWorkerEnvelope<string>(
             DurableWorkerProjectionOutcome.Completed,
             "applied",
             DurableWorkerRetryability.Terminal,
             correlation,
             "result",
-            executionIdentity: identity);
+            null);
+        var native = DurableWorkerEnvelope<string>.CreateNative(
+            DurableWorkerProjectionOutcome.Completed,
+            "applied",
+            DurableWorkerRetryability.Terminal,
+            correlation,
+            identity,
+            payload: "result");
 
         Assert.Null(legacy.ExecutionIdentity);
+        Assert.Null(legacyWithExplicitNullMetadata.ExecutionIdentity);
         Assert.Same(identity, native.ExecutionIdentity);
     }
 
@@ -85,13 +93,13 @@ public sealed class DurableWorkerExecutionIdentityTests
     {
         var correlation = new DurableWorkerCorrelation("worker", "work", "instance", "attempt");
 
-        var error = Assert.Throws<ArgumentNullException>(() => new DurableWorkerEnvelope<string>(
+        var error = Assert.Throws<ArgumentNullException>(() => DurableWorkerEnvelope<string>.CreateNative(
             DurableWorkerProjectionOutcome.Completed,
             "applied",
             DurableWorkerRetryability.Terminal,
             correlation,
-            "result",
-            executionIdentity: null!));
+            executionIdentity: null!,
+            payload: "result"));
 
         Assert.Equal("executionIdentity", error.ParamName);
     }
@@ -121,5 +129,9 @@ public sealed class DurableWorkerExecutionIdentityTests
         var error = Assert.Throws<ArgumentException>(() => identity.Advance(1, 3, 4, "epoch"));
 
         Assert.Null(error.ParamName);
+        Assert.Contains("runtime epoch", error.Message, StringComparison.Ordinal);
+
+        var nextEpoch = identity.Advance(1, 3, 4, "next-epoch");
+        Assert.Equal("next-epoch", nextEpoch.RuntimeEpoch);
     }
 }

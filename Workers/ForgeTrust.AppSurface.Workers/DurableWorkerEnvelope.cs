@@ -21,8 +21,9 @@ public sealed record DurableWorkerEnvelope<TPayload>
     /// <param name="metadata">Optional privacy-safe metadata.</param>
     /// <param name="diagnostic">Optional safe diagnostic.</param>
     /// <remarks>
-    /// This exact seven-parameter overload is retained for already-compiled adapters. Native runtimes use the overload
-    /// that also supplies <see cref="DurableWorkerExecutionIdentity"/>.
+    /// This exact seven-parameter constructor is retained for already-compiled adapters. Native runtimes use
+    /// <see cref="CreateNative"/> to supply <see cref="DurableWorkerExecutionIdentity"/> without creating an ambiguous
+    /// constructor overload for source consumers.
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when required text or metadata is invalid.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="correlation"/> is null.</exception>
@@ -41,30 +42,31 @@ public sealed record DurableWorkerEnvelope<TPayload>
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="DurableWorkerEnvelope{TPayload}"/> class.
+    /// Creates a native-runtime envelope with required execution and fencing identity.
     /// </summary>
     /// <param name="outcome">Defined observable worker outcome.</param>
     /// <param name="reasonCode">Stable machine-readable reason code that is sanitized with diagnostic-text safety rules.</param>
     /// <param name="retryability">Defined retry classification for the outcome.</param>
     /// <param name="correlation">Correlation identifiers for the operation.</param>
-    /// <param name="payload">Optional typed payload associated with the outcome.</param>
     /// <param name="executionIdentity">Required native-runtime execution and fencing identity.</param>
+    /// <param name="payload">Optional typed payload associated with the outcome.</param>
     /// <param name="metadata">Optional safe metadata values.</param>
     /// <param name="diagnostic">Optional safe diagnostic details.</param>
+    /// <returns>A validated native-runtime envelope.</returns>
     /// <exception cref="ArgumentException">Thrown when required text or metadata is invalid.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="correlation"/> or <paramref name="executionIdentity"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="outcome"/> or <paramref name="retryability"/> is not defined.</exception>
     /// <exception cref="DurableWorkerUnsafeMetadataException">Thrown when metadata appears unsafe.</exception>
-    public DurableWorkerEnvelope(
+    public static DurableWorkerEnvelope<TPayload> CreateNative(
         DurableWorkerProjectionOutcome outcome,
         string reasonCode,
         DurableWorkerRetryability retryability,
         DurableWorkerCorrelation correlation,
-        TPayload? payload,
         DurableWorkerExecutionIdentity executionIdentity,
+        TPayload? payload = default,
         IReadOnlyDictionary<string, string>? metadata = null,
-        DurableWorkerDiagnostic? diagnostic = null)
-        : this(
+        DurableWorkerDiagnostic? diagnostic = null) =>
+        new(
             outcome,
             reasonCode,
             retryability,
@@ -73,9 +75,7 @@ public sealed record DurableWorkerEnvelope<TPayload>
             metadata,
             diagnostic,
             executionIdentity ?? throw new ArgumentNullException(nameof(executionIdentity)),
-            initialize: true)
-    {
-    }
+            initialize: true);
 
     private DurableWorkerEnvelope(
         DurableWorkerProjectionOutcome outcome,

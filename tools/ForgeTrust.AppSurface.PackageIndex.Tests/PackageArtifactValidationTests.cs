@@ -277,6 +277,54 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task PublishPlanResolver_OmitsHeldPublicToolWithoutRequiringCommandName()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 5
+                use_when: Build a web app.
+                includes: Web host.
+                does_not_include: Preview tooling.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Cli/ForgeTrust.AppSurface.Preview/ForgeTrust.AppSurface.Preview.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: Held until provider conformance evidence is available.
+                order: 10
+                use_when: Exercise source-only preview tooling.
+                includes: Preview command contracts.
+                does_not_include: A published tool.
+                start_here_path: Cli/ForgeTrust.AppSurface.Preview/README.md
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Preview/ForgeTrust.AppSurface.Preview.csproj", "<Project />");
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Preview/README.md", "# Preview tool");
+        var resolver = CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Cli/ForgeTrust.AppSurface.Preview/ForgeTrust.AppSurface.Preview.csproj"] = CreateMetadata(
+                "Cli/ForgeTrust.AppSurface.Preview/ForgeTrust.AppSurface.Preview.csproj",
+                "ForgeTrust.AppSurface.Preview",
+                isTool: true)
+        });
+
+        var plan = await resolver.ResolveAsync(_repositoryRoot, ManifestPath, CancellationToken.None);
+
+        var published = Assert.Single(plan.Entries);
+        Assert.Equal("ForgeTrust.AppSurface.Web", published.PackageId);
+        Assert.DoesNotContain(plan.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Preview");
+    }
+
+    [Fact]
     public async Task DurablePublicationHold_OmitsBothPublicPreviewPackagesFromPublishPlan()
     {
         await WriteFileAsync("packages/package-index.yml",

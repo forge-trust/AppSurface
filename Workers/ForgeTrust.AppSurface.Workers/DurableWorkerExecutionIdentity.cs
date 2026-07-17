@@ -120,7 +120,7 @@ public sealed record DurableWorkerExecutionIdentity
             && scopeGeneration == ScopeGeneration
             && string.Equals(runtimeEpoch, RuntimeEpoch, StringComparison.Ordinal))
         {
-            throw new ArgumentException("An advanced execution identity must change an attempt or fence generation.");
+            throw new ArgumentException("An advanced execution identity must change an attempt, fence generation, or runtime epoch.");
         }
 
         return new(

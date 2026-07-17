@@ -278,13 +278,13 @@ public sealed class DurableWorkRegistration<TWork, TResult, TExecutor> : Durable
             work.WorkId.Value,
             executionIdentity.ActivityId,
             $"{executionIdentity.AttemptNumber}:{executionIdentity.LeaseGeneration}");
-        return new DurableWorkerEnvelope<TWork>(
+        return DurableWorkerEnvelope<TWork>.CreateNative(
             DurableWorkerProjectionOutcome.Claimed,
             "durable.claimed",
             DurableWorkerRetryability.Retryable,
             correlation,
-            payload,
-            executionIdentity: executionIdentity);
+            executionIdentity,
+            payload);
     }
 
     private sealed class PreparedInvocation(

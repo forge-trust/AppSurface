@@ -100,6 +100,16 @@ public sealed class DurableContractTests
             "work.test", "v1", DurableDataClassification.Operational, new byte[] { 1, 2, 4 }));
         Assert.NotEqual(first, new DurableEncodedPayload(
             "other.test", "v1", DurableDataClassification.Operational, new byte[] { 1, 2, 3 }));
+        Assert.NotEqual(first, new DurableEncodedPayload(
+            "work.test", "v2", DurableDataClassification.Operational, new byte[] { 1, 2, 3 }));
+        Assert.NotEqual(first, new DurableEncodedPayload(
+            "work.test", "v1", DurableDataClassification.ApprovedApplication, new byte[] { 1, 2, 3 }));
+        Assert.NotEqual(first, new DurableEncodedPayload(
+            "work.test",
+            "v1",
+            DurableDataClassification.Operational,
+            new byte[] { 1, 2, 3 },
+            "other-retention"));
 
         var exposedCopy = equivalent.Content.ToArray();
         exposedCopy[0] = 9;

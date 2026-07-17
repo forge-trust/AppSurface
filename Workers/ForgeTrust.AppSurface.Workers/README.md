@@ -41,7 +41,8 @@ terminal-fact authority.
 ## Native execution identity
 
 `DurableWorkerEnvelope<TPayload>.ExecutionIdentity` is optional for compatibility with existing adapters. The native
-runtime always supplies it before provider I/O. Its `ActivityId` and `ProviderKey` remain stable across retries; its
+runtime creates envelopes with `DurableWorkerEnvelope<TPayload>.CreateNative` and always supplies the identity before
+provider I/O. Its `ActivityId` and `ProviderKey` remain stable across retries; its
 `AttemptNumber`, `LeaseGeneration`, `ScopeGeneration`, and `RuntimeEpoch` fence one exact execution observation.
 
 Do not derive a provider idempotency key from `Correlation.AttemptId`, an attempt number, or a lease generation. Doing
