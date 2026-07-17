@@ -408,6 +408,23 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Core
+  - project: Web/ForgeTrust.AppSurface.Web.Push/ForgeTrust.AppSurface.Web.Push.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 75
+    use_when: Add this after the base Web package when an app wants standards-based Web Push with protected subscription intake and app-owned custody.
+    includes: Exact push-service origin allowlisting, validated retained VAPID keys, cookie-antiforgery or explicit-scheme bearer endpoint mapping, gesture-safe browser subscription, one-attempt encrypted sending, safe response classification, and conditional 404/410 cleanup.
+    does_not_include: Identity, tenants, persistence, audiences, preferences, campaigns, scheduling, fan-out, retries, hosted provider abstraction, delivery proof, readiness scoring, or telemetry.
+    start_here_path: Web/ForgeTrust.AppSurface.Web.Push/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Web.Push` when the shared PWA worker needs a protected standards-based subscription and delivery rail while the host retains product policy and storage.
+    depends_on:
+      - ForgeTrust.AppSurface.Web
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Web
   - project: Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj
     classification: public
     publish_decision: publish

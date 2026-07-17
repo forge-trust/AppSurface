@@ -1,6 +1,6 @@
 # AppSurface Web PWA Worker Foundation Proof
 
-This example shows the AppSurface Web install, offline, and push-worker foundation without adding a separate package. Its explicit registration button proves browser worker activation while deliberately leaving notification permission, push subscription, and delivery unconfigured.
+This example shows the AppSurface Web install, offline, and shared push-worker foundation. Without external keys, its registration button proves worker activation while leaving permission, subscription, and delivery unconfigured. In Development, externally configured keys activate the optional [`ForgeTrust.AppSurface.Web.Push`](../../Web/ForgeTrust.AppSurface.Web.Push/README.md) proof card with DevAuth personas, in-memory app-owned custody, direct-gesture subscription, and a truthful example-only protected host action.
 
 ```bash
 dotnet run --project examples/web-pwa-install/WebPwaInstallExample.csproj -- --environment Development --port 5055
@@ -34,6 +34,24 @@ The script writes CI-friendly verifier evidence to `examples/web-pwa-install/pwa
 - `/service-worker.js` combines the opted-in offline and push handlers.
 - `<appsurface:pwa-head />` loads the inert registration helper when push is enabled.
 - The proof card loads its state machine from a content-versioned static asset and calls only `window.AppSurface.Pwa.register()`. It never requests permission, subscribes through `PushManager`, or sends a notification.
+- With explicit external Web Push configuration, the Development-only safe-rail card manually demonstrates Admin policy success, Viewer rejection, cookie antiforgery, app-owned custody, and gesture-bound subscribe/unsubscribe behavior. Its protected host action runs the package sender against the Development-only proof transport; it makes no network request and claims no browser delivery.
+
+## Optional Web Push safe-rail proof
+
+Generate a key pair only through the explicit example command, then store it outside the repository:
+
+```bash
+dotnet run --project examples/web-pwa-install -- --generate-vapid-keys
+dotnet user-secrets init --project examples/web-pwa-install
+dotnet user-secrets set --project examples/web-pwa-install WebPush:Keys:Primary:PublicKey "<public>"
+dotnet user-secrets set --project examples/web-pwa-install WebPush:Keys:Primary:PrivateKey "<private>"
+dotnet user-secrets set --project examples/web-pwa-install WebPush:Keys:Primary:Subject "mailto:push@example.test"
+dotnet user-secrets set --project examples/web-pwa-install WebPush:AllowedPushServiceOrigins:0 "https://fcm.googleapis.com"
+```
+
+Use the browser-specific exact origin: Chromium commonly uses `https://fcm.googleapis.com`, Firefox uses `https://updates.push.services.mozilla.com`, and Safari uses `https://web.push.apple.com`. Review and add a changed vendor origin explicitly; never use an arbitrary-HTTPS fallback.
+
+Run in Development, open `/_appsurface/dev-auth/`, select **Push Admin**, and return to `/`. **Enable notifications** is the only action that may prompt. The Viewer persona receives `403`. Subscription custody is persona-keyed and process-local. **Run protected host-action proof** invokes the package sender against a deterministic Development-only HTTP 201 proof transport while the separate **Push delivery** row remains `Not proven`; no network request or browser delivery occurs. Never use the sample custody, proof transport, or DevAuth implementation in production.
 
 ## Configuration
 

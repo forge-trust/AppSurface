@@ -183,6 +183,9 @@ test('view loads the exact proof script as a versioned external asset', async ()
   assert.match(view, /PwaOptions\.Enabled/u);
   assert.match(view, /PwaOptions\.Offline\.Enabled/u);
   assert.match(view, /PwaOptions\.Push\.Enabled/u);
+  assert.match(view, /var devAuthPath = Url\.Content\("~\/_appsurface\/dev-auth\/"\)/u);
+  assert.match(view, /data-endpoint="@Url\.Content\("~\/account\/push-subscriptions"\)"/u);
+  assert.match(view, />Unsubscribe<\/button>/u);
 });
 
 test('initializing remains visible until DOM readiness, then transitions to ready', async () => {

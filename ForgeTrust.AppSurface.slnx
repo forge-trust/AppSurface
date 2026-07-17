@@ -124,6 +124,8 @@
     <Project Path="tests/ForgeTrust.AppSurface.Testing.Tests/ForgeTrust.AppSurface.Testing.Tests.csproj" />
   </Folder>
   <Folder Name="/Web/">
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Push.Tests/ForgeTrust.AppSurface.Web.Push.Tests.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Push/ForgeTrust.AppSurface.Web.Push.csproj" />
     <Project Path="Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj" />
     <Project Path="Web/ForgeTrust.RazorWire.Auth.AspNetCore.Tests/ForgeTrust.RazorWire.Auth.AspNetCore.Tests.csproj" />
     <Project Path="Web/ForgeTrust.RazorWire.Auth.AspNetCore/ForgeTrust.RazorWire.Auth.AspNetCore.csproj" />

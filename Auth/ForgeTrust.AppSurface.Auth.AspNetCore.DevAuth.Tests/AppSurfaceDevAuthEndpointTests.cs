@@ -68,6 +68,139 @@ public sealed class AppSurfaceDevAuthEndpointTests
     }
 
     [Fact]
+    public void BuildMutationUrl_WithoutReturnUrl_ReturnsBareAction()
+    {
+        var action = AppSurfaceDevAuthEndpointRouteBuilderExtensions.BuildMutationUrl(
+            "/_appsurface/dev-auth",
+            "select/admin",
+            returnUrl: null);
+
+        Assert.Equal("/_appsurface/dev-auth/select/admin", action);
+    }
+
+    [Fact]
+    public void BuildMutationUrl_WithReturnUrl_AppendsOneUriEscapedValue()
+    {
+        var action = AppSurfaceDevAuthEndpointRouteBuilderExtensions.BuildMutationUrl(
+            "/_appsurface/dev-auth",
+            "clear",
+            "/protected?tab=auth&mode=full");
+
+        Assert.Equal(
+            "/_appsurface/dev-auth/clear?returnUrl=%2Fprotected%3Ftab%3Dauth%26mode%3Dfull",
+            action);
+    }
+
+    [Fact]
+    public async Task ControlPage_WithSafeReturnUrl_RendersTargetOnEveryMutationAction()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/", HttpMethods.Get);
+        var context = CreateContext(app.Services);
+        context.Request.QueryString = QueryString.Create("returnUrl", "/protected?tab=auth&mode=full");
+
+        await endpoint.RequestDelegate!(context);
+
+        var html = await ReadBodyAsync(context);
+        const string encodedReturnUrl = "%2Fprotected%3Ftab%3Dauth%26mode%3Dfull";
+        Assert.Contains($"action=\"/_appsurface/dev-auth/select/admin?returnUrl={encodedReturnUrl}\"", html, StringComparison.Ordinal);
+        Assert.Contains($"action=\"/_appsurface/dev-auth/select/viewer?returnUrl={encodedReturnUrl}\"", html, StringComparison.Ordinal);
+        Assert.Contains($"action=\"/_appsurface/dev-auth/clear?returnUrl={encodedReturnUrl}\"", html, StringComparison.Ordinal);
+        Assert.Equal(3, CountOccurrences(html, "returnUrl="));
+    }
+
+    [Fact]
+    public async Task ControlPage_WithRootReturnUrl_PreservesExplicitRoot()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/", HttpMethods.Get);
+        var context = CreateContext(app.Services);
+        context.Request.QueryString = QueryString.Create("returnUrl", "/");
+
+        await endpoint.RequestDelegate!(context);
+
+        var html = await ReadBodyAsync(context);
+        Assert.Contains("action=\"/_appsurface/dev-auth/select/admin?returnUrl=%2F\"", html, StringComparison.Ordinal);
+        Assert.Contains("action=\"/_appsurface/dev-auth/select/viewer?returnUrl=%2F\"", html, StringComparison.Ordinal);
+        Assert.Contains("action=\"/_appsurface/dev-auth/clear?returnUrl=%2F\"", html, StringComparison.Ordinal);
+        Assert.Equal(3, CountOccurrences(html, "returnUrl=%2F"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("?returnUrl=")]
+    [InlineData("?returnUrl=%20%20")]
+    public async Task ControlPage_WithoutUsableReturnUrl_RendersBareMutationActions(string queryString)
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/", HttpMethods.Get);
+        var context = CreateContext(app.Services);
+        context.Request.QueryString = new QueryString(queryString);
+
+        await endpoint.RequestDelegate!(context);
+
+        var html = await ReadBodyAsync(context);
+        AssertBareMutationActions(html, "/_appsurface/dev-auth");
+    }
+
+    [Theory]
+    [InlineData("?returnUrl=dashboard")]
+    [InlineData("?returnUrl=https%3A%2F%2Fexample.com%2F")]
+    [InlineData("?returnUrl=%2F%2Fexample.com%2F")]
+    [InlineData("?returnUrl=%2F%5Cexample.com")]
+    [InlineData("?returnUrl=%2Fsafe%5Cevil")]
+    [InlineData("?returnUrl=%2Fsafe%0Aevil")]
+    public async Task ControlPage_WithRejectedReturnUrl_RendersBareMutationActions(string queryString)
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/", HttpMethods.Get);
+        var context = CreateContext(app.Services);
+        context.Request.QueryString = new QueryString(queryString);
+
+        await endpoint.RequestDelegate!(context);
+
+        var html = await ReadBodyAsync(context);
+        AssertBareMutationActions(html, "/_appsurface/dev-auth");
+    }
+
+    [Fact]
+    public async Task ControlPage_WithCustomPathPrefixAndSafeReturnUrl_ComposesExactActions()
+    {
+        await using var app = BuildApp(options =>
+        {
+            options.PathPrefix = "/local/personas";
+            AddDefaultPersonas(options);
+        });
+        var endpoint = FindEndpoint(app, "/local/personas/", HttpMethods.Get);
+        var context = CreateContext(app.Services);
+        context.Request.QueryString = QueryString.Create("returnUrl", "/protected");
+
+        await endpoint.RequestDelegate!(context);
+
+        var html = await ReadBodyAsync(context);
+        Assert.Contains("action=\"/local/personas/select/admin?returnUrl=%2Fprotected\"", html, StringComparison.Ordinal);
+        Assert.Contains("action=\"/local/personas/select/viewer?returnUrl=%2Fprotected\"", html, StringComparison.Ordinal);
+        Assert.Contains("action=\"/local/personas/clear?returnUrl=%2Fprotected\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ControlPage_WithHtmlSensitiveSafeReturnUrl_EscapesBeforeEncodingActionAttribute()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/", HttpMethods.Get);
+        var context = CreateContext(app.Services);
+        context.Request.QueryString = QueryString.Create("returnUrl", "/protected?note=\"<x>&mode=1");
+
+        await endpoint.RequestDelegate!(context);
+
+        var html = await ReadBodyAsync(context);
+        const string encodedReturnUrl = "%2Fprotected%3Fnote%3D%22%3Cx%3E%26mode%3D1";
+        Assert.Contains($"action=\"/_appsurface/dev-auth/select/admin?returnUrl={encodedReturnUrl}\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("note=\"<x>", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("%252Fprotected", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Marker_RendersPersistentOverlayControlsWithCurrentReturnUrl()
     {
         using var app = BuildApp();
@@ -88,8 +221,29 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains("<details class=\"appsurface-dev-auth-marker__details\">", html, StringComparison.Ordinal);
         Assert.Contains("<summary class=\"appsurface-dev-auth-marker__summary\">", html, StringComparison.Ordinal);
         Assert.Contains("/_appsurface/dev-auth/select/admin?returnUrl=%2Fdashboard%3Ftab%3Dauth", html, StringComparison.Ordinal);
+        Assert.Contains("/_appsurface/dev-auth/select/viewer?returnUrl=%2Fdashboard%3Ftab%3Dauth", html, StringComparison.Ordinal);
+        Assert.Contains("/_appsurface/dev-auth/clear?returnUrl=%2Fdashboard%3Ftab%3Dauth", html, StringComparison.Ordinal);
         Assert.Contains("Open persona lab", html, StringComparison.Ordinal);
         Assert.Contains("Status JSON", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Marker_WithUnsafeConfiguredReturnUrl_NormalizesMutationActionsToRoot()
+    {
+        using var app = BuildApp();
+        var context = CreateContext(app.Services);
+
+        var html = AppSurfaceDevAuthMarker.Render(
+            context,
+            app.Services.GetRequiredService<IHostEnvironment>(),
+            app.Services.GetRequiredService<IOptions<AppSurfaceDevAuthOptions>>(),
+            app.Services.GetRequiredService<IDataProtectionProvider>(),
+            options => options.ReturnUrl = "https://example.com/");
+
+        Assert.Contains("/_appsurface/dev-auth/select/admin?returnUrl=%2F", html, StringComparison.Ordinal);
+        Assert.Contains("/_appsurface/dev-auth/select/viewer?returnUrl=%2F", html, StringComparison.Ordinal);
+        Assert.Contains("/_appsurface/dev-auth/clear?returnUrl=%2F", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("example.com", html, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -612,6 +766,23 @@ public sealed class AppSurfaceDevAuthEndpointTests
     }
 
     [Fact]
+    public async Task ClearPersona_WithExternalReturnUrl_RendersControlPageInsteadOfRedirecting()
+    {
+        await using var app = BuildApp();
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/clear", HttpMethods.Post);
+        var context = CreateContext(app.Services);
+        context.Request.QueryString = new QueryString("?returnUrl=https%3A%2F%2Fexample.com%2F");
+
+        await endpoint.RequestDelegate!(context);
+
+        var html = await ReadBodyAsync(context);
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.True(context.Response.Headers.Location.Count == 0, "External return URLs must not redirect.");
+        Assert.Contains("DEV AUTH: Anonymous (AppSurface.DevAuth)", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("returnUrl=", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ClearPersona_WithCrossSiteFetchMetadata_RejectsWithoutCookieMutation()
     {
         await using var app = BuildApp();
@@ -972,5 +1143,26 @@ public sealed class AppSurfaceDevAuthEndpointTests
         context.Response.Body.Position = 0;
         using var reader = new StreamReader(context.Response.Body, leaveOpen: true);
         return await reader.ReadToEndAsync();
+    }
+
+    private static void AssertBareMutationActions(string html, string pathPrefix)
+    {
+        Assert.Contains($"action=\"{pathPrefix}/select/admin\"", html, StringComparison.Ordinal);
+        Assert.Contains($"action=\"{pathPrefix}/select/viewer\"", html, StringComparison.Ordinal);
+        Assert.Contains($"action=\"{pathPrefix}/clear\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("returnUrl=", html, StringComparison.Ordinal);
+    }
+
+    private static int CountOccurrences(string value, string searchValue)
+    {
+        var count = 0;
+        var startIndex = 0;
+        while ((startIndex = value.IndexOf(searchValue, startIndex, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            startIndex += searchValue.Length;
+        }
+
+        return count;
     }
 }
