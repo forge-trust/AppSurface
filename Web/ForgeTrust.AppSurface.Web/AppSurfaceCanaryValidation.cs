@@ -77,6 +77,29 @@ internal static partial class AppSurfaceCanaryValidation
             tags.Add(tag);
         }
 
+        if (options.AllowedDetailKeys.Count > AppSurfaceCanaryResultValidation.MaximumDetails)
+        {
+            throw InvalidConfiguration(
+                $"At most {AppSurfaceCanaryResultValidation.MaximumDetails} allowed detail keys may be declared.");
+        }
+
+        var allowedDetailKeys = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var key in options.AllowedDetailKeys)
+        {
+            if (key is null)
+            {
+                throw InvalidConfiguration("Allowed detail keys must not be null.");
+            }
+
+            if (!AppSurfaceCanaryResultValidation.IsValidDetailKey(key))
+            {
+                throw InvalidConfiguration(
+                    "Allowed detail keys must be 1-64 lowercase ASCII characters in dot-separated letter, digit, and internal-hyphen segments.");
+            }
+
+            allowedDetailKeys.Add(key);
+        }
+
         return new AppSurfaceCanaryDescriptor(
             name,
             options.DisplayName,
@@ -84,6 +107,7 @@ internal static partial class AppSurfaceCanaryValidation
             tags.ToArray(),
             options.MarkerRequired,
             options.FreshSinceRequired,
+            allowedDetailKeys,
             evaluatorType);
     }
 

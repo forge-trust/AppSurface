@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Mime;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -10,6 +12,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.AppSurface.Web;
@@ -21,8 +24,9 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
 {
     private const string DocsLink = "https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints";
     private const int MaximumMarkerUtf8Bytes = 256;
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly EventId EvaluationFailureEvent = new(62301, "AppSurfaceCanaryEvaluationFailed");
-    private static readonly JsonSerializerOptions ResponseJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions ResponseJsonOptions = CreateResponseJsonOptions();
 
     /// <summary>
     /// Maps <c>GET /_appsurface/canaries/{name}</c> with a required host-owned authorization policy.
@@ -84,6 +88,9 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         }
 
         var responseMode = options.CompletedResponseMode;
+        var hostEnvironment = services.GetService<IHostEnvironment>();
+        var applicationName = NormalizeHostName(hostEnvironment?.ApplicationName);
+        var environmentName = NormalizeHostName(hostEnvironment?.EnvironmentName);
 
         _ = services.GetRequiredService<AppSurfaceCanaryRegistry>();
         var mappingState = services.GetRequiredService<AppSurfaceCanaryMappingState>();
@@ -99,7 +106,9 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
                 (Func<HttpContext, Task>)(httpContext => HandleRequestAsync(
                     httpContext,
                     responseMode,
-                    authorizationPolicyName)))
+                    authorizationPolicyName,
+                    applicationName,
+                    environmentName)))
             .WithDisplayName("AppSurface named canary evaluation")
             .WithMetadata(AppSurfaceCanaryRouteMetadata.Instance)
             .ExcludeFromDescription()
@@ -136,7 +145,9 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
     private static async Task HandleRequestAsync(
         HttpContext httpContext,
         AppSurfaceCanaryCompletedResponseMode responseMode,
-        string authorizationPolicyName)
+        string authorizationPolicyName,
+        string applicationName,
+        string environmentName)
     {
         var endpoint = httpContext.GetEndpoint();
         var hasRequiredPolicy = endpoint?.Metadata
@@ -185,6 +196,7 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         }
 
         AppSurfaceCanaryResult result;
+        var evaluationStarted = Stopwatch.GetTimestamp();
         try
         {
             result = await runner.EvaluateAsync(
@@ -220,13 +232,41 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         }
 
         var statusText = ToWireStatus(result.Status);
+        var ready = result.Status == AppSurfaceCanaryStatus.Pass;
+        var elapsedMilliseconds = Stopwatch.GetElapsedTime(evaluationStarted).TotalMilliseconds;
+        var markerFingerprint = marker is null ? null : CreateMarkerFingerprint(marker);
+        var normalizedFreshSince = freshSince?.ToUniversalTime();
+
+        CanaryEvaluationCompleted(
+            httpContext.RequestServices.GetRequiredService<ILogger<AppSurfaceCanaryEvaluationRunner>>(),
+            descriptor.Name,
+            statusText,
+            ready,
+            result.ObservedAt,
+            normalizedFreshSince,
+            result.MatchedCount,
+            elapsedMilliseconds,
+            applicationName,
+            environmentName);
+
         var statusCode = responseMode == AppSurfaceCanaryCompletedResponseMode.AlwaysOk
-            || result.Status == AppSurfaceCanaryStatus.Pass
+            || ready
                 ? StatusCodes.Status200OK
                 : StatusCodes.Status503ServiceUnavailable;
 
         await Results.Json(
-                new AppSurfaceCanaryResponse(name, statusText),
+                new AppSurfaceCanaryResponse(
+                    name,
+                    ready,
+                    statusText,
+                    markerFingerprint,
+                    normalizedFreshSince,
+                    result.ObservedAt,
+                    result.MatchedCount,
+                    result.ReasonCode,
+                    result.Summary,
+                    result.Details.Count == 0 ? null : result.Details,
+                    result.CorrelationId),
                 options: ResponseJsonOptions,
                 statusCode: statusCode,
                 contentType: $"{MediaTypeNames.Application.Json}; charset={Encoding.UTF8.WebName}")
@@ -242,7 +282,8 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
     /// <param name="problem">The safe 400 response when validation fails; otherwise <see langword="null"/>.</param>
     /// <returns>
     /// <see langword="true"/> when the optional value is absent or one valid value of at most 256 UTF-8 bytes is
-    /// present; otherwise <see langword="false"/>. Repeated values and control characters are rejected.
+    /// present; otherwise <see langword="false"/>. Repeated values, malformed Unicode, and control characters are
+    /// rejected.
     /// </returns>
     internal static bool TryReadMarker(
         HttpContext httpContext,
@@ -274,9 +315,17 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
             return false;
         }
 
-        if (marker is not null && Encoding.UTF8.GetByteCount(marker) > MaximumMarkerUtf8Bytes)
+        try
         {
-            problem = InvalidHeaderProblem("ASCAN202", "The marker exceeds the 256-byte limit.", "Send a marker of at most 256 UTF-8 bytes.");
+            if (marker is not null && StrictUtf8.GetByteCount(marker) > MaximumMarkerUtf8Bytes)
+            {
+                problem = InvalidHeaderProblem("ASCAN202", "The marker exceeds the 256-byte limit.", "Send a marker of at most 256 UTF-8 bytes.");
+                return false;
+            }
+        }
+        catch (EncoderFallbackException)
+        {
+            problem = InvalidHeaderProblem("ASCAN202", "The marker contains malformed Unicode.", "Send a marker containing well-formed Unicode scalar values.");
             return false;
         }
 
@@ -366,6 +415,22 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         httpContext.Response.Headers.Pragma = "no-cache";
     }
 
+    private static JsonSerializerOptions CreateResponseJsonOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        };
+        options.Converters.Add(new CanonicalUtcDateTimeOffsetConverter());
+        return options;
+    }
+
+    private static string NormalizeHostName(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "unknown" : value;
+
+    private static string CreateMarkerFingerprint(string marker) =>
+        $"sha256:{Convert.ToHexString(SHA256.HashData(StrictUtf8.GetBytes(marker))).ToLowerInvariant()}";
+
     /// <summary>Maps a defined canary status to its stable lowercase wire value.</summary>
     /// <param name="status">The status to map.</param>
     /// <returns>The stable JSON status text.</returns>
@@ -389,16 +454,92 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
             and not AccessViolationException
             and not AppDomainUnloadedException;
 
+    [LoggerMessage(
+        EventId = 62401,
+        Level = LogLevel.Information,
+        EventName = "AppSurfaceCanaryEvaluationCompleted",
+        Message = "Named canary {CanaryName} completed with status {CanaryStatus}; ready {Ready}; observed {ObservedAt}; fresh since {FreshSince}; matched {MatchedCount}; elapsed {ElapsedMilliseconds}; application {ApplicationName}; environment {EnvironmentName}.")]
+    private static partial void CanaryEvaluationCompleted(
+        ILogger logger,
+        string canaryName,
+        string canaryStatus,
+        bool ready,
+        DateTimeOffset? observedAt,
+        DateTimeOffset? freshSince,
+        int? matchedCount,
+        double elapsedMilliseconds,
+        string applicationName,
+        string environmentName);
+
     [GeneratedRegex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,7})?(?:Z|[+-]\\d{2}:\\d{2})$", RegexOptions.CultureInvariant)]
     private static partial Regex FreshSinceRegex();
 
-    private sealed class AppSurfaceCanaryResponse(string name, string status)
+    private sealed class AppSurfaceCanaryResponse(
+        string name,
+        bool ready,
+        string status,
+        string? markerFingerprint,
+        DateTimeOffset? freshSince,
+        DateTimeOffset? observedAt,
+        int? matchedCount,
+        string? reasonCode,
+        string? summary,
+        IReadOnlyDictionary<string, string>? details,
+        string? correlationId)
     {
         [JsonPropertyName("name")]
         public string Name { get; } = name;
 
+        [JsonPropertyName("ready")]
+        public bool Ready { get; } = ready;
+
         [JsonPropertyName("status")]
         public string Status { get; } = status;
+
+        [JsonPropertyName("markerFingerprint")]
+        public string? MarkerFingerprint { get; } = markerFingerprint;
+
+        [JsonPropertyName("freshSince")]
+        public DateTimeOffset? FreshSince { get; } = freshSince;
+
+        [JsonPropertyName("observedAt")]
+        public DateTimeOffset? ObservedAt { get; } = observedAt;
+
+        [JsonPropertyName("matchedCount")]
+        public int? MatchedCount { get; } = matchedCount;
+
+        [JsonPropertyName("reasonCode")]
+        public string? ReasonCode { get; } = reasonCode;
+
+        [JsonPropertyName("summary")]
+        public string? Summary { get; } = summary;
+
+        [JsonPropertyName("details")]
+        public IReadOnlyDictionary<string, string>? Details { get; } = details;
+
+        [JsonPropertyName("correlationId")]
+        public string? CorrelationId { get; } = correlationId;
+    }
+
+    private sealed class CanonicalUtcDateTimeOffsetConverter : JsonConverter<DateTimeOffset>
+    {
+        private const string Format = "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'";
+
+        public override DateTimeOffset Read(
+            ref Utf8JsonReader reader,
+            Type typeToConvert,
+            JsonSerializerOptions options) =>
+            DateTimeOffset.ParseExact(
+                reader.GetString() ?? throw new JsonException("A canary timestamp must be a JSON string."),
+                Format,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+
+        public override void Write(
+            Utf8JsonWriter writer,
+            DateTimeOffset value,
+            JsonSerializerOptions options) =>
+            writer.WriteStringValue(value.ToUniversalTime().ToString(Format, CultureInfo.InvariantCulture));
     }
 
     private sealed class AppSurfaceCanaryProblemResponse(

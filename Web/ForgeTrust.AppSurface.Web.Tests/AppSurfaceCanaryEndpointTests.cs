@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -367,7 +368,9 @@ public sealed class AppSurfaceCanaryEndpointTests
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(expectedStatusCode, response.StatusCode);
-        Assert.Equal($"{{\"name\":\"{Name}\",\"status\":\"{expectedWireStatus}\"}}", body);
+        Assert.Equal(
+            $"{{\"name\":\"{Name}\",\"ready\":{(status == AppSurfaceCanaryStatus.Pass ? "true" : "false")},\"status\":\"{expectedWireStatus}\"}}",
+            body);
         Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
         Assert.Equal("utf-8", response.Content.Headers.ContentType?.CharSet);
         AssertNoStore(response);
@@ -391,8 +394,182 @@ public sealed class AppSurfaceCanaryEndpointTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(
-            $"{{\"name\":\"{Name}\",\"status\":\"{expectedWireStatus}\"}}",
+            $"{{\"name\":\"{Name}\",\"ready\":{(status == AppSurfaceCanaryStatus.Pass ? "true" : "false")},\"status\":\"{expectedWireStatus}\"}}",
             await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Endpoint_EmitsFullyPopulatedEnvelopeWithCanonicalTimestampsAndExactMarkerFingerprint()
+    {
+        using var loggerProvider = new RecordingLoggerProvider();
+        var result = new AppSurfaceCanaryResult(
+            AppSurfaceCanaryStatus.Pending,
+            options =>
+            {
+                options.ObservedAt = new DateTimeOffset(2026, 7, 16, 0, 31, 2, 123, TimeSpan.FromHours(-4));
+                options.MatchedCount = 0;
+                options.ReasonCode = "proof-not-observed";
+                options.Summary = "No fresh matching proof observed yet.";
+                options.CorrelationId = "deploy-20260716-004006";
+                options.AddDetail("provider.region", "us-east");
+                options.AddDetail("proof.kind", "bounded-proof-kind");
+            });
+        await using var host = await StartHostAsync(
+            resultFactory: () => result,
+            allowedDetailKeys: ["proof.kind", "provider.region"],
+            loggerProvider: loggerProvider);
+        using var request = AuthorizedRequest(Route(Name));
+        request.Headers.Add(AppSurfaceCanaryHeaderNames.Marker, " marker-secret ");
+        request.Headers.Add(AppSurfaceCanaryHeaderNames.FreshSince, "2026-07-16T00:30:00-04:00");
+
+        using var response = await host.Client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(body);
+        var root = json.RootElement;
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(Name, root.GetProperty("name").GetString());
+        Assert.False(root.GetProperty("ready").GetBoolean());
+        Assert.Equal("pending", root.GetProperty("status").GetString());
+        Assert.Equal(
+            "sha256:6bd4a0d2fca0465d45b13c75065d55ad129f825d18b57d9cb56e20a259728315",
+            root.GetProperty("markerFingerprint").GetString());
+        Assert.Equal("2026-07-16T04:30:00.0000000Z", root.GetProperty("freshSince").GetString());
+        Assert.Equal("2026-07-16T04:31:02.1230000Z", root.GetProperty("observedAt").GetString());
+        Assert.Equal(0, root.GetProperty("matchedCount").GetInt32());
+        Assert.Equal("proof-not-observed", root.GetProperty("reasonCode").GetString());
+        Assert.Equal("No fresh matching proof observed yet.", root.GetProperty("summary").GetString());
+        Assert.Equal("deploy-20260716-004006", root.GetProperty("correlationId").GetString());
+        Assert.Equal(
+            ["proof.kind", "provider.region"],
+            root.GetProperty("details").EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal("bounded-proof-kind", root.GetProperty("details").GetProperty("proof.kind").GetString());
+        Assert.Equal("us-east", root.GetProperty("details").GetProperty("provider.region").GetString());
+        Assert.Equal("marker-secret", host.State.Context?.Marker);
+        Assert.DoesNotContain("marker-secret", body, StringComparison.Ordinal);
+        var completionLog = Assert.Single(loggerProvider.Entries, entry => entry.EventId.Id == 62401);
+        Assert.Equal(result.ObservedAt, completionLog.State["ObservedAt"]);
+        Assert.Equal(0, completionLog.State["MatchedCount"]);
+        foreach (var responseOnlyValue in new[]
+        {
+            "marker-secret",
+            "sha256:",
+            "proof-not-observed",
+            "No fresh matching proof observed yet.",
+            "deploy-20260716-004006",
+            "provider.region",
+            "us-east",
+            "proof.kind",
+            "bounded-proof-kind",
+        })
+        {
+            Assert.DoesNotContain(responseOnlyValue, completionLog.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                completionLog.State.Values,
+                value => value?.ToString()?.Contains(responseOnlyValue, StringComparison.Ordinal) == true);
+        }
+    }
+
+    [Theory]
+    [InlineData(AppSurfaceCanaryStatus.Pass, "pass", true)]
+    [InlineData(AppSurfaceCanaryStatus.Pending, "pending", false)]
+    [InlineData(AppSurfaceCanaryStatus.Fail, "fail", false)]
+    [InlineData(AppSurfaceCanaryStatus.Stale, "stale", false)]
+    [InlineData(AppSurfaceCanaryStatus.NotConfigured, "not-configured", false)]
+    public async Task Endpoint_CompletedEvaluationEmitsOneExactPrivacyBoundedEvent(
+        AppSurfaceCanaryStatus status,
+        string wireStatus,
+        bool ready)
+    {
+        using var loggerProvider = new RecordingLoggerProvider();
+        await using var host = await StartHostAsync(
+            status: status,
+            loggerProvider: loggerProvider,
+            applicationName: "canary-host",
+            environmentName: "Production");
+        using var request = AuthorizedRequest(Route(Name));
+        request.Headers.Add(AppSurfaceCanaryHeaderNames.Marker, "private-marker");
+        request.Headers.Add(AppSurfaceCanaryHeaderNames.FreshSince, "2026-07-16T04:30:00Z");
+
+        using var response = await host.Client.SendAsync(request);
+
+        var entry = Assert.Single(loggerProvider.Entries, candidate => candidate.EventId.Id == 62401);
+        Assert.Equal("AppSurfaceCanaryEvaluationCompleted", entry.EventId.Name);
+        Assert.Equal(LogLevel.Information, entry.Level);
+        Assert.Null(entry.Exception);
+        Assert.Equal(Name, entry.State["CanaryName"]);
+        Assert.Equal(wireStatus, entry.State["CanaryStatus"]);
+        Assert.Equal(ready, entry.State["Ready"]);
+        Assert.Null(entry.State["ObservedAt"]);
+        Assert.Equal(DateTimeOffset.Parse("2026-07-16T04:30:00Z"), entry.State["FreshSince"]);
+        Assert.Null(entry.State["MatchedCount"]);
+        Assert.IsType<double>(entry.State["ElapsedMilliseconds"]);
+        Assert.True((double)entry.State["ElapsedMilliseconds"]! >= 0);
+        Assert.Equal("canary-host", entry.State["ApplicationName"]);
+        Assert.Equal("Production", entry.State["EnvironmentName"]);
+        Assert.Equal(
+            [
+                "ApplicationName",
+                "CanaryName",
+                "CanaryStatus",
+                "ElapsedMilliseconds",
+                "EnvironmentName",
+                "FreshSince",
+                "MatchedCount",
+                "ObservedAt",
+                "Ready",
+                "{OriginalFormat}",
+            ],
+            entry.State.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.DoesNotContain("private-marker", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("sha256:", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Endpoint_BlankHostNamesNormalizeToUnknownInCompletionEvent()
+    {
+        using var loggerProvider = new RecordingLoggerProvider();
+        await using var host = await StartHostAsync(
+            loggerProvider: loggerProvider,
+            applicationName: " ",
+            environmentName: "\t");
+        using var request = AuthorizedRequest(Route(Name));
+
+        using var response = await host.Client.SendAsync(request);
+
+        var entry = Assert.Single(loggerProvider.Entries, candidate => candidate.EventId.Id == 62401);
+        Assert.Equal("unknown", entry.State["ApplicationName"]);
+        Assert.Equal("unknown", entry.State["EnvironmentName"]);
+    }
+
+    [Fact]
+    public async Task Endpoint_MissingHostEnvironmentNormalizesToUnknownAtMapping()
+    {
+        using var loggerProvider = new RecordingLoggerProvider();
+        var builder = WebApplication.CreateBuilder();
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(loggerProvider);
+        ConfigureAuthorization(builder.Services);
+        var state = new EvaluationState(AppSurfaceCanaryStatus.Pass);
+        builder.Services.AddSingleton(state);
+        builder.Services.AddAppSurfaceCanary<TestEvaluator>(Name);
+        await using var app = builder.Build();
+        var endpoints = new TestEndpointRouteBuilder(
+            new FilteringServiceProvider(app.Services, typeof(IHostEnvironment)),
+            ((IEndpointRouteBuilder)app).DataSources);
+        endpoints.MapAppSurfaceCanaries(PolicyName);
+        var endpoint = Assert.Single(GetRouteEndpoints(endpoints));
+        await using var scope = app.Services.CreateAsyncScope();
+        var context = CreateHttpContext(scope.ServiceProvider);
+        context.SetEndpoint(endpoint);
+        context.Request.RouteValues["name"] = Name;
+
+        await endpoint.RequestDelegate!(context);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        var entry = Assert.Single(loggerProvider.Entries, candidate => candidate.EventId.Id == 62401);
+        Assert.Equal("unknown", entry.State["ApplicationName"]);
+        Assert.Equal("unknown", entry.State["EnvironmentName"]);
     }
 
     [Fact]
@@ -454,7 +631,8 @@ public sealed class AppSurfaceCanaryEndpointTests
     [Fact]
     public async Task Endpoint_UnknownNameReturnsSafe404WithoutInventoryOrInvocation()
     {
-        await using var host = await StartHostAsync();
+        using var loggerProvider = new RecordingLoggerProvider();
+        await using var host = await StartHostAsync(loggerProvider: loggerProvider);
         using var request = AuthorizedRequest(Route("other"));
 
         using var response = await host.Client.SendAsync(request);
@@ -464,6 +642,7 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.Contains("ASCAN203", json, StringComparison.Ordinal);
         Assert.DoesNotContain(Name, json, StringComparison.Ordinal);
         Assert.Equal(0, host.State.InvocationCount);
+        Assert.DoesNotContain(loggerProvider.Entries, entry => entry.EventId.Id == 62401);
         AssertNoStore(response);
     }
 
@@ -604,6 +783,20 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.Equal(256, Encoding.UTF8.GetByteCount(atLimitMarker!));
         Assert.Null(atLimitProblem);
 
+        foreach (var malformed in new[] { new string((char)0xD800, 1), new string((char)0xDC00, 1) })
+        {
+            var malformedContext = HeaderContext(AppSurfaceCanaryHeaderNames.Marker, malformed);
+            Assert.False(AppSurfaceCanaryEndpointRouteBuilderExtensions.TryReadMarker(
+                malformedContext,
+                false,
+                out var malformedMarker,
+                out var malformedProblem));
+            Assert.Equal(malformed, malformedMarker);
+            Assert.NotNull(malformedProblem);
+            await malformedProblem.ExecuteAsync(malformedContext);
+            Assert.Contains("ASCAN202", await ReadBodyAsync(malformedContext), StringComparison.Ordinal);
+        }
+
         var repeatedFreshness = HeaderContext(
             AppSurfaceCanaryHeaderNames.FreshSince,
             ["2026-07-12T08:09:10Z", "2026-07-12T08:09:11Z"]);
@@ -641,18 +834,27 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.DoesNotContain("raw-secret", failureLog.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("marker-secret", failureLog.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("2026-07-12", failureLog.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(loggerProvider.Entries, entry => entry.EventId.Id == 62401);
 
-        await using var canceled = await StartHostAsync(cancelOnEvaluate: true);
+        using var canceledLoggerProvider = new RecordingLoggerProvider();
+        await using var canceled = await StartHostAsync(
+            cancelOnEvaluate: true,
+            loggerProvider: canceledLoggerProvider);
         using var cancelRequest = AuthorizedRequest(Route(Name));
         using var cancelResponse = await canceled.Client.SendAsync(cancelRequest);
         Assert.Equal(HttpStatusCode.InternalServerError, cancelResponse.StatusCode);
         Assert.Contains("ASCAN301", await cancelResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.DoesNotContain(canceledLoggerProvider.Entries, entry => entry.EventId.Id == 62401);
 
-        await using var nullResult = await StartHostAsync(returnNull: true);
+        using var nullLoggerProvider = new RecordingLoggerProvider();
+        await using var nullResult = await StartHostAsync(
+            returnNull: true,
+            loggerProvider: nullLoggerProvider);
         using var nullRequest = AuthorizedRequest(Route(Name));
         using var nullResponse = await nullResult.Client.SendAsync(nullRequest);
         Assert.Equal(HttpStatusCode.InternalServerError, nullResponse.StatusCode);
         Assert.Contains("ASCAN301", await nullResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.DoesNotContain(nullLoggerProvider.Entries, entry => entry.EventId.Id == 62401);
     }
 
     [Fact]
@@ -670,7 +872,10 @@ public sealed class AppSurfaceCanaryEndpointTests
     [Fact]
     public async Task Endpoint_PropagatesRequestAbortCancellation()
     {
-        await using var host = await StartHostAsync(waitForCancellation: true);
+        using var loggerProvider = new RecordingLoggerProvider();
+        await using var host = await StartHostAsync(
+            waitForCancellation: true,
+            loggerProvider: loggerProvider);
         using var request = AuthorizedRequest(Route(Name));
         using var cancellation = new CancellationTokenSource();
         var sendTask = host.Client.SendAsync(request, cancellation.Token);
@@ -681,6 +886,7 @@ public sealed class AppSurfaceCanaryEndpointTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => sendTask);
 
         Assert.Equal(1, host.State.InvocationCount);
+        Assert.DoesNotContain(loggerProvider.Entries, entry => entry.EventId.Id is 62301 or 62401);
     }
 
     [Fact]
@@ -709,6 +915,7 @@ public sealed class AppSurfaceCanaryEndpointTests
         await Assert.ThrowsAsync<IOException>(() => endpoint.RequestDelegate!(context));
 
         Assert.Equal(1, state.InvocationCount);
+        Assert.Single(loggerProvider.Entries, entry => entry.EventId.Id == 62401);
         Assert.DoesNotContain(loggerProvider.Entries, entry => entry.EventId.Id == 62301);
     }
 
@@ -737,6 +944,105 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.Contains("ASCAN203", await ReadBodyAsync(missingRouteName), StringComparison.Ordinal);
 
         Assert.Equal(0, state.InvocationCount);
+    }
+
+    [Fact]
+    public void PublicConsumer_AcceptsReorderedCoreAbsentOptionalsAndUnknownFields()
+    {
+        const string json = """
+            {
+              "futureEnvelopeField": { "nested": true },
+              "status": "pending",
+              "name": "migration.schema-v4",
+              "ready": false
+            }
+            """;
+
+        var parsed = CanaryEnvelopeConsumer.Parse(json);
+
+        Assert.Equal("migration.schema-v4", parsed.Name);
+        Assert.Equal("pending", parsed.Status);
+        Assert.False(parsed.Ready);
+        Assert.Null(parsed.ReasonCode);
+        Assert.Equal(CanaryOperatorAction.Wait, parsed.Action);
+    }
+
+    [Theory]
+    [InlineData("pass", true, "proof-observed", CanaryOperatorAction.Continue)]
+    [InlineData("pending", false, "proof-not-observed", CanaryOperatorAction.Wait)]
+    [InlineData("stale", false, "proof-stale", CanaryOperatorAction.Refresh)]
+    [InlineData("not-configured", false, "proof-not-configured", CanaryOperatorAction.Configure)]
+    [InlineData("fail", false, "ambiguous-matches", CanaryOperatorAction.Investigate)]
+    [InlineData("fail", false, "checksum-mismatch", CanaryOperatorAction.RollBack)]
+    public void PublicConsumer_MapsEveryCompletedStatusAndAmbiguityToOperatorAction(
+        string status,
+        bool ready,
+        string reasonCode,
+        CanaryOperatorAction expectedAction)
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            reasonCode,
+            status,
+            futureField = "ignored",
+            ready,
+            name = "consumer.proof",
+        });
+
+        Assert.Equal(expectedAction, CanaryEnvelopeConsumer.Parse(json).Action);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"name\":\"proof\",\"ready\":false}")]
+    [InlineData("{\"name\":\"proof\",\"status\":\"pending\"}")]
+    [InlineData("{\"ready\":false,\"status\":\"pending\"}")]
+    [InlineData("{\"name\":null,\"ready\":false,\"status\":\"pending\"}")]
+    [InlineData("{\"name\":\"proof\",\"ready\":\"false\",\"status\":\"pending\"}")]
+    [InlineData("{\"name\":\"proof\",\"ready\":false,\"status\":null}")]
+    [InlineData("{\"name\":\"proof\",\"ready\":false,\"status\":\"future\"}")]
+    [InlineData("{\"name\":\"proof\",\"ready\":true,\"status\":\"pending\"}")]
+    public void PublicConsumer_RejectsMissingInvalidOrInconsistentRequiredCore(string json)
+    {
+        Assert.Throws<JsonException>(() => CanaryEnvelopeConsumer.Parse(json));
+    }
+
+    [Fact]
+    public async Task PublicForwardingFixture_ProducesActionableAmbiguousEnvelopeThroughEndpoint()
+    {
+        await using var host = await StartConsumerHostAsync<ForwardingProofCanaryEvaluator>(
+            "forwarding.consumer-proof",
+            new CanaryFixtureScenario(AppSurfaceCanaryStatus.Fail, Ambiguous: true),
+            "proof.kind");
+        using var request = AuthorizedRequest(Route("forwarding.consumer-proof"));
+
+        using var response = await host.Client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+        var parsed = CanaryEnvelopeConsumer.Parse(body);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("ambiguous-matches", parsed.ReasonCode);
+        Assert.Equal(CanaryOperatorAction.Investigate, parsed.Action);
+        Assert.DoesNotContain("email", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("provider payload", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("token", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PublicMigrationFixture_ProducesContrastingRollbackEnvelopeThroughEndpoint()
+    {
+        await using var host = await StartConsumerHostAsync<MigrationCompletionCanaryEvaluator>(
+            "migration.consumer-proof",
+            new CanaryFixtureScenario(AppSurfaceCanaryStatus.Fail),
+            "migration.kind");
+        using var request = AuthorizedRequest(Route("migration.consumer-proof"));
+
+        using var response = await host.Client.SendAsync(request);
+        var parsed = CanaryEnvelopeConsumer.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("checksum-mismatch", parsed.ReasonCode);
+        Assert.Equal(CanaryOperatorAction.RollBack, parsed.Action);
     }
 
     [Theory]
@@ -935,10 +1241,23 @@ public sealed class AppSurfaceCanaryEndpointTests
         bool addUnrelatedRoute = false,
         bool customizeProblemDetails = false,
         RecordingLoggerProvider? loggerProvider = null,
+        Func<AppSurfaceCanaryResult>? resultFactory = null,
+        string[]? allowedDetailKeys = null,
+        string? applicationName = null,
+        string? environmentName = null,
         AppSurfaceCanaryStatus status = AppSurfaceCanaryStatus.Pass)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
+        if (applicationName is not null || environmentName is not null)
+        {
+            builder.Services.AddSingleton<IHostEnvironment>(
+                new TestHostEnvironment(
+                    builder.Environment,
+                    applicationName ?? builder.Environment.ApplicationName,
+                    environmentName ?? builder.Environment.EnvironmentName));
+        }
+
         ConfigureAuthorization(builder.Services, registerPolicy);
         if (customizeProblemDetails)
         {
@@ -958,6 +1277,7 @@ public sealed class AppSurfaceCanaryEndpointTests
             CancelOnEvaluate = cancelOnEvaluate,
             ReturnNull = returnNull,
             WaitForCancellation = waitForCancellation,
+            ResultFactory = resultFactory,
         };
         builder.Services.AddSingleton(state);
         builder.Services.AddAppSurfaceCanary<TestEvaluator>(
@@ -968,6 +1288,11 @@ public sealed class AppSurfaceCanaryEndpointTests
                 {
                     options.RequireMarker();
                     options.RequireFreshSince();
+                }
+
+                foreach (var key in allowedDetailKeys ?? [])
+                {
+                    options.AllowedDetailKeys.Add(key);
                 }
             });
 
@@ -1014,6 +1339,27 @@ public sealed class AppSurfaceCanaryEndpointTests
 
         await app.StartAsync();
         return new StartedHost(app, CreateClient(app), state);
+    }
+
+    private static async Task<StartedConsumerHost> StartConsumerHostAsync<TEvaluator>(
+        string name,
+        CanaryFixtureScenario scenario,
+        string allowedDetailKey)
+        where TEvaluator : class, IAppSurfaceCanaryEvaluator
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        ConfigureAuthorization(builder.Services);
+        builder.Services.AddSingleton(scenario);
+        builder.Services.AddAppSurfaceCanary<TEvaluator>(
+            name,
+            options => options.AllowedDetailKeys.Add(allowedDetailKey));
+        var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapAppSurfaceCanaries(PolicyName);
+        await app.StartAsync();
+        return new StartedConsumerHost(app, CreateClient(app));
     }
 
     private static async Task<StartedHost> StartHostWithoutAuthorizationMiddlewareAsync()
@@ -1132,6 +1478,18 @@ public sealed class AppSurfaceCanaryEndpointTests
         }
     }
 
+    private sealed class StartedConsumerHost(IHost host, HttpClient client) : IAsyncDisposable
+    {
+        internal HttpClient Client => client;
+
+        public async ValueTask DisposeAsync()
+        {
+            client.Dispose();
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
     private sealed class FilteringServiceProvider(
         IServiceProvider inner,
         params Type[] hiddenServices) : IServiceProvider
@@ -1140,6 +1498,28 @@ public sealed class AppSurfaceCanaryEndpointTests
 
         public object? GetService(Type serviceType) =>
             _hiddenServices.Contains(serviceType) ? null : inner.GetService(serviceType);
+    }
+
+    private sealed class TestHostEnvironment(
+        IHostEnvironment inner,
+        string applicationName,
+        string environmentName) : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = environmentName;
+
+        public string ApplicationName { get; set; } = applicationName;
+
+        public string ContentRootPath
+        {
+            get => inner.ContentRootPath;
+            set => inner.ContentRootPath = value;
+        }
+
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider
+        {
+            get => inner.ContentRootFileProvider;
+            set => inner.ContentRootFileProvider = value;
+        }
     }
 
     private sealed class TestEndpointRouteBuilder(
@@ -1183,11 +1563,12 @@ public sealed class AppSurfaceCanaryEndpointTests
             var structuredState = state is IEnumerable<KeyValuePair<string, object?>> values
                 ? values.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal)
                 : new Dictionary<string, object?>(StringComparer.Ordinal);
-            entries.Enqueue(new RecordedLog(eventId, formatter(state, exception), exception, structuredState));
+            entries.Enqueue(new RecordedLog(logLevel, eventId, formatter(state, exception), exception, structuredState));
         }
     }
 
     private sealed record RecordedLog(
+        LogLevel Level,
         EventId EventId,
         string Message,
         Exception? Exception,
@@ -1229,6 +1610,8 @@ public sealed class AppSurfaceCanaryEndpointTests
         internal bool WaitForCancellation { get; init; }
 
         internal bool ReturnNull { get; init; }
+
+        internal Func<AppSurfaceCanaryResult>? ResultFactory { get; init; }
     }
 
     private sealed class TestEvaluator(EvaluationState state) : IAppSurfaceCanaryEvaluator
@@ -1255,7 +1638,9 @@ public sealed class AppSurfaceCanaryEndpointTests
                 await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             }
 
-            return state.ReturnNull ? null! : new AppSurfaceCanaryResult(state.Status);
+            return state.ReturnNull
+                ? null!
+                : state.ResultFactory?.Invoke() ?? new AppSurfaceCanaryResult(state.Status);
         }
     }
 

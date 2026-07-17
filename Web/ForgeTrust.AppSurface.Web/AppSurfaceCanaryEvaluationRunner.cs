@@ -80,6 +80,15 @@ internal sealed class AppSurfaceCanaryEvaluationRunner
             throw new InvalidOperationException("A named canary evaluator returned a null result.");
         }
 
+        foreach (var key in result.Details.Keys)
+        {
+            if (!descriptor.AllowedDetailKeys.Contains(key))
+            {
+                throw new InvalidOperationException(
+                    $"ASCAN301: Named canary '{descriptor.Name}' returned undeclared detail key '{key}'. Declare it in AllowedDetailKeys or remove it from the result.");
+            }
+        }
+
         return result;
     }
 }

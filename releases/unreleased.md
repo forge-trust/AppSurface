@@ -14,10 +14,17 @@ This is the living release note for the next coordinated AppSurface version afte
 - `ForgeTrust.AppSurface.Web.OpenApi` now uses `Microsoft.AspNetCore.OpenApi` 10.0.9 and directly requires `Microsoft.OpenApi` in the range `[2.7.5, 3.0.0)`, keeping .NET 10 consumers on the supported 2.x line above the range affected by [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc) while preserving existing OpenAPI and Scalar APIs and endpoint behavior.
 - [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) can now start long-running non-exclusive test projects earlier with `--schedule longest-first`. It reuses prior `timings.json` data when available, preserves integration and Playwright projects as exclusive barriers, supports explicit priority projects, fails invalid explicit timing or priority input before tests run, warns and preserves input order for unmeasured projects when inferred prior timings are missing or unusable, and keeps artifact names stable.
 - [`ForgeTrust.AppSurface.Web` named canary evaluation](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints) is now available in preview: applications register typed, application-owned proof
-  evaluators and explicitly map one fixed protected route family. The default adapter returns `200` only for `pass` and
-  `503` for completed non-pass states; authenticated diagnostic consumers can opt into status-preserving `AlwaysOk`.
-  Authorization remains host-owned and fail-closed, inputs and failures are redacted, reserved-route conflicts fail at
-  startup, and triggering, retries, polling, aggregation, and `/ready` behavior remain outside this primitive.
+  evaluators and explicitly map one fixed protected route family. Completed evaluations add required `name`, `ready`, and
+  `status` fields plus optional typed evidence, a marker fingerprint, and up to 16 registration-declared bounded details.
+  Existing `AppSurfaceCanaryResult(status)` construction remains source-compatible. Consumers must tolerate optional
+  omissions, unknown fields, and property reordering; the contract remains preview until the
+  [#625 caller](https://github.com/forge-trust/AppSurface/issues/625) proves polling and operator actions.
+  The package emits fixed completion event `62401` with typed evaluation and host facts only; marker, reason, summary,
+  correlation, and custom detail values remain response-only. Bounds and declarations constrain shape but do not classify
+  or redact application-authored text. The default adapter still returns `200` only for `pass` and `503` for completed
+  non-pass states; authenticated diagnostic consumers can opt into status-preserving `AlwaysOk`. Authorization remains
+  host-owned and fail-closed, and triggering, retries, polling, aggregation, health-check adaptation, and `/ready` behavior
+  remain outside this primitive.
 - AppSurface Docs adds Theme Contract v1. Hosts can configure `AppSurfaceDocs:Theme` with dark-family presets (`AppSurfaceDark` and `GraphiteDark`), accent/link color overrides, and density/chrome controls. The package validates enum values, CSS hex colors, null nested theme sections, and contrast-sensitive overrides at startup, emits resolved root attributes and CSS variables into rendered HTML, and freezes those variables into static exports and published archives instead of adding a dynamic themed CSS asset route.
 - [AppSurface Docs](../Web/ForgeTrust.AppSurface.Docs/README.md#default-razor-layout-and-deliberate-host-overrides) now uses a package-specific absolute Razor layout and reasserts it for built-in Docs views, so a consuming application's generic `_ViewStart` and `_Layout` no longer strip the Docs theme, client configuration, or search scripts. Hosts can still deliberately replace the complete Docs shell by overriding the uniquely named layout path.
 - Documentation and release authoring guidance now require concept links instead of mention-only prose: start with adopter outcomes, explain internal feature labels in plain language, link named packages, concepts, workflows, diagnostics, guides, examples, and CLI commands to their canonical docs, and keep maintainer evidence after the adoption path.

@@ -137,6 +137,12 @@
           "ForgeTrust.AppSurface.Web": "[0.1.0, )"
         }
       },
+      "forgetrust.appsurface.web.tests.canaryconsumerfixture": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Web": "[0.1.0, )"
+        }
+      },
       "CliWrap": {
         "type": "CentralTransitive",
         "requested": "[3.10.1, )",
