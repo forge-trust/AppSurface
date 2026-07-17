@@ -1,6 +1,6 @@
 # RazorWire Runtime Contract Pipeline
 
-RazorWire browser assets are authored in TypeScript and delivered through the same package paths that hosts already use. Application code does not need to move to new script URLs, globals, custom events, DOM hooks, CSS hooks, or island strategy names.
+RazorWire's first-party browser assets are authored in TypeScript and delivered through the same package paths that hosts already use. The package also carries an exact, byte-copied Turbo runtime under its own custody checks. Application code does not need to move RazorWire script URLs, globals, custom events, DOM hooks, CSS hooks, or island strategy names.
 
 ## Maintainer Quickstart
 
@@ -48,20 +48,21 @@ Generated outputs stay committed because Razor Class Library static web assets, 
 The TypeScript migration preserves the public browser surface:
 
 - Script paths:
+  - `/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js`
   - `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`
   - `/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js`
   - `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js`
   - `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`
   - `/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js`
   - `/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js`
-- Tag helper output: `<rw:scripts />`, `<rw:scripts behavior-kit="true" />`, Turbo attributes, optional Turbo CDN URL, SRI, `crossorigin`, and lazy/eager split-runtime detectors.
+- Tag helper output: `<rw:scripts />`, `<rw:scripts behavior-kit="true" />`, the bundled or custom same-origin Turbo script selected by `RazorWireOptions.Turbo`, host-managed omission, and lazy/eager split-runtime detectors. Hosts that need a cross-origin URL, subresource integrity, or custom script attributes own the complete Turbo tag and its synchronous load order through `HostManaged` mode.
 - Global state: `window.RazorWire`, `window.RazorWire.config`, `connectionManager`, `localTimeFormatter`, `formFailureManager`, `pageNavigationManager`, `sectionCopyManager`, `formInteractionsManager`, and `behaviors`.
 - Form events: `razorwire:form:submit-start`, `razorwire:form:failure`, `razorwire:form:diagnostic`, and `razorwire:form:submit-end`.
 - DOM hooks: `data-rw-*` form, island, page-navigation, and section-copy attributes, including generated failure UI and section-copy fallback markers.
 - CSS hooks: RazorWire form failure variables, generated form error attributes, page-navigation state attributes, and section-copy state/fallback attributes.
 - Island strategies: `load`, `idle`, `visible`, and `only`. Use `only` for client-only islands; `immediate` is intentionally not a public strategy name.
 
-No consumer migration is required for the TypeScript asset pipeline. Hosts should keep using `<rw:scripts />` unless they already have a deliberate custom script loading path.
+No consumer migration is required for the first-party TypeScript asset pipeline. Hosts should keep using `<rw:scripts />`; the default now supplies the packaged same-origin Turbo runtime. See [Choose who supplies Turbo](../README.md#choose-who-supplies-turbo) before retaining a custom or host-owned script tag.
 
 ## Diagnostics
 
