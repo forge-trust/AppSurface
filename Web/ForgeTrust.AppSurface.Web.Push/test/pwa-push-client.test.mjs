@@ -474,6 +474,29 @@ test("cancellation after non-abortable browser awaits rejects with AbortError", 
     await assertAbort(operation);
   }
 
+  for (const parsingOutcome of ["resolve", "reject"]) {
+    const parsing = deferred();
+    const started = deferred();
+    const harness = createHarness({
+      responseFor: (_url, init) => init?.method === "PUT" ? {
+        ok: false,
+        status: 409,
+        json: () => {
+          started.resolve();
+          return parsing.promise;
+        }
+      } : null
+    });
+    const prepared = await harness.api.prepare({ endpoint: "/account/push" });
+    const cancellation = new AbortController();
+    const operation = harness.api.subscribe({ prepared: prepared.handle, signal: cancellation.signal });
+    await started.promise;
+    cancellation.abort();
+    if (parsingOutcome === "resolve") parsing.resolve({ code: "ASPUSH109" });
+    else parsing.reject(new Error("invalid problem details after abort"));
+    await assertAbort(operation);
+  }
+
   {
     const pending = deferred();
     const harness = createHarness({ register: () => pending.promise });

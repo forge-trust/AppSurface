@@ -2,7 +2,6 @@ using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Antiforgery;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Builder;
@@ -34,32 +33,32 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
         string path,
         string authorizationPolicy,
         string? rateLimiterPolicy = null) =>
-        Map(endpoints, path, authorizationPolicy, authenticationScheme: null, rateLimiterPolicy);
+        Map(endpoints, path, authorizationPolicy, useBearerToken: false, rateLimiterPolicy);
 
-    /// <summary>Maps token-only subscription endpoints using one explicit bearer authentication scheme.</summary>
+    /// <summary>Maps token-only subscription endpoints using the app's registered bearer-token validator.</summary>
     /// <param name="endpoints">The application-root endpoint route builder. Route groups are rejected because they would move the package's fixed client asset.</param>
     /// <param name="path">The literal app-root-relative base path for configuration, PUT, and DELETE. Route parameters, catch-alls, and traversal segments are not supported.</param>
     /// <param name="authorizationPolicy">The nonblank host-owned named policy evaluated directly inside every handler.</param>
-    /// <param name="authenticationScheme">The exact bearer-token authentication scheme. Requests must carry a nonblank HTTP <c>Authorization: Bearer</c> credential; sign-in-capable schemes such as cookies fail closed and ambient identities are ignored.</param>
     /// <param name="rateLimiterPolicy">An optional host-owned named rate-limiter policy applied to every protected endpoint.</param>
-    /// <exception cref="ArgumentException">The builder is a route group, or the path, authorization policy, scheme, or supplied rate-limiter policy is blank, unsafe, or inside AppSurface's reserved route space.</exception>
+    /// <remarks>
+    /// Register exactly one <see cref="IAppSurfaceWebPushBearerTokenValidator"/>. Requests must carry a nonblank HTTP
+    /// <c>Authorization: Bearer</c> credential. The package passes only that token to the validator and ignores ambient
+    /// identities and authentication schemes. A missing, rejecting, or failing validator fails closed.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The builder is a route group, or the path, authorization policy, or supplied rate-limiter policy is blank, unsafe, or inside AppSurface's reserved route space.</exception>
     /// <exception cref="InvalidOperationException">The same package base path was already mapped.</exception>
     public static void MapAppSurfaceWebPushBearerSubscriptions(
         this IEndpointRouteBuilder endpoints,
         string path,
         string authorizationPolicy,
-        string authenticationScheme,
-        string? rateLimiterPolicy = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(authenticationScheme);
-        Map(endpoints, path, authorizationPolicy, authenticationScheme, rateLimiterPolicy);
-    }
+        string? rateLimiterPolicy = null) =>
+        Map(endpoints, path, authorizationPolicy, useBearerToken: true, rateLimiterPolicy);
 
     private static void Map(
         IEndpointRouteBuilder endpoints,
         string path,
         string authorizationPolicy,
-        string? authenticationScheme,
+        bool useBearerToken,
         string? rateLimiterPolicy)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -83,19 +82,19 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
         var configurationEndpoint = endpoints.MapGet(
                 path + "/configuration",
                 (Func<HttpContext, Task<IResult>>)(async context =>
-                    await ConfigurationAsync(context, authorizationPolicy, authenticationScheme).ConfigureAwait(false)))
+                    await ConfigurationAsync(context, authorizationPolicy, useBearerToken).ConfigureAwait(false)))
             .ExcludeFromDescription();
 
         var putEndpoint = endpoints.MapPut(
                 path,
                 (Func<HttpContext, Task<IResult>>)(async context =>
-                    await PutAsync(context, authorizationPolicy, authenticationScheme).ConfigureAwait(false)))
+                    await PutAsync(context, authorizationPolicy, useBearerToken).ConfigureAwait(false)))
             .ExcludeFromDescription();
 
         var deleteEndpoint = endpoints.MapDelete(
                 path,
                 (Func<HttpContext, Task<IResult>>)(async context =>
-                    await DeleteAsync(context, authorizationPolicy, authenticationScheme).ConfigureAwait(false)))
+                    await DeleteAsync(context, authorizationPolicy, useBearerToken).ConfigureAwait(false)))
             .ExcludeFromDescription();
 
         if (rateLimiterPolicy is not null)
@@ -118,9 +117,9 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
     private static async Task<IResult> ConfigurationAsync(
         HttpContext context,
         string policyName,
-        string? authenticationScheme)
+        bool useBearerToken)
     {
-        var authorization = await AuthorizeAsync(context, policyName, authenticationScheme).ConfigureAwait(false);
+        var authorization = await AuthorizeAsync(context, policyName, useBearerToken).ConfigureAwait(false);
         if (authorization.Failure is not null)
         {
             return authorization.Failure;
@@ -134,7 +133,7 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
 
         context.Response.Headers.CacheControl = "no-store";
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
-        if (authenticationScheme is null)
+        if (!useBearerToken)
         {
             try
             {
@@ -171,15 +170,15 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
     private static async Task<IResult> PutAsync(
         HttpContext context,
         string policyName,
-        string? authenticationScheme)
+        bool useBearerToken)
     {
-        var authorization = await AuthorizeAsync(context, policyName, authenticationScheme).ConfigureAwait(false);
+        var authorization = await AuthorizeAsync(context, policyName, useBearerToken).ConfigureAwait(false);
         if (authorization.Failure is not null)
         {
             return authorization.Failure;
         }
 
-        var protectionFailure = await ValidateWriteProtectionAsync(context, authenticationScheme).ConfigureAwait(false);
+        var protectionFailure = await ValidateWriteProtectionAsync(context, useBearerToken).ConfigureAwait(false);
         if (protectionFailure is not null)
         {
             return protectionFailure;
@@ -261,15 +260,15 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
     private static async Task<IResult> DeleteAsync(
         HttpContext context,
         string policyName,
-        string? authenticationScheme)
+        bool useBearerToken)
     {
-        var authorization = await AuthorizeAsync(context, policyName, authenticationScheme).ConfigureAwait(false);
+        var authorization = await AuthorizeAsync(context, policyName, useBearerToken).ConfigureAwait(false);
         if (authorization.Failure is not null)
         {
             return authorization.Failure;
         }
 
-        var protectionFailure = await ValidateWriteProtectionAsync(context, authenticationScheme).ConfigureAwait(false);
+        var protectionFailure = await ValidateWriteProtectionAsync(context, useBearerToken).ConfigureAwait(false);
         if (protectionFailure is not null)
         {
             return protectionFailure;
@@ -338,7 +337,7 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
     private static async ValueTask<AuthorizationResult> AuthorizeAsync(
         HttpContext context,
         string policyName,
-        string? authenticationScheme)
+        bool useBearerToken)
     {
         var provider = context.RequestServices.GetService<IAuthorizationPolicyProvider>();
         var authorization = context.RequestServices.GetService<IAuthorizationService>();
@@ -356,7 +355,7 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
             }
 
             ClaimsPrincipal? principal;
-            if (authenticationScheme is null)
+            if (!useBearerToken)
             {
                 if (policy.AuthenticationSchemes.Count != 1)
                 {
@@ -374,13 +373,10 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
             }
             else
             {
-                var schemeProvider = context.RequestServices.GetService<IAuthenticationSchemeProvider>();
-                var scheme = schemeProvider is null
-                    ? null
-                    : await schemeProvider.GetSchemeAsync(authenticationScheme).ConfigureAwait(false);
-                if (scheme is null || typeof(IAuthenticationSignInHandler).IsAssignableFrom(scheme.HandlerType))
+                var validator = context.RequestServices.GetService<IAppSurfaceWebPushBearerTokenValidator>();
+                if (validator is null)
                 {
-                    return new(null, Problem(StatusCodes.Status503ServiceUnavailable, "ASPUSH108", "The token authentication scheme is unavailable."));
+                    return new(null, Problem(StatusCodes.Status503ServiceUnavailable, "ASPUSH108", "Bearer-token validation is unavailable."));
                 }
 
                 if (!AuthenticationHeaderValue.TryParse(context.Request.Headers.Authorization, out var authorizationHeader)
@@ -390,8 +386,9 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
                     return new(null, Results.Unauthorized());
                 }
 
-                var authentication = await context.AuthenticateAsync(authenticationScheme).ConfigureAwait(false);
-                principal = authentication.Succeeded ? authentication.Principal : null;
+                principal = await validator.ValidateAsync(
+                    authorizationHeader.Parameter,
+                    context.RequestAborted).ConfigureAwait(false);
             }
 
             if (principal?.Identity?.IsAuthenticated != true)
@@ -399,7 +396,7 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
                 return new(null, Results.Unauthorized());
             }
 
-            if (authenticationScheme is not null)
+            if (useBearerToken)
             {
                 // Resource-aware handlers must observe the same explicit bearer principal
                 // that is evaluated below, never an ambient cookie identity.
@@ -409,10 +406,9 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
             var result = await authorization.AuthorizeAsync(principal, context, policy).ConfigureAwait(false);
             return result.Succeeded
                 ? new(principal, null)
-                : new(null, Results.Forbid(
-                    authenticationSchemes: authenticationScheme is null
-                        ? policy.AuthenticationSchemes.ToArray()
-                        : [authenticationScheme]));
+                : new(null, useBearerToken
+                    ? Results.StatusCode(StatusCodes.Status403Forbidden)
+                    : Results.Forbid(authenticationSchemes: policy.AuthenticationSchemes.ToArray()));
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
@@ -426,9 +422,9 @@ public static class AppSurfaceWebPushEndpointRouteBuilderExtensions
 
     private static async ValueTask<IResult?> ValidateWriteProtectionAsync(
         HttpContext context,
-        string? authenticationScheme)
+        bool useBearerToken)
     {
-        if (authenticationScheme is not null)
+        if (useBearerToken)
         {
             return null;
         }

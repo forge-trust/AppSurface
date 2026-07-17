@@ -287,7 +287,13 @@
         }
         if (response.status === 204) return result(state.observed ? "already-subscribed" : "subscribed");
         if (response.status === 409) {
-          try { if ((await response.json())?.code === "ASPUSH109") return result("vapid-key-stale", true); } catch { /* safe status below */ }
+          try {
+            const problem = await response.json();
+            abort(signal);
+            if (problem?.code === "ASPUSH109") return result("vapid-key-stale", true);
+          } catch {
+            abort(signal);
+          }
         }
         return await mutationFailure(response, signal);
       } finally { mutationActive = false; }

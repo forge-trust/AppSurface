@@ -72,13 +72,13 @@ public sealed class AppSurfaceWebPushSendOptions
 public enum AppSurfaceWebPushUrgency
 {
     /// <summary>Very low urgency.</summary>
-    VeryLow,
+    VeryLow = 0,
     /// <summary>Low urgency.</summary>
-    Low,
+    Low = 1,
     /// <summary>Normal urgency, which emits no Urgency header.</summary>
-    Normal,
+    Normal = 2,
     /// <summary>High urgency.</summary>
-    High,
+    High = 3,
 }
 
 /// <summary>Contains one immutable, sensitive single-recipient send request.</summary>
@@ -132,34 +132,34 @@ public interface IAppSurfaceWebPushSender
 public enum AppSurfaceWebPushSendOutcome
 {
     /// <summary>The push service returned exactly HTTP 201; delivery and display remain unproven.</summary>
-    Accepted,
+    Accepted = 0,
     /// <summary>The push service returned HTTP 404 or 410 and cleanup was dispatched.</summary>
-    TerminalSubscription,
+    TerminalSubscription = 1,
     /// <summary>A network failure, timeout, HTTP 408, 429, or 5xx occurred.</summary>
-    TransientFailure,
+    TransientFailure = 2,
     /// <summary>The push service returned another 4xx response.</summary>
-    Rejected,
+    Rejected = 3,
     /// <summary>The subscription references a VAPID key absent from the retained ring.</summary>
-    VapidKeyUnavailable,
+    VapidKeyUnavailable = 4,
     /// <summary>The endpoint origin is not in the exact host allowlist; no network request occurred.</summary>
-    PushServiceNotAllowed,
+    PushServiceNotAllowed = 5,
     /// <summary>A redirect, unexpected success response, or protocol invariant failure occurred.</summary>
-    ProtocolFailure,
+    ProtocolFailure = 6,
 }
 
 /// <summary>Classifies conditional terminal cleanup.</summary>
 public enum AppSurfaceWebPushCleanupState
 {
     /// <summary>No terminal cleanup was required.</summary>
-    NotRequired,
+    NotRequired = 0,
     /// <summary>The matching complete snapshot was marked terminal.</summary>
-    Completed,
+    Completed = 1,
     /// <summary>The snapshot was already terminal or a replacement won the race.</summary>
-    AlreadyTerminal,
+    AlreadyTerminal = 2,
     /// <summary>Host custody rejected cleanup.</summary>
-    Rejected,
+    Rejected = 3,
     /// <summary>Cleanup was unavailable, timed out, or failed safely.</summary>
-    Failed,
+    Failed = 4,
 }
 
 /// <summary>Contains safe send classification without endpoint, key, payload, token, body, or exception data.</summary>

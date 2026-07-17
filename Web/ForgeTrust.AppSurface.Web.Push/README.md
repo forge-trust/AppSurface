@@ -1,6 +1,6 @@
 # ForgeTrust.AppSurface.Web.Push
 
-`ForgeTrust.AppSurface.Web.Push` is the optional safe rail between AppSurface Web's [shared PWA worker](../ForgeTrust.AppSurface.Web/Docs/pwa-install.md) and an application-owned notification product. It handles bounded browser subscription intake, VAPID key custody, RFC 8291 encryption, one-attempt push-service requests, safe response classification, and conditional stale-subscription cleanup. The host retains identity, tenants, preferences, persistence, recipients, send timing, and retry policy.
+`ForgeTrust.AppSurface.Web.Push` is the optional safe rail between AppSurface Web's [shared PWA worker](../ForgeTrust.AppSurface.Web/Docs/pwa-install.md) and an application-owned notification product. It handles bounded browser subscription intake, VAPID key custody, [RFC 8291](https://www.rfc-editor.org/rfc/rfc8291) encryption, one-attempt push-service requests, safe response classification, and conditional stale-subscription cleanup. The host retains identity, tenants, preferences, persistence, recipients, send timing, and retry policy.
 
 Use this package for direct standards-based Web Push when the app will own subscription storage and notification policy. Prefer a hosted provider for managed audiences, multi-channel orchestration, analytics, fan-out, or retry operations. Use an app-owned protocol implementation only when its extra control justifies owning encryption, VAPID, SSRF protection, and push-service failure semantics.
 
@@ -45,6 +45,7 @@ services.AddAppSurfaceWebPush(options =>
     options.AllowedPushServiceOrigins.Add("https://updates.push.services.mozilla.com");
 });
 services.AddScoped<IAppSurfaceWebPushSubscriptionCustody, AppPushSubscriptionCustody>();
+services.AddScoped<IAppSurfaceWebPushBearerTokenValidator, AppPushBearerTokenValidator>();
 webOptions.Pwa.Push.Enabled = true;
 ```
 
@@ -62,7 +63,6 @@ app.MapAppSurfaceWebPushSubscriptions(
 app.MapAppSurfaceWebPushBearerSubscriptions(
     "/api/push-subscriptions",
     authorizationPolicy: "push.manage",
-    authenticationScheme: "ApiBearer",
     rateLimiterPolicy: "push.subscription-writes");
 ```
 
@@ -70,7 +70,9 @@ Map these fixed application endpoints on the application-root `WebApplication` b
 reject `RouteGroupBuilder` instances because a group prefix would move the package-owned client asset away
 from its documented fixed path.
 
-Both methods return `void`. Every handler requires an authenticated principal and directly evaluates the named policy before configuration, antiforgery, parsing, or custody; inherited `AllowAnonymous` cannot bypass it. The cookie policy must declare exactly one authentication scheme, which the package evaluates before issuing antiforgery tokens or accepting writes. Bearer mapping requires a nonblank HTTP `Authorization: Bearer` credential and authenticates only its explicit scheme; ambient or non-bearer credentials cannot enter the antiforgery-free rail. Missing or ambiguous policy schemes fail closed with `ASPUSH108`.
+Both methods return `void`. Every handler requires an authenticated principal and directly evaluates the named policy before configuration, antiforgery, parsing, or custody; inherited `AllowAnonymous` cannot bypass it. The cookie policy must declare exactly one authentication scheme, which the package evaluates before issuing antiforgery tokens or accepting writes.
+
+Bearer mapping requires a nonblank HTTP `Authorization: Bearer` credential and exactly one app registration of `IAppSurfaceWebPushBearerTokenValidator`. The package parses the header, passes only the sensitive token value to `ValidateAsync`, requires the returned principal to be authenticated, and evaluates the named policy against that principal. Implement the validator with the app's JWT, opaque-token, or equivalent validation library; validate issuer, audience, signature, lifetime, and revocation as appropriate. Return `null` for rejected credentials, propagate caller cancellation, and never log the token. The validator must not fall back to cookies, `HttpContext.User`, or any other ambient credential. Missing or failing validation and missing policies fail closed with `ASPUSH108`; rejected or malformed credentials return 401.
 
 The mapped base path must be a literal app-root-relative path. Route parameters, catch-alls, `.` or `..` traversal segments, encoded paths, query strings, and fragments are rejected. Reserved-space and duplicate checks are case-insensitive, matching ASP.NET Core routing; map separate literal rails when a host needs more than one custody boundary.
 
@@ -146,7 +148,7 @@ Add and retain the new key, deploy, switch `ActiveVapidKeyId`, migrate users thr
 - iOS/iPadOS require an installed Home Screen app and a direct gesture. Never prompt on page load or preparation.
 - Acceptance does not prove receipt or display. This package has no database, audience, preference UI, campaign, scheduler, fan-out, retry loop, readiness score, or telemetry.
 
-HTTP problems use `ASPUSH100`-`ASPUSH109`; configuration uses `ASPUSHCFG`; sending uses `ASPUSHSEND`; browser invariants use `ASPUSHJS`. Correct the named configuration, authenticate with the required policy/scheme, refresh preparation after key changes, or reconcile custody. Never recover by weakening authorization, antiforgery, or the origin allowlist.
+HTTP problems use `ASPUSH100`-`ASPUSH109`; configuration uses `ASPUSHCFG`; sending uses `ASPUSHSEND`; browser invariants use `ASPUSHJS`. Correct the named configuration, validator, or policy; refresh preparation after key changes; or reconcile custody. Never recover by weakening token validation, authorization, antiforgery, or the origin allowlist.
 
 ### Browser and HTTP contract
 
@@ -156,4 +158,4 @@ Stable preparation results are `prepared`, `vapid-key-migration-required`, `unsu
 
 ## Dependency decision
 
-The package uses `Lib.Net.Http.WebPush` 3.3.1 behind an internal adapter for RFC 8291 `aes128gcm` encryption and RFC 8292 `vapid` signing. AppSurface disables automatic 429 retries and redirects, strips/disposes response content without reading it, and exposes no third-party types or exceptions. See [third-party notices](THIRD-PARTY-NOTICES.md).
+The package uses `Lib.Net.Http.WebPush` 3.3.1 behind an internal adapter for RFC 8291 `aes128gcm` encryption and [RFC 8292](https://www.rfc-editor.org/rfc/rfc8292) `vapid` signing. AppSurface disables automatic 429 retries and redirects, strips/disposes response content without reading it, and exposes no third-party types or exceptions. See [third-party notices](THIRD-PARTY-NOTICES.md).

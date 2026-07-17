@@ -106,46 +106,46 @@ public interface IAppSurfaceWebPushSubscriptionCustody
 public enum AppSurfaceWebPushRegistrationDisposition
 {
     /// <summary>A new principal-owned record was created.</summary>
-    Created,
+    Created = 0,
     /// <summary>The same principal's record was refreshed.</summary>
-    Updated,
+    Updated = 1,
     /// <summary>The complete record already matched.</summary>
-    Unchanged,
+    Unchanged = 2,
     /// <summary>The endpoint belongs to another principal.</summary>
-    Conflict,
+    Conflict = 3,
     /// <summary>Host policy rejected the write.</summary>
-    Rejected,
+    Rejected = 4,
 }
 
 /// <summary>Describes an app-owned unregister result.</summary>
 public enum AppSurfaceWebPushUnregistrationDisposition
 {
     /// <summary>The principal-owned record was removed.</summary>
-    Removed,
+    Removed = 0,
     /// <summary>No matching principal-owned record existed.</summary>
-    NotFound,
+    NotFound = 1,
     /// <summary>The endpoint belongs to another principal.</summary>
-    Conflict,
+    Conflict = 2,
     /// <summary>Host policy rejected the write.</summary>
-    Rejected,
+    Rejected = 3,
 }
 
 /// <summary>Describes compare-and-mark terminal cleanup.</summary>
 public enum AppSurfaceWebPushTerminalDisposition
 {
     /// <summary>The matching complete snapshot was marked terminal.</summary>
-    Completed,
+    Completed = 0,
     /// <summary>The matching snapshot was already terminal or a replacement won the race.</summary>
-    AlreadyTerminal,
+    AlreadyTerminal = 1,
     /// <summary>Host custody rejected terminal cleanup.</summary>
-    Rejected,
+    Rejected = 2,
 }
 
 /// <summary>Identifies the terminal push-service response.</summary>
 public enum AppSurfaceWebPushTerminalReason
 {
     /// <summary>The push service returned HTTP 404.</summary>
-    NotFound,
+    NotFound = 0,
     /// <summary>The push service returned HTTP 410.</summary>
-    Gone,
+    Gone = 1,
 }

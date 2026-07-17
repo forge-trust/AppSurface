@@ -153,7 +153,7 @@ public sealed class AppSurfaceWebPushEndpointTests
     }
 
     [Fact]
-    public async Task BearerMapping_RejectsAmbientCookieIdentityAndAcceptsExplicitScheme()
+    public async Task BearerMapping_RejectsAmbientCookieIdentityAndAcceptsValidatedToken()
     {
         await using var host = await CreateHostAsync(map: true, ambientAdmin: true, bearer: true);
 
@@ -171,15 +171,18 @@ public sealed class AppSurfaceWebPushEndpointTests
     }
 
     [Fact]
-    public async Task BearerMapping_RejectsSignInCapableAuthenticationScheme()
+    public async Task BearerMapping_FailsClosedWhenTokenValidatorIsMissing()
     {
         await using var host = await CreateHostAsync(
             map: true,
             ambientAdmin: false,
             bearer: true,
-            authenticationScheme: "CookieProof");
+            registerBearerTokenValidator: false);
 
-        using var response = await host.Client.GetAsync("/account/push/configuration");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/account/push/configuration");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "admin");
+
+        using var response = await host.Client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal("ASPUSH108", await ReadCodeAsync(response));
@@ -188,15 +191,39 @@ public sealed class AppSurfaceWebPushEndpointTests
     }
 
     [Fact]
-    public async Task BearerMapping_RejectsNonBearerAmbientAuthenticationScheme()
+    public async Task BearerMapping_RejectsAmbientAuthenticationEvenWithPlaceholderBearerHeader()
     {
         await using var host = await CreateHostAsync(
             map: true,
-            ambientAdmin: false,
-            bearer: true,
-            authenticationScheme: "AmbientProof");
+            ambientAdmin: true,
+            bearer: true);
         using var request = new HttpRequestMessage(HttpMethod.Get, "/account/push/configuration");
         request.Headers.TryAddWithoutValidation("X-Ambient-Admin", "true");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "ignored");
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(0, host.Custody.RegisterCalls);
+        Assert.Equal(0, host.Custody.UnregisterCalls);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Basic admin")]
+    [InlineData("Bearer")]
+    [InlineData("Bearer ignored")]
+    [InlineData("Bearer identityless")]
+    [InlineData("Bearer anonymous")]
+    public async Task BearerMapping_RejectsMalformedRejectedAndUnauthenticatedCredentials(string? header)
+    {
+        await using var host = await CreateHostAsync(map: true, ambientAdmin: true, bearer: true);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/account/push/configuration");
+        if (header is not null)
+        {
+            request.Headers.TryAddWithoutValidation("Authorization", header);
+        }
 
         using var response = await host.Client.SendAsync(request);
 
@@ -228,7 +255,7 @@ public sealed class AppSurfaceWebPushEndpointTests
     }
 
     [Fact]
-    public async Task DirectAuthorization_ReturnsSafeFailureForMissingPolicyAndScheme()
+    public async Task DirectAuthorization_ReturnsSafeFailureForMissingPolicyAndFailingValidator()
     {
         await using var missingPolicy = await CreateHostAsync(
             map: true,
@@ -243,16 +270,6 @@ public sealed class AppSurfaceWebPushEndpointTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, policyResponse.StatusCode);
         Assert.Equal("ASPUSH108", await ReadCodeAsync(policyResponse));
 
-        await using var missingScheme = await CreateHostAsync(
-            map: true,
-            ambientAdmin: false,
-            bearer: true,
-            authenticationScheme: "MissingBearer");
-        var schemeResponse = await missingScheme.Client.GetAsync("/account/push/configuration");
-
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, schemeResponse.StatusCode);
-        Assert.Equal("ASPUSH108", await ReadCodeAsync(schemeResponse));
-
         await using var ambiguousCookiePolicy = await CreateHostAsync(
             map: true,
             ambientAdmin: true,
@@ -263,18 +280,45 @@ public sealed class AppSurfaceWebPushEndpointTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, cookieResponse.StatusCode);
         Assert.Equal("ASPUSH108", await ReadCodeAsync(cookieResponse));
 
-        await using var throwingScheme = await CreateHostAsync(
+        await using var throwingValidator = await CreateHostAsync(
             map: true,
             ambientAdmin: false,
             bearer: true,
-            authenticationScheme: "ThrowingProof");
+            throwingBearerTokenValidator: true);
         using var throwingRequest = new HttpRequestMessage(HttpMethod.Get, "/account/push/configuration");
         throwingRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "admin");
-        using var throwingResponse = await throwingScheme.Client.SendAsync(throwingRequest);
+        using var throwingResponse = await throwingValidator.Client.SendAsync(throwingRequest);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, throwingResponse.StatusCode);
         Assert.Equal("ASPUSH108", await ReadCodeAsync(throwingResponse));
-        Assert.DoesNotContain("secret authentication detail", await throwingResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.DoesNotContain("secret token validation detail", await throwingResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BearerTokenValidatorCancellation_RemainsCancellation()
+    {
+        await using var host = await CreateHostAsync(map: true, ambientAdmin: false, bearer: true);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => host.Server.SendAsync(context =>
+        {
+            context.Request.Method = HttpMethods.Get;
+            context.Request.Path = "/account/push/configuration";
+            context.Request.Headers.Authorization = "Bearer cancel";
+            context.RequestAborted = new CancellationToken(canceled: true);
+        }));
+    }
+
+    [Fact]
+    public async Task BearerTokenValidatorNonCallerCancellation_ReturnsSafeFailure()
+    {
+        await using var host = await CreateHostAsync(map: true, ambientAdmin: false, bearer: true);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/account/push/configuration");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "cancel-without-request");
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("ASPUSH108", await ReadCodeAsync(response));
     }
 
     [Fact]
@@ -624,11 +668,12 @@ public sealed class AppSurfaceWebPushEndpointTests
         string basePath = "/account/push",
         string? rateLimiterPolicy = null,
         bool registerPolicy = true,
-        string authenticationScheme = "BearerProof",
         bool registerCustody = true,
         bool declareCookieScheme = true,
         bool resourceAwarePolicy = false,
         bool throwingAntiforgery = false,
+        bool registerBearerTokenValidator = true,
+        bool throwingBearerTokenValidator = false,
         string? secondaryBasePath = null)
     {
         var vapid = CreateKeyPair(ECDsa.Create);
@@ -638,8 +683,6 @@ public sealed class AppSurfaceWebPushEndpointTests
         builder.Services.AddAuthentication("None")
             .AddScheme<AuthenticationSchemeOptions, NoopAuthenticationHandler>("None", _ => { })
             .AddScheme<AuthenticationSchemeOptions, AmbientProofAuthenticationHandler>("AmbientProof", _ => { })
-            .AddScheme<AuthenticationSchemeOptions, ThrowingAuthenticationHandler>("ThrowingProof", _ => { })
-            .AddScheme<AuthenticationSchemeOptions, BearerProofAuthenticationHandler>("BearerProof", _ => { })
             .AddCookie("CookieProof");
         builder.Services.AddAuthorization(options =>
         {
@@ -685,6 +728,13 @@ public sealed class AppSurfaceWebPushEndpointTests
         if (registerCustody)
         {
             builder.Services.AddSingleton<IAppSurfaceWebPushSubscriptionCustody>(custody);
+        }
+        if (registerBearerTokenValidator)
+        {
+            builder.Services.AddSingleton<IAppSurfaceWebPushBearerTokenValidator>(
+                throwingBearerTokenValidator
+                    ? new ThrowingBearerTokenValidator()
+                    : new ProofBearerTokenValidator());
         }
         builder.Services.AddAppSurfaceWebPush(options =>
         {
@@ -732,14 +782,12 @@ public sealed class AppSurfaceWebPushEndpointTests
                 routes.MapAppSurfaceWebPushBearerSubscriptions(
                     basePath,
                     "push.manage",
-                    authenticationScheme,
                     rateLimiterPolicy);
                 if (secondaryBasePath is not null)
                 {
                     routes.MapAppSurfaceWebPushBearerSubscriptions(
                         secondaryBasePath,
                         "push.manage",
-                        authenticationScheme,
                         rateLimiterPolicy);
                 }
             }
@@ -880,27 +928,32 @@ public sealed class AppSurfaceWebPushEndpointTests
             Task.FromResult(AuthenticateResult.NoResult());
     }
 
-    private sealed class BearerProofAuthenticationHandler(
-        IOptionsMonitor<AuthenticationSchemeOptions> options,
-        ILoggerFactory logger,
-        UrlEncoder encoder)
-        : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+    private sealed class ProofBearerTokenValidator : IAppSurfaceWebPushBearerTokenValidator
     {
-        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        public ValueTask<ClaimsPrincipal?> ValidateAsync(
+            string bearerToken,
+            CancellationToken cancellationToken = default)
         {
-            if (Request.Headers.Authorization == "Bearer admin")
+            if (bearerToken == "cancel")
             {
-                var ticket = new AuthenticationTicket(Principal("bearer", "Admin"), Scheme.Name);
-                return Task.FromResult(AuthenticateResult.Success(ticket));
+                throw new OperationCanceledException(cancellationToken);
             }
 
-            if (Request.Headers.Authorization == "Bearer viewer")
+            if (bearerToken == "cancel-without-request")
             {
-                var ticket = new AuthenticationTicket(Principal("bearer-viewer", "Viewer"), Scheme.Name);
-                return Task.FromResult(AuthenticateResult.Success(ticket));
+                throw new OperationCanceledException();
             }
 
-            return Task.FromResult(AuthenticateResult.NoResult());
+            ClaimsPrincipal? principal = bearerToken switch
+            {
+                "admin" => Principal("bearer", "Admin"),
+                "viewer" => Principal("bearer-viewer", "Viewer"),
+                "identityless" => new ClaimsPrincipal(),
+                "anonymous" => new ClaimsPrincipal(new ClaimsIdentity()),
+                _ => null,
+            };
+
+            return ValueTask.FromResult(principal);
         }
     }
 
@@ -928,14 +981,12 @@ public sealed class AppSurfaceWebPushEndpointTests
         }
     }
 
-    private sealed class ThrowingAuthenticationHandler(
-        IOptionsMonitor<AuthenticationSchemeOptions> options,
-        ILoggerFactory logger,
-        UrlEncoder encoder)
-        : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+    private sealed class ThrowingBearerTokenValidator : IAppSurfaceWebPushBearerTokenValidator
     {
-        protected override Task<AuthenticateResult> HandleAuthenticateAsync() =>
-            throw new InvalidOperationException("secret authentication detail");
+        public ValueTask<ClaimsPrincipal?> ValidateAsync(
+            string bearerToken,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("secret token validation detail");
     }
 
     private sealed class ThrowingAntiforgery : IAntiforgery
