@@ -296,14 +296,15 @@ internal sealed class PackagePublishWorkflow
         CancellationToken cancellationToken)
     {
         ValidatePublishRequest(request);
+        var plan = await _planResolver.ResolveAsync(request.RepositoryRoot, request.ManifestPath, cancellationToken);
+        ThrowIfPublicationBlocked(plan);
+
         var apiKey = Environment.GetEnvironmentVariable(request.ApiKeyEnvironmentVariable);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new PackageIndexException($"Environment variable '{request.ApiKeyEnvironmentVariable}' must contain the NuGet API key.");
         }
 
-        var plan = await _planResolver.ResolveAsync(request.RepositoryRoot, request.ManifestPath, cancellationToken);
-        ThrowIfPublicationBlocked(plan);
         var artifactManifest = await _manifestReader.ReadAsync(request.ArtifactManifestPath, cancellationToken);
         var plannedEntries = PackageArtifactManifestPlanValidator.Validate(
             plan,

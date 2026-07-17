@@ -4650,7 +4650,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             new PackageArtifactManifestReader(),
             commandRunner,
             new PackagePublishLedgerRenderer());
-        Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", "secret");
+        var previousApiKey = Environment.GetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY");
+        Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", null);
 
         try
         {
@@ -4671,7 +4672,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         }
         finally
         {
-            Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", null);
+            Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", previousApiKey);
         }
     }
 
