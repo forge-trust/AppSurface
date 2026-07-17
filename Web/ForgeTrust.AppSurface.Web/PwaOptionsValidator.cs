@@ -85,6 +85,10 @@ internal static partial class PwaOptionsValidator
                 RequireLocalPath(options.Push.HandlerScriptPath, "ASPWA022", "PwaOptions.Push.HandlerScriptPath must be an app-root-relative path.", diagnostics);
             }
         }
+        if (options.Badging.Enabled)
+        {
+            RequireEndpointPath(options.Badging.HelperPath, "ASPWA027", "PwaOptions.Badging.HelperPath must be an app-root-relative endpoint path without percent escapes.", diagnostics);
+        }
 
         ValidateKnownRouteCollisions(options, diagnostics);
 
@@ -120,6 +124,10 @@ internal static partial class PwaOptionsValidator
             {
                 routes.Add(("custom push handler", options.Push.HandlerScriptPath));
             }
+        }
+        if (options.Badging.Enabled)
+        {
+            routes.Add(("badging helper", options.Badging.HelperPath));
         }
 
         if (options.Offline.Enabled)

@@ -206,7 +206,7 @@ packages:
     release_notes_path: releases/v0.2.0-preview.2.md
     order: 41
     use_when: Add this when your app or module needs typed input/output port flow definitions, generated-case authoring, inferred graph mapping, and local runner tests before durable hosting.
-    includes: AppSurfaceFlowModule, FlowNodeOutcome discriminated outcome records, generated Flow authoring attributes and analyzer, IFlowTransformerNode, typed port graph inference, IFlowNode, FlowDefinition, FlowGraphBuilder, flow definition registry, and the in-memory runner.
+    includes: AppSurfaceFlowModule, FlowNodeOutcome discriminated outcome records including typed Activity calls, the host-neutral one-node transition evaluator, generated Flow authoring attributes and analyzer, IFlowTransformerNode, typed port graph inference, IFlowNode, FlowDefinition, FlowGraphBuilder, flow definition registry, and the in-memory runner.
     does_not_include: Durable persistence, timers, external-event delivery, ASP.NET endpoints, UI, Semantic Kernel, or preview C# union syntax.
     start_here_path: Flow/ForgeTrust.AppSurface.Flow/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Flow` when you want generated-case typed process graphs, inferred port mapping, and local runner tests.
@@ -231,7 +231,7 @@ packages:
     release_notes_path: releases/v0.2.0-preview.2.md
     order: 43
     use_when: Add this after Flow when the same typed definitions need Durable Task persistence, replay, timers, and authorized resume events.
-    includes: AppSurfaceFlowDurableTaskModule, durable flow runner and client services, resume-event authorization contract, timeout and late-event mapping, retry policy decisions, and context serialization validation.
+    includes: AppSurfaceFlowDurableTaskModule, durable flow runner and client services, typed Activity scheduling through the shared one-node evaluator, resume-event authorization contract, timeout and late-event mapping, retry policy decisions, and context serialization validation.
     does_not_include: Durable Task worker/client hosting, storage providers, ASP.NET endpoints, authentication handlers, UI, or Semantic Kernel.
     start_here_path: Flow/ForgeTrust.AppSurface.Flow.DurableTask/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Flow.DurableTask` after `ForgeTrust.AppSurface.Flow` when a typed process needs durable execution.
@@ -249,7 +249,7 @@ packages:
     release_notes_path: releases/v0.2.0-preview.2.md
     order: 44
     use_when: Add this when an app or reusable module needs host-neutral durable worker contracts, explicit claim/completion/projection-repair outcomes, and privacy-safe repair diagnostics before choosing a runtime adapter.
-    includes: AppSurfaceWorkersModule, durable worker projection contract, executor contract, typed envelopes, outcome and retryability enums, correlation identifiers, privacy-safe diagnostics, safe metadata validation, and bounded projection repair requests.
+    includes: AppSurfaceWorkersModule, durable worker projection contract, executor contract, typed envelopes, native execution identity separating activity/provider identity from retry and lease generations, outcome and retryability enums, correlation identifiers, privacy-safe diagnostics, safe metadata validation, and bounded projection repair requests.
     does_not_include: Durable Task worker/client hosting, EF Core, Postgres, storage schemas, queue or scheduler runtimes, ASP.NET endpoints, authentication handlers, UI, Semantic Kernel, or hosted background services.
     start_here_path: Workers/ForgeTrust.AppSurface.Workers/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Workers` when worker chains need durable claim, completion, and projection-repair contracts without taking a runtime or persistence dependency.
@@ -275,6 +275,45 @@ packages:
       - ForgeTrust.AppSurface.Core
       - ForgeTrust.AppSurface.Workers
       - ForgeTrust.AppSurface.Flow.DurableTask
+  - project: Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj
+    classification: public
+    publish_decision: do_not_publish
+    publish_reason: Public-preview source contract held until the PostgreSQL provider milestone supplies conformance and restore evidence.
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 46
+    use_when: Add this source-preview contract when an AppSurface module needs host-neutral durable work, resumable Flow, or schedule authoring without installing a runtime.
+    includes: AppSurfaceDurableModule, registered and versioned payload codecs, Work and Flow client contracts, reflection-free typed registrations, command fingerprints, provider-safety declarations, and At/After/Every/Cron schedule contracts.
+    does_not_include: Provider SPI, storage, migrations, hosted polling, health or drain operations, operator recovery, ASP.NET endpoints, telemetry implementation, automated retention, deterministic async/await replay, fan-out, child flows, exactly-once provider effects, or a separate workflow control plane.
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable/README.md
+    recipe_summary: Reference the source-preview `ForgeTrust.AppSurface.Durable` contract for portable authoring and registration; no runtime starts until a provider is installed explicitly.
+    depends_on:
+      - ForgeTrust.AppSurface.Flow
+      - ForgeTrust.AppSurface.Workers
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Core
+      - ForgeTrust.AppSurface.Flow
+      - ForgeTrust.AppSurface.Workers
+  - project: Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj
+    classification: public
+    publish_decision: do_not_publish
+    publish_reason: Public-preview source contract held until the PostgreSQL provider milestone supplies conformance and restore evidence.
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 47
+    use_when: Implement or host a durable runtime provider against the public provider, operator, health, drain, and recovery SPI.
+    includes: Runtime pump, health, drain, recovery inventory, operator mutation, claimed-work adaptation, and provider command-fingerprint contracts.
+    does_not_include: PostgreSQL storage, migrations, polling implementation, scheduling execution, hosted services, endpoints, telemetry implementation, or provider conformance evidence.
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable.Provider/README.md
+    recipe_summary: Reference the source-preview Provider SPI only when implementing or hosting a durable runtime; applications normally depend on `ForgeTrust.AppSurface.Durable` alone.
+    depends_on:
+      - ForgeTrust.AppSurface.Durable
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Durable
   - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
     classification: public
     publish_decision: publish
@@ -282,7 +321,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.2.md
-    order: 46
+    order: 48
     use_when: Start here for CLI apps and worker-style entry points that should run through the AppSurface startup pipeline with CliFx.
     includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx source-generated command discovery through AppSurface modules.
     does_not_include: ASP.NET Core hosting, OpenAPI surfaces, or Razor-based UI composition.
@@ -353,6 +392,25 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Console
       - ForgeTrust.AppSurface.Deployment
+  - project: Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    readiness_blocker: "#642"
+    readiness_note: Aspire 13.4.4 leaks its partial host service provider when host construction fails after provider creation; publication remains blocked until the pinned dependency disposes or exposes that state.
+    order: 61
+    use_when: Add this to tests for an AppSurface profile-based AppHost when the resource graph must be created deterministically without invoking the asynchronous AppHost entry point.
+    includes: Typed AppHost, module, and profile selection; shared runtime graph composition; an Aspire-compatible configurable builder; one-build enforcement; and deterministic activation-host cleanup.
+    does_not_include: Native AppHost replacement, CliFx option or positional-parameter binding, cross-assembly profiles, readiness policy, higher-level fixtures, or stable diagnostic codes.
+    start_here_path: Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Aspire.Testing` to tests for profile-based AppHosts; native AppHosts should continue using Aspire's native testing API.
+    depends_on:
+      - ForgeTrust.AppSurface.Aspire
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Aspire
   - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
     classification: public
     publish_decision: publish
@@ -361,14 +419,31 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.2.md
     order: 70
-    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, health/readiness probes, [protected preview named deploy evidence](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints), conventional browser affordances, PWA install metadata or push-worker plumbing, or authenticated config-audit diagnostics before layering on optional UI or docs packages.
-    includes: Base ASP.NET Core hosting, default public `/health` and `/ready` ASP.NET Core health-check probes, pre-routing and endpoint-aware middleware composition, endpoint composition, opt-in protected single-evaluation named canary endpoints, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/shared-worker endpoints, explicit offline behavior, push-event plumbing, an inert service-worker registration helper, opt-in authenticated config audit diagnostics endpoint mapping, and the core AppSurface web module contract.
+    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, health/readiness probes, [protected preview named deploy evidence](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints), conventional browser affordances, PWA install metadata, application badging, or push-worker plumbing, or authenticated config-audit diagnostics before layering on optional UI or docs packages.
+    includes: Base ASP.NET Core hosting, default public `/health` and `/ready` ASP.NET Core health-check probes, pre-routing and endpoint-aware middleware composition, endpoint composition, opt-in protected single-evaluation named canary endpoints, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/shared-worker endpoints, default-off page and active-worker application-badging adapters, explicit offline behavior, push-event plumbing, an inert service-worker registration helper, opt-in authenticated config audit diagnostics endpoint mapping, and the core AppSurface web module contract.
     does_not_include: Canary triggers, retries, polling, aggregation, readiness effects, or authorization policy definitions; OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, AppSurface Docs host, browser-specific install or permission UI, push subscription persistence or delivery, broad offline route/app-data caching, or automatic diagnostics exposure.
     start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
-    recipe_summary: Start with `ForgeTrust.AppSurface.Web` for AppSurface ASP.NET Core hosting and default `/health` plus `/ready` platform probes; register and explicitly map a protected named canary when deployment needs one application-owned proof evaluation, enable independent `WebOptions.Pwa` install, offline, or push-worker capabilities in the same package, or map config audit diagnostics explicitly when support needs sanitized operator evidence.
+    recipe_summary: Start with `ForgeTrust.AppSurface.Web` for AppSurface ASP.NET Core hosting and default `/health` plus `/ready` platform probes; register and explicitly map a protected named canary when deployment needs one application-owned proof evaluation, enable independent `WebOptions.Pwa` install, badging, offline, or push-worker capabilities in the same package, or map config audit diagnostics explicitly when support needs sanitized operator evidence.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Core
+  - project: Web/ForgeTrust.AppSurface.Web.Push/ForgeTrust.AppSurface.Web.Push.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 75
+    use_when: Add this after the base Web package when an app wants standards-based Web Push with protected subscription intake and app-owned custody.
+    includes: Exact push-service origin allowlisting, validated retained VAPID keys, cookie-antiforgery or explicit-scheme bearer endpoint mapping, gesture-safe browser subscription, one-attempt encrypted sending, safe response classification, and conditional 404/410 cleanup.
+    does_not_include: Identity, tenants, persistence, audiences, preferences, campaigns, scheduling, fan-out, retries, hosted provider abstraction, delivery proof, readiness scoring, or telemetry.
+    start_here_path: Web/ForgeTrust.AppSurface.Web.Push/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Web.Push` when the shared PWA worker needs a protected standards-based subscription and delivery rail while the host retains product policy and storage.
+    depends_on:
+      - ForgeTrust.AppSurface.Web
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Web
   - project: Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj
     classification: public
     publish_decision: publish

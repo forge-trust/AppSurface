@@ -37,6 +37,18 @@ The base class for the application bootstrapping logic. While `WebApp` uses a ge
 
 ## Features
 
+### PWA application badging
+
+AppSurface Web includes a default-off, privacy-safe browser rail for application-icon badge requests:
+
+```csharp
+options.Pwa.Badging.Enabled = true;
+```
+
+With `<appsurface:pwa-head />` in the page head, applications can call `AppSurface.Pwa.badging.set(count)` or `.clear()`. Successful calls resolve to `"accepted"` or `"unsupported"`; invalid counts and native failures reject with sanitized `ASPWAJS040`–`ASPWAJS042` errors. `"accepted"` means only that the native request resolved and never proves a visible icon badge. When offline or push already activates the shared worker, the same API is installed in that worker after normal service-worker activation. Badging alone does not create a worker, own an attention count, request permission, change the push payload, or add CLI verification.
+
+Start with the [PWA badging quick start](Docs/pwa-install.md#badging-only), then use the [executable accessible proof](../../examples/web-pwa-install/README.md). The full guide documents configuration, sanitized `ASPWAJS040`–`042` failures, PathBase, activation lag, privacy boundaries, and unsupported-browser behavior.
+
 ### Health and Readiness Probes
 
 AppSurface Web maps public platform probe endpoints by default:
@@ -321,7 +333,7 @@ stable event, canary name, diagnostic code, and exception type.
 
 ### PWA Install and Push-Worker Foundation
 
-AppSurface Web provides independent [PWA install, offline, and push-worker capabilities](Docs/pwa-install.md) from `WebOptions.Pwa`: a manifest endpoint, MVC/Razor head tags, development diagnostics, an explicit starter offline strategy, safe default notification handlers, and an inert registration helper. Every capability is disabled by default. Enabling push does not request permission, create a subscription, choose recipients, or send a notification.
+AppSurface Web provides independent [PWA install, offline, and push-worker capabilities](Docs/pwa-install.md) from `WebOptions.Pwa`: a manifest endpoint, MVC/Razor head tags, development diagnostics, an explicit starter offline strategy, safe default notification handlers, and an inert registration helper. Every capability is disabled by default. Enabling push does not request permission, create a subscription, choose recipients, or send a notification. Add the optional [`ForgeTrust.AppSurface.Web.Push`](../ForgeTrust.AppSurface.Web.Push/README.md) package for protected subscription intake, VAPID, encrypted one-attempt sending, and stale-subscription cleanup while retaining app-owned custody and product policy.
 
 #### 3-minute PWA install path
 

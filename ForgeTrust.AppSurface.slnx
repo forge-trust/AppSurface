@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/Aspire/">
+    <Project Path="Aspire/ForgeTrust.AppSurface.Aspire.Testing.Tests/ForgeTrust.AppSurface.Aspire.Testing.Tests.csproj" />
+    <Project Path="Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj" />
     <Project Path="Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj" />
     <Project Path="Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" />
   </Folder>
@@ -54,6 +56,12 @@
     <Project Path="Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/ForgeTrust.AppSurface.Deployment.GcpCloudRun.csproj" />
     <Project Path="Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests.csproj" />
   </Folder>
+  <Folder Name="/Durable/">
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.Provider.Tests/ForgeTrust.AppSurface.Durable.Provider.Tests.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.Tests/ForgeTrust.AppSurface.Durable.Tests.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" />
+  </Folder>
   <Folder Name="/Examples/">
     <Project Path="examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj" />
     <Project Path="examples/auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" />
@@ -64,6 +72,7 @@
     <Project Path="examples/auth-web-razorwire-proof/AuthWebRazorWireProofExample.csproj" />
     <Project Path="examples/auth-web-razorwire-proof.tests/AuthWebRazorWireProofExample.Tests.csproj" />
     <Project Path="examples/aspire-apphost/AspireAppHostExample.csproj" />
+    <Project Path="examples/aspire-apphost.Tests/AspireAppHostExample.Tests.csproj" />
     <Project Path="examples/aspire-deployment-apphost/AspireDeploymentAppHostExample.csproj" />
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
@@ -118,6 +127,8 @@
     <Project Path="tests/ForgeTrust.AppSurface.Testing.Tests/ForgeTrust.AppSurface.Testing.Tests.csproj" />
   </Folder>
   <Folder Name="/Web/">
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Push.Tests/ForgeTrust.AppSurface.Web.Push.Tests.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Push/ForgeTrust.AppSurface.Web.Push.csproj" />
     <Project Path="Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj" />
     <Project Path="Web/ForgeTrust.RazorWire.Auth.AspNetCore.Tests/ForgeTrust.RazorWire.Auth.AspNetCore.Tests.csproj" />
     <Project Path="Web/ForgeTrust.RazorWire.Auth.AspNetCore/ForgeTrust.RazorWire.Auth.AspNetCore.csproj" />

@@ -24,6 +24,7 @@ Open the `web` endpoint and inspect the dashboard's logs, traces, and metrics ta
 
 - `Program.cs` delegates AppHost startup to `AspireApp<ExampleModule>.RunAsync(args)`.
 - `LocalProfile` is a CliFx command that chooses which Aspire components participate in the resource graph.
+- `QaProfile` selects the same one-project graph for deterministic typed tests without invoking `Program.cs`.
 - `WebAppProjectComponent` registers the web example with `AddProject<Projects.WebAppExample>("web")`.
 - `WebAppEnvironmentComponent` depends on `WebAppProjectComponent`, resolves it through `AspireStartupContext.Resolve(...)`, and applies an environment variable.
 - `examples/web-app` registers `AppSurfaceObservabilityModule`, which uses Aspire's `OTEL_EXPORTER_OTLP_ENDPOINT` to export application telemetry.
@@ -36,6 +37,10 @@ Open the `web` endpoint and inspect the dashboard's logs, traces, and metrics ta
 - Cross-assembly component discovery.
 - Secret management, hosting policy, or production orchestration.
 - Custom AppSurface Flow/Auth/Docs spans; the observability proof is standard OpenTelemetry wiring only.
+
+## Deterministic Profile Test
+
+The paired [`aspire-apphost.Tests`](../aspire-apphost.Tests/TypedProfileIntegrationTests.cs) project selects `QaProfile` by type, builds and starts the graph, waits for the `web` resource to become healthy, performs an HTTP request, and disposes the application before the testing builder. See the canonical [`ForgeTrust.AppSurface.Aspire.Testing` guide](../../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) for lifecycle and compatibility constraints.
 
 ## Project Reference Shape
 

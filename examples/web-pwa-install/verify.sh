@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export MSBUILDDISABLENODEREUSE=1
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 port="${APP_SURFACE_WEB_PWA_PORT:-5055}"
@@ -17,7 +18,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-dotnet run --project "$project" -- --environment Development --port "$port" >"$log_file" 2>&1 &
+dotnet build "$project" -p:UseSharedCompilation=false -nodeReuse:false
+dotnet run --project "$project" --no-build -- --environment Development --port "$port" >"$log_file" 2>&1 &
 app_pid=$!
 
 ready=0
@@ -38,7 +40,7 @@ if [[ "$ready" != "1" ]]; then
 fi
 
 curl -fsS "http://127.0.0.1:$port/_appsurface/pwa/status.json" >/dev/null
-dotnet run --project "$cli_project" -- pwa verify \
+dotnet run --project "$cli_project" -p:UseSharedCompilation=false -- pwa verify \
   --base-url "http://127.0.0.1:$port" \
   --entry-path /account/resume \
   --expect-start-url / \
