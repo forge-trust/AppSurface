@@ -201,6 +201,7 @@ public class RazorWireScriptsTagHelperTests
 
     [Theory]
     [InlineData(null)]
+    [InlineData("/")]
     [InlineData("https://cdn.example.com/turbo.js")]
     public void Process_WithInvalidCustomTurboPath_ThrowsActionableInvalidOperationException(string? customPath)
     {

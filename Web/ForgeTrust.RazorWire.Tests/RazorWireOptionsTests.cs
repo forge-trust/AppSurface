@@ -29,7 +29,6 @@ public class RazorWireOptionsTests
     [Theory]
     [InlineData("/assets/turbo.js")]
     [InlineData("/~vendor/Turbo_8-0.12/turbo.js")]
-    [InlineData("/")]
     public void Validator_AcceptsValidCustomTurboPath(string customPath)
     {
         var options = new RazorWireOptions();
@@ -92,6 +91,7 @@ public class RazorWireOptionsTests
     [InlineData("//cdn.example.com/turbo.js")]
     [InlineData("https://cdn.example.com/turbo.js")]
     [InlineData("assets/turbo.js")]
+    [InlineData("/")]
     [InlineData("/assets/./turbo.js")]
     [InlineData("/assets/../turbo.js")]
     [InlineData("/assets/%74urbo.js")]

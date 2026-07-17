@@ -68,14 +68,14 @@ internal sealed class RazorWireOptionsValidator : IValidateOptions<RazorWireOpti
         if (!IsValidCustomTurboPath(turbo.CustomPath))
         {
             failures.Add(
-                "RazorWireOptions.Turbo.CustomPath must begin with exactly one '/' and contain only ASCII letters, digits, " +
+                "RazorWireOptions.Turbo.CustomPath must be a non-root path beginning with exactly one '/' and contain only ASCII letters, digits, " +
                 "'/', '.', '_', '-', or '~', with no '.' or '..' path segments.");
         }
     }
 
     internal static bool IsValidCustomTurboPath(string path)
     {
-        if (path[0] != '/' || (path.Length > 1 && path[1] == '/'))
+        if (path.Length == 1 || path[0] != '/' || path[1] == '/')
         {
             return false;
         }
