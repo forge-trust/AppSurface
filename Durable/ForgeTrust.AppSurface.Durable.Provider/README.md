@@ -17,6 +17,18 @@ adopter package never depends on Provider. Production providers implement this p
 Ordinary applications and reusable modules should reference only `ForgeTrust.AppSurface.Durable`. This package does not
 provide PostgreSQL storage, migrations, polling, schedule execution, hosted services, endpoints, metrics, or tracing.
 
+## Activation and broker evolution
+
+`IDurableRuntimePump` is the common bounded activation primitive for a continuously hosted loop, scheduled job,
+function, HTTP wake-up, or broker notification. A wake-up is advisory: implementations must recover eligible work from
+their authoritative state even when notifications are lost, duplicated, delayed, or reordered.
+
+Do not translate broker receipt into a claim, effect permit, or terminal fact. A wake-only adapter should call the pump
+without carrying application payloads. A future targeted-dispatch or broker-native provider must revalidate its opaque
+reference against authoritative scope, revision, lease, runtime-epoch, and provider-effect state before invoking work.
+Slice 2 leaves that adapter shape open until a concrete broker topology proves the required routing and acknowledgement
+contract.
+
 ## Public API by audience
 
 Every public type in this package belongs to one of these provider-facing families. The

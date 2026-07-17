@@ -21,6 +21,12 @@ public enum DurableCommandFingerprintMatch
 public sealed record DurableCommandFingerprint
 {
     /// <summary>Initializes a validated command fingerprint.</summary>
+    /// <param name="schemaId">Versioned identity of the canonical encoding used to produce the digest.</param>
+    /// <param name="sha256">Exactly 64 lowercase hexadecimal SHA-256 characters.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="schemaId"/> is invalid or <paramref name="sha256"/> is not a lowercase SHA-256 digest.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sha256"/> is null.</exception>
     public DurableCommandFingerprint(string schemaId, string sha256)
     {
         SchemaId = DurableIdentifier.Require(schemaId, nameof(schemaId), 200);
@@ -40,6 +46,13 @@ public sealed record DurableCommandFingerprint
     public string Sha256 { get; }
 
     /// <summary>Compares a persisted fingerprint without reinterpreting an unknown schema.</summary>
+    /// <param name="persisted">Previously persisted fingerprint to compare.</param>
+    /// <returns>
+    /// <see cref="DurableCommandFingerprintMatch.Exact"/> for identical schemas and digests,
+    /// <see cref="DurableCommandFingerprintMatch.Conflict"/> for differing digests under the same schema, or
+    /// <see cref="DurableCommandFingerprintMatch.UnsupportedSchema"/> for differing schemas.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="persisted"/> is null.</exception>
     public DurableCommandFingerprintMatch Compare(DurableCommandFingerprint persisted)
     {
         ArgumentNullException.ThrowIfNull(persisted);
@@ -84,38 +97,46 @@ internal static class DurableCommandFingerprints
     {
         if (value is null)
         {
-            hash.AppendData([0]);
+            AppendTag(hash, CanonicalTypeTag.Null);
             return;
         }
 
-        hash.AppendData([1]);
         switch (value)
         {
             case string text:
+                AppendTag(hash, CanonicalTypeTag.String);
                 Append(hash, text);
                 break;
             case int number:
+                AppendTag(hash, CanonicalTypeTag.Int32);
                 Append(hash, number);
                 break;
             case long number:
+                AppendTag(hash, CanonicalTypeTag.Int64);
                 Append(hash, number);
                 break;
             case Enum enumValue:
+                AppendTag(hash, CanonicalTypeTag.Enum);
                 Append(hash, Convert.ToInt64(enumValue, System.Globalization.CultureInfo.InvariantCulture));
                 break;
             case bool flag:
+                AppendTag(hash, CanonicalTypeTag.Boolean);
                 hash.AppendData([flag ? (byte)1 : (byte)0]);
                 break;
             case DateTimeOffset timestamp:
+                AppendTag(hash, CanonicalTypeTag.DateTimeOffset);
                 Append(hash, timestamp.ToUniversalTime().Ticks);
                 break;
             case TimeSpan duration:
+                AppendTag(hash, CanonicalTypeTag.TimeSpan);
                 Append(hash, duration.Ticks);
                 break;
             case DurableEncodedPayload payload:
+                AppendTag(hash, CanonicalTypeTag.EncodedPayload);
                 AppendPayload(hash, payload);
                 break;
             case DurableWorkRetryPolicy retry:
+                AppendTag(hash, CanonicalTypeTag.WorkRetryPolicy);
                 AppendObject(hash, retry.MaximumAttempts);
                 AppendObject(hash, retry.MaximumElapsedTime);
                 AppendObject(hash, retry.InitialRetryDelay);
@@ -126,9 +147,11 @@ internal static class DurableCommandFingerprints
                 AppendObject(hash, retry.BackoffAlgorithm);
                 break;
             case DurableSchedule schedule:
+                AppendTag(hash, CanonicalTypeTag.Schedule);
                 AppendSchedule(hash, schedule);
                 break;
             case DurableScheduleTarget target:
+                AppendTag(hash, CanonicalTypeTag.ScheduleTarget);
                 AppendObject(hash, target.Kind);
                 AppendObject(hash, target.RegisteredName);
                 AppendObject(hash, target.RegisteredVersion);
@@ -197,5 +220,24 @@ internal static class DurableCommandFingerprints
         Span<byte> bytes = stackalloc byte[sizeof(long)];
         BinaryPrimitives.WriteInt64BigEndian(bytes, value);
         hash.AppendData(bytes);
+    }
+
+    private static void AppendTag(IncrementalHash hash, CanonicalTypeTag tag) =>
+        hash.AppendData([(byte)tag]);
+
+    private enum CanonicalTypeTag : byte
+    {
+        Null = 0,
+        String = 1,
+        Int32 = 2,
+        Int64 = 3,
+        Enum = 4,
+        Boolean = 5,
+        DateTimeOffset = 6,
+        TimeSpan = 7,
+        EncodedPayload = 8,
+        WorkRetryPolicy = 9,
+        Schedule = 10,
+        ScheduleTarget = 11,
     }
 }

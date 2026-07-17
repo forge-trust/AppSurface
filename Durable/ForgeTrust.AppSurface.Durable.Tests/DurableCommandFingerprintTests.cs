@@ -193,6 +193,37 @@ public sealed class DurableCommandFingerprintTests
         Assert.Throws<ArgumentException>(() => new DurableCommandFingerprint("schema", $"g{new string('a', 63)}"));
     }
 
+    [Fact]
+    public void Canonical_encoding_tags_supported_runtime_types()
+    {
+        var schema = "test.command.type-tags.v1";
+        var integer = DurableCommandFingerprints.Create(schema, 0);
+        var text = DurableCommandFingerprints.Create(schema, string.Empty);
+        var longInteger = DurableCommandFingerprints.Create(schema, 0L);
+        var duration = DurableCommandFingerprints.Create(schema, TimeSpan.Zero);
+        var falseFlag = DurableCommandFingerprints.Create(schema, false);
+        var trueFlag = DurableCommandFingerprints.Create(schema, true);
+
+        Assert.NotEqual(integer.Sha256, text.Sha256);
+        Assert.NotEqual(longInteger.Sha256, duration.Sha256);
+        Assert.NotEqual(falseFlag.Sha256, trueFlag.Sha256);
+
+        var codec = new TestCodec();
+        var encodedPayload = codec.Encode(string.Empty);
+        var retry = DurableWorkRetryPolicy.Default;
+        var schedule = DurableSchedule.After(TimeSpan.FromSeconds(1));
+        var target = DurableScheduleTarget.Flow("flow", "v1", string.Empty, codec);
+        var nested = new[]
+        {
+            DurableCommandFingerprints.Create(schema, encodedPayload).Sha256,
+            DurableCommandFingerprints.Create(schema, retry).Sha256,
+            DurableCommandFingerprints.Create(schema, schedule).Sha256,
+            DurableCommandFingerprints.Create(schema, target).Sha256,
+        };
+
+        Assert.Equal(nested.Length, nested.Distinct(StringComparer.Ordinal).Count());
+    }
+
     private sealed class TestCodec : IDurablePayloadCodec<string>
     {
         public Type PayloadType => typeof(string);
