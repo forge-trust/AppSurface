@@ -94,9 +94,9 @@ internal sealed class PackagePublishPlanResolver
         foreach (var entry in entries)
         {
             if (entry.Manifest.Classification == PackageClassification.Public
-                && entry.Manifest.PublishDecision != PackagePublishDecision.Publish)
+                && entry.Manifest.PublishDecision is not (PackagePublishDecision.Publish or PackagePublishDecision.DoNotPublish))
             {
-                throw new PackageIndexException($"Public manifest entry '{entry.Manifest.Project}' must use publish_decision 'publish'.");
+                throw new PackageIndexException($"Public manifest entry '{entry.Manifest.Project}' must use publish_decision 'publish' or 'do_not_publish'.");
             }
 
             if (entry.Manifest.Classification == PackageClassification.Support
@@ -130,7 +130,10 @@ internal sealed class PackagePublishPlanResolver
             pair => pair.Value,
             StringComparer.OrdinalIgnoreCase);
 
-        foreach (var entry in entries.Where(entry => entry.Manifest.PublishDecision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish))
+        foreach (var entry in entries.Where(entry =>
+                     entry.Manifest.PublishDecision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish
+                     || (entry.Manifest.Classification == PackageClassification.Public
+                         && entry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)))
         {
             if (entry.Metadata.IsTool)
             {
@@ -140,9 +143,12 @@ internal sealed class PackagePublishPlanResolver
                         $"Tool manifest entry '{entry.Manifest.Project}' must not define expected package dependencies because .NET tool packages embed their project references.");
                 }
 
-                PackageIndexGenerator.ValidateToolCommandNameValue(
-                    entry.Manifest.Project,
-                    entry.Manifest.ToolCommandName ?? string.Empty);
+                if (entry.Manifest.PublishDecision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish)
+                {
+                    PackageIndexGenerator.ValidateToolCommandNameValue(
+                        entry.Manifest.Project,
+                        entry.Manifest.ToolCommandName ?? string.Empty);
+                }
 
                 continue;
             }

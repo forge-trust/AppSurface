@@ -52,6 +52,7 @@ internal sealed class PackageIndexGenerator
             [PackageReadinessStatus.ManifestReady] = "manifest evidence complete",
             [PackageReadinessStatus.TransitiveReady] = "transitive package evidence complete",
             [PackageReadinessStatus.ProofReady] = "proof-host evidence complete",
+            [PackageReadinessStatus.PublishHeld] = "public preview held from publishing",
             [PackageReadinessStatus.Excluded] = "excluded by publish decision",
             [PackageReadinessStatus.Blocked] = "blocked"
         };
@@ -620,7 +621,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine("AppSurface v0.1 is a coordinated .NET 10 package family. Start with the package that matches the app you're building, then add optional modules only when your app needs them.");
         builder.AppendLine();
-        builder.AppendLine($"{targetFrameworkSummary} Library package rows use `dotnet package add`; in .NET 10, `dotnet package add` and `dotnet add package` are equivalent. Tool rows use `dotnet tool install`.");
+        builder.AppendLine($"{targetFrameworkSummary} Published library rows use `dotnet package add`; in .NET 10, `dotnet package add` and `dotnet add package` are equivalent. Tool rows use `dotnet tool install`. Public previews marked publication held are source-only and intentionally have no install command.");
         builder.AppendLine();
         builder.AppendLine("## Web app");
         builder.AppendLine();
@@ -629,6 +630,10 @@ internal sealed class PackageIndexGenerator
         if (IsPublicationBlocked(webEntry.Manifest))
         {
             builder.AppendLine(FormatPublicationBlockedMessage(request, webEntry));
+        }
+        else if (webEntry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)
+        {
+            builder.AppendLine("Source only - publication held");
         }
         else
         {
@@ -708,9 +713,7 @@ internal sealed class PackageIndexGenerator
             builder.Append(" | ");
             builder.Append(EscapeTableCell(entry.Manifest.UseWhen!));
             builder.Append(" | ");
-            builder.Append(EscapeTableCell(IsPublicationBlocked(entry.Manifest)
-                ? $"Publication blocked by {entry.Manifest.ReadinessBlocker}; not currently installable."
-                : $"`{entry.Metadata.InstallCommand}`"));
+            builder.Append(EscapeTableCell(FormatInstallCell(entry)));
             builder.Append(" | ");
             builder.Append(EscapeTableCell(entry.Manifest.Includes!));
             builder.Append(" | ");
@@ -1232,6 +1235,10 @@ internal sealed class PackageIndexGenerator
         {
             parts.Add($"publication blocked by {entry.ReadinessBlocker}");
         }
+        else if (entry.PublishDecision == PackagePublishDecision.DoNotPublish)
+        {
+            parts.Add("publication held");
+        }
 
         if (entry.ReleaseStatus != PackageReleaseStatus.Unknown)
         {
@@ -1265,6 +1272,18 @@ internal sealed class PackageIndexGenerator
         return string.IsNullOrWhiteSpace(entry.Manifest.ReadinessNote)
             ? message
             : $"{message} {entry.Manifest.ReadinessNote}";
+    }
+
+    private static string FormatInstallCell(ResolvedPackageEntry entry)
+    {
+        if (IsPublicationBlocked(entry.Manifest))
+        {
+            return $"Publication blocked by {entry.Manifest.ReadinessBlocker}; not currently installable.";
+        }
+
+        return entry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish
+            ? "Source only - publication held"
+            : $"`{entry.Metadata.InstallCommand}`";
     }
 
     private static void AppendReleaseSummary(
@@ -1520,10 +1539,10 @@ internal static class PackageReadinessEvaluator
         List<string> fixHints)
     {
         if (entry.Manifest.Classification == PackageClassification.Public
-            && entry.Manifest.PublishDecision != PackagePublishDecision.Publish)
+            && entry.Manifest.PublishDecision is not (PackagePublishDecision.Publish or PackagePublishDecision.DoNotPublish))
         {
-            blockingReasons.Add("Public package is not marked publish.");
-            fixHints.Add($"Set publish_decision: publish for {entry.Manifest.Project}.");
+            blockingReasons.Add("Public package uses an invalid publish decision.");
+            fixHints.Add($"Set publish_decision: publish or do_not_publish for {entry.Manifest.Project}.");
         }
         else if (entry.Manifest.Classification == PackageClassification.Support
                  && entry.Manifest.PublishDecision == PackagePublishDecision.Publish)
@@ -1550,6 +1569,11 @@ internal static class PackageReadinessEvaluator
 
         if (entry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)
         {
+            if (entry.Manifest.Classification == PackageClassification.Public)
+            {
+                evidence.Add("public preview is machine-held from the publish plan");
+            }
+
             if (string.IsNullOrWhiteSpace(entry.Manifest.PublishReason))
             {
                 blockingReasons.Add("publish_reason is missing for do_not_publish.");
@@ -1626,7 +1650,9 @@ internal static class PackageReadinessEvaluator
 
         if (entry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)
         {
-            return PackageReadinessStatus.Excluded;
+            return entry.Manifest.Classification == PackageClassification.Public
+                ? PackageReadinessStatus.PublishHeld
+                : PackageReadinessStatus.Excluded;
         }
 
         return PackageReadinessStatus.ManifestReady;
@@ -1703,6 +1729,11 @@ internal enum PackageReadinessStatus
     /// Proof-host evidence is complete, but the package is not positioned as a first-install surface.
     /// </summary>
     ProofReady,
+
+    /// <summary>
+    /// Public-preview package evidence is complete, but the package is intentionally held out of publish plans.
+    /// </summary>
+    PublishHeld,
 
     /// <summary>
     /// The package is intentionally excluded from publishing.
