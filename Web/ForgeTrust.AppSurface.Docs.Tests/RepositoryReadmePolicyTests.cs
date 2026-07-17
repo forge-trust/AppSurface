@@ -74,7 +74,7 @@ public sealed partial class RepositoryReadmePolicyTests
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var entries = ReadPackageManifestEntries(repoRoot);
         var requiredReadmes = entries
-            .Where(IsPublicPublishedStartHereEntry)
+            .Where(IsPublicStartHereEntry)
             .Select(entry => entry.StartHerePath!)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -103,7 +103,7 @@ public sealed partial class RepositoryReadmePolicyTests
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var entries = ReadPackageManifestEntries(repoRoot);
         var requiredReadmes = entries
-            .Where(IsPublicPublishedStartHereEntry)
+            .Where(IsPublicStartHereEntry)
             .Select(entry => entry.StartHerePath!)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -113,12 +113,21 @@ public sealed partial class RepositoryReadmePolicyTests
             .Select(entry => entry.StartHerePath!)
             .ToArray();
 
-        Assert.Equal(30, requiredReadmes.Length);
+        Assert.Equal(33, requiredReadmes.Length);
+        Assert.Contains(
+            "Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md",
+            requiredReadmes);
         Assert.Contains(
             "Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md",
             requiredReadmes);
         Assert.Contains(
             "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md",
+            requiredReadmes);
+        Assert.Contains(
+            "Durable/ForgeTrust.AppSurface.Durable/README.md",
+            requiredReadmes);
+        Assert.Contains(
+            "Durable/ForgeTrust.AppSurface.Durable.Provider/README.md",
             requiredReadmes);
         Assert.Contains(
             "Workers/ForgeTrust.AppSurface.Workers/README.md",
@@ -352,16 +361,17 @@ public sealed partial class RepositoryReadmePolicyTests
         return manifest.Packages;
     }
 
-    private static bool IsPublicPublishedStartHereEntry(PackageManifestReadmeEntry entry)
+    private static bool IsPublicStartHereEntry(PackageManifestReadmeEntry entry)
     {
         return string.Equals(entry.Classification, "public", StringComparison.OrdinalIgnoreCase)
-               && string.Equals(entry.PublishDecision, "publish", StringComparison.OrdinalIgnoreCase)
+               && (string.Equals(entry.PublishDecision, "publish", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(entry.PublishDecision, "do_not_publish", StringComparison.OrdinalIgnoreCase))
                && !string.IsNullOrWhiteSpace(entry.StartHerePath);
     }
 
     private static bool IsPublishedAuthPackageEntry(PackageManifestReadmeEntry entry)
     {
-        return IsPublicPublishedStartHereEntry(entry)
+        return IsPublicStartHereEntry(entry)
                && entry.Project.StartsWith("Auth/ForgeTrust.AppSurface.Auth", StringComparison.Ordinal);
     }
 

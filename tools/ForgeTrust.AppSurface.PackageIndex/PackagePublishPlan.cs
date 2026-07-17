@@ -69,7 +69,8 @@ internal sealed class PackagePublishPlanResolver
                     entry.Manifest.PublishDecision!.Value,
                     entry.Manifest.ExpectedDependencyPackageIds.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
                     entry.Metadata.IsTool,
-                    entry.Manifest.ToolCommandName ?? string.Empty))
+                    entry.Manifest.ToolCommandName ?? string.Empty,
+                    entry.Manifest.ReadinessBlocker ?? string.Empty))
                 .ToArray());
     }
 
@@ -93,9 +94,9 @@ internal sealed class PackagePublishPlanResolver
         foreach (var entry in entries)
         {
             if (entry.Manifest.Classification == PackageClassification.Public
-                && entry.Manifest.PublishDecision != PackagePublishDecision.Publish)
+                && entry.Manifest.PublishDecision is not (PackagePublishDecision.Publish or PackagePublishDecision.DoNotPublish))
             {
-                throw new PackageIndexException($"Public manifest entry '{entry.Manifest.Project}' must use publish_decision 'publish'.");
+                throw new PackageIndexException($"Public manifest entry '{entry.Manifest.Project}' must use publish_decision 'publish' or 'do_not_publish'.");
             }
 
             if (entry.Manifest.Classification == PackageClassification.Support
@@ -129,7 +130,10 @@ internal sealed class PackagePublishPlanResolver
             pair => pair.Value,
             StringComparer.OrdinalIgnoreCase);
 
-        foreach (var entry in entries.Where(entry => entry.Manifest.PublishDecision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish))
+        foreach (var entry in entries.Where(entry =>
+                     entry.Manifest.PublishDecision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish
+                     || (entry.Manifest.Classification == PackageClassification.Public
+                         && entry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)))
         {
             if (entry.Metadata.IsTool)
             {
@@ -139,9 +143,12 @@ internal sealed class PackagePublishPlanResolver
                         $"Tool manifest entry '{entry.Manifest.Project}' must not define expected package dependencies because .NET tool packages embed their project references.");
                 }
 
-                PackageIndexGenerator.ValidateToolCommandNameValue(
-                    entry.Manifest.Project,
-                    entry.Manifest.ToolCommandName ?? string.Empty);
+                if (entry.Manifest.PublishDecision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish)
+                {
+                    PackageIndexGenerator.ValidateToolCommandNameValue(
+                        entry.Manifest.Project,
+                        entry.Manifest.ToolCommandName ?? string.Empty);
+                }
 
                 continue;
             }
@@ -196,10 +203,15 @@ internal sealed record PackagePublishPlan(IReadOnlyList<PackagePublishPlanEntry>
 /// Validated command shim token from <c>tool_command_name</c>. It is empty for non-tool packages and required for tool
 /// packages so the pack/publish workflow can carry the exact command name into artifact validation and smoke tests.
 /// </param>
+/// <param name="ReadinessBlocker">
+/// Maintainer blocker that prevents publishing the coordinated artifact set while still allowing artifacts to be packed
+/// and validated.
+/// </param>
 internal sealed record PackagePublishPlanEntry(
     string ProjectPath,
     string PackageId,
     PackagePublishDecision Decision,
     IReadOnlyList<string> ExpectedDependencyPackageIds,
     bool IsTool,
-    string ToolCommandName = "");
+    string ToolCommandName = "",
+    string ReadinessBlocker = "");

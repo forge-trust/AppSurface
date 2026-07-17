@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 41
-- Evidence status: manifest evidence complete: 30; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 4
-- Product families: AppSurface: 28; Forge Trust: 2; Internal support: 8; RazorWire: 3
+- Packages: 44
+- Evidence status: manifest evidence complete: 30; transitive package evidence complete: 5; proof-host evidence complete: 2; public preview held from publishing: 2; excluded by publish decision: 4; blocked: 1
+- Product families: AppSurface: 31; Forge Trust: 2; Internal support: 8; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -32,11 +32,14 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Flow.DurableTask` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Flow` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Flow` | [README](../Flow/ForgeTrust.AppSurface.Flow.DurableTask/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Workers` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Workers/ForgeTrust.AppSurface.Workers/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Workers.DurableTask` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Workers`<br />`ForgeTrust.AppSurface.Flow.DurableTask` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Workers`<br />`ForgeTrust.AppSurface.Flow.DurableTask` | [README](../Workers/ForgeTrust.AppSurface.Workers.DurableTask/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
+| AppSurface | `ForgeTrust.AppSurface.Durable` | public | do not publish | public preview held from publishing | None | `ForgeTrust.AppSurface.Flow`<br />`ForgeTrust.AppSurface.Workers` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Flow`<br />`ForgeTrust.AppSurface.Workers` | [README](../Durable/ForgeTrust.AppSurface.Durable/README.md) | [notes](../releases/unreleased.md) |
+| AppSurface | `ForgeTrust.AppSurface.Durable.Provider` | public | do not publish | public preview held from publishing | None | `ForgeTrust.AppSurface.Durable` | `ForgeTrust.AppSurface.Durable` | [README](../Durable/ForgeTrust.AppSurface.Durable.Provider/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Console` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Console/ForgeTrust.AppSurface.Console/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Dependency.Autofac` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Core` | `ForgeTrust.AppSurface.Core` | [README](../Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Deployment` | public | publish | manifest evidence complete | None | None | None | [README](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Deployment.GcpCloudRun` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Deployment` | `ForgeTrust.AppSurface.Deployment` | [README](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Aspire` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Console`<br />`ForgeTrust.AppSurface.Deployment` | [README](../Aspire/ForgeTrust.AppSurface.Aspire/README.md) | [notes](../releases/unreleased.md) |
+| AppSurface | `ForgeTrust.AppSurface.Aspire.Testing` | public | publish | blocked | Blocker: #642<br />Note: Aspire 13.4.4 leaks its partial host service provider when host construction fails after provider creation; publication remains blocked until the pinned dependency disposes or exposes that state.<br />Maintainer blocker #642 is set. | `ForgeTrust.AppSurface.Aspire` | `ForgeTrust.AppSurface.Aspire` | [README](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Config`<br />`ForgeTrust.AppSurface.Core` | [README](../Web/ForgeTrust.AppSurface.Web/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web.Push` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Web` | [README](../Web/ForgeTrust.AppSurface.Web.Push/README.md) | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web.OpenApi` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Web` | [README](../Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) | [notes](../releases/v0.2.0-preview.2.md) |
@@ -55,6 +58,10 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | RazorWire | `ForgeTrust.RazorWire.Cli` | excluded | do not publish | excluded by publish decision | None | None | None | [RazorWire CLI README](../Web/ForgeTrust.RazorWire.Cli/README.md) | [notes](../releases/unreleased.md) |
+
+## Blocking evidence
+
+- `ForgeTrust.AppSurface.Aspire.Testing`: Maintainer blocker #642 is set. Fix: Resolve the linked issue or PR, then remove readiness_blocker from packages/package-index.yml.
 
 ## Maintainer workflow
 
