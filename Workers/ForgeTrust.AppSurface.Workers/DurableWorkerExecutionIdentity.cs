@@ -44,6 +44,13 @@ public sealed record DurableWorkerExecutionIdentity
     }
 
     /// <summary>Creates the first fenced execution identity for one logical provider operation.</summary>
+    /// <param name="activityId">Stable activity identity; this also becomes the immutable provider key.</param>
+    /// <param name="leaseGeneration">Positive provider-authoritative lease generation.</param>
+    /// <param name="scopeGeneration">Positive provider-authoritative scope generation.</param>
+    /// <param name="runtimeEpoch">Non-empty opaque runtime recovery epoch. Epoch values are not ordered.</param>
+    /// <returns>An identity whose attempt number is one.</returns>
+    /// <exception cref="ArgumentException">Thrown when required text is empty or invalid.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when a generation is not positive.</exception>
     public static DurableWorkerExecutionIdentity CreateInitial(
         string activityId,
         long leaseGeneration,
@@ -52,6 +59,14 @@ public sealed record DurableWorkerExecutionIdentity
         Create(activityId, 1, leaseGeneration, scopeGeneration, runtimeEpoch);
 
     /// <summary>Creates a fenced identity from provider-authoritative attempt and generation values.</summary>
+    /// <param name="activityId">Stable activity identity; this also becomes the immutable provider key.</param>
+    /// <param name="attemptNumber">Positive provider-authoritative attempt number.</param>
+    /// <param name="leaseGeneration">Positive provider-authoritative lease generation.</param>
+    /// <param name="scopeGeneration">Positive provider-authoritative scope generation.</param>
+    /// <param name="runtimeEpoch">Non-empty opaque runtime recovery epoch. Epoch values are not ordered.</param>
+    /// <returns>A validated execution identity.</returns>
+    /// <exception cref="ArgumentException">Thrown when required text is empty or invalid.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when an attempt or generation is not positive.</exception>
     public static DurableWorkerExecutionIdentity Create(
         string activityId,
         int attemptNumber,
@@ -72,6 +87,13 @@ public sealed record DurableWorkerExecutionIdentity
     /// <summary>
     /// Advances retry and fencing generations while retaining the immutable provider-operation identity.
     /// </summary>
+    /// <param name="attemptNumber">Attempt number, which must not be lower than the current value.</param>
+    /// <param name="leaseGeneration">Lease generation, which must not be lower than the current value.</param>
+    /// <param name="scopeGeneration">Scope generation, which must not be lower than the current value.</param>
+    /// <param name="runtimeEpoch">Non-empty opaque runtime recovery epoch. Epoch values are not ordered.</param>
+    /// <returns>A new identity that preserves <see cref="ActivityId"/> and <see cref="ProviderKey"/>.</returns>
+    /// <exception cref="ArgumentException">Thrown when no field changes or required text is empty or invalid.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when an attempt or generation regresses.</exception>
     public DurableWorkerExecutionIdentity Advance(
         int attemptNumber,
         long leaseGeneration,

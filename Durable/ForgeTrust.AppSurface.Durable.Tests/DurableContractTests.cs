@@ -82,6 +82,26 @@ public sealed class DurableContractTests
     }
 
     [Fact]
+    public void Encoded_payload_equality_uses_metadata_and_content_values()
+    {
+        var first = new DurableEncodedPayload(
+            "work.test", "v1", DurableDataClassification.Operational, new byte[] { 1, 2, 3 });
+        var equivalent = new DurableEncodedPayload(
+            "work.test", "v1", DurableDataClassification.Operational, new byte[] { 1, 2, 3 });
+
+        Assert.Equal(first, equivalent);
+        Assert.Equal(first.GetHashCode(), equivalent.GetHashCode());
+        Assert.NotEqual(first, new DurableEncodedPayload(
+            "work.test", "v1", DurableDataClassification.Operational, new byte[] { 1, 2, 4 }));
+        Assert.NotEqual(first, new DurableEncodedPayload(
+            "other.test", "v1", DurableDataClassification.Operational, new byte[] { 1, 2, 3 }));
+
+        var exposedCopy = equivalent.Content.ToArray();
+        exposedCopy[0] = 9;
+        Assert.Equal(first, equivalent);
+    }
+
+    [Fact]
     public void Encoded_payload_rejects_invalid_classification_and_oversized_content()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableEncodedPayload(
@@ -701,9 +721,9 @@ public sealed class DurableContractTests
             DurableFlowState.Suspended,
             requiresRecoveryRelease: true,
             pageSize: 25,
-            continuationToken: "next");
+            continuationToken: "page=2&after=x");
         var source = new List<DurableFlowSnapshot> { snapshot };
-        var result = new DurableFlowListResult(source, "next");
+        var result = new DurableFlowListResult(source, "page=2&after=x");
         source.Clear();
 
         Assert.Equal(scope, get.ScopeId);
@@ -712,9 +732,9 @@ public sealed class DurableContractTests
         Assert.Equal(DurableFlowState.Suspended, request.State);
         Assert.True(request.RequiresRecoveryRelease);
         Assert.Equal(25, request.PageSize);
-        Assert.Equal("next", request.ContinuationToken);
+        Assert.Equal("page=2&after=x", request.ContinuationToken);
         Assert.Single(result.Flows);
-        Assert.Equal("next", result.ContinuationToken);
+        Assert.Equal("page=2&after=x", result.ContinuationToken);
         Assert.Equal(instance, snapshot.InstanceId);
         Assert.Equal("flow", snapshot.FlowId);
         Assert.Equal("v1", snapshot.FlowVersion);
@@ -1038,10 +1058,16 @@ public sealed class DurableContractTests
             CreateFlowContextCodec(),
             "implementation-v1",
             new FlowTransitionEvaluator<FlowTestContext>());
-        var registry = new DurableFlowRegistry([registration]);
+        var registry = new DurableFlowRegistry(
+            [registration],
+            new DurableWorkRegistry([]),
+            new DurablePayloadCodecRegistry([registration.ContextCodec]));
         Assert.Same(registration, registry.GetRequired("flow", "v1"));
         Assert.Throws<InvalidOperationException>(() => registry.GetRequired("flow", "v2"));
-        Assert.Throws<InvalidOperationException>(() => new DurableFlowRegistry([registration, registration]));
+        Assert.Throws<InvalidOperationException>(() => new DurableFlowRegistry(
+            [registration, registration],
+            new DurableWorkRegistry([]),
+            new DurablePayloadCodecRegistry([registration.ContextCodec])));
     }
 
     [Fact]
@@ -1082,6 +1108,56 @@ public sealed class DurableContractTests
         Assert.False(unstable.IsDeterministic);
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await DurableFlowDeterminismVerifier.VerifyAndThrowAsync(nondeterministic, input, codecs));
+    }
+
+    [Fact]
+    public async Task Durable_flow_determinism_verifier_covers_activity_and_event_contract_decisions()
+    {
+        var workCodec = CreateCodec(_ => true);
+        var resultCodec = CreateResultCodec();
+        var contextCodec = CreateFlowContextCodec();
+        var activityCallsite = new FlowActivityCallsite<TestPayload, TestResult>("send", 1, 1);
+        var workRegistration = new DurableWorkRegistration<TestPayload, TestResult, CapturingExecutor>(
+            "test.work", "v1", DurableProviderSafety.ProviderKeyed, workCodec, resultCodec);
+        var activityBinding = new DurableFlowActivityBinding<FlowTestContext, TestPayload, TestResult>(
+            activityCallsite, workRegistration, workCodec, resultCodec);
+        var activityDefinition = FlowGraphBuilder<FlowTestContext>
+            .Create("activity-determinism", "v1")
+            .AddNode("run", new ActivityFlowNode(activityCallsite))
+            .StartAt("run")
+            .Build();
+        var activityRegistration = new DurableFlowRegistration<FlowTestContext>(
+            activityDefinition,
+            contextCodec,
+            "implementation-v1",
+            new FlowTransitionEvaluator<FlowTestContext>(),
+            [activityBinding]);
+        var eventCallsite = new FlowEventCallsite<TestPayload>("approved", workCodec.ContractName, workCodec.ContractVersion);
+        var eventBinding = new DurableFlowEventBinding<TestPayload>(eventCallsite, workCodec);
+        var waitDefinition = FlowGraphBuilder<FlowTestContext>
+            .Create("wait-determinism", "v1")
+            .AddNode("wait", new WaitingFlowNode(eventCallsite))
+            .StartAt("wait")
+            .Build();
+        var waitRegistration = new DurableFlowRegistration<FlowTestContext>(
+            waitDefinition,
+            contextCodec,
+            "implementation-v1",
+            new FlowTransitionEvaluator<FlowTestContext>(),
+            eventBindings: [eventBinding]);
+        var codecs = new DurablePayloadCodecRegistry([workCodec, resultCodec, contextCodec]);
+
+        var activity = await DurableFlowDeterminismVerifier.VerifyAndThrowAsync(
+            activityRegistration,
+            new DurableFlowEvaluationInput("run", contextCodec.Encode(new FlowTestContext(1))),
+            codecs);
+        var waiting = await DurableFlowDeterminismVerifier.VerifyAndThrowAsync(
+            waitRegistration,
+            new DurableFlowEvaluationInput("wait", contextCodec.Encode(new FlowTestContext(1))),
+            codecs);
+
+        Assert.True(activity.IsDeterministic);
+        Assert.True(waiting.IsDeterministic);
     }
 
     [Fact]

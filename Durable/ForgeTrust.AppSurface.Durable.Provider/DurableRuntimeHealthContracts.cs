@@ -31,10 +31,32 @@ public enum DurableRuntimeHealthState
 public sealed record DurableRuntimeHealthSnapshot
 {
     /// <summary>Initializes a runtime health snapshot.</summary>
+    /// <param name="state">Overall defined runtime health state.</param>
+    /// <param name="problemCode">Optional privacy-safe machine problem code.</param>
+    /// <param name="schemaCompatible">Whether installed storage schema is compatible.</param>
+    /// <param name="epochCompatible">Whether the configured runtime epoch is active.</param>
+    /// <param name="installedSchemaVersion">Nonnegative installed schema version.</param>
+    /// <param name="requiredSchemaVersion">Positive schema version required by this runtime.</param>
+    /// <param name="configuredRuntimeEpoch">Nonempty runtime epoch configured for this process.</param>
+    /// <param name="activeRuntimeEpoch">Optional epoch currently authorized by storage.</param>
+    /// <param name="workerId">Stable privacy-safe worker identity.</param>
+    /// <param name="workerInstanceId">Optional process-instance identity.</param>
+    /// <param name="hostedSurfaces">Defined surface set hosted by this runtime.</param>
+    /// <param name="observedAtUtc">Observation time, normalized to UTC.</param>
+    /// <param name="startedAtUtc">Optional runtime start time.</param>
+    /// <param name="lastHeartbeatAtUtc">Optional last heartbeat time.</param>
+    /// <param name="lastSuccessfulSweepAtUtc">Optional last successful sweep time.</param>
+    /// <param name="isDraining">Whether the runtime is refusing new claims.</param>
+    /// <param name="isPassActive">Whether a bounded pump pass is currently active.</param>
+    /// <param name="dueDispatchCount">Nonnegative count of due undispatched items.</param>
+    /// <param name="oldestDueAtUtc">Optional oldest due time when due work exists.</param>
+    /// <param name="oldestDueAge">Optional nonnegative age corresponding to <paramref name="oldestDueAtUtc"/>.</param>
     /// <remarks>
     /// <paramref name="problemCode" />, when present, is limited to 120 characters. <paramref name="workerId" /> is
     /// required and limited to 200 characters. Both use the durable identifier alphabet described on this type.
     /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when identifiers, epochs, surfaces, or due-state fields are incoherent.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when an enum, version, count, or age is invalid.</exception>
     public DurableRuntimeHealthSnapshot(
         DurableRuntimeHealthState state,
         string? problemCode,

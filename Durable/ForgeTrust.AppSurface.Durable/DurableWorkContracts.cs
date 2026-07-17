@@ -47,6 +47,16 @@ public sealed record DurableWorkRetryPolicy
     /// <summary>
     /// Initializes a retry and lease policy.
     /// </summary>
+    /// <param name="maximumAttempts">Maximum attempts including the first execution; must be positive.</param>
+    /// <param name="maximumElapsedTime">Positive wall-clock retry horizon.</param>
+    /// <param name="initialRetryDelay">Positive first retry delay, no greater than <paramref name="maximumRetryDelay"/>.</param>
+    /// <param name="maximumRetryDelay">Positive upper delay bound.</param>
+    /// <param name="leaseDuration">Positive initial lease duration.</param>
+    /// <param name="renewalCadence">Positive renewal interval shorter than <paramref name="leaseDuration"/>.</param>
+    /// <param name="maximumLeaseLifetime">Positive lifetime no shorter than <paramref name="leaseDuration"/>.</param>
+    /// <param name="backoffAlgorithm">Stable registered backoff algorithm identifier.</param>
+    /// <exception cref="ArgumentException">Thrown when related timing values are incoherent or the algorithm id is invalid.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when an attempt or duration is not positive.</exception>
     public DurableWorkRetryPolicy(
         int maximumAttempts,
         TimeSpan maximumElapsedTime,

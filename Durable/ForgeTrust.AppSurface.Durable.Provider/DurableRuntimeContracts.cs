@@ -26,6 +26,10 @@ public sealed record DurableRuntimePumpRequest
     /// <summary>
     /// Initializes a bounded pump request.
     /// </summary>
+    /// <param name="maximumItems">Total item bound from 1 through 10,000; defaults to 32.</param>
+    /// <param name="timeBudget">Positive pass budget of at most five minutes; defaults to ten seconds.</param>
+    /// <param name="surfaces">Nonempty defined set of durable surfaces; defaults to all surfaces.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when a bound, budget, or surface set is invalid.</exception>
     public DurableRuntimePumpRequest(
         int maximumItems = 32,
         TimeSpan? timeBudget = null,

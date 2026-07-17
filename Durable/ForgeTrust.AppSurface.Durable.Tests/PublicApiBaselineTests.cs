@@ -58,6 +58,14 @@ public sealed class PublicApiBaselineTests
         Assert.Contains(genericConstraintSnapshot, line => line.Contains("NullableReference<TValue>() where TValue : class?", StringComparison.Ordinal));
         Assert.Contains(genericConstraintSnapshot, line => line.Contains("NonNullableInterface<TValue>() where TValue : System.Collections.Generic.IEnumerable<System.String>", StringComparison.Ordinal));
         Assert.Contains(genericConstraintSnapshot, line => line.Contains("NullableInterface<TValue>() where TValue : System.Collections.Generic.IEnumerable<System.String?>", StringComparison.Ordinal));
+
+        Assert.Contains("type public readonly ref struct", PublicApiSnapshot.DescribeType(typeof(ReadOnlyRefStructFixture))[0], StringComparison.Ordinal);
+        Assert.Contains("VarianceFixture<out TRead, in TWrite>", PublicApiSnapshot.DescribeType(typeof(VarianceFixture<,>))[0], StringComparison.Ordinal);
+        Assert.Contains("where TValue : unmanaged", PublicApiSnapshot.DescribeType(typeof(UnmanagedFixture<>))[0], StringComparison.Ordinal);
+        Assert.Contains(
+            "NestedFixture<System.String>.Inner<System.Int32>",
+            PublicApiSnapshot.DescribeType(typeof(NestedFixture<string>.Inner<int>))[0],
+            StringComparison.Ordinal);
     }
 
     public class SignatureFixture<T>
@@ -122,6 +130,18 @@ public sealed class PublicApiBaselineTests
         public static void NonNullableInterface<TValue>() where TValue : IEnumerable<string> { }
 
         public static void NullableInterface<TValue>() where TValue : IEnumerable<string?> { }
+    }
+
+    public readonly ref struct ReadOnlyRefStructFixture;
+
+    public interface VarianceFixture<out TRead, in TWrite>;
+
+    public sealed class UnmanagedFixture<TValue>
+        where TValue : unmanaged;
+
+    public sealed class NestedFixture<TOuter>
+    {
+        public sealed class Inner<TInner>;
     }
 
 }

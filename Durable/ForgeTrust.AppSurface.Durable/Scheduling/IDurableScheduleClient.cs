@@ -615,7 +615,7 @@ public sealed record DurableScheduleListResult
     public DurableScheduleListResult(IReadOnlyList<DurableScheduleListItem> schedules, string? continuationToken)
     {
         ArgumentNullException.ThrowIfNull(schedules);
-        Schedules = schedules.ToArray();
+        Schedules = Array.AsReadOnly(schedules.ToArray());
         ContinuationToken = continuationToken;
     }
 
@@ -705,19 +705,28 @@ public sealed record DurableScheduleExplanation
             throw new ArgumentOutOfRangeException(nameof(cronGrammar));
         }
 
+        var hasCompleteCronMetadata = cronDialect is not null && cronGrammar is not null && ianaTimeZoneId is not null;
+        if ((kind == DurableScheduleKind.Cron) != hasCompleteCronMetadata)
+        {
+            throw new ArgumentException(
+                "Cron explanations require dialect, grammar, and IANA time zone metadata; non-cron explanations must omit them.");
+        }
+
         ScheduleId = scheduleId;
         Kind = kind;
         OverlapPolicy = overlapPolicy ?? throw new ArgumentNullException(nameof(overlapPolicy));
         MisfirePolicy = misfirePolicy ?? throw new ArgumentNullException(nameof(misfirePolicy));
         ArgumentNullException.ThrowIfNull(nextOccurrencesUtc);
-        NextOccurrencesUtc = nextOccurrencesUtc.Select(value => value.ToUniversalTime()).ToArray();
+        NextOccurrencesUtc = Array.AsReadOnly(nextOccurrencesUtc.Select(value => value.ToUniversalTime()).ToArray());
         CronDialect = cronDialect;
         CronGrammar = cronGrammar;
-        IanaTimeZoneId = ianaTimeZoneId;
+        IanaTimeZoneId = ianaTimeZoneId is null
+            ? null
+            : DurableIdentifier.RequireText(ianaTimeZoneId, nameof(ianaTimeZoneId), 128);
         EvaluatorVersion = evaluatorVersion;
         JitterSeed = jitterSeed;
         TimeZoneRulesFingerprint = timeZoneRulesFingerprint;
-        Notes = notes?.ToArray() ?? [];
+        Notes = Array.AsReadOnly(notes?.ToArray() ?? []);
     }
 
     /// <summary>Gets the schedule identity.</summary>
@@ -777,25 +786,16 @@ public interface IDurableScheduleClient
         DurableScheduleUpdateRequest request,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Pauses occurrence generation and pending starts without canceling an already-running target.</summary>
-    ValueTask<DurableOperationResult<DurableScheduleMutationResult>> PauseAsync(
-        DurableScheduleCommand command,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>Resumes a paused schedule and makes a preserved pending occurrence immediately eligible.</summary>
-    ValueTask<DurableOperationResult<DurableScheduleMutationResult>> ResumeAsync(
-        DurableScheduleCommand command,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>Deletes a schedule and invalidates every target that has not started.</summary>
-    ValueTask<DurableOperationResult<DurableScheduleMutationResult>> DeleteAsync(
-        DurableScheduleCommand command,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Rebinds a restore-fenced schedule to the active runtime epoch while preserving pending and catch-up state.
-    /// </summary>
-    ValueTask<DurableOperationResult<DurableScheduleMutationResult>> ReleaseAfterRecoveryAsync(
+    /// <summary>Applies the pause, resume, delete, or recovery-release operation selected by the command kind.</summary>
+    /// <param name="command">Lifecycle command whose <see cref="DurableScheduleCommand.Kind"/> is the sole operation selector.</param>
+    /// <param name="cancellationToken">Token that cancels the client call.</param>
+    /// <returns>The accepted mutation result or an actionable durable problem.</returns>
+    /// <remarks>
+    /// Pause blocks new starts without canceling an already-running target; resume makes preserved pending work eligible;
+    /// delete invalidates every target that has not started; recovery release rebinds restore-fenced state to the active
+    /// runtime epoch. Callers must not dispatch the same command through a second method-name operation selector.
+    /// </remarks>
+    ValueTask<DurableOperationResult<DurableScheduleMutationResult>> ApplyLifecycleCommandAsync(
         DurableScheduleCommand command,
         CancellationToken cancellationToken = default);
 

@@ -403,6 +403,47 @@ public sealed class DurableScheduleClientContractTests
             [],
             CronDialect.CronosV1,
             (CronGrammar)99));
+        Assert.Throws<ArgumentException>(() => new DurableScheduleExplanation(
+            ScheduleId,
+            DurableScheduleKind.Cron,
+            ScheduleOverlapPolicy.QueueOne,
+            ScheduleMisfirePolicy.RunOnce,
+            []));
+        Assert.Throws<ArgumentException>(() => new DurableScheduleExplanation(
+            ScheduleId,
+            DurableScheduleKind.Cron,
+            ScheduleOverlapPolicy.QueueOne,
+            ScheduleMisfirePolicy.RunOnce,
+            [],
+            CronDialect.CronosV1,
+            CronGrammar.Standard));
+        Assert.Throws<ArgumentException>(() => new DurableScheduleExplanation(
+            ScheduleId,
+            DurableScheduleKind.Cron,
+            ScheduleOverlapPolicy.QueueOne,
+            ScheduleMisfirePolicy.RunOnce,
+            [],
+            CronDialect.CronosV1,
+            CronGrammar.Standard,
+            " "));
+        Assert.Throws<ArgumentException>(() => new DurableScheduleExplanation(
+            ScheduleId,
+            DurableScheduleKind.Cron,
+            ScheduleOverlapPolicy.QueueOne,
+            ScheduleMisfirePolicy.RunOnce,
+            [],
+            CronDialect.CronosV1,
+            CronGrammar.Standard,
+            new string('A', 129)));
+        Assert.Throws<ArgumentException>(() => new DurableScheduleExplanation(
+            ScheduleId,
+            DurableScheduleKind.At,
+            ScheduleOverlapPolicy.QueueOne,
+            ScheduleMisfirePolicy.RunOnce,
+            [],
+            CronDialect.CronosV1,
+            CronGrammar.Standard,
+            "UTC"));
         Assert.Throws<ArgumentNullException>(() => new DurableScheduleExplanation(
             ScheduleId,
             DurableScheduleKind.At,

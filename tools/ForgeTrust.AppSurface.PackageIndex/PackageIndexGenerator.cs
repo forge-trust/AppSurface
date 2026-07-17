@@ -627,9 +627,16 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine(webEntry.Manifest.UseWhen!);
         builder.AppendLine();
-        builder.AppendLine("```bash");
-        builder.AppendLine(webEntry.Metadata.InstallCommand);
-        builder.AppendLine("```");
+        if (webEntry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)
+        {
+            builder.AppendLine("Source only - publication held");
+        }
+        else
+        {
+            builder.AppendLine("```bash");
+            builder.AppendLine(webEntry.Metadata.InstallCommand);
+            builder.AppendLine("```");
+        }
         builder.AppendLine();
         builder.AppendLine($"What you get: {webEntry.Manifest.Includes}");
         builder.AppendLine();

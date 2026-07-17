@@ -1272,7 +1272,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         var documents = await generator.GenerateDocumentsAsync(CreateRequest());
 
         Assert.Contains("Source only - publication held", documents.ChooserMarkdown, StringComparison.Ordinal);
-        Assert.DoesNotContain("`dotnet package add ForgeTrust.AppSurface.Web", documents.ChooserMarkdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet package add ForgeTrust.AppSurface.Web", documents.ChooserMarkdown, StringComparison.Ordinal);
         Assert.Contains("public preview held from publishing", documents.ReadinessMarkdown, StringComparison.Ordinal);
     }
 

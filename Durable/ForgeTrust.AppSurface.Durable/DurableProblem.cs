@@ -23,9 +23,9 @@ public sealed record DurableProblem
         string correlationId)
     {
         Code = DurableIdentifier.Require(code, nameof(code), 120);
-        Problem = DurableIdentifier.RequireText(problem, nameof(problem), 500);
-        Cause = DurableIdentifier.RequireText(cause, nameof(cause), 1_000);
-        Fix = DurableIdentifier.RequireText(fix, nameof(fix), 1_000);
+        Problem = DurableIdentifier.RequireSafeLabel(problem, nameof(problem), 500);
+        Cause = DurableIdentifier.RequireSafeLabel(cause, nameof(cause), 1_000);
+        Fix = DurableIdentifier.RequireSafeLabel(fix, nameof(fix), 1_000);
         DocumentationUrl = documentationUrl ?? throw new ArgumentNullException(nameof(documentationUrl));
         if (!DocumentationUrl.IsAbsoluteUri || DocumentationUrl.Scheme is not ("https" or "http"))
         {
@@ -71,6 +71,7 @@ public sealed record DurableProblem
 /// </summary>
 /// <typeparam name="T">Successful value type.</typeparam>
 public sealed record DurableOperationResult<T>
+    where T : class
 {
     private DurableOperationResult(T? value, DurableProblem? problem)
     {

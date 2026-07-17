@@ -33,6 +33,25 @@ public sealed class DurableProviderContractTests
         Assert.Equal(DurableCommandFingerprintMatch.Conflict, manual.Fingerprint.Compare(
             new DurableWorkManualResolutionRequest(
                 Scope, Work, Command, "other", "reason", 1, DurableManualResolutionKind.ProvenNotApplied).Fingerprint));
+        var applied = new DurableWorkManualResolutionRequest(
+            Scope,
+            Work,
+            Command,
+            "operator",
+            "reason",
+            1,
+            DurableManualResolutionKind.Applied,
+            new DurableEncodedPayload("result", "v1", DurableDataClassification.Operational, "first"u8.ToArray()));
+        Assert.Equal(DurableCommandFingerprintMatch.Conflict, applied.Fingerprint.Compare(
+            new DurableWorkManualResolutionRequest(
+                Scope,
+                Work,
+                Command,
+                "operator",
+                "reason",
+                1,
+                DurableManualResolutionKind.Applied,
+                new DurableEncodedPayload("result", "v1", DurableDataClassification.Operational, "second"u8.ToArray())).Fingerprint));
         Assert.Equal(DurableCommandFingerprintMatch.Exact, retry.Fingerprint.Compare(
             new DurableWorkRetrySafeRequest(Scope, Work, new DurableCommandId("replay"), "operator", "reason", 1).Fingerprint));
         Assert.Equal(DurableCommandFingerprintMatch.Conflict, retry.Fingerprint.Compare(
@@ -86,6 +105,17 @@ public sealed class DurableProviderContractTests
             false));
 
         Assert.Empty(result.Items);
+        Assert.False(result.Items is DurableWorkListItem[]);
+        Assert.Throws<NotSupportedException>(() => ((IList<DurableWorkListItem>)result.Items).Add(
+            new DurableWorkListItem(
+                Work, "activity", "work", "v1", DurableWorkState.Ready, DurableProviderSafety.Idempotent,
+                0, 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, false, false)));
+
+        var tokenResult = new DurableWorkListResult([], "next.page");
+        var request = new DurableWorkListRequest(Scope, continuationToken: tokenResult.ContinuationToken);
+        Assert.Equal("next.page", request.ContinuationToken);
+        Assert.Throws<ArgumentException>(() => new DurableWorkListResult([], "bad token"));
+        Assert.Throws<ArgumentException>(() => new DurableWorkListResult([], new string('a', 201)));
     }
 
     [Fact]

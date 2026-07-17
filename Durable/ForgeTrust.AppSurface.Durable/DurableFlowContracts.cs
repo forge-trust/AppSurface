@@ -79,6 +79,15 @@ public sealed record DurableFlowStartRequest
     /// <summary>
     /// Initializes a durable Flow start request.
     /// </summary>
+    /// <param name="scopeId">Trusted owning scope authorized by the application.</param>
+    /// <param name="commandId">Unique command identity used to return the prior idempotent outcome.</param>
+    /// <param name="idempotencyKey">Stable caller retry identity; it is excluded from semantic conflict comparison.</param>
+    /// <param name="instanceId">Caller-selected Flow instance identity.</param>
+    /// <param name="flowId">Exact registered Flow definition id.</param>
+    /// <param name="flowVersion">Exact immutable Flow definition version.</param>
+    /// <param name="context">Encoded initial context matching the registered context codec.</param>
+    /// <exception cref="ArgumentException">Thrown when an identifier is default or invalid.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is null.</exception>
     public DurableFlowStartRequest(
         DurableScopeId scopeId,
         DurableCommandId commandId,
@@ -395,7 +404,7 @@ public sealed record DurableFlowListRequest
         PageSize = pageSize;
         ContinuationToken = continuationToken is null
             ? null
-            : DurableIdentifier.Require(continuationToken, nameof(continuationToken), 200);
+            : DurableIdentifier.RequireText(continuationToken, nameof(continuationToken), 200);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -421,8 +430,10 @@ public sealed record DurableFlowListResult
     public DurableFlowListResult(IReadOnlyList<DurableFlowSnapshot> flows, string? continuationToken)
     {
         ArgumentNullException.ThrowIfNull(flows);
-        Flows = flows.ToArray();
-        ContinuationToken = continuationToken;
+        Flows = Array.AsReadOnly(flows.ToArray());
+        ContinuationToken = continuationToken is null
+            ? null
+            : DurableIdentifier.RequireText(continuationToken, nameof(continuationToken), 200);
     }
 
     /// <summary>Gets the immutable page of Flow snapshots.</summary>

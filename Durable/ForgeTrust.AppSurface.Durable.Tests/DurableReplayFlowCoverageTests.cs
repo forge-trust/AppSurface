@@ -75,8 +75,11 @@ public sealed class DurableReplayFlowCoverageTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowListRequest(Scope, (DurableFlowState)999));
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowListRequest(Scope, pageSize: 0));
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowListRequest(Scope, pageSize: 1_001));
-        Assert.Throws<ArgumentException>(() => new DurableFlowListRequest(Scope, continuationToken: "bad value"));
+        Assert.Throws<ArgumentException>(() => new DurableFlowListRequest(Scope, continuationToken: "bad\nvalue"));
+        Assert.Throws<ArgumentException>(() => new DurableFlowListRequest(Scope, continuationToken: new string('a', 201)));
         Assert.Throws<ArgumentNullException>(() => new DurableFlowListResult(null!, null));
+        Assert.Throws<ArgumentException>(() => new DurableFlowListResult([], "bad\nvalue"));
+        Assert.Throws<ArgumentException>(() => new DurableFlowListResult([], new string('a', 201)));
         Assert.Throws<ArgumentException>(() => new DurableFlowSnapshot(
             default,
             "approval",
@@ -124,6 +127,8 @@ public sealed class DurableReplayFlowCoverageTests
         Assert.Throws<ArgumentException>(() => new DurableFlowEventContract(true));
         Assert.Throws<ArgumentException>(() => new DurableFlowEventContract(false, "test.payload", "v1", DurableDataClassification.Operational, "retention"));
         Assert.Throws<ArgumentException>(() => new DurableFlowEventContract(true, "bad value", "v1", DurableDataClassification.Operational, "retention"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowEventContract(
+            true, "test.payload", "v1", (DurableDataClassification)999, "retention"));
         Assert.Throws<ArgumentNullException>(() => new DurableFlowEventBinding<TestPayload>(null!, codec));
         Assert.Throws<ArgumentNullException>(() => new DurableFlowEventBinding<TestPayload>(callsite, null!));
         Assert.Throws<ArgumentException>(() => new DurableFlowEventBinding<TestPayload>(
@@ -301,14 +306,16 @@ public sealed class DurableReplayFlowCoverageTests
             "implementation-v1",
             new FlowTransitionEvaluator<FlowTestContext>(),
             eventBindings: [eventBinding, eventBinding]));
-        Assert.Throws<ArgumentNullException>(() => new DurableFlowRegistry(null!));
-        Assert.Throws<ArgumentNullException>(() => new DurableFlowRegistry([null!]));
-        Assert.Throws<InvalidOperationException>(() => new DurableFlowRegistry([registration, registration]));
-        Assert.Throws<ArgumentNullException>(() => new DurableFlowRegistry([registration], null!));
+        Assert.Throws<ArgumentNullException>(() => new DurableFlowRegistry(null!, workRegistry, payloadRegistry));
+        Assert.Throws<ArgumentNullException>(() => new DurableFlowRegistry([null!], workRegistry, payloadRegistry));
+        Assert.Throws<InvalidOperationException>(() => new DurableFlowRegistry(
+            [registration, registration], workRegistry, payloadRegistry));
+        Assert.Throws<ArgumentNullException>(() => new DurableFlowRegistry([registration], null!, payloadRegistry));
         Assert.Throws<ArgumentNullException>(() => new DurableFlowRegistry([registration], workRegistry, null!));
         Assert.Throws<InvalidOperationException>(() => new DurableFlowRegistry(
             [registration],
-            new DurableWorkRegistry([CreateWorkRegistration(workCodec, resultCodec)])));
+            new DurableWorkRegistry([CreateWorkRegistration(workCodec, resultCodec)]),
+            payloadRegistry));
         Assert.Throws<InvalidOperationException>(() => new DurableFlowRegistry(
             [registration],
             workRegistry,

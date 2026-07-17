@@ -5,8 +5,20 @@ using ForgeTrust.AppSurface.Durable;
 
 namespace ForgeTrust.AppSurface.Durable.Provider;
 
+/// <summary>Creates canonical versioned fingerprints for provider/operator mutation commands.</summary>
 internal static class ProviderCommandFingerprints
 {
+    /// <summary>Hashes the ordered semantic fields of one Work operator command.</summary>
+    /// <param name="schemaId">Versioned canonical encoding schema.</param>
+    /// <param name="scopeId">Authorized scope identity.</param>
+    /// <param name="workId">Target Work identity.</param>
+    /// <param name="actorId">Authorized privacy-safe actor identity.</param>
+    /// <param name="reasonCode">Privacy-safe audit reason.</param>
+    /// <param name="expectedRevision">Expected aggregate revision.</param>
+    /// <param name="resolution">Optional manual-resolution outcome.</param>
+    /// <param name="result">Required encoded result only for an applied manual resolution.</param>
+    /// <returns>A canonical fingerprint for persisted replay/conflict comparison.</returns>
+    /// <remarks>Any change to field ordering or encoding requires a new <paramref name="schemaId"/>.</remarks>
     internal static DurableCommandFingerprint Create(
         string schemaId,
         DurableScopeId scopeId,

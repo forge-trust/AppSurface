@@ -8,6 +8,9 @@ namespace ForgeTrust.AppSurface.Durable.Provider;
 public sealed record DurableWorkGetRequest
 {
     /// <summary>Initializes a scoped work query.</summary>
+    /// <param name="scopeId">Trusted scope already authorized by the application.</param>
+    /// <param name="workId">Opaque Work identity within that scope.</param>
+    /// <exception cref="ArgumentException">Thrown when either identifier is default or invalid.</exception>
     public DurableWorkGetRequest(DurableScopeId scopeId, DurableWorkId workId)
     {
         ProviderContractValidation.Require(scopeId, nameof(scopeId));
@@ -409,8 +412,10 @@ public sealed record DurableWorkListResult
     public DurableWorkListResult(IReadOnlyList<DurableWorkListItem> items, string? continuationToken)
     {
         ArgumentNullException.ThrowIfNull(items);
-        Items = items.ToArray();
-        ContinuationToken = continuationToken;
+        Items = Array.AsReadOnly(items.ToArray());
+        ContinuationToken = continuationToken is null
+            ? null
+            : ProviderContractValidation.Require(continuationToken, nameof(continuationToken), 200);
     }
 
     /// <summary>Gets the ordered payload-free items.</summary>

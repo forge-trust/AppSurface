@@ -16,6 +16,16 @@ public sealed record DurableWorkExecutionContext
     /// <summary>
     /// Initializes a validated work execution context.
     /// </summary>
+    /// <param name="scopeId">Trusted owning scope.</param>
+    /// <param name="workId">Claimed Work aggregate identity.</param>
+    /// <param name="workName">Exact registered Work name.</param>
+    /// <param name="workVersion">Exact registered Work version.</param>
+    /// <param name="payload">Encoded Work input.</param>
+    /// <param name="providerSafety">Declared external-effect ambiguity policy.</param>
+    /// <param name="executionIdentity">Provider-validated attempt and fence identity.</param>
+    /// <exception cref="ArgumentException">Thrown when an identifier is default or invalid.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when payload or execution identity is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when provider safety is undefined.</exception>
     public DurableWorkExecutionContext(
         DurableScopeId scopeId,
         DurableWorkId workId,
@@ -73,6 +83,9 @@ public sealed record DurableWorkExecutionContext
 public abstract class DurablePreparedWork
 {
     /// <summary>Executes the already prepared provider work and returns its encoded terminal result.</summary>
+    /// <param name="cancellationToken">Token that cancels executor invocation.</param>
+    /// <returns>The registered codec's encoded terminal result.</returns>
+    /// <remarks>Call only after the matching external-effect permit commits.</remarks>
     public abstract ValueTask<DurableEncodedPayload> InvokeAsync(CancellationToken cancellationToken = default);
 }
 
@@ -124,6 +137,9 @@ public abstract class DurableWorkRegistration
     /// <summary>
     /// Decodes and validates claimed bytes and resolves local executor dependencies without calling a provider.
     /// </summary>
+    /// <param name="services">Application service provider used to resolve the executor.</param>
+    /// <param name="work">Provider-validated execution context.</param>
+    /// <returns>A prepared invocation that performs no provider I/O until invoked.</returns>
     public abstract DurablePreparedWork Prepare(IServiceProvider services, DurableWorkExecutionContext work);
 
     /// <summary>
@@ -133,6 +149,10 @@ public abstract class DurableWorkRegistration
     /// Runtime code must persist an effect permit before calling this method. Exceptions after that permit represent a
     /// potentially applied external effect and must be handled according to <see cref="ProviderSafety"/>.
     /// </remarks>
+    /// <param name="services">Application service provider used to resolve the executor.</param>
+    /// <param name="work">Provider-validated execution context.</param>
+    /// <param name="cancellationToken">Token that cancels executor invocation.</param>
+    /// <returns>The registered codec's encoded terminal result.</returns>
     public abstract ValueTask<DurableEncodedPayload> InvokeAsync(
         IServiceProvider services,
         DurableWorkExecutionContext work,
@@ -141,6 +161,11 @@ public abstract class DurableWorkRegistration
     /// <summary>
     /// Reconciles an unknown provider outcome without repeating the external mutation.
     /// </summary>
+    /// <param name="services">Application service provider used to resolve the reconciler.</param>
+    /// <param name="work">Provider-validated execution context.</param>
+    /// <param name="cancellationToken">Token that cancels reconciliation.</param>
+    /// <returns>Applied, not-applied, or unknown provider truth.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when no reconciler is registered or reconciliation returns invalid data.</exception>
     public abstract ValueTask<DurableEncodedEffectReconciliation> ReconcileAsync(
         IServiceProvider services,
         DurableWorkExecutionContext work,
@@ -163,6 +188,15 @@ public sealed class DurableWorkRegistration<TWork, TResult, TExecutor> : Durable
     /// <summary>
     /// Initializes a typed durable work registration.
     /// </summary>
+    /// <param name="workName">Stable registered Work name.</param>
+    /// <param name="workVersion">Immutable registered Work version.</param>
+    /// <param name="providerSafety">External-effect ambiguity policy.</param>
+    /// <param name="workCodec">Allowlisted Work input codec.</param>
+    /// <param name="resultCodec">Allowlisted terminal result codec.</param>
+    /// <param name="reconcilerFactory">Optional side-effect-free reconciler resolver.</param>
+    /// <exception cref="ArgumentException">Thrown when identifiers are invalid or reconcile-before-retry lacks a reconciler.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when a codec is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when provider safety is undefined.</exception>
     public DurableWorkRegistration(
         string workName,
         string workVersion,
@@ -276,6 +310,11 @@ public interface IDurableWorkRegistry
     /// <summary>
     /// Gets a required registration or throws before work is accepted or claimed.
     /// </summary>
+    /// <param name="workName">Exact registered Work name.</param>
+    /// <param name="workVersion">Exact immutable Work version.</param>
+    /// <returns>The matching registration.</returns>
+    /// <exception cref="ArgumentException">Thrown when an identifier is invalid.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when no exact registration exists.</exception>
     DurableWorkRegistration GetRequired(string workName, string workVersion);
 }
 
@@ -289,6 +328,9 @@ public sealed class DurableWorkRegistry : IDurableWorkRegistry
     /// <summary>
     /// Initializes a registry and rejects duplicate contract identities.
     /// </summary>
+    /// <param name="registrations">Complete registrations available at host startup.</param>
+    /// <exception cref="ArgumentNullException">Thrown when the sequence or an element is null.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when a Work name/version appears more than once.</exception>
     public DurableWorkRegistry(IEnumerable<DurableWorkRegistration> registrations)
     {
         ArgumentNullException.ThrowIfNull(registrations);
@@ -326,6 +368,15 @@ public static class DurableServiceCollectionExtensions
     /// <summary>
     /// Registers one versioned work contract, its allowlisted codecs, and its transient executor.
     /// </summary>
+    /// <param name="services">Service collection to configure.</param>
+    /// <param name="workName">Stable Work name.</param>
+    /// <param name="workVersion">Immutable Work version.</param>
+    /// <param name="providerSafety">External-effect ambiguity policy; use the reconciler overload for reconcile-before-retry.</param>
+    /// <param name="workCodec">Allowlisted Work codec.</param>
+    /// <param name="resultCodec">Allowlisted terminal result codec.</param>
+    /// <returns>The same service collection.</returns>
+    /// <exception cref="ArgumentException">Thrown when the registration is invalid.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when services or a codec is null.</exception>
     public static IServiceCollection AddDurableWork<TWork, TResult, TExecutor>(
         this IServiceCollection services,
         string workName,
@@ -354,6 +405,15 @@ public static class DurableServiceCollectionExtensions
     /// <summary>
     /// Registers provider work that must reconcile an unknown effect before any retry.
     /// </summary>
+    /// <param name="services">Service collection to configure.</param>
+    /// <param name="workName">Stable Work name.</param>
+    /// <param name="workVersion">Immutable Work version.</param>
+    /// <param name="workCodec">Allowlisted Work codec.</param>
+    /// <param name="resultCodec">Allowlisted terminal result codec.</param>
+    /// <returns>The same service collection.</returns>
+    /// <remarks>Use this overload for <see cref="DurableProviderSafety.ReconcileBeforeRetry"/> so unknown effects are reconciled before retry.</remarks>
+    /// <exception cref="ArgumentException">Thrown when the registration is invalid.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when services or a codec is null.</exception>
     public static IServiceCollection AddDurableWorkWithReconciler<TWork, TResult, TExecutor, TReconciler>(
         this IServiceCollection services,
         string workName,

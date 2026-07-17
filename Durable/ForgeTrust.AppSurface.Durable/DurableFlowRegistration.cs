@@ -152,6 +152,11 @@ public sealed record DurableFlowEventContract
                 "A required event payload must declare both contract name and version; a no-payload event declares neither.");
         }
 
+        if (classification is { } definedClassification && !Enum.IsDefined(definedClassification))
+        {
+            throw new ArgumentOutOfRangeException(nameof(classification));
+        }
+
         PayloadRequired = payloadRequired;
         ContractName = contractName is null ? null : DurableIdentifier.Require(contractName, nameof(contractName), 200);
         ContractVersion = contractVersion is null
@@ -452,6 +457,19 @@ public sealed class DurableFlowRegistration<TContext> : DurableFlowRegistration
     /// <summary>
     /// Initializes a typed durable Flow registration.
     /// </summary>
+    /// <param name="definition">Immutable app-owned Flow graph.</param>
+    /// <param name="contextCodec">Exact global codec used for persisted Flow context.</param>
+    /// <param name="implementationVersion">Stable implementation identity used for compatibility diagnostics.</param>
+    /// <param name="evaluator">Host-neutral transition evaluator.</param>
+    /// <param name="activityBindings">Bindings from declared activity callsites to exact global Work registrations.</param>
+    /// <param name="eventBindings">Bindings from declared event callsites to exact global payload codecs.</param>
+    /// <remarks>
+    /// Construct the global <see cref="DurableFlowRegistry"/> with its Work and payload registries before accepting Flow
+    /// commands; that registry verifies every binding uses the same registered object identity.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when durable identifiers or binding declarations are invalid.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when a required definition, codec, evaluator, or binding is null.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when bindings are duplicate, undeclared, or incompatible.</exception>
     public DurableFlowRegistration(
         FlowDefinition<TContext> definition,
         IDurablePayloadCodec<TContext> contextCodec,
@@ -770,7 +788,7 @@ public sealed class DurableFlowRegistry : IDurableFlowRegistry
     /// <summary>
     /// Initializes a registry and rejects duplicate Flow versions.
     /// </summary>
-    public DurableFlowRegistry(IEnumerable<DurableFlowRegistration> registrations)
+    private DurableFlowRegistry(IEnumerable<DurableFlowRegistration> registrations)
     {
         ArgumentNullException.ThrowIfNull(registrations);
         var map = new Dictionary<(string Id, string Version), DurableFlowRegistration>();
@@ -793,7 +811,7 @@ public sealed class DurableFlowRegistry : IDurableFlowRegistry
     /// </summary>
     /// <param name="registrations">Registered Flow definitions.</param>
     /// <param name="workRegistry">Authoritative global durable work registry.</param>
-    public DurableFlowRegistry(
+    private DurableFlowRegistry(
         IEnumerable<DurableFlowRegistration> registrations,
         IDurableWorkRegistry workRegistry)
         : this(registrations)

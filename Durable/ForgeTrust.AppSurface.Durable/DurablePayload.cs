@@ -70,6 +70,33 @@ public sealed record DurableEncodedPayload
         Sha256 = Convert.ToHexStringLower(SHA256.HashData(_content));
     }
 
+    /// <summary>Compares payload metadata and canonical content bytes by value.</summary>
+    /// <param name="other">Payload to compare.</param>
+    /// <returns><see langword="true"/> when metadata and content bytes are equal.</returns>
+    public bool Equals(DurableEncodedPayload? other) =>
+        other is not null
+        && string.Equals(ContractName, other.ContractName, StringComparison.Ordinal)
+        && string.Equals(ContractVersion, other.ContractVersion, StringComparison.Ordinal)
+        && Classification == other.Classification
+        && string.Equals(RetentionPolicyId, other.RetentionPolicyId, StringComparison.Ordinal)
+        && _content.AsSpan().SequenceEqual(other._content);
+
+    /// <inheritdoc />
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(ContractName, StringComparer.Ordinal);
+        hash.Add(ContractVersion, StringComparer.Ordinal);
+        hash.Add(Classification);
+        hash.Add(RetentionPolicyId, StringComparer.Ordinal);
+        foreach (var value in _content)
+        {
+            hash.Add(value);
+        }
+
+        return hash.ToHashCode();
+    }
+
     /// <summary>
     /// Gets the stable registered contract name.
     /// </summary>
@@ -241,7 +268,13 @@ public sealed class SystemTextJsonDurablePayloadCodec<T> : IDurablePayloadCodec<
     {
         ArgumentNullException.ThrowIfNull(payload);
         RequireMatchingContract(payload);
-        var value = JsonSerializer.Deserialize(payload.Content.Span, _typeInfo);
+        var content = payload.Content;
+        if (content.Length > _maximumBytes)
+        {
+            throw new JsonException($"Encoded durable payload exceeds the registered {_maximumBytes}-byte limit.");
+        }
+
+        var value = JsonSerializer.Deserialize(content.Span, _typeInfo);
         bool isApproved;
         try
         {

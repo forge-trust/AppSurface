@@ -9,6 +9,7 @@ using Xunit;
 
 namespace ForgeTrust.AppSurface.Durable.Tests.Support;
 
+/// <summary>Creates deterministic text snapshots of public API declarations for checked-in contract review.</summary>
 internal static class PublicApiSnapshot
 {
     private static readonly NullabilityInfoContext Nullability = new();
@@ -16,6 +17,9 @@ internal static class PublicApiSnapshot
     private const BindingFlags DeclaredMembers =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
+    /// <summary>Describes every visible type in <paramref name="assembly"/> in ordinal order.</summary>
+    /// <param name="assembly">Assembly whose public and protected contract is inspected.</param>
+    /// <returns>Deterministically ordered declaration lines.</returns>
     internal static string[] Create(Assembly assembly) => assembly
         .GetTypes()
         .Where(IsVisibleType)
@@ -23,6 +27,13 @@ internal static class PublicApiSnapshot
         .SelectMany(DescribeType)
         .ToArray();
 
+    /// <summary>Asserts the generated snapshot matches its copied baseline, or updates the trusted source baseline.</summary>
+    /// <param name="assembly">Assembly whose contract is inspected.</param>
+    /// <param name="copiedBaselineName">Baseline copied into the test output directory.</param>
+    /// <param name="sourceRelativePath">Trusted repository-relative baseline path used only in explicit update mode.</param>
+    /// <remarks>Set <c>APPSURFACE_UPDATE_PUBLIC_API_BASELINES=1</c> only for an intentional reviewed API update.</remarks>
+    /// <exception cref="IOException">Thrown when a baseline cannot be read or written.</exception>
+    /// <exception cref="Xunit.Sdk.EqualException">Thrown when the reviewed and generated snapshots differ.</exception>
     internal static void AssertMatches(Assembly assembly, string copiedBaselineName, string sourceRelativePath)
     {
         var actual = Create(assembly);
@@ -39,6 +50,9 @@ internal static class PublicApiSnapshot
         Assert.Equal(expected, actual);
     }
 
+    /// <summary>Describes one visible type declaration and its visible declared members.</summary>
+    /// <param name="type">Type to inspect.</param>
+    /// <returns>The type declaration followed by ordinally sorted member declarations.</returns>
     internal static string[] DescribeType(Type type)
     {
         var lines = new List<string> { DescribeTypeDeclaration(type) };
@@ -164,6 +178,11 @@ internal static class PublicApiSnapshot
                 modifiers.Add("readonly");
             }
 
+            if (type.IsByRefLike)
+            {
+                modifiers.Add("ref");
+            }
+
             if (type.IsAbstract && !type.IsInterface)
             {
                 modifiers.Add("abstract");
@@ -179,7 +198,7 @@ internal static class PublicApiSnapshot
         var inheritance = type.IsEnum
             ? $" : {FormatType(Enum.GetUnderlyingType(type))}"
             : FormatInheritance(type);
-        return $"{FormatApiAttributes(type)}type {Accessibility(type)}{modifierText} {kind} {FormatType(type)}{inheritance}{FormatGenericConstraints(type.GetGenericArguments())}";
+        return $"{FormatApiAttributes(type)}type {Accessibility(type)}{modifierText} {kind} {FormatTypeDeclarationName(type)}{inheritance}{FormatGenericConstraints(type.GetGenericArguments())}";
     }
 
     private static string FormatInheritance(Type type)
@@ -207,7 +226,7 @@ internal static class PublicApiSnapshot
             }
             else if ((attributes & GenericParameterAttributes.NotNullableValueTypeConstraint) != 0)
             {
-                constraints.Add("struct");
+                constraints.Add(HasUnmanagedConstraint(argument) ? "unmanaged" : "struct");
             }
             else if (HasNotNullConstraint(argument))
             {
@@ -320,19 +339,17 @@ internal static class PublicApiSnapshot
         }
         else
         {
-            var name = FormatNonGenericTypeName(type);
             if (type.IsGenericType)
             {
-                var declaringArgumentCount = type.DeclaringType?.GetGenericArguments().Length ?? 0;
                 var reflectedArguments = type.GetGenericArguments();
                 var formattedArguments = nullability.GenericTypeArguments.Length == reflectedArguments.Length
                     ? nullability.GenericTypeArguments.Select(argument => FormatType(argument, nullableCursor)).ToArray()
                     : reflectedArguments.Select(FormatType).ToArray();
-                formatted = $"{name}<{string.Join(", ", formattedArguments.Skip(declaringArgumentCount))}>";
+                formatted = FormatNamedType(type, formattedArguments);
             }
             else
             {
-                formatted = name;
+                formatted = FormatNamedType(type, []);
             }
         }
 
@@ -365,15 +382,12 @@ internal static class PublicApiSnapshot
             return type.Name;
         }
 
-        var name = FormatNonGenericTypeName(type);
         if (!type.IsGenericType)
         {
-            return name;
+            return FormatNamedType(type, []);
         }
 
-        var declaringArgumentCount = type.DeclaringType?.GetGenericArguments().Length ?? 0;
-        var ownArguments = type.GetGenericArguments().Skip(declaringArgumentCount);
-        return $"{name}<{string.Join(", ", ownArguments.Select(FormatType))}>";
+        return FormatNamedType(type, type.GetGenericArguments().Select(FormatType).ToArray());
     }
 
     private static string FormatType(Type type, NullableFlagCursor nullableCursor)
@@ -394,34 +408,92 @@ internal static class PublicApiSnapshot
         }
         else
         {
-            var name = FormatNonGenericTypeName(type);
             if (!type.IsGenericType)
             {
-                formatted = name;
+                formatted = FormatNamedType(type, []);
             }
             else
             {
-                var declaringArgumentCount = type.DeclaringType?.GetGenericArguments().Length ?? 0;
-                var ownArguments = type.GetGenericArguments()
+                var arguments = type.GetGenericArguments()
                     .Select(argument => FormatType(argument, nullableCursor))
-                    .Skip(declaringArgumentCount);
-                formatted = $"{name}<{string.Join(", ", ownArguments)}>";
+                    .ToArray();
+                formatted = FormatNamedType(type, arguments);
             }
         }
 
         return IsNullableAnnotation(type, nullableFlag, NullabilityState.Unknown) ? formatted + "?" : formatted;
     }
 
-    private static string FormatNonGenericTypeName(Type type)
+    private static string FormatTypeDeclarationName(Type type)
     {
-        var name = StripArity(type.Name);
-        if (type.IsNested)
+        if (!type.IsGenericType)
         {
-            return $"{FormatNonGenericTypeName(type.DeclaringType!)}.{name}";
+            return FormatNamedType(type, []);
         }
 
-        return string.IsNullOrEmpty(type.Namespace) ? name : $"{type.Namespace}.{name}";
+        var arguments = type.GetGenericArguments()
+            .Select(argument =>
+            {
+                if (!argument.IsGenericParameter)
+                {
+                    return FormatType(argument);
+                }
+
+                var variance = argument.GenericParameterAttributes & GenericParameterAttributes.VarianceMask;
+                var prefix = variance switch
+                {
+                    GenericParameterAttributes.Covariant => "out ",
+                    GenericParameterAttributes.Contravariant => "in ",
+                    _ => string.Empty,
+                };
+                return prefix + argument.Name;
+            })
+            .ToArray();
+        return FormatNamedType(type, arguments);
     }
+
+    private static string FormatNamedType(Type type, IReadOnlyList<string> formattedArguments)
+    {
+        var hierarchy = new Stack<Type>();
+        for (var current = type; current is not null; current = current.DeclaringType)
+        {
+            hierarchy.Push(current);
+        }
+
+        var builder = new StringBuilder();
+        var argumentIndex = 0;
+        while (hierarchy.TryPop(out var segment))
+        {
+            if (builder.Length == 0 && !string.IsNullOrEmpty(segment.Namespace))
+            {
+                builder.Append(segment.Namespace).Append('.');
+            }
+            else if (builder.Length > 0)
+            {
+                builder.Append('.');
+            }
+
+            builder.Append(StripArity(segment.Name));
+            var totalArgumentCount = segment.GetGenericArguments().Length;
+            var declaringArgumentCount = segment.DeclaringType?.GetGenericArguments().Length ?? 0;
+            var ownArgumentCount = totalArgumentCount - declaringArgumentCount;
+            if (ownArgumentCount > 0)
+            {
+                builder.Append('<')
+                    .Append(string.Join(", ", formattedArguments.Skip(argumentIndex).Take(ownArgumentCount)))
+                    .Append('>');
+                argumentIndex += ownArgumentCount;
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool HasUnmanagedConstraint(Type argument) => argument.CustomAttributes.Any(attribute =>
+        string.Equals(
+            attribute.AttributeType.FullName,
+            "System.Runtime.CompilerServices.IsUnmanagedAttribute",
+            StringComparison.Ordinal));
 
     private static string StripArity(string name)
     {

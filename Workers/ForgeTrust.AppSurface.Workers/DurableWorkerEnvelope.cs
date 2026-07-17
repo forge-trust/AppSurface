@@ -24,6 +24,10 @@ public sealed record DurableWorkerEnvelope<TPayload>
     /// This exact seven-parameter overload is retained for already-compiled adapters. Native runtimes use the overload
     /// that also supplies <see cref="DurableWorkerExecutionIdentity"/>.
     /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when required text or metadata is invalid.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="correlation"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="outcome"/> or <paramref name="retryability"/> is not defined.</exception>
+    /// <exception cref="DurableWorkerUnsafeMetadataException">Thrown when metadata appears unsafe.</exception>
     public DurableWorkerEnvelope(
         DurableWorkerProjectionOutcome outcome,
         string reasonCode,
@@ -48,7 +52,7 @@ public sealed record DurableWorkerEnvelope<TPayload>
     /// <param name="metadata">Optional safe metadata values.</param>
     /// <param name="diagnostic">Optional safe diagnostic details.</param>
     /// <exception cref="ArgumentException">Thrown when required text or metadata is invalid.</exception>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="correlation"/> is null.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="correlation"/> or <paramref name="executionIdentity"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="outcome"/> or <paramref name="retryability"/> is not defined.</exception>
     /// <exception cref="DurableWorkerUnsafeMetadataException">Thrown when metadata appears unsafe.</exception>
     public DurableWorkerEnvelope(

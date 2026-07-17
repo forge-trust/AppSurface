@@ -367,8 +367,6 @@ type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowRegistration<T
   property public System.String ImplementationVersion { get: public; }
   property public System.String StartNodeId { get: public; }
 type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowRegistry : ForgeTrust.AppSurface.Durable.IDurableFlowRegistry
-  constructor public ForgeTrust.AppSurface.Durable.DurableFlowRegistry(System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableFlowRegistration> registrations)
-  constructor public ForgeTrust.AppSurface.Durable.DurableFlowRegistry(System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableFlowRegistration> registrations, ForgeTrust.AppSurface.Durable.IDurableWorkRegistry workRegistry)
   constructor public ForgeTrust.AppSurface.Durable.DurableFlowRegistry(System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableFlowRegistration> registrations, ForgeTrust.AppSurface.Durable.IDurableWorkRegistry workRegistry, ForgeTrust.AppSurface.Durable.IDurablePayloadCodecRegistry payloadCodecs)
   method public ForgeTrust.AppSurface.Durable.DurableFlowRegistration GetRequired(System.String flowId, System.String flowVersion)
 type public sealed class ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableFlowReleaseRequest>
@@ -454,7 +452,7 @@ type public enum ForgeTrust.AppSurface.Durable.DurableFlowState : System.Int32
   enum-member WaitingForActivity = 3
   enum-member WaitingForEvent = 1
   enum-member WaitingForTimer = 2
-type public sealed class ForgeTrust.AppSurface.Durable.DurableOperationResult<T> : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableOperationResult<T>>
+type public sealed class ForgeTrust.AppSurface.Durable.DurableOperationResult<T> : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableOperationResult<T>> where T : class
   method public ForgeTrust.AppSurface.Durable.DurableOperationResult<T> <Clone>$()
   method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableOperationResult<T>? other)
   method public System.Boolean Equals(System.Object? obj)
@@ -970,11 +968,8 @@ type public interface ForgeTrust.AppSurface.Durable.IDurablePayloadCodecRegistry
 type public interface ForgeTrust.AppSurface.Durable.IDurableScheduleClient
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleExplanation>> ExplainNextOccurrencesAsync(ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest request, System.Threading.CancellationToken cancellationToken = default)
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleListResult>> ListAsync(ForgeTrust.AppSurface.Durable.DurableScheduleListRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> ApplyLifecycleCommandAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCommand command, System.Threading.CancellationToken cancellationToken = default)
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> CreateAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest request, System.Threading.CancellationToken cancellationToken = default)
-  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> DeleteAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCommand command, System.Threading.CancellationToken cancellationToken = default)
-  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> PauseAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCommand command, System.Threading.CancellationToken cancellationToken = default)
-  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> ReleaseAfterRecoveryAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCommand command, System.Threading.CancellationToken cancellationToken = default)
-  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> ResumeAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCommand command, System.Threading.CancellationToken cancellationToken = default)
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> UpdateAsync(ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest request, System.Threading.CancellationToken cancellationToken = default)
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot>> GetAsync(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableScheduleId scheduleId, System.Threading.CancellationToken cancellationToken = default)
 type public interface ForgeTrust.AppSurface.Durable.IDurableWorkClient

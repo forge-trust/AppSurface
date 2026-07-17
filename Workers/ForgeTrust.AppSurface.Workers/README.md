@@ -12,7 +12,7 @@ AppSurface ships as a coordinated package family. Before installing this package
 - `IDurableWorkerProjectionContract<TWork,TResult,TProjection>` for claim, completion, single-projection repair, and bounded pending-projection repair.
 - `IDurableWorkerExecutor<TWork,TResult>` for the side-effecting executor activity that host runtimes schedule only after a claim succeeds.
 - `DurableWorkerEnvelope<TPayload>`, `DurableWorkerCorrelation`, and `DurableWorkerDiagnostic` for typed outcomes and privacy-safe repair diagnostics.
-- `DurableWorkerExecutionIdentity` for native runtimes that must keep immutable activity/provider identity separate from attempt, lease, scope, and restore generations.
+- `DurableWorkerExecutionIdentity` for native runtimes that must keep immutable activity/provider identity separate from attempt, lease, scope, and runtime epochs.
 - Stable outcome and retryability enums for durable adapters and application logs.
 - `DurableWorkerMetadataSafety` for rejecting unsafe diagnostic metadata before it becomes durable or user-visible.
 

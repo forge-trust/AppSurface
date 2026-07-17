@@ -54,8 +54,20 @@ public sealed record DurableCommandFingerprint
     }
 }
 
+/// <summary>Creates canonical versioned fingerprints for command-bearing mutations.</summary>
 internal static class DurableCommandFingerprints
 {
+    /// <summary>Hashes an ordered sequence of supported semantic values under one schema identity.</summary>
+    /// <param name="schemaId">Versioned canonical encoding schema.</param>
+    /// <param name="values">Values in their contract-defined order; null values receive an explicit marker.</param>
+    /// <returns>A fingerprint containing the schema identity and canonical SHA-256 digest.</returns>
+    /// <remarks>
+    /// Ordering is significant. Supported values use the closed canonical encodings below rather than culture-sensitive
+    /// text conversion. Any change to value ordering, null markers, supported types, or their byte encodings must use a
+    /// new <paramref name="schemaId"/> so persisted fingerprints are never compared under incompatible semantics.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="schemaId"/> is invalid.</exception>
+    /// <exception cref="NotSupportedException">Thrown when a value type has no canonical encoding.</exception>
     internal static DurableCommandFingerprint Create(string schemaId, params object?[] values)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);

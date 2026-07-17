@@ -758,6 +758,74 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task PublishPlanResolver_ValidatesHeldPublicPackageDependenciesWithoutPublishingThem()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: Held for provider conformance.
+                order: 10
+                use_when: Evaluate the source-only contract preview.
+                includes: Passive contracts.
+                does_not_include: A published package.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+                expected_dependency_package_ids:
+                  - ForgeTrust.AppSurface.Expected
+              - project: Actual/ForgeTrust.AppSurface.Actual/ForgeTrust.AppSurface.Actual.csproj
+                product_family: appsurface
+                classification: excluded
+                publish_decision: do_not_publish
+                publish_reason: Actual test dependency only.
+                order: 20
+                use_when: Never install directly.
+                includes: Actual test dependency.
+                does_not_include: A public package.
+                start_here_path: Actual/ForgeTrust.AppSurface.Actual/README.md
+                note: Test-only excluded dependency.
+              - project: Expected/ForgeTrust.AppSurface.Expected/ForgeTrust.AppSurface.Expected.csproj
+                product_family: appsurface
+                classification: excluded
+                publish_decision: do_not_publish
+                publish_reason: Expected test dependency only.
+                order: 30
+                use_when: Never install directly.
+                includes: Expected test dependency.
+                does_not_include: A public package.
+                start_here_path: Expected/ForgeTrust.AppSurface.Expected/README.md
+                note: Test-only excluded dependency.
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("Actual/ForgeTrust.AppSurface.Actual/ForgeTrust.AppSurface.Actual.csproj", "<Project />");
+        await WriteFileAsync("Actual/ForgeTrust.AppSurface.Actual/README.md", "# Actual");
+        await WriteFileAsync("Expected/ForgeTrust.AppSurface.Expected/ForgeTrust.AppSurface.Expected.csproj", "<Project />");
+        await WriteFileAsync("Expected/ForgeTrust.AppSurface.Expected/README.md", "# Expected");
+        var resolver = CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web",
+                ["Actual/ForgeTrust.AppSurface.Actual/ForgeTrust.AppSurface.Actual.csproj"]),
+            ["Actual/ForgeTrust.AppSurface.Actual/ForgeTrust.AppSurface.Actual.csproj"] = CreateMetadata(
+                "Actual/ForgeTrust.AppSurface.Actual/ForgeTrust.AppSurface.Actual.csproj",
+                "ForgeTrust.AppSurface.Actual"),
+            ["Expected/ForgeTrust.AppSurface.Expected/ForgeTrust.AppSurface.Expected.csproj"] = CreateMetadata(
+                "Expected/ForgeTrust.AppSurface.Expected/ForgeTrust.AppSurface.Expected.csproj",
+                "ForgeTrust.AppSurface.Expected")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => resolver.ResolveAsync(_repositoryRoot, ManifestPath, CancellationToken.None));
+
+        Assert.Contains("expected dependency package ids [ForgeTrust.AppSurface.Expected]", error.Message, StringComparison.Ordinal);
+        Assert.Contains("project references resolve to [ForgeTrust.AppSurface.Actual]", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublishPlanResolver_ThrowsWhenToolDefinesExpectedPackageDependencies()
     {
         await WriteFileAsync("packages/package-index.yml",

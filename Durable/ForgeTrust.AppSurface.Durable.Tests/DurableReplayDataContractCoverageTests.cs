@@ -60,6 +60,7 @@ public sealed class DurableReplayDataContractCoverageTests
             _ => true,
             maximumBytes: 1);
         Assert.Throws<ArgumentException>(() => tinyCodec.Encode(new ReplayPayload("too-large")));
+        Assert.Throws<JsonException>(() => tinyCodec.Decode(EncodedInput));
 
         var rejectingCodec = CreateCodec(_ => false);
         Assert.Throws<ArgumentException>(() => rejectingCodec.Encode(new ReplayPayload("rejected")));
@@ -231,6 +232,10 @@ public sealed class DurableReplayDataContractCoverageTests
         Assert.Throws<ArgumentNullException>(() => CreateProblem(documentationUrl: null!));
         Assert.Throws<ArgumentException>(() => CreateProblem(new Uri("relative", UriKind.Relative)));
         Assert.Throws<ArgumentException>(() => CreateProblem(new Uri("file:///tmp/durable")));
+        var documentationUrl = new Uri("https://example.test/durable");
+        Assert.Throws<ArgumentException>(() => CreateProblem(documentationUrl, problem: "password=secret"));
+        Assert.Throws<ArgumentException>(() => CreateProblem(documentationUrl, cause: "user@example.test"));
+        Assert.Throws<ArgumentException>(() => CreateProblem(documentationUrl, fix: "{\"raw\":true}"));
 
         var problem = CreateProblem(new Uri("https://example.test/durable"));
         Assert.Equal("ASDUR999", problem.Code);
@@ -330,8 +335,12 @@ public sealed class DurableReplayDataContractCoverageTests
             revision,
             new DateTimeOffset(2026, 7, 15, 8, 30, 0, TimeSpan.FromHours(-4)));
 
-    private static DurableProblem CreateProblem(Uri documentationUrl) =>
-        new("ASDUR999", "Problem", "Cause", "Fix", documentationUrl, "correlation");
+    private static DurableProblem CreateProblem(
+        Uri documentationUrl,
+        string problem = "Problem",
+        string cause = "Cause",
+        string fix = "Fix") =>
+        new("ASDUR999", problem, cause, fix, documentationUrl, "correlation");
 }
 
 public sealed record ReplayPayload(string Value);

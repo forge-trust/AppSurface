@@ -51,6 +51,15 @@ public sealed class DurableCommandFingerprintTests
             new DurableFlowEventRequest(Scope, new DurableCommandId("replay"), new DurableFlowEventId("event"), instance, "approved", Payload, 1).Fingerprint));
         Assert.Equal(DurableCommandFingerprintMatch.Conflict, flowEvent.Fingerprint.Compare(
             new DurableFlowEventRequest(Scope, Command, new DurableFlowEventId("event"), instance, "rejected", Payload, 1).Fingerprint));
+        Assert.Equal(DurableCommandFingerprintMatch.Conflict, flowEvent.Fingerprint.Compare(
+            new DurableFlowEventRequest(
+                Scope,
+                Command,
+                new DurableFlowEventId("event"),
+                instance,
+                "approved",
+                new DurableEncodedPayload("test.payload", "v1", DurableDataClassification.Operational, "other"u8.ToArray()),
+                1).Fingerprint));
         Assert.Equal(DurableCommandFingerprintMatch.Exact, cancel.Fingerprint.Compare(
             new DurableFlowCancelRequest(Scope, new DurableCommandId("replay"), instance, "operator", "cancel", 1).Fingerprint));
         Assert.Equal(DurableCommandFingerprintMatch.Conflict, cancel.Fingerprint.Compare(
@@ -77,6 +86,14 @@ public sealed class DurableCommandFingerprintTests
             new DurableScheduleCreateRequest(Scope, new DurableCommandId("replay"), "other-retry", scheduleId, schedule, target).Fingerprint));
         Assert.Equal(DurableCommandFingerprintMatch.Conflict, create.Fingerprint.Compare(
             new DurableScheduleCreateRequest(Scope, Command, "retry", scheduleId, schedule, target, "label").Fingerprint));
+        Assert.Equal(DurableCommandFingerprintMatch.Conflict, create.Fingerprint.Compare(
+            new DurableScheduleCreateRequest(
+                Scope,
+                Command,
+                "retry",
+                scheduleId,
+                schedule,
+                DurableScheduleTarget.Work("work", "v1", "other-input", codec)).Fingerprint));
         Assert.Equal(DurableCommandFingerprintMatch.Exact, update.Fingerprint.Compare(
             new DurableScheduleUpdateRequest(Scope, new DurableCommandId("replay"), scheduleId, 1, schedule, target).Fingerprint));
         Assert.Equal(DurableCommandFingerprintMatch.Conflict, update.Fingerprint.Compare(

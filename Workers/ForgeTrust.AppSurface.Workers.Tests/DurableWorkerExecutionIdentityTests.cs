@@ -105,7 +105,12 @@ public sealed class DurableWorkerExecutionIdentityTests
         Assert.Equal(initial.ActivityId, next.ActivityId);
         Assert.Equal(initial.ProviderKey, next.ProviderKey);
         Assert.Equal(2, next.AttemptNumber);
+        Assert.Equal(5, next.LeaseGeneration);
+        Assert.Equal(5, next.ScopeGeneration);
+        Assert.Equal("epoch-2", next.RuntimeEpoch);
         Assert.Throws<ArgumentOutOfRangeException>(() => next.Advance(1, 6, 5, "epoch-2"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => next.Advance(2, 4, 5, "epoch-2"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => next.Advance(2, 5, 4, "epoch-2"));
     }
 
     [Fact]

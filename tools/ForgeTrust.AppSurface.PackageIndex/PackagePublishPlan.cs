@@ -129,7 +129,10 @@ internal sealed class PackagePublishPlanResolver
             pair => pair.Value,
             StringComparer.OrdinalIgnoreCase);
 
-        foreach (var entry in entries.Where(entry => entry.Manifest.PublishDecision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish))
+        foreach (var entry in entries.Where(entry =>
+                     entry.Manifest.PublishDecision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish
+                     || (entry.Manifest.Classification == PackageClassification.Public
+                         && entry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)))
         {
             if (entry.Metadata.IsTool)
             {

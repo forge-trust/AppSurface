@@ -13,6 +13,21 @@ namespace ForgeTrust.AppSurface.Durable.Provider;
 public sealed record DurableClaimedWork
 {
     /// <summary>Initializes a validated provider claim.</summary>
+    /// <param name="scopeId">Trusted owning scope.</param>
+    /// <param name="workId">Claimed Work identity.</param>
+    /// <param name="activityId">Immutable provider-operation identity.</param>
+    /// <param name="workName">Exact registered Work name.</param>
+    /// <param name="workVersion">Exact registered Work version.</param>
+    /// <param name="payload">Persisted encoded Work input.</param>
+    /// <param name="providerSafety">Declared external-effect safety class.</param>
+    /// <param name="attemptNumber">Positive provider-authoritative attempt number.</param>
+    /// <param name="leaseGeneration">Positive lease fence generation.</param>
+    /// <param name="scopeGeneration">Positive scope lifecycle fence generation.</param>
+    /// <param name="runtimeEpoch">Validated runtime recovery epoch.</param>
+    /// <remarks>A provider must persist the matching effect permit before invoking prepared work.</remarks>
+    /// <exception cref="ArgumentException">Thrown when an identifier is default or invalid.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="payload"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when safety is undefined or a generation is not positive.</exception>
     public DurableClaimedWork(
         DurableScopeId scopeId,
         DurableWorkId workId,
