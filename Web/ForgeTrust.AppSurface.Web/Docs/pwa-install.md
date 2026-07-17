@@ -1,8 +1,8 @@
-# AppSurface Web PWA Install and Push-Worker Support
+# AppSurface Web PWA Install, Badging, and Push-Worker Support
 
-AppSurface Web owns a small, composable [Progressive Web App](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps) foundation: install metadata, explicit offline behavior, push-event plumbing, service-worker registration metadata, and privacy-safe diagnostics. Each capability is opt-in. Enabling push does not request notification permission, create a subscription, choose recipients, or send a message.
+AppSurface Web owns a small, composable [Progressive Web App](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps) foundation: install metadata, application-icon badging requests, explicit offline behavior, push-event plumbing, service-worker registration metadata, and privacy-safe diagnostics. Each capability is opt-in. Badging does not own an attention count or prove that an icon changed. Enabling push does not request notification permission, create a subscription, choose recipients, or send a message.
 
-Use the [executable PWA example](../../../examples/web-pwa-install/README.md) to see install metadata, offline behavior, push handlers, and explicit browser registration together. Use [`appsurface pwa verify`](../../../Cli/ForgeTrust.AppSurface.Cli/README.md) for server-known readiness evidence.
+Use the [executable PWA example](../../../examples/web-pwa-install/README.md) to see install metadata, an independent accessible badging proof, offline behavior, push handlers, and explicit browser registration together. Use [`appsurface pwa verify`](../../../Cli/ForgeTrust.AppSurface.Cli/README.md) for install and worker server-known readiness evidence; its schema does not include badging evidence.
 
 ## Quick Starts
 
@@ -21,6 +21,33 @@ options.Pwa.Icons.Add(new PwaIcon { Source = "/icons/app-512.png", Sizes = "512x
 ```
 
 `Pwa.Enabled` controls install metadata only. It is not a master switch for offline or push behavior.
+
+### Badging only
+
+Enable the default-off browser adapter without enabling install metadata, offline behavior, push, or a worker:
+
+```csharp
+options.Pwa.Badging.Enabled = true;
+```
+
+Add `<appsurface:pwa-head />` to the page head, then call the helper after it has loaded:
+
+```javascript
+const run = async () => {
+    const result = await window.AppSurface.Pwa.badging.set(3);
+    if (result === "unsupported") {
+        // Keep the in-app attention state available.
+    }
+};
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", run, { once: true });
+} else {
+    void run();
+}
+```
+
+Use an authoritative aggregate count, never a delta such as “add one.” Reconcile from application state when the page returns to the foreground. Keep the same state visible and accessible inside the application because the browser exposes no badge readback and may not display the request.
 
 ### Push-only worker
 
@@ -69,6 +96,7 @@ AppSurface generates one worker containing both capabilities. Push failures are 
 | Subscription | None. | Owns `PushManager.subscribe()`, endpoint custody, reconciliation, identity, and persistence. |
 | Delivery | None. | Owns VAPID keys, recipients, sending, provider results, retries, and abuse controls. |
 | Navigation intent | Default adapter accepts only a safe same-scope destination. | Owns product-specific destinations or a custom handler policy. |
+| Application-icon badging | Exposes sanitized page and active-worker set/clear adapters. | Owns the authoritative aggregate, reconciliation, privacy policy, and accessible in-app state. |
 
 The [push-worker foundation case](https://github.com/forge-trust/AppSurface/issues/631) establishes worker and registration plumbing. [Push delivery](https://github.com/forge-trust/AppSurface/issues/632) owns subscriptions and server-side delivery. [Push verification](https://github.com/forge-trust/AppSurface/issues/633) owns browser compatibility and delivered-notification proof. “Push enabled” in server diagnostics therefore does not mean permission granted, subscription created, or notification delivered.
 
@@ -104,6 +132,37 @@ The [push-worker foundation case](https://github.com/forge-trust/AppSurface/issu
 
 `Offline.ServiceWorkerPath` remains a compatibility alias for `Worker.ServiceWorkerPath`. Setting either one alone selects the worker path; setting both to the same value is valid. Conflicting explicit values fail startup regardless of assignment or configuration-binding order. New code should use `Worker.ServiceWorkerPath`.
 
+### Application-icon badging
+
+| Option or API | Default | Behavior |
+|---|---|---|
+| `Badging.Enabled` | `false` | Maps the page helper. When a worker is already active for offline or push, also installs the identical adapter in that worker. Badging alone does not create a worker. |
+| `Badging.HelperPath` | `/_appsurface/pwa/badging.js` | Content-versioned page-helper endpoint. It must be an app-root-relative generated route and is adjusted beneath `PathBase` when emitted. |
+| `AppSurface.Pwa.badging.set(count)` | — | Accepts a finite, nonnegative safe integer. Zero uses the clear path. Resolves to `"accepted"` or `"unsupported"`. |
+| `AppSurface.Pwa.badging.clear()` | — | Requests an explicit clear, falling back to the native zero form only when needed. Resolves to `"accepted"` or `"unsupported"`. |
+
+`"accepted"` means only that the selected native request resolved. It does not mean the app is installed, permission was granted, the badge is visible, or the operating system rendered the requested number. `"unsupported"` means the needed native method is absent in the current page or worker. The API never reads, stores, retries, sequences, or reports a displayed badge value.
+
+| Configuration | Page adapter | Worker adapter |
+|---|---|---|
+| Badging only | Yes | No worker is created. |
+| Badging + offline | Yes | Yes, after the new worker activates. |
+| Badging + default or custom push | Yes | Yes, before push handlers are installed. |
+| Badging disabled | No | No; existing generated worker behavior is unchanged. |
+
+Invalid counts reject with `TypeError("ASPWAJS040")`. Native set failures reject with sanitized `DOMException("ASPWAJS041", "InvalidStateError")`; clear failures use `ASPWAJS042`. A value-free `Error` is used when `DOMException` cannot be constructed. Branch on the bounded `error.message` when product UI needs to distinguish these outcomes; do not log the complete native exception:
+
+```javascript
+try {
+    await window.AppSurface.Pwa.badging.set(authoritativeCount);
+} catch (error) {
+    const code = error instanceof Error ? error.message : "ASPWAJS041";
+    showBadgingFailure(code);
+}
+```
+
+Custom worker handlers can call `self.AppSurface.Pwa.badging`, but must attach their own asynchronous work to `event.waitUntil()`. Page-helper deployment and active-worker deployment are intentionally non-atomic: normal service-worker update and activation rules mean an older active worker may temporarily lack the adapter.
+
 ### Offline behavior
 
 | Option | Default | Behavior |
@@ -121,13 +180,14 @@ All AppSurface endpoint and asset paths are app-root-relative. Startup rejects s
 
 Browsers match service-worker scopes as raw URL prefixes. `/app` therefore also covers `/application`; use `/app/` when the application intends a path-segment boundary. AppSurface validation, the default click adapter, and CLI scope checks follow those browser prefix semantics.
 
-## Head Metadata and Registration Helper
+## Head Metadata and Browser Helpers
 
 `<appsurface:pwa-head />` composes the metadata needed by active capabilities:
 
 - Install enabled: manifest, theme, application, Apple mobile-web-app, and icon tags.
 - Offline enabled: worker path and scope metadata, without loading the registration helper.
 - Push enabled: a versioned external helper script carrying the PathBase-adjusted worker URL and scope as encoded metadata.
+- Badging enabled: a separate versioned external badging helper, whether or not a worker capability is active.
 - Neither active: no output.
 
 The helper safely claims only a compatible `window.AppSurface.Pwa.register` namespace. It does not overwrite conflicting globals, and duplicate loading with identical metadata is harmless. Frozen objects, proxies, throwing accessors, forged helper brands, and incompatible namespace values are contained instead of escaping an exception into the host page.
@@ -184,19 +244,22 @@ The worker and helper support `GET` and `HEAD`; `HEAD` returns the same headers 
 |---|---|---|
 | Worker | `text/javascript; charset=utf-8` | `Cache-Control: no-cache`, `X-Content-Type-Options: nosniff`, and `Service-Worker-Allowed` matching the PathBase-adjusted scope. |
 | Registration helper | `text/javascript; charset=utf-8` | Current content-versioned requests receive immutable caching; unversioned or stale-version requests receive `no-cache`. All responses include `X-Content-Type-Options: nosniff`. |
+| Badging helper | `text/javascript; charset=utf-8` | Uses the same exact-version immutable caching contract as the registration helper and includes `X-Content-Type-Options: nosniff`. |
 | Manifest | `application/manifest+json` | Generated only when install metadata is enabled. |
 
 App-root-relative settings do not include `PathBase`. A host mounted at `/tenant-a` turns `/service-worker.js` into `/tenant-a/service-worker.js` and `/` scope into `/tenant-a/`. Validate and verify the externally visible URL; do not configure `/tenant-a` twice.
 
 ## Diagnostics and CLI Verification
 
-Development diagnostics are available at `/_appsurface/pwa` and `/_appsurface/pwa/status.json` unless `DiagnosticsExposure` changes that policy. The status JSON distinguishes server-known capabilities with `workerEnabled`, `workerPath`, `pushEnabled`, `workerScope`, and `registrationHelperPath` while preserving `manifestPath`, `offlineEnabled`, `serviceWorkerPath`, `configuredServiceWorkerPath`, and `offlineFallbackPath` for older tools.
+Development diagnostics are available at `/_appsurface/pwa` and `/_appsurface/pwa/status.json` unless `DiagnosticsExposure` changes that policy. The status JSON distinguishes server-known capabilities with `workerEnabled`, `workerPath`, `pushEnabled`, `workerScope`, `registrationHelperPath`, `badgingEnabled`, and `badgingHelperPath` while preserving `manifestPath`, `offlineEnabled`, `serviceWorkerPath`, `configuredServiceWorkerPath`, and `offlineFallbackPath` for older tools. Disabled badging is explicit as `badgingEnabled: false` and `badgingHelperPath: null`.
 
 - Offline or combined mode keeps the legacy active `serviceWorkerPath` value.
 - Push-only mode reports the active worker through the new worker fields; legacy offline worker fields are `null`.
 - No-worker mode retains `configuredServiceWorkerPath` so compatible CLI versions can prove the endpoint is absent.
 
-New CLI versions continue accepting older status JSON. When push configuration is observed, the verifier reports that registration, permission, subscription, and delivery were not evaluated. It does not turn server configuration into browser proof.
+Diagnostics report only server-known configuration and helper routing. They never claim that the current browser supports badging or that a visible badge exists. `appsurface pwa verify` remains on its existing schema and does not independently verify badging in this stage. When push configuration is observed, the verifier reports that registration, permission, subscription, and delivery were not evaluated. It does not turn server configuration into browser proof.
+
+Server validation keeps generated paths unambiguous. `ASPWA026` is secure-context guidance for a badging-only configuration, not a browser-support verdict. `ASPWA027` rejects an invalid `Badging.HelperPath`; generated-route collisions continue to use `ASPWA023`, and a web-root file shadowing the active helper fails startup with `ASPWA024` when static-file middleware is otherwise enabled.
 
 ```bash
 appsurface pwa verify \
@@ -222,6 +285,9 @@ Browser diagnostics are stable and value-free:
 | `ASPWAJS020` | Invalid notification-click destination. |
 | `ASPWAJS021` | Client focus/open failed. |
 | `ASPWAJS030` | A shared lifecycle or custom-handler import failure was contained. |
+| `ASPWAJS040` | A badging count was not a finite, nonnegative safe integer. |
+| `ASPWAJS041` | A native set-badge request failed. |
+| `ASPWAJS042` | A native clear-badge request failed. |
 
 Warnings never include payloads, destination URLs, subscription endpoints, identifiers, or exception text.
 
@@ -233,6 +299,11 @@ Warnings never include payloads, destination URLs, subscription endpoints, ident
 - Do not cache authenticated HTML, APIs, tenant data, or logout-sensitive content with the starter offline strategy.
 - Keep `StartUrl` inside `Scope`, and keep the worker scope no broader than the application surface that owns its behavior.
 - Use HTTPS or localhost. Service-worker availability and install prompts remain browser policy decisions.
+- A visible application badge generally requires an installed web-app identity. AppSurface cannot prove a host-owned manifest, installation state, or icon visibility. On iOS and iPadOS, browser policy may also tie badging to notification permission; AppSurface does not request it.
+- Operating systems may hide, coerce, cap, or replace requested counts. There is no readback API. Treat the accessible in-app state as authoritative and reconcile aggregate state on foreground/resume rather than applying deltas.
+- Choose privacy-safe aggregates. Even an icon count can disclose product activity to someone who can see the device.
+- Do not confuse default-push `badgePath` with application-icon badging: `badgePath` selects notification artwork and does not set an app badge count.
+- A newly deployed page helper can be available before an older active worker updates. Avoid assuming page and worker capability activation is atomic.
 - Do not call registration “push ready.” Permission, subscription, server delivery, and end-to-end browser evidence are separate capabilities.
 - A custom handler is executable code with the worker's authority. Serve it from a stable same-origin path, review its payload/navigation trust boundaries, and test failure branches.
 - Keep diagnostics development-only unless the app intentionally exposes sanitized readiness metadata.

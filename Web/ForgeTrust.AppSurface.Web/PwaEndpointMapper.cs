@@ -66,6 +66,14 @@ internal static class PwaEndpointMapper
                 [HttpMethods.Get, HttpMethods.Head],
                 WriteRegistrationHelperAsync);
         }
+
+        if (options.Badging.Enabled)
+        {
+            endpoints.MapMethods(
+                options.Badging.HelperPath,
+                [HttpMethods.Get, HttpMethods.Head],
+                WriteBadgingHelperAsync);
+        }
     }
 
     internal static PwaManifestDocument BuildManifest(HttpContext httpContext, PwaOptions options)
@@ -90,13 +98,22 @@ internal static class PwaEndpointMapper
         var workerEnabled = options.IsWorkerEnabled;
         var workerPath = workerEnabled ? PwaPathBase.Add(request.PathBase, options.Worker.ServiceWorkerPath) : null;
         var diagnostics = PwaOptionsValidator.Validate(options).ToList();
-        if (!IsSecureInstallContext(request))
+        var isSecureContext = IsSecureInstallContext(request);
+        if (!isSecureContext && (options.Enabled || options.IsWorkerEnabled))
         {
             diagnostics.Add(
                 new PwaDiagnostic(
                     "ASPWA018",
                     PwaDiagnosticSeverity.Warning,
                     "This request is not HTTPS, localhost, 127.0.0.1, or ::1. Browsers normally require a secure context for service-worker registration and PWA installation."));
+        }
+        if (!isSecureContext && options.Badging.Enabled && !options.Enabled && !options.IsWorkerEnabled)
+        {
+            diagnostics.Add(
+                new PwaDiagnostic(
+                    "ASPWA026",
+                    PwaDiagnosticSeverity.Warning,
+                    "Badging is configured on a request that is not HTTPS, localhost, 127.0.0.1, or ::1. Browser support and badge visibility were not evaluated."));
         }
 
         return new PwaDiagnosticsDocument(
@@ -116,6 +133,10 @@ internal static class PwaEndpointMapper
             WorkerScope: PwaPathBase.Add(request.PathBase, options.Scope),
             RegistrationHelperPath: options.Push.Enabled
                 ? PwaPathBase.Add(request.PathBase, options.Worker.RegistrationHelperPath)
+                : null,
+            BadgingEnabled: options.Badging.Enabled,
+            BadgingHelperPath: options.Badging.Enabled
+                ? PwaPathBase.Add(request.PathBase, options.Badging.HelperPath)
                 : null,
             Diagnostics: diagnostics
                 .Select(diagnostic => new PwaDiagnosticDocument(diagnostic.Code, diagnostic.Severity.ToString().ToLowerInvariant(), diagnostic.Message))
@@ -157,6 +178,11 @@ internal static class PwaEndpointMapper
         builder.Append(JsonSerializer.Serialize(configuration, ScriptJsonOptions));
         builder.AppendLine(";");
         builder.AppendLine(PwaScriptAssets.WorkerShared);
+        if (options.Badging.Enabled)
+        {
+            builder.AppendLine(PwaScriptAssets.WorkerBadging);
+        }
+
         if (options.Offline.Enabled)
         {
             builder.AppendLine(PwaScriptAssets.WorkerOffline);
@@ -236,6 +262,9 @@ internal static class PwaEndpointMapper
             : options.Offline.Enabled
                 ? "<p>The registration helper is not emitted for this offline-only worker.</p>"
                 : "<p>No worker capability or registration helper is active.</p>";
+        var badgingGuidance = options.Badging.Enabled
+            ? "<p>App badging: enabled. The helper reports only whether a native request was accepted or unsupported; installation, permission, operating-system settings, visibility, and displayed value were not evaluated.</p>"
+            : "<p>App badging: disabled.</p>";
         await httpContext.Response.WriteAsync(
             $$"""
             <!doctype html>
@@ -254,10 +283,12 @@ internal static class PwaEndpointMapper
                 <p>Worker: {{(diagnostics.WorkerEnabled ? "enabled" : "disabled")}}</p>
                 <p>Offline strategy: {{(diagnostics.OfflineEnabled ? "enabled" : "disabled")}}</p>
                 <p>Push handlers: {{(diagnostics.PushEnabled ? "enabled" : "disabled")}}</p>
+                <p>Badging helper: {{(diagnostics.BadgingEnabled ? "enabled" : "disabled")}}</p>
                 <h2>Head metadata</h2>
                 <p>Copy these tags into custom layouts that cannot use &lt;appsurface:pwa-head /&gt;.</p>
                 <pre><code>{{encodedHeadSnippet}}</code></pre>
                 {{registrationGuidance}}
+                {{badgingGuidance}}
                 <ul>{{items}}</ul>
               </main>
             </body>
@@ -282,20 +313,35 @@ internal static class PwaEndpointMapper
 
     private static async Task WriteRegistrationHelperAsync(HttpContext httpContext)
     {
+        await WriteVersionedScriptAsync(
+            httpContext,
+            PwaScriptAssets.RegistrationHelper,
+            PwaScriptAssets.RegistrationHelperVersion);
+    }
+
+    private static async Task WriteBadgingHelperAsync(HttpContext httpContext)
+    {
+        await WriteVersionedScriptAsync(
+            httpContext,
+            PwaScriptAssets.BadgingHelper,
+            PwaScriptAssets.BadgingHelperVersion);
+    }
+
+    private static async Task WriteVersionedScriptAsync(HttpContext httpContext, string script, string currentVersion)
+    {
         httpContext.Response.ContentType = "text/javascript; charset=utf-8";
-        httpContext.Response.Headers.CacheControl = string.Equals(
-            httpContext.Request.Query["v"],
-            PwaScriptAssets.RegistrationHelperVersion,
-            StringComparison.Ordinal)
-            ? "public, max-age=31536000, immutable"
-            : "no-cache";
+        var requestedVersions = httpContext.Request.Query["v"];
+        httpContext.Response.Headers.CacheControl = requestedVersions.Count == 1
+            && string.Equals(requestedVersions[0], currentVersion, StringComparison.Ordinal)
+                ? "public, max-age=31536000, immutable"
+                : "no-cache";
         httpContext.Response.Headers.XContentTypeOptions = "nosniff";
         if (HttpMethods.IsHead(httpContext.Request.Method))
         {
             return;
         }
 
-        await httpContext.Response.WriteAsync(PwaScriptAssets.RegistrationHelper, httpContext.RequestAborted);
+        await httpContext.Response.WriteAsync(script, httpContext.RequestAborted);
     }
 
     private static string BuildCacheScopeKey(PathString pathBase, PwaOptions options)
@@ -337,6 +383,8 @@ internal sealed record PwaManifestIcon(
 /// <param name="PushEnabled">Whether push handlers are enabled.</param>
 /// <param name="WorkerScope">The effective worker scope.</param>
 /// <param name="RegistrationHelperPath">The active registration-helper path.</param>
+/// <param name="BadgingEnabled">Whether the application-icon badging helper is enabled.</param>
+/// <param name="BadgingHelperPath">The active PathBase-adjusted badging-helper path, or an explicit null when disabled.</param>
 /// <param name="Diagnostics">Stable startup diagnostics.</param>
 internal sealed record PwaDiagnosticsDocument(
     bool Enabled,
@@ -350,6 +398,8 @@ internal sealed record PwaDiagnosticsDocument(
     bool PushEnabled,
     string WorkerScope,
     string? RegistrationHelperPath,
+    bool BadgingEnabled,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? BadgingHelperPath,
     IReadOnlyList<PwaDiagnosticDocument> Diagnostics);
 
 internal sealed record PwaDiagnosticDocument(string Code, string Severity, string Message);

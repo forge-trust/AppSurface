@@ -50,6 +50,7 @@ public sealed class PwaEndpointTests
                 ConfigureValidPwa(options.Pwa);
                 options.Pwa.Offline.Enabled = true;
                 options.Pwa.Push.Enabled = true;
+                options.Pwa.Badging.Enabled = true;
                 options.Pwa.Offline.OfflineFallbackPath = "/offline.html";
                 options.Pwa.Offline.StaticAssetPaths = ["/css/site.css"];
             },
@@ -62,12 +63,16 @@ public sealed class PwaEndpointTests
         using var registrationHelperRequest = new HttpRequestMessage(
             HttpMethod.Head,
             $"/_appsurface/pwa/register.js?v={PwaScriptAssets.RegistrationHelperVersion}");
+        using var badgingHelperRequest = new HttpRequestMessage(
+            HttpMethod.Head,
+            $"/_appsurface/pwa/badging.js?v={PwaScriptAssets.BadgingHelperVersion}");
 
         using var manifest = await app.Client.SendAsync(manifestRequest);
         using var diagnostics = await app.Client.SendAsync(diagnosticsRequest);
         using var status = await app.Client.SendAsync(statusRequest);
         using var serviceWorker = await app.Client.SendAsync(serviceWorkerRequest);
         using var registrationHelper = await app.Client.SendAsync(registrationHelperRequest);
+        using var badgingHelper = await app.Client.SendAsync(badgingHelperRequest);
 
         Assert.Equal(HttpStatusCode.OK, manifest.StatusCode);
         Assert.Equal("application/manifest+json", manifest.Content.Headers.ContentType?.MediaType);
@@ -88,6 +93,11 @@ public sealed class PwaEndpointTests
         Assert.Equal("text/javascript", registrationHelper.Content.Headers.ContentType?.MediaType);
         Assert.Equal("public, max-age=31536000, immutable", registrationHelper.Headers.CacheControl?.ToString());
         Assert.Equal(string.Empty, await registrationHelper.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, badgingHelper.StatusCode);
+        Assert.Equal("text/javascript", badgingHelper.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("public, max-age=31536000, immutable", badgingHelper.Headers.CacheControl?.ToString());
+        Assert.Equal("nosniff", Assert.Single(badgingHelper.Headers.GetValues("X-Content-Type-Options")));
+        Assert.Equal(string.Empty, await badgingHelper.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -113,6 +123,63 @@ public sealed class PwaEndpointTests
         Assert.Contains("\"enabled\": true", json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("\"offlineEnabled\": false", json, StringComparison.Ordinal);
         Assert.Contains("\"configuredServiceWorkerPath\": \"/service-worker.js\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"badgingEnabled\": false", json, StringComparison.Ordinal);
+        Assert.Contains("\"badgingHelperPath\": null", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BadgingOnly_MapsVersionedHelperAndDiagnosticsWithoutWorkerOrManifest()
+    {
+        await using var app = await StartHostAsync(
+            options =>
+            {
+                options.Pwa.Badging.Enabled = true;
+                options.Pwa.Badging.HelperPath = "/runtime/badging.js";
+            },
+            Environments.Development,
+            "/tenant");
+
+        using var manifest = await app.Client.GetAsync("/tenant/manifest.webmanifest");
+        using var worker = await app.Client.GetAsync("/tenant/service-worker.js");
+        using var helper = await app.Client.GetAsync(
+            $"/tenant/runtime/badging.js?v={PwaScriptAssets.BadgingHelperVersion}");
+        using var status = await app.Client.GetAsync("/tenant/_appsurface/pwa/status.json");
+        using var diagnostics = await app.Client.GetAsync("/tenant/_appsurface/pwa");
+        var helperScript = await helper.Content.ReadAsStringAsync();
+        var statusJson = await status.Content.ReadAsStringAsync();
+        var diagnosticsHtml = await diagnostics.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.NotFound, manifest.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, worker.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, helper.StatusCode);
+        Assert.Equal("text/javascript", helper.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("nosniff", Assert.Single(helper.Headers.GetValues("X-Content-Type-Options")));
+        Assert.Equal("public, max-age=31536000, immutable", helper.Headers.CacheControl?.ToString());
+        Assert.Contains("ForgeTrust.AppSurface.Pwa.badging", helperScript, StringComparison.Ordinal);
+        Assert.Contains("\"badgingEnabled\": true", statusJson, StringComparison.Ordinal);
+        Assert.Contains("\"badgingHelperPath\": \"/tenant/runtime/badging.js\"", statusJson, StringComparison.Ordinal);
+        Assert.Contains("Badging helper: enabled", diagnosticsHtml, StringComparison.Ordinal);
+        Assert.Contains("visibility, and displayed value were not evaluated", diagnosticsHtml, StringComparison.Ordinal);
+        Assert.Contains(
+            $"src=&quot;/tenant/runtime/badging.js?v={PwaScriptAssets.BadgingHelperVersion}&quot;",
+            diagnosticsHtml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BadgingOnly_InsecureDiagnosticsUseBadgingSpecificWarning()
+    {
+        await using var app = await StartHostAsync(
+            options => options.Pwa.Badging.Enabled = true,
+            Environments.Development);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/_appsurface/pwa/status.json");
+        request.Headers.Host = "app.example.test";
+
+        using var response = await app.Client.SendAsync(request);
+        var json = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("\"code\": \"ASPWA026\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"code\": \"ASPWA018\"", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -264,6 +331,66 @@ public sealed class PwaEndpointTests
         Assert.Equal("public, max-age=31536000, immutable", current.Headers.CacheControl?.ToString());
         Assert.Equal("no-cache", unversioned.Headers.CacheControl?.ToString());
         Assert.Equal("no-cache", stale.Headers.CacheControl?.ToString());
+    }
+
+    [Fact]
+    public async Task BadgingHelper_IsImmutableOnlyForOneExactCurrentContentVersion()
+    {
+        await using var app = await StartHostAsync(options => options.Pwa.Badging.Enabled = true);
+
+        using var current = await app.Client.GetAsync(
+            $"/_appsurface/pwa/badging.js?v={PwaScriptAssets.BadgingHelperVersion}");
+        using var unversioned = await app.Client.GetAsync("/_appsurface/pwa/badging.js");
+        using var stale = await app.Client.GetAsync("/_appsurface/pwa/badging.js?v=stale");
+        using var multiple = await app.Client.GetAsync(
+            $"/_appsurface/pwa/badging.js?v={PwaScriptAssets.BadgingHelperVersion}&v={PwaScriptAssets.BadgingHelperVersion}");
+
+        Assert.Equal("public, max-age=31536000, immutable", current.Headers.CacheControl?.ToString());
+        Assert.Equal("no-cache", unversioned.Headers.CacheControl?.ToString());
+        Assert.Equal("no-cache", stale.Headers.CacheControl?.ToString());
+        Assert.Equal("no-cache", multiple.Headers.CacheControl?.ToString());
+    }
+
+    [Fact]
+    public async Task WorkerBadging_PrecedesCapabilityFragmentsWithoutChangingDefaultPushPayload()
+    {
+        await using var app = await StartHostAsync(options =>
+        {
+            options.Pwa.Badging.Enabled = true;
+            options.Pwa.Offline.Enabled = true;
+            options.Pwa.Offline.OfflineFallbackPath = "/offline.html";
+            options.Pwa.Push.Enabled = true;
+        });
+
+        using var response = await app.Client.GetAsync("/service-worker.js");
+        var script = await response.Content.ReadAsStringAsync();
+
+        var sharedIndex = script.IndexOf("addEventListener(\"install\"", StringComparison.Ordinal);
+        var badgingIndex = script.IndexOf("ForgeTrust.AppSurface.Pwa.badging", StringComparison.Ordinal);
+        var offlineIndex = script.IndexOf("addEventListener(\"fetch\"", StringComparison.Ordinal);
+        var pushIndex = script.IndexOf("allowedKeys =", StringComparison.Ordinal);
+        Assert.True(sharedIndex >= 0 && badgingIndex > sharedIndex && offlineIndex > badgingIndex && pushIndex > offlineIndex);
+        Assert.Contains("badgePath", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("badgeCount", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WorkerBadging_PrecedesCustomHandlerImport()
+    {
+        await using var app = await StartHostAsync(options =>
+        {
+            options.Pwa.Badging.Enabled = true;
+            options.Pwa.Push.Enabled = true;
+            options.Pwa.Push.HandlerScriptPath = "/workers/custom-push.js";
+        });
+
+        using var response = await app.Client.GetAsync("/service-worker.js");
+        var script = await response.Content.ReadAsStringAsync();
+
+        var badgingIndex = script.IndexOf("ForgeTrust.AppSurface.Pwa.badging", StringComparison.Ordinal);
+        var importIndex = script.IndexOf("importScripts(APPSURFACE_PWA_CONFIG.handlerScriptPath);", StringComparison.Ordinal);
+        Assert.True(badgingIndex >= 0 && importIndex > badgingIndex);
+        Assert.DoesNotContain("addEventListener(\"push\"", script, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -20,6 +20,7 @@ await WebApp<WebPwaInstallModule>.RunAsync(
         options.Pwa.Offline.OfflineFallbackPath = "/offline.html";
         options.Pwa.Offline.StaticAssetPaths = ["/icons/app-192.svg", "/icons/app-512.svg", "/offline.html"];
         options.Pwa.Push.Enabled = true;
+        options.Pwa.Badging.Enabled = true;
         // docs:snippet web-pwa-options:end
 
         options.MapEndpoints = endpoints =>

@@ -1,14 +1,15 @@
 namespace ForgeTrust.AppSurface.Web;
 
 /// <summary>
-/// Configures independent AppSurface Progressive Web App install, offline, and push-worker capabilities.
+/// Configures independent AppSurface Progressive Web App install, offline, push-worker, and badging capabilities.
 /// </summary>
 /// <remarks>
 /// Set <see cref="Enabled"/> to <see langword="true"/> when AppSurface should emit and serve install metadata for a
 /// web app. Required metadata mirrors the browser-facing manifest fields that make install posture understandable:
 /// names, start URL, scope, display mode, theme/background colors, and 192x192 plus 512x512 icons. AppSurface maps
 /// diagnostics separately from install metadata so production apps can hide diagnostics while still serving the manifest.
-/// Offline and push capabilities activate one shared worker without requiring install metadata.
+/// Offline and push capabilities activate one shared worker without requiring install metadata. Badging exposes a page
+/// helper independently and joins that worker only when another capability already activates it.
 /// </remarks>
 public sealed class PwaOptions
 {
@@ -116,11 +117,19 @@ public sealed class PwaOptions
     /// </summary>
     public PwaPushOptions Push { get; } = new();
 
+    /// <summary>
+    /// Gets opt-in application-icon badging settings.
+    /// </summary>
+    public PwaBadgingOptions Badging { get; } = new();
+
     /// <summary>Gets whether at least one capability requires the shared service worker.</summary>
     internal bool IsWorkerEnabled => Offline.Enabled || Push.Enabled;
 
     /// <summary>Gets whether AppSurface should validate and map any PWA surface.</summary>
-    internal bool HasAnySurfaceEnabled => Enabled || IsWorkerEnabled;
+    internal bool HasAnySurfaceEnabled => Enabled || IsWorkerEnabled || Badging.Enabled;
+
+    /// <summary>Gets whether at least one active capability maps a generated JavaScript route.</summary>
+    internal bool HasAnyGeneratedScriptRoute => IsWorkerEnabled || Badging.Enabled;
 
     /// <summary>
     /// Gets whether the configured PWA surfaces require AppSurface to enable static-file middleware.
