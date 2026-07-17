@@ -2,7 +2,9 @@
 
 AppSurface Web owns a small, composable [Progressive Web App](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps) foundation: install metadata, application-icon badging requests, explicit offline behavior, push-event plumbing, service-worker registration metadata, and privacy-safe diagnostics. Each capability is opt-in. Badging does not own an attention count or prove that an icon changed. Enabling push does not request notification permission, create a subscription, choose recipients, or send a message.
 
-Use the [executable PWA example](../../../examples/web-pwa-install/README.md) to see install metadata, an independent accessible badging proof, offline behavior, push handlers, and explicit browser registration together. Use [`appsurface pwa verify`](../../../Cli/ForgeTrust.AppSurface.Cli/README.md) for install and worker server-known readiness evidence; its schema does not include badging evidence.
+The base package owns the shared worker and inert registration helper. For protected subscription intake, VAPID rotation, encrypted one-attempt sending, exact push-service origin allowlisting, and 404/410 cleanup, add the optional [`ForgeTrust.AppSurface.Web.Push`](../../ForgeTrust.AppSurface.Web.Push/README.md) safe rail. It reuses this worker and never maps a second worker or chooses recipients, preferences, persistence, scheduling, retry, or notification policy.
+
+Use the [executable PWA example](../../../examples/web-pwa-install/README.md) to see install metadata, an independent accessible badging proof, offline behavior, push handlers, the optional protected push rail, and explicit browser registration together. Use [`appsurface pwa verify`](../../../Cli/ForgeTrust.AppSurface.Cli/README.md) for install and worker server-known readiness evidence; its schema does not include badging evidence.
 
 ## Quick Starts
 

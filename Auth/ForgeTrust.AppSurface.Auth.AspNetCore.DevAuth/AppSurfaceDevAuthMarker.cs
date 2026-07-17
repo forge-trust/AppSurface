@@ -102,10 +102,18 @@ public static class AppSurfaceDevAuthMarker
             foreach (var persona in options.Users.Personas.Values)
             {
                 var selected = string.Equals(status.PersonaId, persona.Id, StringComparison.Ordinal);
-                builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(BuildMutationUrl(options.PathPrefix, "select/" + persona.Id, returnUrl))}\"><button class=\"{classPrefix}__button\" aria-current=\"{(selected ? "true" : "false")}\">{html.Encode(AppSurfaceDevAuthEndpointRouteBuilderExtensions.DisplayPersonaName(persona))}</button></form>");
+                var action = AppSurfaceDevAuthEndpointRouteBuilderExtensions.BuildMutationUrl(
+                    options.PathPrefix,
+                    "select/" + persona.Id,
+                    returnUrl);
+                builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(action)}\"><button class=\"{classPrefix}__button\" aria-current=\"{(selected ? "true" : "false")}\">{html.Encode(AppSurfaceDevAuthEndpointRouteBuilderExtensions.DisplayPersonaName(persona))}</button></form>");
             }
 
-            builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(BuildMutationUrl(options.PathPrefix, "clear", returnUrl))}\"><button class=\"{classPrefix}__button\">Clear</button></form>");
+            var clearAction = AppSurfaceDevAuthEndpointRouteBuilderExtensions.BuildMutationUrl(
+                options.PathPrefix,
+                "clear",
+                returnUrl);
+            builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(clearAction)}\"><button class=\"{classPrefix}__button\">Clear</button></form>");
             builder.AppendLine("</div>");
         }
 
@@ -151,8 +159,4 @@ public static class AppSurfaceDevAuthMarker
         return httpContext.Request.PathBase + httpContext.Request.Path + httpContext.Request.QueryString;
     }
 
-    private static string BuildMutationUrl(string pathPrefix, string action, string returnUrl)
-    {
-        return string.Concat(pathPrefix, "/", action, "?returnUrl=", Uri.EscapeDataString(returnUrl));
-    }
 }

@@ -128,8 +128,18 @@
             cursor: not-allowed;
         }
 
+        .action-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+
+        .primary-action,
         .secondary-action {
             min-height: 44px;
+        }
+
+        .secondary-action {
             border: 1px solid #94a3b8;
             border-radius: 0.55rem;
             padding: 0.8rem 1.1rem;
@@ -142,7 +152,7 @@
 
         .secondary-action:disabled {
             color: #64748b;
-            background: #f1f5f9;
+            background: #e2e8f0;
             cursor: not-allowed;
         }
 
@@ -217,7 +227,6 @@
                 min-height: 44px;
             }
         }
-
         .notice {
             margin-top: 1rem;
             color: #7f1d1d;
