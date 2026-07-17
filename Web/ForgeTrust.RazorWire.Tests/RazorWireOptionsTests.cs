@@ -92,6 +92,8 @@ public class RazorWireOptionsTests
     [InlineData("https://cdn.example.com/turbo.js")]
     [InlineData("assets/turbo.js")]
     [InlineData("/")]
+    [InlineData("/assets/")]
+    [InlineData("/assets//turbo.js")]
     [InlineData("/assets/./turbo.js")]
     [InlineData("/assets/../turbo.js")]
     [InlineData("/assets/%74urbo.js")]

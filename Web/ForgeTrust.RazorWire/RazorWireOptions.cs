@@ -56,10 +56,10 @@ public class RazorWireTurboOptions
     /// <see cref="RazorWireTurboRuntimeMode.Custom"/> mode.
     /// </summary>
     /// <remarks>
-    /// The path must be non-root, begin with exactly one <c>/</c>, contain at least one path segment, and cannot contain
-    /// a query string, fragment, percent encoding, dot segment, whitespace, or HTML-sensitive character. RazorWire
-    /// passes the path through ASP.NET Core static-asset versioning. Leave this value <see langword="null"/> in bundled
-    /// and host-managed modes. Use
+    /// The path must be non-root, begin with exactly one <c>/</c>, contain at least one non-empty path segment, and
+    /// cannot contain empty or dot segments, a query string, fragment, percent encoding, whitespace, or HTML-sensitive
+    /// characters. RazorWire passes the path through ASP.NET Core static-asset versioning. Leave this value
+    /// <see langword="null"/> in bundled and host-managed modes. Use
     /// <see cref="RazorWireTurboRuntimeMode.HostManaged"/> when the host needs a cross-origin URL, integrity metadata,
     /// or custom script attributes.
     /// </remarks>

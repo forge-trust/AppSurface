@@ -69,7 +69,7 @@ internal sealed class RazorWireOptionsValidator : IValidateOptions<RazorWireOpti
         {
             failures.Add(
                 "RazorWireOptions.Turbo.CustomPath must be a non-root path beginning with exactly one '/' and contain only ASCII letters, digits, " +
-                "'/', '.', '_', '-', or '~', with no '.' or '..' path segments.");
+                "'/', '.', '_', '-', or '~', with no empty, '.', or '..' path segments.");
         }
     }
 
@@ -92,7 +92,7 @@ internal sealed class RazorWireOptionsValidator : IValidateOptions<RazorWireOpti
             }
         }
 
-        return !path[1..].Split('/').Any(segment => segment is "." or "..");
+        return !path[1..].Split('/').Any(segment => segment.Length == 0 || segment is "." or "..");
     }
 
     private static void ValidateBasePath(string? basePath, ICollection<string> failures)

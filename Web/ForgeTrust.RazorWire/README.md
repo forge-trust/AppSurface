@@ -313,7 +313,7 @@ services.AddRazorWire(options =>
 });
 ```
 
-`CustomPath` must be a non-root, app-absolute same-origin path beginning with exactly one `/` and containing at least one path segment. RazorWire rejects query strings, fragments, percent encoding, dot segments, whitespace, protocol-relative paths, and HTML-sensitive characters, then applies the current `PathBase` and ASP.NET Core static-asset versioning. Do not use `Custom` for a CDN URL.
+`CustomPath` must be a non-root, app-absolute same-origin path beginning with exactly one `/` and containing only non-empty path segments. RazorWire rejects empty or dot segments, query strings, fragments, percent encoding, whitespace, protocol-relative paths, and HTML-sensitive characters, then applies the current `PathBase` and ASP.NET Core static-asset versioning. Do not use `Custom` for a CDN URL.
 
 Use `HostManaged` when the host must own a cross-origin URL, subresource integrity, CSP metadata, or other script attributes:
 

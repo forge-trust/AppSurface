@@ -256,7 +256,7 @@ public class RazorWireScriptsTagHelper : TagHelper
         {
             throw new InvalidOperationException(
                 "RazorWireOptions.Turbo.CustomPath must be a non-root path beginning with exactly one '/' and contain only ASCII letters, " +
-                "digits, '/', '.', '_', '-', or '~', with no '.' or '..' path segments when RuntimeMode is Custom.");
+                "digits, '/', '.', '_', '-', or '~', with no empty, '.', or '..' path segments when RuntimeMode is Custom.");
         }
 
         return customPath;

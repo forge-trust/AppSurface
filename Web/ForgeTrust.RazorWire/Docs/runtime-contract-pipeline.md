@@ -62,7 +62,7 @@ The TypeScript migration preserves the public browser surface:
 - CSS hooks: RazorWire form failure variables, generated form error attributes, page-navigation state attributes, and section-copy state/fallback attributes.
 - Island strategies: `load`, `idle`, `visible`, and `only`. Use `only` for client-only islands; `immediate` is intentionally not a public strategy name.
 
-No consumer migration is required for the first-party TypeScript asset pipeline. Hosts should keep using `<rw:scripts />`; the default now supplies the packaged same-origin Turbo runtime. See [Choose who supplies Turbo](../README.md#choose-who-supplies-turbo) before retaining a custom or host-owned script tag.
+No consumer migration is required for hosts that use the first-party TypeScript asset pipeline through `<rw:scripts />` without a separate Turbo tag; the default now supplies the packaged same-origin runtime. Hosts retaining the former CDN tag must remove it or switch to `HostManaged` so Turbo is not loaded twice. See [Choose who supplies Turbo](../README.md#choose-who-supplies-turbo) before retaining a custom or host-owned script tag.
 
 ## Diagnostics
 

@@ -142,6 +142,33 @@ test('third-party copy reports actionable RWASSET004 diagnostics for a missing p
   }
 });
 
+test('third-party copy reports actionable RWASSET004 diagnostics for malformed package metadata', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'razorwire-turbo-manifest-'));
+  try {
+    const packageManifest = path.join(root, 'package.json');
+    const source = path.join(root, 'readable.js');
+    writeFileSync(packageManifest, '{ malformed json');
+    writeFileSync(source, 'readable package entry');
+    const asset = {
+      ...copiedThirdPartyOutputs[0],
+      packageManifest,
+      source,
+      output: path.join(root, 'output.js')
+    };
+
+    await assert.rejects(
+      copyThirdPartyOutput(asset),
+      error => error.message.includes('RWASSET004')
+        && error.message.includes(`the pinned package manifest ${packageManifest} could not be read`)
+        && error.message.includes('package metadata is invalid')
+        && error.message.includes('pnpm --dir Web install --frozen-lockfile')
+        && error.message.includes('Node error:')
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('third-party copy rejects bytes that do not match the approved digest', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'razorwire-turbo-digest-'));
   try {
@@ -267,7 +294,10 @@ test('generated verifier emits actionable stale-output diagnostics', () => {
   assert.match(verifier, /RWASSET004 RazorWire copied third-party assets are stale/);
   assert.match(verifier, /Problem:/);
   assert.match(verifier, /Cause:/);
-  assert.match(verifier, /Fix: run `pnpm --dir Web run assets:razorwire:build`/);
+  assert.match(
+    verifier,
+    /Fix: run `pnpm --dir Web install --frozen-lockfile`, then `pnpm --dir Web run assets:razorwire:build`/
+  );
   assert.match(verifier, /Docs: Web\/ForgeTrust\.RazorWire\/Docs\/runtime-contract-pipeline\.md/);
 });
 
