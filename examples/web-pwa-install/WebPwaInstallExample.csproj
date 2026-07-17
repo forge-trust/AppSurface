@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.csproj" />
+    <ProjectReference Include="../../Web/ForgeTrust.AppSurface.Web.Push/ForgeTrust.AppSurface.Web.Push.csproj" />
     <ProjectReference Include="../../Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj" />
   </ItemGroup>
 </Project>
