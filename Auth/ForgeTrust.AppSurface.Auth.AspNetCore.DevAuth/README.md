@@ -110,6 +110,16 @@ Open the persona lab:
 /_appsurface/dev-auth
 ```
 
+### Return To The Host Page
+
+To return to a host page after selecting or clearing a persona, open the control page with a URI-encoded local target:
+
+```text
+/_appsurface/dev-auth/?returnUrl=%2Fprotected%3Ftab%3Dauth
+```
+
+DevAuth carries a safe rooted local path through every select and clear form action, then returns through the existing local redirect after the mutation. An explicit `/` is valid. Missing, blank, non-rooted, absolute, protocol-relative, backslash-containing, or control-character values are omitted from the forms; submitting then leaves the browser on the normal updated DevAuth control response. Rejected targets do not produce a diagnostic because omission is the fail-closed fallback.
+
 The control page lets you select a seeded persona, clear the persona cookie, inspect safe local claims, and copy a visible marker such as `DEV AUTH: Local Admin (AppSurface.DevAuth)`. For a persistent in-app indicator, render `AppSurfaceDevAuthMarker` from your local layout or proof page. The renderer returns an empty string when the current environment is not in `AllowedEnvironmentNames`, so layouts do not need their own `environment.IsDevelopment()` guard. With default styles, the marker is a fixed bottom-right overlay above 640 CSS pixels and participates in normal document flow at widths up to and including 640 CSS pixels. It starts collapsed, keeps the active fake persona visible, and expands to POST-only persona controls that return to the current page after selection.
 
 The host must provide `<meta name="viewport" content="width=device-width, initial-scale=1">` so the 640 CSS-pixel breakpoint tracks the device width. Render the marker after persistent application chrome and before `<main>` (or the equivalent primary content container). At narrow widths, that host-owned location becomes the marker's in-flow position, so opening the disclosure pushes following content rather than covering it. The host also owns outer spacing and the containing layout.
@@ -117,7 +127,7 @@ The host must provide `<meta name="viewport" content="width=device-width, initia
 ## API Reference
 
 - `AddAppSurfaceDevAuth(IHostEnvironment environment, Action<AppSurfaceDevAuthOptions> configure)` registers the named DevAuth authentication scheme and startup safety validation. The `configure` callback is evaluated once during registration, and the same validated options are used for both scheme registration and runtime DevAuth behavior.
-- `MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)` maps the local-only control page, status JSON, select persona endpoint, and clear persona endpoint. Control and mutation endpoints return not found when the active environment is not allowed; status remains read-only and reports `enabled: false`. The control page root always includes a static-auditable DevAuth control-page marker attribute so static export audits can reject DevAuth UI before it is written to disk.
+- `MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)` maps the local-only control page, status JSON, select persona endpoint, and clear persona endpoint. The control-page GET accepts an optional safe rooted local `returnUrl`, carries it through every select and clear form action, and returns through a local redirect after successful mutation. Missing or rejected targets are omitted, so mutations render the updated control page normally. Control and mutation endpoints return not found when the active environment is not allowed; status remains read-only and reports `enabled: false`. The control page root always includes a static-auditable DevAuth control-page marker attribute so static export audits can reject DevAuth UI before it is written to disk.
 - `AppSurfaceDevAuthMarker.Render(HttpContext, IHostEnvironment, IOptions<AppSurfaceDevAuthOptions>, IDataProtectionProvider, Action<AppSurfaceDevAuthMarkerOptions>?)` returns safe HTML for an explicit in-app DevAuth state marker. It returns `string.Empty` when the active environment is not allowed. With default styles, the marker is fixed above 640 CSS pixels and in flow at or below 640 CSS pixels. The marker root always includes a static-auditable DevAuth marker attribute so static export audits can reject DevAuth UI even when the CSS class prefix is customized.
 - `AppSurfaceDevAuthDefaults.AuthenticationScheme` is `AppSurface.DevAuth`.
 - `AppSurfaceDevAuthDefaults.PathPrefix` is `/_appsurface/dev-auth`.
@@ -304,6 +314,7 @@ Diagnostics, HTML, and status JSON do not include raw tokens, secrets, passwords
 - Include the standard viewport meta tag and render the marker after persistent application chrome and before main content. The package cannot reserve safe space when a host puts the marker inside a fixed, absolute, clipped, or overlapping container.
 - DevAuth does not automatically inject a marker into arbitrary responses. Add it explicitly to the pages or local layout where the fake-auth state should be visible; the renderer self-suppresses outside allowed environments.
 - If persona selection returns a same-origin 403, make sure custom local UI posts from the same scheme, host, and port as the mapped DevAuth endpoints.
+- If persona selection leaves you in the persona lab, verify that the initial control-page URL contained a URI-encoded, rooted local `returnUrl`. Inspect the rendered form action when debugging; rejected values are intentionally omitted rather than diagnosed or redirected to `/`.
 
 ## Upgrade And Removal
 

@@ -89,6 +89,7 @@ This approach aims to:
 ### [Web](./Web/README.md)
 
 - [**ForgeTrust.AppSurface.Web**](./Web/ForgeTrust.AppSurface.Web/README.md) – Bootstraps ASP.NET Core apps, lets modules register pre-routing middleware, endpoint-aware middleware, and endpoints, and includes [protected preview named deploy canary evaluation](./Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints), conventional browser status pages, and opt-in production 500 pages.
+- [**ForgeTrust.AppSurface.Web.Push**](./Web/ForgeTrust.AppSurface.Web.Push/README.md) – Optional protected Web Push subscription and one-attempt delivery rail with app-owned custody, explicit cookie-antiforgery or bearer mapping, exact push-service origin allowlisting, and safe terminal cleanup.
 - [**ForgeTrust.AppSurface.Web.OpenApi**](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation with development-only endpoint exposure by default.
 - [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps.
 - [**ForgeTrust.RazorWire.Auth.AspNetCore**](./Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md) – ASP.NET Core adapter for RazorWire auth projection helpers, delegating rendered UI state to host-owned AppSurface policy evaluation without adding auth schemes, redirects, or endpoint enforcement.
