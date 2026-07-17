@@ -115,8 +115,9 @@ public class RazorWireScriptsTagHelper : TagHelper
     /// <exception cref="InvalidOperationException">
     /// Thrown when <see cref="RazorWireOptions.Hybrid"/>.<see cref="RazorWireHybridOptions.LiveOrigin"/> is not an
     /// absolute HTTP(S) origin or includes a path, query string, fragment, or userinfo.
-    /// Also thrown when <see cref="RazorWireTurboOptions.RuntimeMode"/> contains an undefined value. Normal dependency
-    /// injection validates this at startup; the renderer repeats the check for callers that construct it directly.
+    /// Also thrown when <see cref="RazorWireTurboOptions.RuntimeMode"/> contains an undefined value, or when custom mode
+    /// has a missing or invalid <see cref="RazorWireTurboOptions.CustomPath"/>. Normal dependency injection validates
+    /// these values at startup; the renderer repeats the checks for callers that construct it directly.
     /// </exception>
     public override void Process(TagHelperContext context, TagHelperOutput output)
     {

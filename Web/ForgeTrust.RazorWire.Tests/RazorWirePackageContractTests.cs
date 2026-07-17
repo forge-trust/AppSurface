@@ -35,8 +35,11 @@ public sealed class RazorWirePackageContractTests
     [Trait("Category", "PackageVerification")]
     public void Package_Should_Ship_Exact_Turbo_Runtime_And_Notice()
     {
-        var repositoryRoot = FindRepositoryRoot();
-        var packageDirectory = Path.Combine(Path.GetTempPath(), "razorwire-package-contract", Guid.NewGuid().ToString("N"));
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var packageDirectory = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "razorwire-package-contract",
+            Guid.NewGuid().ToString("N"));
         Exception? primaryFailure = null;
         Directory.CreateDirectory(packageDirectory);
 
@@ -45,7 +48,7 @@ public sealed class RazorWirePackageContractTests
             var result = RunDotNetPack(repositoryRoot, packageDirectory);
             Assert.True(result == 0, "Expected RazorWire package contract pack to succeed. See the captured test output for dotnet pack diagnostics.");
 
-            var packagePath = Path.Combine(packageDirectory, $"ForgeTrust.RazorWire.{PackageVersion}.nupkg");
+            var packagePath = TestPathUtils.PathUnder(packageDirectory, $"ForgeTrust.RazorWire.{PackageVersion}.nupkg");
             Assert.True(File.Exists(packagePath), $"Expected package file to exist at {packagePath}.");
 
             using var archive = ZipFile.OpenRead(packagePath);
@@ -83,7 +86,7 @@ public sealed class RazorWirePackageContractTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add("pack");
-        startInfo.ArgumentList.Add(Path.Combine("Web", "ForgeTrust.RazorWire", "ForgeTrust.RazorWire.csproj"));
+        startInfo.ArgumentList.Add(TestPathUtils.RelativePath("Web", "ForgeTrust.RazorWire", "ForgeTrust.RazorWire.csproj"));
         startInfo.ArgumentList.Add("--configuration");
         startInfo.ArgumentList.Add(CurrentConfiguration);
         startInfo.ArgumentList.Add("--no-build");
@@ -141,19 +144,4 @@ public sealed class RazorWirePackageContractTests
         }
     }
 
-    private static string FindRepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "ForgeTrust.AppSurface.slnx")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new InvalidOperationException("Could not locate the repository root from the test output directory.");
-    }
 }
