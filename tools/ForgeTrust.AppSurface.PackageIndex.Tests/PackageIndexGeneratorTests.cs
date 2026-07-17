@@ -729,7 +729,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         Assert.Contains("| `ForgeTrust.RazorWire.Cli` |", markdown, StringComparison.Ordinal);
         Assert.Contains("`dotnet tool install --global ForgeTrust.RazorWire.Cli --prerelease`", markdown, StringComparison.Ordinal);
-        Assert.Contains("Library package rows use `dotnet package add`", markdown, StringComparison.Ordinal);
+        Assert.Contains("Published library rows use `dotnet package add`", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1241,6 +1241,42 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerateDocumentsAsync_RendersPublicPreviewPublicationHoldWithoutInstallCommand()
+    {
+        await WriteProgramRepoAsync();
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: Held until provider conformance evidence is available.
+                release_status: public_preview
+                commercial_status: commercial_ready
+                release_notes_path: releases/unreleased.md
+                order: 10
+                use_when: Evaluate the source-only contract preview.
+                includes: Passive contracts.
+                does_not_include: A published package.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+            """);
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web")
+        });
+
+        var documents = await generator.GenerateDocumentsAsync(CreateRequest());
+
+        Assert.Contains("Source only - publication held", documents.ChooserMarkdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet package add ForgeTrust.AppSurface.Web", documents.ChooserMarkdown, StringComparison.Ordinal);
+        Assert.Contains("public preview held from publishing", documents.ReadinessMarkdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GenerateDocumentsAsync_RendersNonPublicReadinessStatusesAndExcludedChooserSection()
     {
         await WriteProgramRepoAsync();
@@ -1402,6 +1438,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
     [Theory]
     [InlineData((int)PackageClassification.Public, (int)PackagePublishDecision.Publish, (int)PackageReleaseStatus.PublicPreview, (int)PackageCommercialStatus.CommercialReady, (int)PackageReadinessStatus.ManifestReady)]
+    [InlineData((int)PackageClassification.Public, (int)PackagePublishDecision.DoNotPublish, (int)PackageReleaseStatus.PublicPreview, (int)PackageCommercialStatus.CommercialReady, (int)PackageReadinessStatus.PublishHeld)]
     [InlineData((int)PackageClassification.Support, (int)PackagePublishDecision.SupportPublish, (int)PackageReleaseStatus.SupportRuntime, (int)PackageCommercialStatus.NotApplicable, (int)PackageReadinessStatus.TransitiveReady)]
     [InlineData((int)PackageClassification.ProofHost, (int)PackagePublishDecision.DoNotPublish, (int)PackageReleaseStatus.ProofHost, (int)PackageCommercialStatus.NotApplicable, (int)PackageReadinessStatus.ProofReady)]
     [InlineData((int)PackageClassification.Excluded, (int)PackagePublishDecision.DoNotPublish, (int)PackageReleaseStatus.Excluded, (int)PackageCommercialStatus.NotApplicable, (int)PackageReadinessStatus.Excluded)]
@@ -1576,6 +1613,12 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 CreateMetadata("Packages/PublicHeld/PublicHeld.csproj", "ForgeTrust.AppSurface.PublicHeld")),
             new ResolvedPackageEntry(
                 CreateReadinessManifestEntry(
+                    "Packages/PublicSupport/PublicSupport.csproj",
+                    PackageClassification.Public,
+                    PackagePublishDecision.SupportPublish),
+                CreateMetadata("Packages/PublicSupport/PublicSupport.csproj", "ForgeTrust.AppSurface.PublicSupport")),
+            new ResolvedPackageEntry(
+                CreateReadinessManifestEntry(
                     "Packages/SupportDirect/SupportDirect.csproj",
                     PackageClassification.Support,
                     PackagePublishDecision.Publish,
@@ -1657,7 +1700,11 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         var readinessByPackage = PackageReadinessEvaluator.Evaluate(_repositoryRoot, entries)
             .ToDictionary(item => item.PackageId, StringComparer.Ordinal);
 
-        AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.PublicHeld", "Public package is not marked publish", "publish_decision: publish");
+        var publicHeld = readinessByPackage["ForgeTrust.AppSurface.PublicHeld"];
+        Assert.Equal(PackageReadinessStatus.PublishHeld, publicHeld.Status);
+        Assert.Empty(publicHeld.BlockingReasons);
+        Assert.Contains(publicHeld.Evidence, evidence => evidence.Contains("machine-held", StringComparison.Ordinal));
+        AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.PublicSupport", "invalid publish decision", "publish or do_not_publish");
         AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.SupportDirect", "Support package uses direct publish", "support_publish or do_not_publish");
         AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.ProofDirect", "Proof-host package uses direct publish", "support_publish or do_not_publish");
         AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.ExcludedMaybe", "Excluded package is not marked do_not_publish", "publish_decision: do_not_publish");

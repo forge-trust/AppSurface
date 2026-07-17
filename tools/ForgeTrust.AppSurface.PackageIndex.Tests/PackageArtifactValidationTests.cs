@@ -246,7 +246,183 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
-    public async Task PublishPlanResolver_ThrowsWhenPublicEntryIsNotMarkedForPublish()
+    public async Task PublishPlanResolver_OmitsPublicEntryHeldFromPublishing()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: Held until provider conformance evidence is available.
+                order: 10
+                use_when: Install this first.
+                includes: Base web hosting.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        var resolver = CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web")
+        });
+
+        var plan = await resolver.ResolveAsync(_repositoryRoot, ManifestPath, CancellationToken.None);
+
+        Assert.Empty(plan.Entries);
+    }
+
+    [Fact]
+    public async Task PublishPlanResolver_OmitsHeldPublicToolWithoutRequiringCommandName()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 5
+                use_when: Build a web app.
+                includes: Web host.
+                does_not_include: Preview tooling.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Cli/ForgeTrust.AppSurface.Preview/ForgeTrust.AppSurface.Preview.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: Held until provider conformance evidence is available.
+                order: 10
+                use_when: Exercise source-only preview tooling.
+                includes: Preview command contracts.
+                does_not_include: A published tool.
+                start_here_path: Cli/ForgeTrust.AppSurface.Preview/README.md
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Preview/ForgeTrust.AppSurface.Preview.csproj", "<Project />");
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Preview/README.md", "# Preview tool");
+        var resolver = CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Cli/ForgeTrust.AppSurface.Preview/ForgeTrust.AppSurface.Preview.csproj"] = CreateMetadata(
+                "Cli/ForgeTrust.AppSurface.Preview/ForgeTrust.AppSurface.Preview.csproj",
+                "ForgeTrust.AppSurface.Preview",
+                isTool: true)
+        });
+
+        var plan = await resolver.ResolveAsync(_repositoryRoot, ManifestPath, CancellationToken.None);
+
+        var published = Assert.Single(plan.Entries);
+        Assert.Equal("ForgeTrust.AppSurface.Web", published.PackageId);
+        Assert.DoesNotContain(plan.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Preview");
+    }
+
+    [Fact]
+    public async Task DurablePublicationHold_OmitsBothPublicPreviewPackagesFromPublishPlan()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 5
+                use_when: Build a web app.
+                includes: Web host.
+                does_not_include: Durable runtime.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: Held for PostgreSQL provider evidence.
+                order: 10
+                use_when: Author durable contracts.
+                includes: Adopter contracts.
+                does_not_include: Runtime.
+                start_here_path: Durable/ForgeTrust.AppSurface.Durable/README.md
+              - project: Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: Held for PostgreSQL provider evidence.
+                order: 20
+                use_when: Implement a runtime provider.
+                includes: Provider SPI.
+                does_not_include: Storage implementation.
+                start_here_path: Durable/ForgeTrust.AppSurface.Durable.Provider/README.md
+                expected_dependency_package_ids:
+                  - ForgeTrust.AppSurface.Durable
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj", "<Project />");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable/README.md", "# Durable");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj", "<Project />");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable.Provider/README.md", "# Provider");
+        var durableProjectPath = CombineSafeChildPath(
+            _repositoryRoot,
+            "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj");
+        var resolver = CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj"] = CreateMetadata(
+                "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj",
+                "ForgeTrust.AppSurface.Durable"),
+            ["Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj"] = CreateMetadata(
+                "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj",
+                "ForgeTrust.AppSurface.Durable.Provider",
+                projectReferences: [durableProjectPath])
+        });
+
+        var plan = await resolver.ResolveAsync(_repositoryRoot, ManifestPath, CancellationToken.None);
+
+        var published = Assert.Single(plan.Entries);
+        Assert.Equal("ForgeTrust.AppSurface.Web", published.PackageId);
+        Assert.DoesNotContain(plan.Entries, entry => entry.PackageId.StartsWith("ForgeTrust.AppSurface.Durable", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task DurablePublicationHold_CheckedInManifestHoldsBothPackagesOutOfActualPublishPlan()
+    {
+        var repositoryRoot = GetRepositoryRoot();
+        var manifestPath = CombineSafeChildPath(repositoryRoot, "packages/package-index.yml");
+        var manifest = await new PackageManifestLoader().LoadAsync(manifestPath, CancellationToken.None);
+        var durableEntries = manifest.Packages
+            .Where(entry => entry.Project is
+                "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" or
+                "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj")
+            .ToArray();
+
+        Assert.Equal(2, durableEntries.Length);
+        Assert.All(durableEntries, entry =>
+        {
+            Assert.Equal(PackagePublishDecision.DoNotPublish, entry.PublishDecision);
+            Assert.Contains("PostgreSQL provider milestone", entry.PublishReason, StringComparison.Ordinal);
+        });
+
+        var plan = await new PackagePublishPlanResolver(
+            new PackageProjectScanner(),
+            new DotNetProjectMetadataProvider(),
+            new PackageManifestLoader()).ResolveAsync(repositoryRoot, manifestPath, CancellationToken.None);
+
+        Assert.DoesNotContain(plan.Entries, entry =>
+            entry.PackageId is "ForgeTrust.AppSurface.Durable" or "ForgeTrust.AppSurface.Durable.Provider");
+    }
+
+    [Fact]
+    public async Task PublishPlanResolver_ThrowsWhenPublicEntryUsesSupportPublish()
     {
         await WriteFileAsync("packages/package-index.yml",
             """
@@ -627,6 +803,74 @@ public sealed class PackageArtifactValidationTests : IDisposable
             () => resolver.ResolveAsync(_repositoryRoot, ManifestPath, CancellationToken.None));
 
         Assert.Contains("unknown dependency package id 'ForgeTrust.AppSurface.Missing'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishPlanResolver_ValidatesHeldPublicPackageDependenciesWithoutPublishingThem()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: Held for provider conformance.
+                order: 10
+                use_when: Evaluate the source-only contract preview.
+                includes: Passive contracts.
+                does_not_include: A published package.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+                expected_dependency_package_ids:
+                  - ForgeTrust.AppSurface.Expected
+              - project: Actual/ForgeTrust.AppSurface.Actual/ForgeTrust.AppSurface.Actual.csproj
+                product_family: appsurface
+                classification: excluded
+                publish_decision: do_not_publish
+                publish_reason: Actual test dependency only.
+                order: 20
+                use_when: Never install directly.
+                includes: Actual test dependency.
+                does_not_include: A public package.
+                start_here_path: Actual/ForgeTrust.AppSurface.Actual/README.md
+                note: Test-only excluded dependency.
+              - project: Expected/ForgeTrust.AppSurface.Expected/ForgeTrust.AppSurface.Expected.csproj
+                product_family: appsurface
+                classification: excluded
+                publish_decision: do_not_publish
+                publish_reason: Expected test dependency only.
+                order: 30
+                use_when: Never install directly.
+                includes: Expected test dependency.
+                does_not_include: A public package.
+                start_here_path: Expected/ForgeTrust.AppSurface.Expected/README.md
+                note: Test-only excluded dependency.
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("Actual/ForgeTrust.AppSurface.Actual/ForgeTrust.AppSurface.Actual.csproj", "<Project />");
+        await WriteFileAsync("Actual/ForgeTrust.AppSurface.Actual/README.md", "# Actual");
+        await WriteFileAsync("Expected/ForgeTrust.AppSurface.Expected/ForgeTrust.AppSurface.Expected.csproj", "<Project />");
+        await WriteFileAsync("Expected/ForgeTrust.AppSurface.Expected/README.md", "# Expected");
+        var resolver = CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web",
+                ["Actual/ForgeTrust.AppSurface.Actual/ForgeTrust.AppSurface.Actual.csproj"]),
+            ["Actual/ForgeTrust.AppSurface.Actual/ForgeTrust.AppSurface.Actual.csproj"] = CreateMetadata(
+                "Actual/ForgeTrust.AppSurface.Actual/ForgeTrust.AppSurface.Actual.csproj",
+                "ForgeTrust.AppSurface.Actual"),
+            ["Expected/ForgeTrust.AppSurface.Expected/ForgeTrust.AppSurface.Expected.csproj"] = CreateMetadata(
+                "Expected/ForgeTrust.AppSurface.Expected/ForgeTrust.AppSurface.Expected.csproj",
+                "ForgeTrust.AppSurface.Expected")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => resolver.ResolveAsync(_repositoryRoot, ManifestPath, CancellationToken.None));
+
+        Assert.Contains("expected dependency package ids [ForgeTrust.AppSurface.Expected]", error.Message, StringComparison.Ordinal);
+        Assert.Contains("project references resolve to [ForgeTrust.AppSurface.Actual]", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -5858,18 +6102,22 @@ public sealed class PackageArtifactValidationTests : IDisposable
         };
     }
 
-    private static string GetRepositoryRoot()
+    private static string GetRepositoryRoot(
+        [System.Runtime.CompilerServices.CallerFilePath] string sourcePath = "")
     {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null)
+        foreach (var startingPath in new[] { sourcePath, Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
         {
-            if (File.Exists(CombineSafeChildPath(current.FullName, "ForgeTrust.AppSurface.slnx")) &&
-                Directory.Exists(CombineSafeChildPath(current.FullName, ".github/workflows")))
+            var current = new DirectoryInfo(startingPath);
+            while (current is not null)
             {
-                return current.FullName;
-            }
+                if (File.Exists(CombineSafeChildPath(current.FullName, "ForgeTrust.AppSurface.slnx")) &&
+                    Directory.Exists(CombineSafeChildPath(current.FullName, ".github/workflows")))
+                {
+                    return current.FullName;
+                }
 
-            current = current.Parent;
+                current = current.Parent;
+            }
         }
 
         throw new InvalidOperationException("Could not locate repository root from test base directory.");

@@ -3,7 +3,7 @@
   "version": "0.2.0-preview.3",
   "tag": "v0.2.0-preview.3",
   "date": "2026-07-17",
-  "sourceCommit": "7698ca61ce15a834b67cf93d82d4acc176e581c2",
+  "sourceCommit": "0b957156546c49267f88685a7ec5a72213485102",
   "releaseClassification": "prerelease",
   "generatedFiles": [
     "releases/v0.2.0-preview.3.md",

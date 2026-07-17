@@ -9,13 +9,13 @@
   "evidencePath": "releases/v0.2.0-preview.3.evidence.json",
   "releaseManifestDigest": {
     "algorithm": "sha256",
-    "value": "d4b36eb8d6a53a83ed72ee62e7c862205b455ff1e618c9db3620f6184529e933"
+    "value": "fd20bca1e727cdcb01cc7df318b138b79ed8c75e19d3003b276328f64e8caf74"
   },
   "releaseArtifactDigests": [
     {
       "path": "releases/v0.2.0-preview.3.md",
       "algorithm": "sha256",
-      "value": "e58e2c49b483ef505c2dad7ba8edb72f67e71ba117ba82f3758f0d5bd450b2b9"
+      "value": "441c0b0450c4d56665b8dbb7ea9a710a62f073a805b218b8e4d3a51a88fa7f74"
     },
     {
       "path": "releases/v0.2.0-preview.3.md.yml",
@@ -25,7 +25,7 @@
     {
       "path": "releases/v0.2.0-preview.3.release.json",
       "algorithm": "sha256",
-      "value": "d4b36eb8d6a53a83ed72ee62e7c862205b455ff1e618c9db3620f6184529e933"
+      "value": "fd20bca1e727cdcb01cc7df318b138b79ed8c75e19d3003b276328f64e8caf74"
     }
   ],
   "packageReleaseNotePaths": [
@@ -159,7 +159,7 @@
     "catalogEntry": null
   },
   "commits": {
-    "contentSourceCommit": "7698ca61ce15a834b67cf93d82d4acc176e581c2",
+    "contentSourceCommit": "0b957156546c49267f88685a7ec5a72213485102",
     "releasePreparationCommit": null,
     "tagCommit": null,
     "workflowRunId": null
@@ -167,10 +167,10 @@
   "generatedBy": {
     "tool": "./eng/release"
   },
-  "generatedAtUtc": "2026-07-17T05:53:12.1167340Z",
+  "generatedAtUtc": "2026-07-17T06:53:32.5820020Z",
   "subject": {
     "name": "releases/v0.2.0-preview.3.evidence.json",
-    "sha256": "5527702aea249f6823026737beb1081ae19a41ba1e52c80bbbebdea685e525b3"
+    "sha256": "a42b7613e25be2765ec2f0e8c3ba28c57bc53cdb2e3e4e64de8f95adcac4124c"
   },
   "attestation": null
 }
