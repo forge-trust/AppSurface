@@ -101,7 +101,6 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             """);
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
-
         var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
             ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
@@ -144,6 +143,11 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             """);
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
+        await WriteFileAsync("releases/README.md", "# Releases");
+        await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
+        await WriteFileAsync("CHANGELOG.md", "# Changelog");
 
         var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
@@ -260,6 +264,77 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         Assert.Contains("readiness_blocker", error.Message, StringComparison.Ordinal);
         Assert.Contains("#123", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_SurfacesPublicPackagePublicationBlockerInChooser()
+    {
+        await WriteFileAsync("packages/README.md.yml", "title: AppSurface");
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                readiness_blocker: "#642"
+                readiness_note: Pinned dependency cleanup is incomplete.
+                order: 10
+                use_when: Install this first for a normal ASP.NET Core app with AppSurface modules.
+                includes: Base startup
+                does_not_include: OpenAPI
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                readiness_blocker: "#642"
+                readiness_note: Pinned dependency cleanup is incomplete.
+                order: 20
+                use_when: Add this to tests for an AppSurface profile-based AppHost.
+                includes: Typed profile testing
+                does_not_include: Native AppHost replacement
+                start_here_path: Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md
+                recipe_summary: Add `ForgeTrust.AppSurface.Aspire.Testing` for profile-based AppHosts.
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync(
+            "Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj",
+            "<Project />");
+        await WriteFileAsync("Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md", "# Aspire Testing");
+        await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
+        await WriteFileAsync("releases/README.md", "# Releases");
+        await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
+        await WriteFileAsync("CHANGELOG.md", "# Changelog");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj"] = CreateMetadata(
+                "Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj",
+                "ForgeTrust.AppSurface.Aspire.Testing")
+        });
+        var request = CreateRequest();
+
+        var chooser = await generator.GenerateAsync(request);
+
+        Assert.Contains(
+            "Publication of [`ForgeTrust.AppSurface.Web`](../Web/ForgeTrust.AppSurface.Web/README.md) is blocked by #642; it is not currently installable. Pinned dependency cleanup is incomplete.",
+            chooser,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "- Publication of [`ForgeTrust.AppSurface.Aspire.Testing`](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) is blocked by #642; it is not currently installable. Pinned dependency cleanup is incomplete.",
+            chooser,
+            StringComparison.Ordinal);
+        Assert.Contains("Publication blocked by #642; not currently installable.", chooser, StringComparison.Ordinal);
+        Assert.Contains("publication blocked by #642", chooser, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet package add ForgeTrust.AppSurface.Web", chooser, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet package add ForgeTrust.AppSurface.Aspire.Testing", chooser, StringComparison.Ordinal);
     }
 
     [Fact]

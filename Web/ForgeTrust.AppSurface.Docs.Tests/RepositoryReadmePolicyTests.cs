@@ -113,7 +113,10 @@ public sealed partial class RepositoryReadmePolicyTests
             .Select(entry => entry.StartHerePath!)
             .ToArray();
 
-        Assert.Equal(32, requiredReadmes.Length);
+        Assert.Equal(33, requiredReadmes.Length);
+        Assert.Contains(
+            "Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md",
+            requiredReadmes);
         Assert.Contains(
             "Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md",
             requiredReadmes);

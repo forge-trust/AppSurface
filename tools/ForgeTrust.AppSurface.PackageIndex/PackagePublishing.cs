@@ -296,13 +296,15 @@ internal sealed class PackagePublishWorkflow
         CancellationToken cancellationToken)
     {
         ValidatePublishRequest(request);
+        var plan = await _planResolver.ResolveAsync(request.RepositoryRoot, request.ManifestPath, cancellationToken);
+        ThrowIfPublicationBlocked(plan);
+
         var apiKey = Environment.GetEnvironmentVariable(request.ApiKeyEnvironmentVariable);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new PackageIndexException($"Environment variable '{request.ApiKeyEnvironmentVariable}' must contain the NuGet API key.");
         }
 
-        var plan = await _planResolver.ResolveAsync(request.RepositoryRoot, request.ManifestPath, cancellationToken);
         var artifactManifest = await _manifestReader.ReadAsync(request.ArtifactManifestPath, cancellationToken);
         var plannedEntries = PackageArtifactManifestPlanValidator.Validate(
             plan,
@@ -367,6 +369,21 @@ internal sealed class PackagePublishWorkflow
 
         var ledger = new PackagePublishLedger(artifactManifest.PackageVersion, request.Source, ledgerEntries);
         return ledger;
+    }
+
+    private static void ThrowIfPublicationBlocked(PackagePublishPlan plan)
+    {
+        var blockedEntries = plan.Entries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.ReadinessBlocker))
+            .Select(entry => $"{entry.PackageId} ({entry.ReadinessBlocker})")
+            .ToArray();
+        if (blockedEntries.Length > 0)
+        {
+            throw new PackageIndexException(
+                $"Package publication is blocked by unresolved readiness evidence: {string.Join(", ", blockedEntries)}. " +
+                "Clear each blocked package's readiness_blocker in packages/package-index.yml, or transfer the blocker " +
+                "to its replacement package entry, before publishing.");
+        }
     }
 
     private async Task<ExternalCommandResult> RunPushAsync(
