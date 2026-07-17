@@ -29,6 +29,7 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public class AppSurfaceDocsViewsTests
 {
+    private const string AppSurfaceDocsLayoutPath = "/Views/Shared/_AppSurfaceDocsLayout.cshtml";
     private static readonly Regex RawCssColorLiteralRegex = new(
         @"#[0-9a-fA-F]{3,8}\b|rgba?\(",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
@@ -56,6 +57,19 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("data-docs-theme-preset", layout);
         Assert.Contains("data-docs-density", layout);
         Assert.Contains("data-docs-chrome", layout);
+    }
+
+    [Fact]
+    public void ViewStarts_ShouldSelectPackageSpecificAbsoluteLayout()
+    {
+        var projectRoot = GetDocsProjectRoot();
+        var rootViewStart = File.ReadAllText(Path.Join(projectRoot, "Views", "_ViewStart.cshtml"));
+        var docsViewStart = File.ReadAllText(Path.Join(projectRoot, "Views", "Docs", "_ViewStart.cshtml"));
+
+        Assert.Contains($"Layout = \"{AppSurfaceDocsLayoutPath}\";", rootViewStart, StringComparison.Ordinal);
+        Assert.Contains($"Layout = \"{AppSurfaceDocsLayoutPath}\";", docsViewStart, StringComparison.Ordinal);
+        Assert.DoesNotContain("Layout = \"_Layout\";", rootViewStart, StringComparison.Ordinal);
+        Assert.DoesNotContain("Layout = \"_Layout\";", docsViewStart, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -4792,7 +4806,7 @@ public class AppSurfaceDocsViewsTests
             "ForgeTrust.AppSurface.Docs",
             "Views",
             "Shared",
-            "_Layout.cshtml");
+            "_AppSurfaceDocsLayout.cshtml");
 
         return File.ReadAllText(layoutPath);
     }

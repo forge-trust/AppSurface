@@ -10,19 +10,42 @@ namespace ForgeTrust.AppSurface.Flow;
 /// <remarks>
 /// This runner does not persist state, create durable timers, or buffer external events. It executes synchronously through
 /// <see cref="FlowNext{TContext}"/> outcomes and stops at <see cref="FlowWait{TContext}"/>,
-/// <see cref="FlowComplete{TContext}"/>, <see cref="FlowTimedOut{TContext}"/>, or <see cref="FlowFaultOutcome{TContext}"/>.
+/// <see cref="FlowActivity{TContext,TWork,TResult}"/>, <see cref="FlowComplete{TContext}"/>,
+/// <see cref="FlowTimedOut{TContext}"/>, or <see cref="FlowFaultOutcome{TContext}"/>. It reports activities to the
+/// caller; it never executes external work itself.
 /// </remarks>
 public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
 {
     private readonly IOptions<AppSurfaceFlowOptions> _options;
+    private readonly IFlowTransitionEvaluator<TContext> _transitionEvaluator;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="InMemoryFlowRunner{TContext}"/> class.
     /// </summary>
     /// <param name="options">Runner options.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is null.</exception>
     public InMemoryFlowRunner(IOptions<AppSurfaceFlowOptions> options)
+        : this(options, new FlowTransitionEvaluator<TContext>())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="InMemoryFlowRunner{TContext}"/> class.
+    /// </summary>
+    /// <param name="options">Runner options.</param>
+    /// <param name="transitionEvaluator">
+    /// Host-neutral one-node evaluator. Custom implementations should decorate and delegate to
+    /// <see cref="FlowTransitionEvaluator{TContext}"/>; transition creation remains package-owned.
+    /// </param>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="options"/> or <paramref name="transitionEvaluator"/> is null.
+    /// </exception>
+    public InMemoryFlowRunner(
+        IOptions<AppSurfaceFlowOptions> options,
+        IFlowTransitionEvaluator<TContext> transitionEvaluator)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _transitionEvaluator = transitionEvaluator ?? throw new ArgumentNullException(nameof(transitionEvaluator));
     }
 
     /// <inheritdoc />
@@ -32,7 +55,7 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(definition);
-        return ExecuteAsync(definition, definition.StartExecutionNode, initialContext, null, cancellationToken);
+        return ExecuteAsync(definition, definition.StartExecutionNode, initialContext, null, null, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -50,6 +73,26 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
             ResolveExecutionNode(definition, FlowDefinition<TContext>.RequireText(nodeId, nameof(nodeId))),
             context,
             resumeEvent,
+            null,
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<FlowRunResult<TContext>> ResumeActivityAsync(
+        FlowDefinition<TContext> definition,
+        string nodeId,
+        TContext context,
+        FlowActivityWorkResult activityResult,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(activityResult);
+        return ExecuteAsync(
+            definition,
+            ResolveExecutionNode(definition, FlowDefinition<TContext>.RequireText(nodeId, nameof(nodeId))),
+            context,
+            null,
+            activityResult,
             cancellationToken);
     }
 
@@ -58,6 +101,7 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
         FlowExecutionNode<TContext> executionNode,
         TContext context,
         FlowResumeEvent? resumeEvent,
+        FlowActivityWorkResult? activityResult,
         CancellationToken cancellationToken)
     {
         var maxSteps = _options.Value.MaxStepsPerRun;
@@ -69,39 +113,63 @@ public sealed class InMemoryFlowRunner<TContext> : IFlowRunner<TContext>
         var currentExecutionNode = executionNode;
         var currentContext = FlowNodeOutcome<TContext>.RequireContext(context);
         var currentResumeEvent = resumeEvent;
+        var currentActivityResult = activityResult;
 
         for (var step = 0; step < maxSteps; step++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var descriptor = currentExecutionNode.Descriptor;
-            var currentNodeId = descriptor.NodeId;
-            var executionContext = new FlowExecutionContext<TContext>(
-                definition.FlowId,
-                definition.Version,
-                currentNodeId,
-                currentContext,
-                currentResumeEvent);
-            var outcome = await descriptor.Node.ExecuteAsync(executionContext, cancellationToken).ConfigureAwait(false);
-            ArgumentNullException.ThrowIfNull(outcome);
+            var currentNodeId = currentExecutionNode.Descriptor.NodeId;
+            var transition = await _transitionEvaluator.EvaluateAsync(
+                definition,
+                new FlowTransitionInput<TContext>(
+                    currentNodeId,
+                    currentContext,
+                    currentResumeEvent,
+                    currentActivityResult),
+                cancellationToken).ConfigureAwait(false);
             currentResumeEvent = null;
+            currentActivityResult = null;
 
-            switch (outcome)
+            switch (transition.Kind)
             {
-                case FlowNext<TContext> next:
-                    currentExecutionNode = ResolveNextExecutionNode(definition, currentExecutionNode, next.NodeId);
-                    currentContext = next.Context;
+                case FlowTransitionKind.Next:
+                    currentExecutionNode = ResolveNextExecutionNode(
+                        definition,
+                        currentExecutionNode,
+                        transition.NextNodeId!);
+                    currentContext = transition.Context!;
                     break;
-                case FlowWait<TContext> wait:
-                    return FlowRunResult<TContext>.Waiting(currentNodeId, wait.EventName, wait.Context, wait.Timeout);
-                case FlowTimedOut<TContext> timedOut:
-                    return FlowRunResult<TContext>.TimedOut(currentNodeId, timedOut.EventName, timedOut.Context);
-                case FlowComplete<TContext> complete:
-                    return FlowRunResult<TContext>.Completed(currentNodeId, complete.Context);
-                case FlowFaultOutcome<TContext> fault:
-                    return FlowRunResult<TContext>.Faulted(currentNodeId, fault.Fault);
+                case FlowTransitionKind.Wait:
+                    return transition.EventCallsite is null
+                        ? FlowRunResult<TContext>.Waiting(
+                            currentNodeId,
+                            transition.EventName!,
+                            transition.Context!,
+                            transition.Timeout)
+                        : FlowRunResult<TContext>.Waiting(
+                            currentNodeId,
+                            transition.EventCallsite,
+                            transition.Context!,
+                            transition.Timeout);
+                case FlowTransitionKind.TimedOut:
+                    return FlowRunResult<TContext>.TimedOut(
+                        currentNodeId,
+                        transition.EventName!,
+                        transition.Context!);
+                case FlowTransitionKind.Complete:
+                    return FlowRunResult<TContext>.Completed(currentNodeId, transition.Context!);
+                case FlowTransitionKind.Fault when transition.Fault?.Code is
+                    FlowTransitionFaultCodes.NextNodeInvalid:
+                    throw new FlowDefinitionException(transition.Fault.Message);
+                case FlowTransitionKind.Fault when transition.Fault?.Code is FlowTransitionFaultCodes.OutcomeUnsupported:
+                    throw new FlowDefinitionException(transition.Fault.Message);
+                case FlowTransitionKind.Fault:
+                    return FlowRunResult<TContext>.Faulted(currentNodeId, transition.Fault!);
+                case FlowTransitionKind.Activity:
+                    return FlowRunResult<TContext>.ActivityPending(currentNodeId, transition.Activity!);
                 default:
-                    throw new FlowDefinitionException($"Unsupported flow outcome type '{outcome.GetType().FullName}'.");
+                    throw new FlowDefinitionException($"Unsupported flow transition kind '{transition.Kind}'.");
             }
         }
 

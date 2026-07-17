@@ -228,6 +228,7 @@ Options:
 
 - `--solution`: Solution file used for discovery. Supports `.sln` and `.slnx`. When omitted, the current directory must contain exactly one `.sln` or `.slnx`.
 - `--test-project`: Repeatable explicit test project path. Supplying one or more values skips solution discovery.
+- `--exclude-test-project`: Repeatable normalized segment glob that excludes matching solution-discovered test projects from coverage execution. It cannot be combined with `--test-project`, and every pattern must match at least one discovered test project.
 - `--output`: Coverage output directory. Defaults to `TestResults/coverage-merged`.
 - `--configuration`: Build/test configuration. Defaults to `Debug`.
 - `--parallelism`: Positive integer for non-exclusive test project concurrency. Defaults to `1`.
@@ -269,6 +270,26 @@ dotnet tool run appsurface coverage run \
 ```
 
 Use `--priority-test-project` for a known bottleneck that should start first even when its timing is missing or temporarily shorter. Priority projects must match one selected non-exclusive project. Duplicate, unmatched, ambiguous, or exclusive priority values fail before tests run so a typo does not silently change CI behavior.
+
+#### Exclude Discovered Test Projects
+
+Use repeatable `--exclude-test-project` values when a solution contains test projects that should still compile but must not participate in coverage execution:
+
+```bash
+dotnet tool run appsurface coverage run \
+  --solution ./MyApp.slnx \
+  --exclude-test-project "**/MyApp.Browser.Tests.csproj" \
+  --exclude-test-project "tests/*Generated.Tests.csproj" \
+  --dry-run
+```
+
+Patterns match solution-relative project paths after separators are normalized to `/`, and matching is case-insensitive on every operating system. A filename-only pattern matches the last path segment. `*` matches zero or more characters within one segment; `**` matches zero or more complete path segments and must occupy a complete segment. All other characters, including `?`, are literal. Exact paths and leading `..` segments are supported for projects that the solution references outside its directory.
+
+Patterns are intentionally strict: roots, drive-qualified or UNC paths, `.`, non-leading `..`, repeated or trailing separators, embedded `**`, empty values, and case-insensitive duplicates are rejected. Every normalized pattern must match at least one discovered test project; stale patterns fail with `ASCOV112` before project reads, output cleanup, build, scheduling, or tests. Matching a non-test solution entry does not satisfy a pattern.
+
+`--list-projects` and `--dry-run` print every skipped project and every matching exclusion pattern in stable solution and command-line order. Exclusions cannot be combined with explicit `--test-project` selection, and an excluded project cannot also be targeted by `--exclusive-test-project` or required as the only `--priority-test-project` candidate. If exclusions remove every discovered test project, the command fails with `ASCOV105` and reports pattern match counts.
+
+This option controls test execution, not the build graph. The default solution build still compiles excluded projects; use `--no-build` only when an earlier build already proved the solution. Do not confuse `--exclude-test-project` with Coverlet's `--exclude`, which filters instrumented assemblies while the test project still runs, or with `--no-discover-exclusive`, which changes scheduling classification without removing any project.
 
 Artifacts are local and private by default:
 
@@ -426,11 +447,12 @@ Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs 
 | `ASCOV102` | Solution discovery or `dotnet sln <solution> list` failed. | Pass a valid `.sln`/`.slnx`, fix the solution file, or use repeated `--test-project`. |
 | `ASCOV103` | No Coverlet Cobertura files were produced. | Add `coverlet.msbuild` to each selected test project, then rerun `coverage run`. |
 | `ASCOV104` | ReportGenerator merge failed. | Inspect per-project Cobertura files and rerun with `--dry-run` to verify selected projects. |
-| `ASCOV105` | Discovery selected no test projects. | Rename test projects to match `*Tests.csproj`, or pass explicit `--test-project` values. |
+| `ASCOV105` | Discovery selected no test projects, including when exclusions remove every test project. | Narrow `--exclude-test-project`, rename test projects to match `*Tests.csproj`, or use explicit `--test-project` values without exclusions. |
 | `ASCOV106` | The merged Cobertura file is malformed. | Regenerate coverage and inspect ReportGenerator output. |
 | `ASCOV109` | The output path is unsafe or not AppSurface-owned. | Use a dedicated artifact directory such as `TestResults/coverage-merged`. |
 | `ASCOV110` | `dotnet build`, `dotnet test`, or process startup failed. | Fix the build/test failure and inspect the listed project log. |
 | `ASCOV111` | An unsupported managed test-result format was requested. | Use `--test-results junit`, omit `--test-results`, or keep custom loggers on `--logger`. |
+| `ASCOV112` | An exclusion pattern matched no discovered test project. | Run with `--list-projects`, then correct or remove each stale `--exclude-test-project` pattern. |
 | `ASCOV114` | The package-owned ReportGenerator dependency was not found. | Restore or reinstall `ForgeTrust.AppSurface.Cli` so its package dependencies are present. |
 | `ASCOV120` | One or more test, merge, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix failing tests, then rerun. |
 

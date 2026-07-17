@@ -72,6 +72,14 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor NondeterministicNodeApi = new(
+        "ASFLOWA007",
+        "Flow node directly reads a nondeterministic value",
+        "Flow node '{0}' directly uses nondeterministic API '{1}'; pass the value through persisted context or a durable resume contract",
+        "AppSurface.Flow.Determinism",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var flowSpecs = context.SyntaxProvider
@@ -175,7 +183,20 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
             ? OutcomeKindName(value)
             : null;
         var outputContext = ConstructorValue(attribute, 2) as ITypeSymbol;
-        return new OutcomeSpec(name, kind, outputContext);
+        var workType = ConstructorValue(attribute, 3) as ITypeSymbol;
+        var resultType = ConstructorValue(attribute, 4) as ITypeSymbol;
+        var callsiteId = NamedValue(attribute, "CallsiteId") as string;
+        var workContractVersion = NamedValue(attribute, "WorkContractVersion") is int workVersion ? workVersion : 1;
+        var resultContractVersion = NamedValue(attribute, "ResultContractVersion") is int resultVersion ? resultVersion : 1;
+        return new OutcomeSpec(
+            name,
+            kind,
+            outputContext,
+            workType,
+            resultType,
+            callsiteId,
+            workContractVersion,
+            resultContractVersion);
     }
 
     private static bool ValidateFlow(SourceProductionContext context, Compilation compilation, FlowSpec flow)
@@ -331,6 +352,19 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                 $"Flow '{flow.FlowId}' generates multiple graph builder members named '{duplicate.Key}'. Rename the colliding node or outcome.");
         }
 
+        foreach (var duplicate in flow.Nodes
+            .SelectMany(node => node.Outcomes
+                .Where(outcome => string.Equals(outcome.Kind, "Activity", StringComparison.Ordinal))
+                .Select(outcome => ActivityCallsiteId(node, outcome)))
+            .GroupBy(callsiteId => callsiteId, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1))
+        {
+            ReportError(
+                InvalidDeclaration,
+                flow.Declaration.Identifier.GetLocation(),
+                $"Flow '{flow.FlowId}' declares activity callsite id '{duplicate.Key}' more than once. Activity callsite ids must be unique within a Flow definition.");
+        }
+
         foreach (var diagnostic in ExplicitGraphMappingDiagnostics(compilation, flow))
         {
             hasErrors = true;
@@ -339,6 +373,11 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
 
         foreach (var node in flow.Nodes)
         {
+            foreach (var diagnostic in NondeterministicApiDiagnostics(compilation, node))
+            {
+                context.ReportDiagnostic(diagnostic);
+            }
+
             if (node.Symbol.TypeParameters.Length > 0)
             {
                 ReportError(
@@ -402,6 +441,24 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                     $"Outcome '{outcome.Name}' on node '{node.NodeId}' carries context '{outcome.OutputContext!.ToDisplayString()}', which is less accessible than generated helpers for flow '{flow.FlowId}'.");
             }
 
+            foreach (var outcome in node.Outcomes.Where(outcome =>
+                outcome.WorkType is not null && !IsExposableFromFlow(outcome.WorkType, flow.Symbol)))
+            {
+                ReportError(
+                    InvalidDeclaration,
+                    node.Symbol.Locations.FirstOrDefault(),
+                    $"Activity outcome '{outcome.Name}' on node '{node.NodeId}' carries work contract '{outcome.WorkType!.ToDisplayString()}', which is less accessible than generated helpers for flow '{flow.FlowId}'.");
+            }
+
+            foreach (var outcome in node.Outcomes.Where(outcome =>
+                outcome.ResultType is not null && !IsExposableFromFlow(outcome.ResultType, flow.Symbol)))
+            {
+                ReportError(
+                    InvalidDeclaration,
+                    node.Symbol.Locations.FirstOrDefault(),
+                    $"Activity outcome '{outcome.Name}' on node '{node.NodeId}' carries result contract '{outcome.ResultType!.ToDisplayString()}', which is less accessible than generated helpers for flow '{flow.FlowId}'.");
+            }
+
             if (node.Outcomes.Count == 0)
             {
                 ReportError(
@@ -410,12 +467,14 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                     $"Flow node '{node.Symbol.Name}' must declare at least one [FlowOutcome].");
             }
 
-            foreach (var duplicate in node.Outcomes.GroupBy(CaseName, StringComparer.Ordinal).Where(group => group.Count() > 1))
+            foreach (var duplicate in GeneratedOutcomeUnionMemberNames(node)
+                         .GroupBy(name => name, StringComparer.Ordinal)
+                         .Where(group => group.Count() > 1))
             {
                 ReportError(
                     InvalidDeclaration,
                     node.Symbol.Locations.FirstOrDefault(),
-                    $"Flow node '{node.Symbol.Name}' declares multiple outcomes that generate the case '{duplicate.Key}'. Use unique outcome names.");
+                    $"Flow node '{node.Symbol.Name}' generates multiple outcome-union members named '{duplicate.Key}'. Use outcome names that remain unique after generated suffixes are applied.");
             }
 
             foreach (var outcome in node.Outcomes)
@@ -449,6 +508,61 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
                         InvalidDeclaration,
                         node.Symbol.Locations.FirstOrDefault(),
                         $"Outcome '{OutcomeDiagnosticName(outcome)}' on node '{node.NodeId}' carries context '{outcome.OutputContext.ToDisplayString()}', which must be a concrete non-void context type.");
+                }
+
+                if (string.Equals(outcome.Kind, "Activity", StringComparison.Ordinal))
+                {
+                    if (outcome.WorkType is null || !IsConcreteContextType(outcome.WorkType))
+                    {
+                        ReportError(
+                            InvalidDeclaration,
+                            node.Symbol.Locations.FirstOrDefault(),
+                            $"Activity outcome '{OutcomeDiagnosticName(outcome)}' on node '{node.NodeId}' must declare a concrete non-void work contract type with the five-argument FlowOutcome constructor.");
+                    }
+
+                    if (outcome.ResultType is null || !IsConcreteContextType(outcome.ResultType))
+                    {
+                        ReportError(
+                            InvalidDeclaration,
+                            node.Symbol.Locations.FirstOrDefault(),
+                            $"Activity outcome '{OutcomeDiagnosticName(outcome)}' on node '{node.NodeId}' must declare a concrete non-void result contract type with the five-argument FlowOutcome constructor.");
+                    }
+
+                    if (node.InputContext is not null &&
+                        !SymbolEqualityComparer.Default.Equals(node.InputContext, outcome.OutputContext))
+                    {
+                        ReportError(
+                            InvalidDeclaration,
+                            node.Symbol.Locations.FirstOrDefault(),
+                            $"Activity outcome '{outcome.Name}' on node '{node.NodeId}' must carry the node input context '{node.InputContext.ToDisplayString()}' because the activity result resumes the same node.");
+                    }
+
+                    if (outcome.CallsiteId is not null && !HasText(outcome.CallsiteId))
+                    {
+                        ReportError(
+                            InvalidDeclaration,
+                            node.Symbol.Locations.FirstOrDefault(),
+                            $"Activity outcome '{outcome.Name}' on node '{node.NodeId}' must declare a non-empty CallsiteId when overriding the generated id.");
+                    }
+
+                    if (outcome.WorkContractVersion < 1 || outcome.ResultContractVersion < 1)
+                    {
+                        ReportError(
+                            InvalidDeclaration,
+                            node.Symbol.Locations.FirstOrDefault(),
+                            $"Activity outcome '{outcome.Name}' on node '{node.NodeId}' must use work and result contract versions of at least 1.");
+                    }
+                }
+                else if (outcome.WorkType is not null ||
+                    outcome.ResultType is not null ||
+                    outcome.CallsiteId is not null ||
+                    outcome.WorkContractVersion != 1 ||
+                    outcome.ResultContractVersion != 1)
+                {
+                    ReportError(
+                        InvalidDeclaration,
+                        node.Symbol.Locations.FirstOrDefault(),
+                        $"Outcome '{OutcomeDiagnosticName(outcome)}' on node '{node.NodeId}' declares activity metadata but its kind is '{outcome.Kind ?? "unknown"}'. Use FlowOutcomeKind.Activity with the five-argument constructor, or remove the activity metadata.");
                 }
             }
 
@@ -510,6 +624,156 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
 
         return hasErrors;
     }
+
+    private static IEnumerable<Diagnostic> NondeterministicApiDiagnostics(
+        Compilation compilation,
+        NodeSpec node)
+    {
+        foreach (var syntaxReference in node.Symbol.DeclaringSyntaxReferences)
+        {
+            if (syntaxReference.GetSyntax() is not TypeDeclarationSyntax declaration)
+            {
+                continue;
+            }
+
+            var semanticModel = compilation.GetSemanticModel(declaration.SyntaxTree);
+            foreach (var memberAccess in declaration.DescendantNodes().OfType<MemberAccessExpressionSyntax>()
+                         .Where(static memberAccess =>
+                             IsNondeterministicMemberCandidate(memberAccess.Name.Identifier.ValueText)))
+            {
+                if (IsWithinNameOf(memberAccess))
+                {
+                    continue;
+                }
+
+                if (TryDescribeNondeterministicMember(
+                        semanticModel.GetSymbolInfo(memberAccess).Symbol,
+                        out var api))
+                {
+                    yield return Diagnostic.Create(
+                        NondeterministicNodeApi,
+                        memberAccess.GetLocation(),
+                        node.NodeId,
+                        api);
+                }
+            }
+
+            foreach (var identifier in declaration.DescendantNodes().OfType<IdentifierNameSyntax>()
+                         .Where(static identifier =>
+                             identifier.Parent is not MemberAccessExpressionSyntax &&
+                             IsNondeterministicMemberCandidate(identifier.Identifier.ValueText)))
+            {
+                if (IsWithinNameOf(identifier))
+                {
+                    continue;
+                }
+
+                if (TryDescribeNondeterministicMember(
+                        semanticModel.GetSymbolInfo(identifier).Symbol,
+                        out var api))
+                {
+                    yield return Diagnostic.Create(
+                        NondeterministicNodeApi,
+                        identifier.GetLocation(),
+                        node.NodeId,
+                        api);
+                }
+            }
+
+            foreach (var objectCreation in declaration.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
+            {
+                if (IsSystemRandom(semanticModel.GetTypeInfo(objectCreation).Type))
+                {
+                    yield return Diagnostic.Create(
+                        NondeterministicNodeApi,
+                        objectCreation.GetLocation(),
+                        node.NodeId,
+                        "System.Random constructor");
+                }
+            }
+
+            foreach (var objectCreation in declaration.DescendantNodes().OfType<ImplicitObjectCreationExpressionSyntax>())
+            {
+                if (IsSystemRandom(semanticModel.GetTypeInfo(objectCreation).Type))
+                {
+                    yield return Diagnostic.Create(
+                        NondeterministicNodeApi,
+                        objectCreation.GetLocation(),
+                        node.NodeId,
+                        "System.Random constructor");
+                }
+            }
+        }
+    }
+
+    private static bool TryDescribeNondeterministicMember(ISymbol? symbol, out string api)
+    {
+        if (symbol is IPropertySymbol property)
+        {
+            var containingType = property.ContainingType.ToDisplayString();
+            if ((string.Equals(containingType, "System.DateTime", StringComparison.Ordinal) ||
+                    string.Equals(containingType, "System.DateTimeOffset", StringComparison.Ordinal)) &&
+                (string.Equals(property.Name, "Now", StringComparison.Ordinal) ||
+                    string.Equals(property.Name, "UtcNow", StringComparison.Ordinal)))
+            {
+                api = containingType + "." + property.Name;
+                return true;
+            }
+
+            if (string.Equals(containingType, "System.DateTime", StringComparison.Ordinal) &&
+                string.Equals(property.Name, "Today", StringComparison.Ordinal))
+            {
+                api = "System.DateTime.Today";
+                return true;
+            }
+
+            if (string.Equals(containingType, "System.Random", StringComparison.Ordinal) &&
+                string.Equals(property.Name, "Shared", StringComparison.Ordinal))
+            {
+                api = "System.Random.Shared";
+                return true;
+            }
+
+            if (string.Equals(containingType, "System.TimeProvider", StringComparison.Ordinal) &&
+                string.Equals(property.Name, "System", StringComparison.Ordinal))
+            {
+                api = "System.TimeProvider.System";
+                return true;
+            }
+        }
+
+        if (symbol is IMethodSymbol method)
+        {
+            var containingType = method.ContainingType.ToDisplayString();
+            if (string.Equals(containingType, "System.Guid", StringComparison.Ordinal) &&
+                string.Equals(method.Name, "NewGuid", StringComparison.Ordinal))
+            {
+                api = "System.Guid.NewGuid";
+                return true;
+            }
+
+            if (string.Equals(containingType, "System.Diagnostics.Stopwatch", StringComparison.Ordinal) &&
+                string.Equals(method.Name, "GetTimestamp", StringComparison.Ordinal))
+            {
+                api = "System.Diagnostics.Stopwatch.GetTimestamp";
+                return true;
+            }
+        }
+
+        api = string.Empty;
+        return false;
+    }
+
+    private static bool IsNondeterministicMemberCandidate(string name) =>
+        name is "Now" or "UtcNow" or "Today" or "Shared" or "System" or "NewGuid" or "GetTimestamp";
+
+    private static bool IsWithinNameOf(SyntaxNode node) =>
+        node.AncestorsAndSelf().OfType<InvocationExpressionSyntax>().Any(invocation =>
+            invocation.Expression is IdentifierNameSyntax identifier &&
+            string.Equals(identifier.Identifier.Text, "nameof", StringComparison.Ordinal));
+
+    private static bool IsSystemRandom(ITypeSymbol? symbol) =>
+        symbol is not null && string.Equals(symbol.ToDisplayString(), "System.Random", StringComparison.Ordinal);
 
     private static IEnumerable<Diagnostic> ExplicitGraphMappingDiagnostics(Compilation compilation, FlowSpec flow)
     {
@@ -1094,7 +1358,28 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         foreach (var outcome in node.Outcomes)
         {
             var caseName = CaseName(outcome);
-            if (string.Equals(outcome.Kind, "Fault", StringComparison.Ordinal))
+            if (string.Equals(outcome.Kind, "Activity", StringComparison.Ordinal))
+            {
+                source.Append("        public static global::ForgeTrust.AppSurface.Flow.FlowActivityCallsite<")
+                    .Append(TypeName(outcome.WorkType!)).Append(", ").Append(TypeName(outcome.ResultType!)).Append("> ")
+                    .Append(caseName).Append("Callsite { get; } = new(\"").Append(Escape(ActivityCallsiteId(node, outcome)))
+                    .Append("\", ").Append(outcome.WorkContractVersion.ToString(global::System.Globalization.CultureInfo.InvariantCulture))
+                    .Append(", ").Append(outcome.ResultContractVersion.ToString(global::System.Globalization.CultureInfo.InvariantCulture))
+                    .AppendLine(");");
+                source.Append("        public sealed record ").Append(caseName).Append("Outcome(")
+                    .Append(TypeName(outcome.WorkType!)).Append(" Work, ").Append(TypeName(outcome.OutputContext!))
+                    .Append(" Context) : ").Append(outcomeType).AppendLine();
+                source.AppendLine("        {");
+                source.Append("            public ").Append(TypeName(outcome.WorkType!))
+                    .Append(" Work { get; } = RequireContext(Work);").AppendLine();
+                source.Append("            public ").Append(TypeName(outcome.OutputContext!))
+                    .Append(" Context { get; } = RequireContext(Context);").AppendLine();
+                source.AppendLine("        }");
+                source.Append("        public static ").Append(caseName).Append("Outcome ").Append(caseName).Append("(")
+                    .Append(TypeName(outcome.WorkType!)).Append(" work, ").Append(TypeName(outcome.OutputContext!))
+                    .Append(" context) => new(RequireContext(work), RequireContext(context));").AppendLine();
+            }
+            else if (string.Equals(outcome.Kind, "Fault", StringComparison.Ordinal))
             {
                 source.Append("        public sealed record ").Append(caseName).Append("Outcome(").Append(TypeName(outcome.OutputContext!))
                     .Append(" Context) : ").Append(outcomeType).AppendLine();
@@ -1166,7 +1451,10 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         source.AppendLine("                context.Version,");
         source.AppendLine("                context.NodeId,");
         source.AppendLine("                typedState,");
-        source.AppendLine("                context.ResumeEvent);");
+        source.AppendLine("                context.ResumeEvent)");
+        source.AppendLine("            {");
+        source.AppendLine("                ActivityResult = context.ActivityResult,");
+        source.AppendLine("            };");
         source.AppendLine("            var outcome = await _node.ExecuteAsync(transformerContext, cancellationToken).ConfigureAwait(false);");
         source.AppendLine("            if (outcome is null)");
         source.AppendLine("            {");
@@ -1228,6 +1516,13 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         {
             source.Append("                ").Append(caseType).Append(" typed => global::ForgeTrust.AppSurface.Flow.FlowNodeOutcome<")
                 .Append(envelopeName).Append(">.Fault(typed.Context.Code, typed.Context.Message),").AppendLine();
+        }
+        else if (string.Equals(outcome.Kind, "Activity", StringComparison.Ordinal))
+        {
+            source.Append("                ").Append(caseType).Append(" typed => global::ForgeTrust.AppSurface.Flow.FlowNodeOutcome<")
+                .Append(envelopeName).Append(">.Activity(").Append(outcomeType).Append(".").Append(CaseName(outcome))
+                .Append("Callsite, typed.Work, ").Append(envelopeName).Append(".For").Append(node.Symbol.Name)
+                .Append("(typed.Context)),").AppendLine();
         }
     }
 
@@ -1565,6 +1860,44 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         return identifier[0] == '_' ? "Outcome" + identifier.Substring(1) : identifier;
     }
 
+    private static IEnumerable<string> GeneratedOutcomeUnionMemberNames(NodeSpec node)
+    {
+        yield return "RequireContext";
+        yield return "Clone";
+        yield return "EqualityContract";
+        foreach (var outcome in node.Outcomes)
+        {
+            var caseName = CaseName(outcome);
+            yield return caseName;
+            yield return caseName + "Outcome";
+            if (string.Equals(outcome.Kind, "Activity", StringComparison.Ordinal))
+            {
+                yield return caseName + "Callsite";
+            }
+
+            if (OutcomeFactoryHasSingleContextParameter(outcome) &&
+                string.Equals(caseName, "Equals", StringComparison.Ordinal) &&
+                outcome.OutputContext?.SpecialType == SpecialType.System_Object)
+            {
+                yield return "Equals";
+            }
+
+            if (OutcomeFactoryHasSingleContextParameter(outcome) &&
+                string.Equals(caseName, "PrintMembers", StringComparison.Ordinal) &&
+                string.Equals(
+                    outcome.OutputContext?.ToDisplayString(),
+                    "System.Text.StringBuilder",
+                    StringComparison.Ordinal))
+            {
+                yield return "PrintMembers";
+            }
+        }
+    }
+
+    private static bool OutcomeFactoryHasSingleContextParameter(OutcomeSpec outcome) =>
+        !string.Equals(outcome.Kind, "Activity", StringComparison.Ordinal) &&
+        !string.Equals(outcome.Kind, "Wait", StringComparison.Ordinal);
+
     private static string GraphBuilderNextMethodName(NodeSpec node, OutcomeSpec outcome, NodeSpec target) =>
         "Map" + node.Symbol.Name + CaseName(outcome) + "To" + target.Symbol.Name;
 
@@ -1575,6 +1908,9 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         node.NodeId.Length.ToString(global::System.Globalization.CultureInfo.InvariantCulture) + ":" + node.NodeId +
         "|" + outcome.Name.Length.ToString(global::System.Globalization.CultureInfo.InvariantCulture) + ":" + outcome.Name;
 
+    private static string ActivityCallsiteId(NodeSpec node, OutcomeSpec outcome) =>
+        outcome.CallsiteId ?? node.NodeId + "." + outcome.Name;
+
     private static string? OutcomeKindName(int value) =>
         value switch
         {
@@ -1583,6 +1919,7 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
             2 => "TimedOut",
             3 => "Complete",
             4 => "Fault",
+            5 => "Activity",
             _ => null,
         };
 
@@ -1596,6 +1933,9 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
         index < attribute.ConstructorArguments.Length
             ? attribute.ConstructorArguments[index].Value
             : null;
+
+    private static object? NamedValue(AttributeData attribute, string name) =>
+        attribute.NamedArguments.FirstOrDefault(pair => string.Equals(pair.Key, name, StringComparison.Ordinal)).Value.Value;
 
     private static string SlotPropertyName(ITypeSymbol context) =>
         context switch
@@ -1834,7 +2174,12 @@ internal sealed class FlowAuthoringGenerator : IIncrementalGenerator
     private sealed record OutcomeSpec(
         string Name,
         string? Kind,
-        ITypeSymbol? OutputContext);
+        ITypeSymbol? OutputContext,
+        ITypeSymbol? WorkType,
+        ITypeSymbol? ResultType,
+        string? CallsiteId,
+        int WorkContractVersion,
+        int ResultContractVersion);
 
     private sealed record ContextSlot(
         ITypeSymbol Context,

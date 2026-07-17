@@ -9,8 +9,9 @@ namespace ForgeTrust.AppSurface.Flow.DurableTask;
 /// </summary>
 /// <typeparam name="TContext">Serializable context type carried by the flow.</typeparam>
 /// <remarks>
-/// This service is the AppSurface mapping layer between durable orchestration code and Flow definitions. Hosts still own
-/// Durable Task worker/client setup, instance scheduling, persisted state, timers, replay, and external event delivery.
+/// This service is the AppSurface mapping layer between durable orchestration code and the core host-neutral
+/// <see cref="IFlowTransitionEvaluator{TContext}"/>. Hosts still own Durable Task worker/client setup, instance and
+/// activity scheduling, registered work/result codecs, persisted state, timers, replay, and external event delivery.
 /// </remarks>
 public interface IDurableTaskFlowRunner<TContext>
 {
@@ -24,7 +25,8 @@ public interface IDurableTaskFlowRunner<TContext>
     /// <param name="cancellationToken">Token that cancels node execution.</param>
     /// <returns>
     /// A durable decision. Missing definitions, missing nodes, non-durable contexts, invalid next targets, and
-    /// unsupported outcomes are returned as <see cref="DurableTaskFlowDecisionKind.Fault"/> decisions.
+    /// unsupported outcomes are returned as <see cref="DurableTaskFlowDecisionKind.Fault"/> decisions. Typed Activity
+    /// outcomes return <see cref="DurableTaskFlowDecisionKind.ScheduleActivity"/>.
     /// </returns>
     /// <exception cref="ArgumentException">
     /// Thrown when <paramref name="flowId"/>, <paramref name="version"/>, or <paramref name="instanceId"/> is empty.
@@ -51,11 +53,15 @@ public interface IDurableTaskFlowRunner<TContext>
     /// unsupported outcomes are returned as <see cref="DurableTaskFlowDecisionKind.Fault"/> decisions.
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="step"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="step"/> carries both a resume event and an activity result. A node evaluation can
+    /// resume from only one external input at a time.
+    /// </exception>
     /// <remarks>
     /// When <see cref="AppSurfaceFlowDurableTaskOptions.ValidateContextSerialization"/> is enabled, this method
-    /// validates the input context before executing the node and validates returned contexts before scheduling, waiting,
-    /// timing out, or completing. Disabling that option skips the serialization round-trip check. Callers must branch on
-    /// the returned decision kind.
+    /// validates the input context before executing the node and validates returned contexts before scheduling a node or
+    /// activity, waiting, timing out, or completing. Disabling that option skips the context round-trip check. Activity
+    /// work/result codec registration remains a host responsibility. Callers must branch on the returned decision kind.
     /// </remarks>
     ValueTask<DurableTaskFlowDecision<TContext>> RunNodeAsync(
         DurableTaskFlowStep<TContext> step,
@@ -96,18 +102,50 @@ public sealed class DurableTaskFlowRunner<TContext> : IDurableTaskFlowRunner<TCo
     private readonly IFlowDefinitionRegistry _registry;
     private readonly FlowContextSerializationValidator _serializationValidator;
     private readonly IOptions<AppSurfaceFlowDurableTaskOptions> _options;
+    private readonly IFlowTransitionEvaluator<TContext> _transitionEvaluator;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DurableTaskFlowRunner{TContext}"/> class.
     /// </summary>
+    /// <param name="registry">Flow definition registry.</param>
+    /// <param name="serializationValidator">Configured durable context validator.</param>
+    /// <param name="options">Durable Task adapter options.</param>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="registry"/>, <paramref name="serializationValidator"/>, or
+    /// <paramref name="options"/> is null.
+    /// </exception>
     public DurableTaskFlowRunner(
         IFlowDefinitionRegistry registry,
         FlowContextSerializationValidator serializationValidator,
         IOptions<AppSurfaceFlowDurableTaskOptions> options)
+        : this(registry, serializationValidator, options, new FlowTransitionEvaluator<TContext>())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DurableTaskFlowRunner{TContext}"/> class.
+    /// </summary>
+    /// <param name="registry">Flow definition registry.</param>
+    /// <param name="serializationValidator">Configured durable context validator.</param>
+    /// <param name="options">Durable Task adapter options.</param>
+    /// <param name="transitionEvaluator">
+    /// Shared host-neutral one-node evaluator. Custom implementations should decorate and delegate to
+    /// <see cref="FlowTransitionEvaluator{TContext}"/>; transition creation remains package-owned.
+    /// </param>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="registry"/>, <paramref name="serializationValidator"/>,
+    /// <paramref name="options"/>, or <paramref name="transitionEvaluator"/> is null.
+    /// </exception>
+    public DurableTaskFlowRunner(
+        IFlowDefinitionRegistry registry,
+        FlowContextSerializationValidator serializationValidator,
+        IOptions<AppSurfaceFlowDurableTaskOptions> options,
+        IFlowTransitionEvaluator<TContext> transitionEvaluator)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _serializationValidator = serializationValidator ?? throw new ArgumentNullException(nameof(serializationValidator));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _transitionEvaluator = transitionEvaluator ?? throw new ArgumentNullException(nameof(transitionEvaluator));
     }
 
     /// <inheritdoc />
@@ -147,7 +185,7 @@ public sealed class DurableTaskFlowRunner<TContext> : IDurableTaskFlowRunner<TCo
             return MissingDefinition(step.FlowId, step.Version, step.NodeId);
         }
 
-        if (!definition.Nodes.TryGetValue(step.NodeId, out var descriptor))
+        if (!definition.Nodes.ContainsKey(step.NodeId))
         {
             return DurableTaskFlowDecision<TContext>.Faulted(
                 step.NodeId,
@@ -167,25 +205,26 @@ public sealed class DurableTaskFlowRunner<TContext> : IDurableTaskFlowRunner<TCo
                 contextValidation.Exception?.Message);
         }
 
-        var executionContext = new FlowExecutionContext<TContext>(
-            step.FlowId,
-            step.Version,
-            step.NodeId,
-            step.Context,
-            step.ResumeEvent);
-        var outcome = await descriptor.Node.ExecuteAsync(executionContext, cancellationToken).ConfigureAwait(false);
-        ArgumentNullException.ThrowIfNull(outcome);
+        var transition = await _transitionEvaluator.EvaluateAsync(
+            definition,
+            new FlowTransitionInput<TContext>(
+                step.NodeId,
+                step.Context,
+                step.ResumeEvent,
+                step.ActivityResult),
+            cancellationToken).ConfigureAwait(false);
 
-        return outcome switch
+        return transition.Kind switch
         {
-            FlowNext<TContext> next => MapNext(definition, descriptor, next),
-            FlowWait<TContext> wait => MapWait(step.NodeId, wait),
-            FlowTimedOut<TContext> timedOut => MapTimedOut(step.NodeId, timedOut),
-            FlowComplete<TContext> complete => MapComplete(step.NodeId, complete),
-            FlowFaultOutcome<TContext> fault => DurableTaskFlowDecision<TContext>.Faulted(step.NodeId, fault.Fault),
+            FlowTransitionKind.Next => MapNext(transition),
+            FlowTransitionKind.Wait => MapWait(transition),
+            FlowTransitionKind.TimedOut => MapTimedOut(transition),
+            FlowTransitionKind.Complete => MapComplete(transition),
+            FlowTransitionKind.Fault => DurableTaskFlowDecision<TContext>.Faulted(step.NodeId, transition.Fault!),
+            FlowTransitionKind.Activity => MapActivity(transition),
             _ => DurableTaskFlowDecision<TContext>.Faulted(
                 step.NodeId,
-                new FlowFault("flow.outcome-unsupported", $"Unsupported flow outcome type '{outcome.GetType().FullName}'.")),
+                new FlowFault("flow.transition-unsupported", $"Unsupported flow transition kind '{transition.Kind}'.")),
         };
     }
 
@@ -238,52 +277,62 @@ public sealed class DurableTaskFlowRunner<TContext> : IDurableTaskFlowRunner<TCo
         return _serializationValidator.Validate(context);
     }
 
-    private DurableTaskFlowDecision<TContext> MapNext(
-        FlowDefinition<TContext> definition,
-        FlowNodeDescriptor<TContext> descriptor,
-        FlowNext<TContext> next)
+    private DurableTaskFlowDecision<TContext> MapNext(FlowTransition<TContext> transition)
     {
-        if (!descriptor.NextNodeIds.Contains(next.NodeId) || !definition.Nodes.ContainsKey(next.NodeId))
-        {
-            return DurableTaskFlowDecision<TContext>.Faulted(
-                descriptor.NodeId,
-                new FlowFault(
-                    "flow.next-node-invalid",
-                    string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"Flow '{definition.FlowId}' version '{definition.Version}' node '{descriptor.NodeId}' returned invalid target '{next.NodeId}'.")));
-        }
-
-        var contextFault = ValidateOutcomeContext(descriptor.NodeId, next.Context);
+        var contextFault = ValidateOutcomeContext(transition.NodeId, transition.Context!);
         if (contextFault is not null)
         {
             return contextFault;
         }
 
-        return DurableTaskFlowDecision<TContext>.ScheduleNode(next.NodeId, next.Context, _options.Value.NodeRetryPolicy);
+        return DurableTaskFlowDecision<TContext>.ScheduleNode(
+            transition.NextNodeId!,
+            transition.Context!,
+            _options.Value.NodeRetryPolicy);
     }
 
-    private DurableTaskFlowDecision<TContext> MapWait(string nodeId, FlowWait<TContext> wait)
+    private DurableTaskFlowDecision<TContext> MapWait(FlowTransition<TContext> transition)
     {
-        var contextFault = ValidateOutcomeContext(nodeId, wait.Context);
-        return contextFault
-            ?? DurableTaskFlowDecision<TContext>.WaitForExternalEvent(
-                nodeId,
-                wait.EventName,
-                wait.Context,
-                wait.Timeout);
+        var contextFault = ValidateOutcomeContext(transition.NodeId, transition.Context!);
+        if (contextFault is not null)
+        {
+            return contextFault;
+        }
+
+        return transition.EventCallsite is null
+            ? DurableTaskFlowDecision<TContext>.WaitForExternalEvent(
+                transition.NodeId,
+                transition.EventName!,
+                transition.Context!,
+                transition.Timeout)
+            : DurableTaskFlowDecision<TContext>.WaitForExternalEvent(
+                transition.NodeId,
+                transition.EventCallsite,
+                transition.Context!,
+                transition.Timeout);
     }
 
-    private DurableTaskFlowDecision<TContext> MapTimedOut(string nodeId, FlowTimedOut<TContext> timedOut)
+    private DurableTaskFlowDecision<TContext> MapTimedOut(FlowTransition<TContext> transition)
     {
-        var contextFault = ValidateOutcomeContext(nodeId, timedOut.Context);
-        return contextFault ?? DurableTaskFlowDecision<TContext>.TimedOut(nodeId, timedOut.EventName, timedOut.Context);
+        var contextFault = ValidateOutcomeContext(transition.NodeId, transition.Context!);
+        return contextFault ?? DurableTaskFlowDecision<TContext>.TimedOut(
+            transition.NodeId,
+            transition.EventName!,
+            transition.Context!);
     }
 
-    private DurableTaskFlowDecision<TContext> MapComplete(string nodeId, FlowComplete<TContext> complete)
+    private DurableTaskFlowDecision<TContext> MapComplete(FlowTransition<TContext> transition)
     {
-        var contextFault = ValidateOutcomeContext(nodeId, complete.Context);
-        return contextFault ?? DurableTaskFlowDecision<TContext>.Complete(nodeId, complete.Context);
+        var contextFault = ValidateOutcomeContext(transition.NodeId, transition.Context!);
+        return contextFault ?? DurableTaskFlowDecision<TContext>.Complete(transition.NodeId, transition.Context!);
+    }
+
+    private DurableTaskFlowDecision<TContext> MapActivity(FlowTransition<TContext> transition)
+    {
+        var contextFault = ValidateOutcomeContext(transition.NodeId, transition.Context!);
+        return contextFault ?? DurableTaskFlowDecision<TContext>.ScheduleActivity(
+            transition.NodeId,
+            transition.Activity!);
     }
 
     private DurableTaskFlowDecision<TContext>? ValidateOutcomeContext(string nodeId, TContext context)

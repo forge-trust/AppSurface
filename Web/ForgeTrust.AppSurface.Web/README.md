@@ -127,6 +127,198 @@ Important behavior:
 - The product-readiness lab's `/readiness` endpoint is an example-local report endpoint. It is separate from the reusable
   AppSurface Web `/ready` platform probe contract.
 
+### Named Canary Endpoints
+
+Named canaries are a preview primitive for protected, application-owned deploy evidence. They are not liveness,
+readiness, general diagnostics, dogfood approval, customer readiness, or launch approval. Keep platform traffic decisions
+on the [`/health` and `/ready` probes](#health-and-readiness-probes). A named canary answers one narrower question once:
+does the application currently hold acceptable proof for this registered workflow, deploy marker, and freshness boundary?
+
+AppSurface owns registration, the fixed protected route, request validation, and status mapping. Your application owns
+the proof query. The deploy caller triggers synthetic work before evaluation and owns polling, retries, and total timeout.
+Issue [#624](https://github.com/forge-trust/AppSurface/issues/624) adds a privacy-safe evidence envelope,
+[#625](https://github.com/forge-trust/AppSurface/issues/625) adds caller-side polling, and
+[#626](https://github.com/forge-trust/AppSurface/issues/626) adds a neutral end-to-end example. Until that operator rail is
+proved, this API remains preview. A separate [aggregate snapshot follow-up](https://github.com/forge-trust/AppSurface/issues/645)
+will compile multiple checks with bounded concurrency and deadlines after the safe envelope exists; #623 evaluates one
+registered name per request.
+
+#### 5-minute named canary path
+
+This path assumes the host already has authentication. If it does not, first choose a host-owned scheme and policy using
+the [AppSurface Auth adoption ladder](../../Auth/ForgeTrust.AppSurface.Auth/README.md). Named canaries never install an
+authentication scheme or define who an operator is.
+
+Start from this compile-only evaluator skeleton. Replace its placeholder result with an application-owned lookup that
+uses `context.Marker` and `context.FreshSince`; the evaluator must inspect existing proof and must not trigger the workflow:
+
+<!-- appsurface:snippet id="appsurface-canary-evaluator" file="Web/ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture/NamedCanaryPublicApiFixture.cs" marker="appsurface-canary-evaluator" lang="csharp" -->
+```csharp
+using ForgeTrust.AppSurface.Web;
+
+public sealed class ForwardingCanaryEvaluator : IAppSurfaceCanaryEvaluator
+{
+    public ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
+        AppSurfaceCanaryEvaluationContext context,
+        CancellationToken cancellationToken)
+    {
+        // Compile-only placeholder: query application-owned proof using context.Marker and context.FreshSince.
+        return ValueTask.FromResult(
+            new AppSurfaceCanaryResult(AppSurfaceCanaryStatus.Pending));
+    }
+}
+```
+<!-- /appsurface:snippet -->
+
+The placeholder always returns `Pending` and is not a working deploy proof. Replace it with your application-owned query:
+return `Pass` when matching proof at or after the requested freshness boundary is acceptable, `Pending` while matching proof
+may still arrive, `Fail` for a completed negative outcome, `Stale` for proof older than the boundary, and `NotConfigured` when
+the proof dependency is intentionally unavailable.
+
+Register the evaluator and require the inputs your proof query needs. Registration alone exposes no route:
+
+<!-- appsurface:snippet id="appsurface-canary-registration" file="Web/ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture/NamedCanaryPublicApiFixture.cs" marker="appsurface-canary-registration" lang="csharp" -->
+```csharp
+public void ConfigureServices(StartupContext context, IServiceCollection services)
+{
+    services.AddAuthorization(options =>
+        options.AddPolicy("DeployOperators", policy => policy.RequireAuthenticatedUser()));
+
+    services.AddAppSurfaceCanary<ForwardingCanaryEvaluator>(
+        "forwarding.alpha-evidence",
+        canary =>
+        {
+            canary.RequireMarker();
+            canary.RequireFreshSince();
+        });
+}
+```
+<!-- /appsurface:snippet -->
+
+Run host-owned authentication and authorization in the endpoint-aware phase, then map the fixed route family explicitly:
+
+<!-- appsurface:snippet id="appsurface-canary-mapping" file="Web/ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture/NamedCanaryPublicApiFixture.cs" marker="appsurface-canary-mapping" lang="csharp" -->
+```csharp
+public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+{
+    app.UseAuthentication();
+    app.UseAuthorization();
+}
+
+public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+{
+    endpoints.MapAppSurfaceCanaries("DeployOperators");
+}
+```
+<!-- /appsurface:snippet -->
+
+Evaluate one registered name with the dedicated headers and an operator credential:
+
+```bash
+curl --fail-with-body \
+  -H "Authorization: Bearer $DEPLOY_OPERATOR_TOKEN" \
+  -H "X-AppSurface-Canary-Marker: deploy-42" \
+  -H "X-AppSurface-Canary-Fresh-Since: 2026-07-12T12:00:00Z" \
+  https://app.example.com/_appsurface/canaries/forwarding.alpha-evidence
+```
+
+The response is status-only in #623:
+
+```json
+{"name":"forwarding.alpha-evidence","status":"pending"}
+```
+
+#### Status and HTTP contract
+
+`MapAppSurfaceCanaries` maps one GET route, `/_appsurface/canaries/{name}`, for the whole named registry. It is excluded
+from API Explorer/OpenAPI and every package-owned response sets `Cache-Control: no-store` and `Pragma: no-cache`.
+
+| Evaluator status | Meaning for a caller | Default HTTP status |
+|---|---|---:|
+| `pass` | Current proof is acceptable. | `200` |
+| `pending` | Acceptable proof may still arrive. | `503` |
+| `fail` | Current proof demonstrates failure. | `503` |
+| `stale` | Proof exists but predates the requested boundary. | `503` |
+| `not-configured` | The registered evaluator cannot inspect an intentionally unavailable proof dependency. | `503` |
+
+The default `AppSurfaceCanaryCompletedResponseMode.StatusCode` makes deployment checks work without parsing JSON.
+Authenticated diagnostic/reporting consumers can explicitly opt into `AlwaysOk`; they must then parse `status` because
+every completed result returns `200`:
+
+<!-- appsurface:snippet id="appsurface-canary-always-ok" file="Web/ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture/NamedCanaryPublicApiFixture.cs" marker="appsurface-canary-always-ok" lang="csharp" -->
+```csharp
+public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+{
+    endpoints.MapAppSurfaceCanaries(
+        "DeployOperators",
+        options => options.CompletedResponseMode = AppSurfaceCanaryCompletedResponseMode.AlwaysOk);
+}
+```
+<!-- /appsurface:snippet -->
+
+This option changes only the HTTP status. It never changes the evaluator contract or JSON. Clients should parse JSON,
+use `status` as the decision field, and ignore unknown properties so the #624 envelope can grow additively.
+
+#### Registration and request reference
+
+- Names are 1-128 lowercase characters in dot-separated segments. A segment starts and ends with a letter or digit and
+  may contain internal hyphens, for example `forwarding.alpha-evidence`. Matching is exact and ordinal.
+- `DisplayName` defaults to the registered name, `Description` defaults to `null` and is limited to 512 characters, and
+  `Tags` is an ordinal set of 1-64 character lowercase letter/digit/internal-hyphen values. These values are immutable
+  registry metadata and are not returned by the #623 endpoint.
+- `RequireMarker()` and `RequireFreshSince()` are idempotent. Optional inputs still reach the evaluator when supplied.
+- Marker values are opaque: AppSurface preserves the value delivered by ASP.NET Core, including internal whitespace,
+  but HTTP clients and servers may normalize leading or trailing field-value whitespace. Avoid whitespace-significant
+  markers. Control characters and repeated values are rejected, the maximum is 256 UTF-8 bytes, and a blank optional
+  marker becomes `null`.
+- Freshness accepts strict RFC 3339 timestamps with seconds, a `Z` or numeric offset, and zero to seven fractional digits.
+  It rejects surrounding whitespace, offset-free values, and invalid calendar or offset values, then normalizes to UTC.
+- `AddAppSurfaceCanary<TEvaluator>` uses a host registration of the concrete evaluator when one already exists. Otherwise
+  it adds the evaluator as transient. Singleton, scoped, and transient overrides are supported; one request resolves the
+  concrete evaluator exactly once from its request scope.
+- An unknown route name returns `404`. `not-configured` is different: the name is registered and its evaluator ran.
+- One request performs one evaluation. Request abort cancellation propagates. The package adds no evaluator timeout,
+  retry, polling loop, cache, fan-out, trigger, or readiness effect.
+
+#### Authorization and route sharp edges
+
+Mapping requires a nonblank host-owned policy and registered ASP.NET Core authorization services. Native policy
+resolution remains authoritative, including dynamic policy providers. Authentication and `UseAuthorization()` must run
+after `UseRouting()` and before the endpoint executes; AppSurface's
+[`ConfigureEndpointAwareMiddleware`](#key-abstractions) hook is the intended phase. A missing policy or missing/misordered
+authorization middleware fails closed with `500` before evaluator invocation. Native schemes still own challenges,
+forbids, and cookie redirects.
+
+Never append `AllowAnonymous` to the returned `RouteHandlerBuilder` or remove its required named-policy metadata. The
+adapter detects either weakening and returns a safe `ASCAN113` `500` before name lookup or evaluation. Map named canaries
+at the application root, not through a route group: the route must remain exactly `/_appsurface/canaries/{name}`. The
+entire `/_appsurface/canaries` namespace is reserved while the mapper is active; startup fails with `ASCAN115` if the
+framework route is relocated or a literal, parameterized, constrained, or controller route exists at that path or below
+it. Routes outside that exact namespace, such as `/_appsurface/canaries-extra`, are unaffected.
+
+#### Diagnostic rescue table
+
+Problem responses contain only fixed `title`, `status`, `code`, `problem`, `cause`, `fix`, and `docsLink` fields. The
+canary adapter uses package-owned JSON settings rather than the host-global ProblemDetails customizer, so host callbacks
+cannot append trace identifiers or request-derived fields. Responses never echo marker/freshness values, registered-name
+inventories, exception messages, stacks, or trace identifiers. Host-local logs for evaluation failures contain only a
+stable event, canary name, diagnostic code, and exception type.
+
+| Code | Problem | Likely cause | Fix |
+|---|---|---|---|
+| `ASCAN101` | Invalid registration | Name, display metadata, description, or tag grammar is invalid. | Correct the registration callback before building the host. |
+| `ASCAN102` | Duplicate name | More than one registration used the same exact name. | Keep one registration per name. |
+| `ASCAN111` | Invalid mapping policy | The supplied policy name is blank. | Pass a nonblank host-owned policy name. |
+| `ASCAN112` | No registrations | The route was mapped without any named canaries. | Register at least one typed evaluator first. |
+| `ASCAN113` | Unsafe/missing authorization | Authorization services are absent, anonymous metadata bypassed the policy, or the required named-policy metadata was removed. | Register authorization, remove `AllowAnonymous`, and retain the mapped named policy. |
+| `ASCAN114` | Repeated mapping | The fixed route family was mapped more than once. | Map it exactly once. |
+| `ASCAN115` | Fixed/reserved route conflict | Mapping through a route group relocated the fixed route, or a host endpoint overlaps the canary namespace. | Map on the application root and move host routes outside `/_appsurface/canaries`. |
+| `ASCAN116` | Invalid response mode | The mapper callback assigned an undefined enum value. | Choose `StatusCode` or `AlwaysOk`. |
+| `ASCAN201` | Required header missing | A registration-required marker or freshness value is blank/absent. | Supply the named header and retry. |
+| `ASCAN202` | Header invalid | A header is repeated, malformed, unsafe, or too large. | Follow the marker or strict freshness rules above. |
+| `ASCAN203` | Canary not found | The exact route name is not registered. | Register it or correct the lowercase name. |
+| `ASCAN301` | Evaluation failed | Activation failed, the evaluator threw/canceled independently, or returned null. | Inspect host-local evaluator diagnostics; caller retry policy remains external. |
+
 ### PWA Install and Push-Worker Foundation
 
 AppSurface Web provides independent [PWA install, offline, and push-worker capabilities](Docs/pwa-install.md) from `WebOptions.Pwa`: a manifest endpoint, MVC/Razor head tags, development diagnostics, an explicit starter offline strategy, safe default notification handlers, and an inert registration helper. Every capability is disabled by default. Enabling push does not request permission, create a subscription, choose recipients, or send a notification.

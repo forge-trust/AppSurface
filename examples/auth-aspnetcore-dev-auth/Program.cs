@@ -63,17 +63,20 @@ app.MapGet("/", (
       <title>AppSurface DevAuth Example</title>
       <style>
         body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; color: #111827; background: #f8fafc; }
+        header { padding: 16px 32px; background: #0f172a; color: #fff; font-weight: 700; }
         main { max-width: 760px; padding: 32px; }
         .proof { display: inline-block; margin-top: 12px; color: #1d4ed8; }
+        @media (max-width: 640px) { .demo-dev-auth { margin: 12px 16px; } }
       </style>
     </head>
     <body>
+      <header>AppSurface local proof</header>
+      {{marker}}
       <main>
         <h1>AppSurface DevAuth proof is running.</h1>
         <p>This page keeps the current local persona visible while you work through the app.</p>
         <a class="proof" href="/api/auth-proof">Open protected auth proof</a>
       </main>
-      {{marker}}
     </body>
     </html>
     """,

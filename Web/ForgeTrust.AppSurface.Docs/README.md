@@ -118,7 +118,7 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 
 | Surface | Default | Why | Real examples | Exception / note |
 | --- | --- | --- | --- | --- |
-| One-off owned package chrome in Razor views | Prefer Tailwind utility classes in markup | AppSurface Docs fully owns the markup, so local utility classes keep intent obvious where the change happens | docs landing shell in `Views/Docs/Index.cshtml`, sidebar shell and layout framing in `Views/Shared/_Layout.cshtml`, one-off page header spacing in `Views/Docs/Details.cshtml` | If the same styling contract repeats across package surfaces, promote it to a semantic component class instead of copying long utility strings |
+| One-off owned package chrome in Razor views | Prefer Tailwind utility classes in markup | AppSurface Docs fully owns the markup, so local utility classes keep intent obvious where the change happens | docs landing shell in `Views/Docs/Index.cshtml`, sidebar shell and layout framing in `Views/Shared/_AppSurfaceDocsLayout.cshtml`, one-off page header spacing in `Views/Docs/Details.cshtml` | If the same styling contract repeats across package surfaces, promote it to a semantic component class instead of copying long utility strings |
 | Reusable owned package components or stable cross-file UI selectors | Use semantic component classes in the shared package stylesheet | Shared selectors keep repeated UI stable across Razor, CSS, and sometimes JavaScript | `docs-page-badge`, `docs-metadata-chip`, `docs-page-meta`, `docs-provenance-strip`, `docs-trust-bar`, and `docs-outline-*` in `wwwroot/css/app.css` | Utilities can still handle surrounding layout and one-off placement |
 | Harvested or generated document bodies that AppSurface Docs does not fully author element by element | Use wrapper-scoped semantic CSS such as `.docs-content ...` in the shared package stylesheet | AppSurface Docs cannot safely push utility classes into nested harvested HTML | headings, paragraphs, code blocks, overload groups, and namespace sections inside `.docs-content` in `Views/Docs/Details.cshtml` and `wwwroot/css/app.css` | Do not rewrite harvested nested HTML just to satisfy utility-class purity |
 | JavaScript-generated or stateful UI that needs CSS and JavaScript to share stable hooks | Use semantic hook classes, then style them in CSS | Runtime UI needs stable names both the stylesheet and script can rely on | search result rows, filter chips, active-filter pills, and state containers in `wwwroot/docs/search.css` and `wwwroot/docs/search-client.js` | Use `id` values where uniqueness or ARIA wiring require them, but keep reusable styling and state contracts on semantic classes |
@@ -1374,6 +1374,26 @@ Environment variable spelling follows the normal double-underscore configuration
 Theme validation is part of the public contract. `Theme`, `Theme:Colors`, and `Theme:Layout` must not be null. Color values must be CSS hex colors, not CSS functions, variables, color names, or style declarations. Contrast failures name the config path, configured value, required ratio, tested preset background, and a fix hint so maintainers can correct the value without inspecting generated CSS.
 
 Use theme options when the host wants branded docs without owning views. Do not use them when the goal is a light/system theme, arbitrary text or surface overrides, syntax-highlighting replacement, selector-level CSS compatibility, external theme packages, or a bespoke documentation template. Static exports and published release archives freeze the resolved theme variables in exported HTML, so host config changes do not rewrite already-exported archives.
+
+### Default Razor layout and deliberate host overrides
+
+Live AppSurface Docs views use the package-specific absolute layout path
+`/Views/Shared/_AppSurfaceDocsLayout.cshtml`. The package root `_ViewStart` selects that path, and the more-specific
+`Views/Docs/_ViewStart.cshtml` reasserts it for every built-in Docs controller view. A consuming application's normal
+`Views/_ViewStart.cshtml` and `Views/Shared/_Layout.cshtml` therefore remain app-wide conventions without accidentally
+removing AppSurface Docs styling or search behavior. This follows ASP.NET Core's documented
+[Razor Class Library override precedence](https://learn.microsoft.com/en-us/aspnet/core/razor-pages/ui-class?view=aspnetcore-10.0)
+and [hierarchical `_ViewStart` behavior](https://learn.microsoft.com/en-us/aspnet/core/mvc/views/layout?view=aspnetcore-10.0).
+
+Use `AppSurfaceDocs:Theme` for supported branding and density changes. When a host intentionally needs to replace the
+entire Docs shell, it can deliberately override `Views/Shared/_AppSurfaceDocsLayout.cshtml` at the same Razor Class
+Library path. That replacement becomes responsible for the complete layout contract: the generated package stylesheet,
+`search.css`, resolved theme attributes and variables, `<rw:scripts/>`, `window.__appSurfaceDocsConfig`,
+`minisearch.min.js` on the search page, `search-client.js`, the document body, and optional page script sections.
+
+Do not point AppSurface Docs back to a generic `_Layout` name and do not expect an app's ordinary `_Layout.cshtml` to be
+a supported partial customization seam. A generic name can collide with host conventions, while an incomplete deliberate
+replacement can leave `/docs/search` permanently loading even though the server returned a successful page.
 
 - `AppSurfaceDocs:Harvest:FailOnFailure`
   - Defaults to `false`.
