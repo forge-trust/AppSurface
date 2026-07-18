@@ -22,8 +22,9 @@ Run only the Flow benchmarks when investigating state-machine overhead:
 dotnet run -c Release --project benchmarks/AppSurfaceBenchmarks/AppSurfaceBenchmarks.csproj -- --filter "AppSurfaceBenchmarks.Flow.*"
 ```
 
-Measure the incremental cold-start and allocation cost of the opt-in AppSurface Web
-health-check services and `/health` plus `/ready` endpoints with a same-run A/B comparison:
+Measure the incremental cold-start and allocation cost of the
+[opt-in AppSurface Web health-check services and `/health` plus `/ready` endpoints](../Web/ForgeTrust.AppSurface.Web/README.md#health-and-readiness-probes)
+with a same-run A/B comparison:
 
 ```bash
 dotnet run -c Release --project benchmarks/AppSurfaceBenchmarks/AppSurfaceBenchmarks.csproj -- --filter "*WebHealthColdStartBenchmarks*"

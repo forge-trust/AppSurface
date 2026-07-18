@@ -22,7 +22,12 @@ public class AppSurfaceWebServer : IWebBenchmarkServer
     /// <c>http://localhost:5000/</c> address.
     /// </summary>
     /// <remarks>
+    /// Use this overload only for legacy benchmark cases that depend on the historical fixed-port host. Comparisons that
+    /// vary health-probe configuration should use <see cref="StartMinimalAsync(bool)"/> and send requests to its returned
+    /// ephemeral address.
+    /// <para>
     /// Call <see cref="StopAsync"/> before starting another host with this server instance.
+    /// </para>
     /// </remarks>
     public async Task StartMinimalAsync()
     {
@@ -41,7 +46,11 @@ public class AppSurfaceWebServer : IWebBenchmarkServer
     /// requests instead of assuming a fixed port.
     /// </returns>
     /// <remarks>
+    /// Use this overload for health A/B comparisons so both cases receive identical ephemeral-port behavior and the
+    /// caller does not depend on the legacy fixed port.
+    /// <para>
     /// Call <see cref="StopAsync"/> before starting another host with this server instance.
+    /// </para>
     /// </remarks>
     public Task<Uri> StartMinimalAsync(bool healthEnabled) =>
         StartMinimalAsync(healthEnabled, useEphemeralPort: true);

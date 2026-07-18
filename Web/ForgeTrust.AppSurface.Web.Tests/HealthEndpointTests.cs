@@ -245,6 +245,12 @@ public sealed class HealthEndpointTests
 
         Assert.Equal(HttpStatusCode.NotFound, health.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, ready.StatusCode);
+        Assert.DoesNotContain(
+            app.RouteEndpoints,
+            endpoint => endpoint.RoutePattern.RawText == AppSurfaceHealthEndpointDefaults.HealthPath);
+        Assert.DoesNotContain(
+            app.RouteEndpoints,
+            endpoint => endpoint.RoutePattern.RawText == AppSurfaceHealthEndpointDefaults.ReadyPath);
         Assert.Null(app.Services.GetService<HealthCheckService>());
     }
 
