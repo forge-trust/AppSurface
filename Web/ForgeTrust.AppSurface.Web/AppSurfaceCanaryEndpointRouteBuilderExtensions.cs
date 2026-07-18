@@ -521,10 +521,12 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         public string? CorrelationId { get; } = correlationId;
     }
 
-    private sealed class CanonicalUtcDateTimeOffsetConverter : JsonConverter<DateTimeOffset>
+    /// <summary>Reads and writes named-canary timestamps using the canonical UTC wire format.</summary>
+    internal sealed class CanonicalUtcDateTimeOffsetConverter : JsonConverter<DateTimeOffset>
     {
         private const string Format = "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'";
 
+        /// <inheritdoc />
         public override DateTimeOffset Read(
             ref Utf8JsonReader reader,
             Type typeToConvert,
@@ -535,6 +537,7 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
 
+        /// <inheritdoc />
         public override void Write(
             Utf8JsonWriter writer,
             DateTimeOffset value,

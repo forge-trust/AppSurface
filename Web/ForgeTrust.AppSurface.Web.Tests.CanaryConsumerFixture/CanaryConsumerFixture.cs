@@ -41,15 +41,6 @@ public sealed record CanaryConsumerResult(
 /// <summary>Parses named-canary JSON by semantic field name without depending on property order or optional fields.</summary>
 public static class CanaryEnvelopeConsumer
 {
-    private static readonly HashSet<string> DefinedStatuses =
-    [
-        "pass",
-        "pending",
-        "fail",
-        "stale",
-        "not-configured",
-    ];
-
     /// <summary>Parses and validates the required named-canary compatibility core.</summary>
     /// <param name="json">The non-null JSON envelope to parse.</param>
     /// <returns>The validated core fields and selected operator action.</returns>
@@ -67,10 +58,12 @@ public static class CanaryEnvelopeConsumer
 
         var name = ReadRequiredString(root, "name");
         var status = ReadRequiredString(root, "status");
-        if (!DefinedStatuses.Contains(status))
-        {
-            throw new JsonException("The named-canary status is not recognized.");
-        }
+
+        var reasonCode = root.TryGetProperty("reasonCode", out var reasonProperty)
+            && reasonProperty.ValueKind == JsonValueKind.String
+                ? reasonProperty.GetString()
+                : null;
+        var action = SelectAction(status, reasonCode);
 
         if (!root.TryGetProperty("ready", out var readyProperty)
             || readyProperty.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
@@ -84,12 +77,7 @@ public static class CanaryEnvelopeConsumer
             throw new JsonException("The named-canary ready projection does not match status.");
         }
 
-        var reasonCode = root.TryGetProperty("reasonCode", out var reasonProperty)
-            && reasonProperty.ValueKind == JsonValueKind.String
-                ? reasonProperty.GetString()
-                : null;
-
-        return new CanaryConsumerResult(name, status, ready, reasonCode, SelectAction(status, reasonCode));
+        return new CanaryConsumerResult(name, status, ready, reasonCode, action);
     }
 
     private static string ReadRequiredString(JsonElement root, string propertyName)
@@ -138,6 +126,16 @@ public sealed class StatusOnlyCanaryEvaluator(CanaryFixtureScenario scenario) : 
 /// <param name="scenario">The evaluation scenario.</param>
 public sealed class ForwardingProofCanaryEvaluator(CanaryFixtureScenario scenario) : IAppSurfaceCanaryEvaluator
 {
+    private static readonly IReadOnlyDictionary<AppSurfaceCanaryStatus, string> Reasons =
+        new Dictionary<AppSurfaceCanaryStatus, string>
+        {
+            [AppSurfaceCanaryStatus.Pass] = "proof-observed",
+            [AppSurfaceCanaryStatus.Pending] = "proof-not-observed",
+            [AppSurfaceCanaryStatus.Fail] = "proof-rejected",
+            [AppSurfaceCanaryStatus.Stale] = "proof-stale",
+            [AppSurfaceCanaryStatus.NotConfigured] = "proof-not-configured",
+        };
+
     /// <summary>The application-owned detail key used for the forwarding proof kind.</summary>
     public const string ProofKindDetailKey = "proof.kind";
 
@@ -162,21 +160,23 @@ public sealed class ForwardingProofCanaryEvaluator(CanaryFixtureScenario scenari
                     options.AddDetail(ProofKindDetailKey, "forwarding");
                 }));
 
-    private static string ReasonFor(AppSurfaceCanaryStatus status) => status switch
-    {
-        AppSurfaceCanaryStatus.Pass => "proof-observed",
-        AppSurfaceCanaryStatus.Pending => "proof-not-observed",
-        AppSurfaceCanaryStatus.Fail => "proof-rejected",
-        AppSurfaceCanaryStatus.Stale => "proof-stale",
-        AppSurfaceCanaryStatus.NotConfigured => "proof-not-configured",
-        _ => throw new ArgumentOutOfRangeException(nameof(status)),
-    };
+    private static string ReasonFor(AppSurfaceCanaryStatus status) => Reasons[status];
 }
 
 /// <summary>Produces migration-completion evidence using only the public named-canary API.</summary>
 /// <param name="scenario">The evaluation scenario.</param>
 public sealed class MigrationCompletionCanaryEvaluator(CanaryFixtureScenario scenario) : IAppSurfaceCanaryEvaluator
 {
+    private static readonly IReadOnlyDictionary<AppSurfaceCanaryStatus, string> Reasons =
+        new Dictionary<AppSurfaceCanaryStatus, string>
+        {
+            [AppSurfaceCanaryStatus.Pass] = "migration-complete",
+            [AppSurfaceCanaryStatus.Pending] = "migration-in-progress",
+            [AppSurfaceCanaryStatus.Fail] = "checksum-mismatch",
+            [AppSurfaceCanaryStatus.Stale] = "checkpoint-stale",
+            [AppSurfaceCanaryStatus.NotConfigured] = "migration-not-configured",
+        };
+
     /// <summary>The application-owned detail key used for the migration kind.</summary>
     public const string MigrationKindDetailKey = "migration.kind";
 
@@ -195,15 +195,7 @@ public sealed class MigrationCompletionCanaryEvaluator(CanaryFixtureScenario sce
                     options.AddDetail(MigrationKindDetailKey, "schema");
                 }));
 
-    private static string ReasonFor(AppSurfaceCanaryStatus status) => status switch
-    {
-        AppSurfaceCanaryStatus.Pass => "migration-complete",
-        AppSurfaceCanaryStatus.Pending => "migration-in-progress",
-        AppSurfaceCanaryStatus.Fail => "checksum-mismatch",
-        AppSurfaceCanaryStatus.Stale => "checkpoint-stale",
-        AppSurfaceCanaryStatus.NotConfigured => "migration-not-configured",
-        _ => throw new ArgumentOutOfRangeException(nameof(status)),
-    };
+    private static string ReasonFor(AppSurfaceCanaryStatus status) => Reasons[status];
 }
 
 // docs:snippet appsurface-canary-forwarding-complete:start

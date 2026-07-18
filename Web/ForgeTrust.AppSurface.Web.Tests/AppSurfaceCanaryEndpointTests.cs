@@ -1011,6 +1011,15 @@ public sealed class AppSurfaceCanaryEndpointTests
     }
 
     [Fact]
+    public void CanonicalUtcConverter_ReadsCanonicalTimestampAndRejectsNull()
+    {
+        Assert.Equal(
+            new DateTimeOffset(2026, 7, 16, 8, 31, 2, TimeSpan.Zero).AddTicks(1_234_567),
+            ReadCanonicalTimestamp("\"2026-07-16T08:31:02.1234567Z\""));
+        Assert.Throws<JsonException>(() => ReadCanonicalTimestamp("null"));
+    }
+
+    [Fact]
     public async Task PublicForwardingFixture_ProducesActionableAmbiguousEnvelopeThroughEndpoint()
     {
         await using var host = await StartConsumerHostAsync<ForwardingProofCanaryEvaluator>(
@@ -1736,6 +1745,14 @@ public sealed class AppSurfaceCanaryEndpointTests
             CancellationToken = cancellationToken;
             return ValueTask.FromResult(snapshot);
         }
+    }
+
+    private static DateTimeOffset ReadCanonicalTimestamp(string json)
+    {
+        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(json));
+        Assert.True(reader.Read());
+        return new AppSurfaceCanaryEndpointRouteBuilderExtensions.CanonicalUtcDateTimeOffsetConverter()
+            .Read(ref reader, typeof(DateTimeOffset), new JsonSerializerOptions());
     }
 
     private sealed class TestEvaluator(EvaluationState state) : IAppSurfaceCanaryEvaluator

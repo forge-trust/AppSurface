@@ -482,15 +482,6 @@ public sealed record CanaryConsumerResult(
 /// <summary>Parses named-canary JSON by semantic field name without depending on property order or optional fields.</summary>
 public static class CanaryEnvelopeConsumer
 {
-    private static readonly HashSet<string> DefinedStatuses =
-    [
-        "pass",
-        "pending",
-        "fail",
-        "stale",
-        "not-configured",
-    ];
-
     /// <summary>Parses and validates the required named-canary compatibility core.</summary>
     /// <param name="json">The non-null JSON envelope to parse.</param>
     /// <returns>The validated core fields and selected operator action.</returns>
@@ -508,10 +499,12 @@ public static class CanaryEnvelopeConsumer
 
         var name = ReadRequiredString(root, "name");
         var status = ReadRequiredString(root, "status");
-        if (!DefinedStatuses.Contains(status))
-        {
-            throw new JsonException("The named-canary status is not recognized.");
-        }
+
+        var reasonCode = root.TryGetProperty("reasonCode", out var reasonProperty)
+            && reasonProperty.ValueKind == JsonValueKind.String
+                ? reasonProperty.GetString()
+                : null;
+        var action = SelectAction(status, reasonCode);
 
         if (!root.TryGetProperty("ready", out var readyProperty)
             || readyProperty.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
@@ -525,12 +518,7 @@ public static class CanaryEnvelopeConsumer
             throw new JsonException("The named-canary ready projection does not match status.");
         }
 
-        var reasonCode = root.TryGetProperty("reasonCode", out var reasonProperty)
-            && reasonProperty.ValueKind == JsonValueKind.String
-                ? reasonProperty.GetString()
-                : null;
-
-        return new CanaryConsumerResult(name, status, ready, reasonCode, SelectAction(status, reasonCode));
+        return new CanaryConsumerResult(name, status, ready, reasonCode, action);
     }
 
     private static string ReadRequiredString(JsonElement root, string propertyName)
