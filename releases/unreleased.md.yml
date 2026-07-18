@@ -1,5 +1,5 @@
 title: Unreleased
-summary: Fix-forward preview that republishes the coordinated preview.3 package surface without moving its failed tag, while keeping Aspire.Testing held from NuGet.
+summary: Living proof artifact for the next coordinated AppSurface release. This page is intentionally provisional until a version is tagged.
 page_type: release-note
 nav_group: Releases
 order: 15
@@ -8,9 +8,9 @@ breadcrumbs:
   - Unreleased
 trust:
   status: Unreleased
-  summary: This page tracks the fix-forward release after preview.3 stopped before NuGet publication. The existing tag remains immutable and Aspire.Testing remains held.
+  summary: This page tracks merged work that is intended for the next coordinated AppSurface release. The grouping and wording can still change before the tag is cut.
   freshness: Updated as changes land on main. Treat it as current but provisional.
-  change_scope: Coordinated republish of the preview.3 package surface plus an early release-policy guard for readiness-blocked packages.
+  change_scope: Repository-wide. Packages, CLI tooling, examples, and docs-facing behavior all roll into the same next version.
   migration:
     label: Read the pre-1.0 upgrade policy
     href: /docs/releases/upgrade-policy
