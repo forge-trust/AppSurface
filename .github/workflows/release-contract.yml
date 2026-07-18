@@ -20,57 +20,184 @@ permissions:
 jobs:
   enforce:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Validate PR title and unreleased entry
+      - name: Checkout trusted base release policy
+        id: policy-checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .release-contract-policy
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Evaluate trusted release contract
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
+            const { pathToFileURL } = await import("node:url");
             const pr = context.payload.pull_request;
 
-            if (!pr) {
-              core.setFailed("This workflow only supports pull_request events.");
+            const escape = value => String(value ?? "")
+              .slice(0, 500)
+              .replaceAll("&", "&amp;")
+              .replaceAll("<", "&lt;")
+              .replaceAll(">", "&gt;")
+              .replaceAll("|", "&#124;")
+              .replaceAll("`", "&#96;")
+              .replaceAll("\r", " ")
+              .replaceAll("\n", " ");
+
+            const writeInfrastructureFailure = async (code, problem, cause, remediation) => {
+              const baseSha = typeof pr?.base?.sha === "string" ? pr.base.sha : "main";
+              const docsUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${baseSha}/.github/release-ops.md#release-contract-check`;
+              const summary = [
+                "## Decision",
+                "",
+                "**FAIL**",
+                "",
+                "## Why",
+                "",
+                escape(problem),
+                "",
+                "## What to do next",
+                "",
+                escape(remediation),
+                "",
+                "<details><summary>Infrastructure diagnostic</summary>",
+                "",
+                "| Code | Cause |",
+                "| --- | --- |",
+                `| ${escape(code)} | ${escape(cause)} |`,
+                "",
+                `See [release-contract maintainer guidance](${docsUrl}).`,
+                "",
+                "</details>",
+                ""
+              ].join("\n");
+              await core.summary.addRaw(summary).write();
+              core.setFailed(`${code}: ${problem}`);
+            };
+
+            if (!pr || typeof pr.number !== "number" || typeof pr.base?.sha !== "string") {
+              await writeInfrastructureFailure(
+                "infrastructure-event-invalid",
+                "The pull-request event payload is unavailable or malformed.",
+                "Trusted base identity and pull-request number could not be acquired.",
+                "Re-run the pull_request workflow; if the event remains malformed, ask a repository administrator to inspect the event.");
               return;
             }
 
-            const title = (pr.title || "").trim();
-            const conventionalCommitTitle = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+/;
-            const labels = (pr.labels || [])
-              .map(label => label && typeof label.name === "string" ? label.name : "")
-              .filter(Boolean);
-            const skipUnreleasedEntry = labels.includes("no-unreleased-entry");
-            const files = await github.paginate(
-              github.rest.pulls.listFiles,
-              {
+            const modulePath = `${process.env.GITHUB_WORKSPACE}/.release-contract-policy/.github/scripts/release-contract-v1.mjs`;
+            let policy;
+            try {
+              policy = await import(pathToFileURL(modulePath).href);
+            } catch (error) {
+              await writeInfrastructureFailure(
+                "infrastructure-import-failure",
+                "The trusted release-contract classifier could not be imported.",
+                error instanceof Error ? error.message : String(error),
+                "Verify the base revision contains release-contract-v1.mjs, then re-run the workflow.");
+              return;
+            }
+
+            if (policy.contractVersion !== 1
+                || typeof policy.evaluateReleaseContractV1 !== "function"
+                || typeof policy.renderReleaseContractSummaryV1 !== "function") {
+              await writeInfrastructureFailure(
+                "infrastructure-version-mismatch",
+                "The trusted release-contract classifier is incompatible with this workflow.",
+                `Expected contractVersion 1 with v1 evaluator and renderer; received ${escape(policy.contractVersion)}.`,
+                "Disable or revert the integration workflow first, then restore a compatible v1 base module.");
+              return;
+            }
+
+            let files;
+            try {
+              files = await github.paginate(github.rest.pulls.listFiles, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number: pr.number,
                 per_page: 100
               });
-            const changedFiles = files.map(file => file.filename);
-            const touchesUnreleased = changedFiles.includes("releases/unreleased.md");
-
-            const failures = [];
-
-            if (!conventionalCommitTitle.test(title)) {
-              failures.push(
-                "PR titles must follow Conventional Commits, for example `feat(web): add streamed sidebar`.");
+            } catch (error) {
+              await writeInfrastructureFailure(
+                "infrastructure-api-failure",
+                "GitHub pull-request file evidence could not be acquired.",
+                error instanceof Error ? error.message : String(error),
+                "Re-run the workflow; if GitHub still cannot enumerate every file, classify the pull request manually after service recovery.");
+              return;
             }
 
-            if (!skipUnreleasedEntry && !touchesUnreleased) {
-              failures.push(
-                "PRs must update `releases/unreleased.md` unless a maintainer applies the `no-unreleased-entry` label.");
+            try {
+              const input = {
+                title: pr.title,
+                authorLogin: pr.user?.login,
+                labels: Array.isArray(pr.labels) ? pr.labels.map(label => label?.name) : pr.labels,
+                changedFiles: pr.changed_files,
+                files: files.map(file => ({
+                  filename: file.filename,
+                  status: file.status,
+                  additions: file.additions,
+                  deletions: file.deletions,
+                  changes: file.changes,
+                  patch: file.patch
+                }))
+              };
+
+              const result = policy.evaluateReleaseContractV1(input);
+              if (!result || result.contractVersion !== 1 || !Array.isArray(result.diagnostics)) {
+                throw new Error("The v1 evaluator returned an incompatible result shape.");
+              }
+
+              const summary = policy.renderReleaseContractSummaryV1(result, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                baseSha: pr.base.sha
+              });
+              await core.summary.addRaw(summary).write();
+              const blocking = result.diagnostics.filter(item => item?.blocking === true);
+              if (blocking.length > 0) {
+                core.setFailed(blocking.map(item => item.code).join(", "));
+              }
+            } catch (error) {
+              await writeInfrastructureFailure(
+                "infrastructure-runtime-failure",
+                "The trusted release-contract classifier failed unexpectedly.",
+                error instanceof Error ? error.message : String(error),
+                "Disable or revert the integration workflow first and use an authored release entry while the runtime failure is investigated.");
             }
 
-            await core.summary
-              .addHeading("Release contract check")
-              .addTable([
-                [{data: "PR title", header: true}, title || "(empty)"],
-                [{data: "Conventional title", header: true}, conventionalCommitTitle.test(title) ? "yes" : "no"],
-                [{data: "Touched unreleased note", header: true}, touchesUnreleased ? "yes" : "no"],
-                [{data: "Skip label present", header: true}, skipUnreleasedEntry ? "yes" : "no"]
-              ])
-              .write();
-
-            if (failures.length > 0) {
-              core.setFailed(failures.join("\n"));
-            }
+      - name: Summarize trusted-policy checkout failure
+        if: ${{ failure() && steps.policy-checkout.outcome == 'failure' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const baseSha = context.payload.pull_request?.base?.sha || "main";
+            const docsUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${baseSha}/.github/release-ops.md#release-contract-check`;
+            await core.summary.addRaw([
+              "## Decision",
+              "",
+              "**FAIL**",
+              "",
+              "## Why",
+              "",
+              "The trusted base release policy could not be checked out.",
+              "",
+              "## What to do next",
+              "",
+              "Re-run the workflow; if checkout still fails, inspect the checkout step and temporarily use an authored release entry after the workflow can execute.",
+              "",
+              "<details><summary>Infrastructure diagnostic</summary>",
+              "",
+              "| Code | Cause |",
+              "| --- | --- |",
+              "| infrastructure-checkout-failure | The isolated trusted-base checkout step failed. |",
+              "",
+              `See [release-contract maintainer guidance](${docsUrl}).`,
+              "",
+              "</details>",
+              ""
+            ].join("\n")).write();

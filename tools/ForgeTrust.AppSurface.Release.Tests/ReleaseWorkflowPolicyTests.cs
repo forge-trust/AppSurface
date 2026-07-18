@@ -3,6 +3,85 @@ namespace ForgeTrust.AppSurface.Release.Tests;
 public sealed class ReleaseWorkflowPolicyTests
 {
     [Fact]
+    public async Task ReleaseContractUsesTrustedBaseReadOnlyClassifier()
+    {
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-contract.yml");
+        var buildWorkflow = await ReadRepositoryFileAsync(".github/workflows/build.yml");
+
+        var trigger = SliceBetween(workflow, "on:\n", "\npermissions:");
+        Assert.Contains("  pull_request:\n", trigger, StringComparison.Ordinal);
+        Assert.DoesNotContain("pull_request_target", trigger, StringComparison.Ordinal);
+
+        var permissions = SliceBetween(workflow, "permissions:\n", "\njobs:");
+        Assert.Equal("  contents: read\n  pull-requests: read\n", permissions);
+        Assert.DoesNotContain("write", permissions, StringComparison.Ordinal);
+
+        var enforceJob = workflow[workflow.IndexOf("  enforce:\n", StringComparison.Ordinal)..];
+        Assert.Contains("    timeout-minutes: 5\n", enforceJob, StringComparison.Ordinal);
+        Assert.DoesNotContain("secrets.", enforceJob, StringComparison.Ordinal);
+        Assert.DoesNotContain("pull_request_target", enforceJob, StringComparison.Ordinal);
+        Assert.DoesNotContain("permissions:", enforceJob, StringComparison.Ordinal);
+        Assert.DoesNotContain("issues: write", enforceJob, StringComparison.Ordinal);
+        Assert.DoesNotContain("pull-requests: write", enforceJob, StringComparison.Ordinal);
+
+        var checkout = SliceBetween(
+            enforceJob,
+            "      - name: Checkout trusted base release policy\n",
+            "\n      - name: Evaluate trusted release contract");
+        Assert.Contains("          ref: ${{ github.event.pull_request.base.sha }}\n", checkout, StringComparison.Ordinal);
+        Assert.Contains("          path: .release-contract-policy\n", checkout, StringComparison.Ordinal);
+        Assert.Contains("          persist-credentials: false\n", checkout, StringComparison.Ordinal);
+        Assert.Contains("          sparse-checkout: |\n            .github/scripts\n", checkout, StringComparison.Ordinal);
+        Assert.Contains("          sparse-checkout-cone-mode: false\n", checkout, StringComparison.Ordinal);
+
+        var evaluate = SliceBetween(
+            enforceJob,
+            "      - name: Evaluate trusted release contract\n",
+            "\n      - name: Summarize trusted-policy checkout failure");
+        Assert.Contains("const { pathToFileURL } = await import(\"node:url\");", evaluate, StringComparison.Ordinal);
+        Assert.Contains(".release-contract-policy/.github/scripts/release-contract-v1.mjs", evaluate, StringComparison.Ordinal);
+        Assert.Contains("policy.contractVersion !== 1", evaluate, StringComparison.Ordinal);
+        Assert.Contains("github.rest.pulls.listFiles", evaluate, StringComparison.Ordinal);
+        Assert.Contains("policy.evaluateReleaseContractV1(input)", evaluate, StringComparison.Ordinal);
+        Assert.Contains("policy.renderReleaseContractSummaryV1(result", evaluate, StringComparison.Ordinal);
+        Assert.Contains("infrastructure-api-failure", evaluate, StringComparison.Ordinal);
+        Assert.Contains("infrastructure-import-failure", evaluate, StringComparison.Ordinal);
+        Assert.Contains("infrastructure-runtime-failure", evaluate, StringComparison.Ordinal);
+        Assert.DoesNotContain("github.rest.issues", evaluate, StringComparison.Ordinal);
+        Assert.DoesNotContain("addLabels", evaluate, StringComparison.Ordinal);
+        Assert.DoesNotContain("createComment", evaluate, StringComparison.Ordinal);
+        var infrastructureSummaryGolden = SliceBetween(
+            evaluate,
+            "              const summary = [\n",
+            "              await core.summary.addRaw(summary).write();");
+        Assert.Equal(
+            "01F01D38A82BB2CCA9680DF73B1178BD6C891BCBAFEBC9ECF41AE51B073722E0",
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(infrastructureSummaryGolden))));
+
+        var fallback = enforceJob[enforceJob.IndexOf("      - name: Summarize trusted-policy checkout failure\n", StringComparison.Ordinal)..];
+        Assert.Contains("if: ${{ failure() && steps.policy-checkout.outcome == 'failure' }}", fallback, StringComparison.Ordinal);
+        Assert.Contains("infrastructure-checkout-failure", fallback, StringComparison.Ordinal);
+        Assert.Contains("## Decision", fallback, StringComparison.Ordinal);
+        Assert.Contains("## Why", fallback, StringComparison.Ordinal);
+        Assert.Contains("## What to do next", fallback, StringComparison.Ordinal);
+        var checkoutSummaryGolden = SliceBetween(
+            fallback,
+            "            await core.summary.addRaw([\n",
+            "            ].join(\"\\n\")).write();");
+        Assert.Equal(
+            "5E0291D42478E031BE74686B31BCD7D9441FAA3E7F2DF94BB7EF0EAA2FD321F4",
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(checkoutSummaryGolden))));
+
+        var buildNodeSlice = SliceBetween(
+            buildWorkflow,
+            "      - name: Setup Node.js\n",
+            "\n      - name: Verify generated package chooser");
+        Assert.Contains("          node-version: 24\n", buildNodeSlice, StringComparison.Ordinal);
+        Assert.Contains("      - name: Test dormant release-contract classifier\n", buildNodeSlice, StringComparison.Ordinal);
+        Assert.Contains("node --experimental-test-coverage --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 --test .github/scripts/release-contract-v1.test.mjs", buildNodeSlice, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReleasePrepReviewUsesReadOnlyPullRequestTriggerWithoutSecrets()
     {
         var workflow = await ReadRepositoryFileAsync(".github/workflows/release-prep.yml");
@@ -238,5 +317,15 @@ public sealed class ReleaseWorkflowPolicyTests
     {
         var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         return await File.ReadAllTextAsync(TestPathUtils.PathUnder(root, relativePath));
+    }
+
+    private static string SliceBetween(string source, string start, string end)
+    {
+        var startIndex = source.IndexOf(start, StringComparison.Ordinal);
+        Assert.True(startIndex >= 0, $"Expected bounded slice start: {start}");
+        startIndex += start.Length;
+        var endIndex = source.IndexOf(end, startIndex, StringComparison.Ordinal);
+        Assert.True(endIndex >= startIndex, $"Expected bounded slice end: {end}");
+        return source[startIndex..endIndex];
     }
 }
