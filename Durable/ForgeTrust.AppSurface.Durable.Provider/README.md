@@ -23,7 +23,7 @@ provide PostgreSQL storage, migrations, polling, schedule execution, hosted serv
 function, HTTP wake-up, or broker notification. A wake-up is advisory: implementations must recover eligible work from
 their authoritative state even when notifications are lost, duplicated, delayed, or reordered.
 
-Do not translate broker receipt into a claim, effect permit, or terminal fact. A wake-only adapter should call the pump
+Do not translate broker receipt into a claim, effect permit, or terminal fact. A wake-only adapter must call the pump
 without carrying application payloads. A future targeted-dispatch or broker-native provider must revalidate its opaque
 reference against authoritative scope, revision, lease, runtime-epoch, and provider-effect state before invoking work.
 Slice 2 leaves that adapter shape open until a concrete broker topology proves the required routing and acknowledgement

@@ -208,6 +208,20 @@ public sealed class DurableCommandFingerprintTests
         Assert.NotEqual(longInteger.Sha256, duration.Sha256);
         Assert.NotEqual(falseFlag.Sha256, trueFlag.Sha256);
 
+        var enumDigests = new[]
+        {
+            DurableCommandFingerprints.Create(schema, DurableProviderSafety.ProviderKeyed).Sha256,
+            DurableCommandFingerprints.Create(schema, DurableDataClassification.Operational).Sha256,
+            DurableCommandFingerprints.Create(schema, DurableScheduleKind.At).Sha256,
+            DurableCommandFingerprints.Create(schema, ScheduleOverlapPolicyKind.QueueOne).Sha256,
+            DurableCommandFingerprints.Create(schema, ScheduleMisfirePolicyKind.RunOnce).Sha256,
+            DurableCommandFingerprints.Create(schema, CronGrammar.Standard).Sha256,
+            DurableCommandFingerprints.Create(schema, CronDialect.CronosV1).Sha256,
+            DurableCommandFingerprints.Create(schema, DurableScheduleTargetKind.Work).Sha256,
+        };
+
+        Assert.Equal(enumDigests.Length, enumDigests.Distinct(StringComparer.Ordinal).Count());
+
         var codec = new TestCodec();
         var encodedPayload = codec.Encode(string.Empty);
         var retry = DurableWorkRetryPolicy.Default;
