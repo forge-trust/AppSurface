@@ -4,34 +4,92 @@ This file lives under `.github/` on purpose so AppSurface Docs does not publish 
 
 <a id="release-contract-check"></a>
 
-## Dormant automatic release-contract classifier
+## Release contract check
 
-The versioned classifier in [`.github/scripts/release-contract-v1.mjs`](scripts/release-contract-v1.mjs)
-is base-owned maintainer tooling for a proposed, syntactic classification of pinned
-external-action updates. It is deliberately dormant in this change: the live
-release-contract workflow does not import it, and **no third release-evidence path
-is active yet**. The only active evidence paths remain an authored
-[`releases/unreleased.md`](../releases/unreleased.md) entry or the exact,
-case-sensitive `no-unreleased-entry` label described below.
+The [release-contract workflow](workflows/release-contract.yml) accepts three
+release-evidence paths. It evaluates them in this order, while Conventional Commits
+title validation remains an independent requirement:
 
-The classifier decides only whether public release prose is required. It does not
-approve action compatibility, supply-chain safety, CI health, review sufficiency,
-or merge safety. Conventional-title validation and ordinary branch protection are
-independent. A future integration change must activate the classifier from the
-trusted base revision and update this document before automatic evidence can pass
-the live check.
+| Priority | Evidence | When to use it | Review consequence |
+| --- | --- | --- | --- |
+| 1 | Authored [`releases/unreleased.md`](../releases/unreleased.md) entry | The change is part of the adopter-visible release story. | Review the prose for accuracy. It takes precedence over both exemptions. |
+| 2 | Exact, case-sensitive `no-unreleased-entry` label | A maintainer has determined the change is outside the public release story. | Follow the [override runbook](#no-unreleased-entry-label) and remove the label if impact is later found. |
+| 3 | Automatic Dependabot classification | The exact bot identity and labels are present and every complete, bounded patch is syntactically limited to same-position pinned external-action references. | Release-note exemption only; all ordinary checks and review remain required. |
 
-Maintainers can reproduce a normalized input locally with Node.js 24. The command
-accepts a JSON file path, or reads the same JSON from standard input. A document may
-contain the classifier fields directly or wrap them as `{ "input": ..., "context": ... }`.
-It prints the same Markdown summary renderer intended for CI, exits 0 for a passing
-contract, 1 for a blocking contract diagnostic, and 2 for unreadable or invalid JSON.
+The automatic path decides only whether public release prose is required. It does
+not approve action compatibility, action behavior, supply-chain safety, CI health,
+review sufficiency, or merge safety. It is a textual, fail-closed classification of
+base-owned normalized evidence, not a YAML validity or semantic safety proof.
+Conventional-title validation, branch protection, CI, and ordinary human review are
+independent. There is no force-fail label: when a reviewer identifies adopter-visible
+impact, request an authored unreleased entry and remove any stale maintainer label.
+The authored entry then wins by evidence precedence.
+
+### Trusted-base and read-only boundary
+
+The workflow remains on `pull_request` with only `contents: read` and
+`pull-requests: read`. It checks out `github.event.pull_request.base.sha` into the
+isolated `.release-contract-policy` path, restricts sparse checkout to
+`.github/scripts`, disables persisted credentials, imports the module with
+`pathToFileURL()`, and requires `contractVersion === 1`. Pull-request code never
+supplies the policy executable. The job has no secrets, mutation, comments, label
+writes, `pull_request_target`, or write permission.
+
+The v1 classifier requires complete file enumeration and valid GitHub counts. It
+accepts at most 3,000 unique modified workflow YAML files, 128 KiB per patch,
+1 MiB aggregate patch data, and 8 KiB per patch line. Its linear unified-diff parser
+validates paired file headers when present, every hunk range and consumed line count,
+legal prefixes, complete input, and API addition/deletion totals. It rejects omitted,
+binary, combined, truncated, malformed, over-limit, CR, newline-marker, movement,
+reordering, input, permission, action-substitution, local, Docker, quoted, tag, and
+reusable-workflow evidence. Automatic rejection is informational when an earlier
+evidence path passes.
+
+### Override runbook
+
+Repository maintainers may apply `no-unreleased-entry` only after reviewing the
+actual diff and confirming that it is outside the adopter-facing release story.
+Apply it in the pull request Labels control or with:
+
+```bash
+gh pr edit <number> --add-label no-unreleased-entry
+```
+
+Record the rationale in normal review discussion when it is not self-evident. The
+label comparison is exact and case-sensitive. Remove it when scope changes, public
+impact is discovered, or an authored entry is requested:
+
+```bash
+gh pr edit <number> --remove-label no-unreleased-entry
+```
+
+An authored entry has higher precedence if both appear, but stale labels should still
+be removed so the audit trail matches the decision.
+
+### Troubleshooting and local reproduction
+
+Use the stable diagnostic leaf code in the check summary. Eligibility codes mean the
+evidence is outside the deliberately narrow automatic grammar; they do not mean the
+dependency update is unsafe. Add public prose or use the maintainer runbook after
+review. `infrastructure-event-invalid`, `infrastructure-api-failure`, `infrastructure-import-failure`,
+`infrastructure-version-mismatch`, `infrastructure-runtime-failure`, and
+`infrastructure-checkout-failure` fail the job rather than changing release evidence.
+Re-run once to distinguish a transient GitHub failure, then inspect the named checkout,
+API, import, or runtime boundary. Platform action-resolution failures remain in the
+standard step failure details because no repository script can run before the action
+resolves.
+
+Maintainers can reproduce normalized evidence with Node.js 24. The command accepts a
+JSON file path or standard input. A document may contain classifier fields directly or
+wrap them as `{ "input": ..., "context": ... }`. It prints the same bounded Markdown
+summary as CI, never renders patches, and exits 0 for pass, 1 for contract blockers,
+or 2 for unreadable or invalid JSON:
 
 ```bash
 node .github/scripts/release-contract-diagnose.mjs normalized-release-contract.json
 ```
 
-Run the complete fail-closed parser and renderer suite with its exact coverage gate:
+Run the classifier, renderer, and diagnostic-command suite with the ordinary-build gate:
 
 ```bash
 node --experimental-test-coverage \
@@ -40,6 +98,30 @@ node --experimental-test-coverage \
   --test-coverage-branches=100 \
   --test .github/scripts/release-contract-v1.test.mjs
 ```
+
+### Rollback and versioning
+
+Rollback triggers are any false exemption, classifier runtime failure, unexplained
+required-check result, or incompatible v1 output. Revert or disable the workflow
+integration first while retaining the v1 module. Use an authored entry for the
+rollback pull request, verify both manual evidence paths after the workflow can run,
+and remove dormant code only in a later change. A maintainer may temporarily adjust
+branch protection only when the required workflow cannot execute at all.
+
+Breaking classifier contracts must use a new module and contract version through the
+same bootstrap-then-integration sequence. Do not replace v1 and its importer in one
+pull request.
+
+### 6–8 week effectiveness checkpoint
+
+Six to eight weeks after activation, the AppSurface release maintainer reviews every
+GitHub Actions Dependabot pull request in the window. Record automatic exemption rate,
+leaf rejection codes, manual-label use, public-prose cases, false or misleading
+exemptions, missed release notes, runtime failures, and maintainer effort. Retain the
+classifier only with zero false or misleading exemptions, zero missed release notes,
+zero runtime failures, and at least a 50% exemption rate among syntactically eligible
+candidates. If fewer than three eligible candidates occur, extend observation by four
+weeks. End with an explicit **retain**, **narrow**, **expand**, or **remove** decision.
 
 ## `no-unreleased-entry` label
 
