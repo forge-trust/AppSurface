@@ -45,14 +45,20 @@ internal sealed class PackageIndexSummary
         }
 
         var packages = manifest?.Packages ?? [];
-        return new PackageIndexSummary(packages
-            .Where(package => string.Equals(package.Classification, "public", StringComparison.Ordinal)
+        var publicPublishedPackages = new List<PackageIndexEntry>();
+        foreach (var package in packages)
+        {
+            if (string.Equals(package.Classification, "public", StringComparison.Ordinal)
                 && string.Equals(package.PublishDecision, "publish", StringComparison.Ordinal))
-            .Select(package => new PackageIndexEntry(
-                package.Project,
-                package.ReleaseNotesPath ?? string.Empty,
-                package.ReadinessBlocker))
-            .ToArray());
+            {
+                publicPublishedPackages.Add(new PackageIndexEntry(
+                    package.Project,
+                    package.ReleaseNotesPath ?? string.Empty,
+                    package.ReadinessBlocker));
+            }
+        }
+
+        return new PackageIndexSummary(publicPublishedPackages);
     }
 }
 
