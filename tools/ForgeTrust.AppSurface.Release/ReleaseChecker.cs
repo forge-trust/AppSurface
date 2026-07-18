@@ -132,6 +132,20 @@ internal sealed class ReleaseChecker
                     "Fix `packages/package-index.yml` before preparing a coordinated release.",
                     "packages/README.md"));
             }
+
+            var blockedPackages = packageSummary.PublicPublishedPackages
+                .Where(package => !string.IsNullOrWhiteSpace(package.ReadinessBlocker))
+                .Select(package => $"{package.Project} ({package.ReadinessBlocker})")
+                .ToArray();
+            if (blockedPackages.Length > 0)
+            {
+                errors.Add(ReleaseDiagnostic.Error(
+                    "release-public-package-readiness-blocked",
+                    $"Public package publication is blocked by {string.Join(", ", blockedPackages)}. Resolve the blocker or use `publish_decision: do_not_publish` with a `publish_reason`.",
+                    $"Blocked package entries: {string.Join(", ", blockedPackages)}.",
+                    "Resolve and clear each readiness blocker, or change the held package to `publish_decision: do_not_publish` with a `publish_reason`, before preparing the release.",
+                    "packages/README.md"));
+            }
         }
 
         var sourceCommit = await TryGetSourceCommitAsync(cancellationToken);
