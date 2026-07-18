@@ -24,7 +24,6 @@ Composed local proof: [Product readiness lab](../examples/product-readiness-lab/
 
 Release and readiness:
 - [Release hub](../releases/README.md) keeps the public release story, adoption risk, and policy links in one place.
-- [v0.2.0-preview.4 release note](../releases/v0.2.0-preview.4.md) is the current package-facing story for this coordinated release.
 - [Unreleased proof artifact](../releases/unreleased.md) shows what is queued for the next coordinated version.
 - [CHANGELOG.md](../CHANGELOG.md) is the compact ledger for tagged and in-flight package changes.
 - [Pre-1.0 upgrade policy](../releases/upgrade-policy.md) explains the current stability contract before `v1.0.0`.
