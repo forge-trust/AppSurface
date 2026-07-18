@@ -3,7 +3,7 @@
   "version": "0.2.0-preview.3",
   "tag": "v0.2.0-preview.3",
   "date": "2026-07-17",
-  "sourceCommit": "0b957156546c49267f88685a7ec5a72213485102",
+  "sourceCommit": "e1781ab53b04ecb3db60c3ac47f174e499bf988c",
   "releaseClassification": "prerelease",
   "generatedFiles": [
     "releases/v0.2.0-preview.3.md",
@@ -34,6 +34,7 @@
     "Deployment/ForgeTrust.AppSurface.Deployment/ForgeTrust.AppSurface.Deployment.csproj",
     "Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/ForgeTrust.AppSurface.Deployment.GcpCloudRun.csproj",
     "Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj",
+    "Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj",
     "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
     "Web/ForgeTrust.AppSurface.Web.Push/ForgeTrust.AppSurface.Web.Push.csproj",
     "Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj",
@@ -151,6 +152,11 @@
     },
     {
       "project": "Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj",
+      "previousReleaseNotesPath": "releases/unreleased.md",
+      "nextReleaseNotesPath": "releases/v0.2.0-preview.3.md"
+    },
+    {
+      "project": "Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj",
       "previousReleaseNotesPath": "releases/unreleased.md",
       "nextReleaseNotesPath": "releases/v0.2.0-preview.3.md"
     },

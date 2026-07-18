@@ -627,7 +627,11 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine(webEntry.Manifest.UseWhen!);
         builder.AppendLine();
-        if (webEntry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)
+        if (IsPublicationBlocked(webEntry.Manifest))
+        {
+            builder.AppendLine(FormatPublicationBlockedMessage(request, webEntry));
+        }
+        else if (webEntry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)
         {
             builder.AppendLine("Source only - publication held");
         }
@@ -690,7 +694,9 @@ internal sealed class PackageIndexGenerator
         foreach (var recipeEntry in publicEntries.Where(entry => !string.IsNullOrWhiteSpace(entry.Manifest.RecipeSummary)
                                                                  && !string.Equals(entry.Metadata.PackageId, WebPackageId, StringComparison.OrdinalIgnoreCase)))
         {
-            builder.AppendLine($"- {recipeEntry.Manifest.RecipeSummary}");
+            builder.AppendLine(IsPublicationBlocked(recipeEntry.Manifest)
+                ? $"- {FormatPublicationBlockedMessage(request, recipeEntry)}"
+                : $"- {recipeEntry.Manifest.RecipeSummary}");
         }
 
         builder.AppendLine();
@@ -810,7 +816,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("4. Use an `audits` record only for narrow generated-first-party evidence or provenance-backed dependency closures that are not notice records. Include `applies_to`, `matched_rule`, `evidence_kind`, `source_paths`, `reviewed_on`, `source`, and `revalidate_when`; add `generated_paths` whenever `evidence_kind` is `generated_first_party` so the waiver self-invalidates when source or generated outputs move. Audit `applies_to` patterns must not overlap notice-covered payload entries; the gate fails broad audits that could mask notice-required payloads.");
         builder.AppendLine("5. Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` and fix any `ASPKG###` diagnostics. Payload diagnostics use Problem/Cause/Fix/Docs wording and link back to this section, and the package report shows covered/total suspicious payload counts beside the detailed payload evidence rows.");
         builder.AppendLine();
-        builder.AppendLine("Examples already covered by the inventory: `ForgeTrust.AppSurface.Cli` bundles ReportGenerator under `tools/**/reportgenerator/**` and audits its SDK-produced .NET tool dependency closure; Tailwind runtime packages carry native Tailwind binaries under `runtimes/*/native/**`; `ForgeTrust.AppSurface.Web.Tailwind` notices its build-task CliWrap payload; `ForgeTrust.AppSurface.Docs` embeds the generated MiniSearch runtime and carries `THIRD-PARTY-NOTICES.md`; `ForgeTrust.RazorWire` uses `generated_first_party` audit evidence for browser assets generated from first-party TypeScript.");
+        builder.AppendLine("Examples already covered by the inventory: `ForgeTrust.AppSurface.Cli` bundles ReportGenerator under `tools/**/reportgenerator/**` and audits its SDK-produced .NET tool dependency closure; Tailwind runtime packages carry native Tailwind binaries under `runtimes/*/native/**`; `ForgeTrust.AppSurface.Web.Tailwind` notices its build-task CliWrap payload; `ForgeTrust.AppSurface.Docs` embeds the generated MiniSearch runtime and carries `THIRD-PARTY-NOTICES.md`; `ForgeTrust.RazorWire` notices its copied Turbo runtime and separately uses `generated_first_party` audit evidence for browser assets generated from first-party TypeScript.");
 
         return NormalizeMarkdownNewlines(builder.ToString()).TrimEnd('\n') + "\n";
     }
@@ -1225,7 +1231,11 @@ internal sealed class PackageIndexGenerator
     private static string FormatReleaseCell(PackageIndexRequest request, PackageManifestEntry entry)
     {
         var parts = new List<string>();
-        if (entry.PublishDecision == PackagePublishDecision.DoNotPublish)
+        if (IsPublicationBlocked(entry))
+        {
+            parts.Add($"publication blocked by {entry.ReadinessBlocker}");
+        }
+        else if (entry.PublishDecision == PackagePublishDecision.DoNotPublish)
         {
             parts.Add("publication held");
         }
@@ -1248,8 +1258,29 @@ internal sealed class PackageIndexGenerator
         return parts.Count == 0 ? "Not declared" : string.Join("<br />", parts);
     }
 
+    private static bool IsPublicationBlocked(PackageManifestEntry entry) =>
+        !string.IsNullOrWhiteSpace(entry.ReadinessBlocker);
+
+    private static string FormatPublicationBlockedMessage(
+        PackageIndexRequest request,
+        ResolvedPackageEntry entry)
+    {
+        var packageName = FormatMarkdownLink(
+            $"`{entry.Metadata.PackageId}`",
+            GetRelativeDocPath(request, entry.Manifest.StartHerePath!));
+        var message = $"Publication of {packageName} is blocked by {entry.Manifest.ReadinessBlocker}; it is not currently installable.";
+        return string.IsNullOrWhiteSpace(entry.Manifest.ReadinessNote)
+            ? message
+            : $"{message} {entry.Manifest.ReadinessNote}";
+    }
+
     private static string FormatInstallCell(ResolvedPackageEntry entry)
     {
+        if (IsPublicationBlocked(entry.Manifest))
+        {
+            return $"Publication blocked by {entry.Manifest.ReadinessBlocker}; not currently installable.";
+        }
+
         return entry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish
             ? "Source only - publication held"
             : $"`{entry.Metadata.InstallCommand}`";

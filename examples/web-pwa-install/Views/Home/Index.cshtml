@@ -1,7 +1,7 @@
 @inject ForgeTrust.AppSurface.Web.PwaOptions PwaOptions
 @inject WebPushProofState WebPushProof
 @{
-    ViewData["Title"] = "Worker foundation";
+    ViewData["Title"] = "PWA runtime foundation";
     var diagnosticsPath = Url.Content("~/_appsurface/pwa");
     var devAuthPath = Url.Content("~/_appsurface/dev-auth/");
     var verifierUrl = $"{Context.Request.Scheme}://{Context.Request.Host}{Context.Request.PathBase}";
@@ -10,11 +10,12 @@
 <main>
     <header class="hero">
         <p class="eyebrow">Executable package proof</p>
-        <h1>AppSurface PWA worker foundation</h1>
+        <h1>AppSurface PWA runtime foundation</h1>
         <p class="lede">
             This page combines install metadata, the starter offline strategy, push event handlers,
-            and explicit service-worker registration. It never prompts or creates a push subscription on load;
-            when the development-only safe rail is configured, only the labeled user action can do so.
+            explicit service-worker registration, and independent application-icon badging. It never prompts or creates
+            a push subscription on load, sends no notification, and does not claim that a badge is visible. When the
+            development-only safe rail is configured, only the labeled user action can open the browser permission prompt.
         </p>
     </header>
 
@@ -31,6 +32,35 @@
         </button>
         <noscript>
             <p class="notice">JavaScript is required to run this registration proof. The manifest, diagnostics, and CLI proof remain available without it.</p>
+        </noscript>
+    </section>
+
+    <section class="proof-card" aria-labelledby="badging-heading">
+        <div>
+            <p class="eyebrow">Progressive enhancement proof</p>
+            <h2 id="badging-heading">Application badge</h2>
+        </div>
+        <div class="attention-state" aria-labelledby="attention-heading">
+            <h3 id="attention-heading">Synthetic attention state</h3>
+            <p id="attention-count">3 items need attention</p>
+        </div>
+        <div class="badging-controls">
+            <div class="field">
+                <label for="badge-count">Items needing attention</label>
+                <input id="badge-count" type="text" inputmode="numeric" value="3" aria-describedby="badge-count-help badge-count-error" />
+                <p id="badge-count-help" class="help">Use a synthetic, privacy-safe whole number. Zero clears the badge.</p>
+                <p id="badge-count-error" class="field-error" aria-live="polite"></p>
+            </div>
+            <div class="actions">
+                <button id="set-badge" class="primary-action" type="button" disabled>Set app badge</button>
+                <button id="clear-badge" class="secondary-action" type="button" disabled>Clear app badge</button>
+            </div>
+        </div>
+        <p id="badging-status" class="status" data-state="initializing" role="status" aria-live="polite" aria-atomic="true">
+            Preparing the AppSurface badging helper…
+        </p>
+        <noscript>
+            <p class="notice">JavaScript is required to run the badging proof. The synthetic in-app attention state remains the accessible source of truth.</p>
         </noscript>
     </section>
 
@@ -63,6 +93,7 @@
             <div><dt>Install metadata</dt><dd><span class="pill @(PwaOptions.Enabled ? "configured" : "unconfigured")">@(PwaOptions.Enabled ? "Configured" : "Not configured")</span></dd></div>
             <div><dt>Offline handlers</dt><dd><span class="pill @(PwaOptions.Offline.Enabled ? "configured" : "unconfigured")">@(PwaOptions.Offline.Enabled ? "Configured" : "Not configured")</span></dd></div>
             <div><dt>Push handlers</dt><dd><span class="pill @(PwaOptions.Push.Enabled ? "configured" : "unconfigured")">@(PwaOptions.Push.Enabled ? "Configured" : "Not configured")</span></dd></div>
+            <div><dt>App badging</dt><dd><span class="pill @(PwaOptions.Badging.Enabled ? "configured" : "unconfigured")">@(PwaOptions.Badging.Enabled ? "Configured" : "Not configured")</span></dd></div>
             <div><dt>Active worker</dt><dd><span id="worker-capability" class="pill pending">Not proven</span></dd></div>
             <div><dt>Notification permission</dt><dd><span id="push-permission-capability" class="pill unconfigured">Not requested</span></dd></div>
             <div><dt>Push subscription</dt><dd><span id="push-subscription-capability" class="pill unconfigured">Not configured</span></dd></div>
@@ -73,17 +104,17 @@
 
     <section class="recovery" aria-labelledby="recovery-heading">
         <p class="eyebrow">Server-side evidence</p>
-        <h2 id="recovery-heading">Diagnostics and CLI</h2>
+        <h2 id="recovery-heading">Diagnostics</h2>
         <p>
-            Open <a href="@diagnosticsPath">AppSurface PWA diagnostics</a>, or run
+            Open <a href="@diagnosticsPath">AppSurface PWA diagnostics</a> for server-known configuration. The install verifier remains available separately:
             <code>appsurface pwa verify --base-url @verifierUrl --entry-path /account/resume</code>.
-            The verifier reports server-known posture; it does not claim permission, subscription, delivery,
-            or browser registration evidence.
+            Stage 1 does not add CLI badging evidence; neither surface claims permission, badge visibility, or a displayed value.
         </p>
     </section>
 </main>
 
 <script src="~/js/pwa-registration-proof.js" asp-append-version="true" defer></script>
+<script src="~/js/pwa-badging-proof.js" asp-append-version="true" defer></script>
 @if (WebPushProof.Enabled)
 {
     <appsurface:web-push-client />

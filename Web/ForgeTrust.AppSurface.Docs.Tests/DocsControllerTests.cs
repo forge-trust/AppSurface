@@ -1102,7 +1102,7 @@ public class DocsControllerTests : IDisposable
         };
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
-        var (controller, cache, memo) = CreateController(options, harvester, registerHarvestCoordinator: true);
+        var (controller, cache, memo) = CreateController(options, harvester);
         using (memo)
         using (cache)
         {

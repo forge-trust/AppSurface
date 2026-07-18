@@ -9,13 +9,13 @@
   "evidencePath": "releases/v0.2.0-preview.3.evidence.json",
   "releaseManifestDigest": {
     "algorithm": "sha256",
-    "value": "fd20bca1e727cdcb01cc7df318b138b79ed8c75e19d3003b276328f64e8caf74"
+    "value": "f7f19725b6d2a85cceacb6d108c23b99b5f7d6024f3a75819b188ede5bb654c1"
   },
   "releaseArtifactDigests": [
     {
       "path": "releases/v0.2.0-preview.3.md",
       "algorithm": "sha256",
-      "value": "cabe11a832cd68638a078e308c58a450c1ed8c4bdd0a19d5787583b4c8a1b544"
+      "value": "f91440256512abc23e2b986c2b0b7359ef3c768846c8c5e576e9bcb0f8c5a7e6"
     },
     {
       "path": "releases/v0.2.0-preview.3.md.yml",
@@ -25,10 +25,14 @@
     {
       "path": "releases/v0.2.0-preview.3.release.json",
       "algorithm": "sha256",
-      "value": "fd20bca1e727cdcb01cc7df318b138b79ed8c75e19d3003b276328f64e8caf74"
+      "value": "f7f19725b6d2a85cceacb6d108c23b99b5f7d6024f3a75819b188ede5bb654c1"
     }
   ],
   "packageReleaseNotePaths": [
+    {
+      "project": "Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj",
+      "releaseNotesPath": "releases/v0.2.0-preview.3.md"
+    },
     {
       "project": "Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj",
       "releaseNotesPath": "releases/v0.2.0-preview.3.md"
@@ -159,7 +163,7 @@
     "catalogEntry": null
   },
   "commits": {
-    "contentSourceCommit": "0b957156546c49267f88685a7ec5a72213485102",
+    "contentSourceCommit": "e1781ab53b04ecb3db60c3ac47f174e499bf988c",
     "releasePreparationCommit": null,
     "tagCommit": null,
     "workflowRunId": null
@@ -167,10 +171,10 @@
   "generatedBy": {
     "tool": "./eng/release"
   },
-  "generatedAtUtc": "2026-07-17T07:01:20.5133050Z",
+  "generatedAtUtc": "2026-07-18T03:38:44.9315960Z",
   "subject": {
     "name": "releases/v0.2.0-preview.3.evidence.json",
-    "sha256": "14701d97bb87bd52f30e0fe8fd9709214951776b9760c96b608f48a47be4be81"
+    "sha256": "748eacf759f893f06fbca1df0795be3c96b27bb56f66330a38c330b26f15fbff"
   },
   "attestation": null
 }
