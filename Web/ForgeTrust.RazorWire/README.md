@@ -164,7 +164,7 @@ Use RazorWire form interactions when a server-rendered form needs conditional fi
 
 RazorWire owns local behavior, state attributes, sparse `.index` allocation, and accessibility status hooks. Your app owns fields, labels, layout, styling, persistence, and server validation. See the full contract in [Form Interactions](Docs/form-interactions.md).
 
-## Behavior Kit in 3 Minutes
+## Behavior Kit Reference
 
 Use RazorWire Behavior Kit when an app needs small local JavaScript that follows RazorWire's lifecycle without becoming a frontend framework. Root behaviors enhance replaceable DOM roots; lifecycle behaviors run once per logical browser visit.
 
@@ -298,6 +298,35 @@ RazorWire markup only lights up when your views import the package TagHelpers an
 Plain `<rw:scripts/>` is enough for page navigation, section copy, and form interactions. RazorWire emits small detectors that load `page-navigation.js` only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup, `section-copy.js` only when it contains `data-rw-section-copy` / `data-rw-section-copy-target` markup, and `form-interactions.js` only when it contains `data-rw-form-toggle` or `data-rw-form-collection` markup, including after Turbo page or frame renders. The optional `page-navigation="true"`, `section-copy="true"`, and `form-interactions="true"` attributes are eager-load escape hatches, but they are not required for normal adoption. Behavior Kit is explicit in v1; set `behavior-kit="true"` when the page registers `window.RazorWire.behaviors`.
 
 App-authored behavior kit registration is different: use `<rw:scripts behavior-kit="true" />` when app bundles call `window.RazorWire.behaviors.register(...)` or `window.RazorWire.behaviors.registerLifecycle(...)`. Behavior kit has no v1 lazy marker or synthetic static-export reference.
+
+### Choose who supplies Turbo
+
+RazorWire defaults to `RazorWireTurboRuntimeMode.Bundled`: `<rw:scripts />` emits the package's exact Turbo 8.0.12 UMD build from the same origin before the RazorWire scripts. This is the recommended mode because a normal package install works without an external CDN request, additional CSP origin, or host-managed load-order step.
+
+Use `Custom` only when the app publishes a compatible Turbo build as its own same-origin static asset:
+
+```csharp
+services.AddRazorWire(options =>
+{
+    options.Turbo.RuntimeMode = RazorWireTurboRuntimeMode.Custom;
+    options.Turbo.CustomPath = "/js/turbo.es2017-umd.js";
+});
+```
+
+`CustomPath` must be a non-root, app-absolute same-origin path beginning with exactly one `/` and containing only non-empty path segments. RazorWire rejects empty or dot segments, query strings, fragments, percent encoding, whitespace, protocol-relative paths, and HTML-sensitive characters, then applies the current `PathBase` and ASP.NET Core static-asset versioning. Do not use `Custom` for a CDN URL.
+
+Use `HostManaged` when the host must own a cross-origin URL, subresource integrity, CSP metadata, or other script attributes:
+
+```csharp
+services.AddRazorWire(options =>
+{
+    options.Turbo.RuntimeMode = RazorWireTurboRuntimeMode.HostManaged;
+});
+```
+
+In host-managed mode, RazorWire emits no Turbo script. Load the host's Turbo script before `<rw:scripts />` without `async` or `defer`; `window.Turbo` must already exist when RazorWire executes. RazorWire verifies compatibility with Turbo 8.0.12 only. Other versions are host-owned compatibility experiments and should be covered by the app's browser tests.
+
+When migrating from the former CDN-backed default, remove any duplicate Turbo tag and keep the default bundled mode. A CSP can then allow the runtime through `'self'` rather than `https://cdn.jsdelivr.net`. Choose one owner—bundled, custom, or host-managed—because loading Turbo twice can register duplicate navigation listeners and produce nondeterministic page visits.
 
 ## Configure Services (Optional)
 
@@ -544,6 +573,16 @@ Endpoint admission is separate from hub delivery. The default endpoint validates
 All numeric admission limits must be greater than zero and are validated at startup. Raising them increases connection,
 memory, and request-slot pressure in the current process; it does not create distributed fairness.
 
+### `RazorWireTurboOptions`
+
+`RazorWireOptions.Turbo` controls the Turbo script emitted by `<rw:scripts />`:
+
+- `RuntimeMode` defaults to `RazorWireTurboRuntimeMode.Bundled` (`0`). `Custom` is `1`; `HostManaged` is `2`.
+- `CustomPath` is required only for `Custom` and must otherwise be `null`.
+- Invalid modes, paths, and mode/path combinations fail during options validation at startup.
+
+See [Choose who supplies Turbo](#choose-who-supplies-turbo) for configuration, ownership guidance, ordering requirements, and migration pitfalls.
+
 ### `IRazorWireStreamAuthorizer`
 
 - `AuthorizeAsync(RazorWireStreamAuthorizationContext)` returns a passive `AppSurfaceAuthResult`.
@@ -672,7 +711,7 @@ Localizes UTC timestamps on the client with the browser's `Intl` APIs.
 
 ### `rw:scripts`
 
-Injects the client scripts RazorWire needs, including Turbo and the RazorWire assets.
+Injects the client scripts RazorWire needs. By default this includes the same-origin bundled Turbo 8.0.12 runtime followed by the RazorWire assets; `RazorWireOptions.Turbo` can select a custom same-origin runtime or host-managed ownership.
 
 ```html
 <rw:scripts />
@@ -837,8 +876,8 @@ export function mount(root, props) {
 }
 ```
 
-RazorWire serves `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`,
-`razorwire.islands.js`, `behavior-kit.js`, and the package demo assets as normal Razor Class Library
+RazorWire serves `/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js`,
+`razorwire.js`, `razorwire.islands.js`, `behavior-kit.js`, and the package demo assets as normal Razor Class Library
 static web assets when the host has a static-web-assets manifest. The same files
 are also embedded into the `ForgeTrust.RazorWire` assembly and mapped as endpoint
 fallbacks by `RazorWireWebModule`, so packaged command-line hosts can serve the

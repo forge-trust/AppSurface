@@ -7,5 +7,8 @@
     "test": "node assets/scripts/build.mjs && node --test test/generated-assets.test.mjs && node --test test/razorwire-form-failure.regression-001.test.mjs test/razorwire-form-failure.test.mjs test/razorwire-islands.test.mjs test/section-copy.test.mjs test/form-interactions.test.mjs test/behavior-kit.test.mjs",
     "build": "node assets/scripts/build.mjs",
     "verify-generated": "node assets/scripts/verify-generated.mjs"
+  },
+  "dependencies": {
+    "@hotwired/turbo": "8.0.12"
   }
 }

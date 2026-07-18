@@ -1,0 +1,16 @@
+@{
+    Layout = "_DeterministicRuntimeLayout";
+    ViewData["Title"] = "Deterministic bundled runtime";
+    var state = (string?)ViewData["DeterministicRuntimeState"] ?? "first";
+}
+
+<h1>Deterministic bundled runtime</h1>
+<p data-deterministic-runtime-state="@state">State: @state</p>
+<p data-deterministic-runtime-proof data-render-kind="pending">pending</p>
+
+@if (state == "first")
+{
+    <a asp-controller="Reactivity" asp-action="DeterministicRuntime" asp-route-state="second">
+        Show second state
+    </a>
+}

@@ -29,6 +29,72 @@ public class RazorWireOptions
     /// Gets configuration options for split-origin hybrid deployments.
     /// </summary>
     public RazorWireHybridOptions Hybrid { get; } = new();
+
+    /// <summary>
+    /// Gets the policy that controls how the Turbo browser runtime is sourced.
+    /// </summary>
+    /// <remarks>
+    /// RazorWire emits its package-owned Turbo runtime by default. Configure this policy when the app publishes a
+    /// compatible same-origin copy or when the host must own the complete Turbo script tag and its loading order.
+    /// </remarks>
+    public RazorWireTurboOptions Turbo { get; } = new();
+}
+
+/// <summary>
+/// Represents the policy for sourcing the Turbo browser runtime used by RazorWire.
+/// </summary>
+public class RazorWireTurboOptions
+{
+    /// <summary>
+    /// Gets or sets who supplies the Turbo browser runtime. Defaults to
+    /// <see cref="RazorWireTurboRuntimeMode.Bundled"/>.
+    /// </summary>
+    public RazorWireTurboRuntimeMode RuntimeMode { get; set; } = RazorWireTurboRuntimeMode.Bundled;
+
+    /// <summary>
+    /// Gets or sets the same-origin, app-absolute Turbo script path used in
+    /// <see cref="RazorWireTurboRuntimeMode.Custom"/> mode.
+    /// </summary>
+    /// <remarks>
+    /// The path must be non-root, begin with exactly one <c>/</c>, contain at least one non-empty path segment, and
+    /// cannot contain empty or dot segments, a query string, fragment, percent encoding, whitespace, or HTML-sensitive
+    /// characters. RazorWire passes the path through ASP.NET Core static-asset versioning. Leave this value
+    /// <see langword="null"/> in bundled and host-managed modes. Use
+    /// <see cref="RazorWireTurboRuntimeMode.HostManaged"/> when the host needs a cross-origin URL, integrity metadata,
+    /// or custom script attributes.
+    /// </remarks>
+    public string? CustomPath { get; set; }
+}
+
+/// <summary>
+/// Defines who supplies the Turbo browser runtime used by RazorWire.
+/// </summary>
+/// <remarks>
+/// The numeric values are explicit because this public enum may be bound from configuration. New values should be
+/// appended without changing the values documented here.
+/// </remarks>
+public enum RazorWireTurboRuntimeMode
+{
+    /// <summary>
+    /// Emit the package-owned, same-origin Turbo 8.0.12 runtime before RazorWire's scripts.
+    /// </summary>
+    Bundled = 0,
+
+    /// <summary>
+    /// Emit the compatible same-origin runtime at <see cref="RazorWireTurboOptions.CustomPath"/> before RazorWire's
+    /// scripts, preserving the current request path base and static-asset versioning.
+    /// </summary>
+    Custom = 1,
+
+    /// <summary>
+    /// Emit no Turbo script. The host must synchronously load a compatible <c>window.Turbo</c> before the
+    /// <c>&lt;rw:scripts /&gt;</c> output executes.
+    /// </summary>
+    /// <remarks>
+    /// A deferred or asynchronous host script does not satisfy the ordering contract. This mode is appropriate when the
+    /// host owns cross-origin sourcing, subresource integrity, content-security policy, or custom script attributes.
+    /// </remarks>
+    HostManaged = 2
 }
 
 /// <summary>
