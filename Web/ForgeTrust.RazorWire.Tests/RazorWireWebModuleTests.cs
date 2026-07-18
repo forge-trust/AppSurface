@@ -259,6 +259,19 @@ public class RazorWireWebModuleTests
                 await formInteractionsResponse.Content.ReadAsStringAsync(),
                 StringComparison.Ordinal);
 
+            using var turboResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js");
+            Assert.Equal(HttpStatusCode.OK, turboResponse.StatusCode);
+            Assert.Equal("text/javascript", turboResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains(
+                "Turbo 8.0.12",
+                await turboResponse.Content.ReadAsStringAsync(),
+                StringComparison.Ordinal);
+
+            using var turboHeadRequest = new HttpRequestMessage(HttpMethod.Head, "/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js");
+            using var turboHeadResponse = await client.SendAsync(turboHeadRequest);
+            Assert.Equal(HttpStatusCode.OK, turboHeadResponse.StatusCode);
+            Assert.True(turboHeadResponse.Content.Headers.ContentLength > 0);
+
             using var imageResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/background.png");
             Assert.Equal(HttpStatusCode.OK, imageResponse.StatusCode);
             Assert.Equal("image/png", imageResponse.Content.Headers.ContentType?.MediaType);
