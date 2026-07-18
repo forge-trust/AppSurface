@@ -10,6 +10,8 @@ namespace AppSurfaceBenchmarks;
 
 public class Program
 {
+    private const string ReloadConfigOnChangeEnvironmentVariable = "DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE";
+
     private static int LaunchCount =>
         int.TryParse(Environment.GetEnvironmentVariable("BENCH_LAUNCH_COUNT"), out var n) && n > 0 ? n : 100;
 
@@ -69,6 +71,7 @@ public class Program
             .WithIterationCount(1)
             .WithId(id)
             .WithBaseline(id == "Native")
+            .WithEnvironmentVariable(ReloadConfigOnChangeEnvironmentVariable, "false")
             .WithArguments([new MsBuildArgument($"/p:DefineConstants={define}")]);
     }
 
@@ -93,6 +96,7 @@ public class Program
             .WithInvocationCount(1)
             .WithUnrollFactor(1)
             .WithId("AppSurface.Web.HealthAB")
+            .WithEnvironmentVariable(ReloadConfigOnChangeEnvironmentVariable, "false")
             .WithArguments([new MsBuildArgument("/p:DefineConstants=APPSURFACE_WEB")]);
     }
 }

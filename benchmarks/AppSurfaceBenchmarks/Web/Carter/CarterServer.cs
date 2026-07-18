@@ -16,7 +16,7 @@ public class CarterServer : IWebBenchmarkServer
 
     public async Task StartMinimalAsync()
     {
-        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
+        var builder = WebApplication.CreateBuilder();
         builder.Services.AddCarter();
         _app = builder.Build();
         _app.MapCarter();
@@ -26,7 +26,7 @@ public class CarterServer : IWebBenchmarkServer
 
     public async Task StartControllersAsync()
     {
-        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
+        var builder = WebApplication.CreateBuilder();
         var mvc = builder.Services.AddControllers();
         mvc.AddApplicationPart(typeof(HelloController).Assembly);
 
@@ -42,7 +42,7 @@ public class CarterServer : IWebBenchmarkServer
 
     public async Task StartDependencyInjectionAsync()
     {
-        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
+        var builder = WebApplication.CreateBuilder();
         builder.Services.AddSingleton<IMyDependencyService, MyDependencyService>();
         var mvc = builder.Services.AddControllers();
         mvc.AddApplicationPart(typeof(DependencyInjectionController).Assembly);
@@ -59,7 +59,7 @@ public class CarterServer : IWebBenchmarkServer
 
     public async Task StartManyDependencyInjectionAsync()
     {
-        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
+        var builder = WebApplication.CreateBuilder();
         builder.Services.AddManyDiServices();
         var mvc = builder.Services.AddControllers();
         mvc.AddApplicationPart(typeof(ManyInjected01Controller).Assembly);

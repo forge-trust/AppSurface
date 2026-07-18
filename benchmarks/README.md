@@ -9,9 +9,10 @@ projects. They measure:
 
 Benchmarks are compiled separately per library using conditional
 compilation, ensuring that only the code under test is loaded for each job.
-Every web benchmark host disables automatic reload of default JSON configuration files so file-watcher callbacks do not
-add unrelated timing or allocation noise. The same host argument is applied to AppSurface, Native ASP.NET Core, Carter,
-and ABP cases to keep framework comparisons symmetric.
+Every web benchmark job disables automatic reload of default JSON configuration files in its process environment so
+file-watcher callbacks do not add unrelated timing or allocation noise. AppSurface, Native ASP.NET Core, Carter, and ABP
+receive the same setting before timed host startup, keeping the framework comparisons symmetric without adding harness
+command-line parsing or a per-host argument-array allocation to the measurements.
 
 From the repository root, run them in release mode to get optimized measurements:
 
