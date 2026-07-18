@@ -336,14 +336,7 @@ public sealed class SecretPromotionWorkflowTests
         workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "local-to-staging", planPath, false, TimeSpan.FromMinutes(10), context));
         var plan = JsonNode.Parse(File.ReadAllText(planPath))!.AsObject();
         var row = plan["rows"]!.AsArray()[0]!.AsObject();
-        if (propertyName == "rowNumber")
-        {
-            row[propertyName] = 2;
-        }
-        else
-        {
-            row[propertyName] = "tampered";
-        }
+        row[propertyName] = propertyName == "rowNumber" ? 2 : "tampered";
         File.WriteAllText(planPath, plan.ToJsonString());
 
         var exception = Assert.Throws<CommandException>(() =>
