@@ -1373,6 +1373,28 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PackageIndexSummaryNormalizesMissingOptionalPublicationMetadata()
+    {
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                classification: public
+                publish_decision: publish
+                order: 10
+            """);
+
+        var summary = await PackageIndexSummary.LoadAsync(
+            Path.Join(_repositoryRoot, "packages", "package-index.yml"),
+            CancellationToken.None);
+
+        var package = Assert.Single(summary.PublicPublishedPackages);
+        Assert.Equal(string.Empty, package.ReleaseNotesPath);
+        Assert.Null(package.ReadinessBlocker);
+    }
+
+    [Fact]
     public async Task PublishRejectsStableReleaseWithoutStablePackageProof()
     {
         await SeedRepositoryAsync();
