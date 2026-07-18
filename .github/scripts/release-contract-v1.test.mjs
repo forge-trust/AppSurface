@@ -384,7 +384,7 @@ test("summary bounds and escapes all raw evidence and supports explicit docs URL
     labels: ["dependencies", "github_actions", hostile]
   }));
   const summary = renderReleaseContractSummaryV1(result, { docsUrl: "https://example.test/docs?a=1&b=2" });
-  assert.doesNotMatch(summary, /<script>/);
+  assert.equal(summary.includes("<script>"), false);
   assert.match(summary, /&lt;script&gt;&#124;&#96;x&#96;/);
   assert.match(summary, /https:\/\/example\.test\/docs\?a=1&amp;b=2/);
   assert.ok(summary.length < 10_000);
