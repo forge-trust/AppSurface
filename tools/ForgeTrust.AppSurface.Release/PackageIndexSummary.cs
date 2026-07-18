@@ -48,7 +48,10 @@ internal sealed class PackageIndexSummary
         return new PackageIndexSummary(packages
             .Where(package => string.Equals(package.Classification, "public", StringComparison.Ordinal)
                 && string.Equals(package.PublishDecision, "publish", StringComparison.Ordinal))
-            .Select(package => new PackageIndexEntry(package.Project, package.ReleaseNotesPath ?? string.Empty))
+            .Select(package => new PackageIndexEntry(
+                package.Project,
+                package.ReleaseNotesPath ?? string.Empty,
+                package.ReadinessBlocker))
             .ToArray());
     }
 }
@@ -88,9 +91,14 @@ internal sealed class PackageIndexYamlEntry
     /// Gets the release notes path.
     /// </summary>
     public string? ReleaseNotesPath { get; init; }
+
+    /// <summary>
+    /// Gets the same-repository issue or pull request that blocks publication, when one remains unresolved.
+    /// </summary>
+    public string? ReadinessBlocker { get; init; }
 }
 
 /// <summary>
 /// Package row included in a release manifest.
 /// </summary>
-internal sealed record PackageIndexEntry(string Project, string ReleaseNotesPath);
+internal sealed record PackageIndexEntry(string Project, string ReleaseNotesPath, string? ReadinessBlocker);

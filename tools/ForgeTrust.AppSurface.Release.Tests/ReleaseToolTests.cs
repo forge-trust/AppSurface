@@ -1348,6 +1348,31 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckRejectsPublicPublishedPackageWithReadinessBlocker()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj
+                classification: public
+                publish_decision: publish
+                release_notes_path: releases/unreleased.md
+                readiness_blocker: "#642"
+                order: 10
+            """);
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("`release-public-package-readiness-blocked`", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("A public package selected for publication still has a readiness blocker.", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublishRejectsStableReleaseWithoutStablePackageProof()
     {
         await SeedRepositoryAsync();

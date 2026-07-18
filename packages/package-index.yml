@@ -396,7 +396,8 @@ packages:
       - ForgeTrust.AppSurface.Deployment
   - project: Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj
     classification: public
-    publish_decision: publish
+    publish_decision: do_not_publish
+    publish_reason: Public-preview package held until pinned Aspire disposes or exposes partial host state created before a failed host construction.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
