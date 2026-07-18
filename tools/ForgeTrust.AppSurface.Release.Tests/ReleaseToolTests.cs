@@ -1369,7 +1369,9 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("`release-public-package-readiness-blocked`", result.Stdout, StringComparison.Ordinal);
-        Assert.Contains("A public package selected for publication still has a readiness blocker.", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("#642", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("publish_decision: do_not_publish", result.Stdout, StringComparison.Ordinal);
     }
 
     [Fact]

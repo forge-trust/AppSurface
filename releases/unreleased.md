@@ -14,4 +14,4 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## Migration watch
 
-- Record breaking or behavior-changing guidance here before it moves into the tagged release note.
+- Record-breaking or behavior-changing guidance here before it moves into the tagged release note.

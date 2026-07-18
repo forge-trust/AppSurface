@@ -401,7 +401,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.3.md
+    release_notes_path: releases/unreleased.md
     readiness_blocker: "#668"
     readiness_note: Aspire 13.4.4 leaks its partial host service provider when host construction fails after provider creation; publication remains blocked until the pinned dependency disposes or exposes that state.
     order: 61

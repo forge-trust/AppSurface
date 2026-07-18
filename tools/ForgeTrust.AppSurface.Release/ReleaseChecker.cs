@@ -141,7 +141,7 @@ internal sealed class ReleaseChecker
             {
                 errors.Add(ReleaseDiagnostic.Error(
                     "release-public-package-readiness-blocked",
-                    "A public package selected for publication still has a readiness blocker.",
+                    $"Public package publication is blocked by {string.Join(", ", blockedPackages)}. Resolve the blocker or use `publish_decision: do_not_publish` with a `publish_reason`.",
                     $"Blocked package entries: {string.Join(", ", blockedPackages)}.",
                     "Resolve and clear each readiness blocker, or change the held package to `publish_decision: do_not_publish` with a `publish_reason`, before preparing the release.",
                     "packages/README.md"));
