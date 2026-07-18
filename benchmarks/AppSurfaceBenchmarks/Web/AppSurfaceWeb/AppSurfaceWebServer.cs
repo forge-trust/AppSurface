@@ -4,6 +4,10 @@ using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Web;
 using ManyDependencyInjectionControllers;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -13,22 +17,84 @@ public class AppSurfaceWebServer : IWebBenchmarkServer
 {
     private IHost? _host;
 
+    /// <summary>
+    /// Starts the historical minimal AppSurface benchmark host with default health options on the fixed
+    /// <c>http://localhost:5000/</c> address.
+    /// </summary>
+    /// <remarks>
+    /// Call <see cref="StopAsync"/> before starting another host with this server instance.
+    /// </remarks>
     public async Task StartMinimalAsync()
+    {
+        _ = await StartMinimalAsync(healthEnabled: null, useEphemeralPort: false);
+    }
+
+    /// <summary>
+    /// Starts the minimal AppSurface benchmark host with the opt-in platform health endpoints either enabled or disabled.
+    /// </summary>
+    /// <param name="healthEnabled">
+    /// <see langword="true"/> to include health-check services plus the default <c>/health</c> and <c>/ready</c> endpoints;
+    /// otherwise, <see langword="false"/>.
+    /// </param>
+    /// <returns>
+    /// The ephemeral loopback base address selected after the benchmark host starts. Use this address for benchmark
+    /// requests instead of assuming a fixed port.
+    /// </returns>
+    /// <remarks>
+    /// Call <see cref="StopAsync"/> before starting another host with this server instance.
+    /// </remarks>
+    public Task<Uri> StartMinimalAsync(bool healthEnabled) =>
+        StartMinimalAsync(healthEnabled, useEphemeralPort: true);
+
+    private async Task<Uri> StartMinimalAsync(bool? healthEnabled, bool useEphemeralPort)
     {
         var startup = new BenchmarkWebStartup<AppSurfaceBenchmarkModule>()
             .WithOptions(options =>
             {
                 // Disabling MVC support when testing minimal APIs to avoid any overhead.
                 options.Mvc = options.Mvc with { MvcSupportLevel = MvcSupport.None };
+                if (healthEnabled.HasValue)
+                {
+                    options.Health.Enabled = healthEnabled.Value;
+                }
 
                 options.MapEndpoints = endpoints => { endpoints.MapGet("/hello", () => "Hello World!"); };
             });
 
         // We need to create the host builder manually to get access to start/stop.
         var context = new StartupContext([], new AppSurfaceBenchmarkModule());
-        _host = ((IAppSurfaceStartup)startup).CreateHostBuilder(context).Build();
+        var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+        if (healthEnabled.HasValue)
+        {
+            builder.ConfigureHostConfiguration(configuration =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["hostBuilder:reloadConfigOnChange"] = "false",
+                }));
+        }
+
+        if (useEphemeralPort)
+        {
+            builder.ConfigureWebHost(webHost => webHost.UseUrls("http://127.0.0.1:0"));
+        }
+
+        _host = builder.Build();
 
         await _host.StartAsync();
+
+        if (!useEphemeralPort)
+        {
+            return new Uri("http://localhost:5000/");
+        }
+
+        var addresses = _host.Services
+            .GetRequiredService<IServer>()
+            .Features
+            .Get<IServerAddressesFeature>()
+            ?.Addresses;
+        var address = addresses?.SingleOrDefault()
+            ?? throw new InvalidOperationException("The health A/B benchmark host did not publish one loopback address.");
+        return new Uri(address.EndsWith("/", StringComparison.Ordinal) ? address : $"{address}/");
     }
 
     public async Task StartControllersAsync()
