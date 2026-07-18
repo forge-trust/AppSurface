@@ -1,6 +1,6 @@
 # Unreleased
 
-This is the living release note for the next coordinated AppSurface version after `0.2.0-preview.3`. It stays provisional until the next tag is cut.
+This is the living release note for the next coordinated AppSurface version after `0.2.0-preview.4`. It stays provisional until the next tag is cut.
 
 ## What is taking shape
 

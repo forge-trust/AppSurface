@@ -18,7 +18,7 @@ Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`
 
 ## Check
 
-`check` validates the release inputs without mutating the repository. It verifies required release files, target versioned artifacts, package publishing policy, package manifest shape, release evidence bundles, optional stable docs archive inputs, and warning IDs that the review workflow can enforce with `--fail-on-warnings`. The release-prep review workflow also passes `--allow-existing-targets` because it reviews the versioned artifacts that the preparation workflow intentionally generated.
+`check` validates the release inputs without mutating the repository. It verifies required release files, target versioned artifacts, package publishing policy, package manifest shape, release evidence bundles, optional stable docs archive inputs, and warning IDs that the review workflow can enforce with `--fail-on-warnings`. A public package cannot combine `publish_decision: publish` with a `readiness_blocker`; resolve and clear the blocker, or hold the package with `publish_decision: do_not_publish` plus a `publish_reason`, before release preparation. The release-prep review workflow also passes `--allow-existing-targets` because it reviews the versioned artifacts that the preparation workflow intentionally generated.
 
 `--fail-on-warnings` and `--allow-existing-targets` are intentionally check-only options. `--docs-catalog` and `--docs-trusted-release-root` are stable docs evidence review options for `check` and optional publish-time diagnostics. `prepare` rejects all of these options so a maintainer does not think warning policy, target-collision policy, or docs archive selection changed while generating release artifacts.
 
