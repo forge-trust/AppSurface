@@ -12,7 +12,7 @@ public class NativeDotnetServer : IWebBenchmarkServer
 
     public async Task StartMinimalAsync()
     {
-        var builder = WebApplication.CreateBuilder();
+        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
         _app = builder.Build();
         _app.MapGet("/hello", () => "Hello World!");
 
@@ -21,7 +21,7 @@ public class NativeDotnetServer : IWebBenchmarkServer
 
     public async Task StartControllersAsync()
     {
-        var builder = WebApplication.CreateBuilder();
+        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
         var mvc = builder.Services.AddControllers();
         mvc.AddApplicationPart(typeof(HelloController).Assembly);
 
@@ -35,7 +35,7 @@ public class NativeDotnetServer : IWebBenchmarkServer
 
     public async Task StartDependencyInjectionAsync()
     {
-        var builder = WebApplication.CreateBuilder();
+        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
         builder.Services.AddSingleton<IMyDependencyService, MyDependencyService>();
         var mvc = builder.Services.AddControllers();
         mvc.AddApplicationPart(typeof(DependencyInjectionController).Assembly);
@@ -50,7 +50,7 @@ public class NativeDotnetServer : IWebBenchmarkServer
 
     public async Task StartManyDependencyInjectionAsync()
     {
-        var builder = WebApplication.CreateBuilder();
+        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
         builder.Services.AddManyDiServices();
         var mvc = builder.Services.AddControllers();
         mvc.AddApplicationPart(typeof(ManyInjected01Controller).Assembly);

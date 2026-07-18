@@ -17,7 +17,7 @@ public class AbpServer : IWebBenchmarkServer
 
     public async Task StartMinimalAsync()
     {
-        var builder = WebApplication.CreateBuilder();
+        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
         await builder.Services.AddApplicationAsync<AbpBenchmarkModule>();
         _app = builder.Build();
 
@@ -29,7 +29,7 @@ public class AbpServer : IWebBenchmarkServer
 
     public async Task StartControllersAsync()
     {
-        var builder = WebApplication.CreateBuilder();
+        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
         var mvc = builder.Services.AddControllers();
         mvc.AddApplicationPart(typeof(HelloController).Assembly);
         await builder.Services.AddApplicationAsync<AbpBenchmarkModule>();
@@ -44,7 +44,7 @@ public class AbpServer : IWebBenchmarkServer
 
     public async Task StartAbpControllersAsync()
     {
-        var builder = WebApplication.CreateBuilder();
+        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
         var mvc = builder.Services.AddControllers();
         mvc.AddApplicationPart(typeof(HelloAbpController).Assembly);
         await builder.Services.AddApplicationAsync<AbpBenchmarkModule>();
@@ -59,7 +59,7 @@ public class AbpServer : IWebBenchmarkServer
 
     public async Task StartDependencyInjectionAsync()
     {
-        var builder = WebApplication.CreateBuilder();
+        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
         var mvc = builder.Services.AddControllers();
         mvc.AddApplicationPart(typeof(DependencyInjectionController).Assembly);
         await builder.Services.AddApplicationAsync<AbpDependencyModule>();
@@ -74,7 +74,7 @@ public class AbpServer : IWebBenchmarkServer
 
     public async Task StartManyDependencyInjectionAsync()
     {
-        var builder = WebApplication.CreateBuilder();
+        var builder = WebApplication.CreateBuilder(WebBenchmarkHostConfiguration.CreateArguments());
         var mvc = builder.Services.AddControllers();
         mvc.AddApplicationPart(typeof(ManyInjected01Controller).Assembly);
         await builder.Services.AddApplicationAsync<AbpManyDependencyModule>();

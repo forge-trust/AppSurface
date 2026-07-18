@@ -9,6 +9,9 @@ projects. They measure:
 
 Benchmarks are compiled separately per library using conditional
 compilation, ensuring that only the code under test is loaded for each job.
+Every web benchmark host disables automatic reload of default JSON configuration files so file-watcher callbacks do not
+add unrelated timing or allocation noise. The same host argument is applied to AppSurface, Native ASP.NET Core, Carter,
+and ABP cases to keep framework comparisons symmetric.
 
 From the repository root, run them in release mode to get optimized measurements:
 
@@ -33,9 +36,7 @@ dotnet run -c Release --project benchmarks/AppSurfaceBenchmarks/AppSurfaceBenchm
 `Health_Disabled` is the baseline. `Health_Enabled` changes only
 `WebOptions.Health.Enabled`, so the comparison targets the optional health surface. The pair binds an
 ephemeral loopback port, avoiding conflicts with local services while keeping network behavior identical
-between cases. Configuration
-file reload is disabled for this pair so operating-system file-watcher callbacks do not contaminate
-the feature delta. Its dedicated job records one start/request/stop operation in each timed sample,
+between cases. Its dedicated job records one start/request/stop operation in each timed sample,
 avoiding invocation calibration that would combine multiple host lifecycles into one sample;
 [BenchmarkDotNet](https://benchmarkdotnet.org/) may run a separate diagnostic invocation to collect allocation
 data. This comparison

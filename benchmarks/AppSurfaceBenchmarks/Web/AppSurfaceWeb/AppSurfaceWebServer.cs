@@ -7,7 +7,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -71,16 +70,8 @@ public class AppSurfaceWebServer : IWebBenchmarkServer
             });
 
         // We need to create the host builder manually to get access to start/stop.
-        var context = new StartupContext([], new AppSurfaceBenchmarkModule());
+        var context = new StartupContext(WebBenchmarkHostConfiguration.CreateArguments(), new AppSurfaceBenchmarkModule());
         var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
-        if (healthEnabled.HasValue)
-        {
-            builder.ConfigureHostConfiguration(configuration =>
-                configuration.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["hostBuilder:reloadConfigOnChange"] = "false",
-                }));
-        }
 
         if (useEphemeralPort)
         {
@@ -121,7 +112,7 @@ public class AppSurfaceWebServer : IWebBenchmarkServer
             });
 
         // We need to create the host builder manually to get access to start/stop.
-        var context = new StartupContext([], new AppSurfaceBenchmarkModule());
+        var context = new StartupContext(WebBenchmarkHostConfiguration.CreateArguments(), new AppSurfaceBenchmarkModule());
         _host = ((IAppSurfaceStartup)startup).CreateHostBuilder(context).Build();
 
         await _host.StartAsync();
@@ -142,7 +133,7 @@ public class AppSurfaceWebServer : IWebBenchmarkServer
             });
 
         // We need to create the host builder manually to get access to start/stop.
-        var context = new StartupContext([], new AppSurfaceDependencyBenchmarkModule());
+        var context = new StartupContext(WebBenchmarkHostConfiguration.CreateArguments(), new AppSurfaceDependencyBenchmarkModule());
         _host = ((IAppSurfaceStartup)startup).CreateHostBuilder(context).Build();
 
         await _host.StartAsync();
@@ -159,7 +150,7 @@ public class AppSurfaceWebServer : IWebBenchmarkServer
                 };
             });
 
-        var context = new StartupContext([], new AppSurfaceManyDependencyBenchmarkModule());
+        var context = new StartupContext(WebBenchmarkHostConfiguration.CreateArguments(), new AppSurfaceManyDependencyBenchmarkModule());
         _host = ((IAppSurfaceStartup)startup).CreateHostBuilder(context).Build();
 
         await _host.StartAsync();
