@@ -39,7 +39,7 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Deployment` | public | publish | manifest evidence complete | None | None | None | [README](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) | [notes](../releases/v0.2.0-preview.4.md) |
 | AppSurface | `ForgeTrust.AppSurface.Deployment.GcpCloudRun` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Deployment` | `ForgeTrust.AppSurface.Deployment` | [README](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) | [notes](../releases/v0.2.0-preview.4.md) |
 | AppSurface | `ForgeTrust.AppSurface.Aspire` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Console`<br />`ForgeTrust.AppSurface.Deployment` | [README](../Aspire/ForgeTrust.AppSurface.Aspire/README.md) | [notes](../releases/v0.2.0-preview.4.md) |
-| AppSurface | `ForgeTrust.AppSurface.Aspire.Testing` | public | do not publish | blocked | Blocker: #642<br />Note: Aspire 13.4.4 leaks its partial host service provider when host construction fails after provider creation; publication remains blocked until the pinned dependency disposes or exposes that state.<br />Maintainer blocker #642 is set. | `ForgeTrust.AppSurface.Aspire` | `ForgeTrust.AppSurface.Aspire` | [README](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) | [notes](../releases/v0.2.0-preview.3.md) |
+| AppSurface | `ForgeTrust.AppSurface.Aspire.Testing` | public | do not publish | blocked | Blocker: #668<br />Note: Aspire 13.4.4 leaks its partial host service provider when host construction fails after provider creation; publication remains blocked until the pinned dependency disposes or exposes that state.<br />Maintainer blocker #668 is set. | `ForgeTrust.AppSurface.Aspire` | `ForgeTrust.AppSurface.Aspire` | [README](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) | [notes](../releases/v0.2.0-preview.3.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Config`<br />`ForgeTrust.AppSurface.Core` | [README](../Web/ForgeTrust.AppSurface.Web/README.md) | [notes](../releases/v0.2.0-preview.4.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web.Push` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Web` | [README](../Web/ForgeTrust.AppSurface.Web.Push/README.md) | [notes](../releases/v0.2.0-preview.4.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web.OpenApi` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Web` | [README](../Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) | [notes](../releases/v0.2.0-preview.4.md) |
@@ -61,7 +61,7 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Blocking evidence
 
-- `ForgeTrust.AppSurface.Aspire.Testing`: Maintainer blocker #642 is set. Fix: Resolve the linked issue or PR, then remove readiness_blocker from packages/package-index.yml.
+- `ForgeTrust.AppSurface.Aspire.Testing`: Maintainer blocker #668 is set. Fix: Resolve the linked issue or PR, then remove readiness_blocker from packages/package-index.yml.
 
 ## Maintainer workflow
 
