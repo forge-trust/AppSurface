@@ -279,6 +279,7 @@ packages:
     classification: public
     publish_decision: do_not_publish
     publish_reason: Public-preview source contract held until the PostgreSQL provider milestone supplies conformance and restore evidence.
+    readiness_note: Publication is held until the PostgreSQL provider milestone supplies conformance and restore evidence.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
@@ -300,6 +301,7 @@ packages:
     classification: public
     publish_decision: do_not_publish
     publish_reason: Public-preview source contract held until the PostgreSQL provider milestone supplies conformance and restore evidence.
+    readiness_note: Publication is held until the PostgreSQL provider milestone supplies conformance and restore evidence.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready

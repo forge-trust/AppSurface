@@ -22,6 +22,24 @@ The application package registers only passive registries. A provider is selecte
 contains no storage implementation, migrations, polling, scheduling execution, hosted service, endpoint, or telemetry
 implementation.
 
+## Scale and transport boundary
+
+PostgreSQL is the first planned authoritative provider, not the definition of AppSurface Durable. The adopter contracts
+describe accepted Work, Flow, Schedule, payload, and external-effect semantics without selecting a database, polling
+loop, queue, or broker. The Provider SPI likewise describes bounded activation and fenced execution without exposing a
+broker acknowledgement as durable truth.
+
+A deployment may evolve in two distinct ways:
+
+- a wake-only broker or notification may activate `IDurableRuntimePump`; the authoritative provider still discovers,
+  claims, fences, and completes eligible work, and a periodic pass remains the recovery path for lost notifications;
+- a future broker-backed provider may implement the Provider SPI directly when it can preserve the same acceptance,
+  revision, execution-identity, provider-effect, schedule, and recovery contracts.
+
+Slice 2 intentionally does not define a targeted broker-dispatch token or general event-bus API. Those shapes require a
+concrete broker and deployment need. Queue delivery alone must never authorize execution, prove completion, or replace
+the provider's authoritative history.
+
 The preview persists explicit Work and Flow decisions rather than arbitrary `async` stack state. It also makes no
 exactly-once claim for external effects. Provider safety, immutable execution identity, revision fences, and versioned
 command fingerprints make ambiguity observable and fail closed.
