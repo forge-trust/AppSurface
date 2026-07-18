@@ -82,6 +82,28 @@ public sealed class AppSurfacePwaHeadTagHelperTests
     }
 
     [Fact]
+    public void Process_WhenBadgingOnly_EmitsVersionedHelperWithoutWorkerMetadata()
+    {
+        var options = new PwaOptions();
+        options.Badging.Enabled = true;
+        var helper = new AppSurfacePwaHeadTagHelper(new StubFileVersionProvider(), options)
+        {
+            ViewContext = CreateViewContext("/tenant")
+        };
+        var output = CreateOutput();
+
+        helper.Process(CreateContext(), output);
+
+        var html = output.Content.GetContent();
+        Assert.DoesNotContain("rel=\"manifest\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("appsurface:pwa-service-worker", html, StringComparison.Ordinal);
+        Assert.Contains(
+            $"src=\"/tenant/_appsurface/pwa/badging.js?v={PwaScriptAssets.BadgingHelperVersion}\"",
+            html,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Process_PushMetadata_EncodesHostileValues()
     {
         var options = new PwaOptions();

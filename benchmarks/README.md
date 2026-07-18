@@ -9,6 +9,10 @@ projects. They measure:
 
 Benchmarks are compiled separately per library using conditional
 compilation, ensuring that only the code under test is loaded for each job.
+Every web benchmark job disables automatic reload of default JSON configuration files in its process environment so
+file-watcher callbacks do not add unrelated timing or allocation noise. AppSurface, Native ASP.NET Core, Carter, and ABP
+receive the same setting before timed host startup, keeping the framework comparisons symmetric without adding harness
+command-line parsing or a per-host argument-array allocation to the measurements.
 
 From the repository root, run them in release mode to get optimized measurements:
 
@@ -21,6 +25,26 @@ Run only the Flow benchmarks when investigating state-machine overhead:
 ```bash
 dotnet run -c Release --project benchmarks/AppSurfaceBenchmarks/AppSurfaceBenchmarks.csproj -- --filter "AppSurfaceBenchmarks.Flow.*"
 ```
+
+Measure the incremental cold-start and allocation cost of the
+[opt-in AppSurface Web health-check services and `/health` plus `/ready` endpoints](../Web/ForgeTrust.AppSurface.Web/README.md#health-and-readiness-probes)
+with a same-run A/B comparison:
+
+```bash
+dotnet run -c Release --project benchmarks/AppSurfaceBenchmarks/AppSurfaceBenchmarks.csproj -- --filter "*WebHealthColdStartBenchmarks*"
+```
+
+`Health_Disabled` is the baseline. `Health_Enabled` changes only
+`WebOptions.Health.Enabled`, so the comparison targets the optional health surface. The pair binds an
+ephemeral loopback port, avoiding conflicts with local services while keeping network behavior identical
+between cases. Its dedicated job records one start/request/stop operation in each timed sample,
+avoiding invocation calibration that would combine multiple host lifecycles into one sample;
+[BenchmarkDotNet](https://benchmarkdotnet.org/) may run a separate diagnostic invocation to collect allocation
+data. This comparison
+measures the combined cost of health-check service registration and endpoint mapping; it does not
+attribute that cost to either operation individually. Because every sample creates a complete host,
+small timing and allocation deltas can fall within cold-start variance; treat them as attributable only
+when their direction and magnitude remain stable across repeated runs.
 
 The Flow benchmark is synthetic runner-overhead evidence. It compares the
 in-memory runner with a direct lower-bound loop so changes to routing,

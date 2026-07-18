@@ -14,15 +14,23 @@ internal static class PwaStaticFileShadowValidator
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(webRootFileProvider);
 
-        if (!options.IsWorkerEnabled)
+        if (!options.HasAnyGeneratedScriptRoute)
         {
             return;
         }
 
-        ThrowIfFileExists(webRootFileProvider, options.Worker.ServiceWorkerPath, "service worker");
+        if (options.IsWorkerEnabled)
+        {
+            ThrowIfFileExists(webRootFileProvider, options.Worker.ServiceWorkerPath, "service worker");
+        }
+
         if (options.Push.Enabled)
         {
             ThrowIfFileExists(webRootFileProvider, options.Worker.RegistrationHelperPath, "registration helper");
+        }
+        if (options.Badging.Enabled)
+        {
+            ThrowIfFileExists(webRootFileProvider, options.Badging.HelperPath, "badging helper");
         }
     }
 

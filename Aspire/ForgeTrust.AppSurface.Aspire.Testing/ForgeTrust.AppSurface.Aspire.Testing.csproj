@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageDescription>Deterministic typed AppSurface Aspire profile testing without invoking an AppHost entry point.</PackageDescription>
+    <PackageTags>appsurface;dotnet;aspire;testing;apphost</PackageTags>
+    <!-- Required to implement the complete Aspire 13.4.4 testing-builder interface. -->
+    <NoWarn>$(NoWarn);ASPIREPIPELINES001;ASPIREFILESYSTEM001;ASPIREUSERSECRETS001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Keep the delegated Aspire 13.4.4 builder contract exact for package consumers. -->
+    <PackageReference Include="Aspire.Hosting" VersionOverride="[13.4.4]" />
+    <PackageReference Include="Aspire.Hosting.AppHost" VersionOverride="[13.4.4]" />
+    <PackageReference Include="Aspire.Hosting.Testing" VersionOverride="[13.4.4]" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Testing.Tests" />
+  </ItemGroup>
+
+</Project>

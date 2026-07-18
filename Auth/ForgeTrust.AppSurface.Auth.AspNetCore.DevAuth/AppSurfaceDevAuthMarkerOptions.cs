@@ -65,8 +65,9 @@ public sealed class AppSurfaceDevAuthMarkerOptions
     /// Gets or sets the local URL to return to after a marker persona mutation.
     /// </summary>
     /// <remarks>
-    /// Leave this unset to return to the current request path and query. External URLs, protocol-relative URLs, and
-    /// backslash-prefixed URLs are ignored by the DevAuth endpoints.
+    /// Leave this unset to return to the current request path and query. The marker normalizes blank, non-rooted,
+    /// external, protocol-relative, backslash-containing, and control-character values to the site root before
+    /// constructing its mutation actions.
     /// </remarks>
     public string? ReturnUrl { get; set; }
 }

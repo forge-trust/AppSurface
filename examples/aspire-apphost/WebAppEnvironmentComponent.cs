@@ -11,7 +11,8 @@ namespace AspireAppHostExample;
 /// This component demonstrates component composition by resolving
 /// <see cref="WebAppProjectComponent"/> instead of creating the project resource
 /// directly. It sets <c>APPSURFACE_ASPIRE_EXAMPLE=local</c> for the local AppHost
-/// run and may replace an existing value with the same environment variable name.
+/// run, may replace an existing value with the same environment variable name, and exposes the project's HTTP endpoint
+/// for readiness and client-based Aspire tests.
 /// </remarks>
 public sealed class WebAppEnvironmentComponent : IAspireComponent<ProjectResource>
 {
@@ -36,5 +37,6 @@ public sealed class WebAppEnvironmentComponent : IAspireComponent<ProjectResourc
         AspireStartupContext context,
         IDistributedApplicationBuilder appBuilder) =>
         context.Resolve(_webApp)
-            .WithEnvironment("APPSURFACE_ASPIRE_EXAMPLE", "local");
+            .WithEnvironment("APPSURFACE_ASPIRE_EXAMPLE", "local")
+            .WithHttpEndpoint();
 }

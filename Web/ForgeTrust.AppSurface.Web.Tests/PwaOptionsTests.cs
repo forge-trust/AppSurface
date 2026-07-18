@@ -41,9 +41,11 @@ public sealed class PwaOptionsTests
         Assert.Equal("/manifest.webmanifest", options.ManifestPath);
         Assert.False(options.Offline.Enabled);
         Assert.False(options.Push.Enabled);
+        Assert.False(options.Badging.Enabled);
         Assert.Equal("/service-worker.js", options.Worker.ServiceWorkerPath);
         Assert.Equal("/service-worker.js", options.Offline.ServiceWorkerPath);
         Assert.Equal("/_appsurface/pwa/register.js", options.Worker.RegistrationHelperPath);
+        Assert.Equal("/_appsurface/pwa/badging.js", options.Badging.HelperPath);
     }
 
     [Fact]
@@ -78,6 +80,21 @@ public sealed class PwaOptionsTests
         options.Push.HandlerScriptPath = handlerScriptPath;
 
         Assert.Equal(expected, options.RequiresStaticFileMiddleware);
+    }
+
+    [Fact]
+    public void BadgingOnly_ActivatesSurfaceAndGeneratedRouteWithoutWorkerOrStaticFiles()
+    {
+        var options = new PwaOptions();
+        options.Badging.Enabled = true;
+
+        Assert.True(options.HasAnySurfaceEnabled);
+        Assert.True(options.HasAnyGeneratedScriptRoute);
+        Assert.False(options.IsWorkerEnabled);
+        Assert.False(options.RequiresStaticFileMiddleware);
+        Assert.DoesNotContain(
+            PwaOptionsValidator.Validate(options),
+            diagnostic => diagnostic.Severity == PwaDiagnosticSeverity.Error);
     }
 
     [Fact]
@@ -171,7 +188,9 @@ public sealed class PwaOptionsTests
                 ["Worker:RegistrationHelperPath"] = "/workers/register.js",
                 ["Offline:ServiceWorkerPath"] = "/workers/app.js",
                 ["Push:Enabled"] = "true",
-                ["Push:HandlerScriptPath"] = "/workers/push.js"
+                ["Push:HandlerScriptPath"] = "/workers/push.js",
+                ["Badging:Enabled"] = "true",
+                ["Badging:HelperPath"] = "/runtime/badging.js"
             });
 
         Assert.Equal("/workers/app.js", options.Worker.ServiceWorkerPath);
@@ -179,6 +198,8 @@ public sealed class PwaOptionsTests
         Assert.Equal("/workers/register.js", options.Worker.RegistrationHelperPath);
         Assert.True(options.Push.Enabled);
         Assert.Equal("/workers/push.js", options.Push.HandlerScriptPath);
+        Assert.True(options.Badging.Enabled);
+        Assert.Equal("/runtime/badging.js", options.Badging.HelperPath);
         Assert.Null(Record.Exception(() => PwaOptionsValidator.ThrowIfInvalid(options)));
     }
 
@@ -229,6 +250,7 @@ public sealed class PwaOptionsTests
     [InlineData("helper", "/register.js?version=1", "ASPWA021")]
     [InlineData("helper", "/register/%66oo.js", "ASPWA021")]
     [InlineData("handler", "/%2e%2e/custom.js", "ASPWA022")]
+    [InlineData("badging", "/badging.js?v=1", "ASPWA027")]
     public void ThrowIfInvalid_RejectsUnsafeWorkerPaths(string target, string path, string expectedCode)
     {
         var options = new PwaOptions();
@@ -241,8 +263,12 @@ public sealed class PwaOptionsTests
             case "helper":
                 options.Worker.RegistrationHelperPath = path;
                 break;
-            default:
+            case "handler":
                 options.Push.HandlerScriptPath = path;
+                break;
+            default:
+                options.Badging.Enabled = true;
+                options.Badging.HelperPath = path;
                 break;
         }
 
@@ -257,6 +283,18 @@ public sealed class PwaOptionsTests
         var options = new PwaOptions();
         options.Push.Enabled = true;
         options.Worker.ServiceWorkerPath = "/_APPSURFACE/pwa/register.js/";
+
+        var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
+
+        Assert.Contains("ASPWA023", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThrowIfInvalid_RejectsBadgingRouteCollision()
+    {
+        var options = new PwaOptions();
+        options.Badging.Enabled = true;
+        options.Badging.HelperPath = options.DiagnosticsPath;
 
         var exception = Assert.Throws<InvalidOperationException>(() => PwaOptionsValidator.ThrowIfInvalid(options));
 

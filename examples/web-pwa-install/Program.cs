@@ -1,5 +1,25 @@
+using System.Security.Cryptography;
+using System.Text.Json;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Web;
+
+if (args.Contains("--generate-vapid-keys", StringComparer.Ordinal))
+{
+    using var algorithm = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+    var parameters = algorithm.ExportParameters(true);
+    var publicKey = new byte[65];
+    publicKey[0] = 4;
+    parameters.Q.X!.CopyTo(publicKey, 1);
+    parameters.Q.Y!.CopyTo(publicKey, 33);
+    static string Encode(byte[] value) => Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    Console.WriteLine(JsonSerializer.Serialize(new
+    {
+        publicKey = Encode(publicKey),
+        privateKey = Encode(parameters.D!),
+        warning = "Store the private key in user-secrets or environment configuration; never commit it.",
+    }, new JsonSerializerOptions { WriteIndented = true }));
+    return;
+}
 
 await WebApp<WebPwaInstallModule>.RunAsync(
     args,
@@ -20,6 +40,7 @@ await WebApp<WebPwaInstallModule>.RunAsync(
         options.Pwa.Offline.OfflineFallbackPath = "/offline.html";
         options.Pwa.Offline.StaticAssetPaths = ["/icons/app-192.svg", "/icons/app-512.svg", "/offline.html"];
         options.Pwa.Push.Enabled = true;
+        options.Pwa.Badging.Enabled = true;
         // docs:snippet web-pwa-options:end
 
         options.MapEndpoints = endpoints =>
@@ -71,10 +92,11 @@ internal sealed class WebPwaInstallModule : IAppSurfaceWebModule
     /// Configures the host before AppSurface builds the service collection.
     /// </summary>
     /// <remarks>
-    /// This hook is intentionally empty; host-level PWA settings are configured in the startup options delegate.
+    /// Registers the development-only Web Push proof before host services are built.
     /// </remarks>
     public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
     {
+        WebPushProof.ConfigureHost(context, builder);
     }
 
     /// <summary>
@@ -86,4 +108,19 @@ internal sealed class WebPwaInstallModule : IAppSurfaceWebModule
     public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
     {
     }
+
+    /// <inheritdoc />
+    public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicationBuilder app)
+    {
+        if (context.IsDevelopment
+            && app.ApplicationServices.GetRequiredService<WebPushProofState>().Enabled)
+        {
+            app.UseAuthentication();
+            app.UseAuthorization();
+        }
+    }
+
+    /// <inheritdoc />
+    public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints) =>
+        WebPushProof.MapEndpoints(context, endpoints);
 }

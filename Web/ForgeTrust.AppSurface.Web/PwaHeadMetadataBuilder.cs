@@ -45,6 +45,14 @@ internal static class PwaHeadMetadataBuilder
             }
         }
 
+        if (options.Badging.Enabled)
+        {
+            var helperPath = PwaPathBase.Add(pathBase, options.Badging.HelperPath);
+            builder.Append("<script defer src=\"");
+            builder.Append(Escape($"{helperPath}?v={PwaScriptAssets.BadgingHelperVersion}"));
+            builder.AppendLine("\"></script>");
+        }
+
         return builder.ToString().TrimEnd();
     }
 

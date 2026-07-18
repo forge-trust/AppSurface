@@ -37,17 +37,30 @@ The base class for the application bootstrapping logic. While `WebApp` uses a ge
 
 ## Features
 
+### PWA application badging
+
+AppSurface Web includes a default-off, privacy-safe browser rail for application-icon badge requests:
+
+```csharp
+options.Pwa.Badging.Enabled = true;
+```
+
+With `<appsurface:pwa-head />` in the page head, applications can call `AppSurface.Pwa.badging.set(count)` or `.clear()`. Successful calls resolve to `"accepted"` or `"unsupported"`; invalid counts and native failures reject with sanitized `ASPWAJS040`–`ASPWAJS042` errors. `"accepted"` means only that the native request resolved and never proves a visible icon badge. When offline or push already activates the shared worker, the same API is installed in that worker after normal service-worker activation. Badging alone does not create a worker, own an attention count, request permission, change the push payload, or add CLI verification.
+
+Start with the [PWA badging quick start](Docs/pwa-install.md#badging-only), then use the [executable accessible proof](../../examples/web-pwa-install/README.md). The full guide documents configuration, sanitized `ASPWAJS040`–`042` failures, PathBase, activation lag, privacy boundaries, and unsupported-browser behavior.
+
 ### Health and Readiness Probes
 
-AppSurface Web maps public platform probe endpoints by default:
+AppSurface Web can map public platform probe endpoints when a host explicitly enables them:
 
 - `/health` runs every registered ASP.NET Core health check.
 - `/ready` runs only checks tagged with `AppSurfaceHealthCheckTags.Ready`.
 
 Both endpoints return minimal plain-text aggregate status (`Healthy`, `Degraded`, or `Unhealthy`), set no-store headers,
 and return `200` only for `Healthy`. `Degraded` and `Unhealthy` return `503` so Kubernetes, Aspire, Docker, and similar
-platforms can remove an instance from traffic. The endpoints are excluded from API Explorer/OpenAPI by default because
-they are platform probes, not application API operations.
+platforms can remove an instance from traffic. They are disabled by default so apps that do not consume platform probes
+avoid health-check service registration and endpoint-mapping cost. When enabled, the endpoints are excluded from API
+Explorer/OpenAPI because they are platform probes, not application API operations.
 
 If no checks are tagged with `AppSurfaceHealthCheckTags.Ready`, `/ready` reports `Healthy` once the web app has started.
 Add ready-tagged checks for dependencies that must be available before the app receives traffic.
@@ -63,6 +76,11 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 public sealed class MyRootModule : IAppSurfaceWebModule
 {
+    public void ConfigureWebOptions(StartupContext context, WebOptions options)
+    {
+        options.Health.Enabled = true;
+    }
+
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
         services.AddHealthChecks()
@@ -74,7 +92,7 @@ public sealed class MyRootModule : IAppSurfaceWebModule
 }
 ```
 
-Run the app and verify the default routes:
+Run the app and verify the configured default routes:
 
 ```bash
 curl -i http://127.0.0.1:5000/health
@@ -99,21 +117,23 @@ readinessProbe:
   timeoutSeconds: 2
 ```
 
-Customize or disable the routes through `WebOptions.Health`:
+Enable and optionally customize the routes through `WebOptions.Health`:
 
 ```csharp
 await WebApp<MyRootModule>.RunAsync(
     args,
     options =>
     {
+        options.Health.Enabled = true;
         options.Health.HealthPath = "/internal/live";
         options.Health.ReadyPath = "/internal/ready";
-        // options.Health.Enabled = false; // Use this when the host owns probe endpoints directly.
     });
 ```
 
 Important behavior:
 
+- `Enabled` defaults to `false`. Set it to `true` only when deployment or monitoring infrastructure consumes the probes.
+- One flag controls both endpoints. AppSurface does not register health-check services or map either route while disabled.
 - Probe paths must be app-root-relative paths without route parameters, query strings, fragments, whitespace, or
   traversal segments.
 - `HealthPath` and `ReadyPath` must be distinct after normalization.
@@ -321,7 +341,7 @@ stable event, canary name, diagnostic code, and exception type.
 
 ### PWA Install and Push-Worker Foundation
 
-AppSurface Web provides independent [PWA install, offline, and push-worker capabilities](Docs/pwa-install.md) from `WebOptions.Pwa`: a manifest endpoint, MVC/Razor head tags, development diagnostics, an explicit starter offline strategy, safe default notification handlers, and an inert registration helper. Every capability is disabled by default. Enabling push does not request permission, create a subscription, choose recipients, or send a notification.
+AppSurface Web provides independent [PWA install, offline, and push-worker capabilities](Docs/pwa-install.md) from `WebOptions.Pwa`: a manifest endpoint, MVC/Razor head tags, development diagnostics, an explicit starter offline strategy, safe default notification handlers, and an inert registration helper. Every capability is disabled by default. Enabling push does not request permission, create a subscription, choose recipients, or send a notification. Add the optional [`ForgeTrust.AppSurface.Web.Push`](../ForgeTrust.AppSurface.Web.Push/README.md) package for protected subscription intake, VAPID, encrypted one-attempt sending, and stale-subscription cleanup while retaining app-owned custody and product policy.
 
 #### 3-minute PWA install path
 

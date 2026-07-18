@@ -34,9 +34,10 @@ curl http://127.0.0.1:5061/readiness.md
 ```
 
 The lab-local `/readiness` and `/readiness.md` routes return the evaluator report. They are not the reusable AppSurface
-Web platform probes. Normal AppSurface web apps get default `/health` and `/ready` probes from
-`ForgeTrust.AppSurface.Web`; use ready-tagged ASP.NET Core health checks when deployment traffic must wait for a
-startup-critical dependency.
+Web platform probes. Apps can explicitly enable `/health` and `/ready` by setting
+`WebOptions.Health.Enabled = true` as described in the [canonical probe configuration](../../Web/ForgeTrust.AppSurface.Web/README.md#health-and-readiness-probes)
+when deployment infrastructure consumes them; use ready-tagged ASP.NET Core health checks when deployment traffic must
+wait for a startup-critical dependency.
 
 Run the Aspire AppHost with local Postgres:
 
