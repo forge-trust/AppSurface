@@ -122,9 +122,40 @@ public sealed class PostgreSqlDurableWorkStoreTests
 
         var completedTransaction = await connection.BeginTransactionAsync();
         await completedTransaction.CommitAsync();
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await writer.EnqueueAsync(completedTransaction, CreateRequest("scope-a", "command-completed")));
         await completedTransaction.DisposeAsync();
+        var inactive = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await writer.EnqueueAsync(completedTransaction, CreateRequest("scope-a", "command-completed")));
+        Assert.Contains("not active on an open connection", inactive.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TransactionWriter_RejectsProviderSafetyThatDiffersFromRegistration()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var writer = CreateWriter(database.DataSource, epoch);
+        var registered = CreateRequest("scope-safety", "command-safety");
+        var mismatched = new DurableWorkRequest(
+            registered.ScopeId,
+            registered.CommandId,
+            registered.IdempotencyKey,
+            registered.WorkName,
+            registered.WorkVersion,
+            registered.Payload,
+            DurableProviderSafety.ManualResolution,
+            registered.RetryPolicy,
+            registered.DueAtUtc);
+        await using var connection = await database.DataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await writer.EnqueueAsync(transaction, mismatched));
+
+        Assert.Contains("provider-safety mode does not match", exception.Message, StringComparison.Ordinal);
+        await using var stillUsable = new NpgsqlCommand("SELECT 1;", connection, transaction);
+        Assert.Equal(1, (int)(await stillUsable.ExecuteScalarAsync())!);
+        await transaction.RollbackAsync();
     }
 
     [Fact]
@@ -464,6 +495,11 @@ public sealed class PostgreSqlDurableWorkStoreTests
                 ExpectedState: DurableWorkState.Suspended,
                 PersistedState: "suspended_contract_unavailable",
                 EventType: "completion_contract_unavailable"),
+            (
+                Kind: PostgreSqlWorkCompletionKind.AmbiguousExternalOutcome,
+                ExpectedState: DurableWorkState.Suspended,
+                PersistedState: "suspended_ambiguous_external_outcome",
+                EventType: "completion_ambiguous_external_outcome"),
         };
 
         for (var index = 0; index < cases.Length; index++)
@@ -495,6 +531,82 @@ public sealed class PostgreSqlDurableWorkStoreTests
                     accepted.WorkId,
                     cases[index].EventType));
         }
+    }
+
+    [Fact]
+    public async Task CompletionForMissingWorkReturnsSuspendedStaleObservation()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var client = CreateClient(database.DataSource, epoch);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var request = CreateRequest("scope-missing-completion", "command-missing-completion");
+        await client.EnqueueAsync(request);
+        var claim = await store.TryClaimAsync(Assert.Single(await store.DiscoverAsync(1)), "completion-worker");
+
+        var result = await store.RecordCompletionAsync(
+            claim! with { WorkId = new DurableWorkId("missing-work") },
+            new PostgreSqlWorkCompletion(PostgreSqlWorkCompletionKind.Retry, "transient_failure", "{}"));
+
+        Assert.Equal(PostgreSqlWorkObservationOutcome.StaleObservation, result.Outcome);
+        Assert.Equal(DurableWorkState.Suspended, result.State);
+        Assert.Equal(claim.Revision, result.Revision);
+        Assert.Null(result.NextDueAtUtc);
+    }
+
+    [Fact]
+    public async Task WorkStore_RejectsInvalidCompletionAndProtocolInputsBeforeMutation()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var client = CreateClient(database.DataSource, epoch);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var request = CreateRequest("scope-invalid-input", "command-invalid-input");
+        await client.EnqueueAsync(request);
+        var claim = await store.TryClaimAsync(Assert.Single(await store.DiscoverAsync(1)), "validation-worker");
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await store.RecordCompletionAsync(
+                claim!,
+                new PostgreSqlWorkCompletion((PostgreSqlWorkCompletionKind)int.MaxValue, "invalid-kind", "{}")));
+        foreach (var invalidCode in new[] { "", new string('x', 201), "control\u0001code" })
+        {
+            await Assert.ThrowsAsync<ArgumentException>(async () =>
+                await store.RecordCompletionAsync(
+                    claim!,
+                    new PostgreSqlWorkCompletion(PostgreSqlWorkCompletionKind.Retry, invalidCode, "{}")));
+        }
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await store.RecordCompletionAsync(
+                claim!,
+                new PostgreSqlWorkCompletion(PostgreSqlWorkCompletionKind.Retry, "invalid-json-shape", "[]")));
+        var oversizedDetails = "{\"value\":\"" + new string('x', 16_384) + "\"}";
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await store.RecordCompletionAsync(
+                claim!,
+                new PostgreSqlWorkCompletion(PostgreSqlWorkCompletionKind.Retry, "oversized-json", oversizedDetails)));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await store.DisableScopeAsync(request.ScopeId, "tests", "invalid-generation", expectedGeneration: 0));
+
+        var unsupportedPolicy = new DurableWorkRetryPolicy(
+            maximumAttempts: 3,
+            maximumElapsedTime: TimeSpan.FromHours(1),
+            initialRetryDelay: TimeSpan.FromSeconds(1),
+            maximumRetryDelay: TimeSpan.FromMinutes(1),
+            leaseDuration: TimeSpan.FromMinutes(2),
+            renewalCadence: TimeSpan.FromSeconds(30),
+            maximumLeaseLifetime: TimeSpan.FromMinutes(10),
+            backoffAlgorithm: "linear-v1");
+        var unsupportedRequest = CreateRequest(
+            "scope-unsupported-retry",
+            "command-unsupported-retry",
+            retryPolicy: unsupportedPolicy);
+        var unsupported = await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            await client.EnqueueAsync(unsupportedRequest));
+        Assert.Contains("linear-v1", unsupported.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -792,9 +904,13 @@ public sealed class PostgreSqlDurableWorkStoreTests
             "operator-test",
             "account_closed",
             expectedGeneration: 1);
+        var refusedClaim = await store.TryClaimAsync(fencedCandidate, "worker-after-disable");
+        var refusedRenewal = await store.RenewLeaseAsync(fencedClaim!);
         var refusedPermit = await store.TryAcquireEffectPermitAsync(fencedClaim!);
         Assert.Equal(PostgreSqlScopeMutationOutcome.Applied, disabled.Outcome);
         Assert.Equal(2, disabled.Generation);
+        Assert.Null(refusedClaim);
+        Assert.Null(refusedRenewal);
         Assert.Null(refusedPermit);
         var staleDisable = await store.DisableScopeAsync(
             fenced.ScopeId,

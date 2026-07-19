@@ -64,6 +64,7 @@ public sealed class DurableSchemaContractTests
 
         var script = manager.GenerateScript();
         var pendingOnly = manager.GenerateScript(1);
+        var current = manager.GenerateScript(PostgreSqlDurableRuntimeSchemaManager.RequiredVersion);
 
         Assert.True(
             script.IndexOf("0001_work_shared", StringComparison.Ordinal)
@@ -71,6 +72,7 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("pg_advisory_lock", script, StringComparison.Ordinal);
         Assert.DoesNotContain("0001_work_shared", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0002_forced_rls", pendingOnly, StringComparison.Ordinal);
+        Assert.DoesNotContain("-- Migration", current, StringComparison.Ordinal);
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(3));
     }
@@ -102,7 +104,15 @@ public sealed class DurableSchemaContractTests
         await Assert.ThrowsAsync<ArgumentException>(async () =>
             await manager.RotateRuntimeEpochAsync(Guid.Empty, epoch, "deploy", "restore"));
         await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await manager.RotateRuntimeEpochAsync(epoch, Guid.Empty, "deploy", "restore"));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
             await manager.RotateRuntimeEpochAsync(epoch, epoch, "deploy", "restore"));
+    }
+
+    [Fact]
+    public void SchemaManager_RequiresDataSource()
+    {
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableRuntimeSchemaManager(null!));
     }
 
     [Fact]

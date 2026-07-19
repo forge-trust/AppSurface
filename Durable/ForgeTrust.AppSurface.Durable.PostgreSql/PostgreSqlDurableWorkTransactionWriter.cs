@@ -34,7 +34,19 @@ public sealed class PostgreSqlDurableWorkTransactionWriter : IDurableWorkTransac
     {
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(request);
-        if (transaction.Connection is not { State: ConnectionState.Open } connection)
+        NpgsqlConnection? connection;
+        try
+        {
+            connection = transaction.Connection;
+        }
+        catch (ObjectDisposedException exception)
+        {
+            throw new InvalidOperationException(
+                "The supplied Npgsql transaction is not active on an open connection. Pass the exact uncommitted domain transaction.",
+                exception);
+        }
+
+        if (connection is not { State: ConnectionState.Open })
         {
             throw new InvalidOperationException(
                 "The supplied Npgsql transaction is not active on an open connection. Pass the exact uncommitted domain transaction.");

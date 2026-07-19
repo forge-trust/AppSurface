@@ -784,6 +784,15 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         var recoveryScope = new DurableScopeId("operator-recovery");
         var recoveryRequest = Request(recoveryScope, replaySafe, "recovery");
         var recoveryAccepted = (await client.EnqueueAsync(recoveryRequest)).Value!;
+        var prematureRelease = await operators.ReleaseAfterRecoveryAsync(new DurableWorkRecoveryReleaseRequest(
+            recoveryScope,
+            recoveryAccepted.WorkId,
+            new DurableCommandId("operator-premature-recovery-command"),
+            "operator-test",
+            "premature-release",
+            recoveryAccepted.Revision));
+        Assert.False(prematureRelease.IsSuccess);
+        Assert.Equal(DurableProblemCodes.OperatorTransitionRejected, prematureRelease.Problem!.Code);
         var nextEpoch = Guid.NewGuid();
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.RotateRuntimeEpochAsync(epoch, nextEpoch, "operator-test", "restore");
@@ -1177,6 +1186,34 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         var resumed = await operators.ReconcileAsync(reconcileRequest);
         Assert.True(resumed.IsSuccess);
         Assert.Equal(1, reconcile.ReconciliationCount);
+
+        var mismatchScope = new DurableScopeId("operator-typed-safety-mismatch");
+        var mismatchAccepted = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, reconcile, mismatchScope, "typed-safety-mismatch");
+        var mismatchRevision = await ForceStateAsync(
+            database.DataSource,
+            mismatchScope,
+            mismatchAccepted.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+        var mismatchedRegistration = new OperatorRegistration(
+            reconcile.WorkName,
+            DurableProviderSafety.ProviderKeyed,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Unknown, null));
+        var mismatched = await new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource,
+            new DurableWorkRegistry([mismatchedRegistration]),
+            NullServices.Instance,
+            epoch).ReconcileAsync(new DurableWorkReconcileRequest(
+                mismatchScope,
+                mismatchAccepted.WorkId,
+                new DurableCommandId("operator-typed-safety-mismatch-command"),
+                "operator-test",
+                "provider-proof",
+                mismatchRevision));
+        Assert.False(mismatched.IsSuccess);
+        Assert.Equal(DurableProblemCodes.OperatorTransitionRejected, mismatched.Problem!.Code);
+        Assert.Equal(0, mismatchedRegistration.ReconciliationCount);
 
         var manualScope = new DurableScopeId("operator-typed-proof");
         var manualAccepted = await AcceptAndPermitAsync(

@@ -15,6 +15,8 @@ public interface IDurableWorkTransactionWriter
     /// <param name="request">Validated Work request.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The stable new or duplicate acceptance, or an actionable domain problem.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="transaction"/> or <paramref name="request"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the transaction is disposed, inactive, closed, or targets a different PostgreSQL store.</exception>
     ValueTask<DurableOperationResult<DurableWorkAcceptance>> EnqueueAsync(
         NpgsqlTransaction transaction,
         DurableWorkRequest request,

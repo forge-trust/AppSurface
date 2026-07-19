@@ -20,8 +20,11 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var manager = new PostgreSqlDurableRuntimeSchemaManager(dataSource);
 
         var missing = await manager.GetStatusAsync();
+        var missingEpoch = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(async () =>
+            await manager.InitializeRuntimeEpochAsync(Guid.NewGuid(), "tests", "initial"));
         var first = await manager.ApplyAsync();
         var compatible = await manager.GetStatusAsync();
+        await manager.ValidateAsync();
         var second = await manager.ApplyAsync();
         var initialEpoch = Guid.NewGuid();
         var activation = await manager.InitializeRuntimeEpochAsync(initialEpoch, "tests", "initial");
@@ -34,6 +37,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var afterStaleRotation = await manager.GetStatusAsync();
 
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missingEpoch.Status.Compatibility);
         Assert.Equal([1, 2], first.AppliedVersions);
         Assert.Empty(second.AppliedVersions);
         Assert.True(compatible.IsCompatible);
