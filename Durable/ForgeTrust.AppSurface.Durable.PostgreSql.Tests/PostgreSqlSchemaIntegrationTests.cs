@@ -1,0 +1,286 @@
+using Npgsql;
+using Testcontainers.PostgreSql;
+
+namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
+
+public sealed class PostgreSqlSchemaIntegrationTests
+{
+    private const long MigrationAdvisoryLock = 4_707_181_168_775_217_740;
+
+    [Fact]
+    public async Task ApplyStatusInitializeRotate_AreExplicitAndIdempotent()
+    {
+        await using var container = new PostgreSqlBuilder("postgres:17.5")
+            .WithDatabase("appsurface_durable")
+            .WithUsername("appsurface")
+            .WithPassword("appsurface-test-password")
+            .Build();
+        await container.StartAsync();
+        await using var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(dataSource);
+
+        var missing = await manager.GetStatusAsync();
+        var first = await manager.ApplyAsync();
+        var compatible = await manager.GetStatusAsync();
+        var second = await manager.ApplyAsync();
+        var initialEpoch = Guid.NewGuid();
+        var activation = await manager.InitializeRuntimeEpochAsync(initialEpoch, "tests", "initial");
+        var afterActivation = await manager.GetStatusAsync();
+        var nextEpoch = Guid.NewGuid();
+        var rotation = await manager.RotateRuntimeEpochAsync(initialEpoch, nextEpoch, "tests", "restore");
+        var afterRotation = await manager.GetStatusAsync();
+
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
+        Assert.Equal([1, 2], first.AppliedVersions);
+        Assert.Empty(second.AppliedVersions);
+        Assert.True(compatible.IsCompatible);
+        Assert.NotEqual(Guid.Empty, compatible.StoreId);
+        Assert.Null(compatible.ActiveRuntimeEpoch);
+        Assert.Equal(initialEpoch, activation.ActiveEpoch);
+        Assert.Equal(initialEpoch, afterActivation.ActiveRuntimeEpoch);
+        Assert.Equal(nextEpoch, rotation.ActiveEpoch);
+        Assert.Equal(nextEpoch, afterRotation.ActiveRuntimeEpoch);
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await manager.InitializeRuntimeEpochAsync(Guid.NewGuid(), "tests", "duplicate"));
+    }
+
+    [Fact]
+    public async Task ModifiedMigrationHistory_FailsClosed()
+    {
+        await using var container = new PostgreSqlBuilder("postgres:17.5")
+            .WithDatabase("appsurface_durable")
+            .WithUsername("appsurface")
+            .WithPassword("appsurface-test-password")
+            .Build();
+        await container.StartAsync();
+        await using var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(dataSource);
+        await manager.ApplyAsync();
+        await using (var command = dataSource.CreateCommand(
+            "UPDATE appsurface_durable.schema_migration SET sha256 = repeat('0', 64) WHERE version = 1;"))
+        {
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var status = await manager.GetStatusAsync();
+        var exception = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(async () => await manager.ValidateAsync());
+
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Inconsistent, status.Compatibility);
+        Assert.Equal(status.Compatibility, exception.Status.Compatibility);
+        Assert.Equal(status.InstalledVersion, exception.Status.InstalledVersion);
+        Assert.Equal(status.Problem, exception.Status.Problem);
+    }
+
+    [Fact]
+    public async Task ConcurrentApply_SerializesAndRecordsEachMigrationOnce()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var first = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var second = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+
+        var results = await Task.WhenAll(first.ApplyAsync().AsTask(), second.ApplyAsync().AsTask())
+            .WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal([1, 2], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
+        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2]));
+        Assert.Contains(results, result => result.AppliedVersions.Count == 0);
+        await using var count = database.DataSource.CreateCommand(
+            "SELECT count(*) FROM appsurface_durable.schema_migration;");
+        Assert.Equal(2, (long)(await count.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task ApplyCancellationWhileWaitingForLock_DoesNotLeakLockAndCanRetry()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", blocker))
+        {
+            acquire.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await acquire.ExecuteNonQueryAsync();
+        }
+
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await manager.ApplyAsync(cancellation.Token));
+
+        await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
+        {
+            release.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await release.ExecuteNonQueryAsync();
+        }
+
+        var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal([1, 2], applied.AppliedVersions);
+    }
+
+    [Fact]
+    public async Task EpochActivation_WaitsForTheSchemaAdvisoryLock()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await manager.ApplyAsync();
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", blocker))
+        {
+            acquire.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await acquire.ExecuteNonQueryAsync();
+        }
+
+        var epoch = Guid.NewGuid();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await manager.InitializeRuntimeEpochAsync(epoch, "tests", "initial", cancellation.Token));
+        await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
+        {
+            release.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await release.ExecuteNonQueryAsync();
+        }
+
+        var activated = await manager.InitializeRuntimeEpochAsync(epoch, "tests", "initial");
+        Assert.Equal(epoch, activated.ActiveEpoch);
+    }
+
+    [Fact]
+    public async Task ApplyConnectionLossWhileWaitingForLock_CanRecoverOnANewSession()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", blocker))
+        {
+            acquire.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await acquire.ExecuteNonQueryAsync();
+        }
+
+        var applicationName = $"slice3-loss-{Guid.NewGuid():N}";
+        var managerConnection = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            ApplicationName = applicationName,
+        };
+        await using var managerDataSource = NpgsqlDataSource.Create(managerConnection.ConnectionString);
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(managerDataSource);
+        var apply = manager.ApplyAsync().AsTask();
+        var backendPid = await WaitForBackendAsync(database.DataSource, applicationName);
+        await using (var terminate = database.DataSource.CreateCommand("SELECT pg_terminate_backend(@pid);"))
+        {
+            terminate.Parameters.AddWithValue("pid", backendPid);
+            Assert.True((bool)(await terminate.ExecuteScalarAsync())!);
+        }
+
+        await Assert.ThrowsAnyAsync<NpgsqlException>(async () =>
+            await apply.WaitAsync(TimeSpan.FromSeconds(30)));
+        await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
+        {
+            release.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await release.ExecuteNonQueryAsync();
+        }
+
+        var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal([1, 2], applied.AppliedVersions);
+    }
+
+    [Fact]
+    public async Task ApplyConnectionLossAfterAcquiringLock_PreservesFailureAndCanRetry()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var initialManager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await initialManager.ApplyAsync();
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using var blockerTransaction = await blocker.BeginTransactionAsync();
+        await using (var lockTable = new NpgsqlCommand(
+            "LOCK TABLE appsurface_durable.schema_migration IN ACCESS EXCLUSIVE MODE;",
+            blocker,
+            blockerTransaction))
+        {
+            await lockTable.ExecuteNonQueryAsync();
+        }
+
+        var applicationName = $"slice3-post-lock-loss-{Guid.NewGuid():N}";
+        var managerConnection = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            ApplicationName = applicationName,
+        };
+        await using var managerDataSource = NpgsqlDataSource.Create(managerConnection.ConnectionString);
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(managerDataSource);
+        var apply = manager.ApplyAsync().AsTask();
+        var backendPid = await WaitForBackendAsync(database.DataSource, applicationName, "relation");
+        await using (var terminate = database.DataSource.CreateCommand("SELECT pg_terminate_backend(@pid);"))
+        {
+            terminate.Parameters.AddWithValue("pid", backendPid);
+            Assert.True((bool)(await terminate.ExecuteScalarAsync())!);
+        }
+
+        await Assert.ThrowsAnyAsync<NpgsqlException>(async () =>
+            await apply.WaitAsync(TimeSpan.FromSeconds(30)));
+        await blockerTransaction.RollbackAsync();
+
+        var retried = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Empty(retried.AppliedVersions);
+    }
+
+    [Fact]
+    public async Task RoleIdentifierFormatting_RoundTripsExactHostileNames()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var roleNames = new[]
+        {
+            $"Durable Mixed {Guid.NewGuid():N}",
+            $"durable-role.{Guid.NewGuid():N}",
+            $"durable\"quote-{Guid.NewGuid():N}",
+            $"durable\";drop role x;--{Guid.NewGuid():N}",
+        };
+
+        foreach (var roleName in roleNames)
+        {
+            await using var format = database.DataSource.CreateCommand("SELECT format('%I', @role_name);");
+            format.Parameters.AddWithValue("role_name", roleName);
+            var identifier = (string)(await format.ExecuteScalarAsync())!;
+            await using var create = database.DataSource.CreateCommand($"CREATE ROLE {identifier};");
+            await create.ExecuteNonQueryAsync();
+            try
+            {
+                await using var exists = database.DataSource.CreateCommand(
+                    "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = @role_name);");
+                exists.Parameters.AddWithValue("role_name", roleName);
+                Assert.True((bool)(await exists.ExecuteScalarAsync())!);
+            }
+            finally
+            {
+                await using var drop = database.DataSource.CreateCommand($"DROP ROLE {identifier};");
+                await drop.ExecuteNonQueryAsync();
+            }
+        }
+    }
+
+    private static ValueTask<int> WaitForBackendAsync(NpgsqlDataSource dataSource, string applicationName)
+        => WaitForBackendAsync(dataSource, applicationName, "advisory");
+
+    private static async ValueTask<int> WaitForBackendAsync(
+        NpgsqlDataSource dataSource,
+        string applicationName,
+        string waitEvent)
+    {
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            await using var command = dataSource.CreateCommand(
+                """
+                SELECT pid
+                FROM pg_catalog.pg_stat_activity
+                WHERE application_name = @application_name
+                  AND wait_event = @wait_event
+                LIMIT 1;
+                """);
+            command.Parameters.AddWithValue("application_name", applicationName);
+            command.Parameters.AddWithValue("wait_event", waitEvent);
+            if (await command.ExecuteScalarAsync() is int backendPid)
+            {
+                return backendPid;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+
+        throw new TimeoutException($"The migration session did not begin waiting for the {waitEvent} lock.");
+    }
+}
