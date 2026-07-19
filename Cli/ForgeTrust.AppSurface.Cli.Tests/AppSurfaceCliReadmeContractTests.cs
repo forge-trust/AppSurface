@@ -139,6 +139,32 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.DoesNotContain("intentionally does not expose run or merge orchestration yet", readme, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Readme_ShouldDocumentCoverageRunWatchdogContract()
+    {
+        var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
+
+        Assert.Contains("#### Coverage Run Watchdog", readme, StringComparison.Ordinal);
+        Assert.Contains("| Defaults | Every 30 seconds | Warn after 10 minutes | No |", readme, StringComparison.Ordinal);
+        Assert.Contains("| `--watchdog off` | Every 30 seconds | No | No |", readme, StringComparison.Ordinal);
+        Assert.Contains("| `--heartbeat-interval 0` | No | Warn after 10 minutes | No |", readme, StringComparison.Ordinal);
+        Assert.Contains("| `--watchdog fail` | Every 30 seconds | Fail after 10 minutes | Yes |", readme, StringComparison.Ordinal);
+        Assert.Contains("--heartbeat-interval 0 \\", readme, StringComparison.Ordinal);
+        Assert.Contains("--watchdog off", readme, StringComparison.Ordinal);
+        Assert.Contains("emits `ASCOV121`, and exits `124`", readme, StringComparison.Ordinal);
+        Assert.Contains("| `ASCOV121` | The watchdog classified an operation", readme, StringComparison.Ordinal);
+        Assert.Contains("| `ASCOV122` | Watchdog evidence could not be committed", readme, StringComparison.Ordinal);
+        Assert.Contains("privacy-minimized and bounded, not automatically safe to publish", readme, StringComparison.Ordinal);
+        Assert.Contains("review those fields, confirm the destination's retention and access policy", readme, StringComparison.Ordinal);
+        Assert.Contains("uses: actions/upload-artifact@v4", readme, StringComparison.Ordinal);
+        Assert.Contains("if: always()", readme, StringComparison.Ordinal);
+        Assert.Contains("${{ runner.temp }}/appsurface-coverage-watchdog/**", readme, StringComparison.Ordinal);
+        Assert.Contains("Uploading watchdog evidence is an explicit workflow choice", readme, StringComparison.Ordinal);
+        Assert.Contains("VSTest `--blame-hang`", readme, StringComparison.Ordinal);
+        Assert.Contains("Microsoft.Testing.Platform hang dumps", readme, StringComparison.Ordinal);
+        Assert.Contains("AppSurface does not silently inject those settings", readme, StringComparison.Ordinal);
+    }
+
     private static string GetAppSurfaceCliReadmePath()
     {
         var repositoryRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);

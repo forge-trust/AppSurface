@@ -3446,13 +3446,15 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 "dotnet new tool-manifest",
                 "dotnet tool install",
                 "appsurface --version",
+                "appsurface coverage run --help",
                 "appsurface coverage run",
+                "appsurface coverage run watchdog fail",
                 "appsurface coverage merge",
                 "appsurface coverage gate",
                 "appsurface coverage gate"
             ],
             commandRunner.Requests
-                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface coverage run" or "appsurface coverage merge" or "appsurface coverage gate")
+                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface coverage run --help" or "appsurface coverage run" or "appsurface coverage run watchdog fail" or "appsurface coverage merge" or "appsurface coverage gate")
                 .Select(request => request.OperationName)
                 .ToArray());
         var coverageRunRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run");
@@ -3773,7 +3775,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [InlineData("dotnet new tool-manifest", null)]
     [InlineData("dotnet tool install", null)]
     [InlineData("appsurface --version", null)]
+    [InlineData("appsurface coverage run --help", null)]
     [InlineData("appsurface coverage run", null)]
+    [InlineData("appsurface coverage run watchdog fail", null)]
     [InlineData("appsurface coverage merge", null)]
     [InlineData("appsurface coverage gate", "passing")]
     public async Task CoverageCliConsumerProofWorkflow_StopsWhenRequiredCommandFails(
@@ -3803,7 +3807,10 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Equal(failedOperationName, report.Commands.Last().OperationName);
-        Assert.Contains("Expected exit code 0", report.FirstFailure, StringComparison.Ordinal);
+        Assert.Contains(
+            failedOperationName == "appsurface coverage run watchdog fail" ? "Expected watchdog exit code 124" : "Expected exit code 0",
+            report.FirstFailure,
+            StringComparison.Ordinal);
         Assert.Equal(commandRunner.Requests.Count, report.Commands.Count);
         if (failedTimeoutDescription is not null)
         {
@@ -6379,6 +6386,14 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 return Task.FromResult(new ExternalCommandResult(0, _packageVersion, string.Empty));
             }
 
+            if (request.OperationName == "appsurface coverage run --help")
+            {
+                return Task.FromResult(new ExternalCommandResult(
+                    0,
+                    "--watchdog --heartbeat-interval --no-progress-timeout",
+                    string.Empty));
+            }
+
             if (request.OperationName == "appsurface coverage run")
             {
                 var outputDirectory = ReadOption(request.Arguments, "--output");
@@ -6396,6 +6411,17 @@ public sealed class PackageArtifactValidationTests : IDisposable
                           """
                         : "coverage run passed",
                     string.Empty));
+            }
+
+            if (request.OperationName == "appsurface coverage run watchdog fail")
+            {
+                var outputDirectory = ReadOption(request.Arguments, "--output");
+                Directory.CreateDirectory(outputDirectory);
+                File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
+                File.WriteAllText(
+                    Path.Join(outputDirectory, "coverage-watchdog.json"),
+                    "{\"schemaVersion\":1,\"outcome\":\"terminated\",\"diagnosticCode\":\"ASCOV121\"}");
+                return Task.FromResult(new ExternalCommandResult(124, string.Empty, "ASCOV121 no observable progress"));
             }
 
             if (request.OperationName == "appsurface coverage merge")

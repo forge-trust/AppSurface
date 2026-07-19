@@ -169,7 +169,7 @@ appsurface coverage run \
   --output ./TestResults/coverage-merged
 ```
 
-`coverage run` is the public package-consumer coverage orchestrator for private .NET repositories. It supports `.sln` and `.slnx` discovery, repeated `--test-project` selection, a default output directory that matches `coverage gate`, bounded parallel scheduling, per-project logs, stable per-project artifact directories, safe cleanup of AppSurface-owned outputs, managed JUnit test-result artifacts, optional slow-test diagnostics, and a package-owned ReportGenerator merge. Package consumers do not need a separate merge step: the command finishes by writing the merged `coverage.cobertura.xml` artifact. It does not mutate consumer projects, install tools into the consumer repo, read the consumer `.config/dotnet-tools.json`, upload coverage, call GitHub APIs, or store trends.
+`coverage run` is the public package-consumer coverage orchestrator for private .NET repositories. It supports `.sln` and `.slnx` discovery, repeated `--test-project` selection, a default output directory that matches `coverage gate`, bounded parallel scheduling, per-project logs, stable per-project artifact directories, safe cleanup of AppSurface-owned outputs, managed JUnit test-result artifacts, optional slow-test diagnostics, a [no-progress watchdog](#coverage-run-watchdog), and a package-owned ReportGenerator merge. Package consumers do not need a separate merge step: the command finishes by writing the merged `coverage.cobertura.xml` artifact. It does not mutate consumer projects, install tools into the consumer repo, read the consumer `.config/dotnet-tools.json`, upload coverage, call GitHub APIs, or store trends.
 
 The v1 contract assumes selected test projects are already instrumented with Coverlet. No managed test result export happens by default. Use `--test-results junit` when AppSurface should own top-level JUnit artifacts, and make sure every selected test project references `JunitXml.TestLogger`. `junit` is the only managed test-result format supported in this release; `trx` and TUnit-compatible parsing are reserved for follow-up work. `--logger` remains raw `dotnet test` pass-through and does not create AppSurface-managed artifacts.
 
@@ -221,8 +221,52 @@ Options:
 - `--test-argument`: Repeatable extra argument token appended to every `dotnet test` invocation.
 - `--test-results`: Managed test-result format. Use `junit` to write AppSurface-owned top-level JUnit files. Other values fail before tests run.
 - `--slow-test-diagnostics`: Writes `slow-test-diagnostics.md` and `.json` from managed JUnit results. This implies `--test-results junit`.
+- `--watchdog`: Response when one active coverage operation produces no observable progress for `--no-progress-timeout`. Use `warn`, `fail`, or `off`. Defaults to `warn`.
+- `--heartbeat-interval`: Interval between coverage-run heartbeat blocks. Defaults to `30s`; the exact value `0` disables heartbeat rendering without disabling watchdog evaluation.
+- `--no-progress-timeout`: Per-operation no-observable-progress threshold. Defaults to `10m` and must be greater than zero.
 - `--no-clean`: Preserves existing AppSurface-owned output instead of cleaning known coverage artifacts first.
 - `--verbosity`: `dotnet test` verbosity. Defaults to `minimal`.
+
+#### Coverage Run Watchdog
+
+The watchdog supervises AppSurface's orchestration operations: project discovery, solution build, each active test project, merge, diagnostics, and artifact finalization. It classifies an operation after the configured interval with **no observable progress**. It does not prove that a test host is deadlocked or identify the last test that ran.
+
+An operation makes observable progress when its phase changes or its child process emits stdout or stderr bytes. CPU activity, time spent queued behind another project, output from a sibling project, heartbeat rendering, and later JUnit parsing do not reset its clock. Each active operation has its own clock, so one noisy parallel project cannot hide a quiet project. Queued projects do not age until they become active.
+
+Durations use lowercase integer values with one of `ms`, `s`, `m`, or `h`, for example `500ms`, `30s`, `10m`, or `1h`. Signs, decimals, spaces, and uppercase suffixes are invalid. The maximum is 30 days. Only `--heartbeat-interval` accepts `0`.
+
+| Configuration | Heartbeats | No-progress classification | Terminates active process trees |
+| --- | --- | --- | --- |
+| Defaults | Every 30 seconds | Warn after 10 minutes | No |
+| `--watchdog off` | Every 30 seconds | No | No |
+| `--heartbeat-interval 0` | No | Warn after 10 minutes | No |
+| `--watchdog fail` | Every 30 seconds | Fail after 10 minutes | Yes |
+| `--heartbeat-interval 0 --watchdog off` | No | No | No |
+
+`warn` emits one incident for a newly classified operation, attempts to write `coverage-watchdog.json`, and lets the run continue with its eventual normal exit status. Real output rearms the operation, so a later quiet interval can produce a new incident. `fail` cancels the run, requests termination of every discoverable active process tree, records bounded cleanup status, emits `ASCOV121`, and exits `124`. Exit `124` means the AppSurface watchdog classified no observable progress; it is distinct from an ordinary build or test failure. `off` disables classification and termination, but heartbeats remain independently enabled unless their interval is `0`.
+
+Use the complete compatibility escape hatch when upgrading a workflow that must initially preserve the earlier console and artifact behavior:
+
+```bash
+dotnet tool run appsurface coverage run \
+  --solution ./MyApp.slnx \
+  --heartbeat-interval 0 \
+  --watchdog off
+```
+
+To verify the feature without risking termination of a real suite, select a consumer-owned test project that intentionally runs quietly for at least five seconds and use warn mode with short development-only thresholds:
+
+```bash
+dotnet tool run appsurface coverage run \
+  --test-project tests/MyApp.Quiet.Tests/MyApp.Quiet.Tests.csproj \
+  --heartbeat-interval 2s \
+  --no-progress-timeout 5s \
+  --watchdog warn
+```
+
+Expect a heartbeat after about two seconds and a warning plus `coverage-watchdog.json` after about five seconds. Because this recipe uses `warn`, AppSurface does not terminate the test process; remove the short thresholds after verification. AppSurface's internal test suite uses maintained fixtures to verify warning and fail-mode behavior without pointing package consumers at a repository-specific fixture; packed-tool smoke verifies option discovery and the exact fail-mode `ASCOV121`/124 contract.
+
+AppSurface owns orchestration-level visibility and cleanup. For per-test identity, test-host hang detection, and dump collection, configure the native test platform instead: [VSTest `--blame-hang`](https://learn.microsoft.com/dotnet/core/tools/dotnet-test-vstest#--blame-hang) or [Microsoft.Testing.Platform hang dumps](https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-crash-hang-dumps). AppSurface does not silently inject those settings, and output bytes can keep the AppSurface clock active even when a test is semantically stuck.
 
 Duration-aware scheduling keeps exclusive projects as barriers. If discovery returns `A.Tests`, `Browser.IntegrationTests`, and `B.Tests`, `B.Tests` never jumps ahead of the exclusive browser project even when it was slower in the previous run. AppSurface sorts only the non-exclusive segment before each barrier and only the non-exclusive segment after it.
 
@@ -272,11 +316,53 @@ Artifacts are local and private by default:
 - `reportgenerator-summary.txt`: Text summary from the package-owned ReportGenerator merge when available.
 - `junit-coverage-<index>-<project-name-hash>.xml`: AppSurface-managed JUnit test results when `--test-results junit` or `--slow-test-diagnostics` is used.
 - `slow-test-diagnostics.md` and `slow-test-diagnostics.json`: Slow-test evidence, parser warnings, metadata completeness, and diagnostic overhead when `--slow-test-diagnostics` is used.
+- `coverage-watchdog.json`: Latest schema-v1 no-progress incident written by `warn` or `fail`. It contains bounded orchestration metadata and cleanup status, but no raw child-process output, environment values, test identifiers, or argument values.
 - `projects/<project-name-hash>/coverage.cobertura.xml`: Per-project Coverlet Cobertura output.
 - `projects/<project-name-hash>/dotnet-test.log`: Full `dotnet test` output for that project.
 - `.appsurface-coverage-output`: Ownership marker that allows future runs to clean only known AppSurface-owned artifacts.
 
 `coverage run` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, the solution directory, test project directories, files, and populated directories that do not carry the AppSurface ownership marker. Use a dedicated artifact directory for CI, for example `TestResults/coverage-merged`.
+
+The watchdog artifact is privacy-minimized and bounded, not automatically safe to publish. It can still reveal normalized repository-relative project names, phase names, timestamps, and logical command metadata. Before uploading it outside the repository's normal CI access boundary, review those fields, confirm the destination's retention and access policy, and avoid uploading `projects/**/dotnet-test.log` unless arbitrary test output has received a separate sensitive-data review. A discovery incident that occurs before AppSurface can establish ownership of the configured output is written under the runner-scoped temporary directory `appsurface-coverage-watchdog/<run-id>/`; on Unix, AppSurface creates that run directory with user-only permissions. The terminal diagnostic reports its resolved local path.
+
+Schema version 1 uses lowercase enum strings, millisecond integer durations, UTC timestamps, non-null arrays, and explicit JSON `null` for unavailable fields. A representative warning is:
+
+```json
+{
+  "schemaVersion": 1,
+  "incidentOrdinal": 1,
+  "outcome": "warning",
+  "diagnosticCode": null,
+  "watchdogMode": "warn",
+  "heartbeatIntervalMilliseconds": 30000,
+  "noProgressTimeoutMilliseconds": 600000,
+  "runElapsedMilliseconds": 650000,
+  "classifiedAtUtc": "2026-07-19T16:30:00.0000000+00:00",
+  "primary": {
+    "kind": "project",
+    "project": "tests/MyApp.Tests/MyApp.Tests.csproj",
+    "state": "running",
+    "elapsedMilliseconds": 610000,
+    "noProgressMilliseconds": 600000,
+    "lastProgressAtUtc": "2026-07-19T16:20:00.0000000+00:00",
+    "progressSequence": 3,
+    "outputBytes": 2048,
+    "log": "projects/myapp-tests-a1b2c3/dotnet-test.log",
+    "command": {
+      "executable": "dotnet",
+      "options": ["test", "--configuration", "--no-restore"]
+    }
+  },
+  "concurrentlyStale": [],
+  "concurrentlyStaleOmitted": 0,
+  "cleanup": {
+    "status": "not-requested",
+    "detail": null
+  }
+}
+```
+
+Fail-mode artifacts use `outcome: "terminated"`, `diagnosticCode: "ASCOV121"`, and cleanup status `complete`, `failed`, or `deadline-exceeded`. Consumers should ignore unknown fields within schema version 1; a breaking shape requires another schema version. The serialized artifact remains below 64 KiB by dropping optional metadata from concurrent operations and then trailing concurrent records; `concurrentlyStaleOmitted` reports how many were excluded.
 
 `coverage run`, `coverage merge`, and `coverage gate` are the supported CLI coverage surfaces. The package artifact verifier installs the packed `ForgeTrust.AppSurface.Cli` tool in a clean fixture and proves all three coverage commands, including a deliberately failing gate that must still write reports, before publication. Grouped CLI execution and TRX/TUnit result parsing remain separate follow-up work.
 
@@ -292,7 +378,8 @@ Use this GitHub Actions shape for a private pull request workflow that already h
     dotnet-version: 10.0.x
 - run: dotnet tool restore
 - run: dotnet restore ./MyApp.slnx
-- run: dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore --test-results junit --slow-test-diagnostics
+- name: Run coverage with no-progress containment
+  run: dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore --test-results junit --slow-test-diagnostics --watchdog fail
 - run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75 --diff-base HEAD^1 --min-patch-line 85 --min-patch-branch 75
 - uses: actions/upload-artifact@v4
   if: always()
@@ -305,12 +392,15 @@ Use this GitHub Actions shape for a private pull request workflow that already h
       TestResults/coverage-merged/junit-*.xml
       TestResults/coverage-merged/slow-test-diagnostics.md
       TestResults/coverage-merged/slow-test-diagnostics.json
+      TestResults/coverage-merged/coverage-watchdog.json
       TestResults/coverage-merged/coverage-gate.json
       TestResults/coverage-merged/coverage-gate.md
-      TestResults/coverage-merged/projects/**/dotnet-test.log
+      ${{ runner.temp }}/appsurface-coverage-watchdog/**
 ```
 
 GitHub's default `pull_request` checkout is the synthetic merge commit. `fetch-depth: 2` brings in the merge commit and its base parent, so `--diff-base HEAD^1` reports the pull request changes as tested by the job without fetching the full repository. If `fetch-depth: 2` is omitted, `actions/checkout` fetches only `HEAD`, `HEAD^1` is unavailable, and the gate fails closed with `ASCOV010`. If a workflow checks out the pull request head instead, use a head-vs-base source for that same tree; do not reuse merge-ref coverage artifacts with a head diff.
+
+The gate is intentionally a normal subsequent step: it runs only when coverage completed and produced merged Cobertura. The upload uses `if: always()` so a fail-mode `ASCOV121`/124 can still preserve the canonical watchdog artifact or the pre-discovery temporary artifact. Uploading watchdog evidence is an explicit workflow choice. The default example omits raw project logs because those files can contain arbitrary process output; add `TestResults/coverage-merged/projects/**/dotnet-test.log` only after reviewing the data and artifact-access policy.
 
 ### `appsurface coverage merge`
 
@@ -428,6 +518,8 @@ Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs 
 | `ASCOV112` | An exclusion pattern matched no discovered test project. | Run with `--list-projects`, then correct or remove each stale `--exclude-test-project` pattern. |
 | `ASCOV114` | The package-owned ReportGenerator dependency was not found. | Restore or reinstall `ForgeTrust.AppSurface.Cli` so its package dependencies are present. |
 | `ASCOV120` | One or more test, merge, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix failing tests, then rerun. |
+| `ASCOV121` | The watchdog classified an operation after the configured interval with no observable progress. The command exits `124`; this is not an ordinary test failure. | Inspect the local project log and `coverage-watchdog.json`, raise `--no-progress-timeout` for intentionally quiet work, use `--watchdog warn`, or configure native VSTest/Microsoft.Testing.Platform hang diagnostics for per-test evidence. |
+| `ASCOV122` | Watchdog evidence could not be committed within its bounded write contract, or a previous incident writer is still busy. | Use a writable dedicated output directory and inspect the allowlisted `Artifact: unavailable (...)` detail. The run continues in warn mode; fail mode still reports `ASCOV121`/124. |
 
 ### `appsurface coverage gate`
 

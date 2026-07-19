@@ -4,12 +4,15 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
-- Add merged public changes here as they land.
+- `appsurface coverage run` now explains long-running orchestration with per-operation heartbeats and no-observable-progress classification. The default remains non-terminating: heartbeats render every 30 seconds and `warn` records an incident after 10 minutes without observable progress.
 
 ## Included in the next coordinated version
 
 ### Release and docs surface
 
+- Add `--watchdog warn|fail|off`, `--heartbeat-interval`, and `--no-progress-timeout` to `coverage run`. Fail mode requests bounded cleanup of discoverable active process trees, emits `ASCOV121`, and exits `124`; artifact write degradation is reported as `ASCOV122` without replacing the primary run outcome.
+- Add a bounded, privacy-minimized `coverage-watchdog.json` incident artifact plus a runner-scoped temporary fallback for incidents that occur before the configured output directory can be safely claimed. The fallback run directory uses user-only permissions on Unix. Publishing remains an explicit operator choice because normalized repository-relative names and command metadata can still be sensitive.
+- Keep per-test hang detection, test identity, and dump collection with VSTest or Microsoft.Testing.Platform. The AppSurface watchdog observes orchestration phases and output bytes; it does not diagnose test-host internals.
 - [`ForgeTrust.AppSurface.Web` named canary evaluation](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints) is now available in preview: applications register typed, application-owned proof
   evaluators and explicitly map one fixed protected route family. Completed evaluations add required `name`, `ready`, and
   `status` fields plus optional typed evidence, a marker fingerprint, and up to 16 registration-declared bounded details.
@@ -29,4 +32,5 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## Migration watch
 
+- Existing runs can now produce periodic console output and, after a warning boundary, an owned watchdog artifact. Use `--heartbeat-interval 0 --watchdog off` for the previous silent, non-classifying behavior, or tune `--no-progress-timeout` for intentionally quiet suites.
 - Existing hosts that consume `/health` or `/ready` must set `WebOptions.Health.Enabled = true` when upgrading.

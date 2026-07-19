@@ -200,6 +200,29 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return BuildReport(context, commands, artifacts);
         }
 
+        if (!await RunRequiredAsync(ToolCommand(
+            context,
+            ["coverage", "run", "--help"],
+            "appsurface coverage run --help",
+            "checking packaged watchdog option discovery")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        var coverageRunHelp = commands[^1];
+        var missingWatchdogOptions = new[] { "--watchdog", "--heartbeat-interval", "--no-progress-timeout" }
+            .Where(option => !coverageRunHelp.StandardOutput.Contains(option, StringComparison.Ordinal))
+            .ToArray();
+        if (missingWatchdogOptions.Length > 0)
+        {
+            commands[^1] = coverageRunHelp with
+            {
+                Succeeded = false,
+                FailureReason = $"Packaged coverage run help omitted watchdog option(s): {string.Join(", ", missingWatchdogOptions)}."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
         var coverageMergedDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-merged");
         if (!await RunRequiredAsync(ToolCommand(
             context,
@@ -231,6 +254,35 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         artifacts.AddRange(CheckCoverageRunArtifacts(coverageMergedDirectory));
         artifacts.Add(CheckExcludedProjectArtifacts(coverageMergedDirectory, "Smoke.Browser.Tests"));
         if (artifacts.Any(artifact => !artifact.Exists))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        var watchdogFailDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-watchdog-fail");
+        var watchdogFailResult = await RunCommandAsync(
+            ToolCommand(
+                context,
+                [
+                    "coverage", "run",
+                    "--test-project", Path.Join(fixtureDirectory, "Smoke.Tests", "Smoke.Tests.csproj"),
+                    "--output", watchdogFailDirectory,
+                    "--no-build", "--no-restore",
+                    "--watchdog", "fail",
+                    "--heartbeat-interval", "100ms",
+                    "--no-progress-timeout", "1s",
+                ],
+                "appsurface coverage run watchdog fail",
+                "verifying packaged no-progress exit 124"),
+            logsDirectory,
+            commands.Count + 1,
+            ExpectedCommandExitCode.Watchdog,
+            cancellationToken);
+        commands.Add(watchdogFailResult);
+        var watchdogArtifact = CheckArtifact(
+            Path.Join(watchdogFailDirectory, "coverage-watchdog.json"),
+            "coverage run watchdog terminal incident");
+        artifacts.Add(watchdogArtifact);
+        if (!watchdogFailResult.Succeeded || !watchdogArtifact.Exists)
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -539,14 +591,22 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         await File.WriteAllTextAsync(stdoutPath, result.StandardOutput, cancellationToken);
         await File.WriteAllTextAsync(stderrPath, result.StandardError, cancellationToken);
 
-        var succeeded = expectedExitCode == ExpectedCommandExitCode.Zero
-            ? result.ExitCode == 0
-            : result.ExitCode != 0;
+        var succeeded = expectedExitCode switch
+        {
+            ExpectedCommandExitCode.Zero => result.ExitCode == 0,
+            ExpectedCommandExitCode.NonZero => result.ExitCode != 0,
+            ExpectedCommandExitCode.Watchdog => result.ExitCode == 124,
+            _ => false,
+        };
         var failureReason = succeeded
             ? string.Empty
-            : expectedExitCode == ExpectedCommandExitCode.Zero
-                ? $"Expected exit code 0, got {result.ExitCode}."
-                : $"Expected a non-zero exit code, got {result.ExitCode}.";
+            : expectedExitCode switch
+            {
+                ExpectedCommandExitCode.Zero => $"Expected exit code 0, got {result.ExitCode}.",
+                ExpectedCommandExitCode.NonZero => $"Expected a non-zero exit code, got {result.ExitCode}.",
+                ExpectedCommandExitCode.Watchdog => $"Expected watchdog exit code 124, got {result.ExitCode}.",
+                _ => $"Unexpected expected-exit classification '{expectedExitCode}'.",
+            };
 
         return new CoverageCliConsumerProofCommandResult(
             request.OperationName,
@@ -554,7 +614,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             request.Arguments,
             request.WorkingDirectory,
             result.ExitCode,
-            expectedExitCode == ExpectedCommandExitCode.NonZero,
+            expectedExitCode != ExpectedCommandExitCode.Zero,
             succeeded,
             failureReason,
             stopwatch.Elapsed,
@@ -588,7 +648,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
     {
         return new ExternalCommandRequest(
             "dotnet",
-            ["tool", "run", CliCommandName, .. arguments],
+            ["tool", "run", CliCommandName, "--", .. arguments],
             context.FixtureDirectory,
             operationName,
             timeoutDescription,
@@ -662,6 +722,12 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
                 public void Sign_ClassifiesValue(int value, string expected)
                 {
                     Assert.Equal(expected, Calculator.Sign(value));
+                }
+
+                [Fact]
+                public async Task QuietOperation_AllowsWatchdogProof()
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(3));
                 }
             }
             """,
@@ -852,7 +918,8 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
     private enum ExpectedCommandExitCode
     {
         Zero,
-        NonZero
+        NonZero,
+        Watchdog,
     }
 }
 

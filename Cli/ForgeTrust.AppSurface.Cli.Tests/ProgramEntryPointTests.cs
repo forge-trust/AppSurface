@@ -375,6 +375,49 @@ public sealed class ProgramEntryPointTests
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task EntryPoint_ShouldPrintCoverageRunWatchdogHelpAndDefaults()
+    {
+        var result = await InvokeEntryPointAsync(["coverage", "run", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("--watchdog", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("No-progress response: warn, fail, or off. Defaults to warn", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--heartbeat-interval", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Defaults to 30s; 0 disables heartbeats", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--no-progress-timeout", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Defaults to 10m and must be greater than 0", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_ShouldParseCoverageRunWatchdogOptions()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-watchdog-options-");
+        var projectDirectory = Path.Join(temp.Path, "tests", "Sample.Tests");
+        Directory.CreateDirectory(projectDirectory);
+        var project = Path.Join(projectDirectory, "Sample.Tests.csproj");
+        await File.WriteAllTextAsync(project, "<Project />");
+        var output = Path.Join(temp.Path, "coverage-output");
+
+        var result = await InvokeEntryPointAsync(
+            [
+                "coverage", "run",
+                "--test-project", project,
+                "--output", output,
+                "--dry-run",
+                "--watchdog", "off",
+                "--heartbeat-interval", "0",
+                "--no-progress-timeout", "1h",
+            ]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("  Output:", result.AllText, StringComparison.Ordinal);
+        Assert.Contains(output, result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("ASCOV101", result.AllText, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("0.1.0", "0.1.0")]
     [InlineData("0.1.0-rc.1", "0.1.0-rc.1")]
