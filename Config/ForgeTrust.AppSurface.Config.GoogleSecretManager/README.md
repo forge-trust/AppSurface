@@ -166,6 +166,11 @@ The transfer seam is separate from the read-only provider client. It probes secr
 structured payload access only during apply, and adds a new enabled version to an existing secret. It does not include
 create, delete, disable, destroy, rotate, IAM, Terraform, or `gcloud` operations.
 
+Transfer writes use `GoogleSecretManagerTransferStatus.IndeterminateWrite` when Google may have accepted a new version
+but did not return a definitive response. Callers must not retry that result automatically because `AddSecretVersion`
+has no idempotency key; reconcile the destination's versions first, then create a new reviewed plan for any remaining
+work. Definitive missing-resource, access-denied, and invalid-resource failures remain separately classified.
+
 ## CLI Transfer
 
 Use the [AppSurface CLI transfer workflow](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-secrets-transfer)

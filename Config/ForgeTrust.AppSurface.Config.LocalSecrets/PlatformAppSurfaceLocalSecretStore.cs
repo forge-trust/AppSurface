@@ -1002,10 +1002,32 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 return WriteStoredValue(identity, value);
             }
 
-            var write = WriteStoredValue(identity, value);
-            return write.Status == LocalSecretResultStatus.Found
-                ? AddToIndex(identity)
-                : write;
+            var index = ReadIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
+            if (index.Status != LocalSecretResultStatus.Found)
+            {
+                return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
+            }
+
+            var keys = index.Keys.ToHashSet(StringComparer.Ordinal);
+            var added = keys.Add(identity.Key);
+            if (added)
+            {
+                var indexWrite = WriteIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix, keys);
+                if (indexWrite.Status != LocalSecretResultStatus.Found)
+                {
+                    return indexWrite;
+                }
+            }
+
+            var valueWrite = WriteStoredValue(identity, value);
+            if (valueWrite.Status == LocalSecretResultStatus.Found || !added)
+            {
+                return valueWrite;
+            }
+
+            keys.Remove(identity.Key);
+            var rollback = WriteIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix, keys);
+            return rollback.Status == LocalSecretResultStatus.Found ? valueWrite : rollback;
         }
 
         public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity)
@@ -1163,19 +1185,6 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         private static bool IsIndexIdentity(AppSurfaceLocalSecretIdentity identity) =>
             string.Equals(identity.Key, IndexKey, StringComparison.Ordinal);
-
-        private AppSurfaceLocalSecretResult AddToIndex(AppSurfaceLocalSecretIdentity identity)
-        {
-            var index = ReadIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
-            if (index.Status != LocalSecretResultStatus.Found)
-            {
-                return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
-            }
-
-            var keys = index.Keys.ToHashSet(StringComparer.Ordinal);
-            keys.Add(identity.Key);
-            return WriteIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix, keys);
-        }
 
         private AppSurfaceLocalSecretResult WriteIndex(
             string applicationName,

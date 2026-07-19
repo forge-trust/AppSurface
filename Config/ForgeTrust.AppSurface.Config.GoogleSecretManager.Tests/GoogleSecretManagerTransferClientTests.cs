@@ -12,6 +12,21 @@ namespace ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests;
 public sealed class GoogleSecretManagerTransferClientTests
 {
     [Fact]
+    public void PublicTransferStatus_Should_KeepStableNumericValues()
+    {
+        Assert.Equal(0, (int)GoogleSecretManagerTransferStatus.Ready);
+        Assert.Equal(1, (int)GoogleSecretManagerTransferStatus.Written);
+        Assert.Equal(2, (int)GoogleSecretManagerTransferStatus.Missing);
+        Assert.Equal(3, (int)GoogleSecretManagerTransferStatus.AccessDenied);
+        Assert.Equal(4, (int)GoogleSecretManagerTransferStatus.Unavailable);
+        Assert.Equal(5, (int)GoogleSecretManagerTransferStatus.InvalidResource);
+        Assert.Equal(6, (int)GoogleSecretManagerTransferStatus.Cancelled);
+        Assert.Equal(7, (int)GoogleSecretManagerTransferStatus.ProviderFailed);
+        Assert.Equal(8, (int)GoogleSecretManagerTransferStatus.NotEnabled);
+        Assert.Equal(9, (int)GoogleSecretManagerTransferStatus.IndeterminateWrite);
+    }
+
+    [Fact]
     public void CredentialFileFactory_Should_CreateIsolatedClientFromValidServiceAccountJson()
     {
         var path = Path.Join(Path.GetTempPath(), $"appsurface-google-credential-{Guid.NewGuid():N}.json");
@@ -91,6 +106,29 @@ public sealed class GoogleSecretManagerTransferClientTests
     }
 
     [Fact]
+    public void ProbeSecret_Should_RequestOneEnabledVersionWithSharedAbsoluteDeadline()
+    {
+        var serviceClient = new TransferSecretManagerServiceClient(
+            hasEnabledVersions: false,
+            hasAdditionalEnabledVersionPage: true);
+        var client = new GoogleSecretManagerTransferClientAdapter(() => serviceClient);
+
+        var result = client.ProbeSecret("projects/project/secrets/api-key", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.Ready, result.Status);
+        Assert.False(result.HasEnabledVersions);
+        Assert.Equal("projects/project/secrets/api-key", serviceClient.LastGetRequest?.Name);
+        Assert.Equal("projects/project/secrets/api-key", serviceClient.LastListRequest?.Parent);
+        Assert.Equal("state:ENABLED", serviceClient.LastListRequest?.Filter);
+        Assert.Equal(1, serviceClient.LastListRequest?.PageSize);
+        Assert.Equal(1, serviceClient.ListRawResponseEnumerationCount);
+        Assert.Equal(ExpirationType.Deadline, serviceClient.LastGetCallSettings?.Expiration?.Type);
+        Assert.Equal(
+            serviceClient.LastGetCallSettings?.Expiration?.Deadline,
+            serviceClient.LastListCallSettings?.Expiration?.Deadline);
+    }
+
+    [Fact]
     public void ProbeSecret_Should_MapNullClientFactoryResultValueSafely()
     {
         var client = new GoogleSecretManagerTransferClientAdapter(() => null!);
@@ -99,6 +137,7 @@ public sealed class GoogleSecretManagerTransferClientTests
 
         Assert.Equal(GoogleSecretManagerTransferStatus.Unavailable, result.Status);
         Assert.Equal("google-secret-transfer-unavailable", result.Diagnostic?.Code);
+        Assert.DoesNotContain("Application Default Credentials", result.Diagnostic?.Fix, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -123,6 +162,7 @@ public sealed class GoogleSecretManagerTransferClientTests
 
         Assert.Equal(GoogleSecretManagerTransferStatus.NotEnabled, result.Status);
         Assert.Equal("google-secret-transfer-version-not-enabled", result.Diagnostic?.Code);
+        Assert.DoesNotContain("LocalSecrets", result.Diagnostic?.Fix, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -186,6 +226,24 @@ public sealed class GoogleSecretManagerTransferClientTests
         Assert.Equal("projects/project/secrets/api-key/versions/1", result.WrittenVersionResourceName);
         Assert.Equal("projects/project/secrets/api-key", serviceClient.LastAddParent);
         Assert.Equal("payload", serviceClient.LastAddPayload?.ToStringUtf8());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("projects/project/secrets/api-key/versions/latest")]
+    [InlineData("projects/other/secrets/api-key/versions/1")]
+    public void AddSecretVersion_Should_TreatInvalidWrittenVersionNameAsIndeterminate(string writtenVersionName)
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(addVersionName: writtenVersionName));
+
+        var result = client.AddSecretVersion("projects/project/secrets/api-key", "sentinel-secret", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.IndeterminateWrite, result.Status);
+        Assert.Equal("google-secret-transfer-indeterminate-write", result.Diagnostic?.Code);
+        Assert.False(result.Diagnostic?.Retryable);
+        Assert.DoesNotContain("sentinel-secret", result.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -259,15 +317,29 @@ public sealed class GoogleSecretManagerTransferClientTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void AddSecretVersion_Should_MapClientAvailabilityFailures(bool timeout)
+    public void AddSecretVersion_Should_MapClientCreationAvailabilityFailures(bool timeout)
     {
+        var exception = timeout ? (Exception)new TimeoutException() : new InvalidOperationException();
         var client = new GoogleSecretManagerTransferClientAdapter(
-            () => new TransferSecretManagerServiceClient(timeout ? new TimeoutException() : new InvalidOperationException()));
+            () => throw exception);
 
         var result = client.AddSecretVersion("projects/project/secrets/api-key", "payload", TimeSpan.FromSeconds(1));
 
         Assert.Equal(GoogleSecretManagerTransferStatus.Unavailable, result.Status);
         Assert.Equal("google-secret-transfer-unavailable", result.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void AddSecretVersion_Should_MapPostDispatchTimeoutToIndeterminateWrite()
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(new TimeoutException()));
+
+        var result = client.AddSecretVersion("projects/project/secrets/api-key", "payload", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.IndeterminateWrite, result.Status);
+        Assert.Equal("google-secret-transfer-indeterminate-write", result.Diagnostic?.Code);
+        Assert.False(result.Diagnostic?.Retryable);
     }
 
     [Theory]
@@ -287,12 +359,14 @@ public sealed class GoogleSecretManagerTransferClientTests
     }
 
     [Theory]
-    [InlineData(StatusCode.NotFound, GoogleSecretManagerTransferStatus.Missing)]
-    [InlineData(StatusCode.PermissionDenied, GoogleSecretManagerTransferStatus.AccessDenied)]
-    [InlineData(StatusCode.InvalidArgument, GoogleSecretManagerTransferStatus.InvalidResource)]
-    [InlineData(StatusCode.Cancelled, GoogleSecretManagerTransferStatus.Cancelled)]
-    [InlineData(StatusCode.Unknown, GoogleSecretManagerTransferStatus.ProviderFailed)]
-    public void AddSecretVersion_Should_MapProviderFailuresValueSafely(StatusCode statusCode, GoogleSecretManagerTransferStatus expected)
+    [InlineData(StatusCode.NotFound, GoogleSecretManagerTransferStatus.Missing, "google-secret-transfer-missing")]
+    [InlineData(StatusCode.PermissionDenied, GoogleSecretManagerTransferStatus.AccessDenied, "google-secret-transfer-access-denied")]
+    [InlineData(StatusCode.Unauthenticated, GoogleSecretManagerTransferStatus.AccessDenied, "google-secret-transfer-access-denied")]
+    [InlineData(StatusCode.InvalidArgument, GoogleSecretManagerTransferStatus.InvalidResource, "google-secret-transfer-invalid-resource")]
+    public void AddSecretVersion_Should_KeepDefinitiveProviderFailuresDefinitive(
+        StatusCode statusCode,
+        GoogleSecretManagerTransferStatus expected,
+        string expectedDiagnostic)
     {
         var client = new GoogleSecretManagerTransferClientAdapter(
             () => new TransferSecretManagerServiceClient(new RpcException(new Status(statusCode, "sentinel-secret"))));
@@ -300,6 +374,29 @@ public sealed class GoogleSecretManagerTransferClientTests
         var result = client.AddSecretVersion("projects/project/secrets/api-key", "payload", TimeSpan.FromSeconds(1));
 
         Assert.Equal(expected, result.Status);
+        Assert.Equal(expectedDiagnostic, result.Diagnostic?.Code);
+        Assert.DoesNotContain("sentinel-secret", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(StatusCode.Cancelled)]
+    [InlineData(StatusCode.Unavailable)]
+    [InlineData(StatusCode.DeadlineExceeded)]
+    [InlineData(StatusCode.Unknown)]
+    [InlineData(StatusCode.Internal)]
+    [InlineData(StatusCode.Aborted)]
+    [InlineData(StatusCode.DataLoss)]
+    [InlineData(StatusCode.ResourceExhausted)]
+    public void AddSecretVersion_Should_MapAmbiguousProviderFailuresToIndeterminateWrite(StatusCode statusCode)
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(new RpcException(new Status(statusCode, "sentinel-secret"))));
+
+        var result = client.AddSecretVersion("projects/project/secrets/api-key", "payload", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.IndeterminateWrite, result.Status);
+        Assert.Equal("google-secret-transfer-indeterminate-write", result.Diagnostic?.Code);
+        Assert.False(result.Diagnostic?.Retryable);
         Assert.DoesNotContain("sentinel-secret", result.ToString(), StringComparison.Ordinal);
     }
 
@@ -308,8 +405,20 @@ public sealed class GoogleSecretManagerTransferClientTests
         SecretVersion.Types.State versionState = SecretVersion.Types.State.Enabled,
         Exception? accessException = null,
         bool returnNullPayload = false,
-        bool hasEnabledVersions = true) : SecretManagerServiceClient
+        bool hasEnabledVersions = true,
+        bool hasAdditionalEnabledVersionPage = false,
+        string? addVersionName = null) : SecretManagerServiceClient
     {
+        public GetSecretRequest? LastGetRequest { get; private set; }
+
+        public CallSettings? LastGetCallSettings { get; private set; }
+
+        public ListSecretVersionsRequest? LastListRequest { get; private set; }
+
+        public CallSettings? LastListCallSettings { get; private set; }
+
+        public int ListRawResponseEnumerationCount { get; private set; }
+
         public string? LastAddParent { get; private set; }
 
         public ByteString? LastAddPayload { get; private set; }
@@ -321,13 +430,22 @@ public sealed class GoogleSecretManagerTransferClientTests
                 throw exception;
             }
 
+            LastGetRequest = request;
+            LastGetCallSettings = callSettings;
             return new Secret { Name = request.Name };
         }
 
         public override PagedEnumerable<ListSecretVersionsResponse, SecretVersion> ListSecretVersions(
             ListSecretVersionsRequest request,
-            CallSettings? callSettings = null) =>
-            new SinglePageSecretVersions(hasEnabledVersions);
+            CallSettings? callSettings = null)
+        {
+            LastListRequest = request;
+            LastListCallSettings = callSettings;
+            return new SecretVersionPages(
+                hasEnabledVersions,
+                hasAdditionalEnabledVersionPage,
+                () => ListRawResponseEnumerationCount++);
+        }
 
         public override SecretVersion GetSecretVersion(
             GetSecretVersionRequest request,
@@ -373,11 +491,14 @@ public sealed class GoogleSecretManagerTransferClientTests
 
             LastAddParent = request.Parent;
             LastAddPayload = request.Payload.Data;
-            return new SecretVersion { Name = $"{request.Parent}/versions/1" };
+            return new SecretVersion { Name = addVersionName ?? $"{request.Parent}/versions/1" };
         }
     }
 
-    private sealed class SinglePageSecretVersions(bool hasEnabledVersions) :
+    private sealed class SecretVersionPages(
+        bool hasEnabledVersions,
+        bool hasAdditionalEnabledVersionPage,
+        Action rawResponseEnumerated) :
         PagedEnumerable<ListSecretVersionsResponse, SecretVersion>
     {
         public override IEnumerator<SecretVersion> GetEnumerator() =>
@@ -392,7 +513,16 @@ public sealed class GoogleSecretManagerTransferClientTests
                     ? SecretVersion.Types.State.Enabled
                     : SecretVersion.Types.State.Disabled
             });
+            rawResponseEnumerated();
             yield return response;
+
+            if (hasAdditionalEnabledVersionPage)
+            {
+                var additionalResponse = new ListSecretVersionsResponse();
+                additionalResponse.Versions.Add(new SecretVersion { State = SecretVersion.Types.State.Enabled });
+                rawResponseEnumerated();
+                yield return additionalResponse;
+            }
         }
     }
 }

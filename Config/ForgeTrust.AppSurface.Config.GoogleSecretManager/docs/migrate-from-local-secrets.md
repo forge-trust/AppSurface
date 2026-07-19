@@ -17,36 +17,41 @@ Manager.
 
 1. Create the Secret Manager secret through your deployment-owned process.
 2. Grant the app runtime identity `secretmanager.versions.access` for the version it will read. Grant the operator
-   running transfer the minimum `secretmanager.versions.add` permission for the existing secret.
+   running transfer `secretmanager.secrets.get`, `secretmanager.versions.list`, and `secretmanager.versions.add` on the
+   existing destination secret so plan can verify its metadata and apply can add the version.
 3. Declare the source, destination, and exact key mapping in a reviewed promotion job, then create its value-free plan:
 
-```bash
-appsurface secrets transfer plan --config ./secret-promotion.json \
-  --job local-to-production \
-  --out ./local-to-production.plan.json
-```
+   ```bash
+   appsurface secrets transfer plan --config ./secret-promotion.json \
+     --job local-to-production \
+     --out ./local-to-production.plan.json
+   ```
 
 4. Apply only after the plan reports the intended row:
 
-```bash
-appsurface secrets transfer apply --config ./secret-promotion.json \
-  --plan ./local-to-production.plan.json \
-  --apply --confirm local-to-production
-```
+   ```bash
+   appsurface secrets transfer apply --config ./secret-promotion.json \
+     --plan ./local-to-production.plan.json \
+     --apply --confirm local-to-production
+   ```
 
-If the secret already has enabled versions, create the plan with `--replace` to add a new enabled version. The workflow
-does not create the secret parent, disable old versions, destroy versions, grant IAM, or rotate values.
+   If the destination secret has no enabled versions, the apply writes the first enabled version. If it already has
+   enabled versions, create the plan with `--replace` to add another enabled version. The workflow does not create the
+   secret parent, disable old versions, destroy versions, grant IAM, or rotate values.
 
 5. Add `ForgeTrust.AppSurface.Config.GoogleSecretManager`.
 6. Map the existing logical key to the written version:
 
-```csharp
-services.ConfigureAppSurfaceGoogleSecretManager(options =>
-{
-    options.ProjectId = "my-production-project";
-    options.MapSecret("Stripe:ApiKey", "stripe-api-key", version: "7");
-});
-```
+   ```csharp
+   services.ConfigureAppSurfaceGoogleSecretManager(options =>
+   {
+       options.ProjectId = "my-production-project";
+       options.MapSecret("Stripe:ApiKey", "stripe-api-key", version: "<applied numeric version>");
+   });
+   ```
+
+   Replace `<applied numeric version>` with the numeric version from the value-free apply receipt, such as `3`, after
+   confirming that version is the intended production read target.
 
 7. Run `appsurface config diagnostics` or an app-owned config audit endpoint in the deployed environment.
 8. Confirm the source is `GoogleSecretManagerConfigProvider` and the value is redacted.
@@ -67,8 +72,12 @@ The promotion configuration carries batch mappings and keeps source/sink authori
 }
 ```
 
-Apply validates the whole job before any payload read. Writes are ordered but not cross-secret atomic; a receipt records
-partial or indeterminate outcomes without ever including secret values.
+Apply validates the whole job before any payload read. Writes are ordered but not cross-secret atomic. Before mutation,
+the workflow persists a value-free journal for the planned rows, then updates that journal atomically after each row. If
+the process crashes, resume from the latest journal or receipt; rows already confirmed as `Written` are skipped, rows not
+confirmed are revalidated before another write, and indeterminate Google writes require operator reconciliation instead
+of automatic retry. Journals and receipts record resources, row statuses, and written version names only; they never
+include secret values, payload bytes, hashes, credentials, or raw provider exceptions.
 
 ## Pitfalls
 

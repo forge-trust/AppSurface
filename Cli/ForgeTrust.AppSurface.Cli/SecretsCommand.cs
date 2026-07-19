@@ -21,7 +21,7 @@ internal sealed partial class SecretsCommand : ICommand
     [ExcludeFromCodeCoverage(Justification = "CliFx command discovery covers root help; subcommands carry behavior tests.")]
     public async ValueTask ExecuteAsync(IConsole console)
     {
-        await console.Output.WriteLineAsync("Use 'appsurface secrets init', 'set', 'get', 'list', 'delete', and 'doctor' to manage local development secrets, or 'transfer google' for explicit remote transfer.");
+        await console.Output.WriteLineAsync("Use 'appsurface secrets init', 'set', 'get', 'list', 'delete', and 'doctor' to manage local development secrets, or 'appsurface secrets transfer plan|apply' for explicit remote transfer.");
     }
 }
 

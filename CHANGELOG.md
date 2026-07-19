@@ -14,7 +14,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
-- `appsurface secrets transfer plan|apply` adds declared, value-safe LocalSecrets and Google promotion jobs. Plans bind exact endpoint mappings, configuration digest, expiry, and destination preconditions; Google destinations add a new version only when an apply plan permits replacement.
+- `appsurface secrets transfer plan|apply` adds declared, value-safe LocalSecrets and Google promotion jobs. Plans bind exact endpoint mappings, configuration digest, expiry, and destination preconditions; Google destinations write the first enabled version when none exists, while `--replace` permits adding another enabled version to an existing Google secret.
 - [`ForgeTrust.AppSurface.Web` health and readiness probes](./Web/ForgeTrust.AppSurface.Web/README.md#health-and-readiness-probes) now default off, avoiding health-check service registration and `/health` plus `/ready` endpoint mapping unless a host explicitly sets `WebOptions.Health.Enabled = true`; enabled probes also avoid general route-handler binding during startup, and existing probe consumers must opt in during upgrade.
 ## 0.2.0-preview.4 - 2026-07-18
 

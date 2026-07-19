@@ -68,6 +68,16 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task SecretsCommand_Should_PrintPlanApplyGuidance()
+    {
+        var result = await InvokeProgramEntryPointAsync(["secrets"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("appsurface secrets transfer plan|apply", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("transfer google", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SecretsTransfer_Should_PrintDeclaredWorkflowGuidance()
     {
         var result = await InvokeProgramEntryPointAsync(["secrets", "transfer"]);
@@ -141,8 +151,10 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, plan.ExitCode);
         Assert.Equal(0, dryRun.ExitCode);
         Assert.Equal(0, apply.ExitCode);
-        Assert.Single(client.Writes);
-        Assert.DoesNotContain("sentinel-local-secret", plan.AllText + dryRun.AllText + apply.AllText, StringComparison.Ordinal);
+        Assert.Equal("projects/staging/secrets/stripe-api-key", Assert.Single(client.Writes));
+        var planArtifact = await File.ReadAllTextAsync(planPath);
+        var receiptArtifact = await File.ReadAllTextAsync($"{planPath}.receipt.json");
+        Assert.DoesNotContain("sentinel-local-secret", plan.AllText + dryRun.AllText + apply.AllText + planArtifact + receiptArtifact, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3402,7 +3414,7 @@ public sealed class ProgramEntryPointTests
 
         public Dictionary<string, GoogleSecretManagerTransferStatus> AccessFailures { get; } = new(StringComparer.Ordinal);
 
-        public List<(string ResourceName, string Value)> Writes { get; } = [];
+        public List<string> Writes { get; } = [];
 
         public int ProbeSecretCalls { get; private set; }
 
@@ -3452,7 +3464,8 @@ public sealed class ProgramEntryPointTests
 
         public AppSurfaceGoogleSecretWriteResult AddSecretVersion(string secretResourceName, string value, TimeSpan timeout)
         {
-            Writes.Add((secretResourceName, value));
+            _ = value;
+            Writes.Add(secretResourceName);
             return AppSurfaceGoogleSecretWriteResult.Written(
                 secretResourceName,
                 $"{secretResourceName}/versions/{Writes.Count.ToString(CultureInfo.InvariantCulture)}");

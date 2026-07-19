@@ -520,6 +520,42 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void IndexedStoreSet_Should_NotWriteValue_WhenIndexWriteFails()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var live = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+        store.FailIndexWrites(LocalSecretResultStatus.Unavailable);
+
+        var set = store.Set(live, "live-secret");
+        var probe = store.Probe(live);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, set.Status);
+        Assert.False(store.HasIndex("MyApp", "Development", null));
+        Assert.False(store.HasStoredValue(live));
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+        Assert.DoesNotContain("live-secret", probe.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void IndexedStoreSet_Should_RemoveNewIndexEntry_WhenValueWriteFails()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var live = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+        store.FailValueWrites(LocalSecretResultStatus.Unavailable);
+
+        var set = store.Set(live, "live-secret");
+        var probe = store.Probe(live);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, set.Status);
+        Assert.False(store.HasStoredValue(live));
+        Assert.DoesNotContain(live.Key, store.ReadIndexKeys("MyApp", "Development", null));
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+        Assert.DoesNotContain("live-secret", probe.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void IndexedStoreList_Should_PruneStaleIndexedKeys()
     {
         var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
@@ -684,6 +720,8 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
         private readonly Dictionary<string, AppSurfaceLocalSecretResult> _readFailures = new(StringComparer.Ordinal);
         private LocalSecretResultStatus? _nextWriteFailure;
+        private LocalSecretResultStatus? _indexWriteFailure;
+        private LocalSecretResultStatus? _valueWriteFailure;
 
         public override string Name => nameof(IndexedMemoryStore);
 
@@ -704,10 +742,17 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         public bool HasIndex(string applicationName, string environment, string? keyPrefix) =>
             _values.ContainsKey(IndexStorageName(applicationName, environment, keyPrefix));
 
+        public bool HasStoredValue(AppSurfaceLocalSecretIdentity identity) =>
+            _values.ContainsKey(identity.StorageName);
+
         public void FailRead(AppSurfaceLocalSecretIdentity identity, LocalSecretResultStatus status) =>
             _readFailures[identity.StorageName] = Failure(status);
 
         public void FailNextWrite(LocalSecretResultStatus status) => _nextWriteFailure = status;
+
+        public void FailIndexWrites(LocalSecretResultStatus status) => _indexWriteFailure = status;
+
+        public void FailValueWrites(LocalSecretResultStatus status) => _valueWriteFailure = status;
 
         protected override AppSurfaceLocalSecretResult ReadStoredValue(AppSurfaceLocalSecretIdentity identity)
         {
@@ -723,6 +768,16 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
 
         protected override AppSurfaceLocalSecretResult WriteStoredValue(AppSurfaceLocalSecretIdentity identity, string value)
         {
+            if (string.Equals(identity.Key, IndexKey, StringComparison.Ordinal) && _indexWriteFailure is { } indexStatus)
+            {
+                return Failure(indexStatus);
+            }
+
+            if (!string.Equals(identity.Key, IndexKey, StringComparison.Ordinal) && _valueWriteFailure is { } valueStatus)
+            {
+                return Failure(valueStatus);
+            }
+
             if (_nextWriteFailure is { } status)
             {
                 _nextWriteFailure = null;

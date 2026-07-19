@@ -19,6 +19,45 @@ internal interface ISecretPromotionGoogleClientFactory
     IAppSurfaceGoogleSecretTransferClient Create(SecretPromotionEndpoint endpoint);
 }
 
+/// <summary>Persists value-free receipt snapshots for crash-safe promotion recovery.</summary>
+internal interface ISecretPromotionReceiptWriter
+{
+    /// <summary>Atomically replaces the receipt at <paramref name="path"/>.</summary>
+    /// <param name="path">Destination receipt path.</param>
+    /// <param name="receipt">Value-free journal snapshot.</param>
+    void Write(string path, SecretPromotionReceipt receipt);
+}
+
+/// <summary>Writes receipt snapshots through same-directory atomic replacement.</summary>
+internal sealed class AtomicSecretPromotionReceiptWriter : ISecretPromotionReceiptWriter
+{
+    /// <inheritdoc />
+    public void Write(string path, SecretPromotionReceipt receipt)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath) ?? Directory.GetCurrentDirectory();
+        var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(receipt, SecretPromotionWorkflow.JsonOptions));
+            File.Move(temporaryPath, fullPath, overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            try
+            {
+                File.Delete(temporaryPath);
+            }
+            catch (Exception cleanupException) when (cleanupException is IOException or UnauthorizedAccessException)
+            {
+                // The temporary artifact is value-free; the original receipt remains authoritative.
+            }
+
+            throw SecretPromotionCommandExtensions.Usage("--receipt could not be written.");
+        }
+    }
+}
+
 internal sealed class DefaultSecretPromotionGoogleClientFactory(IAppSurfaceGoogleSecretTransferClient applicationDefaultClient) :
     ISecretPromotionGoogleClientFactory
 {
@@ -54,7 +93,11 @@ internal sealed class DefaultSecretPromotionGoogleClientFactory(IAppSurfaceGoogl
             $"Google endpoint '{endpoint.Name}' must explicitly select credential.mode 'applicationDefault' or 'credentialFile'.");
     }
 
-    private static string ValidateCredentialFile(string? value)
+    /// <summary>Validates a credential file path without returning its contents or path in diagnostics.</summary>
+    /// <param name="value">Absolute credential-file path.</param>
+    /// <param name="isWindows">Optional platform seam used to verify fail-closed Windows behavior.</param>
+    /// <returns>The canonical absolute path after posture validation.</returns>
+    internal static string ValidateCredentialFile(string? value, bool? isWindows = null)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -73,8 +116,15 @@ internal sealed class DefaultSecretPromotionGoogleClientFactory(IAppSurfaceGoogl
             throw SecretPromotionCommandExtensions.Usage("Google credentialFile must identify an existing regular file.");
         }
 
+        if (isWindows ?? OperatingSystem.IsWindows())
+        {
+            throw SecretPromotionCommandExtensions.Usage(
+                "Google credentialFile is not supported on Windows because AppSurface cannot verify a restrictive file ACL.");
+        }
+
         if (!OperatingSystem.IsWindows())
         {
+            ValidateCredentialDirectoryAncestors(path);
             const UnixFileMode exposed =
                 UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
                 UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
@@ -87,18 +137,64 @@ internal sealed class DefaultSecretPromotionGoogleClientFactory(IAppSurfaceGoogl
 
         return path;
     }
+
+    private static void ValidateCredentialDirectoryAncestors(string path)
+    {
+        var directory = Path.GetDirectoryName(path)!;
+        var root = Path.GetPathRoot(directory)!;
+        var current = root;
+        var relative = Path.GetRelativePath(root, directory);
+        foreach (var segment in relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+        {
+            current = Path.Join(current, segment);
+            var info = new DirectoryInfo(current);
+            var isLink = info.LinkTarget is not null || info.Attributes.HasFlag(FileAttributes.ReparsePoint);
+            var allowedSystemAlias = IsAllowedMacOsSystemDirectoryAlias(current, info.LinkTarget);
+            if (!info.Exists || isLink && !allowedSystemAlias)
+            {
+                throw SecretPromotionCommandExtensions.Usage(
+                    "Google credentialFile parent directories must exist and must not use symbolic links.");
+            }
+
+            var mode = info.UnixFileMode;
+            var sharedWrite = mode.HasFlag(UnixFileMode.GroupWrite) || mode.HasFlag(UnixFileMode.OtherWrite);
+            if (!allowedSystemAlias && sharedWrite && !mode.HasFlag(UnixFileMode.StickyBit))
+            {
+                throw SecretPromotionCommandExtensions.Usage(
+                    "Google credentialFile parent directories must not be writable by group or other users unless sticky.");
+            }
+        }
+    }
+
+    private static bool IsAllowedMacOsSystemDirectoryAlias(string path, string? target)
+    {
+        if (!OperatingSystem.IsMacOS() || target is null)
+        {
+            return false;
+        }
+
+        var normalizedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        var normalizedTarget = Path.TrimEndingDirectorySeparator(target.StartsWith(Path.DirectorySeparatorChar)
+            ? target
+            : Path.Join(Path.GetPathRoot(normalizedPath), target));
+        return normalizedPath == "/var" && normalizedTarget == "/private/var"
+            || normalizedPath == "/tmp" && normalizedTarget == "/private/tmp";
+    }
 }
 
 /// <summary>
 /// Runs declared, value-safe promotion jobs.
 /// </summary>
-internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactory googleFactory)
+internal sealed class SecretPromotionWorkflow(
+    ISecretPromotionGoogleClientFactory googleFactory,
+    ISecretPromotionReceiptWriter? receiptWriter = null)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         WriteIndented = true
     };
+    private readonly ISecretPromotionReceiptWriter _receiptWriter = receiptWriter ?? new AtomicSecretPromotionReceiptWriter();
 
     public SecretPromotionPlanResult CreatePlan(SecretPromotionPlanRequest request)
     {
@@ -113,18 +209,31 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
             throw SecretPromotionCommandExtensions.Usage("Promotion job contains duplicate normalized LocalSecrets keys.");
         }
 
-        var rows = draftRows.Select(row => CaptureDestinationPrecondition(row, endpoints.Destination, request.Context)).ToArray();
+        var rows = draftRows.Select(row => CaptureDestinationPrecondition(row, endpoints.Destination)).ToArray();
         var summaryRows = rows.Select(row => ProbeRow(row, endpoints, request.Context, request.Replace)).ToArray();
         var succeeded = summaryRows.All(IsReadyOrSkipped);
+        var createdAtUtc = DateTimeOffset.UtcNow;
+        var expiresAtUtc = createdAtUtc.Add(request.Expiry);
+        var production = IsProduction(endpoints.Destination);
+        var planIdentity = ComputePlanIdentity(
+            job.Name,
+            loaded.Digest,
+            createdAtUtc,
+            expiresAtUtc,
+            request.Replace,
+            production,
+            succeeded,
+            rows);
         var plan = new SecretPromotionPlanArtifact(
             1,
             job.Name,
             loaded.Digest,
-            DateTimeOffset.UtcNow,
-            DateTimeOffset.UtcNow.Add(request.Expiry),
+            createdAtUtc,
+            expiresAtUtc,
             request.Replace,
-            IsProduction(endpoints.Destination),
+            production,
             succeeded,
+            planIdentity,
             rows);
         WriteJson(request.OutputPlanPath, plan, "--out");
 
@@ -146,6 +255,8 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
             throw SecretPromotionCommandExtensions.Usage("The plan has expired. Create a new plan before applying.");
         }
 
+        ValidatePlanIdentity(plan);
+
         if (!plan.Ready)
         {
             throw SecretPromotionCommandExtensions.Usage("The plan contains failed preflight rows and cannot be applied.");
@@ -161,20 +272,28 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
         }
 
         var plannedRows = plan.Rows.Select(row => RehydrateRow(row, endpoints, request.Context)).ToArray();
-        var completedRows = LoadCompletedRows(request.ResumeReceiptPath, plan);
+        var resumeState = LoadResumeState(request.ResumeReceiptPath, plan);
+        var completedRows = resumeState.CompletedRows;
+        VerifyCompletedRows(completedRows, endpoints.Destination);
         var preflight = plannedRows
-            .Where(row => !completedRows.Contains(row.RowNumber))
+            .Where(row => !completedRows.ContainsKey(row.RowNumber))
             .Select(row => RecheckRow(row, endpoints, request.Context, plan.Replace))
             .ToDictionary(row => row.RowNumber);
         var plannedResults = plannedRows
-            .Select(row => completedRows.Contains(row.RowNumber)
+            .Select(row => completedRows.ContainsKey(row.RowNumber)
                 ? row.Result("Skipped", "ResumeSkippedConfirmedWrite", "secret-promotion-resume-skipped", null, false)
                 : preflight[row.RowNumber])
             .ToArray();
         if (plannedResults.Any(row => !IsReadyOrSkipped(row)))
         {
             var blocked = new SecretPromotionSummary("apply", plan.JobName, request.Apply, false, plannedResults, null, null);
-            WriteReceipt(request, plan, blocked);
+            var blockedJournalRows = resumeState.Rows.ToList();
+            foreach (var row in plannedResults.Where(row => !completedRows.ContainsKey(row.RowNumber)))
+            {
+                SetJournalResult(blockedJournalRows, row);
+            }
+
+            WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, blockedJournalRows));
             return blocked;
         }
 
@@ -184,24 +303,66 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
         }
 
         var results = new List<SecretPromotionRowResult>(plannedRows.Length);
+        var journalResults = resumeState.Rows.ToList();
+        WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
         foreach (var row in plannedRows)
         {
-            if (completedRows.Contains(row.RowNumber))
+            if (completedRows.ContainsKey(row.RowNumber))
             {
                 results.Add(row.Result("Skipped", "ResumeSkippedConfirmedWrite", "secret-promotion-resume-skipped", null, false));
                 continue;
             }
 
             var preflightResult = preflight[row.RowNumber];
-            results.Add(preflightResult.Status == "DestinationExists"
-                ? SkipExistingDestination(preflightResult)
-                : ApplyRow(row, endpoints, request.Context));
+            if (preflightResult.Status == "DestinationExists")
+            {
+                results.Add(SkipExistingDestination(preflightResult));
+                SetJournalResult(journalResults, results[^1]);
+                WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
+                continue;
+            }
+
+            results.Add(row.Result(
+                "IndeterminateWrite",
+                "WritePending",
+                "secret-promotion-write-pending",
+                "The destination write must be reconciled if this operation is interrupted.",
+                false));
+            SetJournalResult(journalResults, results[^1]);
+            WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
+
+            results[^1] = ApplyRow(row, endpoints, request.Context);
+            SetJournalResult(journalResults, results[^1]);
+            WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
         }
 
         var succeeded = results.All(row => row.Status is "Written" or "Skipped");
         var summary = new SecretPromotionSummary("apply", plan.JobName, true, succeeded, results, null, null);
-        WriteReceipt(request, plan, summary);
+        WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
         return summary;
+    }
+
+    private static SecretPromotionSummary CreateJournalSummary(
+        string jobName,
+        IReadOnlyList<SecretPromotionRowResult> rows) =>
+        new("apply", jobName, true, false, rows, null, null);
+
+    private static void SetJournalResult(List<SecretPromotionRowResult> journalRows, SecretPromotionRowResult result)
+    {
+        var index = result.RowNumber - 1;
+        if (index < journalRows.Count)
+        {
+            journalRows[index] = result;
+            return;
+        }
+
+        if (index == journalRows.Count)
+        {
+            journalRows.Add(result);
+            return;
+        }
+
+        throw SecretPromotionCommandExtensions.Usage("The receipt journal is not in declared row order.");
     }
 
     private static LoadedConfiguration LoadConfiguration(string path)
@@ -242,7 +403,10 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
         try
         {
             var plan = JsonSerializer.Deserialize<SecretPromotionPlanArtifact>(File.ReadAllBytes(Path.GetFullPath(path)), JsonOptions);
-            if (plan?.Version != 1 || plan.Rows is null || string.IsNullOrWhiteSpace(plan.JobName))
+            if (plan?.Version != 1 ||
+                plan.Rows is null ||
+                plan.Rows.Any(static row => row is null) ||
+                string.IsNullOrWhiteSpace(plan.JobName))
             {
                 throw SecretPromotionCommandExtensions.Usage("--plan must be a version 1 AppSurface secret-promotion plan.");
             }
@@ -315,6 +479,11 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
             throw SecretPromotionCommandExtensions.Usage("V1 supports only the built-in local endpoint and Google endpoints.");
         }
 
+        if (IsLocal(endpoints.Destination))
+        {
+            throw SecretPromotionCommandExtensions.Usage("V1 promotion destinations must be declared Google endpoints.");
+        }
+
         var duplicateKeys = job.Rows.GroupBy(row => row.Key, StringComparer.Ordinal).FirstOrDefault(group => string.IsNullOrWhiteSpace(group.Key) || group.Count() > 1);
         if (duplicateKeys is not null)
         {
@@ -338,7 +507,7 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
         }
 
         var duplicates = job.Rows
-            .Select(row => IsLocal(endpoints.Destination) ? row.Key : ResourceForDestination(row, endpoints.Destination))
+            .Select(row => ResourceForDestination(row, endpoints.Destination))
             .GroupBy(value => value, StringComparer.Ordinal)
             .FirstOrDefault(group => group.Count() > 1);
         if (duplicates is not null)
@@ -356,8 +525,8 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
         SecretsCommandContext context) =>
         CreateDeclaredPlanRow(row, rowNumber, endpoints, context) with
         {
-            DestinationHasEnabledVersions = IsLocal(endpoints.Destination) ? null : false,
-            DestinationExists = IsLocal(endpoints.Destination) ? false : null
+            DestinationHasEnabledVersions = false,
+            DestinationExists = null
         };
 
     private SecretPromotionRowResult ProbeRow(SecretPromotionPlanRow row, ResolvedEndpoints endpoints, SecretsCommandContext context, bool replace)
@@ -368,25 +537,13 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
             return source;
         }
 
-        return ProbeDestination(row, endpoints.Destination, context, replace, includePrecondition: true);
+        return ProbeDestination(row, endpoints.Destination, replace, includePrecondition: true);
     }
 
     private SecretPromotionPlanRow CaptureDestinationPrecondition(
         SecretPromotionPlanRow row,
-        SecretPromotionEndpoint endpoint,
-        SecretsCommandContext context)
+        SecretPromotionEndpoint endpoint)
     {
-        if (IsLocal(endpoint))
-        {
-            var probe = ProbeLocal(context, row.Key);
-            return probe.Status switch
-            {
-                LocalSecretResultStatus.Found => row with { DestinationExists = true },
-                LocalSecretResultStatus.Missing => row with { DestinationExists = false },
-                _ => row
-            };
-        }
-
         var remoteProbe = googleFactory.Create(endpoint).ProbeSecret(row.DestinationResource!, TimeSpan.FromSeconds(5));
         return remoteProbe.Status == GoogleSecretManagerTransferStatus.Ready
             ? row with { DestinationHasEnabledVersions = remoteProbe.HasEnabledVersions }
@@ -401,7 +558,7 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
             return source;
         }
 
-        var destination = ProbeDestination(row, endpoints.Destination, context, replace, includePrecondition: true);
+        var destination = ProbeDestination(row, endpoints.Destination, replace, includePrecondition: true);
         if (destination.Status != "Ready")
         {
             return destination;
@@ -426,39 +583,19 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
         var result = googleFactory.Create(endpoint).ProbeSecretVersion(row.SourceResource!, TimeSpan.FromSeconds(5));
         return result.Status == GoogleSecretManagerTransferStatus.Ready
             ? null
-            : row.GoogleFailure("ProbeGoogleSource", result.Status, result.Diagnostic);
+            : row.GoogleSourceFailure("ProbeGoogleSource", result.Status, result.Diagnostic);
     }
 
     private SecretPromotionRowResult ProbeDestination(
         SecretPromotionPlanRow row,
         SecretPromotionEndpoint endpoint,
-        SecretsCommandContext context,
         bool replace,
         bool includePrecondition)
     {
-        if (IsLocal(endpoint))
-        {
-            var probe = ProbeLocal(context, row.Key);
-            if (probe.Status is not (LocalSecretResultStatus.Found or LocalSecretResultStatus.Missing))
-            {
-                return row.Result("Failed", "ProbeLocalDestination", probe.Diagnostic?.Code, probe.Diagnostic?.Problem, probe.Diagnostic?.Retryable);
-            }
-
-            var exists = probe.Status == LocalSecretResultStatus.Found;
-            if (includePrecondition && row.DestinationExists != exists)
-            {
-                return row.Result("DestinationChanged", "ProbeLocalDestination", "secret-promotion-destination-changed", "Local destination state changed after planning.", false);
-            }
-
-            return exists && !replace
-                ? row.Result("DestinationExists", "ProbeLocalDestination", "secret-promotion-destination-exists", "Local destination already exists.", false)
-                : row.Result("Ready", exists ? "WouldReplaceLocal" : "WouldWriteLocal", null, null, null);
-        }
-
         var result = googleFactory.Create(endpoint).ProbeSecret(row.DestinationResource!, TimeSpan.FromSeconds(5));
         if (result.Status != GoogleSecretManagerTransferStatus.Ready)
         {
-            return row.GoogleFailure("ProbeGoogleDestination", result.Status, result.Diagnostic);
+            return row.GoogleDestinationFailure("ProbeGoogleDestination", result.Status, result.Diagnostic);
         }
 
         if (includePrecondition && row.DestinationHasEnabledVersions != result.HasEnabledVersions)
@@ -478,9 +615,7 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
             return failure!;
         }
 
-        return IsLocal(endpoints.Destination)
-            ? WriteLocal(row, context, value!)
-            : WriteGoogle(row, endpoints.Destination, value!);
+        return WriteGoogle(row, endpoints.Destination, value!);
     }
 
     private bool TryReadSource(
@@ -501,14 +636,16 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
                 return true;
             }
 
-            failure = row.Result("SourceMissing", "ReadLocalSource", localResult.Diagnostic?.Code, localResult.Diagnostic?.Problem, localResult.Diagnostic?.Retryable);
+            failure = localResult.Status == LocalSecretResultStatus.Missing
+                ? row.Result("SourceMissing", "ReadLocalSource", localResult.Diagnostic?.Code, localResult.Diagnostic?.Problem, localResult.Diagnostic?.Retryable)
+                : row.Result("Failed", "ReadLocalSource", localResult.Diagnostic?.Code, localResult.Diagnostic?.Problem, localResult.Diagnostic?.Retryable);
             return false;
         }
 
         var result = googleFactory.Create(endpoint).AccessSecretVersion(row.SourceResource!, TimeSpan.FromSeconds(5));
         if (result.Status != GoogleSecretManagerTransferStatus.Ready || result.Payload is null)
         {
-            failure = row.GoogleFailure("AccessGoogleSource", result.Status, result.Diagnostic);
+            failure = row.GoogleSourceFailure("AccessGoogleSource", result.Status, result.Diagnostic);
             return false;
         }
 
@@ -521,14 +658,6 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
         return true;
     }
 
-    private static SecretPromotionRowResult WriteLocal(SecretPromotionPlanRow row, SecretsCommandContext context, string value)
-    {
-        var result = context.Store.Set(IdentityFrom(row, context), value);
-        return result.Status == LocalSecretResultStatus.Found
-            ? row.Result("Written", "WroteLocal", null, null, null)
-            : row.Result("Failed", "WriteLocal", result.Diagnostic?.Code, result.Diagnostic?.Problem, result.Diagnostic?.Retryable);
-    }
-
     private SecretPromotionRowResult WriteGoogle(SecretPromotionPlanRow row, SecretPromotionEndpoint endpoint, string value)
     {
         var result = googleFactory.Create(endpoint).AddSecretVersion(row.DestinationResource!, value, TimeSpan.FromSeconds(5));
@@ -537,9 +666,9 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
             return row.Result("Written", "AddedGoogleVersion", null, null, null, result.WrittenVersionResourceName);
         }
 
-        return result.Status is GoogleSecretManagerTransferStatus.Unavailable or GoogleSecretManagerTransferStatus.Cancelled
+        return result.Status is GoogleSecretManagerTransferStatus.Unavailable or GoogleSecretManagerTransferStatus.Cancelled or GoogleSecretManagerTransferStatus.IndeterminateWrite
             ? row.Result("IndeterminateWrite", "AddGoogleVersion", result.Diagnostic?.Code ?? "secret-promotion-indeterminate-write", "Google may have accepted the version before the response failed. Reconcile before resuming.", false)
-            : row.GoogleFailure("AddGoogleVersion", result.Status, result.Diagnostic);
+            : row.GoogleDestinationFailure("AddGoogleVersion", result.Status, result.Diagnostic);
     }
 
     private static AppSurfaceLocalSecretResult ProbeLocal(SecretsCommandContext context, string key)
@@ -653,16 +782,6 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
 
     private static string ResourceForDestination(SecretPromotionJobRow row, SecretPromotionEndpoint endpoint)
     {
-        if (IsLocal(endpoint))
-        {
-            if (!string.IsNullOrWhiteSpace(row.Destination))
-            {
-                throw SecretPromotionCommandExtensions.Usage("Local destination rows must not declare destination resources.");
-            }
-
-            return "local";
-        }
-
         if (!IsSecretParentResource(row.Destination))
         {
             throw SecretPromotionCommandExtensions.Usage("Google destination rows require full projects/.../secrets/... resources.");
@@ -719,6 +838,47 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
         }
     }
 
+    private static string ComputePlanIdentity(
+        string jobName,
+        string configDigest,
+        DateTimeOffset createdAtUtc,
+        DateTimeOffset expiresAtUtc,
+        bool replace,
+        bool production,
+        bool ready,
+        IReadOnlyList<SecretPromotionPlanRow> rows)
+    {
+        var material = new SecretPromotionPlanIdentityMaterial(
+            1,
+            jobName,
+            configDigest,
+            createdAtUtc,
+            expiresAtUtc,
+            replace,
+            production,
+            ready,
+            rows);
+        return Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(material, JsonOptions)))
+            .ToLowerInvariant();
+    }
+
+    private static void ValidatePlanIdentity(SecretPromotionPlanArtifact plan)
+    {
+        var expected = ComputePlanIdentity(
+            plan.JobName,
+            plan.ConfigDigest,
+            plan.CreatedAtUtc,
+            plan.ExpiresAtUtc,
+            plan.Replace,
+            plan.Production,
+            plan.Ready,
+            plan.Rows);
+        if (!string.Equals(plan.PlanIdentity, expected, StringComparison.Ordinal))
+        {
+            throw SecretPromotionCommandExtensions.Usage("The plan identity is invalid. Create a new plan before applying.");
+        }
+    }
+
     private static void WriteJson<T>(string path, T value, string option)
     {
         try
@@ -731,22 +891,40 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
         }
     }
 
-    private static IReadOnlySet<int> LoadCompletedRows(string? receiptPath, SecretPromotionPlanArtifact plan)
+    private static ResumeReceiptState LoadResumeState(string? receiptPath, SecretPromotionPlanArtifact plan)
     {
         if (string.IsNullOrWhiteSpace(receiptPath))
         {
-            return new HashSet<int>();
+            return new ResumeReceiptState([], new Dictionary<int, SecretPromotionRowResult>());
         }
 
         try
         {
             var receipt = JsonSerializer.Deserialize<SecretPromotionReceipt>(File.ReadAllBytes(Path.GetFullPath(receiptPath)), JsonOptions);
-            if (receipt is null || receipt.PlanJob != plan.JobName || receipt.ConfigDigest != plan.ConfigDigest)
+            if (receipt is null ||
+                receipt.PlanJob != plan.JobName ||
+                receipt.ConfigDigest != plan.ConfigDigest ||
+                receipt.PlanIdentity != plan.PlanIdentity)
             {
                 throw SecretPromotionCommandExtensions.Usage("--resume does not match the supplied plan.");
             }
 
-            return receipt.Rows.Where(row => row.Status == "Written").Select(row => row.RowNumber).ToHashSet();
+            if (receipt.Rows is null || receipt.Rows.Any(static row => row is null))
+            {
+                throw SecretPromotionCommandExtensions.Usage("--resume contains rows that do not match the supplied plan.");
+            }
+
+            ValidateReceiptRows(receipt.Rows, plan.Rows);
+            if (receipt.Rows.Any(static row => row.Status == "IndeterminateWrite"))
+            {
+                throw SecretPromotionCommandExtensions.Usage(
+                    "--resume contains an indeterminate write. Reconcile the destination before creating a new plan.");
+            }
+
+            var completedRows = receipt.Rows
+                .Where(static row => row.Status == "Written")
+                .ToDictionary(static row => row.RowNumber);
+            return new ResumeReceiptState(receipt.Rows, completedRows);
         }
         catch (JsonException)
         {
@@ -758,14 +936,84 @@ internal sealed class SecretPromotionWorkflow(ISecretPromotionGoogleClientFactor
         }
     }
 
-    private static void WriteReceipt(SecretPromotionApplyRequest request, SecretPromotionPlanArtifact plan, SecretPromotionSummary summary)
+    private void VerifyCompletedRows(
+        IReadOnlyDictionary<int, SecretPromotionRowResult> completedRows,
+        SecretPromotionEndpoint destination)
+    {
+        if (completedRows.Count == 0)
+        {
+            return;
+        }
+
+        var client = googleFactory.Create(destination);
+        foreach (var row in completedRows.Values.OrderBy(static row => row.RowNumber))
+        {
+            var result = client.ProbeSecretVersion(row.DestinationResource!, TimeSpan.FromSeconds(5));
+            if (result.Status != GoogleSecretManagerTransferStatus.Ready)
+            {
+                throw SecretPromotionCommandExtensions.Usage(
+                    "--resume written-version evidence could not be verified. Reconcile the destination before retrying.");
+            }
+        }
+    }
+
+    private void WriteReceipt(SecretPromotionApplyRequest request, SecretPromotionPlanArtifact plan, SecretPromotionSummary summary)
     {
         var path = request.ReceiptPath ?? $"{request.PlanPath}.receipt.json";
-        WriteJson(path, new SecretPromotionReceipt(plan.JobName, plan.ConfigDigest, summary.Rows), "--receipt");
+        _receiptWriter.Write(
+            path,
+            new SecretPromotionReceipt(plan.JobName, plan.ConfigDigest, plan.PlanIdentity, summary.Rows));
     }
+
+    private static void ValidateReceiptRows(
+        IReadOnlyList<SecretPromotionRowResult> receiptRows,
+        IReadOnlyList<SecretPromotionPlanRow> planRows)
+    {
+        if (receiptRows.Count > planRows.Count)
+        {
+            throw SecretPromotionCommandExtensions.Usage("--resume contains rows that do not match the supplied plan.");
+        }
+
+        for (var index = 0; index < receiptRows.Count; index++)
+        {
+            var receiptRow = receiptRows[index];
+            var planned = planRows[index];
+            if (receiptRow.RowNumber != planned.RowNumber ||
+                !string.Equals(receiptRow.Key, planned.Key, StringComparison.Ordinal) ||
+                !string.Equals(receiptRow.SourceEndpoint, planned.SourceEndpoint, StringComparison.Ordinal) ||
+                !string.Equals(receiptRow.SourceResource, planned.SourceResource, StringComparison.Ordinal) ||
+                !string.Equals(receiptRow.DestinationEndpoint, planned.DestinationEndpoint, StringComparison.Ordinal) ||
+                !IsReceiptDestinationResource(receiptRow, planned) ||
+                receiptRow.Status == "Written" && receiptRow.Action != "AddedGoogleVersion")
+            {
+                throw SecretPromotionCommandExtensions.Usage("--resume contains rows that do not match the supplied plan.");
+            }
+        }
+    }
+
+    private static bool IsReceiptDestinationResource(
+        SecretPromotionRowResult receiptRow,
+        SecretPromotionPlanRow planned) =>
+        string.Equals(receiptRow.DestinationResource, planned.DestinationResource, StringComparison.Ordinal) ||
+        receiptRow.Status == "Written" &&
+        IsNumericVersionResource(receiptRow.DestinationResource) &&
+        receiptRow.DestinationResource?.StartsWith($"{planned.DestinationResource}/versions/", StringComparison.Ordinal) == true;
 
     private sealed record LoadedConfiguration(SecretPromotionConfiguration Configuration, string Digest);
     private sealed record ResolvedEndpoints(SecretPromotionEndpoint Source, SecretPromotionEndpoint Destination);
+    private sealed record ResumeReceiptState(
+        IReadOnlyList<SecretPromotionRowResult> Rows,
+        IReadOnlyDictionary<int, SecretPromotionRowResult> CompletedRows);
+    private sealed record SecretPromotionPlanIdentityMaterial(
+        int Version,
+        string JobName,
+        string ConfigDigest,
+        DateTimeOffset CreatedAtUtc,
+        DateTimeOffset ExpiresAtUtc,
+        bool Replace,
+        bool Production,
+        bool Ready,
+        IReadOnlyList<SecretPromotionPlanRow> Rows);
 }
 
 internal static class SecretPromotionOutput
@@ -792,23 +1040,103 @@ internal static class SecretPromotionOutput
     }
 }
 
+/// <summary>Describes a value-free request to create a promotion plan.</summary>
+/// <param name="ConfigPath">Path to the reviewed endpoint and job configuration.</param>
+/// <param name="JobName">Exact declared job name to plan.</param>
+/// <param name="OutputPlanPath">Destination for the value-free plan artifact.</param>
+/// <param name="Replace">Whether existing enabled Google versions may receive another version.</param>
+/// <param name="Expiry">Positive lifetime after which apply must reject the plan.</param>
+/// <param name="Context">LocalSecrets identity and metadata-only store context.</param>
 internal sealed record SecretPromotionPlanRequest(string ConfigPath, string JobName, string OutputPlanPath, bool Replace, TimeSpan Expiry, SecretsCommandContext Context);
+
+/// <summary>Describes a dry-run or mutation-gated promotion apply request.</summary>
+/// <param name="ConfigPath">Path to the same reviewed configuration used for planning.</param>
+/// <param name="PlanPath">Path to the unexpired value-free plan.</param>
+/// <param name="Apply">Whether destination mutations are permitted; false performs apply preflight only.</param>
+/// <param name="Confirmation">Exact job name required for a production destination.</param>
+/// <param name="ReceiptPath">Optional value-free receipt path; defaults beside the plan.</param>
+/// <param name="ResumeReceiptPath">Optional prior receipt whose confirmed writes may be skipped.</param>
+/// <param name="Context">LocalSecrets identity and store context used only after preflight permits payload access.</param>
 internal sealed record SecretPromotionApplyRequest(string ConfigPath, string PlanPath, bool Apply, string? Confirmation, string? ReceiptPath, string? ResumeReceiptPath, SecretsCommandContext Context);
+
+/// <summary>Wraps the display-safe result returned after plan creation.</summary>
+/// <param name="Summary">Value-free row summary and plan location.</param>
 internal sealed record SecretPromotionPlanResult(SecretPromotionSummary Summary);
 
+/// <summary>Defines the versioned endpoint and named-job configuration authorization boundary.</summary>
+/// <param name="Version">Configuration schema version; v1 is required.</param>
+/// <param name="Endpoints">Explicit remote endpoint profiles; LocalSecrets is the built-in <c>local</c> endpoint.</param>
+/// <param name="Jobs">Reviewed jobs that bind exact sources, Google destinations, and rows.</param>
 internal sealed record SecretPromotionConfiguration(int Version, IReadOnlyList<SecretPromotionEndpoint> Endpoints, IReadOnlyList<SecretPromotionJob> Jobs);
+
+/// <summary>Declares one named provider endpoint without embedding credential values.</summary>
+/// <param name="Name">Case-sensitive endpoint name referenced by jobs.</param>
+/// <param name="Provider">Provider identifier; v1 accepts <c>google</c> plus built-in local sources.</param>
+/// <param name="Environment">Environment label used to enforce production rules.</param>
+/// <param name="Credential">Explicit Google credential mode; null is valid only for the built-in local endpoint.</param>
 internal sealed record SecretPromotionEndpoint(string Name, string Provider, string Environment, SecretPromotionCredential? Credential);
+
+/// <summary>Chooses a Google credential acquisition mode without carrying raw credentials.</summary>
+/// <param name="Mode"><c>applicationDefault</c> or <c>credentialFile</c>.</param>
+/// <param name="Path">Absolute restricted credential-file path when that mode is selected; never emitted.</param>
 internal sealed record SecretPromotionCredential(string Mode, string? Path);
+
+/// <summary>Declares one reviewed, direction-specific promotion job.</summary>
+/// <param name="Name">Case-sensitive job identity used by plan, confirmation, and receipt checks.</param>
+/// <param name="Source">Built-in <c>local</c> or a declared Google endpoint name.</param>
+/// <param name="Destination">Declared Google endpoint name; local destinations are rejected in v1.</param>
+/// <param name="AllowMutableLocalSource">Explicit production exception for a mutable LocalSecrets source.</param>
+/// <param name="Rows">Ordered explicit key and resource mappings.</param>
 internal sealed record SecretPromotionJob(string Name, string Source, string Destination, bool AllowMutableLocalSource, IReadOnlyList<SecretPromotionJobRow> Rows);
+
+/// <summary>Maps one logical LocalSecrets key to explicit provider resources.</summary>
+/// <param name="Key">Required logical AppSurface configuration key and row identity.</param>
+/// <param name="Source">Explicit Google version resource, or null for a LocalSecrets source.</param>
+/// <param name="Destination">Explicit existing Google secret parent resource.</param>
 internal sealed record SecretPromotionJobRow(string Key, string? Source, string? Destination);
 
-internal sealed record SecretPromotionPlanArtifact(int Version, string JobName, string ConfigDigest, DateTimeOffset CreatedAtUtc, DateTimeOffset ExpiresAtUtc, bool Replace, bool Production, bool Ready, IReadOnlyList<SecretPromotionPlanRow> Rows);
+/// <summary>Persists an expiring, value-free plan bound to all safety-relevant fields.</summary>
+/// <param name="Version">Plan schema version.</param>
+/// <param name="JobName">Declared job identity.</param>
+/// <param name="ConfigDigest">Digest of the exact endpoint configuration bytes.</param>
+/// <param name="CreatedAtUtc">UTC creation timestamp included in plan identity.</param>
+/// <param name="ExpiresAtUtc">UTC expiration enforced before payload access.</param>
+/// <param name="Replace">Whether another enabled Google version is authorized.</param>
+/// <param name="Production">Value-free production label captured for review.</param>
+/// <param name="Ready">Whether all plan-time probes were ready or intentionally skipped.</param>
+/// <param name="PlanIdentity">Stable SHA-256 identity over every plan safety field and row precondition.</param>
+/// <param name="Rows">Ordered canonical mappings and destination preconditions; never payloads.</param>
+internal sealed record SecretPromotionPlanArtifact(int Version, string JobName, string ConfigDigest, DateTimeOffset CreatedAtUtc, DateTimeOffset ExpiresAtUtc, bool Replace, bool Production, bool Ready, string PlanIdentity, IReadOnlyList<SecretPromotionPlanRow> Rows);
+
+/// <summary>Captures one canonical, value-free plan row and its destination precondition.</summary>
+/// <param name="RowNumber">One-based declared processing order.</param>
+/// <param name="Key">Explicit logical LocalSecrets key.</param>
+/// <param name="SourceEndpoint">Declared source endpoint name.</param>
+/// <param name="SourceResource">Canonical Google version resource, or <c>local</c>.</param>
+/// <param name="DestinationEndpoint">Declared Google destination endpoint name.</param>
+/// <param name="DestinationResource">Canonical existing Google secret parent.</param>
+/// <param name="LocalStorageName">Normalized LocalSecrets identity used to detect duplicate logical mappings.</param>
+/// <param name="DestinationHasEnabledVersions">Google enabled-version precondition captured during planning.</param>
+/// <param name="DestinationExists">Reserved provider-neutral existence precondition; null for v1 Google destinations.</param>
 internal sealed record SecretPromotionPlanRow(int RowNumber, string Key, string SourceEndpoint, string? SourceResource, string DestinationEndpoint, string? DestinationResource, string LocalStorageName, bool? DestinationHasEnabledVersions, bool? DestinationExists)
 {
+    /// <summary>Creates a value-free row result while preserving canonical row identity.</summary>
+    /// <param name="status">Stable workflow status.</param>
+    /// <param name="action">Display-safe operation classification.</param>
+    /// <param name="diagnosticCode">Optional stable diagnostic code.</param>
+    /// <param name="problem">Optional paste-safe problem statement.</param>
+    /// <param name="retryable">Whether an operator may retry without reconciliation.</param>
+    /// <param name="writtenResource">Confirmed written Google version resource, when available.</param>
+    /// <returns>A result that never includes secret payloads.</returns>
     public SecretPromotionRowResult Result(string status, string action, string? diagnosticCode, string? problem, bool? retryable, string? writtenResource = null) =>
         new(RowNumber, Key, SourceEndpoint, SourceResource, DestinationEndpoint, writtenResource ?? DestinationResource, status, action, diagnosticCode, problem, retryable);
 
-    public SecretPromotionRowResult GoogleFailure(string action, GoogleSecretManagerTransferStatus status, AppSurfaceGoogleSecretTransferDiagnostic? diagnostic) =>
+    /// <summary>Maps a Google source failure without misclassifying destination absence.</summary>
+    /// <param name="action">Source probe or access action.</param>
+    /// <param name="status">Provider status to classify.</param>
+    /// <param name="diagnostic">Optional value-safe provider diagnostic.</param>
+    /// <returns>A value-free source result.</returns>
+    public SecretPromotionRowResult GoogleSourceFailure(string action, GoogleSecretManagerTransferStatus status, AppSurfaceGoogleSecretTransferDiagnostic? diagnostic) =>
         Result(
             status switch
             {
@@ -824,8 +1152,56 @@ internal sealed record SecretPromotionPlanRow(int RowNumber, string Key, string 
             diagnostic?.Code ?? "google-secret-promotion-failed",
             diagnostic?.Problem ?? "Google Secret Manager promotion failed.",
             diagnostic?.Retryable);
+
+    /// <summary>Maps a Google destination failure, preserving indeterminate write state.</summary>
+    /// <param name="action">Destination probe or write action.</param>
+    /// <param name="status">Provider status to classify.</param>
+    /// <param name="diagnostic">Optional value-safe provider diagnostic.</param>
+    /// <returns>A value-free destination result.</returns>
+    public SecretPromotionRowResult GoogleDestinationFailure(string action, GoogleSecretManagerTransferStatus status, AppSurfaceGoogleSecretTransferDiagnostic? diagnostic) =>
+        Result(
+            status switch
+            {
+                GoogleSecretManagerTransferStatus.AccessDenied => "AccessDenied",
+                GoogleSecretManagerTransferStatus.Unavailable => "Unavailable",
+                GoogleSecretManagerTransferStatus.Cancelled => "Cancelled",
+                GoogleSecretManagerTransferStatus.InvalidResource => "InvalidResource",
+                GoogleSecretManagerTransferStatus.IndeterminateWrite => "IndeterminateWrite",
+                _ => "Failed"
+            },
+            action,
+            diagnostic?.Code ?? "google-secret-promotion-failed",
+            diagnostic?.Problem ?? "Google Secret Manager promotion failed.",
+            diagnostic?.Retryable);
 }
 
+/// <summary>Reports one value-free row outcome.</summary>
+/// <param name="RowNumber">One-based declared processing order.</param>
+/// <param name="Key">Logical AppSurface key; never its value.</param>
+/// <param name="SourceEndpoint">Declared source endpoint name.</param>
+/// <param name="SourceResource">Canonical source identity.</param>
+/// <param name="DestinationEndpoint">Declared Google destination endpoint name.</param>
+/// <param name="DestinationResource">Planned secret parent or confirmed written version resource.</param>
+/// <param name="Status">Stable result classification.</param>
+/// <param name="Action">Display-safe action classification.</param>
+/// <param name="DiagnosticCode">Optional stable diagnostic code.</param>
+/// <param name="Problem">Optional paste-safe problem statement.</param>
+/// <param name="Retryable">Whether retry is safe without reconciliation.</param>
 internal sealed record SecretPromotionRowResult(int RowNumber, string Key, string SourceEndpoint, string? SourceResource, string DestinationEndpoint, string? DestinationResource, string Status, string Action, string? DiagnosticCode, string? Problem, bool? Retryable);
+
+/// <summary>Aggregates ordered value-free plan or apply results.</summary>
+/// <param name="Operation"><c>plan</c> or <c>apply</c>.</param>
+/// <param name="Job">Declared job name.</param>
+/// <param name="Apply">Whether payload reads and destination writes were permitted.</param>
+/// <param name="Succeeded">Whether every row completed or was intentionally skipped.</param>
+/// <param name="Rows">Ordered value-free row outcomes.</param>
+/// <param name="PlanPath">Written plan path for plan output.</param>
+/// <param name="ReceiptPath">Written receipt path when surfaced by a caller.</param>
 internal sealed record SecretPromotionSummary(string Operation, string Job, bool Apply, bool Succeeded, IReadOnlyList<SecretPromotionRowResult> Rows, string? PlanPath, string? ReceiptPath);
-internal sealed record SecretPromotionReceipt(string PlanJob, string ConfigDigest, IReadOnlyList<SecretPromotionRowResult> Rows);
+
+/// <summary>Provides the durable, value-free apply journal and resume evidence.</summary>
+/// <param name="PlanJob">Exact job name from the plan.</param>
+/// <param name="ConfigDigest">Exact configuration digest from the plan.</param>
+/// <param name="PlanIdentity">Identity binding every safety field and destination precondition.</param>
+/// <param name="Rows">Atomically persisted ordered outcomes; indeterminate rows block automatic resume.</param>
+internal sealed record SecretPromotionReceipt(string PlanJob, string ConfigDigest, string PlanIdentity, IReadOnlyList<SecretPromotionRowResult> Rows);

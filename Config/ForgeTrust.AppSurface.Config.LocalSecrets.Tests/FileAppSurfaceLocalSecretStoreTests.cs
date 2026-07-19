@@ -73,6 +73,25 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void Probe_Should_FindStorageNamesWithEquivalentEscapedAndRawUtf8PropertyNames()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:雪😀")
+            .Identity!;
+        var escapedStorageName = identity.StorageName
+            .Replace(":", "\\u003A", StringComparison.Ordinal)
+            .Replace("雪", "\\u96ea", StringComparison.Ordinal);
+
+        var raw = CreateProbeStore("{\"" + identity.StorageName + "\":{}}").Probe(identity);
+        var escaped = CreateProbeStore("{\"" + escapedStorageName + "\":{}}").Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Found, raw.Status);
+        Assert.Equal(LocalSecretResultStatus.Found, escaped.Status);
+        Assert.Equal(string.Empty, raw.Value);
+        Assert.Equal(string.Empty, escaped.Value);
+    }
+
+    [Fact]
     public void Probe_Should_NotReadStoredValueObject_WhenStorageNameMatches()
     {
         var identity = new AppSurfaceLocalSecretIdentityNormalizer()
@@ -243,6 +262,22 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
     }
 
+    [Fact]
+    public void Probe_Should_ReturnInvalidStore_ForInvalidUtf8InSkippedString()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var prefix = System.Text.Encoding.UTF8.GetBytes("{\"Ignored\":{\"value\":\"");
+        var suffix = System.Text.Encoding.UTF8.GetBytes("\"},\"" + identity.StorageName + "\":{}}");
+        byte[] json = [.. prefix, 0xC3, 0x28, .. suffix];
+
+        var probe = CreateProbeStore(json).Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -313,6 +348,36 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, probe.Status);
         Assert.Equal("local-secret-test-posture", probe.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void Probe_Should_ValidatePostureBeforeCheckingFileExists()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var inspectedPosture = false;
+        var checkedFileExists = false;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(
+                fileExists: () =>
+                {
+                    checkedFileExists = true;
+                    Assert.True(inspectedPosture);
+                    return false;
+                },
+                existingFilePosture: () =>
+                {
+                    inspectedPosture = true;
+                    return FileSecretPostureResult.Ready();
+                }));
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+        Assert.True(inspectedPosture);
+        Assert.True(checkedFileExists);
     }
 
     [Theory]
@@ -400,6 +465,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     [Theory]
     [InlineData("")]
     [InlineData(" \r\n\t")]
+    [InlineData("null")]
     [InlineData("{}")]
     public void Probe_Should_ReturnMissing_ForEmptyStoreDocuments(string json)
     {
@@ -439,6 +505,11 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         new(
             "/tmp/appsurface-test-secrets.json",
             new ThrowingFileSystem(openRead: () => new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json))));
+
+    private static FileAppSurfaceLocalSecretStore CreateProbeStore(byte[] json) =>
+        new(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(openRead: () => new MemoryStream(json)));
 
     [Fact]
     public void Delete_Should_ReturnMissing_WhenKeyDoesNotExist()
@@ -1672,13 +1743,14 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Func<string>? read = null,
         Action<string>? write = null,
         Func<Stream>? openRead = null,
+        Func<bool>? fileExists = null,
         Func<FileSecretPostureResult>? readPath = null,
         Func<FileSecretPostureResult>? existingFilePosture = null,
         Func<FileSecretPostureResult>? prepareWrite = null,
         Func<FileSecretPostureResult>? writePosture = null,
         Func<FileSecretPostureResult>? doctor = null) : IFileAppSurfaceLocalSecretStoreFileSystem
     {
-        public bool FileExists(string path) => true;
+        public bool FileExists(string path) => fileExists?.Invoke() ?? true;
 
         public string ReadAllText(string path) => read?.Invoke() ?? "{}";
 

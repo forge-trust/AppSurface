@@ -15,47 +15,52 @@ public enum GoogleSecretManagerTransferStatus
     /// <summary>
     /// The requested Google Secret Manager resource exists and can participate in transfer planning.
     /// </summary>
-    Ready,
+    Ready = 0,
 
     /// <summary>
     /// The requested Google Secret Manager resource was written.
     /// </summary>
-    Written,
+    Written = 1,
 
     /// <summary>
     /// The requested Google Secret Manager resource does not exist.
     /// </summary>
-    Missing,
+    Missing = 2,
 
     /// <summary>
     /// The current credentials cannot access the requested Google Secret Manager resource.
     /// </summary>
-    AccessDenied,
+    AccessDenied = 3,
 
     /// <summary>
     /// Google Secret Manager or the local transport is temporarily unavailable.
     /// </summary>
-    Unavailable,
+    Unavailable = 4,
 
     /// <summary>
     /// The supplied Google Secret Manager resource name is invalid.
     /// </summary>
-    InvalidResource,
+    InvalidResource = 5,
 
     /// <summary>
     /// The Google Secret Manager request was cancelled.
     /// </summary>
-    Cancelled,
+    Cancelled = 6,
 
     /// <summary>
     /// Google Secret Manager returned an unexpected provider failure.
     /// </summary>
-    ProviderFailed,
+    ProviderFailed = 7,
 
     /// <summary>
     /// The requested Google Secret Manager secret version is not enabled for access.
     /// </summary>
-    NotEnabled
+    NotEnabled = 8,
+
+    /// <summary>
+    /// A Google Secret Manager write may have completed, but the response did not confirm the written version.
+    /// </summary>
+    IndeterminateWrite = 9
 }
 
 /// <summary>
@@ -294,13 +299,24 @@ public sealed class GoogleSecretManagerTransferClientAdapter : IAppSurfaceGoogle
     {
         try
         {
+            var deadline = DateTime.UtcNow.Add(timeout);
+            var callSettings = CallSettings.FromExpiration(Expiration.FromDeadline(deadline));
             _client.Value.GetSecret(
                 new GetSecretRequest { Name = secretResourceName },
-                CallSettings.FromExpiration(Expiration.FromTimeout(timeout)));
+                callSettings);
             var versions = _client.Value.ListSecretVersions(
-                new ListSecretVersionsRequest { Parent = secretResourceName },
-                CallSettings.FromExpiration(Expiration.FromTimeout(timeout)));
-            var hasEnabledVersions = versions.Any(version => version.State == SecretVersion.Types.State.Enabled);
+                new ListSecretVersionsRequest
+                {
+                    Parent = secretResourceName,
+                    Filter = "state:ENABLED",
+                    PageSize = 1
+                },
+                callSettings);
+            var hasEnabledVersions = versions
+                .AsRawResponses()
+                .Take(1)
+                .SelectMany(static response => response.Versions)
+                .Any(static version => version.State == SecretVersion.Types.State.Enabled);
             return AppSurfaceGoogleSecretProbeResult.Ready(secretResourceName, hasEnabledVersions);
         }
         catch (RpcException ex)
@@ -414,30 +430,45 @@ public sealed class GoogleSecretManagerTransferClientAdapter : IAppSurfaceGoogle
     /// <inheritdoc />
     public AppSurfaceGoogleSecretWriteResult AddSecretVersion(string secretResourceName, string value, TimeSpan timeout)
     {
+        var dispatched = false;
         try
         {
-            var response = _client.Value.AddSecretVersion(
+            var client = _client.Value;
+            dispatched = true;
+            var response = client.AddSecretVersion(
                 new AddSecretVersionRequest
                 {
                     Parent = secretResourceName,
                     Payload = new SecretPayload { Data = ByteString.CopyFromUtf8(value) }
                 },
                 CallSettings.FromExpiration(Expiration.FromTimeout(timeout)));
+            if (!IsWrittenVersionResourceName(secretResourceName, response.Name))
+            {
+                return AppSurfaceGoogleSecretWriteResult.Failed(
+                    GoogleSecretManagerTransferStatus.IndeterminateWrite,
+                    secretResourceName,
+                    CreateIndeterminateWriteDiagnostic());
+            }
+
             return AppSurfaceGoogleSecretWriteResult.Written(secretResourceName, response.Name);
         }
         catch (RpcException ex)
         {
+            var status = dispatched ? MapAddSecretVersionRpcStatus(ex.StatusCode) : MapRpcStatus(ex.StatusCode);
             return AppSurfaceGoogleSecretWriteResult.Failed(
-                MapRpcStatus(ex.StatusCode),
+                status,
                 secretResourceName,
-                CreateDiagnostic("write", ex.StatusCode));
+                CreateDiagnostic("write", ex.StatusCode, status));
         }
         catch (TimeoutException)
         {
+            var status = dispatched
+                ? GoogleSecretManagerTransferStatus.IndeterminateWrite
+                : GoogleSecretManagerTransferStatus.Unavailable;
             return AppSurfaceGoogleSecretWriteResult.Failed(
-                GoogleSecretManagerTransferStatus.Unavailable,
+                status,
                 secretResourceName,
-                CreateUnavailableDiagnostic("write"));
+                dispatched ? CreateIndeterminateWriteDiagnostic() : CreateUnavailableDiagnostic("write"));
         }
         catch (InvalidOperationException)
         {
@@ -465,9 +496,34 @@ public sealed class GoogleSecretManagerTransferClientAdapter : IAppSurfaceGoogle
             _ => GoogleSecretManagerTransferStatus.ProviderFailed
         };
 
-    private static AppSurfaceGoogleSecretTransferDiagnostic CreateDiagnostic(string operation, StatusCode statusCode)
+    private static GoogleSecretManagerTransferStatus MapAddSecretVersionRpcStatus(StatusCode statusCode) =>
+        statusCode switch
+        {
+            StatusCode.NotFound => GoogleSecretManagerTransferStatus.Missing,
+            StatusCode.PermissionDenied or StatusCode.Unauthenticated => GoogleSecretManagerTransferStatus.AccessDenied,
+            StatusCode.InvalidArgument => GoogleSecretManagerTransferStatus.InvalidResource,
+            _ => GoogleSecretManagerTransferStatus.IndeterminateWrite
+        };
+
+    private static bool IsWrittenVersionResourceName(string secretResourceName, string? versionResourceName)
     {
-        var status = MapRpcStatus(statusCode);
+        var prefix = $"{secretResourceName}/versions/";
+        return versionResourceName?.StartsWith(prefix, StringComparison.Ordinal) == true &&
+            versionResourceName.Length > prefix.Length &&
+            versionResourceName.AsSpan(prefix.Length).IndexOfAnyExceptInRange('0', '9') < 0;
+    }
+
+    private static AppSurfaceGoogleSecretTransferDiagnostic CreateDiagnostic(
+        string operation,
+        StatusCode statusCode,
+        GoogleSecretManagerTransferStatus? mappedStatus = null)
+    {
+        var status = mappedStatus ?? MapRpcStatus(statusCode);
+        if (status == GoogleSecretManagerTransferStatus.IndeterminateWrite)
+        {
+            return CreateIndeterminateWriteDiagnostic(statusCode);
+        }
+
         return new AppSurfaceGoogleSecretTransferDiagnostic(
             CodeFor(status),
             "Google Secret Manager transfer could not complete.",
@@ -482,9 +538,20 @@ public sealed class GoogleSecretManagerTransferClientAdapter : IAppSurfaceGoogle
             CodeFor(GoogleSecretManagerTransferStatus.Unavailable),
             "Google Secret Manager transfer could not complete.",
             $"The Google Secret Manager client was unavailable during {operation}.",
-            "Verify Application Default Credentials and retry after the provider is available.",
+            "Verify the Secret Manager client configuration and retry after the service is available.",
             Docs,
             true);
+
+    private static AppSurfaceGoogleSecretTransferDiagnostic CreateIndeterminateWriteDiagnostic(StatusCode? statusCode = null) =>
+        new(
+            CodeFor(GoogleSecretManagerTransferStatus.IndeterminateWrite),
+            "Google Secret Manager write outcome is indeterminate.",
+            statusCode.HasValue
+                ? $"Google Secret Manager returned {statusCode.Value} during write after the write was dispatched."
+                : "The Google Secret Manager write did not return before the timeout.",
+            "Reconcile the secret versions before retrying or resuming the write.",
+            Docs,
+            false);
 
     private static AppSurfaceGoogleSecretTransferDiagnostic CreateProviderDiagnostic(string operation) =>
         new(
@@ -500,7 +567,7 @@ public sealed class GoogleSecretManagerTransferClientAdapter : IAppSurfaceGoogle
             CodeFor(GoogleSecretManagerTransferStatus.NotEnabled),
             "Google Secret Manager version is not enabled.",
             $"Google Secret Manager reported the version state as {state}.",
-            "Choose an enabled version or enable the version before pulling it into LocalSecrets.",
+            "Choose an enabled version or enable the version before reading it.",
             Docs,
             false);
 
@@ -513,6 +580,7 @@ public sealed class GoogleSecretManagerTransferClientAdapter : IAppSurfaceGoogle
             GoogleSecretManagerTransferStatus.InvalidResource => "google-secret-transfer-invalid-resource",
             GoogleSecretManagerTransferStatus.Cancelled => "google-secret-transfer-cancelled",
             GoogleSecretManagerTransferStatus.NotEnabled => "google-secret-transfer-version-not-enabled",
+            GoogleSecretManagerTransferStatus.IndeterminateWrite => "google-secret-transfer-indeterminate-write",
             _ => "google-secret-transfer-failed"
         };
 }
