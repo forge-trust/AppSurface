@@ -131,19 +131,23 @@ test('collection duplicate copies editable values, rewrites references, and clea
   assert.equal(clone.querySelector('[data-valmsg-for]').textContent, '');
 });
 
-test('collection duplicate resets a root-selected delete field without an authored value', () => {
+test('collection duplicate resets a root-selected delete field from a non-zero row', () => {
   const { context, document } = loadRuntime();
   const { root, duplicate } = buildCollection(document);
-  root.setAttribute('data-rw-form-collection-delete-field', 'input[name="Actions[0].Delete"]');
-  root.querySelector('input[name="Actions[0].Delete"]').removeAttribute('value');
+  root.setAttribute('data-rw-form-collection-delete-field', '[data-delete-control]');
+  root.querySelector('input[name="Actions[0].Delete"]').setAttribute('data-delete-control', 'true');
   const form = document.createElement('form');
   form.appendChild(root);
   document.body.appendChild(form);
 
   context.window.RazorWire.formInteractionsManager.scan();
   duplicate.dispatchEvent(createEvent('click'));
+  const secondRow = root.querySelectorAll('[data-rw-form-collection-row]')[1];
+  const secondDeleteField = secondRow.querySelector('input[name="Actions[1].Delete"]');
+  secondDeleteField.removeAttribute('value');
+  secondRow.querySelector('[data-rw-form-collection-duplicate]').dispatchEvent(createEvent('click'));
 
-  const cloneDeleteField = root.querySelector('input[name="Actions[1].Delete"]');
+  const cloneDeleteField = root.querySelector('input[name="Actions[2].Delete"]');
   assert.equal(cloneDeleteField.hasAttribute('data-rw-form-collection-delete-field'), false);
   assert.equal(cloneDeleteField.value, 'false');
   assert.equal(cloneDeleteField.disabled, false);
@@ -153,6 +157,12 @@ test('collection duplicate tolerates an invalid root delete-field selector', () 
   const { context, document } = loadRuntime();
   const { root, duplicate } = buildCollection(document);
   root.setAttribute('data-rw-form-collection-delete-field', '[');
+  const sourceRow = root.querySelector('[data-rw-form-collection-row]');
+  const originalQuerySelector = sourceRow.querySelector.bind(sourceRow);
+  sourceRow.querySelector = selector => {
+    if (selector === '[') throw new Error('invalid selector');
+    return originalQuerySelector(selector);
+  };
   root.querySelector('input[name="Actions[0].Delete"]').value = 'true';
   const form = document.createElement('form');
   form.appendChild(root);

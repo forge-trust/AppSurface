@@ -674,7 +674,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 try {
                     selectedDeleteField = sourceRow.querySelector(deleteFieldSelector);
                 } catch {
-                    // Invalid selectors are diagnosed by the mark-remove command that owns them.
+                    // Duplicate stays fail-soft; mark-remove records the invalid selector if invoked.
                 }
             }
 
