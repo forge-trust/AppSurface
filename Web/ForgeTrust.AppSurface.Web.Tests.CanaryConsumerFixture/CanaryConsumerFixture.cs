@@ -218,7 +218,10 @@ public sealed record ForwardingProofSnapshot(
 public interface IForwardingProofReader
 {
     /// <summary>Finds proof for the exact marker and freshness boundary supplied by the deploy caller.</summary>
-    /// <param name="marker">The required opaque, non-secret deploy marker.</param>
+    /// <param name="marker">
+    /// The required opaque, potentially sensitive deploy marker. Do not log, persist, expose in telemetry, or return
+    /// the raw value in a response; use only a redacted or fingerprinted representation outside the proof lookup.
+    /// </param>
     /// <param name="freshSince">The required proof freshness boundary.</param>
     /// <param name="cancellationToken">The request cancellation token.</param>
     /// <returns>The application-owned proof decision and bounded evidence.</returns>
@@ -229,9 +232,19 @@ public interface IForwardingProofReader
 }
 
 /// <summary>Evaluates existing forwarding proof without triggering forwarding itself.</summary>
+/// <remarks>
+/// During <c>AddAppSurfaceCanary</c> registration, call both <c>RequireMarker()</c> and <c>RequireFreshSince()</c> before
+/// mapping the endpoint. Missing required HTTP headers fail as <c>ASCAN201</c> before evaluation. Direct evaluation
+/// validates marker and then freshness and throws <see cref="InvalidOperationException"/> with a registration
+/// diagnostic when either input is absent.
+/// </remarks>
 public sealed class CompleteForwardingCanaryEvaluator(IForwardingProofReader proofReader) : IAppSurfaceCanaryEvaluator
 {
     /// <summary>The application-owned detail key shared by registration and result construction.</summary>
+    /// <remarks>
+    /// Add this key to <see cref="AppSurfaceCanaryRegistrationOptions.AllowedDetailKeys"/> before returning it through
+    /// <see cref="AppSurfaceCanaryResultOptions.AddDetail(string, string)"/>.
+    /// </remarks>
     public const string ProofKindDetailKey = "proof.kind";
 
     /// <inheritdoc />
@@ -239,9 +252,23 @@ public sealed class CompleteForwardingCanaryEvaluator(IForwardingProofReader pro
         AppSurfaceCanaryEvaluationContext context,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(context.Marker))
+        {
+            throw new InvalidOperationException(
+                "CompleteForwardingCanaryEvaluator requires a marker. Register it with RequireMarker().");
+        }
+
+        var marker = context.Marker;
+
+        if (context.FreshSince is not { } freshSince)
+        {
+            throw new InvalidOperationException(
+                "CompleteForwardingCanaryEvaluator requires a freshness boundary. Register it with RequireFreshSince().");
+        }
+
         var proof = await proofReader.ReadAsync(
-            context.Marker!,
-            context.FreshSince!.Value,
+            marker,
+            freshSince,
             cancellationToken);
 
         return new AppSurfaceCanaryResult(

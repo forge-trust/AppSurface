@@ -81,6 +81,15 @@ public sealed class AppSurfaceCanaryDocumentationTests
         Assert.Contains("ready does not match status", invalidRun.StandardError, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void NamedCanaryDocumentation_JqConsumerExtractionAcceptsCrLf()
+    {
+        var repositoryRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        var readme = File.ReadAllText(Path.Join(repositoryRoot, "Web", "ForgeTrust.AppSurface.Web", "README.md"));
+
+        Assert.Equal(ExtractJqFilter(readme), ExtractJqFilter(readme.ReplaceLineEndings("\r\n")));
+    }
+
     private static async Task<(int ExitCode, string StandardOutput, string StandardError)> RunJqAsync(
         string filter,
         string input)
@@ -118,6 +127,7 @@ public sealed class AppSurfaceCanaryDocumentationTests
 
     private static string ExtractJqFilter(string readme)
     {
+        readme = readme.ReplaceLineEndings("\n");
         const string prefix = "jq -er '\n";
         const string suffix = "\n  end'";
         var start = readme.IndexOf(prefix, StringComparison.Ordinal);

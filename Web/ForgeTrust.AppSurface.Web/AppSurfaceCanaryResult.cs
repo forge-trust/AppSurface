@@ -7,14 +7,23 @@ namespace ForgeTrust.AppSurface.Web;
 /// </summary>
 public sealed class AppSurfaceCanaryResult
 {
+    private static readonly IReadOnlyDictionary<string, string> EmptyDetails =
+        ImmutableSortedDictionary<string, string>.Empty.WithComparers(StringComparer.Ordinal);
+
     /// <summary>
     /// Initializes a new result with no optional evidence and an empty immutable detail collection.
     /// </summary>
     /// <param name="status">A defined named-canary status.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="status"/> is undefined.</exception>
     public AppSurfaceCanaryResult(AppSurfaceCanaryStatus status)
-        : this(status, static _ => { })
     {
+        if (!Enum.IsDefined(status))
+        {
+            throw new ArgumentOutOfRangeException(nameof(status), status, "The AppSurface canary status must be defined.");
+        }
+
+        Status = status;
+        Details = EmptyDetails;
     }
 
     /// <summary>Initializes a result with bounded operator evidence.</summary>

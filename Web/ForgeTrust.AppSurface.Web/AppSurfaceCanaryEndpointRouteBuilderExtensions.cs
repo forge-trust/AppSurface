@@ -23,6 +23,7 @@ namespace ForgeTrust.AppSurface.Web;
 public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
 {
     private const string DocsLink = "https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints";
+    private const int MaximumHostNameUtf8Bytes = 128;
     private const int MaximumMarkerUtf8Bytes = 256;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly EventId EvaluationFailureEvent = new(62301, "AppSurfaceCanaryEvaluationFailed");
@@ -425,8 +426,30 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         return options;
     }
 
-    private static string NormalizeHostName(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? "unknown" : value;
+    private static string NormalizeHostName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "unknown";
+        }
+
+        foreach (var rune in value.EnumerateRunes())
+        {
+            if (Rune.GetUnicodeCategory(rune) == UnicodeCategory.Control)
+            {
+                return "unknown";
+            }
+        }
+
+        try
+        {
+            return StrictUtf8.GetByteCount(value) <= MaximumHostNameUtf8Bytes ? value : "unknown";
+        }
+        catch (EncoderFallbackException)
+        {
+            return "unknown";
+        }
+    }
 
     private static string CreateMarkerFingerprint(string marker) =>
         $"sha256:{Convert.ToHexString(SHA256.HashData(StrictUtf8.GetBytes(marker))).ToLowerInvariant()}";

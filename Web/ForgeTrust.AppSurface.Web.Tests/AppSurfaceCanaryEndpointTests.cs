@@ -543,6 +543,43 @@ public sealed class AppSurfaceCanaryEndpointTests
     }
 
     [Fact]
+    public async Task Endpoint_UnsafeOrOversizedHostNamesNormalizeToUnknownInCompletionEvent()
+    {
+        using var loggerProvider = new RecordingLoggerProvider();
+        await using var host = await StartHostAsync(
+            loggerProvider: loggerProvider,
+            applicationName: "unsafe\r\napplication",
+            environmentName: new string('e', 129));
+        using var request = AuthorizedRequest(Route(Name));
+
+        using var response = await host.Client.SendAsync(request);
+
+        var entry = Assert.Single(loggerProvider.Entries, candidate => candidate.EventId.Id == 62401);
+        Assert.Equal("unknown", entry.State["ApplicationName"]);
+        Assert.Equal("unknown", entry.State["EnvironmentName"]);
+        Assert.DoesNotContain("unsafe", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(new string('e', 129), entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Endpoint_HostNameNormalizationRejectsMalformedUnicodeAndPreservesUtf8Boundary()
+    {
+        var validBoundary = string.Concat(Enumerable.Repeat("é", 64));
+        using var loggerProvider = new RecordingLoggerProvider();
+        await using var host = await StartHostAsync(
+            loggerProvider: loggerProvider,
+            applicationName: "\ud800",
+            environmentName: validBoundary);
+        using var request = AuthorizedRequest(Route(Name));
+
+        using var response = await host.Client.SendAsync(request);
+
+        var entry = Assert.Single(loggerProvider.Entries, candidate => candidate.EventId.Id == 62401);
+        Assert.Equal("unknown", entry.State["ApplicationName"]);
+        Assert.Equal(validBoundary, entry.State["EnvironmentName"]);
+    }
+
+    [Fact]
     public async Task Endpoint_MissingHostEnvironmentNormalizesToUnknownAtMapping()
     {
         using var loggerProvider = new RecordingLoggerProvider();
@@ -1159,6 +1196,31 @@ public sealed class AppSurfaceCanaryEndpointTests
     }
 
     [Theory]
+    [InlineData(null, "2026-07-16T08:30:00Z", "requires a marker")]
+    [InlineData("", "2026-07-16T08:30:00Z", "requires a marker")]
+    [InlineData(" ", "2026-07-16T08:30:00Z", "requires a marker")]
+    [InlineData("deploy-42", null, "requires a freshness boundary")]
+    public async Task CompleteForwardingFixture_RejectsMissingRequiredInputsBeforeReadingProof(
+        string? marker,
+        string? freshSinceText,
+        string expectedMessage)
+    {
+        var reader = new RecordingForwardingProofReader(
+            new ForwardingProofSnapshot(AppSurfaceCanaryStatus.Pass, null, 1, "proof-observed", "done", "deploy-42"));
+        var evaluator = new CompleteForwardingCanaryEvaluator(reader);
+        var context = new AppSurfaceCanaryEvaluationContext(
+            "forwarding.complete-example",
+            marker,
+            freshSinceText is null ? null : DateTimeOffset.Parse(freshSinceText));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await evaluator.EvaluateAsync(context, CancellationToken.None));
+
+        Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, reader.InvocationCount);
+    }
+
+    [Theory]
     [InlineData("/_appsurface/canaries")]
     [InlineData("/_appsurface/canaries/special")]
     [InlineData("/_APPSURFACE/CANARIES/{other}")]
@@ -1729,6 +1791,8 @@ public sealed class AppSurfaceCanaryEndpointTests
 
     private sealed class RecordingForwardingProofReader(ForwardingProofSnapshot snapshot) : IForwardingProofReader
     {
+        internal int InvocationCount { get; private set; }
+
         internal string? Marker { get; private set; }
 
         internal DateTimeOffset? FreshSince { get; private set; }
@@ -1740,6 +1804,7 @@ public sealed class AppSurfaceCanaryEndpointTests
             DateTimeOffset freshSince,
             CancellationToken cancellationToken)
         {
+            InvocationCount++;
             Marker = marker;
             FreshSince = freshSince;
             CancellationToken = cancellationToken;

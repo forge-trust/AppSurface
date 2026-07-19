@@ -62,7 +62,10 @@ internal sealed class AppSurfaceCanaryEvaluationRunner
     /// <param name="cancellationToken">The evaluation cancellation token.</param>
     /// <returns>The non-null evaluator result, including any validated optional evidence.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="descriptor"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">The evaluator returns <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The evaluator returns <see langword="null"/> or includes a detail key absent from the descriptor's declared
+    /// allowed keys.
+    /// </exception>
     internal async ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
         AppSurfaceCanaryDescriptor descriptor,
         string? marker,

@@ -47,8 +47,10 @@ internal static partial class AppSurfaceCanaryValidation
     /// A descriptor whose tags are deduplicated and stored in ordinal order and whose required-input flags are frozen.
     /// </returns>
     /// <exception cref="ArgumentException">
-    /// The display name is blank, the description exceeds 512 characters, or a tag violates its 1-64 character
-    /// lowercase letter/digit/internal-hyphen grammar.
+    /// The display name is blank, the description exceeds 512 characters, a tag violates its 1-64 character lowercase
+    /// letter/digit/internal-hyphen grammar, more than 16 allowed detail keys are declared, or an allowed detail key is
+    /// null or violates its 1-64 character lowercase dot-separated grammar. These failures use diagnostic
+    /// <c>ASCAN101</c>.
     /// </exception>
     internal static AppSurfaceCanaryDescriptor CreateDescriptor(
         string name,
