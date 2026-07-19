@@ -16,6 +16,7 @@ internal sealed class AppSurfaceCanaryDescriptor
     /// <param name="tags">Validated tags to snapshot into an ordinal-sorted immutable set with duplicates removed.</param>
     /// <param name="markerRequired">Whether the HTTP adapter must receive a nonblank marker.</param>
     /// <param name="freshSinceRequired">Whether the HTTP adapter must receive a valid freshness boundary.</param>
+    /// <param name="allowedDetailKeys">Validated detail keys to snapshot into an ordinal-sorted immutable set.</param>
     /// <param name="evaluatorType">
     /// The registered concrete service type expected to implement <see cref="IAppSurfaceCanaryEvaluator"/>.
     /// </param>
@@ -30,6 +31,7 @@ internal sealed class AppSurfaceCanaryDescriptor
         IEnumerable<string> tags,
         bool markerRequired,
         bool freshSinceRequired,
+        IEnumerable<string> allowedDetailKeys,
         Type evaluatorType)
     {
         Name = name;
@@ -38,6 +40,7 @@ internal sealed class AppSurfaceCanaryDescriptor
         Tags = tags.ToImmutableSortedSet(StringComparer.Ordinal);
         MarkerRequired = markerRequired;
         FreshSinceRequired = freshSinceRequired;
+        AllowedDetailKeys = allowedDetailKeys.ToImmutableSortedSet(StringComparer.Ordinal);
         EvaluatorType = evaluatorType;
     }
 
@@ -58,6 +61,9 @@ internal sealed class AppSurfaceCanaryDescriptor
 
     /// <summary>Gets a value indicating whether the freshness boundary is required.</summary>
     internal bool FreshSinceRequired { get; }
+
+    /// <summary>Gets the immutable ordinal set of detail keys this evaluator may return.</summary>
+    internal IReadOnlySet<string> AllowedDetailKeys { get; }
 
     /// <summary>Gets the concrete evaluator service type resolved for each evaluation.</summary>
     internal Type EvaluatorType { get; }

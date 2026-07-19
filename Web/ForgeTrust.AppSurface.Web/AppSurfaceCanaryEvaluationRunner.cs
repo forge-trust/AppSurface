@@ -60,9 +60,12 @@ internal sealed class AppSurfaceCanaryEvaluationRunner
     /// <param name="marker">The optional opaque marker.</param>
     /// <param name="freshSince">The optional freshness boundary.</param>
     /// <param name="cancellationToken">The evaluation cancellation token.</param>
-    /// <returns>The non-null status-only evaluator result.</returns>
+    /// <returns>The non-null evaluator result, including any validated optional evidence.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="descriptor"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">The evaluator returns <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The evaluator returns <see langword="null"/> or includes a detail key absent from the descriptor's declared
+    /// allowed keys.
+    /// </exception>
     internal async ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
         AppSurfaceCanaryDescriptor descriptor,
         string? marker,
@@ -78,6 +81,15 @@ internal sealed class AppSurfaceCanaryEvaluationRunner
         if (result is null)
         {
             throw new InvalidOperationException("A named canary evaluator returned a null result.");
+        }
+
+        foreach (var key in result.Details.Keys)
+        {
+            if (!descriptor.AllowedDetailKeys.Contains(key))
+            {
+                throw new InvalidOperationException(
+                    $"ASCAN301: Named canary '{descriptor.Name}' returned undeclared detail key '{key}'. Declare it in AllowedDetailKeys or remove it from the result.");
+            }
         }
 
         return result;
