@@ -36,7 +36,8 @@ internal sealed class AtomicSecretPromotionReceiptWriter : ISecretPromotionRecei
     {
         var fullPath = Path.GetFullPath(path);
         var directory = Path.GetDirectoryName(fullPath) ?? Directory.GetCurrentDirectory();
-        var temporaryPath = Path.Combine(directory, $".appsurface-receipt-{Guid.NewGuid():N}.tmp");
+        var temporaryFileName = $".appsurface-receipt-{Guid.NewGuid():N}.tmp";
+        var temporaryPath = Path.Combine(directory, Path.GetFileName(temporaryFileName));
         try
         {
             File.WriteAllText(temporaryPath, JsonSerializer.Serialize(receipt, SecretPromotionWorkflow.JsonOptions));
