@@ -6,8 +6,9 @@ AppSurface Durable is a source-only public preview of portable durable contracts
   for work, Flow, schedules, serialization, registration, and clients.
 - [`ForgeTrust.AppSurface.Durable.Provider`](ForgeTrust.AppSurface.Durable.Provider/README.md) is the runtime-provider and
   operator SPI for claims, pumping, health, drain, recovery, and controlled repair.
-- `ForgeTrust.AppSurface.Durable.PostgreSql` is the first authoritative-store implementation. Slice 3 supplies explicit
-  schema management and a manually driven Work engine; it starts no hosted worker.
+- [`ForgeTrust.AppSurface.Durable.PostgreSql`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md) is the first
+  authoritative-store implementation. Slice 3 supplies explicit schema management and a manually driven Work engine;
+  it starts no hosted worker.
 
 All three packages are machine-held out of every publish plan until slices 4-6 prove Flow, Schedule, hosted runtime,
 drain/recovery, and operational conformance in a coordinated release review. They can be built and packed directly for
