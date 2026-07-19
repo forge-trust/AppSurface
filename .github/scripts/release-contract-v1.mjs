@@ -27,15 +27,16 @@ import { Buffer } from "node:buffer";
 /** Version checked by trusted-base workflow integration before evaluation. */
 export const contractVersion = 1;
 
-export const MaximumPullRequestFiles = 3000;
-export const MaximumPatchBytesPerFile = 128 * 1024;
-export const MaximumAggregatePatchBytes = 1024 * 1024;
-export const MaximumPatchLineBytes = 8 * 1024;
+const MaximumPullRequestFiles = 3000;
+const MaximumPatchBytesPerFile = 128 * 1024;
+const MaximumAggregatePatchBytes = 1024 * 1024;
+const MaximumPatchLineBytes = 8 * 1024;
 
 const ConventionalTitlePattern = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+/;
 const WorkflowPathPattern = /^\.github\/workflows\/.+\.ya?ml$/;
 const UsesLinePattern = /^([ \t]*(?:-[ \t]+)?uses:[ \t]+)([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+)@([0-9a-f]{40})((?:[ \t]+#.*)?[ \t]*)$/;
-const HunkHeaderPattern = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$/;
+const HunkHeaderPattern = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: (.*))?$/;
+const StepMetadataPattern = /^- (?:name|id|if|continue-on-error|timeout-minutes):(?:\s|$)/;
 const DocumentationPath = ".github/release-ops.md#release-contract-check";
 const MaximumLocationLength = 256;
 
@@ -301,7 +302,7 @@ function parsePatch(patch, filename) {
       };
     }
 
-    hunks.push({ oldLines, newLines, hunk: hunkIndex });
+    hunks.push({ oldLines, newLines, hunk: hunkIndex, section: header[5] ?? "" });
   }
 
   if (hunkIndex === 0) {
@@ -322,20 +323,24 @@ function indentation(line) {
   return /^[ \t]*/.exec(line)[0].length;
 }
 
-function isBlockScalarContent(lines, changedIndex) {
-  const changedIndent = indentation(lines[changedIndex].content);
-  for (let index = changedIndex - 1; index >= 0; index -= 1) {
-    const candidate = lines[index].content;
-    if (candidate.trim().length === 0) {
-      continue;
+function isScalarContent(lines, changedIndex) {
+  let upperIndent = indentation(lines[changedIndex].content);
+  let startIndex = changedIndex;
+  while (upperIndent > 0) {
+    const candidateIndex = precedingLowerIndentIndex(lines, startIndex, upperIndent);
+    if (candidateIndex < 0) {
+      return false;
     }
 
-    const candidateIndent = indentation(candidate);
-    if (candidateIndent >= changedIndent) {
-      continue;
+    const candidate = lines[candidateIndex].content;
+    if (/:\s*[|>](?:[+-]?\d?|\d?[+-])?\s*(?:#.*)?$/.test(candidate)
+        || /:\s*"(?:\\.|[^"\\])*$/.test(candidate)
+        || /:\s*'(?:''|[^'])*$/.test(candidate)) {
+      return true;
     }
 
-    return /:\s*[|>](?:[+-]?\d?|\d?[+-])?\s*(?:#.*)?$/.test(candidate);
+    upperIndent = indentation(candidate);
+    startIndex = candidateIndex;
   }
 
   return false;
@@ -351,7 +356,7 @@ function precedingLowerIndentIndex(lines, startIndex, upperIndent) {
   return -1;
 }
 
-function isEligibleUsesPosition(lines, changedIndex) {
+function isEligibleUsesPosition(lines, changedIndex, section) {
   const changed = lines[changedIndex].content;
   const changedIndent = indentation(changed);
   const parentIndex = precedingLowerIndentIndex(lines, changedIndex, changedIndent);
@@ -367,12 +372,11 @@ function isEligibleUsesPosition(lines, changedIndex) {
   const parentIndent = indentation(lines[parentIndex].content);
   const grandparentIndex = precedingLowerIndentIndex(lines, parentIndex, parentIndent);
   if (grandparentIndex < 0) {
-    return false;
+    return section === "jobs:" && StepMetadataPattern.test(parent);
   }
 
   const grandparent = lines[grandparentIndex].content.trim();
-  return (parent.startsWith("- ") && grandparent === "steps:")
-    || (/^[A-Za-z0-9_.-]+:\s*(?:#.*)?$/.test(parent) && grandparent === "jobs:");
+  return parent.startsWith("- ") && grandparent === "steps:";
 }
 
 function validateChangedLines(parsed, filename) {
@@ -388,7 +392,7 @@ function validateChangedLines(parsed, filename) {
         }
 
         const normalizedLine = parseUsesLine(line.content);
-        if (normalizedLine === null || isBlockScalarContent(lines, index) || !isEligibleUsesPosition(lines, index)) {
+        if (normalizedLine === null || isScalarContent(lines, index) || !isEligibleUsesPosition(lines, index, hunk.section)) {
           return automaticDiagnostic(
             `uses-${side}-ineligible`,
             `A ${side === "removal" ? "removed" : "added"} line is not an eligible pinned external-action reference.`,
@@ -686,7 +690,9 @@ export function evaluateReleaseContractV1(input) {
   const fileEntriesValid = Array.isArray(files)
     && firstArrayProblem(files, file => isRecord(file) && typeof file.filename === "string" && file.filename.length > 0) === null
     && new Set(files.map(file => file.filename)).size === files.length;
-  const hasUnreleasedEntry = fileEntriesValid && files.some(file => file.filename === "releases/unreleased.md");
+  const hasUnreleasedEntry = fileEntriesValid && files.some(file =>
+    file.filename === "releases/unreleased.md"
+      && (file.status === "added" || file.status === "modified"));
   const hasMaintainerExemptionLabel = labelsValid && labels.includes("no-unreleased-entry");
   const automatic = evaluateAutomaticExemption(normalizedInput, labels, files);
 
@@ -840,7 +846,7 @@ export function renderReleaseContractSummaryV1(result, context = {}) {
       "| --- | --- | --- | --- | --- | --- |");
     for (const item of result.diagnostics) {
       const location = item.location
-        ? [item.location.file, item.location.hunk ? `hunk ${item.location.hunk}` : null, item.location.field]
+        ? [item.location.file, item.location.hunk ? `hunk ${item.location.hunk}` : null]
           .filter(Boolean)
           .join(", ")
         : "none";

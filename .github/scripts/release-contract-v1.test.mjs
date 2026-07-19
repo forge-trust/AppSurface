@@ -8,10 +8,6 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import {
-  MaximumAggregatePatchBytes,
-  MaximumPatchBytesPerFile,
-  MaximumPatchLineBytes,
-  MaximumPullRequestFiles,
   contractVersion,
   evaluateReleaseContractV1,
   renderReleaseContractSummaryV1
@@ -19,12 +15,27 @@ import {
 
 const oldPin = "1111111111111111111111111111111111111111";
 const newPin = "2222222222222222222222222222222222222222";
+const MaximumPullRequestFiles = 3000;
+const MaximumPatchBytesPerFile = 128 * 1024;
+const MaximumAggregatePatchBytes = 1024 * 1024;
+const MaximumPatchLineBytes = 8 * 1024;
+const pullRequest622Patch = [
+  "@@ -300,7 +300,7 @@ jobs:",
+  "           gh release upload \"${TAG}\" \"${ARCHIVE_PATH}\" \"${SHA256_PATH}\" --clobber",
+  " ",
+  "       - name: Upload docs publication artifacts",
+  `-        uses: actions/upload-artifact@${oldPin} # v4.6.2`,
+  `+        uses: actions/upload-artifact@${newPin} # v7.0.1`,
+  "         with:",
+  "           name: docs-publication-${{ needs.validate-release.outputs.version }}",
+  "           path: |"
+].join("\n");
 
 function patch(oldReference = `actions/checkout@${oldPin}`, newReference = `actions/checkout@${newPin}`, options = {}) {
-  const indent = options.indent ?? "      ";
+  const indent = options.indent ?? "      - ";
   const suffixOld = options.suffixOld ?? "";
   const suffixNew = options.suffixNew ?? "";
-  const context = options.context ?? ["jobs:", "  build:"];
+  const context = options.context ?? ["jobs:", "  build:", "    steps:"];
   const oldLines = [...context, `${indent}uses: ${oldReference}${suffixOld}`];
   const newLines = [...context, `${indent}uses: ${newReference}${suffixNew}`];
   const body = [
@@ -67,12 +78,8 @@ function summaryDigest(result, context) {
   return createHash("sha256").update(renderReleaseContractSummaryV1(result, context)).digest("hex");
 }
 
-test("exports the v1 public constants", () => {
+test("exports only the documented v1 contract version", () => {
   assert.equal(contractVersion, 1);
-  assert.equal(MaximumPullRequestFiles, 3000);
-  assert.equal(MaximumPatchBytesPerFile, 128 * 1024);
-  assert.equal(MaximumAggregatePatchBytes, 1024 * 1024);
-  assert.equal(MaximumPatchLineBytes, 8 * 1024);
 });
 
 test("accepts the documented 3,000-file boundary and an exact per-patch byte limit", () => {
@@ -83,11 +90,12 @@ test("accepts the documented 3,000-file boundary and an exact per-patch byte lim
 
   const hunkCount = 20;
   const makeSizedPatch = fillers => Array.from({ length: hunkCount }, (_, index) => [
-    `@@ -${index * 3 + 1},3 +${index * 3 + 1},3 @@`,
+    `@@ -${index * 4 + 1},4 +${index * 4 + 1},4 @@`,
     " jobs:",
     "   generated:",
-    `-    uses: owner/action@${oldPin} # ${"x".repeat(fillers[index * 2])}`,
-    `+    uses: owner/action@${newPin} # ${"x".repeat(fillers[index * 2 + 1])}`
+    "     steps:",
+    `-      - uses: owner/action@${oldPin} # ${"x".repeat(fillers[index * 2])}`,
+    `+      - uses: owner/action@${newPin} # ${"x".repeat(fillers[index * 2 + 1])}`
   ].join("\n")).join("\n");
   const fillers = Array(hunkCount * 2).fill(0);
   const remaining = MaximumPatchBytesPerFile - Buffer.byteLength(makeSizedPatch(fillers));
@@ -99,10 +107,19 @@ test("accepts the documented 3,000-file boundary and an exact per-patch byte lim
   assert.equal(codeFor({
     files: [file({ additions: hunkCount, deletions: hunkCount, changes: hunkCount * 2, patch: maximumPatch })]
   }), null);
+
+  const aggregateMaximum = Array.from({ length: MaximumAggregatePatchBytes / MaximumPatchBytesPerFile }, (_, index) => file({
+    filename: `.github/workflows/aggregate-${index}.yml`,
+    additions: hunkCount,
+    deletions: hunkCount,
+    changes: hunkCount * 2,
+    patch: maximumPatch
+  }));
+  assert.equal(evaluateReleaseContractV1(input({ files: aggregateMaximum })).automaticExemption, true);
 });
 
 test("classifies the PR 622 shape and preserves independent title validation", () => {
-  const result = evaluateReleaseContractV1(input());
+  const result = evaluateReleaseContractV1(input({ files: [file({ patch: pullRequest622Patch })] }));
   assert.deepEqual(
     {
       title: result.conventionalTitleValid,
@@ -139,11 +156,12 @@ test("supports grouped files, multiple hunks, YAML extensions, list syntax, and 
     "  steps:",
     `-    - uses: owner/action/sub@${oldPin} # v1`,
     `+    - uses: owner/action/sub@${newPin} # v2`,
-    "@@ -20,3 +20,3 @@",
+    "@@ -20,4 +20,4 @@",
     " jobs:",
     "   other:",
-    `-    uses: owner/other@${oldPin} # old release`,
-    `+    uses: owner/other@${newPin} # new release`
+    "     steps:",
+    `-      - uses: owner/other@${oldPin} # old release`,
+    `+      - uses: owner/other@${newPin} # new release`
   ].join("\n");
   const files = [
     file({ filename: ".github/workflows/nested/b.yaml" }),
@@ -164,6 +182,18 @@ test("authored entry and exact maintainer label take precedence over automatic c
   assert.equal(authored.hasUnreleasedEntry, true);
   assert.equal(authored.automaticDiagnostic.code, "identity-not-dependabot");
   assert.equal(authored.diagnostics.some(item => item.blocking), false);
+
+  for (const status of ["removed", "renamed", undefined, null, 1]) {
+    const releaseWithoutAuthoredEntry = file({ filename: "releases/unreleased.md", status });
+    const rejected = evaluateReleaseContractV1(input({ authorLogin: "human", files: [releaseWithoutAuthoredEntry], changedFiles: 1 }));
+    assert.equal(rejected.hasUnreleasedEntry, false, String(status));
+    assert.equal(rejected.releaseEvidenceKind, "none", String(status));
+    assert.equal(rejected.diagnostics.some(item => item.blocking), true, String(status));
+  }
+
+  const added = evaluateReleaseContractV1(input({ authorLogin: "human", files: [file({ filename: "releases/unreleased.md", status: "added" })], changedFiles: 1 }));
+  assert.equal(added.hasUnreleasedEntry, true);
+  assert.equal(added.releaseEvidenceKind, "unreleased-entry");
 
   const labeled = evaluateReleaseContractV1(input({
     authorLogin: "human",
@@ -280,7 +310,7 @@ test("rejects every unsupported uses shape and semantic substitution", () => {
   }
 
   assert.equal(codeFor({ files: [file({ patch: patch(`owner/action@${oldPin}`, `other/action@${newPin}`) })] }), "patch-normalized-content-changed");
-  const moved = `@@ -1,3 +1,3 @@\n jobs:\n   build:\n-    uses: owner/action@${oldPin}\n+      uses: owner/action@${newPin}`;
+  const moved = `@@ -1,4 +1,4 @@\n jobs:\n   build:\n     steps:\n-      - uses: owner/action@${oldPin}\n+        - uses: owner/action@${newPin}`;
   assert.equal(codeFor({ files: [file({ patch: moved })] }), "patch-normalized-content-changed");
   assert.equal(codeFor({ files: [file({ patch: patch(`owner/action@${oldPin}`, `owner/action@${newPin}`, { suffixNew: " # changed" }) })] }), null);
 
@@ -288,6 +318,12 @@ test("rejects every unsupported uses shape and semantic substitution", () => {
   assert.equal(codeFor({ files: [file({ patch: scalar })] }), "uses-removal-ineligible");
   const scalarWithBlank = `@@ -1,3 +1,3 @@\n run: >-\n \n-  uses: owner/action@${oldPin}\n+  uses: owner/action@${newPin}`;
   assert.equal(codeFor({ files: [file({ patch: scalarWithBlank })] }), "uses-removal-ineligible");
+  const nestedScalar = `@@ -1,3 +1,3 @@\n run: |\n   steps:\n-    - uses: owner/action@${oldPin}\n+    - uses: owner/action@${newPin}`;
+  assert.equal(codeFor({ files: [file({ patch: nestedScalar })] }), "uses-removal-ineligible");
+  for (const quote of ["\"", "'"]) {
+    const quotedScalar = `@@ -1,3 +1,3 @@ jobs:\n run: ${quote}text\n   steps:\n-    - uses: owner/action@${oldPin}\n+    - uses: owner/action@${newPin}`;
+    assert.equal(codeFor({ files: [file({ patch: quotedScalar })] }), "uses-removal-ineligible", quote);
+  }
 
   for (const mapping of ["with", "env", "permissions"]) {
     const lookalike = `@@ -1,4 +1,4 @@\n jobs:\n   build:\n     ${mapping}:\n-      uses: owner/action@${oldPin}\n+      uses: owner/action@${newPin}`;
@@ -304,21 +340,24 @@ test("rejects every unsupported uses shape and semantic substitution", () => {
   assert.equal(codeFor({ files: [file({ patch: noParent })] }), "uses-removal-ineligible");
   const noGrandparent = `@@ -1,2 +1,2 @@\n build:\n-  uses: owner/action@${oldPin}\n+  uses: owner/action@${newPin}`;
   assert.equal(codeFor({ files: [file({ patch: noGrandparent })] }), "uses-removal-ineligible");
+  const jobLevel = `@@ -1,3 +1,3 @@\n jobs:\n   build:\n-    uses: owner/action@${oldPin}\n+    uses: owner/action@${newPin}`;
+  assert.equal(codeFor({ files: [file({ patch: jobLevel })] }), "uses-removal-ineligible");
 });
 
 test("rejects movement, reordering, unequal pairs, mixed changes, and API count mismatch", () => {
   const reordered = [
-    "@@ -1,4 +1,4 @@",
+    "@@ -1,5 +1,5 @@",
     " jobs:",
     "   build:",
-    `-    uses: one/action@${oldPin}`,
-    `-    uses: two/action@${oldPin}`,
-    `+    uses: two/action@${newPin}`,
-    `+    uses: one/action@${newPin}`
+    "     steps:",
+    `-      - uses: one/action@${oldPin}`,
+    `-      - uses: two/action@${oldPin}`,
+    `+      - uses: two/action@${newPin}`,
+    `+      - uses: one/action@${newPin}`
   ].join("\n");
   assert.equal(codeFor({ files: [file({ additions: 2, deletions: 2, changes: 4, patch: reordered })] }), "patch-normalized-content-changed");
   assert.equal(codeFor({ files: [file({ patch: patch(), additions: 2, changes: 3 })] }), "patch-api-count-mismatch");
-  assert.equal(codeFor({ files: [file({ patch: "@@ -1,3 +1,3 @@\n jobs:\n   build:\n-    uses: x/action@1111111111111111111111111111111111111111\n+    permissions: write" })] }), "uses-addition-ineligible");
+  assert.equal(codeFor({ files: [file({ patch: "@@ -1,4 +1,4 @@\n jobs:\n   build:\n     steps:\n-      - uses: x/action@1111111111111111111111111111111111111111\n+      - permissions: write" })] }), "uses-addition-ineligible");
 });
 
 test("is total for JSON-shaped null, missing, sparse, duplicate, and wrong-typed values", () => {
@@ -378,14 +417,14 @@ test("renders exact golden summaries for automatic, authored, label, title failu
 });
 
 test("summary bounds and escapes all raw evidence and supports explicit docs URLs", () => {
-  const hostile = `<script>|\`x\`\n${"z".repeat(500)}`;
+  const hostile = `<ScRiPt>|\`x\`\n${"z".repeat(500)}`;
   const result = evaluateReleaseContractV1(input({
     authorLogin: hostile,
     labels: ["dependencies", "github_actions", hostile]
   }));
   const summary = renderReleaseContractSummaryV1(result, { docsUrl: "https://example.test/docs?a=1&b=2" });
-  assert.equal(summary.includes("<script>"), false);
-  assert.match(summary, /&lt;script&gt;&#124;&#96;x&#96;/);
+  assert.equal(summary.includes("<ScRiPt>"), false);
+  assert.match(summary, /&lt;ScRiPt&gt;&#124;&#96;x&#96;/);
   assert.match(summary, /https:\/\/example\.test\/docs\?a=1&amp;b=2/);
   assert.ok(summary.length < 10_000);
 
