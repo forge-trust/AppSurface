@@ -156,18 +156,31 @@ does the application currently hold acceptable proof for this registered workflo
 
 AppSurface owns registration, the fixed protected route, request validation, and status mapping. Your application owns
 the proof query. The deploy caller triggers synthetic work before evaluation and owns polling, retries, and total timeout.
-Issue [#624](https://github.com/forge-trust/AppSurface/issues/624) adds a privacy-safe evidence envelope,
+Issue [#624](https://github.com/forge-trust/AppSurface/issues/624) adds a bounded evidence envelope and fixed
+completion telemetry. It constrains shape and exposure; it does not classify or redact application-authored text. Issue
 [#625](https://github.com/forge-trust/AppSurface/issues/625) adds caller-side polling, and
 [#626](https://github.com/forge-trust/AppSurface/issues/626) adds a neutral end-to-end example. Until that operator rail is
 proved, this API remains preview. A separate [aggregate snapshot follow-up](https://github.com/forge-trust/AppSurface/issues/645)
 will compile multiple checks with bounded concurrency and deadlines after the safe envelope exists; #623 evaluates one
 registered name per request.
 
-#### 5-minute named canary path
+Choose the surface by the question you need to answer:
 
-This path assumes the host already has authentication. If it does not, first choose a host-owned scheme and policy using
-the [AppSurface Auth adoption ladder](../../Auth/ForgeTrust.AppSurface.Auth/README.md). Named canaries never install an
-authentication scheme or define who an operator is.
+| Use | Question | Lifetime and audience |
+|---|---|---|
+| ASP.NET Core health checks through `/health` or `/ready` | Is this process and its required dependencies healthy enough for infrastructure traffic decisions? | Ongoing, public/minimal platform probes. |
+| AppSurface named canary | Does this protected, registered workflow have acceptable proof for this marker and freshness boundary right now? | One authenticated evaluation for deploy operators or automation. |
+
+Named canaries do not replace ASP.NET Core health checks, do not affect `/ready`, and ship no health-check adapter. Do not
+point a liveness or readiness probe at the canary route.
+
+#### Named canary time-to-first-success paths
+
+Budget **under 5 minutes** when the host already has authentication and an operator policy. Budget **under 15 minutes**
+for the cold path where the Web host must first add its host-owned scheme and policy using the
+[AppSurface Auth adoption ladder](../../Auth/ForgeTrust.AppSurface.Auth/README.md). Named canaries never install an
+authentication scheme or define who an operator is. Both clocks assume the application already has a proof reader; the
+server primitive evaluates existing proof and never triggers the workflow.
 
 Start from this compile-only evaluator skeleton. Replace its placeholder result with an application-owned lookup that
 uses `context.Marker` and `context.FreshSince`; the evaluator must inspect existing proof and must not trigger the workflow:
@@ -178,6 +191,13 @@ using ForgeTrust.AppSurface.Web;
 
 public sealed class ForwardingCanaryEvaluator : IAppSurfaceCanaryEvaluator
 {
+    /// <summary>The declared result-detail key identifying the forwarding proof kind.</summary>
+    /// <remarks>
+    /// Add this key to <see cref="AppSurfaceCanaryRegistrationOptions.AllowedDetailKeys"/> before returning it through
+    /// <see cref="AppSurfaceCanaryResultOptions.AddDetail(string, string)"/>.
+    /// </remarks>
+    public const string ProofKindDetailKey = "proof.kind";
+
     public ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
         AppSurfaceCanaryEvaluationContext context,
         CancellationToken cancellationToken)
@@ -193,7 +213,130 @@ public sealed class ForwardingCanaryEvaluator : IAppSurfaceCanaryEvaluator
 The placeholder always returns `Pending` and is not a working deploy proof. Replace it with your application-owned query:
 return `Pass` when matching proof at or after the requested freshness boundary is acceptable, `Pending` while matching proof
 may still arrive, `Fail` for a completed negative outcome, `Stale` for proof older than the boundary, and `NotConfigured` when
-the proof dependency is intentionally unavailable.
+the proof dependency is intentionally unavailable. This complete fixture shows the application boundary: `IForwardingProofReader`
+reads existing proof and returns already-classified, bounded evidence; the evaluator only translates that decision into the
+package contract.
+
+<!-- appsurface:snippet id="appsurface-canary-forwarding-complete" file="Web/ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture/CanaryConsumerFixture.cs" marker="appsurface-canary-forwarding-complete" lang="csharp" -->
+```csharp
+/// <summary>Describes application-owned forwarding proof returned by a protected proof store.</summary>
+/// <param name="Status">The named-canary status derived by the application.</param>
+/// <param name="ObservedAt">The time the proof was observed, when meaningful.</param>
+/// <param name="MatchedCount">The number of matching proof records.</param>
+/// <param name="ReasonCode">The stable, operator-safe reason code.</param>
+/// <param name="Summary">The bounded, operator-safe summary.</param>
+/// <param name="CorrelationId">The non-secret application correlation identifier.</param>
+public sealed record ForwardingProofSnapshot(
+    AppSurfaceCanaryStatus Status,
+    DateTimeOffset? ObservedAt,
+    int MatchedCount,
+    string ReasonCode,
+    string Summary,
+    string CorrelationId);
+
+/// <summary>Reads existing forwarding proof without triggering the workflow under evaluation.</summary>
+public interface IForwardingProofReader
+{
+    /// <summary>Finds proof for the exact marker and freshness boundary supplied by the deploy caller.</summary>
+    /// <param name="marker">
+    /// The required opaque, potentially sensitive deploy marker. Do not log, persist, expose in telemetry, or return
+    /// the raw value in a response; use only a redacted or fingerprinted representation outside the proof lookup.
+    /// </param>
+    /// <param name="freshSince">The required proof freshness boundary.</param>
+    /// <param name="cancellationToken">The request cancellation token.</param>
+    /// <returns>The application-owned proof decision and bounded evidence.</returns>
+    ValueTask<ForwardingProofSnapshot> ReadAsync(
+        string marker,
+        DateTimeOffset freshSince,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>Evaluates existing forwarding proof without triggering forwarding itself.</summary>
+/// <remarks>
+/// During <c>AddAppSurfaceCanary</c> registration, call both <c>RequireMarker()</c> and <c>RequireFreshSince()</c> before
+/// mapping the endpoint. Missing required HTTP headers fail as <c>ASCAN201</c> before evaluation. Direct evaluation
+/// validates marker and then freshness and throws <see cref="InvalidOperationException"/> with a registration
+/// diagnostic when either input is absent.
+/// </remarks>
+public sealed class CompleteForwardingCanaryEvaluator(IForwardingProofReader proofReader) : IAppSurfaceCanaryEvaluator
+{
+    /// <summary>The application-owned detail key shared by registration and result construction.</summary>
+    /// <remarks>
+    /// Add this key to <see cref="AppSurfaceCanaryRegistrationOptions.AllowedDetailKeys"/> before returning it through
+    /// <see cref="AppSurfaceCanaryResultOptions.AddDetail(string, string)"/>.
+    /// </remarks>
+    public const string ProofKindDetailKey = "proof.kind";
+
+    /// <inheritdoc />
+    public async ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
+        AppSurfaceCanaryEvaluationContext context,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(context.Marker))
+        {
+            throw new InvalidOperationException(
+                "CompleteForwardingCanaryEvaluator requires a marker. Register it with RequireMarker().");
+        }
+
+        var marker = context.Marker;
+
+        if (context.FreshSince is not { } freshSince)
+        {
+            throw new InvalidOperationException(
+                "CompleteForwardingCanaryEvaluator requires a freshness boundary. Register it with RequireFreshSince().");
+        }
+
+        var proof = await proofReader.ReadAsync(
+            marker,
+            freshSince,
+            cancellationToken);
+
+        return new AppSurfaceCanaryResult(
+            proof.Status,
+            result =>
+            {
+                result.ObservedAt = proof.ObservedAt;
+                result.MatchedCount = proof.MatchedCount;
+                result.ReasonCode = proof.ReasonCode;
+                result.Summary = proof.Summary;
+                result.CorrelationId = proof.CorrelationId;
+                result.AddDetail(ProofKindDetailKey, "forwarding");
+            });
+    }
+}
+```
+<!-- /appsurface:snippet -->
+
+The existing `new AppSurfaceCanaryResult(status)` constructor remains valid and produces no optional evaluator evidence.
+The callback overload is construction-only. AppSurface validates it and snapshots the options and details before the result becomes
+observable; later mutations cannot change the result. Prefer the typed fields. Use details only for a small, stable,
+operator-safe token that does not fit a typed field. Keep raw provider payloads and deep diagnostics in an application-owned,
+protected system.
+
+A separate public consumer fixture exercised by endpoint tests also uses a contrasting non-message case to keep forwarding-specific
+concepts out of the typed contract:
+
+```csharp
+public sealed class MigrationCompletionCanaryEvaluator : IAppSurfaceCanaryEvaluator
+{
+    public const string MigrationKindDetailKey = "migration.kind";
+
+    public ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
+        AppSurfaceCanaryEvaluationContext context,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult(
+            new AppSurfaceCanaryResult(
+                AppSurfaceCanaryStatus.Pass,
+                result =>
+                {
+                    result.ObservedAt = DateTimeOffset.UtcNow;
+                    result.MatchedCount = 1;
+                    result.ReasonCode = "migration-complete";
+                    result.Summary = "The expected schema migration is complete.";
+                    result.AddDetail(MigrationKindDetailKey, "schema");
+                }));
+}
+```
 
 Register the evaluator and require the inputs your proof query needs. Registration alone exposes no route:
 
@@ -210,10 +353,28 @@ public void ConfigureServices(StartupContext context, IServiceCollection service
         {
             canary.RequireMarker();
             canary.RequireFreshSince();
+            canary.AllowedDetailKeys.Add(ForwardingCanaryEvaluator.ProofKindDetailKey);
         });
 }
 ```
 <!-- /appsurface:snippet -->
+
+After registering the application's `IForwardingProofReader` implementation with its normal host-owned lifetime, register
+the complete evaluator and declare every custom result key in that same callback:
+
+```csharp
+services.AddAppSurfaceCanary<CompleteForwardingCanaryEvaluator>(
+    "forwarding.alpha-evidence",
+    canary =>
+    {
+        canary.RequireMarker();
+        canary.RequireFreshSince();
+        canary.AllowedDetailKeys.Add(CompleteForwardingCanaryEvaluator.ProofKindDetailKey);
+    });
+```
+
+Declarations are isolated per canary and snapshotted after registration. Duplicate declarations are idempotent. An
+undeclared returned key fails the evaluation closed as `ASCAN301`; AppSurface never silently drops it.
 
 Run host-owned authentication and authorization in the endpoint-aware phase, then map the fixed route family explicitly:
 
@@ -242,24 +403,47 @@ curl --fail-with-body \
   https://app.example.com/_appsurface/canaries/forwarding.alpha-evidence
 ```
 
-The response is status-only in #623:
+The completed response contains a required compatibility core and omits optional evidence that is absent:
 
 ```json
-{"name":"forwarding.alpha-evidence","status":"pending"}
+{
+  "name": "forwarding.alpha-evidence",
+  "ready": false,
+  "status": "pending",
+  "markerFingerprint": "sha256:8f3e39850c0f5251fc6d36845f3d69a4cb12963e96e9ee95c935b33b68d893f6",
+  "freshSince": "2026-07-12T12:00:00.0000000Z",
+  "matchedCount": 0,
+  "reasonCode": "proof-not-observed",
+  "summary": "No fresh matching forwarding proof observed yet.",
+  "details": {
+    "proof.kind": "forwarding"
+  },
+  "correlationId": "deploy-20260716-004006"
+}
 ```
+
+`name`, `ready`, and `status` are always present. `ready` is only a projection of `status == "pass"`; it does not mean
+the process is ready for traffic. `markerFingerprint` is present only when a validated marker was supplied and is
+`sha256:` plus the lowercase SHA-256 digest of the exact UTF-8 marker. It is a correlation aid, not anonymization: a
+low-entropy marker can be guessed offline. Never put a secret, token, email address, personal identifier, or private
+content in a marker.
+
+`freshSince` comes from the validated request. `observedAt` comes from the evaluator and does not default to request time.
+Both are normalized to UTC and use exactly seven fractional digits. The other evaluator-owned fields and `details` are
+omitted when absent; an empty details collection is omitted.
 
 #### Status and HTTP contract
 
 `MapAppSurfaceCanaries` maps one GET route, `/_appsurface/canaries/{name}`, for the whole named registry. It is excluded
 from API Explorer/OpenAPI and every package-owned response sets `Cache-Control: no-store` and `Pragma: no-cache`.
 
-| Evaluator status | Meaning for a caller | Default HTTP status |
-|---|---|---:|
-| `pass` | Current proof is acceptable. | `200` |
-| `pending` | Acceptable proof may still arrive. | `503` |
-| `fail` | Current proof demonstrates failure. | `503` |
-| `stale` | Proof exists but predates the requested boundary. | `503` |
-| `not-configured` | The registered evaluator cannot inspect an intentionally unavailable proof dependency. | `503` |
+| Evaluator status | Meaning for a caller | Typical caller action | Default HTTP status |
+|---|---|---|---:|
+| `pass` | Current proof is acceptable. | Continue the deploy decision. | `200` |
+| `pending` | Acceptable proof may still arrive. | Wait and retry within the caller-owned deadline. | `503` |
+| `fail` | Current proof demonstrates failure. | Stop and surface the bounded reason; do not retry blindly. | `503` |
+| `stale` | Proof exists but predates the requested boundary. | Check the trigger/marker boundary before retrying. | `503` |
+| `not-configured` | The registered evaluator cannot inspect an intentionally unavailable proof dependency. | Fix host configuration or deliberately skip this workflow outside the server primitive. | `503` |
 
 The default `AppSurfaceCanaryCompletedResponseMode.StatusCode` makes deployment checks work without parsing JSON.
 Authenticated diagnostic/reporting consumers can explicitly opt into `AlwaysOk`; they must then parse `status` because
@@ -277,7 +461,250 @@ public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder end
 <!-- /appsurface:snippet -->
 
 This option changes only the HTTP status. It never changes the evaluator contract or JSON. Clients should parse JSON,
-use `status` as the decision field, and ignore unknown properties so the #624 envelope can grow additively.
+use `status` as the decision field, and apply these preview compatibility rules:
+
+- Require valid `name`, `ready`, and `status` fields. They are the compatibility core.
+- Accept any optional field being absent and ignore fields added by a future package version.
+- Parse by property name. The package writes deterministic output for reproducibility, but property and detail order are
+  not a wire compatibility guarantee.
+- Do not infer `ready` from HTTP status when `AlwaysOk` is enabled, and do not reinterpret `ready` as platform readiness.
+
+This additive contract is intentionally unversioned while preview. The [#625 caller](https://github.com/forge-trust/AppSurface/issues/625)
+must follow these rules and will prove the server-to-operator polling path before the named-canary API leaves preview.
+
+#### Parse the envelope and choose an action
+
+Use `System.Text.Json` to validate the required core by property name. This public-fixture parser accepts reordered JSON,
+absent optional fields, and future unknown fields. It rejects missing or malformed `name`, `ready`, or `status` fields and
+rejects a `ready` projection that disagrees with `status`.
+
+<!-- appsurface:snippet id="appsurface-canary-consumer" file="Web/ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture/CanaryConsumerFixture.cs" marker="appsurface-canary-consumer" lang="csharp" -->
+```csharp
+using System.Text.Json;
+
+namespace ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture;
+
+/// <summary>Lists the next operator action selected from a semantic named-canary envelope.</summary>
+public enum CanaryOperatorAction
+{
+    /// <summary>Continue the deployment decision after acceptable proof.</summary>
+    Continue,
+
+    /// <summary>Wait for proof that may still arrive.</summary>
+    Wait,
+
+    /// <summary>Refresh stale proof or its trigger boundary.</summary>
+    Refresh,
+
+    /// <summary>Configure the unavailable proof dependency.</summary>
+    Configure,
+
+    /// <summary>Investigate a completed negative outcome.</summary>
+    Investigate,
+
+    /// <summary>Roll back after a known migration-integrity failure.</summary>
+    RollBack,
+}
+
+/// <summary>Represents the required compatibility core and selected operator action parsed by a public consumer.</summary>
+/// <param name="Name">The exact registered canary name.</param>
+/// <param name="Status">The defined lowercase wire status.</param>
+/// <param name="Ready">The compatibility projection of whether <paramref name="Status"/> is <c>pass</c>.</param>
+/// <param name="ReasonCode">The optional response-only machine reason.</param>
+/// <param name="Action">The operator action selected from the semantic envelope.</param>
+public sealed record CanaryConsumerResult(
+    string Name,
+    string Status,
+    bool Ready,
+    string? ReasonCode,
+    CanaryOperatorAction Action);
+
+/// <summary>Parses named-canary JSON by semantic field name without depending on property order or optional fields.</summary>
+public static class CanaryEnvelopeConsumer
+{
+    /// <summary>Parses and validates the required named-canary compatibility core.</summary>
+    /// <param name="json">The non-null JSON envelope to parse.</param>
+    /// <returns>The validated core fields and selected operator action.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="json"/> is null.</exception>
+    /// <exception cref="JsonException">A required field is absent, invalid, or semantically inconsistent.</exception>
+    public static CanaryConsumerResult Parse(string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("The named-canary envelope must be a JSON object.");
+        }
+
+        var name = ReadRequiredString(root, "name");
+        var status = ReadRequiredString(root, "status");
+
+        var reasonCode = root.TryGetProperty("reasonCode", out var reasonProperty)
+            && reasonProperty.ValueKind == JsonValueKind.String
+                ? reasonProperty.GetString()
+                : null;
+        var action = SelectAction(status, reasonCode);
+
+        if (!root.TryGetProperty("ready", out var readyProperty)
+            || readyProperty.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+        {
+            throw new JsonException("The named-canary ready projection is required and must be Boolean.");
+        }
+
+        var ready = readyProperty.GetBoolean();
+        if (ready != string.Equals(status, "pass", StringComparison.Ordinal))
+        {
+            throw new JsonException("The named-canary ready projection does not match status.");
+        }
+
+        return new CanaryConsumerResult(name, status, ready, reasonCode, action);
+    }
+
+    private static string ReadRequiredString(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property)
+            || property.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(property.GetString()))
+        {
+            throw new JsonException($"The named-canary {propertyName} is required and must be a nonblank string.");
+        }
+
+        return property.GetString()!;
+    }
+
+    private static CanaryOperatorAction SelectAction(string status, string? reasonCode) => status switch
+    {
+        "pass" => CanaryOperatorAction.Continue,
+        "pending" => CanaryOperatorAction.Wait,
+        "stale" => CanaryOperatorAction.Refresh,
+        "not-configured" => CanaryOperatorAction.Configure,
+        "fail" when string.Equals(reasonCode, "checksum-mismatch", StringComparison.Ordinal) =>
+            CanaryOperatorAction.RollBack,
+        "fail" => CanaryOperatorAction.Investigate,
+        _ => throw new JsonException("The named-canary status is not recognized."),
+    };
+}
+```
+<!-- /appsurface:snippet -->
+
+Shell automation can apply the same semantic checks with `jq`; property order and unknown fields do not affect this filter:
+
+```bash
+curl --silent --show-error \
+  -H "Authorization: Bearer $DEPLOY_OPERATOR_TOKEN" \
+  -H "X-AppSurface-Canary-Marker: deploy-42" \
+  -H "X-AppSurface-Canary-Fresh-Since: 2026-07-12T12:00:00Z" \
+  https://app.example.com/_appsurface/canaries/forwarding.alpha-evidence |
+jq -er '
+  if (.name | type) != "string" or (.name | length) == 0 then error("invalid name")
+  elif (.ready | type) != "boolean" then error("invalid ready")
+  elif (.status | type) != "string"
+    or (.status as $status | ["pass", "pending", "fail", "stale", "not-configured"] | index($status)) == null
+    then error("invalid status")
+  elif .ready != (.status == "pass") then error("ready does not match status")
+  else {
+    name,
+    status,
+    reasonCode: (.reasonCode // null),
+    action: (
+      if .status == "pass" then "continue"
+      elif .status == "pending" then "wait"
+      elif .status == "stale" then "refresh"
+      elif .status == "not-configured" then "configure"
+      elif .reasonCode == "checksum-mismatch" then "roll-back"
+      else "investigate"
+      end)
+  }
+  end'
+```
+
+With the default response mode, do not add `--fail` when the script needs to parse non-pass envelopes because their `503`
+status is intentional. Use `curl --fail-with-body` only when HTTP status alone should fail the deploy step.
+
+#### Upgrade from the #623 status-only envelope
+
+Existing evaluators that return `new AppSurfaceCanaryResult(status)` still compile unchanged. The successful response is
+additive: #624 adds required `ready` and may add bounded optional evidence, while `name` and `status` keep their meaning.
+
+| #623 response | #624 response and consumer change |
+|---|---|
+| `{ "name": "forwarding.alpha-evidence", "status": "pending" }` | `{ "name": "forwarding.alpha-evidence", "ready": false, "status": "pending" }` plus optional evidence when supplied. |
+| Read `name` and `status`. | Require `name`, `ready`, and `status`; verify `ready == (status == "pass")`. |
+| No additive evidence existed. | Tolerate absent optional fields, ignore unknown fields, and never depend on property order. |
+
+No registration, route, or evaluator migration is required for status-only producers. Consumers must make the required-core
+update before reading #624 responses. The API remains preview until the [#625 caller](https://github.com/forge-trust/AppSurface/issues/625)
+proves this contract across the operator path.
+
+#### Result evidence reference
+
+`AppSurfaceCanaryResult.Status` is required. The construction callback can set these optional evaluator-owned fields:
+
+| Field | Contract | Intended use |
+|---|---|---|
+| `ObservedAt` | Any representable `DateTimeOffset`; normalized to UTC. | Time the proof itself was observed. Leave absent when no meaningful observation time exists. |
+| `MatchedCount` | Non-negative integer. | Number of candidate proofs considered or matched. |
+| `ReasonCode` | 1-64 lowercase ASCII letters, digits, or internal hyphens; starts and ends alphanumeric. | Stable machine branching such as `proof-not-observed`. |
+| `Summary` | Nonblank, at most 256 UTF-8 bytes, well-formed Unicode, no Unicode control (`Cc`) scalar. | Short operator-safe explanation. |
+| `CorrelationId` | 1-128 ASCII characters from letters, digits, `.`, `_`, `:`, or `-`; starts and ends alphanumeric. | Non-secret application/deploy correlation token. |
+| `Details` | Up to 16 declared string pairs, exposed as an immutable, ordinally sorted dictionary. | Small application-specific operator tokens that do not belong in the typed fields. |
+
+`AddDetail(key, value)` validates each key and value immediately. Keys are 1-64 lowercase ASCII characters in
+dot-separated segments; segments start and end alphanumeric and may contain internal hyphens. Values are nonblank, at
+most 128 UTF-8 bytes, well-formed Unicode, and contain no Unicode control (`Cc`) scalar. Duplicate result keys or a 17th
+unique result detail throw `InvalidOperationException`. Null callbacks, keys, or values throw `ArgumentNullException`.
+Invalid keys or values throw `ArgumentException` for `key` or `value`; invalid scalar options discovered after the callback
+throw `ArgumentException` for `configure`. Exceptions thrown by application callback code propagate unchanged and no
+partial result is created.
+
+`AllowedDetailKeys` accepts at most 16 unique keys with the same key grammar. Invalid declarations, including a 17th
+unique key, make registration fail atomically with `ASCAN101` as an `ArgumentException` for `configure`; the service
+collection is not partially changed. Returning a syntactically valid key that this canary did not declare is different:
+construction succeeds, then descriptor-specific validation rejects the evaluation as safe `ASCAN301` with no partial
+envelope.
+
+Bounds make transport size and log behavior predictable; they do not make text semantically safe. Never place email
+addresses, provider identifiers or URLs, credentials or tokens, prompts, model output, source text, child names, parent
+emails, private generated content, exception messages, or raw provider/domain payloads in `Summary`, `CorrelationId`, or
+`Details`. `AllowedDetailKeys` is a pre-authorized shape, not classification, redaction, or data-loss prevention.
+
+#### Authoring-time validation rescue
+
+These failures happen when application code constructs a result directly during authoring or startup, or registers a
+canary. They are distinct from endpoint diagnostics because no endpoint evaluation is running. The same construction
+failure thrown inside `EvaluateAsync` occurs under the runtime boundary and is reported as safe `ASCAN301` instead.
+
+| Failure | Exception and parameter | Cause | Fix |
+|---|---|---|---|
+| Missing result callback | `ArgumentNullException`, `configure` | The callback overload received `null`. | Pass a non-null construction callback or use the status-only constructor. |
+| Invalid scalar option | `ArgumentException`, `configure` | A count is negative, a reason/correlation value violates its grammar, or summary/Unicode bounds are invalid. | Correct the value using the limits in the result evidence reference. |
+| Invalid detail key or value | `ArgumentNullException` or `ArgumentException`, `key`/`value` | A key/value is null, blank, malformed, contains a control scalar, or exceeds its UTF-8 bound. | Use a declared 1-64 character key and bounded nonblank value of at most 128 UTF-8 bytes. |
+| Duplicate or 17th result detail | `InvalidOperationException` | Result construction reused a key or exceeded 16 unique details. | Return each declared key once and keep at most 16 details. |
+| Invalid allowed-key declaration | `ArgumentException`, `configure`; diagnostic `ASCAN101` | Registration declared an invalid key or exceeded 16 unique keys. | Correct the registration callback; registration remains atomic. |
+
+A syntactically valid result key that was not declared is a runtime, canary-specific mismatch. Result construction succeeds,
+then evaluation fails closed as `ASCAN301` with no partial envelope. Declare the exact shared constant in that canary's
+`AllowedDetailKeys` or remove the returned detail.
+
+#### Completion telemetry
+
+After one evaluator result passes validation and before response serialization, AppSurface emits one source-generated
+`Information` event: ID `62401`, name `AppSurfaceCanaryEvaluationCompleted`. It contains only the fixed typed fields
+`CanaryName`, `CanaryStatus`, `Ready`, `ObservedAt`, `FreshSince`, `MatchedCount`, `ElapsedMilliseconds`,
+`ApplicationName`, and `EnvironmentName`. Elapsed time covers evaluator activation, invocation, and result validation.
+Host application/environment names are limited to 128 UTF-8 bytes and must contain well-formed Unicode without control
+characters. Missing, blank, malformed, control-containing, or oversized values are normalized to `unknown` and do not
+prevent route mapping.
+
+The event never contains the raw marker, marker fingerprint, reason code, summary, correlation ID, detail keys or values,
+exception message, response body, or evaluator domain payload. The response-only fields stay response-only even when a
+logging provider could accept them. Use ambient logging scopes and OpenTelemetry resource attributes for revision/build
+metadata, and ambient `Activity` context for request correlation; #624 does not define a build identity API.
+
+Evaluation activation, invocation, null-result, result-validation, or undeclared-key failures continue through redacted
+event `62301` and `ASCAN301`, with no completion event. Request-abort cancellation emits neither event. If response writing
+fails after a valid completion, the completion event remains accurate and the write exception flows to host diagnostics.
 
 #### Registration and request reference
 
@@ -285,11 +712,12 @@ use `status` as the decision field, and ignore unknown properties so the #624 en
   may contain internal hyphens, for example `forwarding.alpha-evidence`. Matching is exact and ordinal.
 - `DisplayName` defaults to the registered name, `Description` defaults to `null` and is limited to 512 characters, and
   `Tags` is an ordinal set of 1-64 character lowercase letter/digit/internal-hyphen values. These values are immutable
-  registry metadata and are not returned by the #623 endpoint.
+  registry metadata and are not returned by the endpoint. `AllowedDetailKeys` is also immutable registry metadata, but
+  it declares response shape rather than describing the registration.
 - `RequireMarker()` and `RequireFreshSince()` are idempotent. Optional inputs still reach the evaluator when supplied.
 - Marker values are opaque: AppSurface preserves the value delivered by ASP.NET Core, including internal whitespace,
   but HTTP clients and servers may normalize leading or trailing field-value whitespace. Avoid whitespace-significant
-  markers. Control characters and repeated values are rejected, the maximum is 256 UTF-8 bytes, and a blank optional
+  markers. Malformed Unicode, control characters, and repeated values are rejected, the maximum is 256 UTF-8 bytes, and a blank optional
   marker becomes `null`.
 - Freshness accepts strict RFC 3339 timestamps with seconds, a `Z` or numeric offset, and zero to seven fractional digits.
   It rejects surrounding whitespace, offset-free values, and invalid calendar or offset values, then normalizes to UTC.
@@ -326,7 +754,7 @@ stable event, canary name, diagnostic code, and exception type.
 
 | Code | Problem | Likely cause | Fix |
 |---|---|---|---|
-| `ASCAN101` | Invalid registration | Name, display metadata, description, or tag grammar is invalid. | Correct the registration callback before building the host. |
+| `ASCAN101` | Invalid registration | Name, display metadata, description, tag grammar, allowed-detail grammar, or the 16-key declaration limit is invalid. | Correct the registration callback before building the host. |
 | `ASCAN102` | Duplicate name | More than one registration used the same exact name. | Keep one registration per name. |
 | `ASCAN111` | Invalid mapping policy | The supplied policy name is blank. | Pass a nonblank host-owned policy name. |
 | `ASCAN112` | No registrations | The route was mapped without any named canaries. | Register at least one typed evaluator first. |
@@ -337,7 +765,7 @@ stable event, canary name, diagnostic code, and exception type.
 | `ASCAN201` | Required header missing | A registration-required marker or freshness value is blank/absent. | Supply the named header and retry. |
 | `ASCAN202` | Header invalid | A header is repeated, malformed, unsafe, or too large. | Follow the marker or strict freshness rules above. |
 | `ASCAN203` | Canary not found | The exact route name is not registered. | Register it or correct the lowercase name. |
-| `ASCAN301` | Evaluation failed | Activation failed, the evaluator threw/canceled independently, or returned null. | Inspect host-local evaluator diagnostics; caller retry policy remains external. |
+| `ASCAN301` | Evaluation failed | Activation failed, the evaluator threw/canceled independently, returned null, returned invalid result state, or returned a detail key not declared for this canary. | Correct the evaluator or declare the bounded key; inspect host-local evaluator diagnostics because rejected values remain redacted. Caller retry policy remains external. |
 
 ### PWA Install and Push-Worker Foundation
 
