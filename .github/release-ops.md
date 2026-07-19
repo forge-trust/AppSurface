@@ -2,6 +2,45 @@
 
 This file lives under `.github/` on purpose so AppSurface Docs does not publish it as public documentation.
 
+<a id="release-contract-check"></a>
+
+## Dormant automatic release-contract classifier
+
+The versioned classifier in [`.github/scripts/release-contract-v1.mjs`](scripts/release-contract-v1.mjs)
+is base-owned maintainer tooling for a proposed, syntactic classification of pinned
+external-action updates. It is deliberately dormant in this change: the live
+release-contract workflow does not import it, and **no third release-evidence path
+is active yet**. The only active evidence paths remain an authored
+[`releases/unreleased.md`](../releases/unreleased.md) entry or the exact,
+case-sensitive `no-unreleased-entry` label described below.
+
+The classifier decides only whether public release prose is required. It does not
+approve action compatibility, supply-chain safety, CI health, review sufficiency,
+or merge safety. Conventional-title validation and ordinary branch protection are
+independent. A future integration change must activate the classifier from the
+trusted base revision and update this document before automatic evidence can pass
+the live check.
+
+Maintainers can reproduce a normalized input locally with Node.js 24. The command
+accepts a JSON file path, or reads the same JSON from standard input. A document may
+contain the classifier fields directly or wrap them as `{ "input": ..., "context": ... }`.
+It prints the same Markdown summary renderer intended for CI, exits 0 for a passing
+contract, 1 for a blocking contract diagnostic, and 2 for unreadable or invalid JSON.
+
+```bash
+node .github/scripts/release-contract-diagnose.mjs normalized-release-contract.json
+```
+
+Run the complete fail-closed parser and renderer suite with its exact coverage gate:
+
+```bash
+node --experimental-test-coverage \
+  --test-coverage-lines=100 \
+  --test-coverage-functions=100 \
+  --test-coverage-branches=100 \
+  --test .github/scripts/release-contract-v1.test.mjs
+```
+
 ## `no-unreleased-entry` label
 
 Use `no-unreleased-entry` only when a pull request does not belong in the public release story, such as:

@@ -14,6 +14,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
+- [`ForgeTrust.AppSurface.Web` health and readiness probes](./Web/ForgeTrust.AppSurface.Web/README.md#health-and-readiness-probes) now default off, avoiding health-check service registration and `/health` plus `/ready` endpoint mapping unless a host explicitly sets `WebOptions.Health.Enabled = true`; enabled probes also avoid general route-handler binding during startup, and existing probe consumers must opt in during upgrade.
 - [`ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth`](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#responsive-placement-and-customization) now keeps its marker in normal document flow at widths up to 640 CSS pixels while preserving the fixed desktop overlay, with overflow-safe actions and documented host placement and customization guidance.
 - [`ForgeTrust.RazorWire`](./Web/ForgeTrust.RazorWire/README.md#choose-who-supplies-turbo) now emits its exact Turbo 8.0.23 UMD runtime from the package and same application origin by default. Apps can instead select a validated same-origin custom path or explicitly take full host-managed ownership of Turbo sourcing and load order. The 8.0.12-to-8.0.23 update preserves RazorWire APIs and runtime-source policy while adding risk-mapped Drive, Frame, Stream, form, island, and Behavior Kit compatibility evidence.
 - [`ForgeTrust.RazorWire` Form Interactions](./Web/ForgeTrust.RazorWire/Docs/form-interactions.md) now resets duplicated mark-for-removal fields to their authored inactive value instead of submitting an empty Boolean value that ASP.NET Core rejects during combined duplicate, add, and delete edits.
@@ -25,6 +26,18 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - [`ForgeTrust.AppSurface.Web`](./Web/ForgeTrust.AppSurface.Web/Docs/pwa-install.md) now composes independent offline and push capabilities into one service worker, exposes inert explicit browser registration, validates a strict privacy-safe notification payload and click destination, and keeps permission, subscription, and delivery application-owned.
 - [`ForgeTrust.AppSurface.Web` PWA badging](./Web/ForgeTrust.AppSurface.Web/Docs/pwa-install.md#application-icon-badging) now exposes default-off, identical page and active-worker set/clear adapters with PathBase-aware versioned helper delivery, sanitized outcomes, and explicit server-known diagnostics while leaving push payloads and CLI verification unchanged.
 - [`ForgeTrust.AppSurface.Web.Push`](./Web/ForgeTrust.AppSurface.Web.Push/README.md) adds an optional protected Web Push rail with exact outbound-origin custody, validated VAPID key rings, explicit cookie-antiforgery or bearer endpoint mapping, gesture-safe browser subscription, one-attempt encrypted sending, safe classification, and race-safe 404/410 cleanup.
+
+## 0.2.0-preview.4 - 2026-07-18
+
+- Narrative release note: [v0.2.0-preview.4](./releases/v0.2.0-preview.4.md)
+- Release manifest: `releases/v0.2.0-preview.4.release.json`
+- Release evidence bundle: `releases/v0.2.0-preview.4.evidence.json`
+
+## 0.2.0-preview.3 - 2026-07-17
+
+- Narrative release note: [v0.2.0-preview.3](./releases/v0.2.0-preview.3.md)
+- Release manifest: `releases/v0.2.0-preview.3.release.json`
+- Release evidence bundle: `releases/v0.2.0-preview.3.evidence.json`
 
 ## 0.2.0-preview.2 - 2026-07-02
 
