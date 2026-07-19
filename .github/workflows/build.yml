@@ -139,6 +139,7 @@ jobs:
         if: ${{ always() && !cancelled() && env.CODECOV_TOKEN_PRESENT == 'true' }}
         with:
           files: 'TestResults/coverage-merged/coverage.cobertura.xml'
+          disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test results to Codecov
