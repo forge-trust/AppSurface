@@ -546,7 +546,7 @@ public sealed class SecretPromotionWorkflowTests
         var target = propertyName == "destinationHasEnabledVersions"
             ? plan["rows"]!.AsArray()[0]!.AsObject()
             : plan;
-        target[propertyName] = propertyName == "ready" ? false : true;
+        target[propertyName] = propertyName != "ready";
         File.WriteAllText(planPath, plan.ToJsonString());
 
         var exception = Assert.Throws<CommandException>(() => workflow.Apply(
