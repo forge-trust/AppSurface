@@ -14,7 +14,7 @@ public sealed class AppSurfaceCanaryDocumentationTests
         var readme = File.ReadAllText(Path.Join(repositoryRoot, "Web", "ForgeTrust.AppSurface.Web", "README.md"));
         var packageIndex = File.ReadAllText(Path.Join(repositoryRoot, "packages", "package-index.yml"));
         var generatedChooser = File.ReadAllText(Path.Join(repositoryRoot, "packages", "README.md"));
-        var unreleased = File.ReadAllText(Path.Join(repositoryRoot, "releases", "unreleased.md"));
+        var releaseNote = File.ReadAllText(Path.Join(repositoryRoot, "releases", "v0.2.0-preview.3.md"));
 
         Assert.Contains("### Named Canary Endpoints", readme, StringComparison.Ordinal);
         Assert.Contains("AppSurfaceCanaryCompletedResponseMode.StatusCode", readme, StringComparison.Ordinal);
@@ -44,7 +44,7 @@ public sealed class AppSurfaceCanaryDocumentationTests
             StringComparison.Ordinal);
         Assert.Contains(
             "[`ForgeTrust.AppSurface.Web` named canary evaluation](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints)",
-            unreleased,
+            releaseNote,
             StringComparison.Ordinal);
     }
 

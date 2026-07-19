@@ -150,7 +150,7 @@ validation before persistence.
 | Change | Preview policy |
 |---|---|
 | Additive request/result member | Allowed only with a documented default and fingerprint review |
-| Mutation semantics or canonical bytes | Requires a new fingerprint schema id |
+| Mutation semantics or canonical bytes | Before the first supported publication or persisted deployment, v1 may be corrected in place with updated test vectors; afterward, requires a new fingerprint schema id |
 | Payload bytes | Requires a new application contract version |
 | Flow executable behavior | Requires a new implementation version or explicit migration |
 | Schedule dialect semantics | Requires a new dialect/version, never reinterpret persisted occurrences |

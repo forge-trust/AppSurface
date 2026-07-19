@@ -1685,6 +1685,45 @@ public class ExportEngineTests
         }
     }
 
+    [Theory]
+    [InlineData(ExportMode.Cdn)]
+    [InlineData(ExportMode.Hybrid)]
+    public async Task RunAsync_Should_Materialize_BundledTurbo_ForStaticHosting(ExportMode mode)
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-turbo-export-").FullName;
+
+        try
+        {
+            using var client = new HttpClient(new BundledTurboScriptHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: mode);
+
+            await _sut.RunAsync(context);
+
+            var turboPath = Path.Join(
+                tempDir,
+                "_content",
+                "ForgeTrust.RazorWire",
+                "razorwire",
+                "turbo.es2017-umd.js");
+            Assert.True(File.Exists(turboPath), $"{mode} export should materialize the bundled Turbo runtime.");
+            Assert.Equal("window.Turbo = { version: '8.0.12' };", await File.ReadAllTextAsync(turboPath));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
     [Fact]
     public async Task RunAsync_Should_Export_SectionCopy_Runtime_When_Lazy_Markup_Is_Present()
     {
@@ -5895,6 +5934,31 @@ public class ExportEngineTests
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class BundledTurboScriptHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path is "/" or "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <script src="/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js"></script>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            if (path == "/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js")
+            {
+                return Text("window.Turbo = { version: '8.0.12' };", "text/javascript");
+            }
+
+            return NotFound();
         }
     }
 

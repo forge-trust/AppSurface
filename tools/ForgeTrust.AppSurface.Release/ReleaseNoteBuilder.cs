@@ -65,7 +65,7 @@ internal static class ReleaseNoteBuilder
 
             ## Migration watch
 
-            - Record breaking or behavior-changing guidance here before it moves into the tagged release note.
+            - Record-breaking or behavior-changing guidance here before it moves into the tagged release note.
 
             """;
     }

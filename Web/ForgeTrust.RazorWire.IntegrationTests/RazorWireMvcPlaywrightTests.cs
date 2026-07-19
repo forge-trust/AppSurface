@@ -51,6 +51,66 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task BundledTurbo_DrivesNavigationWithoutExternalRequestsOrFullReload()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        var externalRequests = new ConcurrentQueue<string>();
+        var expectedOrigin = new Uri(_fixture.BaseUrl).GetLeftPart(UriPartial.Authority);
+
+        await page.RouteAsync(
+            "**/*",
+            async route =>
+            {
+                var requestUri = new Uri(route.Request.Url);
+                var requestOrigin = requestUri.GetLeftPart(UriPartial.Authority);
+                if (requestUri.Scheme is "http" or "https"
+                    && !string.Equals(requestOrigin, expectedOrigin, StringComparison.OrdinalIgnoreCase))
+                {
+                    externalRequests.Enqueue(route.Request.Url);
+                    await route.AbortAsync();
+                    return;
+                }
+
+                await route.ContinueAsync();
+            });
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Reactivity/DeterministicRuntime?state=first");
+
+        Assert.Equal(
+            1,
+            await page.Locator("script[src*='/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js']").CountAsync());
+
+        var sentinel = Guid.NewGuid().ToString("N");
+        await page.EvaluateAsync(
+            """
+            value => {
+                window.__razorWireDeterministicRuntimeSentinel = value;
+                document.addEventListener("turbo:load", () => {
+                    const proof = document.querySelector("[data-deterministic-runtime-proof]");
+                    if (!proof) return;
+
+                    proof.dataset.renderKind = "turbo:load";
+                    proof.textContent = "turbo:load";
+                }, { once: true });
+            }
+            """,
+            sentinel);
+
+        await page.GetByRole(AriaRole.Link, new PageGetByRoleOptions { Name = "Show second state" }).ClickAsync();
+        await page.WaitForSelectorAsync("[data-deterministic-runtime-state='second']");
+        await page.WaitForSelectorAsync("[data-deterministic-runtime-proof][data-render-kind='turbo:load']");
+
+        Assert.Equal(
+            sentinel,
+            await page.EvaluateAsync<string>("() => window.__razorWireDeterministicRuntimeSentinel"));
+        Assert.Equal(
+            "turbo:load",
+            await page.Locator("[data-deterministic-runtime-proof]").TextContentAsync());
+        Assert.Empty(externalRequests);
+    }
+
+    [Fact]
     public async Task FormInteractionsSample_ReplacesPageLocalJavaScriptForConditionalAndCollectionRows()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
