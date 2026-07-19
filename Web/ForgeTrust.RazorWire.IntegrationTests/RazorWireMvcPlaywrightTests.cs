@@ -201,6 +201,9 @@ public sealed class RazorWireMvcPlaywrightTests
                     <turbo-stream action="before" target="stream-insertion-target">
                         <template><div id="stream-duplicate-sibling" data-stream-value="new">new</div></template>
                     </turbo-stream>
+                    <turbo-stream action="after" target="stream-insertion-target">
+                        <template><div id="stream-after-sibling">after</div></template>
+                    </turbo-stream>
                     <turbo-stream action="append" target="stream-inline-target">
                         <template><span data-inline-stream-result>executed</span></template>
                     </turbo-stream>
@@ -209,10 +212,15 @@ public sealed class RazorWireMvcPlaywrightTests
             """);
 
         await page.WaitForSelectorAsync("#stream-duplicate-sibling[data-stream-value='new']");
+        await page.WaitForSelectorAsync("#stream-after-sibling");
         await page.WaitForSelectorAsync("#stream-inline-target [data-inline-stream-result]");
 
         Assert.Equal(1, await page.Locator("#stream-duplicate-sibling").CountAsync());
         Assert.Equal("new", await page.Locator("#stream-duplicate-sibling").TextContentAsync());
+        Assert.True(await page.Locator("#stream-insertion-target").EvaluateAsync<bool>(
+            "target => target.previousElementSibling?.id === 'stream-duplicate-sibling'"));
+        Assert.True(await page.Locator("#stream-insertion-target").EvaluateAsync<bool>(
+            "target => target.nextElementSibling?.id === 'stream-after-sibling'"));
         Assert.Equal(1, await page.Locator("[data-inline-stream-result]").CountAsync());
         Assert.Empty(pageErrors);
     }
