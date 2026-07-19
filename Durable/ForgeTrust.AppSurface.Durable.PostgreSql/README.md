@@ -40,7 +40,7 @@ privilege revocation. Flow, Schedule, and runtime-heartbeat schema belong to sli
 rolling application code back does not authorize destructive schema rollback. Execute generated SQL with a client that
 stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
 
-Create host principals outside migrations. Use [`configure-postgresql-roles.sql`](../configure-postgresql-roles.sql) to
+Create host principals outside migrations. Use [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) to
 grant the migration-owner, payload-free dispatcher, and scoped-runtime capabilities. Runtime roles must not receive
 ownership or `BYPASSRLS`. Transaction-local scope context is defense in depth, not a replacement for application
 authorization.
