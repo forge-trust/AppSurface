@@ -97,4 +97,14 @@ public sealed class PostgreSqlDurablePublicContractTests
         Assert.Equal("localhost,127.0.0.1", target.Host);
         Assert.Throws<ArgumentNullException>(() => target.Matches(null!));
     }
+
+    [Fact]
+    public void CleanupFailureFilter_OnlyAcceptsExpectedProviderAndLifecycleFailures()
+    {
+        Assert.True(PostgreSqlDurableExceptionFilters.IsExpectedCleanupFailure(new NpgsqlException("provider")));
+        Assert.True(PostgreSqlDurableExceptionFilters.IsExpectedCleanupFailure(new InvalidOperationException("state")));
+        Assert.True(PostgreSqlDurableExceptionFilters.IsExpectedCleanupFailure(new ObjectDisposedException("transaction")));
+        Assert.True(PostgreSqlDurableExceptionFilters.IsExpectedCleanupFailure(new OperationCanceledException("canceled")));
+        Assert.False(PostgreSqlDurableExceptionFilters.IsExpectedCleanupFailure(new ArgumentException("programming error")));
+    }
 }

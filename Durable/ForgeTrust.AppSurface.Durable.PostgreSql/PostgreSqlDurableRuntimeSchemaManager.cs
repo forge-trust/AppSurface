@@ -427,7 +427,7 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         {
             await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception exception) when (PostgreSqlDurableExceptionFilters.IsExpectedCleanupFailure(exception))
         {
             // Preserve the migration failure. Transaction disposal and connection health checks own cleanup.
         }
@@ -459,7 +459,7 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
             command.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
             await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception exception) when (PostgreSqlDurableExceptionFilters.IsExpectedCleanupFailure(exception))
         {
             // Unlock is best-effort so cleanup never masks the schema or epoch failure. Closing the
             // physical session releases any lock that could not be explicitly released.

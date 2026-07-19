@@ -927,7 +927,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
         {
             await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception exception) when (PostgreSqlDurableExceptionFilters.IsExpectedCleanupFailure(exception))
         {
             // Preserve the original store or connection exception.
         }

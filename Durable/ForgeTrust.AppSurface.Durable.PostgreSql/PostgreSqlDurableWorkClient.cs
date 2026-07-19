@@ -42,7 +42,7 @@ public sealed class PostgreSqlDurableWorkClient : IDurableWorkClient
             {
                 await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             }
-            catch (Exception)
+            catch (Exception exception) when (PostgreSqlDurableExceptionFilters.IsExpectedCleanupFailure(exception))
             {
                 // Preserve the original database or transport failure; disposal owns transaction cleanup.
             }
