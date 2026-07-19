@@ -553,12 +553,21 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         public override DateTimeOffset Read(
             ref Utf8JsonReader reader,
             Type typeToConvert,
-            JsonSerializerOptions options) =>
-            DateTimeOffset.ParseExact(
-                reader.GetString() ?? throw new JsonException("A canary timestamp must be a JSON string."),
-                Format,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+            JsonSerializerOptions options)
+        {
+            if (reader.TokenType != JsonTokenType.String
+                || !DateTimeOffset.TryParseExact(
+                    reader.GetString(),
+                    Format,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                    out var value))
+            {
+                throw new JsonException("A canary timestamp must be a canonical UTC JSON string.");
+            }
+
+            return value;
+        }
 
         /// <inheritdoc />
         public override void Write(

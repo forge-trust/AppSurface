@@ -1048,12 +1048,21 @@ public sealed class AppSurfaceCanaryEndpointTests
     }
 
     [Fact]
-    public void CanonicalUtcConverter_ReadsCanonicalTimestampAndRejectsNull()
+    public void CanonicalUtcConverter_ReadsCanonicalTimestamp()
     {
         Assert.Equal(
             new DateTimeOffset(2026, 7, 16, 8, 31, 2, TimeSpan.Zero).AddTicks(1_234_567),
             ReadCanonicalTimestamp("\"2026-07-16T08:31:02.1234567Z\""));
-        Assert.Throws<JsonException>(() => ReadCanonicalTimestamp("null"));
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("1")]
+    [InlineData("true")]
+    [InlineData("\"2026-07-16T08:31:02Z\"")]
+    public void CanonicalUtcConverter_RejectsNonStringOrNonCanonicalValuesWithJsonException(string json)
+    {
+        Assert.Throws<JsonException>(() => ReadCanonicalTimestamp(json));
     }
 
     [Fact]
