@@ -13,6 +13,58 @@ public class PathUtilsTests : IDisposable
     }
 
     [Fact]
+    public void PathUnder_ShouldResolveNestedRelativeSegments()
+    {
+        var result = PathUtils.PathUnder(_testRoot, "receipts", "receipt.json");
+
+        Assert.Equal(Path.GetFullPath(Path.Combine(_testRoot, "receipts", "receipt.json")), result);
+    }
+
+    [Fact]
+    public void PathUnder_ShouldAllowTheBasePath()
+    {
+        var result = PathUtils.PathUnder(_testRoot, ".");
+
+        Assert.Equal(Path.GetFullPath(_testRoot), result);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void PathUnder_ShouldRejectBlankBasePath(string? basePath)
+    {
+        Assert.ThrowsAny<ArgumentException>(() => PathUtils.PathUnder(basePath!, "receipt.json"));
+    }
+
+    [Fact]
+    public void PathUnder_ShouldRejectNullSegments()
+    {
+        Assert.Throws<ArgumentNullException>(() => PathUtils.PathUnder(_testRoot, null!));
+    }
+
+    [Fact]
+    public void PathUnder_ShouldRejectNoSegments()
+    {
+        Assert.Throws<ArgumentException>(() => PathUtils.PathUnder(_testRoot));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("/")]
+    [InlineData("\\")]
+    [InlineData("C:\\outside.txt")]
+    [InlineData("C:/outside.txt")]
+    [InlineData("../outside.txt")]
+    [InlineData("nested/../outside.txt")]
+    public void PathUnder_ShouldRejectUnsafeRelativeSegments(string? segment)
+    {
+        Assert.Throws<ArgumentException>(() => PathUtils.PathUnder(_testRoot, segment!));
+    }
+
+    [Fact]
     public void FindRepositoryRoot_ShouldFindRootWithGitFolder()
     {
         // Arrange

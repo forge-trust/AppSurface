@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ForgeTrust.AppSurface.Config.GoogleSecretManager;
 using ForgeTrust.AppSurface.Config.LocalSecrets;
+using ForgeTrust.AppSurface.Core;
 
 namespace ForgeTrust.AppSurface.Cli;
 
@@ -37,7 +38,7 @@ internal sealed class AtomicSecretPromotionReceiptWriter : ISecretPromotionRecei
         var fullPath = Path.GetFullPath(path);
         var directory = Path.GetDirectoryName(fullPath) ?? Directory.GetCurrentDirectory();
         var temporaryFileName = $".appsurface-receipt-{Guid.NewGuid():N}.tmp";
-        var temporaryPath = Path.Combine(directory, Path.GetFileName(temporaryFileName));
+        var temporaryPath = PathUtils.PathUnder(directory, temporaryFileName);
         try
         {
             File.WriteAllText(temporaryPath, JsonSerializer.Serialize(receipt, SecretPromotionWorkflow.JsonOptions));

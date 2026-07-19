@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.AppSurface.Core;
@@ -7,6 +8,72 @@ namespace ForgeTrust.AppSurface.Core;
 /// </summary>
 public static partial class PathUtils
 {
+    /// <summary>
+    /// Resolves an absolute path that is the same as or a descendant of <paramref name="basePath"/>.
+    /// </summary>
+    /// <param name="basePath">The non-empty directory that bounds the returned path.</param>
+    /// <param name="relativeSegments">
+    /// One or more non-empty relative path segments. Rooted values and parent traversal are rejected.
+    /// </param>
+    /// <returns>A normalized full path under <paramref name="basePath"/>.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="relativeSegments"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the base path or a relative segment is invalid, or when normalization escapes the base path.
+    /// </exception>
+    /// <remarks>
+    /// This helper enforces lexical containment and does not resolve symbolic-link targets. Use a filesystem posture
+    /// check as well when callers must reject links or aliases.
+    /// </remarks>
+    public static string PathUnder(string basePath, params string[] relativeSegments)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(basePath);
+        ArgumentNullException.ThrowIfNull(relativeSegments);
+
+        if (relativeSegments.Length == 0)
+        {
+            throw new ArgumentException("At least one relative path segment is required.", nameof(relativeSegments));
+        }
+
+        var normalizedSegments = new string[relativeSegments.Length];
+        for (var index = 0; index < relativeSegments.Length; index++)
+        {
+            var segment = relativeSegments[index] ??
+                throw new ArgumentException("Relative path segments cannot be null.", nameof(relativeSegments));
+            if (string.IsNullOrWhiteSpace(segment))
+            {
+                throw new ArgumentException("Relative path segments cannot be empty.", nameof(relativeSegments));
+            }
+
+            if (IsRootedOrAbsoluteLooking(segment))
+            {
+                throw new ArgumentException("Relative path segments cannot be rooted.", nameof(relativeSegments));
+            }
+
+            var normalizedSegment = segment.Trim(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.IsNullOrWhiteSpace(normalizedSegment))
+            {
+                throw new ArgumentException("Relative path segments cannot be empty.", nameof(relativeSegments));
+            }
+
+            if (ContainsParentTraversalSegment(normalizedSegment))
+            {
+                throw new ArgumentException("Relative path segments cannot contain parent traversal.", nameof(relativeSegments));
+            }
+
+            normalizedSegments[index] = normalizedSegment;
+        }
+
+        var fullBasePath = Path.GetFullPath(basePath);
+        var relativePath = string.Join(Path.DirectorySeparatorChar, normalizedSegments);
+        var candidatePath = Path.GetFullPath(relativePath, fullBasePath);
+        if (!IsSameOrDescendant(fullBasePath, candidatePath))
+        {
+            throw new ArgumentException("Relative path segments must stay under the base path.", nameof(relativeSegments));
+        }
+
+        return candidatePath;
+    }
+
     /// <summary>
     /// Locates the nearest ancestor directory (starting at <paramref name="startPath"/>) that contains a `.git` directory or file, effectively identifying the repository root.
     /// </summary>
@@ -98,6 +165,44 @@ public static partial class PathUtils
 
         return directoryPath;
     }
+
+    private static bool IsRootedOrAbsoluteLooking(string segment)
+    {
+        if (Path.IsPathRooted(segment))
+        {
+            return true;
+        }
+
+        return (segment.Length >= 2 && char.IsAsciiLetter(segment[0]) && segment[1] == ':')
+            || segment[0] is '\\' or '/';
+    }
+
+    private static bool ContainsParentTraversalSegment(string segment) =>
+        segment
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Any(static part => string.Equals(part, "..", StringComparison.Ordinal));
+
+    private static bool IsSameOrDescendant(string basePath, string candidatePath)
+    {
+        var comparison = GetFilesystemPathComparison();
+        if (string.Equals(
+            Path.TrimEndingDirectorySeparator(candidatePath),
+            Path.TrimEndingDirectorySeparator(basePath),
+            comparison))
+        {
+            return true;
+        }
+
+        var basePrefix = Path.EndsInDirectorySeparator(basePath)
+            ? basePath
+            : basePath + Path.DirectorySeparatorChar;
+        return candidatePath.StartsWith(basePrefix, comparison);
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Runtime OS probe; Windows and Unix CI exercise opposite path-comparison branches.")]
+    private static StringComparison GetFilesystemPathComparison() =>
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     [LoggerMessage(
         EventId = 1001,
