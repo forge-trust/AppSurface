@@ -1,7 +1,8 @@
 # ForgeTrust.AppSurface.Durable.Provider
 
-> **Source-only public preview:** this package is intentionally excluded from all repository publish plans until the
-> PostgreSQL provider milestone supplies conformance and restore evidence. It contains SPI contracts, not a runtime.
+> **Source-only public preview:** the PostgreSQL source provider supplies slice-3 Work conformance and restore fencing,
+> but publication remains held until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated
+> operations. This package contains SPI contracts, not a runtime.
 
 `ForgeTrust.AppSurface.Durable.Provider` is the runtime-provider and operator SPI for
 [`ForgeTrust.AppSurface.Durable`](../ForgeTrust.AppSurface.Durable/README.md). It depends on that adopter package; the

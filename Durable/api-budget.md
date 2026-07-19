@@ -33,6 +33,25 @@ seam was removed. No public type was deleted outright.
 
 ## Compatibility rule
 
-Both packages remain source-only public previews and are machine-blocked from publication. Until the PostgreSQL
-provider milestone, changes may still be made to these contracts, but every public member change must update the
+Both packages remain source-only public previews and are machine-blocked from publication. The PostgreSQL slice-3 source
+provider supplies Work conformance and restore fencing, but publication remains held until slices 4-6 prove Flow,
+Schedule, hosted runtime, drain/recovery, and coordinated operations. Changes may still be made, but every public member change must update the
 appropriate deterministic API snapshot and this ledger when it changes a type's audience, package, or visibility.
+
+## Slice 3 PostgreSQL API
+
+The source-only `ForgeTrust.AppSurface.Durable.PostgreSql` package adds thirteen public types in three deliberate
+families. Its checked-in `PublicAPI.Shipped.txt` is the exhaustive member inventory.
+
+- Schema deployment: `IDurableRuntimeSchemaManager`, `PostgreSqlDurableRuntimeSchemaManager`, schema status,
+  compatibility, apply/activation/rotation results, and the schema exception. These operations require a
+  migration-owner data source and never run automatically at runtime startup.
+- Work acceptance: `IDurableWorkTransactionWriter`, `PostgreSqlDurableWorkTransactionWriter`, and
+  `PostgreSqlDurableWorkClient`. The writer preserves caller ownership of the exact Npgsql transaction; the client
+  owns only its short convenience transaction.
+- Construction policy: `PostgreSqlDurableWorkOptions` and `PostgreSqlDurableWakeNotificationMode` make StoreId,
+  runtime epoch, and default-disabled wake hints explicit without exposing internal claim/store operations.
+
+Discovery, recovery, claim, renew, preparation failure, permit, completion, cancellation, scope disablement,
+operator reconciliation, manual resolution, safe retry, recovery release, and stale-observation types remain internal.
+Slice 6 must prove the smallest hosting and operator SPI before any of those types become public.
