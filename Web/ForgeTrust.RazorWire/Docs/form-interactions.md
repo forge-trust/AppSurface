@@ -36,7 +36,7 @@ For collections, use a hidden `.index` marker and an app-authored template with 
   <fieldset data-rw-form-collection-row data-rw-form-index="0">
     <input type="hidden" name="Actions.index" value="0">
     <input type="hidden" name="Actions[0].Id" data-rw-form-collection-preserve>
-    <input type="hidden" name="Actions[0].Delete" data-rw-form-collection-delete-field>
+    <input type="hidden" name="Actions[0].Delete" value="false" data-rw-form-collection-delete-field>
     <label for="Actions_0__Title">Title</label>
     <input name="Actions[0].Title" id="Actions_0__Title">
     <button type="button" data-rw-form-collection-duplicate>Duplicate</button>
