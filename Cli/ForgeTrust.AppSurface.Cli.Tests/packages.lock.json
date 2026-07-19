@@ -552,6 +552,7 @@
           "ForgeTrust.AppSurface.Config.GoogleSecretManager": "[0.1.0, )",
           "ForgeTrust.AppSurface.Config.LocalSecrets": "[0.1.0, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
           "ForgeTrust.AppSurface.Docs.Standalone": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.RazorWire.Cli": "[0.1.0, )",
