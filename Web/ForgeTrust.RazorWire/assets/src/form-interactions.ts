@@ -686,6 +686,14 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 return;
             }
 
+            if (clone instanceof HTMLInputElement
+                && clone.type === 'hidden'
+                && clone.hasAttribute('data-rw-form-collection-delete-field')) {
+                clone.value = clone.getAttribute('value') || 'false';
+                clone.disabled = false;
+                return;
+            }
+
             if (this.shouldClearHiddenOnDuplicate(clone)) {
                 clone.value = '';
                 return;

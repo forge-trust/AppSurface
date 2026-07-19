@@ -102,7 +102,7 @@ Command TagHelpers set `type="button"` when the app did not already specify a ty
 | Toggle hidden | Target is hidden; descendant controls disabled only if the target opts in. | Toggle keeps focus; `aria-expanded` mirrors state when applicable. |
 | Toggle shown | RazorWire only re-enables controls it disabled itself. | Toggle keeps focus. |
 | Add | New row receives a sparse `.index` marker and rewritten names/ids/labels. | First enabled user-editable control in the new row receives focus. |
-| Duplicate | Editable values copy; validation state and identity/delete/concurrency hidden values clear unless copyable. | First enabled user-editable control in the clone receives focus. |
+| Duplicate | Editable values copy; validation state and identity/concurrency hidden values clear unless copyable. A marked delete field resets to its authored `value` attribute, or `false` when no value is authored, so boolean model binding receives an inactive value instead of an empty string. | First enabled user-editable control in the clone receives focus. |
 | Physical remove | Row and its `.index` marker leave the submitted payload. | Focus moves to the next row command, previous row command, then add command. |
 | Mark remove | Row is hidden; `.index`, preserved fields, and delete field submit; normal editable fields are disabled. | Focus moves as with physical remove. |
 | Canceled before-event | No mutation occurs. | App-owned event handler owns any user feedback. |
