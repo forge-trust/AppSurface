@@ -111,6 +111,113 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task BundledTurbo_HashOnlyNavigationPreservesDocumentWithoutRequest()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Reactivity/DeterministicRuntime?state=first");
+
+        var documentRequests = new ConcurrentQueue<string>();
+        page.Request += (_, request) =>
+        {
+            if (string.Equals(request.ResourceType, "document", StringComparison.Ordinal))
+            {
+                documentRequests.Enqueue(request.Url);
+            }
+        };
+
+        var sentinel = Guid.NewGuid().ToString("N");
+        await page.EvaluateAsync(
+            """
+            value => {
+                window.__razorWireHashSentinel = value;
+                window.__razorWireHashVisitCount = 0;
+                window.__razorWireHashLoadCount = 0;
+                document.addEventListener("turbo:visit", () => window.__razorWireHashVisitCount++);
+                document.addEventListener("turbo:load", () => window.__razorWireHashLoadCount++);
+            }
+            """,
+            sentinel);
+
+        await page.Locator("[data-deterministic-hash-link]").ClickAsync();
+        await page.WaitForFunctionAsync("() => window.location.hash === '#deterministic-hash-target'");
+
+        var proof = await page.EvaluateAsync<HashNavigationProbe>(
+            """
+            () => ({
+                Sentinel: window.__razorWireHashSentinel,
+                VisitCount: window.__razorWireHashVisitCount,
+                LoadCount: window.__razorWireHashLoadCount
+            })
+            """);
+
+        Assert.Equal(sentinel, proof.Sentinel);
+        Assert.Equal(1, proof.VisitCount);
+        Assert.Equal(1, proof.LoadCount);
+        Assert.Empty(documentRequests);
+    }
+
+    [Fact]
+    public async Task BundledTurbo_ParentFrameTarget_UsesResolvedParentIdHeader()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Reactivity/DeterministicRuntime?state=first");
+        await page.EvaluateAsync(
+            """
+            () => {
+                document.getElementById("grandparent-frame").dataset.identity = "preserved";
+            }
+            """);
+
+        await page.GetByRole(AriaRole.Button, new PageGetByRoleOptions { Name = "Replace parent frame" }).ClickAsync();
+        await page.WaitForSelectorAsync("#parent-frame [data-parent-frame-state='updated']");
+
+        Assert.Equal(
+            "parent-frame",
+            await page.GetAttributeAsync("#parent-frame [data-parent-frame-state='updated']", "data-observed-turbo-frame"));
+        Assert.Equal(
+            "preserved",
+            await page.GetAttributeAsync("#grandparent-frame", "data-identity"));
+        Assert.Equal(1, await page.Locator("#grandparent-frame").CountAsync());
+        Assert.Equal(1, await page.Locator("#parent-frame").CountAsync());
+    }
+
+    [Fact]
+    public async Task BundledTurbo_ExecutesInlineStreamsAndRemovesDuplicateSiblings()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        var pageErrors = new ConcurrentQueue<string>();
+        page.PageError += (_, error) => pageErrors.Enqueue(error);
+
+        await page.GotoAsync($"{_fixture.BaseUrl}/Reactivity/DeterministicRuntime?state=first");
+        await page.EvaluateAsync(
+            """
+            () => {
+                document.body.insertAdjacentHTML("beforeend", `
+                    <turbo-stream action="before" target="stream-insertion-target">
+                        <template><div id="stream-duplicate-sibling" data-stream-value="new">new</div></template>
+                    </turbo-stream>
+                    <turbo-stream action="append" target="stream-inline-target">
+                        <template><span data-inline-stream-result>executed</span></template>
+                    </turbo-stream>
+                `);
+            }
+            """);
+
+        await page.WaitForSelectorAsync("#stream-duplicate-sibling[data-stream-value='new']");
+        await page.WaitForSelectorAsync("#stream-inline-target [data-inline-stream-result]");
+
+        Assert.Equal(1, await page.Locator("#stream-duplicate-sibling").CountAsync());
+        Assert.Equal("new", await page.Locator("#stream-duplicate-sibling").TextContentAsync());
+        Assert.Equal(1, await page.Locator("[data-inline-stream-result]").CountAsync());
+        Assert.Empty(pageErrors);
+    }
+
+    [Fact]
     public async Task FormInteractionsSample_ReplacesPageLocalJavaScriptForConditionalAndCollectionRows()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
@@ -999,6 +1106,27 @@ public sealed class RazorWireMvcPlaywrightTests
         /// Gets or sets the current public diagnostic messages exposed by the form-interactions manager.
         /// </summary>
         public string[] Diagnostics { get; set; } = [];
+    }
+
+    /// <summary>
+    /// Describes browser state sampled after a same-document hash navigation.
+    /// </summary>
+    private sealed class HashNavigationProbe
+    {
+        /// <summary>
+        /// Gets or sets the page-owned sentinel used to prove the document was preserved.
+        /// </summary>
+        public string Sentinel { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets the number of observed <c>turbo:visit</c> events.
+        /// </summary>
+        public int VisitCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of observed <c>turbo:load</c> events.
+        /// </summary>
+        public int LoadCount { get; set; }
     }
 
     /// <summary>

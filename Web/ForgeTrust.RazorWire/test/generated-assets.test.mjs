@@ -112,7 +112,7 @@ test('Turbo stays a byte-for-byte copied third-party output outside the esbuild 
   const bytes = readFileSync(turboPath);
 
   assert.equal(turbo.component, '@hotwired/turbo');
-  assert.equal(turbo.version, '8.0.12');
+  assert.equal(turbo.version, '8.0.23');
   assert.equal(turbo.label, 'turbo.es2017-umd.js');
   assert.equal(generatedOutputs.some(output => output.label === turbo.label), false);
   assert.equal(createHash('sha256').update(bytes).digest('hex'), turbo.sha256);
@@ -197,7 +197,7 @@ test('third-party copy rejects a package whose declared UMD entry changed', asyn
     const packageManifest = path.join(root, 'package.json');
     writeFileSync(packageManifest, JSON.stringify({
       name: '@hotwired/turbo',
-      version: '8.0.12',
+      version: '8.0.23',
       main: 'dist/a-different-entry.js'
     }));
     const asset = {

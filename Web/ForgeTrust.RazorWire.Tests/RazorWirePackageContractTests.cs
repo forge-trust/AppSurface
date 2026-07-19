@@ -20,7 +20,7 @@ public sealed class RazorWirePackageContractTests
 #endif
     private const string PackageVersion = "0.0.0-packagecontract";
     private const string TurboPackagePath = "staticwebassets/razorwire/turbo.es2017-umd.js";
-    private const string TurboSha256 = "d5ebcdfcec4244326db950b3437824955abc2f337aaa10a6ef1fec6dac249ce9";
+    private const string TurboSha256 = "f9e09e3a3093874fe56d5341ca3594ac959f8b097c9b6171a5b37838da3aec81";
     private static readonly string[] FirstPartyBrowserPackagePaths =
     [
         "staticwebassets/razorwire/razorwire.js",
