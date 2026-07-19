@@ -90,7 +90,7 @@ Command TagHelpers set `type="button"` when the app did not already specify a ty
 | `data-rw-form-collection-add` | button | Adds a cleared row from the template. |
 | `data-rw-form-collection-duplicate` | button | Duplicates the nearest row with copied editable values. |
 | `data-rw-form-collection-remove` | button | Physically removes the nearest row by default; use value `mark` for mark-for-removal. |
-| `data-rw-form-collection-delete-field` | hidden input | App-owned delete field set in mark-for-removal mode. |
+| `data-rw-form-collection-delete-field` | collection root or hidden input | On the root, a CSS selector resolves the app-owned delete field; on the hidden input, the attribute marks that field directly. Mark-for-removal activates it, while duplicate restores its authored inactive value or `false`. |
 | `data-rw-form-collection-preserve` | input | Keeps a field enabled in mark-for-removal mode. |
 | `data-rw-form-collection-copyable` | hidden input | Allows duplicate to copy an otherwise identity-like hidden value. |
 
