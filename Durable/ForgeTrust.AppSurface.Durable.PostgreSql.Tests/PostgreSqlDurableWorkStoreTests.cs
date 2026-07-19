@@ -233,6 +233,102 @@ public sealed class PostgreSqlDurableWorkStoreTests
     }
 
     [Fact]
+    public async Task TransactionWriter_RejectsWrongExpectedStoreIdWithoutPoisoningCallerTransaction()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        _ = CreateOptions(database.DataSource, epoch);
+        var writer = new PostgreSqlDurableWorkTransactionWriter(
+            database.DataSource,
+            PostgreSqlTestWorkContracts.CreateDeleteProviderAccessRegistry(),
+            new PostgreSqlDurableWorkOptions(epoch, Guid.NewGuid()));
+        await using var connection = await database.DataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await writer.EnqueueAsync(
+                transaction,
+                CreateRequest("scope-wrong-store-id", "command-wrong-store-id")));
+
+        Assert.StartsWith(DurableProblemCodes.StoreIdentityMismatch, exception.Message, StringComparison.Ordinal);
+        await using var stillUsable = new NpgsqlCommand("SELECT 1;", connection, transaction);
+        Assert.Equal(1, (int)(await stillUsable.ExecuteScalarAsync())!);
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task TransactionWriter_FailsClosedForIncompatibleCallerOwnedSchemaWithoutPoisoningTransaction()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var writer = CreateWriter(database.DataSource, Guid.NewGuid());
+        var cases = new[]
+        {
+            (
+                Mutation: """
+                    UPDATE appsurface_durable.store_metadata
+                    SET schema_version = 1,
+                        minimum_reader_version = 1,
+                        maximum_reader_version = 1,
+                        minimum_writer_version = 1,
+                        maximum_writer_version = 1
+                    WHERE singleton;
+                    """,
+                Expected: DurableRuntimeSchemaCompatibility.UpgradeRequired),
+            (
+                Mutation: """
+                    UPDATE appsurface_durable.store_metadata
+                    SET schema_version = 2,
+                        minimum_reader_version = 1,
+                        maximum_reader_version = 1,
+                        minimum_writer_version = 1,
+                        maximum_writer_version = 1
+                    WHERE singleton;
+                    """,
+                Expected: DurableRuntimeSchemaCompatibility.StoreTooNew),
+            (
+                Mutation: "DELETE FROM appsurface_durable.store_metadata WHERE singleton;",
+                Expected: DurableRuntimeSchemaCompatibility.UpgradeRequired),
+        };
+
+        for (var index = 0; index < cases.Length; index++)
+        {
+            if (index > 0)
+            {
+                await using var restore = database.DataSource.CreateCommand(
+                    """
+                    UPDATE appsurface_durable.store_metadata
+                    SET schema_version = 2,
+                        minimum_reader_version = 1,
+                        maximum_reader_version = 2,
+                        minimum_writer_version = 1,
+                        maximum_writer_version = 2
+                    WHERE singleton;
+                    """);
+                await restore.ExecuteNonQueryAsync();
+            }
+
+            await using (var mutate = database.DataSource.CreateCommand(cases[index].Mutation))
+            {
+                await mutate.ExecuteNonQueryAsync();
+            }
+
+            await using var connection = await database.DataSource.OpenConnectionAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+            var exception = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(async () =>
+                await writer.EnqueueAsync(
+                    transaction,
+                    CreateRequest($"scope-schema-{index}", $"command-schema-{index}")));
+
+            Assert.Equal(cases[index].Expected, exception.Status.Compatibility);
+            await using var stillUsable = new NpgsqlCommand("SELECT 1;", connection, transaction);
+            Assert.Equal(1, (int)(await stillUsable.ExecuteScalarAsync())!);
+            await transaction.RollbackAsync();
+        }
+    }
+
+    [Fact]
     public async Task ClaimPermitCompletion_UsesFencingAndPreservesStaleTerminalObservation()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -316,6 +412,16 @@ public sealed class PostgreSqlDurableWorkStoreTests
         Assert.Equal(PostgreSqlWorkObservationOutcome.Applied, applied.Outcome);
         Assert.Equal(DurableWorkState.Succeeded, applied.State);
         Assert.Equal(PostgreSqlWorkObservationOutcome.AlreadyTerminal, stale.Outcome);
+        var persistedResult = await ReadPersistedResultAsync(
+            database.DataSource,
+            request.ScopeId,
+            acceptance.Value.WorkId);
+        Assert.Equal(resultPayload.ContractName, persistedResult.ContractName);
+        Assert.Equal(resultPayload.ContractVersion, persistedResult.ContractVersion);
+        Assert.Equal("operational", persistedResult.Classification);
+        Assert.Equal(resultPayload.RetentionPolicyId, persistedResult.RetentionPolicyId);
+        Assert.Equal(resultPayload.Content.ToArray(), persistedResult.Payload);
+        Assert.Equal(Convert.FromHexString(resultPayload.Sha256), persistedResult.Sha256);
         Assert.Equal(1, await ExecuteScalarAsync<long>(database.DataSource, "SELECT count(*) FROM completion_hook;"));
         Assert.Empty(await store.DiscoverAsync(10));
         Assert.Equal(
@@ -331,6 +437,93 @@ public sealed class PostgreSqlDurableWorkStoreTests
                 database.DataSource,
                 request.ScopeId,
                 acceptance.Value.WorkId));
+    }
+
+    [Fact]
+    public async Task CompletionKinds_ProjectFailedRetryAndContractUnavailableStates()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var client = CreateClient(database.DataSource, epoch);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var cases = new[]
+        {
+            (
+                Kind: PostgreSqlWorkCompletionKind.FailedTerminal,
+                ExpectedState: DurableWorkState.FailedTerminal,
+                PersistedState: "failed",
+                EventType: "completion_failed_terminal"),
+            (
+                Kind: PostgreSqlWorkCompletionKind.ProvenNoEffect,
+                ExpectedState: DurableWorkState.Ready,
+                PersistedState: "retry_wait",
+                EventType: "completion_proven_no_effect"),
+            (
+                Kind: PostgreSqlWorkCompletionKind.ContractUnavailable,
+                ExpectedState: DurableWorkState.Suspended,
+                PersistedState: "suspended_contract_unavailable",
+                EventType: "completion_contract_unavailable"),
+        };
+
+        for (var index = 0; index < cases.Length; index++)
+        {
+            var request = CreateRequest($"scope-completion-{index}", $"command-completion-{index}");
+            var accepted = (await client.EnqueueAsync(request)).Value!;
+            var candidate = (await store.DiscoverAsync(10)).Single(item => item.ScopeId == request.ScopeId);
+            var claim = await store.TryClaimAsync(candidate, $"completion-worker-{index}");
+            Assert.NotNull(claim);
+
+            var completion = cases[index].Kind == PostgreSqlWorkCompletionKind.ContractUnavailable
+                ? await store.RecordPreparationFailureAsync(claim!)
+                : await store.RecordCompletionAsync(
+                    claim!,
+                    new PostgreSqlWorkCompletion(cases[index].Kind, $"completion_code_{index}", "{}"));
+            var persisted = await ReadWorkStateAndRevisionAsync(
+                database.DataSource,
+                request.ScopeId,
+                accepted.WorkId);
+
+            Assert.Equal(PostgreSqlWorkObservationOutcome.Applied, completion.Outcome);
+            Assert.Equal(cases[index].ExpectedState, completion.State);
+            Assert.Equal(cases[index].PersistedState, persisted.State);
+            Assert.Equal(
+                1,
+                await CountHistoryAsync(
+                    database.DataSource,
+                    request.ScopeId,
+                    accepted.WorkId,
+                    cases[index].EventType));
+        }
+    }
+
+    [Fact]
+    public async Task Acceptance_WithWakeNotificationsEnabled_PublishesCommittedDispatchId()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        await using var listener = await database.DataSource.OpenConnectionAsync();
+        var notification = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        listener.Notification += (_, args) => notification.TrySetResult(args.Payload);
+        await using (var listen = new NpgsqlCommand("LISTEN appsurface_durable_wake;", listener))
+        {
+            await listen.ExecuteNonQueryAsync();
+        }
+
+        var epoch = Guid.NewGuid();
+        var client = CreateClient(database.DataSource, epoch, sendWakeNotification: true);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var accepted = await client.EnqueueAsync(CreateRequest("scope-wake", "command-wake"));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        while (!notification.Task.IsCompleted)
+        {
+            await listener.WaitAsync(timeout.Token);
+        }
+
+        var candidate = Assert.Single(await store.DiscoverAsync(1));
+        Assert.True(accepted.IsSuccess);
+        Assert.Equal(candidate.DispatchId.ToString("D"), await notification.Task);
     }
 
     [Theory]
@@ -476,12 +669,16 @@ public sealed class PostgreSqlDurableWorkStoreTests
         }
 
         var renewed = await store.RenewLeaseAsync(claim);
+        var renewedAtMaximumLifetime = await store.RenewLeaseAsync(renewed!);
 
         Assert.NotNull(renewed);
+        Assert.NotNull(renewedAtMaximumLifetime);
         Assert.Equal(TimeSpan.FromMilliseconds(125), renewed.LeaseRenewalCadence);
         Assert.Equal(
             TimeSpan.FromSeconds(2),
             renewed.LeaseExpiresAtUtc - forcedLeaseStartedAt);
+        Assert.Equal(renewed.LeaseExpiresAtUtc, renewedAtMaximumLifetime.LeaseExpiresAtUtc);
+        Assert.True(renewedAtMaximumLifetime.Revision > renewed.Revision);
     }
 
     [Fact]
@@ -563,6 +760,28 @@ public sealed class PostgreSqlDurableWorkStoreTests
             "duplicate_request",
             afterEffectPermit!.Claim.Revision);
         Assert.Equal(PostgreSqlCancellationOutcome.RevisionConflict, staleCancel.Outcome);
+        var terminalCancel = await store.RequestCancellationAsync(
+            afterPermit.ScopeId,
+            afterClaim.WorkId,
+            "operator-test",
+            "terminal_duplicate",
+            succeededAfterCancel.Revision);
+        Assert.Equal(PostgreSqlCancellationOutcome.AlreadyTerminal, terminalCancel.Outcome);
+        Assert.Equal(DurableWorkState.SucceededAfterCancelRequested, terminalCancel.State);
+        var missingCancel = await store.RequestCancellationAsync(
+            afterPermit.ScopeId,
+            new DurableWorkId("work-does-not-exist"),
+            "operator-test",
+            "missing_work",
+            expectedRevision: 1);
+        Assert.Equal(PostgreSqlCancellationOutcome.NotFound, missingCancel.Outcome);
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await store.RequestCancellationAsync(
+                afterPermit.ScopeId,
+                afterClaim.WorkId,
+                "operator-test",
+                "invalid_revision",
+                expectedRevision: 0));
 
         var fenced = CreateRequest("scope-fenced", "command-fenced");
         await client.EnqueueAsync(fenced);
@@ -583,6 +802,17 @@ public sealed class PostgreSqlDurableWorkStoreTests
             "duplicate_request",
             expectedGeneration: 1);
         Assert.Equal(PostgreSqlScopeMutationOutcome.GenerationConflict, staleDisable.Outcome);
+        await using (var disabledAcceptanceConnection = await database.DataSource.OpenConnectionAsync())
+        await using (var disabledAcceptanceTransaction = await disabledAcceptanceConnection.BeginTransactionAsync())
+        {
+            var refusedAcceptance = await writer.EnqueueAsync(
+                disabledAcceptanceTransaction,
+                CreateRequest("scope-fenced", "command-fenced-after-disable"));
+            Assert.False(refusedAcceptance.IsSuccess);
+            Assert.Equal(DurableProblemCodes.ScopeDisabled, refusedAcceptance.Problem!.Code);
+            await disabledAcceptanceTransaction.CommitAsync();
+        }
+
         Assert.Equal(
             ("operator-test", "account_closed"),
             await ReadScopeAuditAsync(database.DataSource, fenced.ScopeId));
@@ -599,8 +829,61 @@ public sealed class PostgreSqlDurableWorkStoreTests
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await store.TryClaimAsync(restoredCandidate, "stale-pre-restore-worker"));
         var postRestoreStore = new PostgreSqlDurableWorkStore(database.DataSource, postRestoreEpoch);
-        var epochFenced = await postRestoreStore.TryClaimAsync(restoredCandidate, "post-restore-worker");
+        DurableWorkState? epochTransitionState = null;
+        string? epochTransitionCode = null;
+        var epochFenced = await postRestoreStore.TryClaimAsync(
+            restoredCandidate,
+            "post-restore-worker",
+            onTransitionApplied: (_, state, code, _) =>
+            {
+                epochTransitionState = state;
+                epochTransitionCode = code;
+                return ValueTask.CompletedTask;
+            });
         Assert.Null(epochFenced);
+        Assert.Equal(DurableWorkState.Suspended, epochTransitionState);
+        Assert.Equal("runtime_epoch_mismatch", epochTransitionCode);
+    }
+
+    [Fact]
+    public async Task DisableScope_DistinguishesMissingConflictAndAlreadyDisabledOutcomes()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var client = CreateClient(database.DataSource, epoch);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var request = CreateRequest("scope-disable-outcomes", "command-disable-outcomes");
+        await client.EnqueueAsync(request);
+
+        var missing = await store.DisableScopeAsync(
+            new DurableScopeId("scope-never-created"),
+            "operator-test",
+            "account_closed",
+            expectedGeneration: 1);
+        var applied = await store.DisableScopeAsync(
+            request.ScopeId,
+            "operator-test",
+            "account_closed",
+            expectedGeneration: 1);
+        var conflict = await store.DisableScopeAsync(
+            request.ScopeId,
+            "operator-test",
+            "stale_generation",
+            expectedGeneration: 1);
+        var alreadyDisabled = await store.DisableScopeAsync(
+            request.ScopeId,
+            "operator-test",
+            "duplicate_request",
+            expectedGeneration: applied.Generation);
+
+        Assert.Equal(PostgreSqlScopeMutationOutcome.NotFound, missing.Outcome);
+        Assert.Equal(0, missing.Generation);
+        Assert.Equal(PostgreSqlScopeMutationOutcome.Applied, applied.Outcome);
+        Assert.Equal(PostgreSqlScopeMutationOutcome.GenerationConflict, conflict.Outcome);
+        Assert.Equal(applied.Generation, conflict.Generation);
+        Assert.Equal(PostgreSqlScopeMutationOutcome.AlreadyDisabled, alreadyDisabled.Outcome);
+        Assert.Equal(applied.Generation, alreadyDisabled.Generation);
     }
 
     [Fact]
@@ -1117,6 +1400,38 @@ public sealed class PostgreSqlDurableWorkStoreTests
     }
 
     [Fact]
+    public async Task Claim_RejectsPayloadWhoseStoredHashDoesNotMatchAuthoritativeBytes()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var client = CreateClient(database.DataSource, epoch);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var request = CreateRequest("scope-corrupt-payload", "command-corrupt-payload");
+        var accepted = (await client.EnqueueAsync(request)).Value!;
+        await using (var corrupt = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.work
+            SET payload_sha256 = decode(repeat('00', 32), 'hex')
+            WHERE scope_id = @scope_id AND work_id = @work_id;
+            """))
+        {
+            corrupt.Parameters.AddWithValue("scope_id", request.ScopeId.Value);
+            corrupt.Parameters.AddWithValue("work_id", accepted.WorkId.Value);
+            Assert.Equal(1, await corrupt.ExecuteNonQueryAsync());
+        }
+
+        var candidate = Assert.Single(await store.DiscoverAsync(1));
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await store.TryClaimAsync(candidate, "corrupt-payload-worker"));
+
+        Assert.Contains("payload hash", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            ("pending", accepted.Revision),
+            await ReadWorkStateAndRevisionAsync(database.DataSource, request.ScopeId, accepted.WorkId));
+    }
+
+    [Fact]
     public async Task ExpiredEffectPermit_SuspendsUnsafeProvider_AndReclaimsProviderKeyedWork()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -1135,9 +1450,21 @@ public sealed class PostgreSqlDurableWorkStoreTests
         await ExpireLeaseAndDispatchAsync(database.DataSource, unsafePermit!.Claim);
 
         var expiredUnsafeCandidate = Assert.Single(await store.DiscoverAsync(10));
-        var refused = await store.TryClaimAsync(expiredUnsafeCandidate, "worker-b");
+        DurableWorkState? unsafeTransitionState = null;
+        string? unsafeTransitionCode = null;
+        var refused = await store.TryClaimAsync(
+            expiredUnsafeCandidate,
+            "worker-b",
+            onTransitionApplied: (_, state, code, _) =>
+            {
+                unsafeTransitionState = state;
+                unsafeTransitionCode = code;
+                return ValueTask.CompletedTask;
+            });
 
         Assert.Null(refused);
+        Assert.Equal(DurableWorkState.Suspended, unsafeTransitionState);
+        Assert.Equal("expired_effect_permit_manual_resolution", unsafeTransitionCode);
         Assert.Empty(await store.DiscoverAsync(10));
 
         var keyedRequest = CreateRequest(
@@ -1349,14 +1676,14 @@ public sealed class PostgreSqlDurableWorkStoreTests
             Assert.Equal(1, (long)(await countCommand.ExecuteScalarAsync())!);
 
             await using var ownDispatch = new NpgsqlCommand(
-                "UPDATE appsurface_durable.dispatch SET priority = priority WHERE scope_id = @scope_id;",
+                "UPDATE appsurface_durable.dispatch SET updated_at = updated_at WHERE scope_id = @scope_id;",
                 connection,
                 transaction);
             ownDispatch.Parameters.AddWithValue("scope_id", scopeA.Value);
             Assert.Equal(1, await ownDispatch.ExecuteNonQueryAsync());
 
             await using var otherDispatch = new NpgsqlCommand(
-                "UPDATE appsurface_durable.dispatch SET priority = priority WHERE scope_id = @scope_id;",
+                "UPDATE appsurface_durable.dispatch SET updated_at = updated_at WHERE scope_id = @scope_id;",
                 connection,
                 transaction);
             otherDispatch.Parameters.AddWithValue("scope_id", scopeB.Value);
@@ -1375,6 +1702,22 @@ public sealed class PostgreSqlDurableWorkStoreTests
             runtimeDataSource,
             scopeA,
             "SELECT EXISTS (SELECT 1 FROM appsurface_durable.work_history);"));
+        await AssertScopedMutationDeniedAsync(
+            runtimeDataSource,
+            scopeA,
+            "UPDATE appsurface_durable.work SET payload_sha256 = decode(repeat('0', 64), 'hex');");
+        await AssertScopedMutationDeniedAsync(
+            runtimeDataSource,
+            scopeA,
+            "UPDATE appsurface_durable.dispatch SET priority = priority + 1;");
+        await AssertScopedMutationDeniedAsync(
+            runtimeDataSource,
+            scopeA,
+            "UPDATE appsurface_durable.scope SET created_at = clock_timestamp();");
+        await AssertScopedMutationDeniedAsync(
+            runtimeDataSource,
+            scopeA,
+            "UPDATE appsurface_durable.scope SET state = 'active';");
         await AssertScopedMutationDeniedAsync(
             runtimeDataSource,
             scopeA,
@@ -1571,6 +1914,42 @@ public sealed class PostgreSqlDurableWorkStoreTests
         command.Parameters.AddWithValue("scope_id", scopeId.Value);
         command.Parameters.AddWithValue("work_id", workId.Value);
         return (byte[])(await command.ExecuteScalarAsync())!;
+    }
+
+    private static async ValueTask<(
+        string ContractName,
+        string ContractVersion,
+        string Classification,
+        string RetentionPolicyId,
+        byte[] Payload,
+        byte[] Sha256)> ReadPersistedResultAsync(
+            NpgsqlDataSource dataSource,
+            DurableScopeId scopeId,
+            DurableWorkId workId)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetTestScopeAsync(connection, transaction, scopeId);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT result_contract_id, result_schema_version, result_classification,
+                   result_retention_policy_id, result_payload, result_sha256
+            FROM appsurface_durable.work
+            WHERE scope_id = @scope_id AND work_id = @work_id;
+            """,
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("scope_id", scopeId.Value);
+        command.Parameters.AddWithValue("work_id", workId.Value);
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        return (
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            reader.GetFieldValue<byte[]>(4),
+            reader.GetFieldValue<byte[]>(5));
     }
 
     private static async ValueTask<(string State, long Revision, bool HasResult, string PermitStatus)>
@@ -2060,13 +2439,24 @@ public sealed class PostgreSqlDurableWorkStoreTests
             GRANT USAGE ON SCHEMA appsurface_durable TO "{runtimeRole}", "{dispatcherRole}";
             GRANT SELECT ON appsurface_durable.store_metadata TO "{runtimeRole}";
             GRANT SELECT ON appsurface_durable.schema_migration TO "{runtimeRole}";
-            GRANT SELECT, INSERT, UPDATE ON appsurface_durable.scope TO "{runtimeRole}";
+            GRANT SELECT, INSERT, UPDATE
+                ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch TO "{runtimeRole}";
+            GRANT SELECT, INSERT ON appsurface_durable.scope TO "{runtimeRole}";
+            REVOKE UPDATE
+                ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch FROM "{runtimeRole}";
+            GRANT UPDATE (generation, state, updated_at) ON appsurface_durable.scope TO "{runtimeRole}";
             GRANT SELECT, INSERT ON appsurface_durable.scope_history TO "{runtimeRole}";
-            GRANT SELECT, INSERT, UPDATE ON appsurface_durable.work TO "{runtimeRole}";
+            GRANT SELECT, INSERT ON appsurface_durable.work TO "{runtimeRole}";
+            GRANT UPDATE (state, due_at, updated_at, terminal_at, cancellation_requested_at, attempt_number,
+                lease_generation, lease_owner, lease_started_at, lease_expires_at, runtime_epoch, revision,
+                result_contract_id, result_schema_version, result_codec_id, result_classification,
+                result_retention_policy_id, result_payload, result_sha256, terminal_code)
+                ON appsurface_durable.work TO "{runtimeRole}";
             GRANT SELECT, INSERT ON appsurface_durable.work_history TO "{runtimeRole}";
             GRANT SELECT, INSERT ON appsurface_durable.effect_permit TO "{runtimeRole}";
             GRANT UPDATE (status, observed_at, details, runtime_epoch) ON appsurface_durable.effect_permit TO "{runtimeRole}";
-            GRANT SELECT, INSERT, UPDATE ON appsurface_durable.dispatch TO "{runtimeRole}";
+            GRANT SELECT, INSERT ON appsurface_durable.dispatch TO "{runtimeRole}";
+            GRANT UPDATE (due_at, state, expected_revision, updated_at) ON appsurface_durable.dispatch TO "{runtimeRole}";
             GRANT SELECT, INSERT ON appsurface_durable.work_operator_command TO "{runtimeRole}";
             GRANT UPDATE (status, resulting_state, resulting_revision, completed_at)
                 ON appsurface_durable.work_operator_command TO "{runtimeRole}";

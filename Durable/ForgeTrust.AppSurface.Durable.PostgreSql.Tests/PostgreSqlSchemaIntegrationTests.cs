@@ -29,6 +29,9 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var nextEpoch = Guid.NewGuid();
         var rotation = await manager.RotateRuntimeEpochAsync(initialEpoch, nextEpoch, "tests", "restore");
         var afterRotation = await manager.GetStatusAsync();
+        var staleRotation = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await manager.RotateRuntimeEpochAsync(initialEpoch, Guid.NewGuid(), "tests", "stale-restore"));
+        var afterStaleRotation = await manager.GetStatusAsync();
 
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
         Assert.Equal([1, 2], first.AppliedVersions);
@@ -40,6 +43,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
         Assert.Equal(initialEpoch, afterActivation.ActiveRuntimeEpoch);
         Assert.Equal(nextEpoch, rotation.ActiveEpoch);
         Assert.Equal(nextEpoch, afterRotation.ActiveRuntimeEpoch);
+        Assert.StartsWith(DurableProblemCodes.RecoveryEpochRequired, staleRotation.Message, StringComparison.Ordinal);
+        Assert.Equal(nextEpoch, afterStaleRotation.ActiveRuntimeEpoch);
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await manager.InitializeRuntimeEpochAsync(Guid.NewGuid(), "tests", "duplicate"));
     }
@@ -69,6 +74,81 @@ public sealed class PostgreSqlSchemaIntegrationTests
         Assert.Equal(status.Compatibility, exception.Status.Compatibility);
         Assert.Equal(status.InstalledVersion, exception.Status.InstalledVersion);
         Assert.Equal(status.Problem, exception.Status.Problem);
+    }
+
+    [Fact]
+    public async Task SchemaStatus_ClassifiesIncompleteInvalidUpgradeAndUnsupportedStores()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+
+        await ExecuteNonQueryAsync(database.DataSource, "CREATE SCHEMA appsurface_durable;");
+        var incomplete = await manager.GetStatusAsync();
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Inconsistent, incomplete.Compatibility);
+        Assert.Contains("incomplete", incomplete.Problem, StringComparison.Ordinal);
+        var incompleteApply = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
+            async () => await manager.ApplyAsync());
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Inconsistent, incompleteApply.Status.Compatibility);
+
+        await ExecuteNonQueryAsync(database.DataSource, "DROP SCHEMA appsurface_durable CASCADE;");
+        await manager.ApplyAsync();
+
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            "UPDATE appsurface_durable.store_metadata SET schema_version = 1 WHERE singleton;");
+        var invalid = await manager.GetStatusAsync();
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Inconsistent, invalid.Compatibility);
+        Assert.Contains("invalid", invalid.Problem, StringComparison.Ordinal);
+        var invalidApply = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
+            async () => await manager.ApplyAsync());
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Inconsistent, invalidApply.Status.Compatibility);
+
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            """
+            UPDATE appsurface_durable.store_metadata
+            SET schema_version = 2,
+                minimum_reader_version = 1,
+                maximum_reader_version = 1,
+                minimum_writer_version = 1,
+                maximum_writer_version = 1
+            WHERE singleton;
+            """);
+        var unsupported = await manager.GetStatusAsync();
+        Assert.Equal(DurableRuntimeSchemaCompatibility.StoreTooNew, unsupported.Compatibility);
+        Assert.Equal(1, unsupported.MaximumReaderVersion);
+        Assert.Equal(1, unsupported.MaximumWriterVersion);
+        var unsupportedValidation = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
+            async () => await manager.ValidateAsync());
+        Assert.Equal(DurableRuntimeSchemaCompatibility.StoreTooNew, unsupportedValidation.Status.Compatibility);
+        var unsupportedApply = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
+            async () => await manager.ApplyAsync());
+        Assert.Equal(DurableRuntimeSchemaCompatibility.StoreTooNew, unsupportedApply.Status.Compatibility);
+
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            """
+            DELETE FROM appsurface_durable.schema_migration WHERE version = 2;
+            UPDATE appsurface_durable.store_metadata
+            SET schema_version = 1,
+                minimum_reader_version = 1,
+                maximum_reader_version = 1,
+                minimum_writer_version = 1,
+                maximum_writer_version = 1
+            WHERE singleton;
+            """);
+        var upgrade = await manager.GetStatusAsync();
+        Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgrade.Compatibility);
+        Assert.Equal([1], upgrade.AppliedVersions);
+        Assert.Equal([2], upgrade.PendingVersions);
+        var upgradeValidation = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
+            async () => await manager.ValidateAsync());
+        Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgradeValidation.Status.Compatibility);
+
+        await ExecuteNonQueryAsync(database.DataSource, "DELETE FROM appsurface_durable.store_metadata WHERE singleton;");
+        var missingMetadata = await manager.GetStatusAsync();
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Inconsistent, missingMetadata.Compatibility);
+        Assert.Contains("metadata is missing", missingMetadata.Problem, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -255,6 +335,12 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
     private static ValueTask<int> WaitForBackendAsync(NpgsqlDataSource dataSource, string applicationName)
         => WaitForBackendAsync(dataSource, applicationName, "advisory");
+
+    private static async ValueTask ExecuteNonQueryAsync(NpgsqlDataSource dataSource, string sql)
+    {
+        await using var command = dataSource.CreateCommand(sql);
+        await command.ExecuteNonQueryAsync();
+    }
 
     private static async ValueTask<int> WaitForBackendAsync(
         NpgsqlDataSource dataSource,

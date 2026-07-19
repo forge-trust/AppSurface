@@ -130,8 +130,77 @@ public sealed class DurableSchemaContractTests
 
         Assert.Equal([1], status.AppliedVersions);
         Assert.Equal([2], status.PendingVersions);
+        Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, status.Compatibility);
+        Assert.NotEqual(Guid.Empty, status.StoreId);
+        Assert.Null(status.ActiveRuntimeEpoch);
+        Assert.Equal(1, status.InstalledVersion);
+        Assert.Equal(2, status.RequiredVersion);
+        Assert.Equal(1, status.MinimumReaderVersion);
+        Assert.Equal(2, status.MaximumReaderVersion);
+        Assert.Equal(1, status.MinimumWriterVersion);
+        Assert.Equal(2, status.MaximumWriterVersion);
+        Assert.Equal("Upgrade required.", status.Problem);
+        Assert.False(status.IsCompatible);
+        Assert.Equal(0, result.PreviousVersion);
+        Assert.Equal(1, result.CurrentVersion);
         Assert.Equal([1], result.AppliedVersions);
         Assert.Throws<ArgumentNullException>(() => new DurableRuntimeSchemaApplyResult(0, 0, null!));
+        Assert.Throws<ArgumentNullException>(() => new DurableRuntimeSchemaStatus(
+            DurableRuntimeSchemaCompatibility.Missing,
+            Guid.Empty,
+            null,
+            0,
+            2,
+            0,
+            0,
+            0,
+            0,
+            null!,
+            [],
+            null));
+        Assert.Throws<ArgumentNullException>(() => new DurableRuntimeSchemaStatus(
+            DurableRuntimeSchemaCompatibility.Missing,
+            Guid.Empty,
+            null,
+            0,
+            2,
+            0,
+            0,
+            0,
+            0,
+            [],
+            null!,
+            null));
+    }
+
+    [Theory]
+    [InlineData(DurableRuntimeSchemaCompatibility.Missing, DurableProblemCodes.SchemaMissing)]
+    [InlineData(DurableRuntimeSchemaCompatibility.UpgradeRequired, DurableProblemCodes.SchemaUpgradeRequired)]
+    [InlineData(DurableRuntimeSchemaCompatibility.StoreTooNew, DurableProblemCodes.SchemaVersionUnsupported)]
+    [InlineData(DurableRuntimeSchemaCompatibility.Inconsistent, DurableProblemCodes.SchemaInconsistent)]
+    public void SchemaException_UsesTheCompatibilityProblemCode(
+        DurableRuntimeSchemaCompatibility compatibility,
+        string expectedCode)
+    {
+        var status = new DurableRuntimeSchemaStatus(
+            compatibility,
+            Guid.NewGuid(),
+            null,
+            1,
+            2,
+            1,
+            2,
+            1,
+            2,
+            [1],
+            [2],
+            "Schema problem.");
+
+        var exception = new DurableRuntimeSchemaException(status);
+
+        Assert.Same(status, exception.Status);
+        Assert.StartsWith(expectedCode, exception.Message, StringComparison.Ordinal);
+        Assert.Throws<ArgumentNullException>(() => new DurableRuntimeSchemaException(null!));
     }
 
     [Fact]
@@ -152,6 +221,37 @@ public sealed class DurableSchemaContractTests
             "GRANT SELECT, INSERT ON appsurface_durable.scope_history, appsurface_durable.work_history",
             recipe,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "GRANT SELECT, INSERT ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "GRANT SELECT, INSERT, UPDATE ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "GRANT UPDATE (generation, state, updated_at) ON appsurface_durable.scope",
+            recipe,
+            StringComparison.Ordinal);
+        var revokeBroadUpdate = recipe.IndexOf(
+            "REVOKE UPDATE ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch",
+            StringComparison.Ordinal);
+        var grantScopedUpdate = recipe.IndexOf(
+            "GRANT UPDATE (generation, state, updated_at) ON appsurface_durable.scope",
+            StringComparison.Ordinal);
+        Assert.True(revokeBroadUpdate >= 0);
+        Assert.True(grantScopedUpdate > revokeBroadUpdate);
+        Assert.Contains(
+            "GRANT UPDATE (due_at, state, expected_revision, updated_at) ON appsurface_durable.dispatch",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "GRANT UPDATE (state, due_at, updated_at, terminal_at, cancellation_requested_at, attempt_number, lease_generation",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("payload_sha256", recipe, StringComparison.Ordinal);
+        Assert.DoesNotContain("request_fingerprint_sha256", recipe, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider_safety", recipe, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "SELECT, INSERT, UPDATE ON appsurface_durable.scope_history",
             recipe,

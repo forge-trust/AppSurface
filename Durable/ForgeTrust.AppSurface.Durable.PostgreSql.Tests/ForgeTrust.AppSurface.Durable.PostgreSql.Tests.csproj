@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Coverage should measure package-owned source, not compiler-generated RegexGenerator output under obj/. -->
+    <ExcludeByFile>**/obj/**</ExcludeByFile>
   </PropertyGroup>
 
   <ItemGroup>

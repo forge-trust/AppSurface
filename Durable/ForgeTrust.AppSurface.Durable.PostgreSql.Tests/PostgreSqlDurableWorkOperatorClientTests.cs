@@ -60,6 +60,669 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         }
     }
 
+    [Theory]
+    [InlineData(DurableEffectReconciliationKind.Applied)]
+    [InlineData(DurableEffectReconciliationKind.NotApplied)]
+    public async Task Reconcile_CancellationDuringProviderCallRejectsStaleProofWithoutMutation(
+        DurableEffectReconciliationKind proofKind)
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var providerEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseProvider = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registration = new OperatorRegistration(
+            $"operator.reconcile-cancel-race.{proofKind}",
+            DurableProviderSafety.ReconcileBeforeRetry,
+            new DurableEncodedEffectReconciliation(
+                proofKind,
+                proofKind == DurableEffectReconciliationKind.Applied ? Result("cancel-race") : null),
+            providerEntered,
+            releaseProvider);
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId($"operator-reconcile-cancel-race-{proofKind}");
+        var accepted = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, $"reconcile-cancel-race-{proofKind}");
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+        var commandId = new DurableCommandId($"operator-reconcile-cancel-race-command-{proofKind}");
+        var request = new DurableWorkReconcileRequest(
+            scope,
+            accepted.WorkId,
+            commandId,
+            "operator-test",
+            "provider-proof",
+            revision);
+
+        var reconciliation = operators.ReconcileAsync(request).AsTask();
+        await providerEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        PostgreSqlCancellationResult cancellation;
+        try
+        {
+            cancellation = await store.RequestCancellationAsync(
+                scope,
+                accepted.WorkId,
+                "operator-test",
+                "cancel-during-reconciliation",
+                revision);
+        }
+        finally
+        {
+            releaseProvider.TrySetResult(true);
+        }
+
+        var result = await reconciliation;
+
+        Assert.Equal(DurableWorkState.Suspended, cancellation.State);
+        Assert.False(result.IsSuccess);
+        Assert.Equal(DurableProblemCodes.WorkRevisionConflict, result.Problem!.Code);
+        Assert.Equal(DurableWorkState.Suspended, await ReadStateAsync(database.DataSource, scope, accepted.WorkId));
+        Assert.True(await ReadCancellationRequestedAsync(database.DataSource, scope, accepted.WorkId));
+        Assert.Equal(
+            cancellation.Revision,
+            await ReadRevisionAsync(database.DataSource, scope, accepted.WorkId));
+        Assert.Equal(
+            "started",
+            await ReadOperatorScalarAsync<string>(database.DataSource, scope, commandId, "status"));
+        Assert.Equal(1, registration.ReconciliationCount);
+    }
+
+    [Fact]
+    public async Task Reconcile_RuntimeEpochRotationDuringProviderCallRejectsProofAndReplay()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var providerEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseProvider = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registration = new OperatorRegistration(
+            "operator.reconcile-epoch-race",
+            DurableProviderSafety.ReconcileBeforeRetry,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Applied, Result("epoch-race")),
+            providerEntered,
+            releaseProvider);
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId("operator-reconcile-epoch-race");
+        var accepted = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, "reconcile-epoch-race");
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+        var commandId = new DurableCommandId("operator-reconcile-epoch-race-command");
+        var request = new DurableWorkReconcileRequest(
+            scope,
+            accepted.WorkId,
+            commandId,
+            "operator-test",
+            "provider-proof",
+            revision);
+
+        var reconciliation = operators.ReconcileAsync(request).AsTask();
+        await providerEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var nextEpoch = Guid.NewGuid();
+        try
+        {
+            await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).RotateRuntimeEpochAsync(
+                epoch, nextEpoch, "operator-test", "rotate-during-reconciliation");
+        }
+        finally
+        {
+            releaseProvider.TrySetResult(true);
+        }
+
+        var result = await reconciliation;
+        var replay = await operators.ReconcileAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(DurableProblemCodes.RecoveryEpochRequired, result.Problem!.Code);
+        Assert.False(replay.IsSuccess);
+        Assert.Equal(DurableProblemCodes.RecoveryEpochRequired, replay.Problem!.Code);
+        Assert.Equal(DurableWorkState.Suspended, await ReadStateAsync(database.DataSource, scope, accepted.WorkId));
+        Assert.Equal(revision, await ReadRevisionAsync(database.DataSource, scope, accepted.WorkId));
+        Assert.Equal(
+            "started",
+            await ReadOperatorScalarAsync<string>(database.DataSource, scope, commandId, "status"));
+        Assert.Equal(1, registration.ReconciliationCount);
+    }
+
+    [Theory]
+    [InlineData("wrong-safety", DurableProblemCodes.OperatorTransitionRejected)]
+    [InlineData("wrong-state", DurableProblemCodes.OperatorTransitionRejected)]
+    [InlineData("no-exact-permit", DurableProblemCodes.OperatorTransitionRejected)]
+    [InlineData("missing", DurableProblemCodes.WorkNotFound)]
+    [InlineData("stale", DurableProblemCodes.WorkRevisionConflict)]
+    [InlineData("terminal", DurableProblemCodes.AlreadyTerminal)]
+    public async Task Reconcile_RejectsInvalidStartingTruthWithoutCallingProvider(
+        string scenario,
+        string expectedProblemCode)
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var safety = scenario == "wrong-safety"
+            ? DurableProviderSafety.ProviderKeyed
+            : DurableProviderSafety.ReconcileBeforeRetry;
+        var registration = new OperatorRegistration(
+            $"operator.reconcile-start.{scenario}",
+            safety,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.NotApplied, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId($"operator-reconcile-start-{scenario}");
+        var accepted = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, $"reconcile-start-{scenario}");
+        var workId = accepted.WorkId;
+        var revision = accepted.Revision;
+
+        if (scenario == "missing")
+        {
+            workId = new DurableWorkId("operator-reconcile-start-missing-work");
+        }
+        else if (scenario == "stale")
+        {
+            revision++;
+        }
+        else
+        {
+            var state = scenario switch
+            {
+                "wrong-state" => "suspended_manual_resolution",
+                "terminal" => "succeeded",
+                _ => "suspended_reconciliation_required",
+            };
+            revision = await ForceStateAsync(
+                database.DataSource,
+                scope,
+                workId,
+                state,
+                scenario == "terminal" ? "operator-test-terminal" : "ambiguous_external_outcome");
+            if (scenario == "no-exact-permit")
+            {
+                revision = await AdvanceFenceWithoutPermitAsync(database.DataSource, scope, workId, revision);
+            }
+        }
+
+        var commandId = new DurableCommandId($"operator-reconcile-start-command-{scenario}");
+        var result = await operators.ReconcileAsync(new DurableWorkReconcileRequest(
+            scope,
+            workId,
+            commandId,
+            "operator-test",
+            "invalid-starting-truth",
+            revision));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(expectedProblemCode, result.Problem!.Code);
+        Assert.Equal(0, registration.ReconciliationCount);
+        Assert.Equal(0, await CountOperatorCommandsAsync(database.DataSource, scope, commandId));
+    }
+
+    [Theory]
+    [InlineData(
+        DurableProviderSafety.ManualResolution,
+        DurableManualResolutionKind.Applied,
+        DurableWorkState.SucceededAfterCancelRequested,
+        "succeeded_after_cancel_requested")]
+    [InlineData(
+        DurableProviderSafety.ManualResolution,
+        DurableManualResolutionKind.ProvenNotApplied,
+        DurableWorkState.CanceledBeforeEffect,
+        "canceled_before_effect")]
+    [InlineData(
+        DurableProviderSafety.ProviderKeyed,
+        DurableManualResolutionKind.Applied,
+        DurableWorkState.SucceededAfterCancelRequested,
+        "succeeded_after_cancel_requested")]
+    [InlineData(
+        DurableProviderSafety.Idempotent,
+        DurableManualResolutionKind.ProvenNotApplied,
+        DurableWorkState.CanceledBeforeEffect,
+        "canceled_before_effect")]
+    public async Task Resolve_CancellationAwareSafeTransitionsBecomeTerminal(
+        DurableProviderSafety safety,
+        DurableManualResolutionKind resolution,
+        DurableWorkState expectedState,
+        string expectedPersistedState)
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var registration = new OperatorRegistration(
+            $"operator.cancel-aware-resolution.{safety}.{resolution}",
+            safety,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Unknown, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId($"operator-cancel-aware-resolution-{safety}-{resolution}");
+        var accepted = await AcceptAndPermitAsync(
+            client,
+            database.DataSource,
+            epoch,
+            registration,
+            scope,
+            $"cancel-aware-resolution-{safety}-{resolution}");
+        var state = safety == DurableProviderSafety.ManualResolution
+            ? "suspended_manual_resolution"
+            : "suspended_ambiguous_external_outcome";
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            state,
+            "ambiguous_external_outcome",
+            cancellationRequested: true);
+
+        var result = await operators.ResolveAsync(new DurableWorkManualResolutionRequest(
+            scope,
+            accepted.WorkId,
+            new DurableCommandId($"operator-cancel-aware-resolution-command-{safety}-{resolution}"),
+            "operator-test",
+            "cancellation-aware-proof",
+            revision,
+            resolution,
+            resolution == DurableManualResolutionKind.Applied ? Result("cancel-aware-resolution") : null));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expectedState, result.Value!.State);
+        Assert.Equal(
+            expectedPersistedState,
+            await ReadScalarAsync<string>(database.DataSource, scope, accepted.WorkId, "state"));
+        Assert.Equal(revision + 1, result.Value.Revision);
+    }
+
+    [Fact]
+    public async Task RetrySafe_ContractUnavailableWithoutPermitReturnsWorkToReady()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var registration = new OperatorRegistration(
+            "operator.retry-safe-preparation",
+            DurableProviderSafety.Idempotent,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Unknown, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId("operator-retry-safe-preparation");
+        var accepted = (await client.EnqueueAsync(Request(scope, registration, "retry-safe-preparation"))).Value!;
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_contract_unavailable",
+            "work_contract_unavailable",
+            cancellationRequested: true);
+
+        var result = await operators.RetrySafeAsync(new DurableWorkRetrySafeRequest(
+            scope,
+            accepted.WorkId,
+            new DurableCommandId("operator-retry-safe-preparation-command"),
+            "operator-test",
+            "registration-restored",
+            revision));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(DurableWorkState.Ready, result.Value!.State);
+        Assert.False(await ReadCancellationRequestedAsync(database.DataSource, scope, accepted.WorkId));
+    }
+
+    [Theory]
+    [InlineData(
+        DurableEffectReconciliationKind.Applied,
+        DurableWorkState.SucceededAfterCancelRequested,
+        "succeeded_after_cancel_requested")]
+    [InlineData(
+        DurableEffectReconciliationKind.NotApplied,
+        DurableWorkState.CanceledBeforeEffect,
+        "canceled_before_effect")]
+    public async Task Reconcile_CancellationObservedWithoutRevisionChangeAppliesProvenTerminalOutcome(
+        DurableEffectReconciliationKind proofKind,
+        DurableWorkState expectedState,
+        string expectedPersistedState)
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var providerEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseProvider = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registration = new OperatorRegistration(
+            $"operator.reconcile-cancellation-observed.{proofKind}",
+            DurableProviderSafety.ReconcileBeforeRetry,
+            new DurableEncodedEffectReconciliation(
+                proofKind,
+                proofKind == DurableEffectReconciliationKind.Applied ? Result("cancellation-observed") : null),
+            providerEntered,
+            releaseProvider);
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId($"operator-reconcile-cancellation-observed-{proofKind}");
+        var accepted = await AcceptAndPermitAsync(
+            client,
+            database.DataSource,
+            epoch,
+            registration,
+            scope,
+            $"reconcile-cancellation-observed-{proofKind}");
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+        var commandId = new DurableCommandId($"operator-reconcile-cancellation-observed-command-{proofKind}");
+        var request = new DurableWorkReconcileRequest(
+            scope,
+            accepted.WorkId,
+            commandId,
+            "operator-test",
+            "provider-proof",
+            revision);
+
+        var reconciliation = operators.ReconcileAsync(request).AsTask();
+        await providerEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            await SetCancellationRequestedWithoutRevisionAsync(
+                database.DataSource, scope, accepted.WorkId);
+        }
+        finally
+        {
+            releaseProvider.TrySetResult(true);
+        }
+
+        var result = await reconciliation;
+        var replay = await operators.ReconcileAsync(request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expectedState, result.Value!.State);
+        Assert.Equal(revision + 1, result.Value.Revision);
+        Assert.Equal(DurableWorkOperatorOutcome.Duplicate, replay.Value!.Outcome);
+        Assert.Equal(expectedState, replay.Value.State);
+        Assert.Equal(
+            expectedPersistedState,
+            await ReadScalarAsync<string>(database.DataSource, scope, accepted.WorkId, "state"));
+        Assert.Equal(1, registration.ReconciliationCount);
+    }
+
+    [Fact]
+    public async Task Reconcile_PreExistingExactStartedCommandResumesAndCompletes()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var registration = new OperatorRegistration(
+            "operator.reconcile-resume-started",
+            DurableProviderSafety.ReconcileBeforeRetry,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.NotApplied, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId("operator-reconcile-resume-started");
+        var accepted = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, "reconcile-resume-started");
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+        var request = new DurableWorkReconcileRequest(
+            scope,
+            accepted.WorkId,
+            new DurableCommandId("operator-reconcile-resume-started-command"),
+            "operator-test",
+            "resume-started",
+            revision);
+        await SeedOperatorCommandAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            request.CommandId,
+            "reconcile",
+            request.ActorId,
+            request.ReasonCode,
+            request.Fingerprint,
+            false,
+            "suspended_reconciliation_required",
+            revision);
+
+        var result = await operators.ReconcileAsync(request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(DurableWorkState.Ready, result.Value!.State);
+        Assert.Equal(1, registration.ReconciliationCount);
+        Assert.Equal(
+            "completed",
+            await ReadOperatorScalarAsync<string>(database.DataSource, scope, request.CommandId, "status"));
+    }
+
+    [Theory]
+    [InlineData(false, DurableProblemCodes.CommandConflict)]
+    [InlineData(true, null)]
+    public async Task Reconcile_PreExistingCommandReturnsConflictOrCompletedReplay(
+        bool completed,
+        string? expectedProblemCode)
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var scenario = completed ? "completed" : "conflict";
+        var registration = new OperatorRegistration(
+            $"operator.reconcile-preexisting-{scenario}",
+            DurableProviderSafety.ReconcileBeforeRetry,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.NotApplied, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId($"operator-reconcile-preexisting-{scenario}");
+        var accepted = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, $"reconcile-preexisting-{scenario}");
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+        var commandId = new DurableCommandId($"operator-reconcile-preexisting-command-{scenario}");
+        var request = new DurableWorkReconcileRequest(
+            scope,
+            accepted.WorkId,
+            commandId,
+            "operator-test",
+            "authoritative-request",
+            revision);
+        var persistedFingerprint = completed
+            ? request.Fingerprint
+            : new DurableWorkReconcileRequest(
+                scope,
+                accepted.WorkId,
+                commandId,
+                "operator-test",
+                "different-semantic-input",
+                revision).Fingerprint;
+        await SeedOperatorCommandAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            commandId,
+            "reconcile",
+            request.ActorId,
+            completed ? request.ReasonCode : "different-semantic-input",
+            persistedFingerprint,
+            completed,
+            "suspended_reconciliation_required",
+            revision);
+
+        var result = await operators.ReconcileAsync(request);
+
+        Assert.Equal(0, registration.ReconciliationCount);
+        if (completed)
+        {
+            Assert.True(result.IsSuccess);
+            Assert.Equal(DurableWorkOperatorOutcome.Duplicate, result.Value!.Outcome);
+            Assert.Equal(DurableWorkState.Suspended, result.Value.State);
+        }
+        else
+        {
+            Assert.False(result.IsSuccess);
+            Assert.Equal(expectedProblemCode, result.Problem!.Code);
+        }
+
+        Assert.Equal(revision, await ReadRevisionAsync(database.DataSource, scope, accepted.WorkId));
+    }
+
+    [Theory]
+    [InlineData("delete", DurableProblemCodes.OperatorTransitionRejected)]
+    [InlineData("replace", DurableProblemCodes.CommandConflict)]
+    public async Task Reconcile_CommandAuthorityChangedDuringProviderCallRejectsProof(
+        string mutation,
+        string expectedProblemCode)
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var providerEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseProvider = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registration = new OperatorRegistration(
+            $"operator.reconcile-command-race.{mutation}",
+            DurableProviderSafety.ReconcileBeforeRetry,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Applied, Result("command-race")),
+            providerEntered,
+            releaseProvider);
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId($"operator-reconcile-command-race-{mutation}");
+        var accepted = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, $"reconcile-command-race-{mutation}");
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+        var commandId = new DurableCommandId($"operator-reconcile-command-race-command-{mutation}");
+        var request = new DurableWorkReconcileRequest(
+            scope,
+            accepted.WorkId,
+            commandId,
+            "operator-test",
+            "provider-proof",
+            revision);
+
+        var reconciliation = operators.ReconcileAsync(request).AsTask();
+        await providerEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            await MutateOperatorCommandAuthorityAsync(database.DataSource, scope, commandId, mutation);
+        }
+        finally
+        {
+            releaseProvider.TrySetResult(true);
+        }
+
+        var result = await reconciliation;
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(expectedProblemCode, result.Problem!.Code);
+        Assert.Equal(DurableWorkState.Suspended, await ReadStateAsync(database.DataSource, scope, accepted.WorkId));
+        Assert.Equal(revision, await ReadRevisionAsync(database.DataSource, scope, accepted.WorkId));
+        Assert.Equal(1, registration.ReconciliationCount);
+        Assert.Equal(
+            mutation == "delete" ? 0 : 1,
+            await CountOperatorCommandsAsync(database.DataSource, scope, commandId));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RetrySafe_PreExistingExactCommandReturnsInProgressOrDuplicate(bool completed)
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var scenario = completed ? "completed" : "started";
+        var registration = new OperatorRegistration(
+            $"operator.retry-safe-preexisting.{scenario}",
+            DurableProviderSafety.Idempotent,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Unknown, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId($"operator-retry-safe-preexisting-{scenario}");
+        var accepted = (await client.EnqueueAsync(Request(scope, registration, $"retry-safe-preexisting-{scenario}"))).Value!;
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_contract_unavailable",
+            "work_contract_unavailable");
+        var request = new DurableWorkRetrySafeRequest(
+            scope,
+            accepted.WorkId,
+            new DurableCommandId($"operator-retry-safe-preexisting-command-{scenario}"),
+            "operator-test",
+            "registration-restored",
+            revision);
+        await SeedOperatorCommandAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            request.CommandId,
+            "retry_safe",
+            request.ActorId,
+            request.ReasonCode,
+            request.Fingerprint,
+            completed,
+            "retry_wait",
+            revision + 1);
+
+        var result = await operators.RetrySafeAsync(request);
+
+        if (completed)
+        {
+            Assert.True(result.IsSuccess);
+            Assert.Equal(DurableWorkOperatorOutcome.Duplicate, result.Value!.Outcome);
+            Assert.Equal(DurableWorkState.Ready, result.Value.State);
+            Assert.Equal(revision + 1, result.Value.Revision);
+        }
+        else
+        {
+            Assert.False(result.IsSuccess);
+            Assert.Equal(DurableProblemCodes.OperatorCommandInProgress, result.Problem!.Code);
+        }
+
+        Assert.Equal(
+            "suspended_contract_unavailable",
+            await ReadScalarAsync<string>(database.DataSource, scope, accepted.WorkId, "state"));
+        Assert.Equal(revision, await ReadRevisionAsync(database.DataSource, scope, accepted.WorkId));
+    }
+
     [Fact]
     public async Task ResolveRetrySafeAndRecoveryRelease_ApplyOnlyAuditedSafeTransitions()
     {
@@ -573,6 +1236,142 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         Assert.Equal(DurableProblemCodes.RecoveryEpochRequired, staleEpoch.Problem!.Code);
     }
 
+    [Theory]
+    [InlineData("missing", DurableProblemCodes.WorkNotFound)]
+    [InlineData("stale", DurableProblemCodes.WorkRevisionConflict)]
+    [InlineData("succeeded", DurableProblemCodes.AlreadyTerminal)]
+    [InlineData("succeeded_after_cancel_requested", DurableProblemCodes.AlreadyTerminal)]
+    [InlineData("failed", DurableProblemCodes.AlreadyTerminal)]
+    [InlineData("canceled_before_effect", DurableProblemCodes.AlreadyTerminal)]
+    public async Task RetrySafe_ReturnsTypedSnapshotFailuresWithoutRecordingACommand(
+        string scenario,
+        string expectedProblemCode)
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var registration = new OperatorRegistration(
+            $"operator.snapshot-failure.{scenario}",
+            DurableProviderSafety.ProviderKeyed,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Unknown, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId($"operator-snapshot-failure-{scenario}");
+        var accepted = (await client.EnqueueAsync(Request(scope, registration, $"snapshot-failure-{scenario}"))).Value!;
+        var commandId = new DurableCommandId($"operator-snapshot-failure-command-{scenario}");
+        var workId = accepted.WorkId;
+        var expectedRevision = accepted.Revision;
+
+        if (scenario == "missing")
+        {
+            workId = new DurableWorkId("operator-snapshot-failure-missing-work");
+        }
+        else if (scenario == "stale")
+        {
+            expectedRevision++;
+        }
+        else
+        {
+            expectedRevision = await ForceStateAsync(
+                database.DataSource,
+                scope,
+                workId,
+                scenario,
+                $"operator-test-{scenario}");
+        }
+
+        var result = await operators.RetrySafeAsync(new DurableWorkRetrySafeRequest(
+            scope,
+            workId,
+            commandId,
+            "operator-test",
+            "snapshot-validation",
+            expectedRevision));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(expectedProblemCode, result.Problem!.Code);
+        Assert.Equal(
+            0,
+            await CountOperatorCommandsAsync(database.DataSource, scope, commandId));
+    }
+
+    [Fact]
+    public async Task Resolve_WithResultAndUnavailableRegistration_ReturnsTypedFailureWithoutMutation()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var registration = new OperatorRegistration(
+            "operator.direct-result-registration",
+            DurableProviderSafety.ManualResolution,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Unknown, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var scope = new DurableScopeId("operator-direct-result-registration");
+        var accepted = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, "direct-result-registration");
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_manual_resolution",
+            "ambiguous_external_outcome");
+        var commandId = new DurableCommandId("operator-direct-result-registration-command");
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, new DurableWorkRegistry([]), NullServices.Instance, epoch);
+
+        var result = await operators.ResolveAsync(new DurableWorkManualResolutionRequest(
+            scope,
+            accepted.WorkId,
+            commandId,
+            "operator-test",
+            "provider-applied",
+            revision,
+            DurableManualResolutionKind.Applied,
+            Result("direct-result")));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(DurableProblemCodes.WorkContractUnavailable, result.Problem!.Code);
+        Assert.Equal(revision, await ReadRevisionAsync(database.DataSource, scope, accepted.WorkId));
+        Assert.Equal(
+            0,
+            await CountOperatorCommandsAsync(database.DataSource, scope, commandId));
+    }
+
+    [Theory]
+    [InlineData("dataSource", "dataSource", typeof(ArgumentNullException))]
+    [InlineData("registry", "registry", typeof(ArgumentNullException))]
+    [InlineData("services", "services", typeof(ArgumentNullException))]
+    [InlineData("runtimeEpoch", "runtimeEpoch", typeof(ArgumentException))]
+    public void Constructor_RejectsInvalidDependenciesAndEpoch(
+        string invalidArgument,
+        string expectedParameter,
+        Type expectedException)
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Username=operator-guard;Password=operator-guard;Database=operator-guard");
+        var registry = new DurableWorkRegistry([]);
+        var epoch = Guid.NewGuid();
+
+        var exception = Record.Exception(() => _ = invalidArgument switch
+        {
+            "dataSource" => new PostgreSqlDurableWorkOperatorClient(
+                null!, registry, NullServices.Instance, epoch),
+            "registry" => new PostgreSqlDurableWorkOperatorClient(
+                dataSource, null!, NullServices.Instance, epoch),
+            "services" => new PostgreSqlDurableWorkOperatorClient(
+                dataSource, registry, null!, epoch),
+            "runtimeEpoch" => new PostgreSqlDurableWorkOperatorClient(
+                dataSource, registry, NullServices.Instance, Guid.Empty),
+            _ => throw new ArgumentOutOfRangeException(nameof(invalidArgument)),
+        });
+
+        Assert.IsType(expectedException, exception);
+        Assert.Equal(expectedParameter, Assert.IsAssignableFrom<ArgumentException>(exception).ParamName);
+    }
+
     private static async ValueTask<Guid> InitializeAsync(NpgsqlDataSource dataSource)
     {
         var schema = new PostgreSqlDurableRuntimeSchemaManager(dataSource);
@@ -717,6 +1516,98 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         command.Parameters.AddWithValue("scope_id", scope.Value);
         command.Parameters.AddWithValue("command_id", commandId.Value);
         return (T)(await command.ExecuteScalarAsync())!;
+    }
+
+    private static async ValueTask<long> CountOperatorCommandsAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableCommandId commandId)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetScopeAsync(connection, transaction, scope);
+        await using var command = new NpgsqlCommand(
+            "SELECT count(*) FROM appsurface_durable.work_operator_command WHERE scope_id = @scope_id AND command_id = @command_id;",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("command_id", commandId.Value);
+        return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    private static async ValueTask SeedOperatorCommandAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableWorkId work,
+        DurableCommandId commandId,
+        string commandType,
+        string actorId,
+        string reasonCode,
+        DurableCommandFingerprint fingerprint,
+        bool completed,
+        string resultingState,
+        long resultingRevision)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetScopeAsync(connection, transaction, scope);
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO appsurface_durable.work_operator_command
+                (scope_id, work_id, command_id, command_type, actor_id, reason_code,
+                 request_schema, request_sha256, status, resulting_state, resulting_revision, completed_at)
+            VALUES
+                (@scope_id, @work_id, @command_id, @command_type, @actor_id, @reason_code,
+                 @request_schema, @request_sha256,
+                 CASE WHEN @completed THEN 'completed' ELSE 'started' END,
+                 CASE WHEN @completed THEN @resulting_state ELSE NULL END,
+                 CASE WHEN @completed THEN @resulting_revision ELSE NULL END,
+                 CASE WHEN @completed THEN clock_timestamp() ELSE NULL END);
+            """,
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("work_id", work.Value);
+        command.Parameters.AddWithValue("command_id", commandId.Value);
+        command.Parameters.AddWithValue("command_type", commandType);
+        command.Parameters.AddWithValue("actor_id", actorId);
+        command.Parameters.AddWithValue("reason_code", reasonCode);
+        command.Parameters.AddWithValue("request_schema", fingerprint.SchemaId);
+        command.Parameters.AddWithValue("request_sha256", Convert.FromHexString(fingerprint.Sha256));
+        command.Parameters.AddWithValue("completed", completed);
+        command.Parameters.AddWithValue("resulting_state", resultingState);
+        command.Parameters.AddWithValue("resulting_revision", resultingRevision);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
+    }
+
+    private static async ValueTask MutateOperatorCommandAuthorityAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableCommandId commandId,
+        string mutation)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetScopeAsync(connection, transaction, scope);
+        var sql = mutation switch
+        {
+            "delete" =>
+                "DELETE FROM appsurface_durable.work_operator_command WHERE scope_id = @scope_id AND command_id = @command_id;",
+            "replace" =>
+                "UPDATE appsurface_durable.work_operator_command SET request_sha256 = @replacement_sha256 WHERE scope_id = @scope_id AND command_id = @command_id;",
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation)),
+        };
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("command_id", commandId.Value);
+        if (mutation == "replace")
+        {
+            command.Parameters.AddWithValue("replacement_sha256", new byte[32]);
+        }
+
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
     }
 
     private static async ValueTask<T> ReadHistoryScalarAsync<T>(
@@ -865,6 +1756,24 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         await transaction.CommitAsync();
     }
 
+    private static async ValueTask SetCancellationRequestedWithoutRevisionAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableWorkId work)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetScopeAsync(connection, transaction, scope);
+        await using var command = new NpgsqlCommand(
+            "UPDATE appsurface_durable.work SET cancellation_requested_at = clock_timestamp() WHERE scope_id = @scope_id AND work_id = @work_id;",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("work_id", work.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
+    }
+
     private static ValueTask<bool> ReadCancellationRequestedAsync(
         NpgsqlDataSource dataSource,
         DurableScopeId scope,
@@ -909,7 +1818,9 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
     private sealed class OperatorRegistration(
         string workName,
         DurableProviderSafety safety,
-        DurableEncodedEffectReconciliation proof) : DurableWorkRegistration(
+        DurableEncodedEffectReconciliation proof,
+        TaskCompletionSource<bool>? providerEntered = null,
+        TaskCompletionSource<bool>? releaseProvider = null) : DurableWorkRegistration(
             workName,
             "v1",
             safety,
@@ -929,13 +1840,19 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public override ValueTask<DurableEncodedEffectReconciliation> ReconcileAsync(
+        public override async ValueTask<DurableEncodedEffectReconciliation> ReconcileAsync(
             IServiceProvider services,
             DurableWorkExecutionContext work,
             CancellationToken cancellationToken = default)
         {
             ReconciliationCount++;
-            return ValueTask.FromResult(proof);
+            providerEntered?.TrySetResult(true);
+            if (releaseProvider is not null)
+            {
+                await releaseProvider.Task.WaitAsync(cancellationToken);
+            }
+
+            return proof;
         }
     }
 
