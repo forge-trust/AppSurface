@@ -101,6 +101,29 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         Directory.CreateDirectory(dotnetHomePath);
 
         await File.WriteAllTextAsync(
+            Path.Join(fixtureDirectory, "Directory.Packages.props"),
+            """
+            <Project>
+              <PropertyGroup>
+                <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+                <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+              </PropertyGroup>
+            </Project>
+            """,
+            cancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Join(fixtureDirectory, "Directory.Build.props"),
+            """
+            <Project>
+              <PropertyGroup>
+                <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+                <GenerateDocumentationFile>false</GenerateDocumentationFile>
+              </PropertyGroup>
+            </Project>
+            """,
+            cancellationToken);
+
+        await File.WriteAllTextAsync(
             toolNuGetConfigPath,
             RenderMappedNuGetConfig(request.ArtifactsDirectory, request.Source),
             cancellationToken);
@@ -143,13 +166,18 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return BuildReport(context, commands, artifacts);
         }
 
+        if (!await RunRequiredAsync(DotNetCommand(context, ["new", "xunit", "-n", "Smoke.Msbuild.Tests"], "dotnet new xunit msbuild", "creating MSBuild compatibility smoke tests")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
         if (!await RunRequiredAsync(DotNetCommand(context, ["new", "xunit", "-n", "Smoke.Browser.Tests"], "dotnet new xunit sentinel", "creating excluded failing sentinel tests")))
         {
             return BuildReport(context, commands, artifacts);
         }
 
         var solutionPath = ResolveSmokeSolutionPath(fixtureDirectory);
-        if (!await RunRequiredAsync(DotNetCommand(context, ["sln", solutionPath, "add", "Smoke/Smoke.csproj", "Smoke.Tests/Smoke.Tests.csproj", "Smoke.Browser.Tests/Smoke.Browser.Tests.csproj"], "dotnet sln add", "adding smoke projects")))
+        if (!await RunRequiredAsync(DotNetCommand(context, ["sln", solutionPath, "add", "Smoke/Smoke.csproj", "Smoke.Tests/Smoke.Tests.csproj", "Smoke.Msbuild.Tests/Smoke.Msbuild.Tests.csproj", "Smoke.Browser.Tests/Smoke.Browser.Tests.csproj"], "dotnet sln add", "adding smoke projects")))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -159,7 +187,17 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return BuildReport(context, commands, artifacts);
         }
 
-        if (!await RunRequiredAsync(DotNetCommand(context, ["add", "Smoke.Tests/Smoke.Tests.csproj", "package", "coverlet.msbuild", "--version", "10.0.1"], "dotnet add package", "adding Coverlet to smoke tests")))
+        if (!await RunRequiredAsync(DotNetCommand(context, ["add", "Smoke.Msbuild.Tests/Smoke.Msbuild.Tests.csproj", "reference", "Smoke/Smoke.csproj"], "dotnet add reference msbuild", "adding MSBuild smoke project reference")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!await RunRequiredAsync(DotNetCommand(context, ["add", "Smoke.Tests/Smoke.Tests.csproj", "package", "coverlet.collector", "--version", "10.0.1"], "dotnet add package", "adding the default Coverlet collector to smoke tests")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!await RunRequiredAsync(DotNetCommand(context, ["add", "Smoke.Msbuild.Tests/Smoke.Msbuild.Tests.csproj", "package", "coverlet.msbuild", "--version", "10.0.1"], "dotnet add msbuild package", "adding the explicit Coverlet compatibility driver to its dedicated smoke tests")))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -203,7 +241,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var coverageMergedDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-merged");
         if (!await RunRequiredAsync(ToolCommand(
             context,
-            ["coverage", "run", "--solution", solutionPath, "--exclude-test-project", "**/Smoke.Browser.Tests.csproj", "--include", "[Smoke]*", "--output", coverageMergedDirectory],
+            ["coverage", "run", "--solution", solutionPath, "--exclude-test-project", "**/Smoke.Browser.Tests.csproj", "--exclude-test-project", "**/Smoke.Msbuild.Tests.csproj", "--include", "[Smoke]*", "--output", coverageMergedDirectory],
             "appsurface coverage run",
             "running packaged coverage CLI")))
         {
@@ -230,6 +268,22 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
 
         artifacts.AddRange(CheckCoverageRunArtifacts(coverageMergedDirectory));
         artifacts.Add(CheckExcludedProjectArtifacts(coverageMergedDirectory, "Smoke.Browser.Tests"));
+        if (artifacts.Any(artifact => !artifact.Exists))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        var coverageMsbuildDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-msbuild");
+        if (!await RunRequiredAsync(ToolCommand(
+            context,
+            ["coverage", "run", "--solution", solutionPath, "--exclude-test-project", "**/Smoke.Browser.Tests.csproj", "--exclude-test-project", "**/Smoke.Tests.csproj", "--coverage-driver", "msbuild", "--include", "[Smoke]*", "--output", coverageMsbuildDirectory],
+            "appsurface coverage run msbuild",
+            "running packaged coverage CLI through the explicit MSBuild compatibility driver")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        artifacts.AddRange(CheckCoverageRunArtifacts(coverageMsbuildDirectory, "coverage run msbuild"));
         if (artifacts.Any(artifact => !artifact.Exists))
         {
             return BuildReport(context, commands, artifacts);
@@ -409,7 +463,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
     /// <summary>
     /// Renders the NuGet config used by the generated consumer fixture for test-only dependencies.
     /// </summary>
-    /// <param name="nugetOrgSource">NuGet source used by <c>dotnet new xunit</c> and <c>dotnet add package coverlet.msbuild</c>.</param>
+    /// <param name="nugetOrgSource">NuGet source used by <c>dotnet new xunit</c> and the Coverlet collector/MSBuild fixture packages.</param>
     /// <returns>NuGet configuration XML containing only the supplied third-party source.</returns>
     /// <remarks>
     /// This config deliberately excludes the local package artifact directory so the fixture exercises the packed CLI
@@ -592,7 +646,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             context.FixtureDirectory,
             operationName,
             timeoutDescription,
-            string.Equals(operationName, "appsurface coverage run", StringComparison.Ordinal)
+            operationName.StartsWith("appsurface coverage run", StringComparison.Ordinal)
                 ? CoverageRunTimeoutMilliseconds
                 : DotNetCommandTimeoutMilliseconds,
             CreateProofEnvironment(context.DotNetHomePath, context.SharedPackagesPath));
@@ -602,9 +656,11 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
     {
         var libraryDirectory = Path.Join(fixtureDirectory, "Smoke");
         var testDirectory = Path.Join(fixtureDirectory, "Smoke.Tests");
+        var msbuildTestDirectory = Path.Join(fixtureDirectory, "Smoke.Msbuild.Tests");
         var excludedTestDirectory = Path.Join(fixtureDirectory, "Smoke.Browser.Tests");
         Directory.CreateDirectory(libraryDirectory);
         Directory.CreateDirectory(testDirectory);
+        Directory.CreateDirectory(msbuildTestDirectory);
         Directory.CreateDirectory(excludedTestDirectory);
 
         await File.WriteAllTextAsync(
@@ -666,6 +722,33 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             }
             """,
             cancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Join(msbuildTestDirectory, "UnitTest1.cs"),
+            """
+            using Xunit;
+
+            using Smoke;
+
+            namespace Smoke.Msbuild.Tests;
+
+            public sealed class UnitTest1
+            {
+                [Fact]
+                public void Add_ReturnsSum()
+                {
+                    Assert.Equal(3, Calculator.Add(1, 2));
+                }
+
+                [Theory]
+                [InlineData(1, "non-negative")]
+                [InlineData(-1, "negative")]
+                public void Sign_ClassifiesValue(int value, string expected)
+                {
+                    Assert.Equal(expected, Calculator.Sign(value));
+                }
+            }
+            """,
+            cancellationToken);
     }
 
     private static string ResolveSmokeSolutionPath(string fixtureDirectory)
@@ -680,16 +763,18 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         return File.Exists(slnPath) ? slnPath : slnxPath;
     }
 
-    private static IReadOnlyList<CoverageCliConsumerProofArtifactCheck> CheckCoverageRunArtifacts(string coverageMergedDirectory)
+    private static IReadOnlyList<CoverageCliConsumerProofArtifactCheck> CheckCoverageRunArtifacts(
+        string coverageMergedDirectory,
+        string descriptionPrefix = "coverage run")
     {
         return
         [
-            CheckArtifact(Path.Join(coverageMergedDirectory, "coverage.cobertura.xml"), "coverage run merged Cobertura"),
-            CheckArtifact(Path.Join(coverageMergedDirectory, "summary.txt"), "coverage run summary"),
-            CheckArtifact(Path.Join(coverageMergedDirectory, "timings.json"), "coverage run timings"),
-            CheckArtifact(Path.Join(coverageMergedDirectory, ".appsurface-coverage-output"), "coverage run ownership marker"),
-            CheckGlob(Path.Join(coverageMergedDirectory, "projects"), "*", "dotnet-test.log", "coverage run project log"),
-            CheckGlob(Path.Join(coverageMergedDirectory, "projects"), "*", "coverage.cobertura.xml", "coverage run project Cobertura")
+            CheckArtifact(Path.Join(coverageMergedDirectory, "coverage.cobertura.xml"), $"{descriptionPrefix} merged Cobertura"),
+            CheckArtifact(Path.Join(coverageMergedDirectory, "summary.txt"), $"{descriptionPrefix} summary"),
+            CheckArtifact(Path.Join(coverageMergedDirectory, "timings.json"), $"{descriptionPrefix} timings"),
+            CheckArtifact(Path.Join(coverageMergedDirectory, ".appsurface-coverage-output"), $"{descriptionPrefix} ownership marker"),
+            CheckGlob(Path.Join(coverageMergedDirectory, "projects"), "*", "dotnet-test.log", $"{descriptionPrefix} project log"),
+            CheckGlob(Path.Join(coverageMergedDirectory, "projects"), "*", "coverage.cobertura.xml", $"{descriptionPrefix} project Cobertura")
         ];
     }
 

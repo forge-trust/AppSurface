@@ -19,6 +19,38 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  coverage-security-windows:
+    name: Coverage security contracts (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+          cache: true
+          cache-dependency-path: |
+            Cli/ForgeTrust.AppSurface.Cli.Tests/packages.lock.json
+
+      - name: Restore coverage security tests (locked)
+        run: dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode
+
+      - name: Run coverage security contracts
+        run: >-
+          dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
+          --configuration Release
+          --no-restore
+          --filter FullyQualifiedName~CoverageRunArtifactReaderTests
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20

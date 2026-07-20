@@ -52,6 +52,10 @@ internal sealed class PackageArtifactWorkflow
     {
         ValidateRequest(request);
         PackageVersionValidator.Require(request.PackageVersion, PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata);
+        CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(
+            request.CoverageProofWorkDirectory,
+            request.RepositoryRoot,
+            request.ArtifactsOutputPath);
 
         var plan = await _planResolver.ResolveAsync(
             request.RepositoryRoot,
@@ -235,6 +239,7 @@ internal sealed class PackageArtifactWorkflow
                 timeoutMilliseconds,
                 new Dictionary<string, string?>
                 {
+                    ["CI"] = "true",
                     ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
                     ["DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE"] = "1",
                     ["DOTNET_NOLOGO"] = "1",

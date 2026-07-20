@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.CoverageRunner.Tests;
 
@@ -409,6 +410,26 @@ public sealed class CoverageRunnerApplicationTests
 
         Assert.False(result);
         Assert.Contains("Merged Cobertura file was not created", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteSummaryAsync_ShouldPreserveCanonicalSummaryWhenCoverageValidationFails()
+    {
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Join(outputDirectory, "coverage.cobertura.xml"), "<coverage />");
+        var summaryPath = Path.Join(outputDirectory, "summary.txt");
+        File.WriteAllText(summaryPath, "previous");
+        var app = CreateApp(new RecordingCommandRunner(workspace));
+
+        var result = await app.WriteSummaryAsync(
+            CreateCoverageOptions(workspace.Root, outputDirectory),
+            CancellationToken.None);
+
+        Assert.False(result);
+        Assert.Equal("previous", File.ReadAllText(summaryPath));
+        Assert.Empty(Directory.EnumerateFiles(outputDirectory, ".summary.txt.*.tmp"));
     }
 
     [Fact]
@@ -968,6 +989,259 @@ public sealed class CoverageRunnerApplicationTests
         Assert.Equal(1, timings.RootElement.GetProperty("merge").GetProperty("exitCode").GetInt32());
     }
 
+    [Theory]
+    [InlineData(0, null, "zero Cobertura files")]
+    [InlineData(2, null, "multiple Cobertura files")]
+    [InlineData(1, "<not-coverage />", "document root is not 'coverage'")]
+    [InlineData(1, "<coverage>", "unreadable or malformed")]
+    public async Task RunAsync_ShouldFailSuccessfulTestWhenCollectorArtifactIsInvalid(
+        int coverageFileCount,
+        string? coverageText,
+        string expectedError)
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Pass.Tests/Pass.Tests.csproj");
+
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            CoverageFileCount = coverageFileCount,
+            CoverageText = coverageText ?? RecordingCommandRunner.ValidCoverageText,
+        };
+        var error = new StringWriter();
+        var app = CreateApp(runner, standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Coverage artifact invalid for tools/Pass.Tests/Pass.Tests.csproj", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains(expectedError, error.ToString(), StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Join(
+            workspace.Root,
+            "TestResults",
+            "coverage-merged",
+            "projects",
+            "Pass.Tests",
+            "coverage.cobertura.xml")));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldPreserveTestFailureBeforeCollectorArtifactFailure()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Fail.Tests/Fail.Tests.csproj");
+
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            FailingProject = "Fail.Tests.csproj",
+            CoverageFileCount = 0,
+        };
+        var error = new StringWriter();
+        var app = CreateApp(runner, standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(7, exitCode);
+        Assert.DoesNotContain("Coverage artifact invalid", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Fail.Tests.csproj (exit 7)", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldNormalizeOnlyTheCurrentCollectorInvocation()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Pass.Tests/Pass.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            CoverageText = "<coverage marker=\"current\" />",
+            StaleSiblingCoverageText = "<coverage marker=\"stale\" />",
+        };
+        var app = CreateApp(runner);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        var canonical = Path.Join(
+            workspace.Root,
+            "TestResults",
+            "coverage-merged",
+            "projects",
+            "Pass.Tests",
+            "coverage.cobertura.xml");
+        Assert.Contains("current", File.ReadAllText(canonical), StringComparison.Ordinal);
+        Assert.DoesNotContain("stale", File.ReadAllText(canonical), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NormalizeCollectorCoverageAsync_ShouldRejectSymbolicLinkArtifact()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var workspace = TestRepo.Create();
+        var projectOutput = Path.Join(workspace.Root, "project");
+        var rawResults = Path.Join(projectOutput, "collector-results", "current");
+        Directory.CreateDirectory(rawResults);
+        var external = Path.Join(workspace.Root, "external.xml");
+        File.WriteAllText(external, "<coverage marker=\"external\" />");
+        File.CreateSymbolicLink(Path.Join(rawResults, "coverage.cobertura.xml"), external);
+
+        var failure = await CoverageRunnerApplication.NormalizeCollectorCoverageAsync(
+            projectOutput,
+            rawResults,
+            CancellationToken.None);
+
+        Assert.Contains("unreadable", failure, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Join(projectOutput, "coverage.cobertura.xml")));
+    }
+
+    [Fact]
+    public async Task NormalizeCollectorCoverageAsync_ShouldPreserveCanonicalArtifactWhenValidationFails()
+    {
+        using var workspace = TestRepo.Create();
+        var projectOutput = Path.Join(workspace.Root, "project");
+        var rawResults = Path.Join(projectOutput, "collector-results", "current");
+        Directory.CreateDirectory(rawResults);
+        var canonical = Path.Join(projectOutput, "coverage.cobertura.xml");
+        File.WriteAllText(canonical, "<coverage marker=\"previous\" />");
+        File.WriteAllText(Path.Join(rawResults, "coverage.cobertura.xml"), "<coverage>");
+
+        var failure = await CoverageRunnerApplication.NormalizeCollectorCoverageAsync(
+            projectOutput,
+            rawResults,
+            CancellationToken.None);
+
+        Assert.Contains("malformed", failure, StringComparison.Ordinal);
+        Assert.Contains("previous", File.ReadAllText(canonical), StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFiles(projectOutput, ".coverage.*.tmp", SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
+    public async Task CommitCoberturaAsync_ShouldPreserveCanonicalAndCleanStagingFileWhenValidationFails()
+    {
+        using var workspace = TestRepo.Create();
+        var destination = Path.Join(workspace.Root, "coverage.cobertura.xml");
+        var source = Path.Join(workspace.Root, "Cobertura.xml");
+        File.WriteAllText(destination, "<coverage marker=\"previous\" />");
+        File.WriteAllText(source, "<coverage lines-covered=\"not-a-number\" />");
+
+        var failure = await CoverageRunnerApplication.CommitCoberturaAsync(
+            source,
+            destination,
+            CancellationToken.None);
+
+        Assert.Contains("numeric coverage attributes", failure, StringComparison.Ordinal);
+        Assert.Contains("previous", File.ReadAllText(destination), StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFiles(workspace.Root, ".coverage.cobertura.xml.*.tmp"));
+    }
+
+    [Fact]
+    public async Task CommitCoberturaAsync_ShouldPreserveCanonicalAndCleanStagingFileWhenCanceledBeforeCommit()
+    {
+        using var workspace = TestRepo.Create();
+        var destination = Path.Join(workspace.Root, "coverage.cobertura.xml");
+        var source = Path.Join(workspace.Root, "Cobertura.xml");
+        File.WriteAllText(destination, "<coverage marker=\"previous\" />");
+        File.WriteAllText(source, RecordingCommandRunner.ValidCoverageText);
+        using var cancellation = new CancellationTokenSource();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => CoverageRunnerApplication.CommitCoberturaAsync(
+            source,
+            destination,
+            cancellation.Token,
+            cancellation.Cancel));
+
+        Assert.Contains("previous", File.ReadAllText(destination), StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFiles(workspace.Root, ".coverage.cobertura.xml.*.tmp"));
+    }
+
+    [Fact]
+    public async Task CommitCoberturaAsync_ShouldPreserveCanonicalAndCleanStagingFileWhenCommitFails()
+    {
+        using var workspace = TestRepo.Create();
+        var destination = Path.Join(workspace.Root, "coverage.cobertura.xml");
+        var source = Path.Join(workspace.Root, "Cobertura.xml");
+        File.WriteAllText(destination, "<coverage marker=\"previous\" />");
+        File.WriteAllText(source, RecordingCommandRunner.ValidCoverageText);
+
+        var failure = await CoverageRunnerApplication.CommitCoberturaAsync(
+            source,
+            destination,
+            CancellationToken.None,
+            () => throw new IOException("simulated commit failure"));
+
+        Assert.Contains("IOException", failure, StringComparison.Ordinal);
+        Assert.Contains("previous", File.ReadAllText(destination), StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFiles(workspace.Root, ".coverage.cobertura.xml.*.tmp"));
+    }
+
+    [Theory]
+    [InlineData("summary.txt")]
+    [InlineData("timings.json")]
+    [InlineData("reportgenerator-summary.txt")]
+    public async Task WriteCanonicalTextAsync_ShouldPreserveCanonicalAndCleanStagingFileWhenCommitFails(string fileName)
+    {
+        using var workspace = TestRepo.Create();
+        var destination = TestPathUtils.PathUnder(workspace.Root, fileName);
+        File.WriteAllText(destination, "previous");
+
+        await Assert.ThrowsAsync<IOException>(() => CoverageRunnerApplication.WriteCanonicalTextAsync(
+            destination,
+            "replacement",
+            CancellationToken.None,
+            () => throw new IOException("simulated commit failure")));
+
+        Assert.Equal("previous", File.ReadAllText(destination));
+        Assert.Empty(Directory.EnumerateFiles(workspace.Root, $".{fileName}.*.tmp"));
+    }
+
+    [Theory]
+    [InlineData("summary.txt")]
+    [InlineData("timings.json")]
+    [InlineData("reportgenerator-summary.txt")]
+    public async Task WriteCanonicalTextAsync_ShouldPreserveCanonicalAndCleanStagingFileWhenCanceledBeforeCommit(string fileName)
+    {
+        using var workspace = TestRepo.Create();
+        var destination = TestPathUtils.PathUnder(workspace.Root, fileName);
+        File.WriteAllText(destination, "previous");
+        using var cancellation = new CancellationTokenSource();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => CoverageRunnerApplication.WriteCanonicalTextAsync(
+            destination,
+            "replacement",
+            cancellation.Token,
+            cancellation.Cancel));
+
+        Assert.Equal("previous", File.ReadAllText(destination));
+        Assert.Empty(Directory.EnumerateFiles(workspace.Root, $".{fileName}.*.tmp"));
+    }
+
+    [Fact]
+    public async Task CopyCanonicalTextAsync_ShouldPreserveReportSummaryAndAvoidStagingWhenSourceReadFails()
+    {
+        using var workspace = TestRepo.Create();
+        var destination = Path.Join(workspace.Root, "reportgenerator-summary.txt");
+        File.WriteAllText(destination, "previous");
+
+        await Assert.ThrowsAsync<FileNotFoundException>(() => CoverageRunnerApplication.CopyCanonicalTextAsync(
+            Path.Join(workspace.Root, "missing-Summary.txt"),
+            destination,
+            CancellationToken.None));
+
+        Assert.Equal("previous", File.ReadAllText(destination));
+        Assert.Empty(Directory.EnumerateFiles(workspace.Root, ".reportgenerator-summary.txt.*.tmp"));
+    }
+
     [Fact]
     public async Task RunAsync_ShouldWriteTimingsWhenReportGeneratorFails()
     {
@@ -1149,6 +1423,36 @@ public sealed class CoverageRunnerApplicationTests
             new Dictionary<string, string?>()));
     }
 
+    [Fact]
+    public async Task RunAsync_ShouldPreserveFirstCancellationWhileDrainingAndObservingAllActiveProjects()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Cancel.Tests/Cancel.Tests.csproj");
+        workspace.AddProject("tools/Throw.Tests/Throw.Tests.csproj");
+
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            CancelingProject = "Cancel.Tests.csproj",
+            UnexpectedThrowingProject = "Throw.Tests.csproj",
+            WaitForReleaseProject = "Throw.Tests.csproj",
+        };
+        var app = CreateApp(runner);
+
+        var run = app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?> { ["COVERAGE_PARALLELISM"] = "2" });
+        await runner.WaitingProjectStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(run.IsCompleted);
+        runner.ReleaseWaitingProject.TrySetResult();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => run);
+        Assert.Equal(2, runner.CompletedTestCommands.Count);
+        Assert.Contains(runner.CompletedTestCommands, project => project.EndsWith("Cancel.Tests.csproj", StringComparison.Ordinal));
+        Assert.Contains(runner.CompletedTestCommands, project => project.EndsWith("Throw.Tests.csproj", StringComparison.Ordinal));
+        Assert.Equal(0, runner.ActiveTests);
+    }
+
     private static CoverageRunnerApplication CreateApp(
         ICommandRunner commandRunner,
         TextWriter? standardOut = null,
@@ -1202,6 +1506,9 @@ public sealed class CoverageRunnerApplicationTests
 
     private sealed class RecordingCommandRunner : ICommandRunner
     {
+        public const string ValidCoverageText =
+            "<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />";
+
         private readonly TestRepo _workspace;
         private int _activeTests;
 
@@ -1224,9 +1531,19 @@ public sealed class CoverageRunnerApplicationTests
 
         public string? MissingCoverageProject { get; init; }
 
+        public int CoverageFileCount { get; init; } = 1;
+
+        public string CoverageText { get; init; } = ValidCoverageText;
+
+        public string? StaleSiblingCoverageText { get; init; }
+
         public string? ThrowingProject { get; init; }
 
         public string? CancelingProject { get; init; }
+
+        public string? UnexpectedThrowingProject { get; init; }
+
+        public string? WaitForReleaseProject { get; init; }
 
         public int ReportGeneratorExitCode { get; init; }
 
@@ -1246,6 +1563,14 @@ public sealed class CoverageRunnerApplicationTests
         public ConcurrentBag<IReadOnlyList<string>> TestArguments { get; } = [];
 
         public ConcurrentBag<string> TestCommands { get; } = [];
+
+        public ConcurrentBag<string> CompletedTestCommands { get; } = [];
+
+        public TaskCompletionSource WaitingProjectStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ReleaseWaitingProject { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int ActiveTests => Volatile.Read(ref _activeTests);
 
         public ConcurrentBag<TestSnapshot> TestSnapshots { get; } = [];
 
@@ -1310,6 +1635,12 @@ public sealed class CoverageRunnerApplicationTests
                         await Task.Delay(TestDelay, cancellationToken);
                     }
 
+                    if (WaitForReleaseProject is not null && project.EndsWith(WaitForReleaseProject, StringComparison.Ordinal))
+                    {
+                        WaitingProjectStarted.TrySetResult();
+                        await ReleaseWaitingProject.Task.WaitAsync(cancellationToken);
+                    }
+
                     if (ThrowingProject is not null && project.EndsWith(ThrowingProject, StringComparison.Ordinal))
                     {
                         throw new IOException($"simulated command failure for {project}");
@@ -1320,13 +1651,29 @@ public sealed class CoverageRunnerApplicationTests
                         throw new OperationCanceledException();
                     }
 
-                    var coveragePrefix = arguments.Single(argument => argument.StartsWith("/p:CoverletOutput=", StringComparison.Ordinal))["/p:CoverletOutput=".Length..];
+                    if (UnexpectedThrowingProject is not null && project.EndsWith(UnexpectedThrowingProject, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException($"simulated unexpected failure for {project}");
+                    }
+
+                    var resultsIndex = arguments.ToList().IndexOf("--results-directory");
+                    var invocationDirectory = arguments[resultsIndex + 1];
+                    if (StaleSiblingCoverageText is not null)
+                    {
+                        var staleDirectory = Path.Join(Path.GetDirectoryName(invocationDirectory)!, "stale", "attachment");
+                        Directory.CreateDirectory(staleDirectory);
+                        File.WriteAllText(Path.Join(staleDirectory, "coverage.cobertura.xml"), StaleSiblingCoverageText);
+                    }
+
+                    var coverageDirectory = Path.Join(invocationDirectory, Guid.NewGuid().ToString("D"));
                     if (MissingCoverageProject is null || !project.EndsWith(MissingCoverageProject, StringComparison.Ordinal))
                     {
-                        Directory.CreateDirectory(Path.GetDirectoryName(coveragePrefix)!);
-                        File.WriteAllText(
-                            coveragePrefix + ".cobertura.xml",
-                            "<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
+                        for (var coverageIndex = 0; coverageIndex < CoverageFileCount; coverageIndex++)
+                        {
+                            var artifactDirectory = Path.Join(coverageDirectory, coverageIndex.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                            Directory.CreateDirectory(artifactDirectory);
+                            File.WriteAllText(Path.Join(artifactDirectory, "coverage.cobertura.xml"), CoverageText);
+                        }
                     }
 
                     var junit = arguments.Single(argument => argument.StartsWith("--logger:junit;LogFilePath=", StringComparison.Ordinal))["--logger:junit;LogFilePath=".Length..];
@@ -1341,6 +1688,7 @@ public sealed class CoverageRunnerApplicationTests
                 }
                 finally
                 {
+                    CompletedTestCommands.Add(project);
                     Interlocked.Decrement(ref _activeTests);
                 }
             }

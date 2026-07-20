@@ -13,6 +13,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Keep the solution coverage gate on the same no-follow artifact reader as the packaged CLI. -->
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunArtifactReader.cs"
+             Link="Coverage/CoverageRunArtifactReader.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>ForgeTrust.AppSurface.CoverageRunner.Tests</_Parameter1>
     </AssemblyAttribute>

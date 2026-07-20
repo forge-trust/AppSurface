@@ -1,5 +1,9 @@
 using System.ComponentModel;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
+using System.Xml;
+using System.Xml.Linq;
+using ForgeTrust.AppSurface.CoverageArtifacts;
 
 namespace ForgeTrust.AppSurface.CoverageRunner;
 
@@ -19,6 +23,13 @@ namespace ForgeTrust.AppSurface.CoverageRunner;
 /// </remarks>
 internal sealed class CoverageRunnerApplication
 {
+    private static readonly XmlReaderSettings CoberturaReaderSettings = new()
+    {
+        Async = true,
+        DtdProcessing = DtdProcessing.Prohibit,
+        XmlResolver = null,
+    };
+
     private const string Usage = """
         ForgeTrust.AppSurface.CoverageRunner
 
@@ -212,7 +223,8 @@ internal sealed class CoverageRunnerApplication
         var mergeExit = await MergeCoverageFilesAsync(options, projectsOutputDirectory, cancellationToken);
         var mergeSeconds = mergeTimer.ElapsedSeconds;
         var junitCount = Directory.EnumerateFiles(options.OutputDirectory, "junit-*.xml", SearchOption.TopDirectoryOnly).Count();
-        var coverageCount = Directory.EnumerateFiles(projectsOutputDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories).Count();
+        var coverageCount = Directory.EnumerateFiles(projectsOutputDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories)
+            .Count(path => !IsCollectorRawPath(path));
         var diagnostics = await RunSlowTestDiagnosticsAsync(options, results, () => totalTimer.ElapsedSeconds, cancellationToken);
         var totalSeconds = totalTimer.ElapsedSeconds;
         var summaryExit = 0;
@@ -323,43 +335,92 @@ internal sealed class CoverageRunnerApplication
     {
         var results = new ProjectRunResult[projects.Count];
         var active = new List<Task<ProjectRunResult>>();
+        ExceptionDispatchInfo? terminalFailure = null;
 
         for (var i = 0; i < projects.Count; i++)
         {
+            if (terminalFailure is not null)
+            {
+                break;
+            }
+
             var project = projects[i];
             if (project.IsExclusive)
             {
-                await DrainActiveAsync(active, results);
-                results[i] = await RunProjectAsync(options, project, i, projects.Count, solutionDirectory, cancellationToken);
+                terminalFailure = await DrainActiveAsync(active, results, terminalFailure);
+                if (terminalFailure is not null)
+                {
+                    break;
+                }
+
+                terminalFailure = await CompleteProjectAsync(
+                    RunProjectAsync(options, project, i, projects.Count, solutionDirectory, cancellationToken),
+                    results,
+                    terminalFailure);
                 continue;
             }
 
-            while (active.Count >= options.Parallelism)
+            while (active.Count >= options.Parallelism && terminalFailure is null)
             {
-                await DrainOneAsync(active, results);
+                terminalFailure = await DrainOneAsync(active, results, terminalFailure);
+            }
+
+            if (terminalFailure is not null)
+            {
+                break;
             }
 
             active.Add(RunProjectAsync(options, project, i, projects.Count, solutionDirectory, cancellationToken));
         }
 
-        await DrainActiveAsync(active, results);
+        terminalFailure = await DrainActiveAsync(active, results, terminalFailure);
+        if (terminalFailure is not null)
+        {
+            terminalFailure.Throw();
+        }
+
         return results;
     }
 
-    private static async Task DrainOneAsync(List<Task<ProjectRunResult>> active, ProjectRunResult[] results)
+    private static async Task<ExceptionDispatchInfo?> DrainOneAsync(
+        List<Task<ProjectRunResult>> active,
+        ProjectRunResult[] results,
+        ExceptionDispatchInfo? terminalFailure)
     {
         var completed = await Task.WhenAny(active);
         active.Remove(completed);
-        var result = await completed;
-        results[result.Index] = result;
+        return await CompleteProjectAsync(completed, results, terminalFailure);
     }
 
-    private static async Task DrainActiveAsync(List<Task<ProjectRunResult>> active, ProjectRunResult[] results)
+    private static async Task<ExceptionDispatchInfo?> DrainActiveAsync(
+        List<Task<ProjectRunResult>> active,
+        ProjectRunResult[] results,
+        ExceptionDispatchInfo? terminalFailure)
     {
         while (active.Count > 0)
         {
-            await DrainOneAsync(active, results);
+            terminalFailure = await DrainOneAsync(active, results, terminalFailure);
         }
+
+        return terminalFailure;
+    }
+
+    private static async Task<ExceptionDispatchInfo?> CompleteProjectAsync(
+        Task<ProjectRunResult> task,
+        ProjectRunResult[] results,
+        ExceptionDispatchInfo? terminalFailure)
+    {
+        try
+        {
+            var result = await task;
+            results[result.Index] = result;
+        }
+        catch (Exception ex)
+        {
+            terminalFailure ??= ExceptionDispatchInfo.Capture(ex);
+        }
+
+        return terminalFailure;
     }
 
     private async Task<ProjectRunResult> RunProjectAsync(
@@ -379,18 +440,29 @@ internal sealed class CoverageRunnerApplication
 
         await _standardOut.WriteLineAsync($"[{index + 1}/{count}][{options.GroupName}] starting dotnet test {project.RelativePath}{(project.IsExclusive ? " (exclusive)" : string.Empty)}");
 
-        var args = CreateTestArguments(options, project, projectOutputDirectory, junitFile);
+        var invocation = CreateTestInvocation(options, project, projectOutputDirectory, junitFile);
         var timer = _clock.StartTimer();
-        var result = await RunProjectCommandAsync(project, args, solutionDirectory, logFile, cancellationToken);
-        var seconds = timer.ElapsedSeconds;
-
-        await _standardOut.WriteLineAsync($"[{index + 1}/{count}][{options.GroupName}] finished {project.RelativePath} in {seconds}s (exit {result.ExitCode})");
-        if (result.ExitCode != 0)
+        var result = await RunProjectCommandAsync(project, invocation.Arguments, solutionDirectory, logFile, cancellationToken);
+        var artifactFailure = await NormalizeCollectorCoverageAsync(
+            projectOutputDirectory,
+            invocation.RawResultsDirectory,
+            cancellationToken);
+        var exitCode = result.ExitCode;
+        if (exitCode == 0 && artifactFailure is not null)
         {
-            await _standardError.WriteLineAsync($"Test run failed for {project.RelativePath} (exit {result.ExitCode})");
+            exitCode = 1;
+            await _standardError.WriteLineAsync($"Coverage artifact invalid for {project.RelativePath}: {artifactFailure}");
         }
 
-        return new ProjectRunResult(index, project, seconds, result.ExitCode, junitFile, logFile);
+        var seconds = timer.ElapsedSeconds;
+
+        await _standardOut.WriteLineAsync($"[{index + 1}/{count}][{options.GroupName}] finished {project.RelativePath} in {seconds}s (exit {exitCode})");
+        if (exitCode != 0)
+        {
+            await _standardError.WriteLineAsync($"Test run failed for {project.RelativePath} (exit {exitCode})");
+        }
+
+        return new ProjectRunResult(index, project, seconds, exitCode, junitFile, logFile);
     }
 
     private async Task<CommandResult> RunProjectCommandAsync(
@@ -416,7 +488,7 @@ internal sealed class CoverageRunnerApplication
         }
     }
 
-    private static List<string> CreateTestArguments(
+    private static CollectorTestInvocation CreateTestInvocation(
         CoverageRunnerOptions options,
         TestProject project,
         string projectOutputDirectory,
@@ -432,11 +504,6 @@ internal sealed class CoverageRunnerApplication
             "minimal",
             "--logger:GitHubActions;report-warnings=false",
             $"--logger:junit;LogFilePath={junitFile}",
-            "/p:CollectCoverage=true",
-            $"/p:CoverletOutput={Path.Join(projectOutputDirectory, "coverage")}",
-            "/p:CoverletOutputFormat=cobertura",
-            $"/p:Include={options.IncludeFilter}",
-            $"/p:Exclude={options.ExcludeFilter}",
         };
 
         if (options.BuildSolution)
@@ -449,8 +516,141 @@ internal sealed class CoverageRunnerApplication
             args.Add("--no-restore");
         }
 
-        return args;
+        var rawResultsDirectory = Path.Join(projectOutputDirectory, "collector-results", Guid.NewGuid().ToString("N"));
+        if (Directory.Exists(rawResultsDirectory) || File.Exists(rawResultsDirectory))
+        {
+            throw new IOException($"Collector invocation directory collision: {rawResultsDirectory}");
+        }
+
+        Directory.CreateDirectory(rawResultsDirectory);
+        args.Add("--collect:XPlat Code Coverage");
+        args.Add("--results-directory");
+        args.Add(rawResultsDirectory);
+        args.Add("--");
+        args.Add("DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura");
+        args.Add($"DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Include={options.IncludeFilter}");
+        args.Add($"DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude={options.ExcludeFilter}");
+
+        return new CollectorTestInvocation(args, rawResultsDirectory);
     }
+
+    /// <summary>
+    /// Validates and atomically normalizes exactly one Cobertura attachment from one collector invocation.
+    /// </summary>
+    /// <remarks>
+    /// The invocation directory is deliberately retained from argument construction so artifacts from stale
+    /// sibling invocations cannot satisfy or invalidate the current test run. Artifact content is copied from
+    /// the shared no-follow reader into a private staging file, validated there, and committed with one rename.
+    /// </remarks>
+    internal static async Task<string?> NormalizeCollectorCoverageAsync(
+        string projectOutputDirectory,
+        string rawResultsDirectory,
+        CancellationToken cancellationToken)
+    {
+        string[] candidates;
+        try
+        {
+            candidates = EnumerateCollectorArtifacts(rawResultsDirectory);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return $"collector results are unreadable ({ex.GetType().Name})";
+        }
+
+        if (candidates.Length == 0)
+        {
+            return "zero Cobertura files were produced";
+        }
+
+        if (candidates.Length > 1)
+        {
+            return $"multiple Cobertura files were produced ({candidates.Length})";
+        }
+
+        var staged = Path.Join(projectOutputDirectory, $".coverage.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await using (var output = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+            await using (var input = CoverageRunArtifactReader.OpenRegularFile(
+                projectOutputDirectory,
+                rawResultsDirectory,
+                candidates[0]))
+            {
+                await input.CopyToAsync(output, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+            }
+
+            await using (var stagedInput = new FileStream(staged, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
+            using (var reader = XmlReader.Create(stagedInput, CoberturaReaderSettings))
+            {
+                var document = await XDocument.LoadAsync(reader, LoadOptions.None, cancellationToken);
+                if (!string.Equals(document.Root?.Name.LocalName, "coverage", StringComparison.Ordinal))
+                {
+                    return "the Cobertura document root is not 'coverage'";
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(staged, Path.Join(projectOutputDirectory, "coverage.cobertura.xml"), overwrite: true);
+            return null;
+        }
+        catch (Exception ex) when (ex is XmlException or InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            return $"the Cobertura file is unreadable or malformed ({ex.GetType().Name})";
+        }
+        finally
+        {
+            if (File.Exists(staged))
+            {
+                try
+                {
+                    File.Delete(staged);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+    }
+
+    private static string[] EnumerateCollectorArtifacts(string rawResultsDirectory)
+    {
+        if (!Directory.Exists(rawResultsDirectory))
+        {
+            return [];
+        }
+
+        var candidates = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(Path.GetFullPath(rawResultsDirectory));
+        while (pending.TryPop(out var directory))
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.TopDirectoryOnly))
+            {
+                var attributes = File.GetAttributes(entry);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new IOException("symbolic link or reparse point encountered in collector results");
+                }
+
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    pending.Push(entry);
+                }
+                else if (string.Equals(Path.GetFileName(entry), "coverage.cobertura.xml", StringComparison.Ordinal))
+                {
+                    candidates.Add(Path.GetFullPath(entry));
+                }
+            }
+        }
+
+        return candidates.OrderBy(path => path, GetPathComparer()).ToArray();
+    }
+
+    private static StringComparer GetPathComparer()
+        => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    private sealed record CollectorTestInvocation(IReadOnlyList<string> Arguments, string RawResultsDirectory);
 
     private async Task ReplayLogsAsync(IReadOnlyList<ProjectRunResult> results, CancellationToken cancellationToken)
     {
@@ -513,11 +713,29 @@ internal sealed class CoverageRunnerApplication
             return 1;
         }
 
-        File.Copy(mergedCoverage, Path.Join(options.OutputDirectory, "coverage.cobertura.xml"), overwrite: true);
+        var canonicalCoverage = Path.Join(options.OutputDirectory, "coverage.cobertura.xml");
+        var commitFailure = await CommitCoberturaAsync(mergedCoverage, canonicalCoverage, cancellationToken);
+        if (commitFailure is not null)
+        {
+            if (commitFailure.Contains("numeric coverage attributes", StringComparison.Ordinal))
+            {
+                await _standardError.WriteLineAsync($"Failed to parse numeric coverage attributes from {mergedCoverage}");
+            }
+            else
+            {
+                await _standardError.WriteLineAsync($"Merged Cobertura artifact is invalid or could not be committed: {commitFailure}");
+            }
+
+            return 1;
+        }
+
         var reportGeneratorSummary = Path.Join(mergeDirectory, "Summary.txt");
         if (File.Exists(reportGeneratorSummary))
         {
-            File.Copy(reportGeneratorSummary, Path.Join(options.OutputDirectory, "reportgenerator-summary.txt"), overwrite: true);
+            await CopyCanonicalTextAsync(
+                reportGeneratorSummary,
+                Path.Join(options.OutputDirectory, "reportgenerator-summary.txt"),
+                cancellationToken);
         }
 
         return 0;
@@ -537,9 +755,15 @@ internal sealed class CoverageRunnerApplication
         }
 
         return Directory.Exists(sourceDirectory)
-            ? Directory.EnumerateFiles(sourceDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories).ToArray()
+            ? Directory.EnumerateFiles(sourceDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories)
+                .Where(path => !IsCollectorRawPath(path))
+                .ToArray()
             : [];
     }
+
+    private static bool IsCollectorRawPath(string path)
+        => path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Contains("collector-results", StringComparer.Ordinal);
 
     private static int CoverageFileCountForMerge(string sourceDirectory)
     {
@@ -614,9 +838,157 @@ internal sealed class CoverageRunnerApplication
             Diagnostic aggregation overhead: {diagnosticsSeconds}s ({diagnosticsPercent:0.00}% of total runner time)
             Diagnostic warnings: {diagnosticsWarnings}
             """);
-        await File.WriteAllTextAsync(Path.Join(options.OutputDirectory, "summary.txt"), summary, cancellationToken);
+        var summaryPath = Path.Join(options.OutputDirectory, "summary.txt");
+        try
+        {
+            await WriteCanonicalTextAsync(summaryPath, summary, cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await _standardError.WriteLineAsync($"Failed to write coverage summary {summaryPath}: {ex.Message}");
+            return false;
+        }
+
         await _standardOut.WriteLineAsync(summary);
         return true;
+    }
+
+    /// <summary>
+    /// Stages, validates, and atomically replaces a canonical Cobertura artifact.
+    /// </summary>
+    /// <param name="sourcePath">ReportGenerator output to stage.</param>
+    /// <param name="destinationPath">Canonical output path to replace.</param>
+    /// <param name="cancellationToken">Cancellation token observed before the atomic replacement.</param>
+    /// <param name="beforeCommit">Optional test seam invoked after validation and before replacement.</param>
+    /// <returns><see langword="null"/> on success; otherwise a stable failure description.</returns>
+    internal static async Task<string?> CommitCoberturaAsync(
+        string sourcePath,
+        string destinationPath,
+        CancellationToken cancellationToken,
+        Action? beforeCommit = null)
+    {
+        var stagedPath = CreateSiblingStagingPath(destinationPath);
+        try
+        {
+            await using (var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
+            await using (var staged = new FileStream(stagedPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+            {
+                await source.CopyToAsync(staged, cancellationToken);
+                await staged.FlushAsync(cancellationToken);
+            }
+
+            await using (var staged = new FileStream(stagedPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
+            using (var reader = XmlReader.Create(staged, CoberturaReaderSettings))
+            {
+                var document = await XDocument.LoadAsync(reader, LoadOptions.None, cancellationToken);
+                var root = document.Root;
+                if (root is null || !string.Equals(root.Name.LocalName, "coverage", StringComparison.Ordinal))
+                {
+                    return "the document root is not 'coverage'";
+                }
+
+                if (!HasNumericCoverageAttribute(root, "lines-covered")
+                    || !HasNumericCoverageAttribute(root, "lines-valid")
+                    || !HasNumericCoverageAttribute(root, "branches-covered")
+                    || !HasNumericCoverageAttribute(root, "branches-valid"))
+                {
+                    return "required numeric coverage attributes are missing or invalid";
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            beforeCommit?.Invoke();
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(stagedPath, destinationPath, overwrite: true);
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is XmlException or InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            return $"the Cobertura file is unreadable or malformed ({ex.GetType().Name})";
+        }
+        finally
+        {
+            TryDeleteStagingFile(stagedPath);
+        }
+    }
+
+    /// <summary>
+    /// Writes a sibling staging file and atomically replaces the requested canonical text artifact.
+    /// </summary>
+    /// <param name="destinationPath">Canonical output path to replace.</param>
+    /// <param name="contents">Complete artifact contents.</param>
+    /// <param name="cancellationToken">Cancellation token observed before the atomic replacement.</param>
+    /// <param name="beforeCommit">Optional test seam invoked after staging and before replacement.</param>
+    internal static async Task WriteCanonicalTextAsync(
+        string destinationPath,
+        string contents,
+        CancellationToken cancellationToken,
+        Action? beforeCommit = null)
+    {
+        var stagedPath = CreateSiblingStagingPath(destinationPath);
+        try
+        {
+            await File.WriteAllTextAsync(stagedPath, contents, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            beforeCommit?.Invoke();
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(stagedPath, destinationPath, overwrite: true);
+        }
+        finally
+        {
+            TryDeleteStagingFile(stagedPath);
+        }
+    }
+
+    /// <summary>
+    /// Reads a complete text artifact and atomically replaces a canonical sibling-path copy.
+    /// </summary>
+    /// <param name="sourcePath">Text artifact to read before staging begins.</param>
+    /// <param name="destinationPath">Canonical output path to replace.</param>
+    /// <param name="cancellationToken">Cancellation token observed while reading, staging, and before replacement.</param>
+    /// <param name="beforeCommit">Optional test seam invoked after staging and before replacement.</param>
+    /// <remarks>
+    /// Reading the source before staging ensures a read failure leaves both the canonical artifact
+    /// and its directory free of partial temporary files.
+    /// </remarks>
+    internal static async Task CopyCanonicalTextAsync(
+        string sourcePath,
+        string destinationPath,
+        CancellationToken cancellationToken,
+        Action? beforeCommit = null)
+    {
+        var contents = await File.ReadAllTextAsync(sourcePath, cancellationToken);
+        await WriteCanonicalTextAsync(destinationPath, contents, cancellationToken, beforeCommit);
+    }
+
+    private static bool HasNumericCoverageAttribute(XElement root, string name)
+        => int.TryParse(root.Attribute(name)?.Value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _);
+
+    private static string CreateSiblingStagingPath(string destinationPath)
+    {
+        var directory = Path.GetDirectoryName(destinationPath)
+            ?? throw new InvalidOperationException($"Canonical artifact path has no directory: {destinationPath}");
+        return Path.Join(directory, $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
+    }
+
+    private static void TryDeleteStagingFile(string stagedPath)
+    {
+        if (!File.Exists(stagedPath))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(stagedPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     /// <summary>
@@ -709,7 +1081,10 @@ internal sealed class CoverageRunnerApplication
         };
 
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(Path.Join(options.OutputDirectory, "timings.json"), json + Environment.NewLine, cancellationToken);
+        await WriteCanonicalTextAsync(
+            Path.Join(options.OutputDirectory, "timings.json"),
+            json + Environment.NewLine,
+            cancellationToken);
     }
 
     private static void PrepareOutputDirectory(CoverageRunnerOptions options)

@@ -2100,6 +2100,7 @@ internal sealed class PackageProjectScanner
         var projectName = Path.GetFileNameWithoutExtension(relativePath).ToLowerInvariant();
 
         if (HasHiddenDirectorySegment(normalizedPath)
+            || normalizedPathLower.StartsWith("/artifacts/", StringComparison.Ordinal)
             || normalizedPathLower.Contains("/bin/", StringComparison.Ordinal)
             || normalizedPathLower.Contains("/obj/", StringComparison.Ordinal)
             || normalizedPathLower.Contains("/node_modules/", StringComparison.Ordinal)
