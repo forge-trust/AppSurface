@@ -129,6 +129,24 @@ public sealed class PostgreSqlDurableWorkStoreTests
     }
 
     [Fact]
+    public async Task TransactionWriter_RejectsTransactionWhoseConnectionWasClosed()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var writer = CreateWriter(database.DataSource, Guid.NewGuid());
+        await using var connection = await database.DataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await connection.CloseAsync();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await writer.EnqueueAsync(
+                transaction,
+                CreateRequest("scope-closed-connection", "command-closed-connection")));
+
+        Assert.Contains("not active on an open connection", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TransactionWriter_RejectsProviderSafetyThatDiffersFromRegistration()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
