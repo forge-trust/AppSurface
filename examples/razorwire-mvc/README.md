@@ -25,7 +25,7 @@ To inspect failed-submission conventions, navigate to `/Reactivity/FormFailures`
 
 To inspect same-page navigation conventions, navigate to `/Navigation/PageNavigation`. That page is a brochure-style proof for active section links, initial hash state, optional mobile panel close, and Bootstrap scrollspy replacement without custom page JavaScript.
 
-To inspect the default runtime-sourcing contract without unrelated network traffic, navigate to `/Reactivity/DeterministicRuntime`. Its dedicated layout contains no external fonts or other remote assets, loads the package-owned Turbo 8.0.12 runtime from the app origin, and links to a second state through Turbo Drive. The integration test records external HTTP requests and preserves a window sentinel across the visit to prove there was no full reload.
+To inspect the default runtime-sourcing contract without unrelated network traffic, navigate to `/Reactivity/DeterministicRuntime`. Its dedicated layout contains no external fonts or other remote assets, loads the package-owned Turbo 8.0.23 runtime from the app origin, and links to a second state through Turbo Drive. The integration tests record external HTTP requests, preserve a window sentinel across visits, and cover the hash, frame, and stream risks selected by the [Turbo 8.0.23 upgrade review](../../Web/ForgeTrust.RazorWire/Docs/turbo-8.0.23-upgrade-review.md).
 
 ## What Just Happened
 

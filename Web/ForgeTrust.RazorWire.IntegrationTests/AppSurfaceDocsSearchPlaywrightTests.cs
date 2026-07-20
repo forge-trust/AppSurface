@@ -824,10 +824,11 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
 
         await page.EvaluateAsync(
             """
-            () => {
-              history.pushState({ rwDocsSearch: true }, "", `${window.location.pathname}?q=retry-test&pageType=guide`);
-              history.back();
-            }
+            () => new Promise(resolve => {
+                document.addEventListener("turbo:load", resolve, { once: true });
+                history.pushState({ rwDocsSearch: true }, "", `${window.location.pathname}?q=retry-test&pageType=guide`);
+                history.back();
+            })
             """);
         await page.WaitForSelectorAsync("#docs-search-page-failure", new PageWaitForSelectorOptions
         {

@@ -36,7 +36,7 @@ For collections, use a hidden `.index` marker and an app-authored template with 
   <fieldset data-rw-form-collection-row data-rw-form-index="0">
     <input type="hidden" name="Actions.index" value="0">
     <input type="hidden" name="Actions[0].Id" data-rw-form-collection-preserve>
-    <input type="hidden" name="Actions[0].Delete" data-rw-form-collection-delete-field>
+    <input type="hidden" name="Actions[0].Delete" value="false" data-rw-form-collection-delete-field>
     <label for="Actions_0__Title">Title</label>
     <input name="Actions[0].Title" id="Actions_0__Title">
     <button type="button" data-rw-form-collection-duplicate>Duplicate</button>
@@ -90,7 +90,7 @@ Command TagHelpers set `type="button"` when the app did not already specify a ty
 | `data-rw-form-collection-add` | button | Adds a cleared row from the template. |
 | `data-rw-form-collection-duplicate` | button | Duplicates the nearest row with copied editable values. |
 | `data-rw-form-collection-remove` | button | Physically removes the nearest row by default; use value `mark` for mark-for-removal. |
-| `data-rw-form-collection-delete-field` | hidden input | App-owned delete field set in mark-for-removal mode. |
+| `data-rw-form-collection-delete-field` | collection root or hidden input | On the root, an index-agnostic CSS selector such as `[data-delete-control]` resolves the app-owned delete field relative to each row; do not embed one row's sparse index in the selector. On the hidden input, the attribute marks that field directly and needs no root selector. Mark-for-removal activates the field, while duplicate restores its authored inactive value or `false`. |
 | `data-rw-form-collection-preserve` | input | Keeps a field enabled in mark-for-removal mode. |
 | `data-rw-form-collection-copyable` | hidden input | Allows duplicate to copy an otherwise identity-like hidden value. |
 
@@ -102,7 +102,7 @@ Command TagHelpers set `type="button"` when the app did not already specify a ty
 | Toggle hidden | Target is hidden; descendant controls disabled only if the target opts in. | Toggle keeps focus; `aria-expanded` mirrors state when applicable. |
 | Toggle shown | RazorWire only re-enables controls it disabled itself. | Toggle keeps focus. |
 | Add | New row receives a sparse `.index` marker and rewritten names/ids/labels. | First enabled user-editable control in the new row receives focus. |
-| Duplicate | Editable values copy; validation state and identity/delete/concurrency hidden values clear unless copyable. | First enabled user-editable control in the clone receives focus. |
+| Duplicate | Editable values copy; validation state and identity/concurrency hidden values clear unless copyable. A marked delete field resets to its authored `value` attribute, or `false` when no value is authored, so boolean model binding receives an inactive value instead of an empty string. | First enabled user-editable control in the clone receives focus. |
 | Physical remove | Row and its `.index` marker leave the submitted payload. | Focus moves to the next row command, previous row command, then add command. |
 | Mark remove | Row is hidden; `.index`, preserved fields, and delete field submit; normal editable fields are disabled. | Focus moves as with physical remove. |
 | Canceled before-event | No mutation occurs. | App-owned event handler owns any user feedback. |

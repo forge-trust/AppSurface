@@ -1,0 +1,9 @@
+@{
+    var observedTurboFrame = (string?)ViewData["ObservedTurboFrame"] ?? string.Empty;
+}
+<turbo-frame id="parent-frame">
+    <div data-parent-frame-state="updated"
+         data-observed-turbo-frame="@observedTurboFrame">
+        Parent frame updated.
+    </div>
+</turbo-frame>

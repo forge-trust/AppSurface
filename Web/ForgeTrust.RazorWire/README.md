@@ -301,7 +301,7 @@ App-authored behavior kit registration is different: use `<rw:scripts behavior-k
 
 ### Choose who supplies Turbo
 
-RazorWire defaults to `RazorWireTurboRuntimeMode.Bundled`: `<rw:scripts />` emits the package's exact Turbo 8.0.12 UMD build from the same origin before the RazorWire scripts. This is the recommended mode because a normal package install works without an external CDN request, additional CSP origin, or host-managed load-order step.
+RazorWire defaults to `RazorWireTurboRuntimeMode.Bundled`: `<rw:scripts />` emits the package's exact Turbo 8.0.23 UMD build from the same origin before the RazorWire scripts. This is the recommended mode because a normal package install works without an external CDN request, additional CSP origin, or host-managed load-order step. Maintainers can review the upstream behavior and package evidence in the [Turbo 8.0.23 upgrade review](Docs/turbo-8.0.23-upgrade-review.md).
 
 Use `Custom` only when the app publishes a compatible Turbo build as its own same-origin static asset:
 
@@ -324,7 +324,7 @@ services.AddRazorWire(options =>
 });
 ```
 
-In host-managed mode, RazorWire emits no Turbo script. Load the host's Turbo script before `<rw:scripts />` without `async` or `defer`; `window.Turbo` must already exist when RazorWire executes. RazorWire verifies compatibility with Turbo 8.0.12 only. Other versions are host-owned compatibility experiments and should be covered by the app's browser tests.
+In host-managed mode, RazorWire emits no Turbo script. Load the host's Turbo script before `<rw:scripts />` without `async` or `defer`; `window.Turbo` must already exist when RazorWire executes. RazorWire verifies compatibility with Turbo 8.0.23 only. Other versions are host-owned compatibility experiments and should be covered by the app's browser tests. Turbo 8.0.23 removed upstream-deprecated `Turbo.clearCache()`, `data-turbo-cache="false"`, and legacy form polyfills; those are not AppSurface-defined APIs, and host-managed consumers that call upstream implementation surfaces must review the [upstream release](https://github.com/hotwired/turbo/releases/tag/v8.0.23).
 
 When migrating from the former CDN-backed default, remove any duplicate Turbo tag and keep the default bundled mode. A CSP can then allow the runtime through `'self'` rather than `https://cdn.jsdelivr.net`. Choose one owner—bundled, custom, or host-managed—because loading Turbo twice can register duplicate navigation listeners and produce nondeterministic page visits.
 
@@ -711,7 +711,7 @@ Localizes UTC timestamps on the client with the browser's `Intl` APIs.
 
 ### `rw:scripts`
 
-Injects the client scripts RazorWire needs. By default this includes the same-origin bundled Turbo 8.0.12 runtime followed by the RazorWire assets; `RazorWireOptions.Turbo` can select a custom same-origin runtime or host-managed ownership.
+Injects the client scripts RazorWire needs. By default this includes the same-origin bundled Turbo 8.0.23 runtime followed by the RazorWire assets; `RazorWireOptions.Turbo` can select a custom same-origin runtime or host-managed ownership.
 
 ```html
 <rw:scripts />
