@@ -58,7 +58,11 @@ public class PathUtilsTests : IDisposable
     [InlineData("C:\\outside.txt")]
     [InlineData("C:/outside.txt")]
     [InlineData("../outside.txt")]
+    [InlineData(".. ")]
+    [InlineData(" ..")]
+    [InlineData(" \t..\t ")]
     [InlineData("nested/../outside.txt")]
+    [InlineData("nested/.. /outside.txt")]
     public void PathUnder_ShouldRejectUnsafeRelativeSegments(string? segment)
     {
         Assert.Throws<ArgumentException>(() => PathUtils.PathUnder(_testRoot, segment!));

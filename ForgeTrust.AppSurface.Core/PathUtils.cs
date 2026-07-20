@@ -166,6 +166,15 @@ public static partial class PathUtils
         return directoryPath;
     }
 
+    /// <summary>
+    /// Determines whether a path segment uses rooted syntax on the current platform or common Windows absolute syntax.
+    /// </summary>
+    /// <param name="segment">A non-empty path segment.</param>
+    /// <returns><see langword="true" /> when the segment could reset the caller-supplied base path.</returns>
+    /// <remarks>
+    /// The explicit drive-letter and leading-separator checks reject Windows-looking inputs even on Unix hosts, so a
+    /// configuration validated on one operating system cannot become rooted when consumed on another.
+    /// </remarks>
     private static bool IsRootedOrAbsoluteLooking(string segment)
     {
         if (Path.IsPathRooted(segment))
@@ -177,12 +186,31 @@ public static partial class PathUtils
             || segment[0] is '\\' or '/';
     }
 
+    /// <summary>
+    /// Determines whether a relative path contains a parent-directory traversal component.
+    /// </summary>
+    /// <param name="segment">A non-empty relative path that may contain either directory separator.</param>
+    /// <returns><see langword="true" /> when any component normalizes to <c>..</c>.</returns>
+    /// <remarks>
+    /// Components are whitespace-trimmed before comparison because Windows filesystem APIs can discard surrounding
+    /// whitespace from path components. The comparison remains ordinal and does not reject dots embedded in names.
+    /// </remarks>
     private static bool ContainsParentTraversalSegment(string segment) =>
         segment
             .Replace('\\', '/')
             .Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Any(static part => string.Equals(part, "..", StringComparison.Ordinal));
+            .Any(static part => string.Equals(part.Trim(), "..", StringComparison.Ordinal));
 
+    /// <summary>
+    /// Determines whether a normalized candidate is the same as or lexically below a normalized base path.
+    /// </summary>
+    /// <param name="basePath">The normalized absolute base path.</param>
+    /// <param name="candidatePath">The normalized absolute candidate path.</param>
+    /// <returns><see langword="true" /> when the candidate stays within the base path boundary.</returns>
+    /// <remarks>
+    /// The separator appended to the descendant prefix prevents sibling names that merely share the base path text from
+    /// matching. This is a lexical check and does not resolve symbolic links.
+    /// </remarks>
     private static bool IsSameOrDescendant(string basePath, string candidatePath)
     {
         var comparison = GetFilesystemPathComparison();
@@ -200,6 +228,13 @@ public static partial class PathUtils
         return candidatePath.StartsWith(basePrefix, comparison);
     }
 
+    /// <summary>
+    /// Gets the path comparison used by the current filesystem family.
+    /// </summary>
+    /// <returns>Case-insensitive ordinal comparison on Windows; case-sensitive ordinal comparison elsewhere.</returns>
+    /// <remarks>
+    /// This follows the repository's supported operating-system boundary. It does not probe per-volume case sensitivity.
+    /// </remarks>
     [ExcludeFromCodeCoverage(Justification = "Runtime OS probe; Windows and Unix CI exercise opposite path-comparison branches.")]
     private static StringComparison GetFilesystemPathComparison() =>
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;

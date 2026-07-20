@@ -668,7 +668,7 @@ internal sealed class SecretPromotionWorkflow(
             return row.Result("Written", "AddedGoogleVersion", null, null, null, result.WrittenVersionResourceName);
         }
 
-        return result.Status is GoogleSecretManagerTransferStatus.Unavailable or GoogleSecretManagerTransferStatus.Cancelled or GoogleSecretManagerTransferStatus.IndeterminateWrite
+        return result.Status == GoogleSecretManagerTransferStatus.IndeterminateWrite
             ? row.Result("IndeterminateWrite", "AddGoogleVersion", result.Diagnostic?.Code ?? "secret-promotion-indeterminate-write", "Google may have accepted the version before the response failed. Reconcile before resuming.", false)
             : row.GoogleDestinationFailure("AddGoogleVersion", result.Status, result.Diagnostic);
     }

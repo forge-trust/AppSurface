@@ -621,7 +621,7 @@ public sealed class SecretPromotionWorkflowTests
     }
 
     [Fact]
-    public void Apply_GoogleWriteUnavailable_ReturnsIndeterminateReceiptWithoutRetrying()
+    public void Apply_GoogleWriteUnavailable_PreservesDefinitiveRetryableFailure()
     {
         using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
         var store = new InMemoryAppSurfaceLocalSecretStore();
@@ -641,7 +641,9 @@ public sealed class SecretPromotionWorkflowTests
         var applied = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
 
         Assert.False(applied.Succeeded);
-        Assert.Equal("IndeterminateWrite", Assert.Single(applied.Rows).Status);
+        var row = Assert.Single(applied.Rows);
+        Assert.Equal("Unavailable", row.Status);
+        Assert.True(row.Retryable);
         Assert.Empty(google.Writes);
         Assert.True(File.Exists($"{planPath}.receipt.json"));
         Assert.DoesNotContain("sentinel-local-secret", File.ReadAllText($"{planPath}.receipt.json"), StringComparison.Ordinal);
@@ -758,8 +760,9 @@ public sealed class SecretPromotionWorkflowTests
     [Theory]
     [InlineData(GoogleSecretManagerTransferStatus.AccessDenied, "AccessDenied", true)]
     [InlineData(GoogleSecretManagerTransferStatus.ProviderFailed, "Failed", true)]
-    [InlineData(GoogleSecretManagerTransferStatus.Cancelled, "IndeterminateWrite", true)]
-    [InlineData(GoogleSecretManagerTransferStatus.Unavailable, "IndeterminateWrite", false)]
+    [InlineData(GoogleSecretManagerTransferStatus.Cancelled, "Cancelled", true)]
+    [InlineData(GoogleSecretManagerTransferStatus.Unavailable, "Unavailable", false)]
+    [InlineData(GoogleSecretManagerTransferStatus.IndeterminateWrite, "IndeterminateWrite", false)]
     public void Apply_GoogleWriteFailure_IsClassifiedValueSafely(
         GoogleSecretManagerTransferStatus status,
         string expected,
