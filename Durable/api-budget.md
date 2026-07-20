@@ -1,9 +1,10 @@
 # Durable slice 2 API budget
 
 This ledger records how the public surface from the original durable-contract commit was treated when the contract was
-rebuilt as two preview packages. The checked-in
+rebuilt as three preview packages. The checked-in
 [Durable](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt) and
-[Provider](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.Provider/PublicAPI.Shipped.txt) snapshots are the exhaustive member-level
+[Provider](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.Provider/PublicAPI.Shipped.txt), and
+[PostgreSQL](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/PublicAPI.Shipped.txt) snapshots are the exhaustive member-level
 source of truth; this ledger explains the intentional package and visibility decisions.
 
 ## Retained adopter API
@@ -33,7 +34,7 @@ seam was removed. No public type was deleted outright.
 
 ## Compatibility rule
 
-Both packages remain source-only public previews and are machine-blocked from publication. The PostgreSQL slice-3 source
+All three packages remain source-only public previews and are machine-blocked from publication. The PostgreSQL slice-3 source
 provider supplies Work conformance and restore fencing, but publication remains held until slices 4-6 prove Flow,
 Schedule, hosted runtime, drain/recovery, and coordinated operations. Changes may still be made, but every public member change must update the
 appropriate deterministic API snapshot and this ledger when it changes a type's audience, package, or visibility.

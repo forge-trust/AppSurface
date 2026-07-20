@@ -19,8 +19,6 @@ contract verification, but they are not a supported NuGet release.
 Reusable modules should describe durable intent without selecting storage or starting workers. Runtime providers need
 public, testable contracts without friend access to the application package. The dependency therefore points one way:
 
-`ForgeTrust.AppSurface.Durable.Provider` → `ForgeTrust.AppSurface.Durable`
-
 `ForgeTrust.AppSurface.Durable.PostgreSql` → `ForgeTrust.AppSurface.Durable.Provider` → `ForgeTrust.AppSurface.Durable`
 
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL

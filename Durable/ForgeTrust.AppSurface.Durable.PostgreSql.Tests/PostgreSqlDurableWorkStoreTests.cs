@@ -282,6 +282,26 @@ public sealed class PostgreSqlDurableWorkStoreTests
     }
 
     [Fact]
+    public async Task StoreTarget_MatchesResolvedEndpointWithinConfiguredHostList()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var builder = new NpgsqlConnectionStringBuilder(database.ConnectionString);
+        var configuredHosts = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            Host = $"unreachable.invalid,{builder.Host}",
+        };
+        var expected = PostgreSqlDurableStoreTarget.Create(configuredHosts.ConnectionString);
+        var wrong = PostgreSqlDurableStoreTarget.Create(new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            Host = "unreachable.invalid",
+        }.ConnectionString);
+        await using var connection = await database.DataSource.OpenConnectionAsync();
+
+        Assert.True(expected.Matches(connection));
+        Assert.False(wrong.Matches(connection));
+    }
+
+    [Fact]
     public async Task TransactionWriter_RejectsWrongExpectedStoreIdWithoutPoisoningCallerTransaction()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

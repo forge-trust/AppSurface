@@ -96,9 +96,9 @@ internal sealed record PostgreSqlDurableStoreTarget(string Host, int Port, strin
     internal bool Matches(NpgsqlConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
-        var actual = Create(connection.ConnectionString);
-        return Port == actual.Port
-            && string.Equals(Host, actual.Host, StringComparison.OrdinalIgnoreCase)
+        var actualHost = NormalizeHost(connection.Host);
+        return Port == connection.Port
+            && Host.Split(',').Contains(actualHost, StringComparer.OrdinalIgnoreCase)
             && string.Equals(Database, connection.Database, StringComparison.Ordinal);
     }
 

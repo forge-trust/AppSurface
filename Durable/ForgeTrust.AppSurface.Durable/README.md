@@ -1,6 +1,7 @@
 # ForgeTrust.AppSurface.Durable
 
-> **Source-only public preview:** the PostgreSQL source provider supplies slice-3 Work conformance and restore fencing,
+> **Source-only public preview:** the [PostgreSQL source provider](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md)
+> supplies slice-3 Work conformance and restore fencing,
 > but publication remains held until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated
 > operations. This package installs no runtime and starts no hosted service.
 
@@ -156,8 +157,8 @@ validation before persistence.
 | Schedule dialect semantics | Requires a new dialect/version, never reinterpret persisted occurrences |
 | Provider SPI behavior | Requires provider conformance evidence before adoption |
 
-Diagnostics available now cover contract validation and semantic conflicts. Storage, schema, activation, heartbeat,
-drain, and restore diagnostics are reserved until a provider implements and tests them. See the
+Diagnostics available now cover contract validation, semantic conflicts, and PostgreSQL Work storage, schema,
+activation, and restore failures. Heartbeat, drain, and later hosted-runtime diagnostics remain reserved. See the
 [`ASDURxxx` catalog](../../troubleshooting/durable-diagnostics.md).
 
 ## Release Guidance
