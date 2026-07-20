@@ -724,6 +724,92 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
     }
 
     [Fact]
+    public async Task RetrySafe_CompletedReplayProjectsEveryPersistedWorkStateAndRejectsUnknown()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var registration = new OperatorRegistration(
+            "operator.retry-safe-replay-state",
+            DurableProviderSafety.Idempotent,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Unknown, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var cases = new[]
+        {
+            (Persisted: "retry_wait", Projected: DurableWorkState.Ready),
+            (Persisted: "leased", Projected: DurableWorkState.Claimed),
+            (Persisted: "cancel_pending", Projected: DurableWorkState.CancelPending),
+            (Persisted: "succeeded", Projected: DurableWorkState.Succeeded),
+            (Persisted: "succeeded_after_cancel_requested", Projected: DurableWorkState.SucceededAfterCancelRequested),
+            (Persisted: "failed", Projected: DurableWorkState.FailedTerminal),
+            (Persisted: "canceled_before_effect", Projected: DurableWorkState.CanceledBeforeEffect),
+            (Persisted: "reconciling", Projected: DurableWorkState.Suspended),
+        };
+
+        for (var index = 0; index < cases.Length; index++)
+        {
+            var scope = new DurableScopeId($"operator-retry-safe-replay-state-{index}");
+            var accepted = (await client.EnqueueAsync(Request(scope, registration, $"retry-safe-replay-state-{index}"))).Value!;
+            var request = new DurableWorkRetrySafeRequest(
+                scope,
+                accepted.WorkId,
+                new DurableCommandId($"operator-retry-safe-replay-state-command-{index}"),
+                "operator-test",
+                "completed-replay",
+                accepted.Revision);
+            await SeedOperatorCommandAsync(
+                database.DataSource,
+                scope,
+                accepted.WorkId,
+                request.CommandId,
+                "retry_safe",
+                request.ActorId,
+                request.ReasonCode,
+                request.Fingerprint,
+                true,
+                cases[index].Persisted,
+                accepted.Revision);
+
+            var replay = await operators.RetrySafeAsync(request);
+
+            Assert.True(replay.IsSuccess);
+            Assert.Equal(DurableWorkOperatorOutcome.Duplicate, replay.Value!.Outcome);
+            Assert.Equal(cases[index].Projected, replay.Value.State);
+        }
+
+        var corruptScope = new DurableScopeId("operator-retry-safe-replay-state-corrupt");
+        var corruptAccepted = (await client.EnqueueAsync(
+            Request(corruptScope, registration, "retry-safe-replay-state-corrupt"))).Value!;
+        var corruptRequest = new DurableWorkRetrySafeRequest(
+            corruptScope,
+            corruptAccepted.WorkId,
+            new DurableCommandId("operator-retry-safe-replay-state-command-corrupt"),
+            "operator-test",
+            "completed-replay",
+            corruptAccepted.Revision);
+        await SeedOperatorCommandAsync(
+            database.DataSource,
+            corruptScope,
+            corruptAccepted.WorkId,
+            corruptRequest.CommandId,
+            "retry_safe",
+            corruptRequest.ActorId,
+            corruptRequest.ReasonCode,
+            corruptRequest.Fingerprint,
+            true,
+            "corrupt",
+            corruptAccepted.Revision);
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await operators.RetrySafeAsync(corruptRequest));
+
+        Assert.Contains("Unknown persisted durable Work state", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ResolveRetrySafeAndRecoveryRelease_ApplyOnlyAuditedSafeTransitions()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
