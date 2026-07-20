@@ -71,6 +71,19 @@ public class ReactivityController : Controller
     }
 
     /// <summary>
+    /// Returns the deterministic parent-frame replacement used to prove Turbo's resolved
+    /// <c>_parent</c> targeting and <c>Turbo-Frame</c> request-header behavior.
+    /// </summary>
+    /// <returns>A partial response whose root frame matches the resolved parent frame identifier.</returns>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public IActionResult ParentFrameTarget()
+    {
+        ViewData["ObservedTurboFrame"] = Request.Headers["Turbo-Frame"].ToString();
+        return PartialView("_TurboParentFrameResult");
+    }
+
+    /// <summary>
     /// Renders the sidebar inside a RazorWire frame with the ID "permanent-island".
     /// </summary>
     /// <returns>An <see cref="IActionResult"/> that produces the RazorWire frame containing the sidebar content.</returns>

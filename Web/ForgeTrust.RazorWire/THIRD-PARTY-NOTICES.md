@@ -5,12 +5,12 @@ ForgeTrust.RazorWire includes the following third-party component in addition to
 ## Hotwire Turbo
 
 - Package: `@hotwired/turbo`
-- Version: `8.0.12`
+- Version: `8.0.23`
 - License: MIT
 - Project: https://github.com/hotwired/turbo
 - Source package path: `Web/ForgeTrust.RazorWire/node_modules/@hotwired/turbo/dist/turbo.es2017-umd.js`
 - Packaged asset path: `Web/ForgeTrust.RazorWire/wwwroot/razorwire/turbo.es2017-umd.js`
-- SHA-256: `d5ebcdfcec4244326db950b3437824955abc2f337aaa10a6ef1fec6dac249ce9`
+- SHA-256: `f9e09e3a3093874fe56d5341ca3594ac959f8b097c9b6171a5b37838da3aec81`
 
 RazorWire copies the official distributed UMD browser runtime byte for byte. The repository pins the package in `Web/ForgeTrust.RazorWire/package.json` and `Web/pnpm-lock.yaml`; the RazorWire asset build verifies the approved SHA-256 digest before copying it to the committed package asset path.
 
