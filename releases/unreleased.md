@@ -10,6 +10,11 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection) now defaults to the
+  VSTest `coverlet.collector` driver, validates each selected project's effective test runner and direct package
+  references before cleanup or execution, and normalizes one validated Cobertura attachment per invocation into the
+  stable artifact path. Native Microsoft Testing Platform projects fail preflight because they require `coverlet.MTP`;
+  `--coverage-driver msbuild` remains available only as an explicit compatibility path and emits a reliability warning.
 - [`ForgeTrust.AppSurface.Web` named canary evaluation](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints) is now available in preview: applications register typed, application-owned proof
   evaluators and explicitly map one fixed protected route family. Completed evaluations add required `name`, `ready`, and
   `status` fields plus optional typed evidence, a marker fingerprint, and up to 16 registration-declared bounded details.
@@ -29,4 +34,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## Migration watch
 
+- Existing `appsurface coverage run` consumers that reference `coverlet.msbuild` must replace it with
+  `coverlet.collector`, or explicitly pass `--coverage-driver msbuild` while completing the migration. The command never
+  silently falls back between drivers.
 - Existing hosts that consume `/health` or `/ready` must set `WebOptions.Health.Enabled = true` when upgrading.
