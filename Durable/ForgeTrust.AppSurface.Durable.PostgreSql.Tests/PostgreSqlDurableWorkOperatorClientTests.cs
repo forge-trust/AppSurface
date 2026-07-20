@@ -14,7 +14,10 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         var registrations = new[]
         {
             new OperatorRegistration("operator.reconcile.applied", DurableProviderSafety.ReconcileBeforeRetry,
-                new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Applied, Result("applied"))),
+                new DurableEncodedEffectReconciliation(
+                    DurableEffectReconciliationKind.Applied,
+                    Result("applied", DurableDataClassification.ApprovedApplication)),
+                resultClassification: DurableDataClassification.ApprovedApplication),
             new OperatorRegistration("operator.reconcile.not-applied", DurableProviderSafety.ReconcileBeforeRetry,
                 new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.NotApplied, null)),
             new OperatorRegistration("operator.reconcile.unknown", DurableProviderSafety.ReconcileBeforeRetry,
@@ -57,6 +60,12 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
             Assert.Equal(DurableWorkOperatorOutcome.Duplicate, duplicate.Value!.Outcome);
             Assert.Equal(1, registrations[index].ReconciliationCount);
             Assert.Equal(expected[index], await ReadStateAsync(database.DataSource, scope, accepted.WorkId));
+            if (index == 0)
+            {
+                Assert.Equal(
+                    "approved_application",
+                    await ReadScalarAsync<string>(database.DataSource, scope, accepted.WorkId, "result_classification"));
+            }
         }
     }
 
@@ -1461,6 +1470,38 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
     }
 
     [Fact]
+    public async Task RetrySafe_UnknownPersistedProviderSafetyFailsBeforeRecordingACommand()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var registration = new OperatorRegistration(
+            "operator.unknown-provider-safety",
+            DurableProviderSafety.Idempotent,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Unknown, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId("operator-unknown-provider-safety");
+        var accepted = (await client.EnqueueAsync(Request(scope, registration, "unknown-provider-safety"))).Value!;
+        await CorruptProviderSafetyAsync(database.DataSource, scope, accepted.WorkId);
+        var commandId = new DurableCommandId("operator-unknown-provider-safety-command");
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await operators.RetrySafeAsync(new DurableWorkRetrySafeRequest(
+                scope,
+                accepted.WorkId,
+                commandId,
+                "operator-test",
+                "corrupt-provider-safety",
+                accepted.Revision)));
+
+        Assert.Contains("Unknown persisted provider safety", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, await CountOperatorCommandsAsync(database.DataSource, scope, commandId));
+    }
+
+    [Fact]
     public async Task Resolve_WithResultAndUnavailableRegistration_ReturnsTypedFailureWithoutMutation()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -1578,10 +1619,12 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         registration.WorkCodec.EncodeObject(Encoding.UTF8.GetBytes(identity)),
         registration.ProviderSafety);
 
-    private static DurableEncodedPayload Result(string value) => new(
+    private static DurableEncodedPayload Result(
+        string value,
+        DurableDataClassification classification = DurableDataClassification.Operational) => new(
         "operator.result",
         "v1",
-        DurableDataClassification.Operational,
+        classification,
         Encoding.UTF8.GetBytes(value));
 
     private static async ValueTask<long> ForceStateAsync(
@@ -1939,6 +1982,33 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         await transaction.CommitAsync();
     }
 
+    private static async ValueTask CorruptProviderSafetyAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableWorkId work)
+    {
+        await using (var constraint = dataSource.CreateCommand(
+            "SELECT format('%I', conname) FROM pg_catalog.pg_constraint WHERE conrelid = 'appsurface_durable.work'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%provider_safety%';"))
+        {
+            var identifier = (string)(await constraint.ExecuteScalarAsync())!;
+            await using var drop = dataSource.CreateCommand(
+                $"ALTER TABLE appsurface_durable.work DROP CONSTRAINT {identifier};");
+            await drop.ExecuteNonQueryAsync();
+        }
+
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetScopeAsync(connection, transaction, scope);
+        await using var update = new NpgsqlCommand(
+            "UPDATE appsurface_durable.work SET provider_safety = 'corrupt' WHERE scope_id = @scope_id AND work_id = @work_id;",
+            connection,
+            transaction);
+        update.Parameters.AddWithValue("scope_id", scope.Value);
+        update.Parameters.AddWithValue("work_id", work.Value);
+        Assert.Equal(1, await update.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
+    }
+
     private static async ValueTask SetCancellationRequestedWithoutRevisionAsync(
         NpgsqlDataSource dataSource,
         DurableScopeId scope,
@@ -2003,12 +2073,13 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         DurableProviderSafety safety,
         DurableEncodedEffectReconciliation proof,
         TaskCompletionSource<bool>? providerEntered = null,
-        TaskCompletionSource<bool>? releaseProvider = null) : DurableWorkRegistration(
+        TaskCompletionSource<bool>? releaseProvider = null,
+        DurableDataClassification resultClassification = DurableDataClassification.Operational) : DurableWorkRegistration(
             workName,
             "v1",
             safety,
             new OperatorCodec("operator.work"),
-            new OperatorCodec("operator.result"))
+            new OperatorCodec("operator.result", resultClassification))
     {
         public int ReconciliationCount { get; private set; }
 
@@ -2039,12 +2110,14 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         }
     }
 
-    private sealed class OperatorCodec(string contractName) : IDurablePayloadCodec
+    private sealed class OperatorCodec(
+        string contractName,
+        DurableDataClassification classification = DurableDataClassification.Operational) : IDurablePayloadCodec
     {
         public Type PayloadType => typeof(byte[]);
         public string ContractName => contractName;
         public string ContractVersion => "v1";
-        public DurableDataClassification Classification => DurableDataClassification.Operational;
+        public DurableDataClassification Classification => classification;
         public string RetentionPolicyId => DurableEncodedPayload.DefaultRetentionPolicyId;
 
         public DurableEncodedPayload EncodeObject(object value) => new(
