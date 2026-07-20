@@ -3448,13 +3448,17 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 "appsurface --version",
                 "appsurface coverage run --help",
                 "appsurface coverage run",
+                "appsurface coverage run watchdog warn",
                 "appsurface coverage run watchdog fail",
+                "appsurface coverage run watchdog noisy",
+                "appsurface coverage run ordinary failure",
+                "appsurface coverage run watchdog off",
                 "appsurface coverage merge",
                 "appsurface coverage gate",
                 "appsurface coverage gate"
             ],
             commandRunner.Requests
-                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface coverage run --help" or "appsurface coverage run" or "appsurface coverage run watchdog fail" or "appsurface coverage merge" or "appsurface coverage gate")
+                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface coverage run --help" or "appsurface coverage run" or "appsurface coverage run watchdog warn" or "appsurface coverage run watchdog fail" or "appsurface coverage run watchdog noisy" or "appsurface coverage run ordinary failure" or "appsurface coverage run watchdog off" or "appsurface coverage merge" or "appsurface coverage gate")
                 .Select(request => request.OperationName)
                 .ToArray());
         var coverageRunRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run");
@@ -3467,6 +3471,21 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains(
             report.Artifacts,
             artifact => artifact.Description == "excluded project 'Smoke.Browser.Tests' produced no coverage artifacts" && artifact.Exists);
+        var warnRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run watchdog warn");
+        Assert.Contains("warn", warnRequest.Arguments);
+        Assert.Contains("100ms", warnRequest.Arguments);
+        Assert.Contains("1s", warnRequest.Arguments);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run watchdog warning incident" && artifact.Exists);
+        var watchdogFailure = Assert.Single(report.Commands, command => command.OperationName == "appsurface coverage run watchdog fail");
+        Assert.Equal(124, watchdogFailure.ExitCode);
+        Assert.Contains("ASCOV121", watchdogFailure.StandardError, StringComparison.Ordinal);
+        var ordinaryFailure = Assert.Single(report.Commands, command => command.OperationName == "appsurface coverage run ordinary failure");
+        Assert.Equal(1, ordinaryFailure.ExitCode);
+        Assert.True(ordinaryFailure.Succeeded);
+        var offRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run watchdog off");
+        Assert.Contains("off", offRequest.Arguments);
+        Assert.Contains("0", offRequest.Arguments);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "disabled watchdog produced no incident artifact" && artifact.Exists);
         var addPackageRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet add package");
         Assert.DoesNotContain("--configfile", addPackageRequest.Arguments);
         Assert.True(File.Exists(CombineSafeChildPath(report.WorkDirectory, "consumer/NuGet.config")));
@@ -3506,6 +3525,34 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.False(report.Succeeded);
         Assert.Contains("did not write both gate reports", report.FirstFailure, StringComparison.Ordinal);
         Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate JSON report" && !artifact.Exists);
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_RejectsWatchdogExitForOrdinaryFailureProof()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            ordinaryFailureExitCode: 124);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("Expected a non-watchdog failure exit code", report.FirstFailure, StringComparison.Ordinal);
+        Assert.Equal("appsurface coverage run ordinary failure", report.Commands.Last().OperationName);
     }
 
     [Fact]
@@ -3614,6 +3661,34 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Equal("appsurface --version", report.Commands.Last().OperationName);
         Assert.Contains(commandRunner.Requests, request => request.OperationName == "dotnet tool install");
         Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage run");
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenPackagedHelpOmitsWatchdogOptions()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            coverageRunHelp: "--watchdog");
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("--heartbeat-interval, --no-progress-timeout", report.FirstFailure, StringComparison.Ordinal);
+        Assert.Equal("appsurface coverage run --help", report.Commands.Last().OperationName);
     }
 
     [Fact]
@@ -3777,7 +3852,10 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [InlineData("appsurface --version", null)]
     [InlineData("appsurface coverage run --help", null)]
     [InlineData("appsurface coverage run", null)]
+    [InlineData("appsurface coverage run watchdog warn", null)]
     [InlineData("appsurface coverage run watchdog fail", null)]
+    [InlineData("appsurface coverage run watchdog noisy", null)]
+    [InlineData("appsurface coverage run watchdog off", null)]
     [InlineData("appsurface coverage merge", null)]
     [InlineData("appsurface coverage gate", "passing")]
     public async Task CoverageCliConsumerProofWorkflow_StopsWhenRequiredCommandFails(
@@ -6342,6 +6420,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         private readonly bool _intentionallyFailingGateExitsNonZero;
         private readonly bool _emitCoverageRunExclusionEvidence;
         private readonly bool _createExcludedProjectArtifacts;
+        private readonly int _ordinaryFailureExitCode;
+        private readonly string _coverageRunHelp;
 
         public CoverageProofRecordingCommandRunner(
             string packageVersion,
@@ -6353,7 +6433,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
             string? failTimeoutDescriptionContains = null,
             bool intentionallyFailingGateExitsNonZero = true,
             bool emitCoverageRunExclusionEvidence = true,
-            bool createExcludedProjectArtifacts = false)
+            bool createExcludedProjectArtifacts = false,
+            int ordinaryFailureExitCode = 1,
+            string coverageRunHelp = "--watchdog --heartbeat-interval --no-progress-timeout")
         {
             _packageVersion = packageVersion;
             _createFailingGateReports = createFailingGateReports;
@@ -6365,6 +6447,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _intentionallyFailingGateExitsNonZero = intentionallyFailingGateExitsNonZero;
             _emitCoverageRunExclusionEvidence = emitCoverageRunExclusionEvidence;
             _createExcludedProjectArtifacts = createExcludedProjectArtifacts;
+            _ordinaryFailureExitCode = ordinaryFailureExitCode;
+            _coverageRunHelp = coverageRunHelp;
         }
 
         public List<ExternalCommandRequest> Requests { get; } = [];
@@ -6390,7 +6474,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             {
                 return Task.FromResult(new ExternalCommandResult(
                     0,
-                    "--watchdog --heartbeat-interval --no-progress-timeout",
+                    _coverageRunHelp,
                     string.Empty));
             }
 
@@ -6420,8 +6504,46 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
                 File.WriteAllText(
                     Path.Join(outputDirectory, "coverage-watchdog.json"),
-                    "{\"schemaVersion\":1,\"outcome\":\"terminated\",\"diagnosticCode\":\"ASCOV121\"}");
+                    "{\"schemaVersion\":1,\"outcome\":\"terminated\",\"diagnosticCode\":\"ASCOV121\",\"watchdogMode\":\"fail\",\"cleanup\":{\"status\":\"complete\"}}");
                 return Task.FromResult(new ExternalCommandResult(124, string.Empty, "ASCOV121 no observable progress"));
+            }
+
+            if (request.OperationName == "appsurface coverage run watchdog warn")
+            {
+                var outputDirectory = ReadOption(request.Arguments, "--output");
+                Directory.CreateDirectory(outputDirectory);
+                File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
+                File.WriteAllText(
+                    Path.Join(outputDirectory, "coverage-watchdog.json"),
+                    "{\"schemaVersion\":1,\"outcome\":\"warning\",\"diagnosticCode\":null,\"watchdogMode\":\"warn\",\"cleanup\":{\"status\":\"not-requested\"}}");
+                return Task.FromResult(new ExternalCommandResult(
+                    0,
+                    "Coverage heartbeat: elapsed=1s" + Environment.NewLine + "Coverage watchdog warning: operation=projects",
+                    string.Empty));
+            }
+
+            if (request.OperationName == "appsurface coverage run watchdog noisy")
+            {
+                var outputDirectory = ReadOption(request.Arguments, "--output");
+                Directory.CreateDirectory(outputDirectory);
+                File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
+                return Task.FromResult(new ExternalCommandResult(0, "Coverage heartbeat: elapsed=1s", string.Empty));
+            }
+
+            if (request.OperationName == "appsurface coverage run ordinary failure")
+            {
+                var outputDirectory = ReadOption(request.Arguments, "--output");
+                Directory.CreateDirectory(outputDirectory);
+                File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
+                return Task.FromResult(new ExternalCommandResult(_ordinaryFailureExitCode, "Test Run Failed.", string.Empty));
+            }
+
+            if (request.OperationName == "appsurface coverage run watchdog off")
+            {
+                var outputDirectory = ReadOption(request.Arguments, "--output");
+                Directory.CreateDirectory(outputDirectory);
+                File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
+                return Task.FromResult(new ExternalCommandResult(0, "Coverage run passed.", string.Empty));
             }
 
             if (request.OperationName == "appsurface coverage merge")

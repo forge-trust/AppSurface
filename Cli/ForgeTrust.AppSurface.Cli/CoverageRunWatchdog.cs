@@ -735,6 +735,23 @@ internal static class CoverageRunWatchdogArtifactSerializer
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
+    /// <summary>Deserializes a bounded schema-version-one artifact for bootstrap promotion.</summary>
+    /// <param name="bytes">UTF-8 JSON previously written by <see cref="Serialize"/>.</param>
+    /// <returns>The validated watchdog artifact.</returns>
+    /// <exception cref="JsonException">The payload is malformed or does not contain an artifact.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The artifact uses an unsupported schema version.</exception>
+    public static CoverageRunWatchdogArtifact Deserialize(ReadOnlySpan<byte> bytes)
+    {
+        var artifact = JsonSerializer.Deserialize<CoverageRunWatchdogArtifact>(bytes, SerializerOptions)
+            ?? throw new JsonException("Watchdog artifact payload was empty.");
+        if (artifact.SchemaVersion != 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(bytes), "Only watchdog artifact schema version 1 is supported.");
+        }
+
+        return artifact;
+    }
+
     /// <summary>
     /// Serializes an artifact, first dropping concurrent command options and log pointers and then trailing records.
     /// </summary>

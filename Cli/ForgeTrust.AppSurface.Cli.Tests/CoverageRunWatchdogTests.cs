@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using CliFx;
 using CliFx.Infrastructure;
@@ -34,6 +35,7 @@ public sealed class CoverageRunWatchdogTests
     [InlineData(" 1s")]
     [InlineData("1s ")]
     [InlineData("721h")]
+    [InlineData("3000000000000h")]
     [InlineData("999999999999999999999999999999999h")]
     public void DurationTryParse_ShouldRejectMalformedOrOutOfRangeValues(string? value)
     {
@@ -48,6 +50,34 @@ public sealed class CoverageRunWatchdogTests
 
         valid.Validate();
         Assert.Throws<ArgumentOutOfRangeException>(() => invalid.Validate());
+    }
+
+    [Fact]
+    public void OptionsValidate_ShouldRejectInvalidModeAndHeartbeatBounds()
+    {
+        var valid = CoverageRunWatchdogOptions.Default;
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => (valid with { Mode = (CoverageRunWatchdogMode)999 }).Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => (valid with { HeartbeatInterval = TimeSpan.FromMilliseconds(-1) }).Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => (valid with { HeartbeatInterval = CoverageRunWatchdogDuration.Maximum + TimeSpan.FromMilliseconds(1) }).Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => (valid with { NoProgressTimeout = CoverageRunWatchdogDuration.Maximum + TimeSpan.FromMilliseconds(1) }).Validate());
+    }
+
+    [Fact]
+    public void Supervisor_ShouldRejectInvalidRegistrationAndIgnoreOutputOutsideActiveStates()
+    {
+        var supervisor = CreateSupervisor(new ManualTimeProvider(), CoverageRunWatchdogMode.Warn);
+        var blank = Project(" ", 0);
+        var queued = Project("queued", 1);
+        var complete = Project("complete", 2);
+
+        Assert.Throws<ArgumentException>(() => supervisor.Register(blank, CoverageRunWatchdogOperationState.Queued));
+        supervisor.Register(queued, CoverageRunWatchdogOperationState.Queued);
+        Assert.Throws<InvalidOperationException>(() => supervisor.Register(queued, CoverageRunWatchdogOperationState.Queued));
+        supervisor.Register(complete, CoverageRunWatchdogOperationState.Complete);
+        Assert.False(supervisor.ObserveOutput("queued", 0));
+        Assert.False(supervisor.ObserveOutput("queued", 10));
+        Assert.False(supervisor.ObserveOutput("complete", 10));
     }
 
     [Fact]
@@ -322,6 +352,21 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public void ArtifactSerializer_ShouldValidateDeserializedPayload()
+    {
+        var bytes = CoverageRunWatchdogArtifactSerializer.Serialize(CreateArtifact([]));
+        var artifact = CoverageRunWatchdogArtifactSerializer.Deserialize(bytes);
+        var unsupported = System.Text.Encoding.UTF8.GetBytes(System.Text.Encoding.UTF8.GetString(bytes).Replace(
+            "\"schemaVersion\": 1",
+            "\"schemaVersion\": 2",
+            StringComparison.Ordinal));
+
+        Assert.Equal(1, artifact.SchemaVersion);
+        Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize("null"u8));
+        Assert.Throws<ArgumentOutOfRangeException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(unsupported));
+    }
+
+    [Fact]
     public async Task ArtifactWriter_ShouldAtomicallyReplaceDestination()
     {
         using var directory = new TemporaryDirectory();
@@ -367,13 +412,12 @@ public sealed class CoverageRunWatchdogTests
         var busy = await writer.WriteAsync("/owned/coverage-watchdog.json", CreateArtifact([]), CancellationToken.None);
         storage.Complete(commit: true);
         await storage.CurrentTask;
-        var timedOutPermission = storage.Permission;
         storage.CommitImmediately = true;
         var retry = await writer.WriteAsync("/owned/coverage-watchdog.json", CreateArtifact([]), CancellationToken.None);
 
         Assert.Equal(CoverageRunWatchdogArtifactWriteResult.TimedOut, timedOut);
         Assert.Equal(CoverageRunWatchdogArtifactWriteResult.WriterBusy, busy);
-        Assert.False(timedOutPermission?.WasCommitted);
+        Assert.Equal(1, storage.CommitCount);
         Assert.Equal(CoverageRunWatchdogArtifactWriteResult.Success, retry);
     }
 
@@ -383,14 +427,83 @@ public sealed class CoverageRunWatchdogTests
         var storage = new ControlledArtifactStorage();
         var writer = new CoverageRunWatchdogArtifactWriter(storage, new ControlledDelay());
         using var cancellation = new CancellationTokenSource();
-        var write = writer.WriteAsync("/owned/coverage-watchdog.json", CreateArtifact([]), cancellation.Token);
+        var write = Task.Run(() => writer.WriteAsync("/owned/coverage-watchdog.json", CreateArtifact([]), cancellation.Token));
 
         await cancellation.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => write);
         storage.Complete(commit: true);
         await storage.CurrentTask;
 
-        Assert.False(storage.Permission?.WasCommitted);
+        Assert.Equal(0, storage.CommitCount);
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_ShouldAwaitAnAlreadyStartedCommitBeforePropagatingCancellation()
+    {
+        var storage = new BlockingCommitArtifactStorage();
+        var writer = new CoverageRunWatchdogArtifactWriter(storage, new ControlledDelay());
+        using var cancellation = new CancellationTokenSource();
+        var write = writer.WriteAsync("/owned/coverage-watchdog.json", CreateArtifact([]), cancellation.Token);
+        storage.ReleaseStaging.TrySetResult("/private/watchdog.tmp");
+        await storage.CommitStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await cancellation.CancelAsync();
+        Assert.False(write.IsCompleted);
+        storage.ReleaseCommit.TrySetResult();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => write);
+        Assert.Equal(1, storage.CommitCount);
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_ShouldReportAnAlreadyStartedCommitInsteadOfALateTimeout()
+    {
+        var storage = new BlockingCommitArtifactStorage();
+        var delay = new ControlledDelay();
+        var writer = new CoverageRunWatchdogArtifactWriter(storage, delay);
+        var write = writer.WriteAsync("/owned/coverage-watchdog.json", CreateArtifact([]), CancellationToken.None);
+        storage.ReleaseStaging.TrySetResult("/private/watchdog.tmp");
+        await storage.CommitStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        delay.Complete();
+        await Task.Yield();
+        Assert.False(write.IsCompleted);
+        storage.ReleaseCommit.TrySetResult();
+
+        Assert.Equal(CoverageRunWatchdogArtifactWriteResult.Success, await write);
+        Assert.Equal(1, storage.CommitCount);
+    }
+
+    [Fact]
+    public void ArtifactCommitPermission_ShouldRejectCompletionWithoutAReservation()
+    {
+        var permission = new CoverageRunWatchdogCommitPermission();
+
+        Assert.Throws<InvalidOperationException>(permission.CompleteCommit);
+        Assert.True(permission.TryRevoke());
+        Assert.False(permission.TryBeginCommit());
+        Assert.False(permission.WasCommitted);
+    }
+
+    [Fact]
+    public void Runtime_ShouldValidateRequiredDependenciesAndConsoleTimeout()
+    {
+        using var console = new FakeInMemoryConsole();
+        var options = CoverageRunWatchdogOptions.Default;
+
+        Assert.Throws<ArgumentNullException>(() => new CoverageRunWatchdogRuntime(null!, TimeProvider.System, options, CancellationToken.None));
+        Assert.Throws<ArgumentNullException>(() => new CoverageRunWatchdogRuntime(console, null!, options, CancellationToken.None));
+        Assert.Throws<ArgumentNullException>(() => new CoverageRunWatchdogRuntime(console, TimeProvider.System, null!, CancellationToken.None));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            options,
+            CancellationToken.None,
+            consoleTimeout: TimeSpan.Zero));
+        Assert.Throws<ArgumentNullException>(() => new CoverageRunWatchdogArtifactWriter(null!));
+        Assert.Throws<ArgumentNullException>(() => new CoverageRunWatchdogArtifactWriter(null!, new ControlledDelay()));
+        Assert.Throws<ArgumentNullException>(() => new CoverageRunWatchdogArtifactWriter(new ControlledArtifactStorage(), null!));
+        Assert.Throws<ArgumentNullException>(() => new CoverageRunWatchdogDelay(null!));
     }
 
     [Fact]
@@ -443,6 +556,36 @@ public sealed class CoverageRunWatchdogTests
         using var artifact = JsonDocument.Parse(await File.ReadAllBytesAsync(artifactPath));
         Assert.Equal("warning", artifact.RootElement.GetProperty("outcome").GetString());
         Assert.Equal("discovery", artifact.RootElement.GetProperty("primary").GetProperty("kind").GetString());
+    }
+
+    [Theory]
+    [InlineData(false, "bootstrap-promotion-failed")]
+    [InlineData(true, "bootstrap-promotion-failed")]
+    public async Task Runtime_ShouldRejectInvalidBootstrapEvidence(bool oversized, string expectedDetail)
+    {
+        using var directory = new TemporaryDirectory();
+        var bootstrap = Path.Join(directory.Path, "bootstrap");
+        var canonical = Path.Join(directory.Path, "canonical");
+        Directory.CreateDirectory(bootstrap);
+        Directory.CreateDirectory(canonical);
+        var bytes = oversized
+            ? new byte[CoverageRunWatchdogArtifactSerializer.MaximumBytes + 1]
+            : "not-json"u8.ToArray();
+        await File.WriteAllBytesAsync(Path.Join(bootstrap, "coverage-watchdog.json"), bytes);
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            new CoverageRunWatchdogOptions(CoverageRunWatchdogMode.Off, TimeSpan.Zero, TimeSpan.FromSeconds(1)),
+            CancellationToken.None,
+            bootstrapDirectory: bootstrap);
+
+        await runtime.BindCanonicalOutputAsync(canonical);
+        await runtime.CompleteAsync();
+
+        Assert.Contains(expectedDetail, console.ReadErrorString(), StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(bootstrap, "coverage-watchdog.json")));
+        Assert.False(File.Exists(Path.Join(canonical, "coverage-watchdog.json")));
     }
 
     [Fact]
@@ -534,9 +677,131 @@ public sealed class CoverageRunWatchdogTests
         await WaitForAsync(() => console.ReadErrorString().Contains("ASCOV122", StringComparison.Ordinal));
 
         Assert.Equal(124, exception.ExitCode);
-        Assert.Contains("ASCOV121", exception.Message, StringComparison.Ordinal);
+        Assert.StartsWith("ASCOV121 Coverage run stalled. Cause: Project \"tests/project-a.csproj\" produced no observable progress", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Artifact: unavailable (forced-failure) Cleanup: complete", exception.Message, StringComparison.Ordinal);
         Assert.Contains("ASCOV122", console.ReadErrorString(), StringComparison.Ordinal);
         Assert.Contains("forced-failure", console.ReadErrorString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Runtime_ShouldRejectStagedCanonicalCommitAfterTerminalClaim()
+    {
+        using var directory = new TemporaryDirectory();
+        var staged = Path.Join(directory.Path, ".summary.txt.staged");
+        var destination = Path.Join(directory.Path, "summary.txt");
+        await File.WriteAllTextAsync(staged, "private");
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Fail,
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(50)),
+            CancellationToken.None,
+            artifactWriter: new StubArtifactWriter(CoverageRunWatchdogArtifactWriteResult.Success));
+        runtime.Register(Project("project-a", 0), CoverageRunWatchdogOperationState.Running);
+
+        await runtime.TerminalTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.ThrowsAny<OperationCanceledException>(() => runtime.CommitStagedFile(staged, destination));
+        Assert.True(File.Exists(staged));
+        Assert.False(File.Exists(destination));
+    }
+
+    [Fact]
+    public async Task Runtime_ShouldPreflightAllStagedFilesBeforePromotingASet()
+    {
+        using var directory = new TemporaryDirectory();
+        var firstStaged = Path.Join(directory.Path, ".first.staged");
+        var firstDestination = Path.Join(directory.Path, "first.json");
+        await File.WriteAllTextAsync(firstStaged, "private");
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            CoverageRunWatchdogOptions.Default,
+            CancellationToken.None);
+
+        Assert.Throws<CoverageRunStagedCommitPreflightException>(() => runtime.CommitStagedFiles(
+            [
+                (firstStaged, firstDestination),
+                (Path.Join(directory.Path, ".missing.staged"), Path.Join(directory.Path, "second.json")),
+            ]));
+        await runtime.CompleteAsync();
+
+        Assert.True(File.Exists(firstStaged));
+        Assert.False(File.Exists(firstDestination));
+    }
+
+    [Fact]
+    public async Task Runtime_ShouldCloseProcessRegistrationAndIgnoreLateOutputAfterTerminalClaim()
+    {
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Fail,
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(50)),
+            CancellationToken.None,
+            artifactWriter: new StubArtifactWriter(CoverageRunWatchdogArtifactWriteResult.Success));
+        runtime.Register(Project("project-a", 0), CoverageRunWatchdogOperationState.Running);
+        var request = runtime.CreateProcessRequest(
+            "dotnet",
+            ["test"],
+            Directory.GetCurrentDirectory(),
+            "project-a",
+            new CoverageRunSafeCommand("dotnet", ["test"]));
+        request.ProcessCompleted?.Invoke();
+
+        await runtime.TerminalTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.ThrowsAny<OperationCanceledException>(() => runtime.CreateProcessRequest(
+            "dotnet",
+            ["test"],
+            Directory.GetCurrentDirectory(),
+            "project-a",
+            new CoverageRunSafeCommand("dotnet", ["test"])));
+        request.ObserveOutput?.Invoke(17);
+        request.ProcessStarted?.Invoke(new Process());
+        request.ProcessCompleted?.Invoke();
+    }
+
+    [Fact]
+    public async Task Runtime_ShouldPreserveTerminalClassificationWhenTheArtifactWriterThrows()
+    {
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Fail,
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(50)),
+            CancellationToken.None,
+            artifactWriter: new ThrowingArtifactWriter());
+        runtime.Register(Project("project-a", 0), CoverageRunWatchdogOperationState.Running);
+
+        var exception = await runtime.TerminalTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(124, exception.ExitCode);
+        Assert.Contains("terminal-handler-failed", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Runtime_ShouldReturnWhenNoWatchdogTerminalWasClaimed()
+    {
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            CoverageRunWatchdogOptions.Default,
+            CancellationToken.None);
+
+        await runtime.ThrowIfWatchdogTerminalAsync();
+        await runtime.CompleteAsync();
     }
 
     [Fact]
@@ -658,42 +923,56 @@ public sealed class CoverageRunWatchdogTests
 
     private sealed class ControlledArtifactStorage : ICoverageRunWatchdogArtifactStorage
     {
-        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<string> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public int CallCount { get; private set; }
-
-        public CoverageRunWatchdogCommitPermission? Permission { get; private set; }
 
         public Task CurrentTask => _completion.Task;
 
         public bool CommitImmediately { get; set; }
 
-        public Task WriteTemporaryAndCommitAsync(
+        public int CommitCount { get; private set; }
+
+        public Task<string> WriteTemporaryAsync(
             string destinationPath,
             ReadOnlyMemory<byte> bytes,
-            CoverageRunWatchdogCommitPermission permission,
             CancellationToken cancellationToken)
         {
             CallCount++;
-            Permission = permission;
-            if (CommitImmediately && permission.TryBeginCommit())
-            {
-                permission.CompleteCommit();
-                return Task.CompletedTask;
-            }
-
-            return _completion.Task;
+            return CommitImmediately ? Task.FromResult("/private/watchdog.tmp") : _completion.Task;
         }
 
         public void Complete(bool commit)
         {
-            if (commit && Permission?.TryBeginCommit() == true)
-            {
-                Permission.CompleteCommit();
-            }
-
-            _completion.TrySetResult();
+            _completion.TrySetResult("/private/watchdog.tmp");
         }
+
+        public void Commit(string temporaryPath, string destinationPath) => CommitCount++;
+
+        public void DeleteTemporary(string temporaryPath) { }
+    }
+
+    private sealed class BlockingCommitArtifactStorage : ICoverageRunWatchdogArtifactStorage
+    {
+        public TaskCompletionSource<string> ReleaseStaging { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CommitStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseCommit { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int CommitCount { get; private set; }
+
+        public Task<string> WriteTemporaryAsync(
+            string destinationPath,
+            ReadOnlyMemory<byte> bytes,
+            CancellationToken cancellationToken)
+            => ReleaseStaging.Task;
+
+        public void Commit(string temporaryPath, string destinationPath)
+        {
+            CommitStarted.TrySetResult();
+            ReleaseCommit.Task.GetAwaiter().GetResult();
+            CommitCount++;
+        }
+
+        public void DeleteTemporary(string temporaryPath) { }
     }
 
     private sealed class StubArtifactWriter(CoverageRunWatchdogArtifactWriteResult result) : ICoverageRunWatchdogArtifactWriter
@@ -703,6 +982,15 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogArtifact artifact,
             CancellationToken cancellationToken)
             => Task.FromResult(result);
+    }
+
+    private sealed class ThrowingArtifactWriter : ICoverageRunWatchdogArtifactWriter
+    {
+        public Task<CoverageRunWatchdogArtifactWriteResult> WriteAsync(
+            string destinationPath,
+            CoverageRunWatchdogArtifact artifact,
+            CancellationToken cancellationToken)
+            => throw new IOException("simulated artifact failure");
     }
 
     private sealed class TemporaryDirectory : IDisposable

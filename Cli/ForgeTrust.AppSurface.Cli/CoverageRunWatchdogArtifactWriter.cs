@@ -7,7 +7,11 @@ internal interface ICoverageRunWatchdogArtifactWriter
     /// <param name="destinationPath">Fully resolved destination path.</param>
     /// <param name="artifact">Normalized watchdog incident.</param>
     /// <param name="cancellationToken">External run cancellation token.</param>
-    /// <returns>A bounded result that never contains exception text.</returns>
+    /// <returns>
+    /// A result whose private staging phase is bounded and that never contains exception text.
+    /// If the final same-directory rename has already begun, the call waits for that non-cancellable
+    /// metadata operation so it cannot report a timeout followed by a late canonical publication.
+    /// </returns>
     Task<CoverageRunWatchdogArtifactWriteResult> WriteAsync(
         string destinationPath,
         CoverageRunWatchdogArtifact artifact,
@@ -25,7 +29,7 @@ internal sealed record CoverageRunWatchdogArtifactWriteResult(bool Written, stri
     /// <summary>Gets the result returned while an earlier writer remains outstanding.</summary>
     public static CoverageRunWatchdogArtifactWriteResult WriterBusy { get; } = new(false, "writer-busy");
 
-    /// <summary>Gets the result returned when the two-second write budget expires.</summary>
+    /// <summary>Gets the result returned when the two-second staging budget expires before commit reservation.</summary>
     public static CoverageRunWatchdogArtifactWriteResult TimedOut { get; } = new(false, "artifact-write-timeout");
 
     /// <summary>Gets a bounded result for a write failure that completed before the timeout.</summary>
@@ -33,7 +37,7 @@ internal sealed record CoverageRunWatchdogArtifactWriteResult(bool Written, stri
 }
 
 /// <summary>
-/// Serializes watchdog artifacts and atomically replaces a same-directory destination with one outstanding write at a time.
+/// Serializes watchdog artifacts, bounds private staging, and atomically replaces a same-directory destination with one outstanding write at a time.
 /// </summary>
 internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogArtifactWriter
 {
@@ -81,42 +85,90 @@ internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogAr
             }
 
             var bytes = CoverageRunWatchdogArtifactSerializer.Serialize(artifact);
-            writeTask = _storage.WriteTemporaryAndCommitAsync(destinationPath, bytes, permission, cancellationToken);
+            writeTask = WriteTemporaryAndCommitAsync(destinationPath, bytes, permission, cancellationToken);
             _activeWrite = writeTask;
         }
 
         var timeoutTask = _delay.DelayAsync(WriteTimeout, CancellationToken.None);
         var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         var completed = await Task.WhenAny(writeTask, timeoutTask, cancellationTask);
+        var cancellationWonAfterCommitStarted = false;
         if (completed == cancellationTask)
         {
-            permission.Revoke();
-            cancellationToken.ThrowIfCancellationRequested();
+            if (permission.TryRevoke())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            cancellationWonAfterCommitStarted = true;
+            completed = writeTask;
         }
 
         if (completed == timeoutTask && !writeTask.IsCompleted)
         {
-            permission.Revoke();
-            ObserveFault(writeTask);
-            return CoverageRunWatchdogArtifactWriteResult.TimedOut;
+            if (!permission.TryRevoke())
+            {
+                // The same-directory atomic replacement has already started. It cannot be
+                // canceled safely, so do not report a timeout that could be followed by a
+                // late canonical publication. Await the commit and report its real result.
+                completed = writeTask;
+            }
+            else
+            {
+                ObserveFault(writeTask);
+                return CoverageRunWatchdogArtifactWriteResult.TimedOut;
+            }
         }
 
         try
         {
             await writeTask;
+            if (cancellationWonAfterCommitStarted)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             return permission.WasCommitted
                 ? CoverageRunWatchdogArtifactWriteResult.Success
                 : CoverageRunWatchdogArtifactWriteResult.Failed;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            permission.Revoke();
+            permission.TryRevoke();
             throw;
         }
         catch
         {
-            permission.Revoke();
+            permission.TryRevoke();
             return CoverageRunWatchdogArtifactWriteResult.Failed;
+        }
+    }
+
+    private async Task WriteTemporaryAndCommitAsync(
+        string destinationPath,
+        ReadOnlyMemory<byte> bytes,
+        CoverageRunWatchdogCommitPermission permission,
+        CancellationToken cancellationToken)
+    {
+        string? temporaryPath = null;
+        try
+        {
+            temporaryPath = await _storage.WriteTemporaryAsync(destinationPath, bytes, cancellationToken);
+            if (permission.TryBeginCommit())
+            {
+                // No await or injectable callback may occur between reserving commit authority
+                // and the same-directory atomic rename. A timeout can therefore revoke staging,
+                // but can never be reported while a background task still has authority to publish.
+                _storage.Commit(temporaryPath, destinationPath);
+                permission.CompleteCommit();
+            }
+        }
+        finally
+        {
+            if (temporaryPath is not null)
+            {
+                _storage.DeleteTemporary(temporaryPath);
+            }
         }
     }
 
@@ -155,33 +207,40 @@ internal sealed class CoverageRunWatchdogCommitPermission
     }
 
     /// <summary>Revokes a write that has not begun its atomic destination replacement.</summary>
-    public void Revoke() => Interlocked.CompareExchange(ref _state, Revoked, Allowed);
+    /// <returns><see langword="true"/> when commit authority was revoked; otherwise the commit already began or completed.</returns>
+    public bool TryRevoke() => Interlocked.CompareExchange(ref _state, Revoked, Allowed) == Allowed;
 }
 
 /// <summary>Abstracts same-directory temporary storage for deterministic artifact-writer tests.</summary>
 internal interface ICoverageRunWatchdogArtifactStorage
 {
-    /// <summary>Writes, flushes, and conditionally commits one serialized artifact.</summary>
+    /// <summary>Writes and flushes one serialized artifact to a unique same-directory temporary path.</summary>
     /// <param name="destinationPath">Canonical destination path.</param>
     /// <param name="bytes">Bounded serialized artifact.</param>
-    /// <param name="permission">Revocable destination commit permission.</param>
     /// <param name="cancellationToken">External cancellation token.</param>
-    /// <returns>A task that completes after commit or temporary cleanup.</returns>
-    Task WriteTemporaryAndCommitAsync(
+    /// <returns>The private temporary path after all bytes have been flushed.</returns>
+    Task<string> WriteTemporaryAsync(
         string destinationPath,
         ReadOnlyMemory<byte> bytes,
-        CoverageRunWatchdogCommitPermission permission,
         CancellationToken cancellationToken);
+
+    /// <summary>Atomically renames one fully flushed same-directory temporary file to its canonical destination.</summary>
+    /// <param name="temporaryPath">Fully flushed private temporary path.</param>
+    /// <param name="destinationPath">Canonical destination path.</param>
+    void Commit(string temporaryPath, string destinationPath);
+
+    /// <summary>Best-effort deletes one private temporary file.</summary>
+    /// <param name="temporaryPath">Private temporary path.</param>
+    void DeleteTemporary(string temporaryPath);
 }
 
 /// <summary>Provides the production same-directory temporary-file and atomic-replacement behavior.</summary>
 internal sealed class CoverageRunWatchdogArtifactStorage : ICoverageRunWatchdogArtifactStorage
 {
     /// <inheritdoc />
-    public async Task WriteTemporaryAndCommitAsync(
+    public async Task<string> WriteTemporaryAsync(
         string destinationPath,
         ReadOnlyMemory<byte> bytes,
-        CoverageRunWatchdogCommitPermission permission,
         CancellationToken cancellationToken)
     {
         var fullPath = Path.GetFullPath(destinationPath);
@@ -203,22 +262,29 @@ internal sealed class CoverageRunWatchdogArtifactStorage : ICoverageRunWatchdogA
                 await stream.FlushAsync(cancellationToken);
             }
 
-            if (permission.TryBeginCommit())
-            {
-                File.Move(temporaryPath, fullPath, overwrite: true);
-                permission.CompleteCommit();
-            }
+            return temporaryPath;
         }
-        finally
+        catch
         {
-            try
-            {
-                File.Delete(temporaryPath);
-            }
-            catch
-            {
-                // Temporary cleanup is best effort and never replaces the bounded public result.
-            }
+            DeleteTemporary(temporaryPath);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Commit(string temporaryPath, string destinationPath)
+        => File.Move(temporaryPath, Path.GetFullPath(destinationPath), overwrite: true);
+
+    /// <inheritdoc />
+    public void DeleteTemporary(string temporaryPath)
+    {
+        try
+        {
+            File.Delete(temporaryPath);
+        }
+        catch
+        {
+            // Temporary cleanup is best effort and never replaces the bounded public result.
         }
     }
 }

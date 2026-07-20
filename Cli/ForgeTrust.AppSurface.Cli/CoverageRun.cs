@@ -575,7 +575,15 @@ internal sealed class CoverageRunWorkflow
 
         try
         {
-            var result = await RunCoreAsync(request, currentDirectory, outputDirectory, watchdog);
+            var runTask = RunCoreAsync(request, currentDirectory, outputDirectory, watchdog);
+            var completed = await Task.WhenAny(runTask, watchdog.TerminalTask);
+            if (completed == watchdog.TerminalTask)
+            {
+                ObserveFault(runTask);
+                throw await watchdog.TerminalTask;
+            }
+
+            var result = await runTask;
             await watchdog.CompleteAsync();
             return result;
         }
@@ -585,6 +593,13 @@ internal sealed class CoverageRunWorkflow
             throw;
         }
     }
+
+    private static void ObserveFault(Task task)
+        => _ = task.ContinueWith(
+            static completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 
     private async Task<CoverageRunResult> RunCoreAsync(
         CoverageRunRequest request,
@@ -674,17 +689,21 @@ internal sealed class CoverageRunWorkflow
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
         }
 
-        var mergedCoveragePath = Path.Join(outputDirectory, "coverage.cobertura.xml");
-        File.Copy(merge.CoberturaPath, mergedCoveragePath, overwrite: true);
-        if (File.Exists(merge.SummaryPath))
-        {
-            File.Copy(merge.SummaryPath, Path.Join(outputDirectory, "reportgenerator-summary.txt"), overwrite: true);
-        }
-
         const string artifactsOperation = CoverageRunWatchdogOperationIds.Artifacts;
         watchdog.Register(
             new CoverageRunWatchdogOperation(artifactsOperation, CoverageRunWatchdogOperationKind.Artifacts),
             CoverageRunWatchdogOperationState.Running);
+        var mergedCoveragePath = Path.Join(outputDirectory, "coverage.cobertura.xml");
+        await CopyStagedFileAsync(merge.CoberturaPath, mergedCoveragePath, watchdog, runToken);
+        if (File.Exists(merge.SummaryPath))
+        {
+            await CopyStagedFileAsync(
+                merge.SummaryPath,
+                Path.Join(outputDirectory, "reportgenerator-summary.txt"),
+                watchdog,
+                runToken);
+        }
+
         await WriteSummaryAsync(outputDirectory, mergedCoveragePath, request, diagnostics, watchdog, runToken);
         await WriteTimingsAsync(
             request,
@@ -699,6 +718,7 @@ internal sealed class CoverageRunWorkflow
             projectResults,
             schedulePlan,
             diagnostics,
+            watchdog,
             runToken);
         watchdog.Transition(artifactsOperation, CoverageRunWatchdogOperationState.Complete);
 
@@ -1754,8 +1774,77 @@ internal sealed class CoverageRunWorkflow
                 """);
         }
 
-        await File.WriteAllTextAsync(Path.Join(outputDirectory, "summary.txt"), summary, cancellationToken);
+        await WriteStagedTextAsync(
+            Path.Join(outputDirectory, "summary.txt"),
+            summary,
+            watchdog,
+            cancellationToken);
         await watchdog.WriteOutputLineAsync(summary);
+    }
+
+    private static async Task CopyStagedFileAsync(
+        string sourcePath,
+        string destinationPath,
+        CoverageRunWatchdogRuntime watchdog,
+        CancellationToken cancellationToken)
+    {
+        var stagedPath = CreateStagedPath(destinationPath);
+        try
+        {
+            await using (var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 16 * 1024, FileOptions.Asynchronous))
+            await using (var destination = new FileStream(
+                stagedPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                16 * 1024,
+                FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await source.CopyToAsync(destination, cancellationToken);
+                await destination.FlushAsync(cancellationToken);
+            }
+
+            watchdog.CommitStagedFile(stagedPath, destinationPath);
+        }
+        finally
+        {
+            TryDeleteStagedFile(stagedPath);
+        }
+    }
+
+    private static async Task WriteStagedTextAsync(
+        string destinationPath,
+        string content,
+        CoverageRunWatchdogRuntime watchdog,
+        CancellationToken cancellationToken)
+    {
+        var stagedPath = CreateStagedPath(destinationPath);
+        try
+        {
+            await File.WriteAllTextAsync(stagedPath, content, cancellationToken);
+            watchdog.CommitStagedFile(stagedPath, destinationPath);
+        }
+        finally
+        {
+            TryDeleteStagedFile(stagedPath);
+        }
+    }
+
+    private static string CreateStagedPath(string destinationPath)
+        => Path.Join(
+            Path.GetDirectoryName(Path.GetFullPath(destinationPath))!,
+            $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
+
+    private static void TryDeleteStagedFile(string stagedPath)
+    {
+        try
+        {
+            File.Delete(stagedPath);
+        }
+        catch
+        {
+            // Staged cleanup is best effort; the unique path is never a canonical artifact.
+        }
     }
 
     private static decimal ReadDecimal(XElement root, string name)
@@ -1781,6 +1870,7 @@ internal sealed class CoverageRunWorkflow
         IReadOnlyList<CoverageProjectRunResult> projectResults,
         CoverageRunSchedulePlan schedulePlan,
         CoverageRunSlowTestDiagnosticsRun? diagnostics,
+        CoverageRunWatchdogRuntime watchdog,
         CancellationToken cancellationToken)
     {
         var testResultArtifacts = projectResults
@@ -1879,7 +1969,11 @@ internal sealed class CoverageRunWorkflow
         };
 
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(Path.Join(outputDirectory, "timings.json"), json + Environment.NewLine, cancellationToken);
+        await WriteStagedTextAsync(
+            Path.Join(outputDirectory, "timings.json"),
+            json + Environment.NewLine,
+            watchdog,
+            cancellationToken);
     }
 
     private static string ResolveParserStatus(
@@ -1908,24 +2002,12 @@ internal sealed class CoverageRunWorkflow
         }
 
         var diagnosticStarted = _timeProvider.GetTimestamp();
-        try
-        {
-            var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(projectResults, cancellationToken);
-            var diagnostics = await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
-                outputDirectory,
-                report,
-                () => ElapsedSeconds(diagnosticStarted),
-                aggregationSeconds => CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
-                cancellationToken);
+        var stagingDirectory = Path.Join(outputDirectory, $".slow-test-diagnostics.{Guid.NewGuid():N}.tmp");
 
-            await watchdog.WriteOutputLineAsync(FormattableString.Invariant(
-                $"Slow-test diagnostics: {diagnostics.MarkdownPath} ({diagnostics.AggregationSeconds}s, {diagnostics.AggregationPercent:0.00}% overhead)"));
-            return diagnostics;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or XmlException)
+        async Task<CoverageRunSlowTestDiagnosticsRun> WarnAsync(Exception exception)
         {
             var aggregationSeconds = ElapsedSeconds(diagnosticStarted);
-            var diagnostics = new CoverageRunSlowTestDiagnosticsRun(
+            var failedDiagnostics = new CoverageRunSlowTestDiagnosticsRun(
                 Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName),
                 Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.JsonFileName),
                 aggregationSeconds,
@@ -1936,8 +2018,58 @@ internal sealed class CoverageRunWorkflow
                     .SelectMany(result => result.TestResults)
                     .ToDictionary(artifact => artifact.Path, _ => "diagnosticsFailed", StringComparer.Ordinal));
             await watchdog.WriteErrorLineAsync(FormattableString.Invariant(
-                $"Slow-test diagnostics failed after {diagnostics.AggregationSeconds}s ({diagnostics.AggregationPercent:0.00}% overhead): {ex.Message}"));
+                $"Slow-test diagnostics failed after {failedDiagnostics.AggregationSeconds}s ({failedDiagnostics.AggregationPercent:0.00}% overhead): {exception.Message}"));
+            return failedDiagnostics;
+        }
+
+        try
+        {
+            CoverageRunSlowTestDiagnosticsRun diagnostics;
+            try
+            {
+                var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(projectResults, cancellationToken);
+                diagnostics = await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
+                    stagingDirectory,
+                    outputDirectory,
+                    report,
+                    () => ElapsedSeconds(diagnosticStarted),
+                    aggregationSeconds => CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or XmlException)
+            {
+                return await WarnAsync(ex);
+            }
+
+            // Commit failure is not a diagnostics-parser warning: allowing the run to continue
+            // could publish summaries that claim a Markdown/JSON pair which was only partially promoted.
+            try
+            {
+                watchdog.CommitStagedFiles(
+                    [
+                        (Path.Join(stagingDirectory, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName), diagnostics.MarkdownPath),
+                        (Path.Join(stagingDirectory, CoverageRunSlowTestDiagnosticsWriter.JsonFileName), diagnostics.JsonPath),
+                    ]);
+            }
+            catch (CoverageRunStagedCommitPreflightException ex)
+            {
+                return await WarnAsync(ex);
+            }
+
+            await watchdog.WriteOutputLineAsync(FormattableString.Invariant(
+                $"Slow-test diagnostics: {diagnostics.MarkdownPath} ({diagnostics.AggregationSeconds}s, {diagnostics.AggregationPercent:0.00}% overhead)"));
             return diagnostics;
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(stagingDirectory, recursive: true);
+            }
+            catch
+            {
+                // Abandoned diagnostics remain confined to a unique private staging directory.
+            }
         }
     }
 

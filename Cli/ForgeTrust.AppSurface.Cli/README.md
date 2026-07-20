@@ -233,7 +233,15 @@ The watchdog supervises AppSurface's orchestration operations: project discovery
 
 An operation makes observable progress when its phase changes or its child process emits stdout or stderr bytes. CPU activity, time spent queued behind another project, output from a sibling project, heartbeat rendering, and later JUnit parsing do not reset its clock. Each active operation has its own clock, so one noisy parallel project cannot hide a quiet project. Queued projects do not age until they become active.
 
-Durations use lowercase integer values with one of `ms`, `s`, `m`, or `h`, for example `500ms`, `30s`, `10m`, or `1h`. Signs, decimals, spaces, and uppercase suffixes are invalid. The maximum is 30 days. Only `--heartbeat-interval` accepts `0`.
+Durations use lowercase integer values with one of `ms`, `s`, `m`, or `h`. Parsing is invariant and intentionally strict:
+
+| Value | Result |
+| --- | --- |
+| `500ms`, `30s`, `10m`, `1h` | Accepted |
+| `0` for `--heartbeat-interval` | Accepted; heartbeat rendering is disabled |
+| `0` for `--no-progress-timeout` | Rejected with `ASCOV101`; classification needs a positive threshold |
+| `+30s`, `-30s`, `1.5m`, `30 s`, `30S` | Rejected with `ASCOV101`; signs, decimals, spaces, and uppercase suffixes are invalid |
+| More than 30 days or an overflowing integer | Rejected with `ASCOV101` |
 
 | Configuration | Heartbeats | No-progress classification | Terminates active process trees |
 | --- | --- | --- | --- |
@@ -243,7 +251,9 @@ Durations use lowercase integer values with one of `ms`, `s`, `m`, or `h`, for e
 | `--watchdog fail` | Every 30 seconds | Fail after 10 minutes | Yes |
 | `--heartbeat-interval 0 --watchdog off` | No | No | No |
 
-`warn` emits one incident for a newly classified operation, attempts to write `coverage-watchdog.json`, and lets the run continue with its eventual normal exit status. Real output rearms the operation, so a later quiet interval can produce a new incident. `fail` cancels the run, requests termination of every discoverable active process tree, records bounded cleanup status, emits `ASCOV121`, and exits `124`. Exit `124` means the AppSurface watchdog classified no observable progress; it is distinct from an ordinary build or test failure. `off` disables classification and termination, but heartbeats remain independently enabled unless their interval is `0`.
+`warn` emits one incident for a newly classified operation, attempts to write `coverage-watchdog.json`, and lets the run continue with its eventual normal exit status. Real output rearms the operation, so a later quiet interval can produce a new incident. `fail` claims the watchdog as the terminal cause, starts cancellation and cleanup before attempting terminal console output, requests termination of every discoverable active process tree, records bounded cleanup status, emits `ASCOV121`, and exits `124`. Exit `124` means the AppSurface watchdog classified no observable progress; it is distinct from an ordinary build or test failure. `off` disables classification and termination, but heartbeats remain independently enabled unless their interval is `0`.
+
+Process cleanup uses .NET [`Process.Kill(entireProcessTree: true)`](https://learn.microsoft.com/dotnet/api/system.diagnostics.process.kill?view=net-10.0). A `complete` cleanup status means AppSurface dispatched tree termination for every captured process lease and observed each captured root complete within the shared cleanup window. It is not proof that every possible descendant was inspected: detached, re-parented, or permission-inaccessible descendants are outside the platform API's guarantee, and the API does not wait for descendants to exit after the request. `failed` records a failed kill request; `deadline-exceeded` records that root completion or pipe drain did not finish within the shared deadline. Use the local process and test-platform evidence when stronger descendant or test-host diagnosis is required.
 
 Use the complete compatibility escape hatch when upgrading a workflow that must initially preserve the earlier console and artifact behavior:
 
@@ -254,19 +264,52 @@ dotnet tool run appsurface coverage run \
   --watchdog off
 ```
 
-To verify the feature without risking termination of a real suite, select a consumer-owned test project that intentionally runs quietly for at least five seconds and use warn mode with short development-only thresholds:
+To verify the feature without risking termination of a real suite, keep a dedicated consumer-owned fixture project with one intentionally quiet test. For example, this xUnit fixture stays silent long enough to cross a short warning boundary:
+
+```csharp
+public sealed class CoverageWatchdogFixture
+{
+    [Fact]
+    public Task QuietOperationProducesWarningEvidence()
+        => Task.Delay(TimeSpan.FromSeconds(20));
+}
+```
+
+Build the fixture once, then run only that project in `warn` mode. Keep this fixture separate from production suites so its deliberate delay cannot affect normal coverage timing:
 
 ```bash
+dotnet build tests/MyApp.CoverageWatchdogFixture/MyApp.CoverageWatchdogFixture.csproj
 dotnet tool run appsurface coverage run \
-  --test-project tests/MyApp.Quiet.Tests/MyApp.Quiet.Tests.csproj \
-  --heartbeat-interval 2s \
-  --no-progress-timeout 5s \
+  --test-project tests/MyApp.CoverageWatchdogFixture/MyApp.CoverageWatchdogFixture.csproj \
+  --no-build \
+  --no-restore \
+  --heartbeat-interval 5s \
+  --no-progress-timeout 15s \
   --watchdog warn
 ```
 
-Expect a heartbeat after about two seconds and a warning plus `coverage-watchdog.json` after about five seconds. Because this recipe uses `warn`, AppSurface does not terminate the test process; remove the short thresholds after verification. AppSurface's internal test suite uses maintained fixtures to verify warning and fail-mode behavior without pointing package consumers at a repository-specific fixture; packed-tool smoke verifies option discovery and the exact fail-mode `ASCOV121`/124 contract.
+Expect the first heartbeat within 15 seconds and the warning plus `coverage-watchdog.json` within two minutes, allowing for runner scheduling. The test still completes normally because `warn` never terminates it; verify that the command preserves the test run's eventual exit status, review the artifact, and then remove the fixture output. Do not use `fail` for this onboarding check. AppSurface's internal test suite uses maintained quiet, noisy-stuck, and nested-child fixtures to verify warning boundaries, the raw-byte limitation, and fail-mode cleanup; packed-tool smoke verifies option discovery and the exact fail-mode `ASCOV121`/124 contract.
 
-AppSurface owns orchestration-level visibility and cleanup. For per-test identity, test-host hang detection, and dump collection, configure the native test platform instead: [VSTest `--blame-hang`](https://learn.microsoft.com/dotnet/core/tools/dotnet-test-vstest#--blame-hang) or [Microsoft.Testing.Platform hang dumps](https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-crash-hang-dumps). AppSurface does not silently inject those settings, and output bytes can keep the AppSurface clock active even when a test is semantically stuck.
+The dynamic elapsed and byte values vary, but the fixture should produce this shape before it completes:
+
+```text
+Coverage heartbeat: elapsed=<seconds>s; queued=0; running=1; finalizing=0; complete=<count>
+  project="tests/MyApp.CoverageWatchdogFixture/MyApp.CoverageWatchdogFixture.csproj"; state=running; elapsed=<seconds>s; no-progress=<seconds>s; output-bytes=<bytes>
+Coverage watchdog warning: operation=project; project="tests/MyApp.CoverageWatchdogFixture/MyApp.CoverageWatchdogFixture.csproj"; no-progress=15s; concurrent-stalls=0; artifact="<output>/coverage-watchdog.json"
+```
+
+Confirm that the JSON has `schemaVersion: 1`, `outcome: "warning"`, `watchdogMode: "warn"`, `noProgressTimeoutMilliseconds: 15000`, the fixture under `primary.project`, and `cleanup.status: "not-requested"`. Then delete the dedicated fixture's `TestResults/coverage-merged` directory; it is AppSurface-owned output, but its evidence still requires the privacy review below.
+
+AppSurface owns orchestration-level visibility and cleanup. AppSurface does not silently inject those settings into the native test platform, and output bytes can keep its clock active even when a test is semantically stuck. Choose the narrowest tool that owns the evidence you need:
+
+| Need | Use | Why |
+| --- | --- | --- |
+| Periodic run-level visibility across discovery, build, projects, merge, diagnostics, and artifacts | AppSurface `warn` | Heartbeats and bounded local evidence without changing the run's eventual exit status |
+| A CI containment boundary for an orchestration operation producing no output bytes | AppSurface `fail` | First-cause exit `124` plus bounded cleanup of captured process trees |
+| Last-test identity, test-host hang detection, or dumps with the VSTest runner | [VSTest `--blame-hang`](https://learn.microsoft.com/dotnet/core/tools/dotnet-test-vstest#--blame-hang) | The runner understands test identity and test-host lifetime |
+| Test-process crash or hang dumps with Microsoft.Testing.Platform | [Microsoft.Testing.Platform hang dumps](https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-crash-hang-dumps) | The platform extension owns crash and hang dump capture |
+
+These tools are complementary. A noisy-but-stuck test can evade AppSurface classification because raw stdout or stderr bytes are observable progress; use VSTest or Microsoft.Testing.Platform when semantic test health, test identity, or dumps matter.
 
 Duration-aware scheduling keeps exclusive projects as barriers. If discovery returns `A.Tests`, `Browser.IntegrationTests`, and `B.Tests`, `B.Tests` never jumps ahead of the exclusive browser project even when it was slower in the previous run. AppSurface sorts only the non-exclusive segment before each barrier and only the non-exclusive segment after it.
 
@@ -363,6 +406,22 @@ Schema version 1 uses lowercase enum strings, millisecond integer durations, UTC
 ```
 
 Fail-mode artifacts use `outcome: "terminated"`, `diagnosticCode: "ASCOV121"`, and cleanup status `complete`, `failed`, or `deadline-exceeded`. Consumers should ignore unknown fields within schema version 1; a breaking shape requires another schema version. The serialized artifact remains below 64 KiB by dropping optional metadata from concurrent operations and then trailing concurrent records; `concurrentlyStaleOmitted` reports how many were excluded.
+
+The two-second evidence deadline covers directory setup, serialization, private same-directory staging, writes, and flushes. A timeout revokes commit authority, so late staging work can only clean its unique temporary file and cannot publish the canonical artifact. After staging succeeds, AppSurface reserves the terminal gate and performs the final same-directory atomic rename synchronously with no intervening await or callback. .NET does not provide a cancellable atomic rename; if the underlying filesystem has already entered that final metadata operation, AppSurface waits for its real success or failure instead of reporting a timeout that could be followed by a late publication. Use a responsive local output filesystem when a hard outer CI deadline is required.
+
+The terminal diagnostic is one line. Dynamic paths and counts vary, but the contract has this exact field order:
+
+```text
+ASCOV121 Coverage run stalled. Cause: Project "tests/MyApp.Tests/MyApp.Tests.csproj" produced no observable progress for 600s; 1 additional operation was concurrently stale. Fix: Inspect the local project log, raise --no-progress-timeout for intentionally quiet tests, or rerun with --watchdog warn. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog Log: projects/myapp-tests-a1b2c3/dotnet-test.log Artifact: coverage-watchdog.json Cleanup: complete
+```
+
+Shared phases use `Operation "build"` and omit `Log`. When evidence cannot be committed, `Artifact: unavailable (<allowlisted-detail>)` appears in `ASCOV121`, preserving exit `124`, and the separate bounded evidence diagnostic is:
+
+```text
+ASCOV122 Coverage watchdog artifact unavailable (<allowlisted-detail>). Fix: Use a writable dedicated --output directory and rerun.
+```
+
+`ASCOV122` never claims an uncommitted artifact exists. In `warn` mode it does not replace the underlying run result. Details are bounded identifiers such as `artifact-write-timeout` or `writer-busy`, never raw exception text.
 
 `coverage run`, `coverage merge`, and `coverage gate` are the supported CLI coverage surfaces. The package artifact verifier installs the packed `ForgeTrust.AppSurface.Cli` tool in a clean fixture and proves all three coverage commands, including a deliberately failing gate that must still write reports, before publication. Grouped CLI execution and TRX/TUnit result parsing remain separate follow-up work.
 

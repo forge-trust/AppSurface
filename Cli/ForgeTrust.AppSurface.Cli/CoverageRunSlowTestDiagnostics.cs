@@ -13,7 +13,7 @@ namespace ForgeTrust.AppSurface.Cli;
 /// diagnostic warnings so slow-test reporting cannot change the coverage result.
 /// <list type="bullet">
 /// <item><description>Only the first managed JUnit artifact for a project is parsed; additional JUnit artifacts emit warnings.</description></item>
-/// <item><description><see cref="WriteAsync"/> may write artifacts twice when aggregation timing changes during the initial write.</description></item>
+/// <item><description><c>WriteAsync</c> may write artifacts twice when aggregation timing changes during the initial write.</description></item>
 /// <item><description>Legacy or externally managed test-result files are not consumed.</description></item>
 /// <item><description>Missing files and parser failures are reported as warnings instead of failing coverage.</description></item>
 /// </list>
@@ -114,7 +114,7 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
     /// <param name="cancellationToken">Cancellation token for artifact writes.</param>
     /// <returns>Written artifact paths and high-level metadata.</returns>
     /// <remarks>
-    /// <see cref="WriteAsync"/> may call <c>WriteArtifactsAsync</c> twice when <c>aggregationSeconds</c> differs from
+    /// <c>WriteAsync</c> may call <c>WriteArtifactsAsync</c> twice when <c>aggregationSeconds</c> differs from
     /// <c>finalAggregationSeconds</c>. The single re-write includes the first file-write cost in reported aggregation
     /// overhead; later timing drift is not captured.
     /// </remarks>
@@ -124,17 +124,61 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         Func<long> getAggregationSeconds,
         Func<long, decimal> calculateAggregationPercent,
         CancellationToken cancellationToken)
+        => await WriteAsync(
+            outputDirectory,
+            outputDirectory,
+            report,
+            getAggregationSeconds,
+            calculateAggregationPercent,
+            cancellationToken);
+
+    /// <summary>
+    /// Writes diagnostics to a private staging directory while recording canonical artifact paths in their contents.
+    /// </summary>
+    /// <param name="stagingDirectory">Private directory that receives the uncommitted files.</param>
+    /// <param name="artifactDirectory">Canonical directory represented in returned and embedded artifact paths.</param>
+    /// <param name="report">Report model returned by <see cref="CollectAsync"/>.</param>
+    /// <param name="getAggregationSeconds">Reads elapsed diagnostic aggregation seconds.</param>
+    /// <param name="calculateAggregationPercent">Calculates aggregation overhead as a percent of runner time.</param>
+    /// <param name="cancellationToken">Cancellation token for artifact writes.</param>
+    /// <returns>Canonical artifact paths and high-level metadata after staging completes.</returns>
+    public static async Task<CoverageRunSlowTestDiagnosticsRun> WriteAsync(
+        string stagingDirectory,
+        string artifactDirectory,
+        CoverageRunSlowTestDiagnosticsReport report,
+        Func<long> getAggregationSeconds,
+        Func<long, decimal> calculateAggregationPercent,
+        CancellationToken cancellationToken)
     {
-        var markdownPath = Path.Join(outputDirectory, MarkdownFileName);
-        var jsonPath = Path.Join(outputDirectory, JsonFileName);
+        Directory.CreateDirectory(stagingDirectory);
+        var stagedMarkdownPath = Path.Join(stagingDirectory, MarkdownFileName);
+        var stagedJsonPath = Path.Join(stagingDirectory, JsonFileName);
+        var markdownPath = Path.Join(artifactDirectory, MarkdownFileName);
+        var jsonPath = Path.Join(artifactDirectory, JsonFileName);
         var aggregationSeconds = getAggregationSeconds();
-        await WriteArtifactsAsync(report, markdownPath, jsonPath, aggregationSeconds, calculateAggregationPercent(aggregationSeconds), cancellationToken);
+        await WriteArtifactsAsync(
+            report,
+            stagedMarkdownPath,
+            stagedJsonPath,
+            markdownPath,
+            jsonPath,
+            aggregationSeconds,
+            calculateAggregationPercent(aggregationSeconds),
+            cancellationToken);
 
         var finalAggregationSeconds = getAggregationSeconds();
         if (finalAggregationSeconds != aggregationSeconds)
         {
             aggregationSeconds = finalAggregationSeconds;
-            await WriteArtifactsAsync(report, markdownPath, jsonPath, aggregationSeconds, calculateAggregationPercent(aggregationSeconds), cancellationToken);
+            await WriteArtifactsAsync(
+                report,
+                stagedMarkdownPath,
+                stagedJsonPath,
+                markdownPath,
+                jsonPath,
+                aggregationSeconds,
+                calculateAggregationPercent(aggregationSeconds),
+                cancellationToken);
         }
 
         return new CoverageRunSlowTestDiagnosticsRun(
@@ -151,6 +195,8 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
 
     private static async Task WriteArtifactsAsync(
         CoverageRunSlowTestDiagnosticsReport report,
+        string stagedMarkdownPath,
+        string stagedJsonPath,
         string markdownPath,
         string jsonPath,
         long aggregationSeconds,
@@ -189,8 +235,11 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
             warnings = report.Warnings,
         };
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(jsonPath, json + Environment.NewLine, cancellationToken);
-        await File.WriteAllTextAsync(markdownPath, RenderMarkdown(report, markdownPath, jsonPath, aggregationSeconds, aggregationPercent), cancellationToken);
+        await File.WriteAllTextAsync(stagedJsonPath, json + Environment.NewLine, cancellationToken);
+        await File.WriteAllTextAsync(
+            stagedMarkdownPath,
+            RenderMarkdown(report, markdownPath, jsonPath, aggregationSeconds, aggregationPercent),
+            cancellationToken);
     }
 
     private static async Task<CoverageRunJunitReadResult> ReadJunitFileAsync(

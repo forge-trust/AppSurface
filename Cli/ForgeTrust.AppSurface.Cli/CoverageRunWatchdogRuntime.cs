@@ -80,6 +80,9 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
     /// <summary>Gets the token canceled by either the caller or fail-mode watchdog classification.</summary>
     public CancellationToken RunCancellationToken => _runCancellation.Token;
 
+    /// <summary>Gets the task that completes after fail-mode cleanup and terminal evidence handling finish.</summary>
+    public Task<CommandException> TerminalTask => _terminal.Task;
+
     /// <summary>Registers an operation with the underlying monotonic supervisor.</summary>
     public void Register(CoverageRunWatchdogOperation operation, CoverageRunWatchdogOperationState state)
     {
@@ -159,29 +162,30 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                 return;
             }
 
-            Directory.CreateDirectory(_canonicalDirectory);
             var canonicalArtifact = Path.Join(_canonicalDirectory, "coverage-watchdog.json");
-            var promotion = Task.Run(() => File.Copy(bootstrapArtifact, canonicalArtifact, overwrite: true));
-            if (await Task.WhenAny(promotion, Task.Delay(TimeSpan.FromSeconds(2), _timeProvider)) != promotion)
+            var bytes = await File.ReadAllBytesAsync(bootstrapArtifact, _monitorCancellation.Token);
+            if (bytes.Length > CoverageRunWatchdogArtifactSerializer.MaximumBytes)
             {
-                ObserveFault(promotion);
-                promotionFailure = "bootstrap-promotion-timeout";
+                promotionFailure = "bootstrap-promotion-failed";
             }
             else
             {
-                try
+                var artifact = CoverageRunWatchdogArtifactSerializer.Deserialize(bytes);
+                var promotion = await _artifactWriter.WriteAsync(canonicalArtifact, artifact, _monitorCancellation.Token);
+                if (promotion.Written)
                 {
-                    await promotion;
                     File.Delete(bootstrapArtifact);
                     TryDeleteBootstrapDirectory();
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+                else
                 {
-                    promotionFailure = "bootstrap-promotion-failed";
+                    promotionFailure = string.Equals(promotion.Detail, "artifact-write-timeout", StringComparison.Ordinal)
+                        ? "bootstrap-promotion-timeout"
+                        : "bootstrap-promotion-failed";
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Text.Json.JsonException or ArgumentOutOfRangeException)
         {
             promotionFailure = "bootstrap-promotion-failed";
         }
@@ -295,7 +299,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                 }
 
                 if (_options.Mode == CoverageRunWatchdogMode.Fail &&
-                    _supervisor.TryClaimTerminal(evaluation.NewlyStale[0], out var terminal) &&
+                    TryClaimTerminal(evaluation.NewlyStale[0], out var terminal) &&
                     terminal is not null)
                 {
                     await HandleTerminalAsync(evaluation, terminal);
@@ -332,7 +336,6 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         ProcessReservation[] reservations;
         lock (_gate)
         {
-            _processRegistrationClosed = true;
             reservations = _processes.Values.ToArray();
             foreach (var reservation in reservations)
             {
@@ -371,6 +374,75 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         }
     }
 
+    private bool TryClaimTerminal(
+        CoverageRunWatchdogOperationSnapshot candidate,
+        out CoverageRunWatchdogOperationSnapshot? terminal)
+    {
+        lock (_gate)
+        {
+            if (!_supervisor.TryClaimTerminal(candidate, out terminal))
+            {
+                return false;
+            }
+
+            _processRegistrationClosed = true;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Atomically promotes a same-directory staged file while the run terminal gate remains open.
+    /// </summary>
+    /// <param name="stagedPath">Unique private staged path.</param>
+    /// <param name="destinationPath">Canonical AppSurface-owned destination.</param>
+    /// <exception cref="OperationCanceledException">A terminal cause or external cancellation won before commit.</exception>
+    public void CommitStagedFile(string stagedPath, string destinationPath)
+        => CommitStagedFiles([(stagedPath, destinationPath)]);
+
+    /// <summary>
+    /// Atomically claims the terminal gate and promotes a related set of staged files without a terminal interleaving.
+    /// </summary>
+    /// <param name="files">Private staged paths paired with canonical AppSurface-owned destinations.</param>
+    /// <exception cref="OperationCanceledException">A terminal cause or external cancellation won before commit.</exception>
+    public void CommitStagedFiles(IReadOnlyList<(string StagedPath, string DestinationPath)> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        foreach (var (stagedPath, destinationPath) in files)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(stagedPath);
+            ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+            if (!File.Exists(stagedPath))
+            {
+                throw new CoverageRunStagedCommitPreflightException(
+                    "A staged coverage artifact was not available for commit.",
+                    stagedPath);
+            }
+
+            if (Directory.Exists(destinationPath))
+            {
+                throw new CoverageRunStagedCommitPreflightException(
+                    $"Coverage artifact destination is a directory: {destinationPath}",
+                    destinationPath);
+            }
+        }
+
+        lock (_gate)
+        {
+            if (_processRegistrationClosed || _supervisor.TerminalCause is not null || _externalCancellation.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(RunCancellationToken);
+            }
+
+            foreach (var (stagedPath, destinationPath) in files)
+            {
+                // Same-directory atomic rename is the terminal critical section. There is no
+                // await or callback between the gate check and commit, so abandoned async work
+                // never retains publication authority after a terminal claim.
+                File.Move(stagedPath, destinationPath, overwrite: true);
+            }
+        }
+    }
+
     private static CommandException CreateTerminalException(
         CoverageRunWatchdogEvaluation evaluation,
         CoverageRunWatchdogOperationSnapshot terminal,
@@ -378,16 +450,23 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         string artifactText)
     {
         var project = terminal.Project is null ? $"Operation {QuotePath(Kind(terminal.Kind))}" : $"Project {QuotePath(terminal.Project)}";
-        return CoverageRunDiagnostics.Create(
+        var concurrentCount = Math.Max(0, evaluation.NewlyStale.Count - 1);
+        var concurrentText = concurrentCount == 1
+            ? "1 additional operation was concurrently stale."
+            : $"{concurrentCount.ToString(CultureInfo.InvariantCulture)} additional operations were concurrently stale.";
+        var diagnostic = CoverageRunDiagnostics.Create(
             "ASCOV121",
-            "Coverage run produced no observable progress.",
+            "Coverage run stalled.",
             $"{project} produced no observable progress for {WholeSeconds(terminal.NoProgress)}s; " +
-            $"{Math.Max(0, evaluation.NewlyStale.Count - 1).ToString(CultureInfo.InvariantCulture)} additional operation(s) were concurrently stale. " +
-            $"Artifact: {artifactText}. Cleanup: {cleanup.Status}.",
+            concurrentText,
             "Inspect the local project log, raise --no-progress-timeout for intentionally quiet tests, or rerun with --watchdog warn.",
             "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog",
             terminal.Log,
             exitCode: 124);
+        return new CommandException(
+            $"{diagnostic.Message} Artifact: {artifactText} Cleanup: {cleanup.Status}",
+            124,
+            showHelp: false);
     }
 
     private async Task<CoverageRunWatchdogCleanup> KillProcessesAsync(IReadOnlyList<ProcessReservation> reservations)
@@ -410,7 +489,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         if (await Task.WhenAny(allKilled, deadline) != allKilled)
         {
             _ = DisposeReservationsWhenFinishedAsync(reservations, allCompleted);
-            return new CoverageRunWatchdogCleanup("deadline-exceeded", "kill-timeout");
+            return new CoverageRunWatchdogCleanup("deadline-exceeded", "kill-failed");
         }
 
         var killSucceeded = await allKilled;
@@ -808,6 +887,12 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                             process.Kill(entireProcessTree: true);
                         }
 
+                        // Process.Kill(true) requests descendant termination but does not wait
+                        // for it. Waiting for the captured root here ensures cleanup is not
+                        // reported complete while the owned root is still alive. Descendant
+                        // guarantees remain bounded by the platform API's documented limits.
+                        process.WaitForExit();
+
                         return true;
                     }
                     catch
@@ -848,4 +933,22 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
     }
 
     private sealed record ArtifactWriteResult(bool Success, string? Path, string? Detail);
+}
+
+/// <summary>
+/// Reports a staged-set validation failure detected before any canonical coverage artifact is promoted.
+/// </summary>
+internal sealed class CoverageRunStagedCommitPreflightException : IOException
+{
+    /// <summary>Initializes a preflight failure with its safe public message and rejected path.</summary>
+    /// <param name="message">Bounded failure description.</param>
+    /// <param name="path">Staged or destination path rejected before commit.</param>
+    public CoverageRunStagedCommitPreflightException(string message, string path)
+        : base(message)
+    {
+        Path = path;
+    }
+
+    /// <summary>Gets the path rejected before any file in the set was promoted.</summary>
+    public string Path { get; }
 }
