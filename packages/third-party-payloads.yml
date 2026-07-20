@@ -3,7 +3,7 @@ notices:
   - id: razorwire-hotwired-turbo-runtime
     package_id: ForgeTrust.RazorWire
     component: Hotwire Turbo
-    version: 8.0.12
+    version: 8.0.23
     license: MIT
     source_url: https://github.com/hotwired/turbo
     payload_patterns:
@@ -13,7 +13,7 @@ notices:
       - THIRD-PARTY-NOTICES.md
     markers:
       - Hotwire Turbo
-      - 8.0.12
+      - 8.0.23
       - MIT
     source_paths:
       - Web/ForgeTrust.RazorWire/package.json
@@ -22,7 +22,7 @@ notices:
       - Web/ForgeTrust.RazorWire/assets/scripts/build.mjs
       - Web/ForgeTrust.RazorWire/wwwroot/razorwire/turbo.es2017-umd.js
     version_source_path: Web/ForgeTrust.RazorWire/package.json
-    version_source_contains: '"@hotwired/turbo": "8.0.12"'
+    version_source_contains: '"@hotwired/turbo": "8.0.23"'
   - id: cli-reportgenerator-tool-payload
     package_id: ForgeTrust.AppSurface.Cli
     component: ReportGenerator

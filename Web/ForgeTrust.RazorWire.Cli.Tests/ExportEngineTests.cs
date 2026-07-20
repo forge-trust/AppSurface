@@ -1716,7 +1716,7 @@ public class ExportEngineTests
                 "razorwire",
                 "turbo.es2017-umd.js");
             Assert.True(File.Exists(turboPath), $"{mode} export should materialize the bundled Turbo runtime.");
-            Assert.Equal("window.Turbo = { version: '8.0.12' };", await File.ReadAllTextAsync(turboPath));
+            Assert.Equal("window.Turbo = { version: '8.0.23' };", await File.ReadAllTextAsync(turboPath));
         }
         finally
         {
@@ -5955,7 +5955,7 @@ public class ExportEngineTests
 
             if (path == "/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js")
             {
-                return Text("window.Turbo = { version: '8.0.12' };", "text/javascript");
+                return Text("window.Turbo = { version: '8.0.23' };", "text/javascript");
             }
 
             return NotFound();

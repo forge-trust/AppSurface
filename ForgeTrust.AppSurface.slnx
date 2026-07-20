@@ -66,6 +66,7 @@
     <Project Path="examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj" />
     <Project Path="examples/auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" />
     <Project Path="examples/auth-aspire-keycloak-web/AuthAspireKeycloakWeb.csproj" />
+    <Project Path="examples/auth-aspnetcore-dev-auth.tests/AuthAspNetCoreDevAuthExample.Tests.csproj" />
     <Project Path="examples/auth-aspnetcore-dev-auth/AuthAspNetCoreDevAuthExample.csproj" />
     <Project Path="examples/auth-aspnetcore-bridge/AuthAspNetCoreBridgeExample.csproj" />
     <Project Path="examples/auth-aspnetcore-oidc/AuthAspNetCoreOidcExample.csproj" />
