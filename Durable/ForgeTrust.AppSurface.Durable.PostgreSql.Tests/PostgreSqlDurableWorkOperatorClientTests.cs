@@ -986,6 +986,46 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
     }
 
     [Fact]
+    public async Task Reconcile_UnsupportedPayloadClassificationFailsBeforeProviderAndRollsBackStartedCommand()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var registration = new OperatorRegistration(
+            "operator.reconcile-unsupported-classification",
+            DurableProviderSafety.ReconcileBeforeRetry,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.NotApplied, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var scope = new DurableScopeId("operator-reconcile-unsupported-classification");
+        var accepted = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, "reconcile-unsupported-classification");
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+        await UpdatePayloadClassificationAsync(database.DataSource, scope, accepted.WorkId, "unsupported");
+        var commandId = new DurableCommandId("operator-reconcile-unsupported-classification-command");
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await new PostgreSqlDurableWorkOperatorClient(
+                database.DataSource, registry, NullServices.Instance, epoch)
+                .ReconcileAsync(new DurableWorkReconcileRequest(
+                    scope,
+                    accepted.WorkId,
+                    commandId,
+                    "operator-test",
+                    "provider-proof",
+                    revision)));
+
+        Assert.Contains("Unknown persisted classification", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, registration.ReconciliationCount);
+        Assert.Equal(0, await CountOperatorCommandsAsync(database.DataSource, scope, commandId));
+    }
+
+    [Fact]
     public async Task Resolve_PersistsFingerprintSchemaAndStructuredAudit_AndRequiresExactPermit()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -1787,6 +1827,26 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
             "UPDATE appsurface_durable.work SET payload = decode('00', 'hex') WHERE scope_id = @scope_id AND work_id = @work_id;",
             connection,
             transaction);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("work_id", work.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
+    }
+
+    private static async ValueTask UpdatePayloadClassificationAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableWorkId work,
+        string classification)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetScopeAsync(connection, transaction, scope);
+        await using var command = new NpgsqlCommand(
+            "UPDATE appsurface_durable.work SET payload_classification = @classification WHERE scope_id = @scope_id AND work_id = @work_id;",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("classification", classification);
         command.Parameters.AddWithValue("scope_id", scope.Value);
         command.Parameters.AddWithValue("work_id", work.Value);
         Assert.Equal(1, await command.ExecuteNonQueryAsync());

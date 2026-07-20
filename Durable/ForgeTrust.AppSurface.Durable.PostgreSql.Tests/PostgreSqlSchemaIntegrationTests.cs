@@ -81,6 +81,25 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
+    public async Task NonContiguousMigrationHistory_FailsClosed()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await manager.ApplyAsync();
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            "DELETE FROM appsurface_durable.schema_migration WHERE version = 1;");
+
+        var status = await manager.GetStatusAsync();
+        var exception = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(async () =>
+            await manager.ValidateAsync());
+
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Inconsistent, status.Compatibility);
+        Assert.Contains("not contiguous at version 1", status.Problem, StringComparison.Ordinal);
+        Assert.Equal(status.Problem, exception.Status.Problem);
+    }
+
+    [Fact]
     public async Task SchemaStatus_ClassifiesIncompleteInvalidUpgradeAndUnsupportedStores()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
