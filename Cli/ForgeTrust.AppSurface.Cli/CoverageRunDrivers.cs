@@ -332,6 +332,18 @@ internal static class CoverageRunDriverStrategy
         for (var index = 0; index < arguments.Count; index++)
         {
             var argument = arguments[index];
+            if ((string.Equals(argument, "--collect", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(argument, "--results-directory", StringComparison.OrdinalIgnoreCase))
+                && index + 1 >= arguments.Count)
+            {
+                throw CoverageRunDiagnostics.Create(
+                    "ASCOV101",
+                    "--test-argument contains an incomplete owned option.",
+                    $"'{argument}' requires a value but AppSurface owns that setting.",
+                    "Remove the option and use the coverage run driver contract.",
+                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection");
+            }
+
             if (argument == "--"
                 || argument.StartsWith("DataCollectionRunSettings.", StringComparison.OrdinalIgnoreCase)
                 || (driver == CoverageRunDriver.Collector && IsSettingsArgument(argument))
@@ -343,18 +355,6 @@ internal static class CoverageRunDriverStrategy
                     "--test-argument cannot override AppSurface-owned coverage settings.",
                     $"The {CoverageRunDriverPreflight.DriverName(driver)} driver owns token '{argument}'.",
                     "Remove the coverage, results-directory, or runsettings override and use the dedicated coverage run options.",
-                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection");
-            }
-
-            if ((string.Equals(argument, "--collect", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(argument, "--results-directory", StringComparison.OrdinalIgnoreCase))
-                && index + 1 >= arguments.Count)
-            {
-                throw CoverageRunDiagnostics.Create(
-                    "ASCOV101",
-                    "--test-argument contains an incomplete owned option.",
-                    $"'{argument}' requires a value but AppSurface owns that setting.",
-                    "Remove the option and use the coverage run driver contract.",
                     "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection");
             }
         }
@@ -638,7 +638,29 @@ internal static class CoverageRunDriverStrategy
             return false;
         }
 
-        var ownedProperties = new[] { "CollectCoverage", "CoverletOutput", "CoverletOutputFormat", "Include", "Exclude" };
+        var ownedProperties = new[]
+        {
+            "CollectCoverage",
+            "Include",
+            "IncludeDirectory",
+            "Exclude",
+            "ExcludeByFile",
+            "ExcludeByAttribute",
+            "IncludeTestAssembly",
+            "SingleHit",
+            "MergeWith",
+            "UseSourceLink",
+            "SkipAutoProps",
+            "DeterministicReport",
+            "DoesNotReturnAttribute",
+            "ExcludeAssembliesWithoutSources",
+            "DisableManagedInstrumentationRestore",
+            "CoverletOutputFormat",
+            "CoverletOutput",
+            "Threshold",
+            "ThresholdType",
+            "ThresholdStat",
+        };
         return value[prefix.Length..]
             .Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(property => property.Split('=', 2)[0])

@@ -381,9 +381,11 @@ internal static class CoverageRunArtifactReader
     private static string GetWindowsFinalPath(SafeFileHandle handle)
     {
         var capacity = 512;
+        var builder = new StringBuilder(capacity);
         while (true)
         {
-            var builder = new StringBuilder(capacity);
+            builder.EnsureCapacity(capacity);
+            builder.Clear();
             var length = GetFinalPathNameByHandle(handle, builder, (uint)builder.Capacity, WindowsVolumeNameDos);
             if (length == 0)
             {
@@ -516,7 +518,8 @@ internal static class CoverageRunArtifactReader
     [DllImport("libc", EntryPoint = "fstat", SetLastError = true)]
     private static extern int FStat(int descriptor, nint buffer);
 
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, CharSet = CharSet.Unicode)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern SafeFileHandle CreateFile(
         [MarshalAs(UnmanagedType.LPWStr)] string fileName,
         uint desiredAccess,
@@ -526,6 +529,7 @@ internal static class CoverageRunArtifactReader
         uint flagsAndAttributes,
         nint templateFile);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandleEx(
@@ -534,16 +538,19 @@ internal static class CoverageRunArtifactReader
         out WindowsFileAttributeTagInformation fileInformation,
         uint bufferSize);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandle(
         SafeFileHandle handle,
         out WindowsByHandleFileInformation fileInformation);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint GetFileType(SafeFileHandle handle);
 
-    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true, CharSet = CharSet.Unicode)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true, CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern uint GetFinalPathNameByHandle(
         SafeFileHandle handle,
         StringBuilder path,

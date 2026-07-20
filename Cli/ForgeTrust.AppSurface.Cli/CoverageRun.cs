@@ -2814,8 +2814,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         CoverageRunProcessRequest request,
         CancellationToken cancellationToken)
     {
-        var standardOutput = new MemoryStream();
-        var standardError = new MemoryStream();
+        using var standardOutput = new MemoryStream();
+        using var standardError = new MemoryStream();
         var result = await CliCommand.Wrap(request.FileName)
             .WithArguments(request.Arguments)
             .WithWorkingDirectory(request.WorkingDirectory)

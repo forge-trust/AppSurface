@@ -382,7 +382,7 @@ public sealed class CoverageRunTests
     public async Task RunAsync_ShouldRunExplicitProjectsAndWriteMergedArtifacts()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
-        var solution = repo.WriteFile("Sample.slnx", "<Solution />");
+        repo.WriteFile("Sample.slnx", "<Solution />");
         var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
         using var current = PushCurrentDirectory(repo.Path);
         var runner = new RecordingCoverageRunProcessRunner();
@@ -3206,6 +3206,25 @@ public sealed class CoverageRunTests
         Assert.Contains("tests/Sample.Tests/Sample.Tests.csproj [net10.0]: TestingPlatformDotnetTestSupport=true", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldReportMalformedTargetFrameworkCapabilityOutput()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = CreateMultiTargetCapabilityRunner();
+        runner.CapabilityOutputsByFramework["net10.0"] = "not json";
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("tests/Sample.Tests/Sample.Tests.csproj [net10.0]: capability evaluation failed", exception.Message, StringComparison.Ordinal);
+    }
+
     private static RecordingCoverageRunProcessRunner CreateMultiTargetCapabilityRunner()
     {
         var runner = new RecordingCoverageRunProcessRunner
@@ -3288,6 +3307,21 @@ public sealed class CoverageRunTests
     [InlineData(true, "/p:CoverletOutputFormat=json", null)]
     [InlineData(true, "/p:Include=[Sample]*", null)]
     [InlineData(true, "/p:Exclude=[Generated]*", null)]
+    [InlineData(true, "/p:IncludeDirectory=../src", null)]
+    [InlineData(true, "/p:ExcludeByFile=**/Generated/*.cs", null)]
+    [InlineData(true, "/p:ExcludeByAttribute=GeneratedCodeAttribute", null)]
+    [InlineData(true, "/p:IncludeTestAssembly=true", null)]
+    [InlineData(true, "/p:SingleHit=true", null)]
+    [InlineData(true, "/p:MergeWith=stale.json", null)]
+    [InlineData(true, "/p:UseSourceLink=true", null)]
+    [InlineData(true, "/p:SkipAutoProps=true", null)]
+    [InlineData(true, "/p:DeterministicReport=true", null)]
+    [InlineData(true, "/p:DoesNotReturnAttribute=DoesNotReturnAttribute", null)]
+    [InlineData(true, "/p:ExcludeAssembliesWithoutSources=MissingAll", null)]
+    [InlineData(true, "/p:DisableManagedInstrumentationRestore=true", null)]
+    [InlineData(true, "/p:Threshold=95", null)]
+    [InlineData(true, "/p:ThresholdType=line", null)]
+    [InlineData(true, "/p:ThresholdStat=total", null)]
     [InlineData(true, "-p:CoverletOutput=artifacts/coverage", null)]
     [InlineData(true, "-property:CollectCoverage=false", null)]
     [InlineData(true, "--property:CoverletOutputFormat=json", null)]
@@ -3305,6 +3339,18 @@ public sealed class CoverageRunTests
 
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
         Assert.Contains($"owns token '{argument}'", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("--collect")]
+    [InlineData("--RESULTS-DIRECTORY")]
+    public void ValidateTestArguments_ShouldExplainIncompleteOwnedArguments(string argument)
+    {
+        var exception = Assert.Throws<CommandException>(
+            () => CoverageRunDriverStrategy.ValidateTestArguments(CoverageRunDriver.Collector, [argument]));
+
+        Assert.Contains("incomplete owned option", exception.Message, StringComparison.Ordinal);
+        Assert.Contains($"'{argument}' requires a value", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

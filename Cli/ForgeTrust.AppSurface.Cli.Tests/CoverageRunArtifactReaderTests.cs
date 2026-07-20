@@ -178,26 +178,30 @@ public sealed class CoverageRunArtifactReaderTests
         var moved = Path.Join(raw, "attachment-moved");
         IOException? replacementFailure = null;
 
-        using var stream = CoverageRunArtifactReader.OpenRegularFile(
-            projectOutput,
-            raw,
-            candidate,
-            beforeWindowsCandidateOpen: () =>
-            {
-                try
-                {
-                    Directory.Move(attachment, moved);
-                }
-                catch (IOException ex)
-                {
-                    replacementFailure = ex;
-                }
-            });
-        using var reader = new StreamReader(stream);
+        string content;
+        using (var stream = CoverageRunArtifactReader.OpenRegularFile(
+                   projectOutput,
+                   raw,
+                   candidate,
+                   beforeWindowsCandidateOpen: () =>
+                   {
+                       try
+                       {
+                           Directory.Move(attachment, moved);
+                       }
+                       catch (IOException ex)
+                       {
+                           replacementFailure = ex;
+                       }
+                   }))
+        using (var reader = new StreamReader(stream))
+        {
+            content = reader.ReadToEnd();
+        }
 
         Assert.NotNull(replacementFailure);
         Directory.Move(attachment, moved);
-        Assert.Equal("<coverage />", reader.ReadToEnd());
+        Assert.Equal("<coverage />", content);
     }
 
     [Fact]

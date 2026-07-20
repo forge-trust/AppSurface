@@ -858,9 +858,10 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         var nowUtc = _timeProvider.GetUtcNow();
         var heartbeatDelay = nextHeartbeat == DateTimeOffset.MaxValue ? TimeSpan.MaxValue : nextHeartbeat - nowUtc;
         var stallDelay = TimeSpan.MaxValue;
-        foreach (var operation in Snapshot().Where(operation => _mode != CoverageRunWatchdogMode.Off && !operation.WarningLatched))
+        foreach (var remaining in Snapshot()
+                     .Where(operation => _mode != CoverageRunWatchdogMode.Off && !operation.WarningLatched)
+                     .Select(operation => _timeout - operation.NoProgress))
         {
-            var remaining = _timeout - operation.NoProgress;
             if (remaining < stallDelay)
             {
                 stallDelay = remaining;
