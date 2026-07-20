@@ -76,6 +76,7 @@ internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogAr
         ArgumentNullException.ThrowIfNull(artifact);
 
         Task writeTask;
+        Task timeoutTask;
         var permission = new CoverageRunWatchdogCommitPermission();
         lock (_gate)
         {
@@ -84,12 +85,23 @@ internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogAr
                 return CoverageRunWatchdogArtifactWriteResult.WriterBusy;
             }
 
-            var bytes = CoverageRunWatchdogArtifactSerializer.Serialize(artifact);
-            writeTask = WriteTemporaryAndCommitAsync(destinationPath, bytes, permission, cancellationToken);
+            byte[] bytes;
+            try
+            {
+                bytes = CoverageRunWatchdogArtifactSerializer.Serialize(artifact);
+            }
+            catch
+            {
+                return CoverageRunWatchdogArtifactWriteResult.Failed;
+            }
+
+            timeoutTask = _delay.DelayAsync(WriteTimeout, CancellationToken.None);
+            writeTask = Task.Run(
+                () => WriteTemporaryAndCommitAsync(destinationPath, bytes, permission, cancellationToken),
+                CancellationToken.None);
             _activeWrite = writeTask;
         }
 
-        var timeoutTask = _delay.DelayAsync(WriteTimeout, CancellationToken.None);
         var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         var completed = await Task.WhenAny(writeTask, timeoutTask, cancellationTask);
         var cancellationWonAfterCommitStarted = false;
@@ -111,7 +123,6 @@ internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogAr
                 // The same-directory atomic replacement has already started. It cannot be
                 // canceled safely, so do not report a timeout that could be followed by a
                 // late canonical publication. Await the commit and report its real result.
-                completed = writeTask;
             }
             else
             {

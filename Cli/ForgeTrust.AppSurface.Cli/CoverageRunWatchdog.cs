@@ -247,6 +247,7 @@ internal sealed record CoverageRunWatchdogOperationSnapshot(
 /// Captures deterministic aggregate and operation state at one monotonic instant.
 /// </summary>
 /// <param name="RunElapsed">Elapsed time since supervisor construction.</param>
+/// <param name="CapturedAtUtc">Wall-clock time paired with this immutable evaluation snapshot.</param>
 /// <param name="Queued">Number of queued operations.</param>
 /// <param name="Running">Number of running operations.</param>
 /// <param name="Finalizing">Number of finalizing operations.</param>
@@ -254,6 +255,7 @@ internal sealed record CoverageRunWatchdogOperationSnapshot(
 /// <param name="Operations">Operations in stable workflow order.</param>
 internal sealed record CoverageRunWatchdogSnapshot(
     TimeSpan RunElapsed,
+    DateTimeOffset CapturedAtUtc,
     int Queued,
     int Running,
     int Finalizing,
@@ -547,6 +549,7 @@ internal sealed class CoverageRunWatchdogSupervisor
         var operations = OrderedOperations().Select(operation => operation.Snapshot(_timeProvider, now)).ToArray();
         return new CoverageRunWatchdogSnapshot(
             _timeProvider.GetElapsedTime(_runStarted, now),
+            _timeProvider.GetUtcNow(),
             operations.Count(operation => operation.State == CoverageRunWatchdogOperationState.Queued),
             operations.Count(operation => operation.State == CoverageRunWatchdogOperationState.Running),
             operations.Count(operation => operation.State == CoverageRunWatchdogOperationState.Finalizing),

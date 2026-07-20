@@ -298,11 +298,13 @@ public sealed class CoverageRunWatchdogTests
         supervisor.Register(Project("project-a", 0), CoverageRunWatchdogOperationState.Running);
         time.Advance(TimeSpan.FromSeconds(5), utcAdvance: TimeSpan.FromHours(-3));
 
-        var snapshot = Assert.Single(supervisor.Snapshot().Operations);
+        var evaluationSnapshot = supervisor.Snapshot();
+        var snapshot = Assert.Single(evaluationSnapshot.Operations);
 
         Assert.Equal(TimeSpan.FromSeconds(5), snapshot.Elapsed);
         Assert.Equal(TimeSpan.FromSeconds(5), snapshot.NoProgress);
         Assert.Equal(ManualTimeProvider.Epoch, snapshot.LastProgressAtUtc);
+        Assert.Equal(ManualTimeProvider.Epoch - TimeSpan.FromHours(3), evaluationSnapshot.CapturedAtUtc);
     }
 
     [Fact]
@@ -384,6 +386,41 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public async Task ArtifactWriter_ShouldConvertSerializationFailureAndRemainAvailable()
+    {
+        var storage = new ControlledArtifactStorage { CommitImmediately = true };
+        var writer = new CoverageRunWatchdogArtifactWriter(storage, new ControlledDelay());
+        var oversized = CreateArtifact([]) with
+        {
+            Primary = CreateIncidentOperation(new string('p', CoverageRunWatchdogArtifactSerializer.MaximumBytes)),
+        };
+
+        var failed = await writer.WriteAsync("/owned/coverage-watchdog.json", oversized, CancellationToken.None);
+        var retry = await writer.WriteAsync("/owned/coverage-watchdog.json", CreateArtifact([]), CancellationToken.None);
+
+        Assert.Equal(CoverageRunWatchdogArtifactWriteResult.Failed, failed);
+        Assert.Equal(CoverageRunWatchdogArtifactWriteResult.Success, retry);
+        Assert.Equal(1, storage.CallCount);
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_ShouldArmDeadlineBeforeSynchronousStorageSetup()
+    {
+        using var storage = new SynchronouslyBlockingArtifactStorage();
+        var delay = new ControlledDelay();
+        var writer = new CoverageRunWatchdogArtifactWriter(storage, delay);
+        var write = writer.WriteAsync("/owned/coverage-watchdog.json", CreateArtifact([]), CancellationToken.None);
+        await storage.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        delay.Complete();
+
+        Assert.Equal(CoverageRunWatchdogArtifactWriteResult.TimedOut, await write.WaitAsync(TimeSpan.FromSeconds(5)));
+        storage.Release.Set();
+        await storage.Deleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, storage.CommitCount);
+    }
+
+    [Fact]
     public async Task ArtifactWriter_ShouldAllowOnlyOneOutstandingWrite()
     {
         var storage = new ControlledArtifactStorage();
@@ -413,7 +450,15 @@ public sealed class CoverageRunWatchdogTests
         storage.Complete(commit: true);
         await storage.CurrentTask;
         storage.CommitImmediately = true;
-        var retry = await writer.WriteAsync("/owned/coverage-watchdog.json", CreateArtifact([]), CancellationToken.None);
+        var retryDeadline = Stopwatch.StartNew();
+        CoverageRunWatchdogArtifactWriteResult retry;
+        do
+        {
+            Assert.True(retryDeadline.Elapsed < TimeSpan.FromSeconds(5));
+            await Task.Yield();
+            retry = await writer.WriteAsync("/owned/coverage-watchdog.json", CreateArtifact([]), CancellationToken.None);
+        }
+        while (retry == CoverageRunWatchdogArtifactWriteResult.WriterBusy);
 
         Assert.Equal(CoverageRunWatchdogArtifactWriteResult.TimedOut, timedOut);
         Assert.Equal(CoverageRunWatchdogArtifactWriteResult.WriterBusy, busy);
@@ -765,7 +810,8 @@ public sealed class CoverageRunWatchdogTests
             "project-a",
             new CoverageRunSafeCommand("dotnet", ["test"])));
         request.ObserveOutput?.Invoke(17);
-        request.ProcessStarted?.Invoke(new Process());
+        using var process = new Process();
+        request.ProcessStarted?.Invoke(process);
         request.ProcessCompleted?.Invoke();
     }
 
@@ -914,11 +960,30 @@ public sealed class CoverageRunWatchdogTests
 
     private sealed class ControlledDelay : ICoverageRunWatchdogDelay
     {
-        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly object _gate = new();
+        private readonly Queue<TaskCompletionSource> _pending = new();
 
-        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => _completion.Task;
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+        {
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_gate)
+            {
+                _pending.Enqueue(completion);
+            }
 
-        public void Complete() => _completion.TrySetResult();
+            return completion.Task;
+        }
+
+        public void Complete()
+        {
+            TaskCompletionSource completion;
+            lock (_gate)
+            {
+                completion = _pending.Dequeue();
+            }
+
+            completion.TrySetResult();
+        }
     }
 
     private sealed class ControlledArtifactStorage : ICoverageRunWatchdogArtifactStorage
@@ -973,6 +1038,34 @@ public sealed class CoverageRunWatchdogTests
         }
 
         public void DeleteTemporary(string temporaryPath) { }
+    }
+
+    private sealed class SynchronouslyBlockingArtifactStorage : ICoverageRunWatchdogArtifactStorage, IDisposable
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Deleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ManualResetEventSlim Release { get; } = new(initialState: false);
+        public int CommitCount { get; private set; }
+
+        public Task<string> WriteTemporaryAsync(
+            string destinationPath,
+            ReadOnlyMemory<byte> bytes,
+            CancellationToken cancellationToken)
+        {
+            Entered.TrySetResult();
+            Release.Wait(cancellationToken);
+            return Task.FromResult("/private/watchdog.tmp");
+        }
+
+        public void Commit(string temporaryPath, string destinationPath) => CommitCount++;
+
+        public void DeleteTemporary(string temporaryPath) => Deleted.TrySetResult();
+
+        public void Dispose()
+        {
+            Release.Set();
+            Release.Dispose();
+        }
     }
 
     private sealed class StubArtifactWriter(CoverageRunWatchdogArtifactWriteResult result) : ICoverageRunWatchdogArtifactWriter

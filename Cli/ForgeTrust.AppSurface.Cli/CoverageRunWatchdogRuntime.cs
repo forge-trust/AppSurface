@@ -211,14 +211,17 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         }
         catch (OperationCanceledException) when (_monitorCancellation.IsCancellationRequested)
         {
+            return;
         }
-
-        TryDeleteEmptyBootstrapDirectory();
-        _externalCancellationRegistration.Dispose();
-        DisposeCancellationSourcesAfterDispatch();
-        _monitorCancellation.Dispose();
-        _artifactBindingGate.Dispose();
-        _monitorWake.Dispose();
+        finally
+        {
+            TryDeleteEmptyBootstrapDirectory();
+            _externalCancellationRegistration.Dispose();
+            DisposeCancellationSourcesAfterDispatch();
+            _monitorCancellation.Dispose();
+            _artifactBindingGate.Dispose();
+            _monitorWake.Dispose();
+        }
     }
 
     /// <summary>Throws the authoritative watchdog diagnostic after a watchdog-caused cancellation.</summary>
@@ -254,6 +257,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         }
         catch (OperationCanceledException) when (_monitorCancellation.IsCancellationRequested)
         {
+            return;
         }
     }
 
@@ -282,6 +286,15 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                 }
 
                 var evaluation = _supervisor.Evaluate();
+                if (_options.Mode == CoverageRunWatchdogMode.Fail &&
+                    evaluation.NewlyStale.Count > 0 &&
+                    TryClaimTerminal(evaluation.NewlyStale[0], out var terminal) &&
+                    terminal is not null)
+                {
+                    await HandleTerminalAsync(evaluation, terminal);
+                    return;
+                }
+
                 if (evaluation.HeartbeatDue)
                 {
                     await WriteConsoleAsync(RenderHeartbeat(evaluation.Snapshot, evaluation.NewlyStale));
@@ -297,18 +310,11 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                     await HandleWarningAsync(evaluation);
                     continue;
                 }
-
-                if (_options.Mode == CoverageRunWatchdogMode.Fail &&
-                    TryClaimTerminal(evaluation.NewlyStale[0], out var terminal) &&
-                    terminal is not null)
-                {
-                    await HandleTerminalAsync(evaluation, terminal);
-                    return;
-                }
             }
         }
         catch (OperationCanceledException) when (delayCancellation.IsCancellationRequested)
         {
+            return;
         }
     }
 
@@ -516,7 +522,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
             checked((long)_options.HeartbeatInterval.TotalMilliseconds),
             checked((long)_options.NoProgressTimeout.TotalMilliseconds),
             checked((long)evaluation.Snapshot.RunElapsed.TotalMilliseconds),
-            _timeProvider.GetUtcNow(),
+            evaluation.Snapshot.CapturedAtUtc,
             ToIncident(primary),
             stale.Skip(1).Select(ToIncident).ToArray(),
             0,
@@ -650,6 +656,8 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         }
         catch (OperationCanceledException) when (iterationCancellation.IsCancellationRequested)
         {
+            // Preserve caller cancellation even though canceling the losing wait is expected.
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -834,6 +842,8 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         }
         catch
         {
+            // Bootstrap cleanup is best effort and must not replace the run's terminal result.
+            return;
         }
     }
 
@@ -848,6 +858,8 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         }
         catch
         {
+            // Bootstrap cleanup is best effort and must not replace the run's terminal result.
+            return;
         }
     }
 
@@ -857,6 +869,8 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
 
     private sealed class ProcessReservation
     {
+        private readonly object _syncRoot = new();
+
         public ProcessReservation(string operationId)
         {
             Id = operationId + ":" + Guid.NewGuid().ToString("N");
@@ -870,7 +884,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
 
         public Task<bool>? StartKill()
         {
-            lock (this)
+            lock (_syncRoot)
             {
                 if (KillTask is not null || Process is null)
                 {
@@ -925,6 +939,8 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         }
         catch
         {
+            // Reservation disposal in finally is authoritative; cleanup task failures are not.
+            return;
         }
         finally
         {
