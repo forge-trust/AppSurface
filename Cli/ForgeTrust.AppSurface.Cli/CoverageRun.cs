@@ -627,7 +627,7 @@ internal sealed class CoverageRunWorkflow
                 .Select(entry => new CoverageRunProjectExecutionState(entry))
                 .ToArray();
             CoverageRunOutputGuard.Validate(outputDirectory, resolution.SolutionDirectory, resolution.Projects);
-            await CoverageRunDriverPreflight.ValidateAsync(request.CoverageDriver, resolution, _processRunner, supervisor, supervisedCancellationToken);
+            await CoverageRunDriverPreflight.ValidateAsync(request.CoverageDriver, request.Configuration, resolution, _processRunner, supervisor, supervisedCancellationToken);
 
             await PrintDiscoveryAsync(runConsole, request, resolution, outputDirectory, schedulePlan);
             if (request.DryRun)
@@ -647,7 +647,6 @@ internal sealed class CoverageRunWorkflow
 
             var artifactFailures = projectResults
                 .Where(result => result.ExitCode == 0
-                    && request.CoverageDriver == CoverageRunDriver.Collector
                     && !string.Equals(result.CoverageArtifactStatus, "produced", StringComparison.Ordinal))
                 .ToArray();
             var coverageFiles = projectResults
@@ -1887,8 +1886,11 @@ internal sealed class CoverageRunWorkflow
 
         foreach (var project in resolution.Projects)
         {
+            var driverCompatibility = request.DryRun
+                ? $" [{CoverageRunDriverPreflight.DriverName(request.CoverageDriver)} compatible]"
+                : string.Empty;
             await console.WriteOutputAsync(
-                $"  include {(project.IsExclusive ? "exclusive" : "parallel ")} {project.RelativePath} -> projects/{project.Slug}");
+                $"  include {(project.IsExclusive ? "exclusive" : "parallel ")} {project.RelativePath} -> projects/{project.Slug}{driverCompatibility}");
         }
 
         await console.WriteOutputAsync("Planned execution order:");

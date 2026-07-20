@@ -382,6 +382,7 @@ public sealed class CoverageRunTests
     public async Task RunAsync_ShouldRunExplicitProjectsAndWriteMergedArtifacts()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var solution = repo.WriteFile("Sample.slnx", "<Solution />");
         var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
         using var current = PushCurrentDirectory(repo.Path);
         var runner = new RecordingCoverageRunProcessRunner();
@@ -550,6 +551,76 @@ public sealed class CoverageRunTests
         Assert.Contains("diagnostics", watchdog, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("discovery")]
+    [InlineData("solution-build")]
+    [InlineData("explicit-build")]
+    [InlineData("test")]
+    [InlineData("merge")]
+    [InlineData("diagnostics")]
+    public async Task RunAsync_ShouldPropagateCancellationFromSupervisedStages(string stage)
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var solution = repo.WriteFile("Sample.slnx", "<Solution />");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            SlnListOutput = "Project(s)\n----------\ntests/Sample.Tests/Sample.Tests.csproj\n",
+            CancelSlnList = stage == "discovery",
+            CancelBuild = stage is "solution-build" or "explicit-build",
+            CancelTest = stage == "test",
+        };
+        var reportGenerator = new RecordingReportGenerator
+        {
+            Exception = stage == "merge" ? new OperationCanceledException() : null,
+        };
+        var workflow = new CoverageRunWorkflow(
+            runner,
+            reportGenerator,
+            TimeProvider.System,
+            stage == "diagnostics" ? _ => throw new OperationCanceledException() : null);
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            SolutionPath: solution,
+            TestProjects: stage is "discovery" or "solution-build" ? null : [project],
+            Build: stage is "solution-build" or "explicit-build",
+            SlowTestDiagnostics: stage == "diagnostics");
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("first-exclusive")]
+    [InlineData("drain-before-exclusive")]
+    [InlineData("parallel-limit")]
+    public async Task RunAsync_ShouldStopSchedulingAfterTerminalProjectFailure(string scheduleShape)
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var first = repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
+        var second = repo.WriteFile("tests/Second.Tests/Second.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner { CancelTest = true };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var exclusive = scheduleShape switch
+        {
+            "first-exclusive" => new[] { first },
+            "drain-before-exclusive" => new[] { second },
+            _ => [],
+        };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => workflow.RunAsync(
+            CreateRequest(
+                TestProjects: [first, second],
+                Parallelism: scheduleShape == "parallel-limit" ? 1 : 2,
+                NoDiscoverExclusive: true,
+                ExclusiveTestProjects: exclusive),
+            console,
+            CancellationToken.None));
+    }
+
     [Fact]
     public async Task ExecuteAsync_SlowTestDiagnostics_ShouldImplyManagedJunitResults()
     {
@@ -673,7 +744,7 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
-    public async Task RunAsync_ShouldWriteActualCoverageFileCountToTimings()
+    public async Task RunAsync_ShouldWritePartialCoverageFileCountToTimingsBeforeRejectingMissingArtifact()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         var first = repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
@@ -687,9 +758,10 @@ public sealed class CoverageRunTests
         using var console = new FakeInMemoryConsole();
         var request = CreateRequest(TestProjects: [first, second]);
 
-        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
 
-        Assert.True(result.Success);
+        Assert.Contains("ASCOV115", exception.Message, StringComparison.Ordinal);
         var timings = File.ReadAllText(Path.Join(repo.Path, "TestResults", "coverage-merged", "timings.json"));
         Assert.Contains("\"coverageFiles\": 1", timings, StringComparison.Ordinal);
     }
@@ -1557,6 +1629,28 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldIgnoreFailureWritingTerminalTimingsAfterArtifactCommitFailure()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var timingsPath = Path.Join(repo.Path, "TestResults", "coverage-merged", "timings.json");
+        var workflow = new CoverageRunWorkflow(
+            new RecordingCoverageRunProcessRunner(),
+            new RecordingReportGenerator(),
+            TimeProvider.System,
+            timingsStaged: () => Directory.CreateDirectory(timingsPath));
+        using var console = new FakeInMemoryConsole();
+
+        await Assert.ThrowsAnyAsync<IOException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project]),
+            console,
+            CancellationToken.None));
+
+        Assert.True(Directory.Exists(timingsPath));
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldSummarizeCoverageRatesWhenValidCountsAreMissing()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -1593,8 +1687,8 @@ public sealed class CoverageRunTests
         var exception = await Assert.ThrowsAsync<CommandException>(
             () => workflow.RunAsync(request, console, CancellationToken.None));
 
-        Assert.Contains("ASCOV103", exception.Message, StringComparison.Ordinal);
-        Assert.Contains("coverlet.msbuild", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ASCOV115", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("zero Cobertura files", exception.Message, StringComparison.Ordinal);
         Assert.Contains("Log:", exception.Message, StringComparison.Ordinal);
     }
 
@@ -2257,6 +2351,138 @@ public sealed class CoverageRunTests
         Assert.Equal("msbuild", runner.Commands[1].Arguments.FirstOrDefault());
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("CoLlEcToR")]
+    public async Task ExecuteAsync_CoverageDriver_ShouldDefaultToCollectorCaseInsensitively(string? driverName)
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()))
+        {
+            TestProjects = [project],
+            CoverageDriverName = driverName!,
+            DryRun = true,
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console, CancellationToken.None);
+
+        var capability = Assert.Single(runner.Commands);
+        Assert.Equal("msbuild", capability.Arguments.FirstOrDefault());
+        Assert.Contains("Coverage driver: collector", console.ReadOutputString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CoverageDriver_ShouldAcceptMixedCaseMsbuild()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()))
+        {
+            TestProjects = [project],
+            CoverageDriverName = "MsBuIlD",
+            DryRun = true,
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console, CancellationToken.None);
+
+        Assert.Contains("Coverage driver: msbuild", console.ReadOutputString(), StringComparison.Ordinal);
+        Assert.Contains("compatibility path", console.ReadErrorString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CoverageDriver_ShouldRejectUnknownValueBeforeRunningCommands()
+    {
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()))
+        {
+            CoverageDriverName = "native",
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--coverage-driver must be collector or msbuild", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Received 'native'", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(runner.Commands);
+    }
+
+    [Theory]
+    [InlineData("FaIl")]
+    [InlineData("oFf")]
+    public async Task ExecuteAsync_Watchdog_ShouldAcceptFailAndOffCaseInsensitively(string watchdog)
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()))
+        {
+            TestProjects = [project],
+            Watchdog = watchdog,
+            DryRun = true,
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console, CancellationToken.None);
+
+        Assert.Single(runner.Commands);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Watchdog_ShouldRejectUnknownValueBeforeRunningCommands()
+    {
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()))
+        {
+            Watchdog = "disabled",
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--watchdog must be warn, fail, or off", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Received 'disabled'", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ListProjects_ShouldRunCollectorCapabilityPreflightWithoutTests()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()))
+        {
+            TestProjects = [project],
+            ListProjects = true,
+            Configuration = "Release",
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console, CancellationToken.None);
+
+        var capability = Assert.Single(runner.Commands);
+        Assert.Equal("msbuild", capability.Arguments.FirstOrDefault());
+        Assert.Contains("-property:Configuration=Release", capability.Arguments);
+        Assert.DoesNotContain(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
+        Assert.Contains("include parallel", console.ReadOutputString(), StringComparison.Ordinal);
+        Assert.Contains("[collector compatible]", console.ReadOutputString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ExecuteAsync_ShouldRejectExplicitProjectsCombinedWithExclusionsBeforeRunningCommands()
     {
@@ -2660,6 +2886,31 @@ public sealed class CoverageRunTests
                 cancellation.Token));
     }
 
+    [Fact]
+    public async Task CliWrapCoverageRunProcessRunner_ShouldIgnoreOutputObserverFailures()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var runner = new CliWrapCoverageRunProcessRunner();
+
+        var result = await runner.RunAsync(
+            new CoverageRunProcessRequest(
+                "/bin/sh",
+                ["-c", "printf hello"],
+                repo.Path,
+                null,
+                _ => throw new InvalidOperationException("observer failure"),
+                CoverageRunProcessLease.Detached()),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("hello", result.Output);
+    }
+
     private static async Task AssertUnsafeOutputAsync(
         CoverageRunWorkflow workflow,
         IConsole console,
@@ -2807,6 +3058,170 @@ public sealed class CoverageRunTests
         Assert.Single(runner.Commands);
     }
 
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("{}")]
+    [InlineData("{ \"Properties\": {}, \"Items\": {} }")]
+    [InlineData("{ \"Properties\": [], \"Items\": { \"PackageReference\": [] } }")]
+    [InlineData("{ \"Properties\": {}, \"Items\": { \"PackageReference\": {} } }")]
+    [InlineData("{ \"Properties\": {}, \"Items\": { \"PackageReference\": [{ \"Identity\": \"coverlet.collector\" }, { \"Identity\": \"COVERLET.COLLECTOR\" }] } }")]
+    public async Task RunAsync_Preflight_ShouldRejectMalformedOrAmbiguousCapabilityOutput(string capabilityOutput)
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner { CapabilityOutput = capabilityOutput };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("ASCOV113", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("capability evaluation failed", exception.Message, StringComparison.Ordinal);
+        Assert.Single(runner.Commands);
+    }
+
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldRejectFailedCapabilityCommand()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner { CapabilityExitCode = 1 };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("capability evaluation failed", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldPropagateCapabilityCancellation()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner { CancelCapability = true };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Single(runner.Commands);
+    }
+
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldMatchPackageAndMtpValuesCaseInsensitively()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            CapabilityOutput = """
+                { "Properties": { "TestingPlatformDotnetTestSupport": "TRUE" }, "Items": { "PackageReference": [{ "Identity": "COVERLET.COLLECTOR" }] } }
+                """,
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("TestingPlatformDotnetTestSupport=true", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("missing direct coverlet.collector", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldValidateEveryTargetFramework()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = CreateMultiTargetCapabilityRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        await workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None);
+
+        Assert.Equal(3, runner.Commands.Count);
+        Assert.Contains(runner.Commands, command => command.Arguments.Contains("-property:TargetFramework=net9.0"));
+        Assert.Contains(runner.Commands, command => command.Arguments.Contains("-property:TargetFramework=net10.0"));
+    }
+
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldReportTargetFrameworkMissingPackage()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = CreateMultiTargetCapabilityRunner();
+        runner.CapabilityOutputsByFramework["net10.0"] = """
+            { "Properties": {}, "Items": { "PackageReference": [] } }
+            """;
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("tests/Sample.Tests/Sample.Tests.csproj [net10.0]: missing direct coverlet.collector", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldReportTargetFrameworkUsingMtp()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = CreateMultiTargetCapabilityRunner();
+        runner.CapabilityOutputsByFramework["net10.0"] = """
+            { "Properties": { "TestingPlatformDotnetTestSupport": "true" }, "Items": { "PackageReference": [{ "Identity": "coverlet.collector" }] } }
+            """;
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("tests/Sample.Tests/Sample.Tests.csproj [net10.0]: TestingPlatformDotnetTestSupport=true", exception.Message, StringComparison.Ordinal);
+    }
+
+    private static RecordingCoverageRunProcessRunner CreateMultiTargetCapabilityRunner()
+    {
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            CapabilityOutput = """
+                { "Properties": { "TargetFrameworks": "net9.0;net10.0" }, "Items": { "PackageReference": [] } }
+                """,
+        };
+        const string compatible = """
+            { "Properties": {}, "Items": { "PackageReference": [{ "Identity": "coverlet.collector" }] } }
+            """;
+        runner.CapabilityOutputsByFramework["net9.0"] = compatible;
+        runner.CapabilityOutputsByFramework["net10.0"] = compatible;
+        return runner;
+    }
+
     [Fact]
     public async Task RunAsync_Preflight_ShouldRejectNativeMtpBeforeOutputMutation()
     {
@@ -2859,6 +3274,65 @@ public sealed class CoverageRunTests
 
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
         Assert.Empty(runner.Commands);
+    }
+
+    [Theory]
+    [InlineData(false, "--CoLlEcT", "XPlat Code Coverage")]
+    [InlineData(false, "--RESULTS-DIRECTORY", "artifacts")]
+    [InlineData(false, "--collect=XPlat Code Coverage", null)]
+    [InlineData(false, "--results-directory:artifacts", null)]
+    [InlineData(false, "--SETTINGS:coverage.runsettings", null)]
+    [InlineData(false, "DATACOLLECTIONRUNSETTINGS.DataCollectors.Enabled=true", null)]
+    [InlineData(true, "/P:COLLECTCOVERAGE=true", null)]
+    [InlineData(true, "/p:CoverletOutput=artifacts/coverage", null)]
+    [InlineData(true, "/p:CoverletOutputFormat=json", null)]
+    [InlineData(true, "/p:Include=[Sample]*", null)]
+    [InlineData(true, "/p:Exclude=[Generated]*", null)]
+    [InlineData(true, "-p:CoverletOutput=artifacts/coverage", null)]
+    [InlineData(true, "-property:CollectCoverage=false", null)]
+    [InlineData(true, "--property:CoverletOutputFormat=json", null)]
+    [InlineData(true, "/property:Other=value;Exclude=[Generated]*", null)]
+    public void ValidateTestArguments_ShouldRejectJoinedSplitAndCaseInsensitiveOwnedArguments(
+        bool useMsbuild,
+        string argument,
+        string? value)
+    {
+        var arguments = value is null ? [argument] : new[] { argument, value };
+        var driver = useMsbuild ? CoverageRunDriver.Msbuild : CoverageRunDriver.Collector;
+
+        var exception = Assert.Throws<CommandException>(
+            () => CoverageRunDriverStrategy.ValidateTestArguments(driver, arguments));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains($"owns token '{argument}'", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateTestArguments_Msbuild_ShouldAllowRunsettingsOwnedOnlyByCollector()
+    {
+        CoverageRunDriverStrategy.ValidateTestArguments(
+            CoverageRunDriver.Msbuild,
+            ["--settings", "coverage.runsettings", "--filter", "Category=Fast"]);
+    }
+
+    [Fact]
+    public async Task RunAsync_Msbuild_ShouldRejectSuccessfulProjectWithoutCoverageArtifact()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        runner.ProjectsWithoutCoverage.Add(project);
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], CoverageDriver: CoverageRunDriver.Msbuild),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("ASCOV115", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("zero Cobertura files", exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -2949,6 +3423,110 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public void DriverStrategy_Msbuild_ShouldDeleteStaleArtifactAndMapFilters()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var projectOutput = Path.Join(repo.Path, "project");
+        Directory.CreateDirectory(projectOutput);
+        var canonical = repo.WriteFile("project/coverage.cobertura.xml", "stale");
+        var request = CreateRequest(
+            IncludeFilter: "[Sample]*",
+            ExcludeFilter: "[Generated]*,[Legacy]*",
+            CoverageDriver: CoverageRunDriver.Msbuild);
+
+        var invocation = CoverageRunDriverStrategy.CreateInvocation(request, projectOutput);
+        var arguments = invocation.OwnedArguments.ToList();
+        CoverageRunDriverStrategy.AppendCollectorRunSettings(request, arguments);
+
+        Assert.False(File.Exists(canonical));
+        Assert.Null(invocation.RawResultsDirectory);
+        Assert.Contains("/p:Include=[Sample]*", arguments);
+        Assert.Contains("/p:Exclude=[Generated]*%2c[Legacy]*", arguments);
+        Assert.DoesNotContain("--", arguments);
+    }
+
+    [Theory]
+    [InlineData(false, "missing")]
+    [InlineData(true, "produced")]
+    public async Task DriverNormalization_Msbuild_ShouldReportCanonicalArtifactState(bool createArtifact, string expectedStatus)
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var projectOutput = Path.Join(repo.Path, "project");
+        Directory.CreateDirectory(projectOutput);
+        if (createArtifact)
+        {
+            repo.WriteFile("project/coverage.cobertura.xml", "<coverage />");
+        }
+
+        var result = await CoverageRunDriverStrategy.NormalizeDetailedAsync(
+            new CoverageRunDriverInvocation(CoverageRunDriver.Msbuild, projectOutput, null, []),
+            CancellationToken.None);
+
+        Assert.Equal(expectedStatus, result.Status);
+        Assert.Equal(createArtifact, result.CoverageFile is not null);
+        Assert.Equal(createArtifact ? null : "zero Cobertura files", result.Cause);
+    }
+
+    [Fact]
+    public async Task CollectorNormalization_ShouldReportMissingRawDirectory()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var projectOutput = Path.Join(repo.Path, "project");
+        Directory.CreateDirectory(projectOutput);
+        var raw = Path.Join(projectOutput, "collector-results", "missing");
+
+        var result = await CoverageRunDriverStrategy.NormalizeDetailedAsync(
+            new CoverageRunDriverInvocation(CoverageRunDriver.Collector, projectOutput, raw, []),
+            CancellationToken.None);
+
+        Assert.Equal("missing", result.Status);
+        Assert.Equal("zero Cobertura files", result.Cause);
+    }
+
+    [Fact]
+    public async Task CollectorNormalization_ShouldUseCommitGate()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var projectOutput = Path.Join(repo.Path, "project");
+        var raw = Path.Join(projectOutput, "collector-results", "0123456789abcdef0123456789abcdef");
+        Directory.CreateDirectory(raw);
+        repo.WriteFile("project/collector-results/0123456789abcdef0123456789abcdef/coverage.cobertura.xml", "<coverage />");
+        var commitCalled = false;
+
+        var result = await CoverageRunDriverStrategy.NormalizeDetailedAsync(
+            new CoverageRunDriverInvocation(CoverageRunDriver.Collector, projectOutput, raw, []),
+            CancellationToken.None,
+            commit =>
+            {
+                commitCalled = true;
+                commit();
+            });
+
+        Assert.True(commitCalled);
+        Assert.Equal("produced", result.Status);
+        Assert.True(File.Exists(Path.Join(projectOutput, "coverage.cobertura.xml")));
+    }
+
+    [Fact]
+    public async Task CollectorNormalization_ShouldReportArtifactRemovedBeforeOpenAsUnreadable()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var projectOutput = Path.Join(repo.Path, "project");
+        var raw = Path.Join(projectOutput, "collector-results", "0123456789abcdef0123456789abcdef");
+        Directory.CreateDirectory(raw);
+        var artifact = repo.WriteFile("project/collector-results/0123456789abcdef0123456789abcdef/coverage.cobertura.xml", "<coverage />");
+
+        var result = await CoverageRunDriverStrategy.NormalizeDetailedAsync(
+            new CoverageRunDriverInvocation(CoverageRunDriver.Collector, projectOutput, raw, []),
+            CancellationToken.None,
+            beforeArtifactOpen: () => File.Delete(artifact));
+
+        Assert.Equal("unreadable", result.Status);
+        Assert.Contains("IOException", result.Cause, StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFiles(projectOutput, ".coverage.*.tmp", SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
     public async Task RunAsync_Preflight_ShouldRejectGlobalJsonMtpRunnerBeforeCommands()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -2972,12 +3550,37 @@ public sealed class CoverageRunTests
     }
 
     [Theory]
+    [InlineData("{ }")]
+    [InlineData("{ \"test\": { } }")]
+    [InlineData("{ \"test\": { \"runner\": \"vStEsT\" } }")]
+    [InlineData("{ // comment\n \"test\": { \"runner\": \"VSTest\" }, }")]
+    public async Task RunAsync_Preflight_ShouldAcceptAbsentOrVstestGlobalJsonRunner(string globalJson)
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        repo.WriteFile("global.json", globalJson);
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var result = await workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Single(runner.Commands);
+    }
+
+    [Theory]
     [InlineData("[]")]
     [InlineData("{ \"test\": null }")]
     [InlineData("{ \"test\": \"VSTest\" }")]
     [InlineData("{ \"test\": { \"runner\": null } }")]
     [InlineData("{ \"test\": { \"runner\": {} } }")]
     [InlineData("{ \"test\": { \"runner\": \"\" } }")]
+    [InlineData("{ invalid json")]
     public async Task RunAsync_Preflight_ShouldRejectMalformedGlobalJsonRunnerShapeBeforeCommands(string globalJson)
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -3123,7 +3726,12 @@ public sealed class CoverageRunTests
         public string SlnListOutput { get; init; } = string.Empty;
         public bool WriteCoverageFiles { get; init; } = true;
         public bool WriteJunitFiles { get; init; } = true;
+        public bool CancelSlnList { get; init; }
+        public bool CancelCapability { get; init; }
+        public bool CancelBuild { get; init; }
+        public bool CancelTest { get; init; }
         public int SlnExitCode { get; init; }
+        public int CapabilityExitCode { get; init; }
         public int BuildExitCode { get; init; }
         public int TestExitCode { get; init; }
         public string TestOutput { get; init; } = "test output";
@@ -3138,6 +3746,7 @@ public sealed class CoverageRunTests
               }
             }
             """;
+        public Dictionary<string, string> CapabilityOutputsByFramework { get; } = [];
         public string CapabilityError { get; init; } = string.Empty;
         public int CoverageFileCount { get; init; } = 1;
         public string CoverageContent { get; init; } = "<coverage lines-covered=\"8\" lines-valid=\"10\" branches-covered=\"2\" branches-valid=\"4\" />";
@@ -3165,27 +3774,52 @@ public sealed class CoverageRunTests
             Commands.Add(command);
             if (arguments is ["sln", ..])
             {
+                if (CancelSlnList)
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+
                 command.Finish();
                 return new CoverageRunProcessResult(SlnExitCode, SlnListOutput);
             }
 
             if (arguments.FirstOrDefault() == "build")
             {
+                if (CancelBuild)
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+
                 command.Finish();
                 return new CoverageRunProcessResult(BuildExitCode, "build output");
             }
 
             if (arguments.FirstOrDefault() == "msbuild")
             {
+                if (CancelCapability)
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+
+                var targetFrameworkArgument = arguments.FirstOrDefault(argument => argument.StartsWith("-property:TargetFramework=", StringComparison.Ordinal));
+                var capabilityOutput = targetFrameworkArgument is not null
+                    && CapabilityOutputsByFramework.TryGetValue(targetFrameworkArgument["-property:TargetFramework=".Length..], out var frameworkOutput)
+                        ? frameworkOutput
+                        : CapabilityOutput;
                 command.Finish();
                 return new CoverageRunProcessResult(
-                    0,
-                    CapabilityOutput + CapabilityError,
-                    StandardOutput: CapabilityOutput);
+                    CapabilityExitCode,
+                    capabilityOutput + CapabilityError,
+                    StandardOutput: capabilityOutput);
             }
 
             if (arguments.FirstOrDefault() == "test")
             {
+                if (CancelTest)
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+
                 if (TestDelays.TryGetValue(arguments[1], out var delay))
                 {
                     await Task.Delay(delay, cancellationToken);

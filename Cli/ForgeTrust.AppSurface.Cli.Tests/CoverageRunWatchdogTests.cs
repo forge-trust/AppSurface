@@ -28,6 +28,7 @@ public sealed class CoverageRunWatchdogTests
     [InlineData("1S")]
     [InlineData("1.5s")]
     [InlineData("721h")]
+    [InlineData("9223372036854776s")]
     [InlineData("999999999999999999999h")]
     public void DurationParser_ShouldRejectInvalidOrOutOfRangeValues(string value)
     {
@@ -501,6 +502,232 @@ public sealed class CoverageRunWatchdogTests
         Assert.Equal(1, output.WriteCount);
     }
 
+    [Fact]
+    public async Task ConsoleSink_ShouldSupportErrorWithoutNewlineAndIgnoreWritesAfterDispose()
+    {
+        using var error = new MemoryStream();
+        using var console = new FakeConsole(Stream.Null, Stream.Null, error);
+        var sink = new CoverageRunConsoleSink(console, TimeSpan.FromSeconds(1));
+
+        await sink.WriteErrorAsync("first", appendNewLine: false);
+        sink.Dispose();
+        await sink.WriteOutputAsync("ignored");
+        await sink.WriteCriticalErrorAsync("also-ignored");
+
+        Assert.Equal("first", System.Text.Encoding.UTF8.GetString(error.ToArray()));
+    }
+
+    [Fact]
+    public async Task ConsoleSink_ShouldPropagateCallerCancellationForBlockedCriticalWrite()
+    {
+        using var output = new GatedCaptureWriteStream();
+        using var console = new FakeConsole(Stream.Null, output, Stream.Null);
+        using var sink = new CoverageRunConsoleSink(console, TimeSpan.FromSeconds(1));
+        using var cancellation = new CancellationTokenSource();
+
+        var blocked = sink.WriteOutputAsync("blocked");
+        await output.FirstWriteStarted.WaitAsync(TimeSpan.FromSeconds(2));
+        var critical = sink.WriteCriticalErrorAsync("cancelled", cancellation.Token);
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => critical);
+        output.ReleaseFirstWrite();
+        await blocked;
+    }
+
+    [Fact]
+    public async Task ConsoleSink_ShouldBoundThrowingCriticalWriter()
+    {
+        using var error = new ThrowingWriteStream();
+        using var console = new FakeConsole(Stream.Null, Stream.Null, error);
+        using var sink = new CoverageRunConsoleSink(console, TimeSpan.FromMilliseconds(20));
+
+        await sink.WriteCriticalErrorAsync("critical");
+
+        Assert.Equal(1, error.WriteCount);
+    }
+
+    [Fact]
+    public async Task ProcessLease_ShouldKillProcessAttachedAfterCompletion()
+    {
+        var lease = CoverageRunProcessLease.Detached();
+        lease.Complete();
+        using var process = Process.Start(CreateLongRunningProcess())!;
+
+        lease.Attach(process);
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(process.HasExited);
+    }
+
+    [Fact]
+    public async Task ProcessLease_ShouldHandleAlreadyExitedAndDisposedProcesses()
+    {
+        var exitedLease = CoverageRunProcessLease.Detached();
+        using (var exited = Process.Start(CreateCompletedProcess())!)
+        {
+            await exited.WaitForExitAsync();
+            exitedLease.Attach(exited);
+            await exitedLease.TerminateAsync();
+        }
+
+        var disposedLease = CoverageRunProcessLease.Detached();
+        var disposed = Process.Start(CreateCompletedProcess())!;
+        await disposed.WaitForExitAsync();
+        disposedLease.Attach(disposed);
+        disposed.Dispose();
+
+        await disposedLease.TerminateAsync();
+    }
+
+    [Fact]
+    public async Task Heartbeat_ShouldDescribeProgressTransitionsAndCompletion()
+    {
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = new CoverageRunWatchdogSupervisor(
+            CoverageRunWatchdogMode.Off,
+            TimeSpan.FromMilliseconds(20),
+            TimeSpan.FromSeconds(1),
+            console,
+            TimeProvider.System,
+            CancellationToken.None);
+        using var operation = supervisor.Start("merge", state: "running");
+        operation.ObserveBytes(12);
+        operation.ObserveBytes(0);
+        operation.Transition("finalizing");
+
+        await WaitForOutputAsync(console, "finalizing=1");
+        operation.Dispose();
+        await WaitForOutputAsync(console, "complete=1");
+
+        var text = console.ReadOutputString();
+        Assert.Contains("operation=\"merge\"", text, StringComparison.Ordinal);
+        Assert.Contains("output-bytes=12", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FailMode_ShouldRejectNewWorkAndCommitsAfterTerminalOwnership()
+    {
+        using var output = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = new CoverageRunWatchdogSupervisor(
+            CoverageRunWatchdogMode.Fail,
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(10),
+            console,
+            TimeProvider.System,
+            CancellationToken.None);
+        supervisor.BindOutputDirectory(output.Path);
+        using var operation = supervisor.Start("diagnostics");
+        await WaitForFileAsync(Path.Join(output.Path, "coverage-watchdog.json"));
+
+        Assert.Throws<OperationCanceledException>(() => supervisor.Start("build"));
+        Assert.Throws<OperationCanceledException>(() => operation.ReserveProcess());
+        Assert.Throws<OperationCanceledException>(() => supervisor.Commit(() => { }));
+        Assert.Throws<ArgumentNullException>(() => supervisor.Commit(null!));
+    }
+
+    [Fact]
+    public async Task Commit_ShouldRunBeforeTerminalOwnershipAndCompletedOperationsIgnoreProgress()
+    {
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = new CoverageRunWatchdogSupervisor(
+            CoverageRunWatchdogMode.Off,
+            TimeSpan.Zero,
+            TimeSpan.FromSeconds(1),
+            console,
+            TimeProvider.System,
+            CancellationToken.None);
+        var committed = false;
+        supervisor.Commit(() => committed = true);
+        var operation = supervisor.Start("custom");
+        operation.Dispose();
+        operation.ObserveBytes(1);
+        operation.Transition("ignored");
+        operation.Dispose();
+
+        Assert.True(committed);
+        supervisor.ThrowIfFailed();
+    }
+
+    [Fact]
+    public async Task WarnMode_ShouldReportOperationSubjectAndBoundCommandMetadata()
+    {
+        using var output = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = new CoverageRunWatchdogSupervisor(
+            CoverageRunWatchdogMode.Warn,
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(20),
+            console,
+            TimeProvider.System,
+            CancellationToken.None);
+        supervisor.BindOutputDirectory(output.Path);
+        using var operation = supervisor.Start(
+            "discovery",
+            state: new string('s', 2_000),
+            log: new string('l', 2_000),
+            commandOptions: Enumerable.Range(0, 40).Select(index => $"--option-{index}-{new string('x', 300)}").ToArray());
+
+        var artifact = Path.Join(output.Path, "coverage-watchdog.json");
+        await WaitForFileAsync(artifact);
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(artifact));
+        var primary = document.RootElement.GetProperty("primary");
+        var options = primary.GetProperty("command").GetProperty("options");
+
+        Assert.Equal(32, options.GetArrayLength());
+        Assert.All(options.EnumerateArray(), item => Assert.True(item.GetString()!.Length <= 256));
+        Assert.Equal(1024, primary.GetProperty("state").GetString()!.Length);
+        Assert.Equal(1024, primary.GetProperty("log").GetString()!.Length);
+        Assert.Contains("operation=discovery", console.ReadErrorString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BindOutputDirectory_ShouldReportPromotionFailure()
+    {
+        using var notDirectory = TestDirectory.Create();
+        var occupiedPath = Path.Join(notDirectory.Path, "occupied");
+        await File.WriteAllTextAsync(occupiedPath, "file");
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = new CoverageRunWatchdogSupervisor(
+            CoverageRunWatchdogMode.Warn,
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(10),
+            console,
+            TimeProvider.System,
+            CancellationToken.None);
+        using var operation = supervisor.Start("project");
+        await WaitForErrorOccurrencesAsync(console, "Coverage watchdog warning", 1);
+
+        supervisor.BindOutputDirectory(occupiedPath);
+        await WaitForErrorOccurrencesAsync(console, "ASCOV122", 1);
+
+        Assert.Contains("bootstrap artifact could not be promoted", console.ReadErrorString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WarnMode_ShouldReportAndCleanStagingWhenCanonicalArtifactCannotBeReplaced()
+    {
+        using var output = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        var destination = Path.Join(output.Path, "coverage-watchdog.json");
+        await using var supervisor = new CoverageRunWatchdogSupervisor(
+            CoverageRunWatchdogMode.Warn,
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(10),
+            console,
+            TimeProvider.System,
+            CancellationToken.None,
+            artifactStaged: () => Directory.CreateDirectory(destination));
+        supervisor.BindOutputDirectory(output.Path);
+        using var operation = supervisor.Start("project");
+
+        await WaitForErrorOccurrencesAsync(console, "ASCOV122", 1);
+
+        Assert.True(Directory.Exists(destination));
+        Assert.Empty(Directory.EnumerateFiles(output.Path, ".coverage-watchdog.json.*.tmp"));
+    }
+
     private static async Task WaitForFileAsync(string path)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
@@ -557,6 +784,20 @@ public sealed class CoverageRunWatchdogTests
         => OperatingSystem.IsWindows()
             ? new ProcessStartInfo("cmd.exe", "/c ping 127.0.0.1 -n 30 > nul") { UseShellExecute = false, CreateNoWindow = true }
             : new ProcessStartInfo("/bin/sh", "-c \"sleep 30\"") { UseShellExecute = false };
+
+    private static ProcessStartInfo CreateCompletedProcess()
+        => OperatingSystem.IsWindows()
+            ? new ProcessStartInfo("cmd.exe", "/c exit 0") { UseShellExecute = false, CreateNoWindow = true }
+            : new ProcessStartInfo("/bin/sh", "-c \"exit 0\"") { UseShellExecute = false };
+
+    private static async Task WaitForOutputAsync(FakeInMemoryConsole console, string value)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while (!console.ReadOutputString().Contains(value, StringComparison.Ordinal))
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+    }
 
     private sealed class TestDirectory(string path) : IDisposable
     {

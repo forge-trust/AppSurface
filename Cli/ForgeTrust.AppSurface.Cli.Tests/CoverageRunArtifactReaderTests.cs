@@ -56,6 +56,17 @@ public sealed class CoverageRunArtifactReaderTests
         Assert.Contains("artifact path", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("/coverage.cobertura.xml")]
+    public void ValidateUnixRelativeArtifactPath_ShouldRejectEmptyOrRootedPaths(string relativePath)
+    {
+        var exception = Assert.Throws<IOException>(() =>
+            CoverageRunArtifactReader.ValidateUnixRelativeArtifactPath(relativePath));
+
+        Assert.Contains("relative file", exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ValidateUnixRelativeArtifactPath_ShouldAcceptArtifactDescent()
     {

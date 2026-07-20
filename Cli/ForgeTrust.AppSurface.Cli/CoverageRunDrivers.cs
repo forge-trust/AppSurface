@@ -50,6 +50,7 @@ internal static class CoverageRunDriverPreflight
     /// </summary>
     public static async Task ValidateAsync(
         CoverageRunDriver driver,
+        string configuration,
         CoverageProjectResolution resolution,
         ICoverageRunProcessRunner processRunner,
         CoverageRunWatchdogSupervisor supervisor,
@@ -61,45 +62,48 @@ internal static class CoverageRunDriverPreflight
 
         foreach (var project in resolution.Projects)
         {
-            var args = new[]
-            {
-                "msbuild",
-                project.FullPath,
-                "-getItem:PackageReference",
-                "-getProperty:TestingPlatformDotnetTestSupport",
-                "-nologo",
-            };
-            CoverageRunProcessResult result;
-            using (var operation = supervisor.Start("discovery", project.RelativePath, commandOptions: ["msbuild", "-getItem", "-getProperty", "-nologo"]))
-            {
-                try
-                {
-                    result = await processRunner.RunAsync(
-                        new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess()),
-                        cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    supervisor.ThrowIfFailed();
-                    throw;
-                }
-            }
+            var result = await EvaluateCapabilitiesAsync(
+                project,
+                configuration,
+                targetFramework: null,
+                resolution.SolutionDirectory,
+                processRunner,
+                supervisor,
+                cancellationToken);
 
             if (result.ExitCode != 0
                 || result.StandardOutput is null
-                || !TryReadCapabilities(result.StandardOutput, requiredPackage, out var hasPackage, out var usesMtp))
+                || !TryReadCapabilities(result.StandardOutput, requiredPackage, out var hasPackage, out var usesMtp, out var targetFrameworks))
             {
                 failures.Add($"{project.RelativePath}: capability evaluation failed");
                 continue;
             }
 
-            if (usesMtp)
+            if (targetFrameworks.Count == 0)
             {
-                failures.Add($"{project.RelativePath}: TestingPlatformDotnetTestSupport=true requires coverlet.MTP, not the VSTest {DriverName(driver)} driver");
+                AddCapabilityFailure(project.RelativePath, hasPackage, usesMtp, driver, requiredPackage, failures);
+                continue;
             }
-            else if (!hasPackage)
+
+            foreach (var targetFramework in targetFrameworks)
             {
-                failures.Add($"{project.RelativePath}: missing direct {requiredPackage}; fix: dotnet add {Quote(project.RelativePath)} package {requiredPackage}");
+                var innerResult = await EvaluateCapabilitiesAsync(
+                    project,
+                    configuration,
+                    targetFramework,
+                    resolution.SolutionDirectory,
+                    processRunner,
+                    supervisor,
+                    cancellationToken);
+                if (innerResult.ExitCode != 0
+                    || innerResult.StandardOutput is null
+                    || !TryReadCapabilities(innerResult.StandardOutput, requiredPackage, out var innerHasPackage, out var innerUsesMtp, out _))
+                {
+                    failures.Add($"{project.RelativePath} [{targetFramework}]: capability evaluation failed");
+                    continue;
+                }
+
+                AddCapabilityFailure($"{project.RelativePath} [{targetFramework}]", innerHasPackage, innerUsesMtp, driver, requiredPackage, failures);
             }
         }
 
@@ -111,6 +115,61 @@ internal static class CoverageRunDriverPreflight
                 string.Join("; ", failures),
                 $"Add {requiredPackage} to every selected VSTest project, or choose the compatible driver explicitly.",
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection");
+        }
+    }
+
+    private static async Task<CoverageRunProcessResult> EvaluateCapabilitiesAsync(
+        CoverageRunProject project,
+        string configuration,
+        string? targetFramework,
+        string solutionDirectory,
+        ICoverageRunProcessRunner processRunner,
+        CoverageRunWatchdogSupervisor supervisor,
+        CancellationToken cancellationToken)
+    {
+        var args = new List<string>
+        {
+            "msbuild",
+            project.FullPath,
+            "-getItem:PackageReference",
+            "-getProperty:TestingPlatformDotnetTestSupport,TargetFramework,TargetFrameworks",
+            $"-property:Configuration={configuration}",
+            "-nologo",
+        };
+        if (targetFramework is not null)
+        {
+            args.Insert(args.Count - 1, $"-property:TargetFramework={targetFramework}");
+        }
+
+        using var operation = supervisor.Start("discovery", project.RelativePath, commandOptions: ["msbuild", "-getItem", "-getProperty", "-nologo"]);
+        try
+        {
+            return await processRunner.RunAsync(
+                new CoverageRunProcessRequest("dotnet", args, solutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess()),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            supervisor.ThrowIfFailed();
+            throw;
+        }
+    }
+
+    private static void AddCapabilityFailure(
+        string projectLabel,
+        bool hasPackage,
+        bool usesMtp,
+        CoverageRunDriver driver,
+        string requiredPackage,
+        List<string> failures)
+    {
+        if (usesMtp)
+        {
+            failures.Add($"{projectLabel}: TestingPlatformDotnetTestSupport=true requires coverlet.MTP, not the VSTest {DriverName(driver)} driver");
+        }
+        else if (!hasPackage)
+        {
+            failures.Add($"{projectLabel}: missing direct {requiredPackage}; fix: dotnet add {Quote(projectLabel.Split(" [", 2, StringSplitOptions.None)[0])} package {requiredPackage}");
         }
     }
 
@@ -194,10 +253,16 @@ internal static class CoverageRunDriverPreflight
             "Use VSTest for collector or msbuild mode; native Microsoft Testing Platform coverage requires coverlet.MTP and is outside #672.",
             "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection");
 
-    private static bool TryReadCapabilities(string json, string requiredPackage, out bool hasPackage, out bool usesMtp)
+    private static bool TryReadCapabilities(
+        string json,
+        string requiredPackage,
+        out bool hasPackage,
+        out bool usesMtp,
+        out IReadOnlyList<string> targetFrameworks)
     {
         hasPackage = false;
         usesMtp = false;
+        targetFrameworks = [];
         try
         {
             using var document = JsonDocument.Parse(json);
@@ -218,6 +283,14 @@ internal static class CoverageRunDriverPreflight
             {
                 usesMtp = mtpProperty.ValueKind == JsonValueKind.String
                     && string.Equals(mtpProperty.GetString(), "true", StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (properties.TryGetProperty("TargetFrameworks", out var targetFrameworksProperty)
+                && targetFrameworksProperty.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(targetFrameworksProperty.GetString()))
+            {
+                targetFrameworks = targetFrameworksProperty.GetString()!
+                    .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             }
 
             var matches = packageReferences.EnumerateArray()
@@ -551,9 +624,25 @@ internal static class CoverageRunDriverStrategy
         var prefixes = new[]
         {
             "--collect:", "--collect=", "--results-directory:", "--results-directory=",
-            "/p:CollectCoverage=", "/p:CoverletOutput=", "/p:CoverletOutputFormat=", "/p:Include=", "/p:Exclude=",
         };
-        return prefixes.Any(prefix => value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        return prefixes.Any(prefix => value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            || IsOwnedMsbuildPropertyArgument(value);
+    }
+
+    private static bool IsOwnedMsbuildPropertyArgument(string value)
+    {
+        var propertyPrefixes = new[] { "/p:", "-p:", "/property:", "-property:", "--property:" };
+        var prefix = propertyPrefixes.FirstOrDefault(candidate => value.StartsWith(candidate, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var ownedProperties = new[] { "CollectCoverage", "CoverletOutput", "CoverletOutputFormat", "Include", "Exclude" };
+        return value[prefix.Length..]
+            .Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(property => property.Split('=', 2)[0])
+            .Any(name => ownedProperties.Contains(name, StringComparer.OrdinalIgnoreCase));
     }
 
     private static bool IsOwnedSplitArgument(string value)

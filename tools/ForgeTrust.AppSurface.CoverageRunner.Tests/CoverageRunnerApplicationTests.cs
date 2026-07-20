@@ -462,6 +462,28 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
+    public async Task WriteSummaryAsync_ShouldReturnFalseWhenSummaryCannotReplaceDirectory()
+    {
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(
+            Path.Join(outputDirectory, "coverage.cobertura.xml"),
+            RecordingCommandRunner.ValidCoverageText);
+        Directory.CreateDirectory(Path.Join(outputDirectory, "summary.txt"));
+        var error = new StringWriter();
+        var app = CreateApp(new RecordingCommandRunner(workspace), standardError: error);
+
+        var result = await app.WriteSummaryAsync(
+            CreateCoverageOptions(workspace.Root, outputDirectory),
+            CancellationToken.None);
+
+        Assert.False(result);
+        Assert.Contains("Failed to write coverage summary", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFiles(outputDirectory, ".summary.txt.*.tmp"));
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldWriteZeroRatesWhenCoverageDenominatorsAreZero()
     {
         using var workspace = TestRepo.Create();
@@ -943,6 +965,71 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldStopSchedulingAfterExclusiveProjectThrowsUnexpectedException()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj");
+        workspace.AddProject("tools/Never.Tests/Never.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            UnexpectedThrowingProject = "ForgeTrust.RazorWire.IntegrationTests.csproj",
+        };
+        var app = CreateApp(runner);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => app.RunAsync(
+            ["--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?> { ["COVERAGE_PARALLELISM"] = "2" }));
+
+        Assert.Single(runner.TestCommands);
+        Assert.DoesNotContain(runner.TestCommands, project => project.EndsWith("Never.Tests.csproj", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldNotStartExclusiveProjectWhenActiveProjectThrowsUnexpectedException()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Throw.Tests/Throw.Tests.csproj");
+        workspace.AddProject("Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj");
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            UnexpectedThrowingProject = "Throw.Tests.csproj",
+        };
+        var app = CreateApp(runner);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => app.RunAsync(
+            ["--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?> { ["COVERAGE_PARALLELISM"] = "2" }));
+
+        Assert.Single(runner.TestCommands);
+        Assert.DoesNotContain(
+            runner.TestCommands,
+            project => project.EndsWith("ForgeTrust.RazorWire.IntegrationTests.csproj", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldStopSchedulingWhenBoundedQueueObservesUnexpectedException()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Throw.Tests/Throw.Tests.csproj");
+        workspace.AddProject("tools/Never.Tests/Never.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            UnexpectedThrowingProject = "Throw.Tests.csproj",
+        };
+        var app = CreateApp(runner);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?> { ["COVERAGE_PARALLELISM"] = "1" }));
+
+        Assert.Single(runner.TestCommands);
+        Assert.DoesNotContain(runner.TestCommands, project => project.EndsWith("Never.Tests.csproj", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldAggregateFailuresAndContinueRemainingProjects()
     {
         using var workspace = TestRepo.Create();
@@ -1124,6 +1211,46 @@ public sealed class CoverageRunnerApplicationTests
         Assert.Contains("malformed", failure, StringComparison.Ordinal);
         Assert.Contains("previous", File.ReadAllText(canonical), StringComparison.Ordinal);
         Assert.Empty(Directory.EnumerateFiles(projectOutput, ".coverage.*.tmp", SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
+    public async Task NormalizeCollectorCoverageAsync_ShouldRejectMissingInvocationDirectory()
+    {
+        using var workspace = TestRepo.Create();
+        var projectOutput = Path.Join(workspace.Root, "project");
+        var rawResults = Path.Join(projectOutput, "collector-results", "missing");
+
+        var failure = await CoverageRunnerApplication.NormalizeCollectorCoverageAsync(
+            projectOutput,
+            rawResults,
+            CancellationToken.None);
+
+        Assert.Contains("zero Cobertura files", failure, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(rawResults));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldReportInvalidMergedCoberturaRoot()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            ReportGeneratorCoverageText = "<report />",
+        };
+        var error = new StringWriter();
+        var app = CreateApp(runner, standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains(
+            "Merged Cobertura artifact is invalid or could not be committed: the document root is not 'coverage'",
+            error.ToString(),
+            StringComparison.Ordinal);
     }
 
     [Fact]
