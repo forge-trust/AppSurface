@@ -11,4 +11,8 @@
     <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="AuthAspNetCoreDevAuthExample.Tests" />
+  </ItemGroup>
+
 </Project>
