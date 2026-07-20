@@ -44,17 +44,16 @@ public sealed class PostgreSqlDurablePublicContractTests
     }
 
     [Theory]
-    [InlineData("LOCALHOST", "localhost", true)]
-    [InlineData("localhost", "127.0.0.1", false)]
-    [InlineData("localhost", "localhost", true)]
-    public void StoreTarget_UsesExactCanonicalConnectionTarget(string configuredHost, string actualHost, bool expected)
+    [InlineData("LOCALHOST", "localhost")]
+    [InlineData(" localhost, 127.0.0.1 ", "localhost,127.0.0.1")]
+    public void StoreTarget_NormalizesConfiguredHosts(string configuredHost, string expectedHost)
     {
         var target = PostgreSqlDurableStoreTarget.Create(
             $"Host={configuredHost};Port=5432;Database=durable_contracts;Username=durable");
-        using var connection = new NpgsqlConnection(
-            $"Host={actualHost};Port=5432;Database=durable_contracts;Username=durable");
 
-        Assert.Equal(expected, target.Matches(connection));
+        Assert.Equal(expectedHost, target.Host);
+        Assert.Equal(5432, target.Port);
+        Assert.Equal("durable_contracts", target.Database);
     }
 
     [Fact]
