@@ -616,7 +616,7 @@ public sealed class VerifierContractTests
 
         private static string FindRepositoryFile(params string[] relativeSegments)
         {
-            var copiedFixture = Path.Combine(AppContext.BaseDirectory, "Fixtures", relativeSegments[^1]);
+            var copiedFixture = TestPathUtils.PathUnder(AppContext.BaseDirectory, "Fixtures", relativeSegments[^1]);
             if (File.Exists(copiedFixture))
             {
                 return copiedFixture;
@@ -625,7 +625,7 @@ public sealed class VerifierContractTests
             var current = new DirectoryInfo(AppContext.BaseDirectory);
             while (current is not null)
             {
-                var candidate = Path.Combine([current.FullName, .. relativeSegments]);
+                var candidate = TestPathUtils.PathUnder(current.FullName, relativeSegments);
                 if (File.Exists(candidate))
                 {
                     return candidate;

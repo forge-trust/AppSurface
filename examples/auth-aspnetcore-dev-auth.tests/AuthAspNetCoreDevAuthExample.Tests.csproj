@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../auth-aspnetcore-dev-auth/AuthAspNetCoreDevAuthExample.csproj" />
+    <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -37,6 +38,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Using Include="ForgeTrust.AppSurface.Testing" />
     <Using Include="Xunit" />
   </ItemGroup>
 </Project>
