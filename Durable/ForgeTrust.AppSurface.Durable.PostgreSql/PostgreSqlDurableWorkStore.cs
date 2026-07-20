@@ -2127,12 +2127,19 @@ internal sealed class PostgreSqlDurableWorkStore
         }
         catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.InvalidSchemaName)
         {
-            throw CreateMissingSchemaException();
+            throw CreateMissingSchemaException(exception);
         }
     }
 
     private static DurableRuntimeSchemaException CreateMissingSchemaException() =>
-        new(new DurableRuntimeSchemaStatus(
+        new(CreateMissingSchemaStatus());
+
+    /// <summary>Preserves the PostgreSQL failure that exposed a missing schema without copying its server text.</summary>
+    internal static DurableRuntimeSchemaException CreateMissingSchemaException(PostgresException innerException) =>
+        new(CreateMissingSchemaStatus(), innerException);
+
+    private static DurableRuntimeSchemaStatus CreateMissingSchemaStatus() =>
+        new(
             DurableRuntimeSchemaCompatibility.Missing,
             Guid.Empty,
             null,
@@ -2144,7 +2151,7 @@ internal sealed class PostgreSqlDurableWorkStore
             0,
             [],
             Enumerable.Range(1, RequiredSchemaVersion).ToArray(),
-            "The caller-owned transaction targets a database where the durable schema is not installed."));
+            "The caller-owned transaction targets a database where the durable schema is not installed.");
 
     private static async ValueTask EnsureCurrentEpochAsync(
         NpgsqlConnection connection,

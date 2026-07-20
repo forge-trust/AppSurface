@@ -25,8 +25,10 @@ public sealed class PostgreSqlDurableWorkStoreTests
             await before.ExecuteNonQueryAsync();
         }
 
-        await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
+        var exception = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
             async () => await writer.EnqueueAsync(transaction, CreateRequest("scope", "command")));
+        Assert.Null(exception.InnerException);
+        Assert.DoesNotContain("appsurface-test-password", exception.Message, StringComparison.Ordinal);
         await using (var after = new NpgsqlCommand("INSERT INTO domain_fact VALUES ('after');", connection, transaction))
         {
             await after.ExecuteNonQueryAsync();

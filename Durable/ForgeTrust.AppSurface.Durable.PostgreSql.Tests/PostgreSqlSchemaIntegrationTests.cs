@@ -10,7 +10,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
     [Fact]
     public async Task ApplyStatusInitializeRotate_AreExplicitAndIdempotent()
     {
-        await using var container = new PostgreSqlBuilder("postgres:17.5")
+        await using var container = new PostgreSqlBuilder(PostgreSqlTestContainerImage.Reference)
             .WithDatabase("appsurface_durable")
             .WithUsername("appsurface")
             .WithPassword("appsurface-test-password")
@@ -56,7 +56,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
     [Fact]
     public async Task ModifiedMigrationHistory_FailsClosed()
     {
-        await using var container = new PostgreSqlBuilder("postgres:17.5")
+        await using var container = new PostgreSqlBuilder(PostgreSqlTestContainerImage.Reference)
             .WithDatabase("appsurface_durable")
             .WithUsername("appsurface")
             .WithPassword("appsurface-test-password")

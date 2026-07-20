@@ -58,9 +58,16 @@ tested implementation without changing their meanings.
 
 After an Npgsql exception, timeout, cancellation, connection loss, or server error, the caller must roll back.
 Diagnostics retain exception type, stack, inner exception, and SQLSTATE, but omit connection strings, credentials,
-parameter values, payloads, provider responses, and user-controlled secrets. See the
+parameter values, payloads, and provider responses from the safe outer durable message/status. The retained
+`PostgresException` is server-controlled evidence, not a safe log projection. See the
 [`Work protocol`](../Durable/work-protocol-v1.md#caller-owned-transaction-contract) and
 [`reference workload`](../Durable/slice3-reference-workload.md#failure-interpretation).
+
+Use the API method being called as the operation identifier. Ordinary provider failures keep their concrete
+`NpgsqlException` or `PostgresException` type. `DurableRuntimeSchemaException.Status` is the safe schema-status snapshot;
+if PostgreSQL exposed the missing schema during acceptance, its `InnerException` retains the original
+`PostgresException` and SQLSTATE. Log only the API method, outer durable code/status, concrete exception type, and
+five-character SQLSTATE. Never log or serialize inner message text, detail, hint, SQL text, object names, or parameters.
 
 ## Reserved hosted-runtime diagnostics
 

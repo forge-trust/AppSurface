@@ -17,6 +17,8 @@ public interface IDurableWorkTransactionWriter
     /// <returns>The stable new or duplicate acceptance, or an actionable domain problem.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="transaction"/> or <paramref name="request"/> is null.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the transaction is disposed, inactive, closed, or targets a different PostgreSQL store.</exception>
+    /// <exception cref="DurableRuntimeSchemaException">Thrown with safe schema status when the durable schema is absent or incompatible. When a PostgreSQL error exposed the missing schema, <see cref="Exception.InnerException"/> retains that original failure.</exception>
+    /// <exception cref="NpgsqlException">The original PostgreSQL or transport failure. The caller must roll back the transaction.</exception>
     ValueTask<DurableOperationResult<DurableWorkAcceptance>> EnqueueAsync(
         NpgsqlTransaction transaction,
         DurableWorkRequest request,

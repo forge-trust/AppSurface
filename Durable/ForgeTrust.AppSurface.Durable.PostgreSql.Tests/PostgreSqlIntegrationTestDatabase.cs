@@ -34,7 +34,7 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
         var configured = Environment.GetEnvironmentVariable("APPSURFACE_POSTGRES_TEST_CONNECTION");
         if (string.IsNullOrWhiteSpace(configured))
         {
-            var container = new PostgreSqlBuilder("postgres:17.5")
+            var container = new PostgreSqlBuilder(PostgreSqlTestContainerImage.Reference)
                 .WithDatabase("appsurface_durable")
                 .WithUsername("appsurface")
                 .WithPassword("appsurface-test-password")

@@ -13,6 +13,11 @@ acceptance, process-loss recovery, exact effect permission, stable provider iden
   `APPSURFACE_POSTGRES_TEST_CONNECTION`.
 - One filtered test command against real PostgreSQL. A skipped or zero-test run is not success.
 
+The Docker path uses the immutable multi-platform image
+`postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302`.
+Refreshing that digest is an explicit reviewed dependency change. The version check still requires
+`server_version_num=170005` after startup.
+
 Use a disposable database. The workload applies forward-only schema and supplies no destructive down migration.
 
 ## Run the proof
@@ -32,9 +37,32 @@ dotnet test \
 The fixture uses the connection environment variable when set; otherwise it starts the pinned Testcontainers image.
 `APPSURFACE_POSTGRES_TEST_ALLOW_SKIP=true` is a local-only escape hatch and is rejected when `CI=true`.
 
-Expected evidence identifies committed crash checkpoints and resulting terminal/suspended states. Elapsed-time,
-application-step, database-transaction, and operator-action evidence remains a merge-readiness follow-up. Exact log
-wording is not API; committed-state assertions are.
+To record classified Docker evidence, run cold before the pinned image exists locally, then warm after the cold run has
+cached it:
+
+```bash
+./Durable/verify-postgresql.sh --quick \
+  --evidence-mode cold \
+  --evidence-output Durable/evidence/postgresql-slice3/cold
+./Durable/verify-postgresql.sh --quick \
+  --evidence-mode warm \
+  --evidence-output Durable/evidence/postgresql-slice3/warm
+```
+
+The wrapper verifies the image-cache precondition instead of trusting the label, rejects external-database runs as
+warm/cold evidence, enforces the 10-minute cold and 5-minute warm targets, and writes `run.json`. Each successful test
+writes a separate privacy-safe JSON document with monotonic timing plus ordered application, database-transaction,
+crash-recovery, provider-invocation, and operator-action checkpoints. Evidence never contains a connection string,
+credential, SQL parameter, payload, actor-provided value, or provider response. Exact log wording is not API;
+committed-state assertions are.
+
+The checked-in [cold](evidence/postgresql-slice3/cold/run.json) and
+[warm](evidence/postgresql-slice3/warm/run.json) manifests record the July 20, 2026 Apple arm64 proof. Both discovered
+and passed six workload cases. The cold run, including the immutable image pull, completed in 32 seconds against the
+600-second target; the warm run completed in 23 seconds against the 300-second target. Both manifests identify the
+Linux arm64 image and Darwin arm64 host, share the same SHA-256 source fingerprint, and bind the exact six freshly
+written scenario documents with a second SHA-256 fingerprint. Their scenario documents are the operation-level
+evidence; the base commit is lineage, not a claim that the tested working tree was already committed.
 
 ## What the workload proves
 
@@ -51,6 +79,7 @@ wording is not API; committed-state assertions are.
    `ManualResolution` suspend until evidence/authorized resolution.
 7. Final truth is an immutable exact-fence terminal fact or required safety suspension. Unknown post-permit outcomes are
    never failed terminal.
+8. An explicit scope-disable operator action commits its audit truth and blocks later acceptance for that scope.
 
 ## Application sequence
 

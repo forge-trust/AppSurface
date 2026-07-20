@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Durable;
 using ForgeTrust.AppSurface.Durable.PostgreSql;
@@ -18,6 +19,8 @@ if (string.IsNullOrWhiteSpace(connectionString))
 }
 
 await using var dataSource = NpgsqlDataSource.Create(connectionString);
+var stopwatch = Stopwatch.StartNew();
+var events = new List<ReferenceCheckpointEvent>();
 var registration = new ReferenceWorkRegistration(providerSafety);
 var registry = new DurableWorkRegistry([registration]);
 var options = new PostgreSqlDurableWorkOptions(runtimeEpoch, storeId);
@@ -42,12 +45,32 @@ var request = new DurableWorkRequest(
         backoffAlgorithm: "exponential-v1"));
 var accepted = await client.EnqueueAsync(request);
 var acceptance = accepted.Value ?? throw new InvalidOperationException(accepted.Problem?.Problem);
+events.Add(new ReferenceCheckpointEvent(
+    "work.accept",
+    "committed",
+    "provider-owned",
+    stopwatch.ElapsedMilliseconds));
 var store = new PostgreSqlDurableWorkStore(dataSource, runtimeEpoch);
 var candidate = (await store.DiscoverAsync(10)).Single(item => item.WorkId == acceptance.WorkId);
+events.Add(new ReferenceCheckpointEvent(
+    "work.discover",
+    "found",
+    "read-only",
+    stopwatch.ElapsedMilliseconds));
 var claim = await store.TryClaimAsync(candidate, "reference-child")
     ?? throw new InvalidOperationException("Reference child could not claim accepted Work.");
+events.Add(new ReferenceCheckpointEvent(
+    "work.claim",
+    "committed",
+    "provider-owned",
+    stopwatch.ElapsedMilliseconds));
 var permit = await store.TryAcquireEffectPermitAsync(claim)
     ?? throw new InvalidOperationException("Reference child could not commit the effect permit.");
+events.Add(new ReferenceCheckpointEvent(
+    "effect-permit.acquire",
+    "committed",
+    "provider-owned",
+    stopwatch.ElapsedMilliseconds));
 
 Console.WriteLine(JsonSerializer.Serialize(new ReferenceCheckpoint(
     "permit-committed",
@@ -55,7 +78,8 @@ Console.WriteLine(JsonSerializer.Serialize(new ReferenceCheckpoint(
     acceptance.WorkId.Value,
     claim.ActivityId,
     claim.AttemptNumber,
-    permit.PermittedAtUtc)));
+    permit.PermittedAtUtc,
+    events)));
 await Console.Out.FlushAsync();
 await Task.Delay(Timeout.InfiniteTimeSpan);
 
@@ -69,13 +93,26 @@ public sealed class ReferenceWorkloadHostMarker;
 /// <param name="ActivityId">Immutable provider activity identity.</param>
 /// <param name="AttemptNumber">Provider attempt number.</param>
 /// <param name="ObservedAtUtc">Authoritative permit timestamp.</param>
+/// <param name="Events">Ordered application and transaction checkpoints before process loss.</param>
 public sealed record ReferenceCheckpoint(
     string Phase,
     string ScopeId,
     string WorkId,
     string ActivityId,
     int AttemptNumber,
-    DateTimeOffset ObservedAtUtc);
+    DateTimeOffset ObservedAtUtc,
+    IReadOnlyList<ReferenceCheckpointEvent> Events);
+
+/// <summary>Reports one privacy-safe operation checkpoint reached by the crash helper.</summary>
+/// <param name="Operation">Stable operation name.</param>
+/// <param name="Outcome">Observed safe outcome.</param>
+/// <param name="TransactionBoundary">Database transaction ownership or absence.</param>
+/// <param name="ElapsedMilliseconds">Monotonic elapsed time since helper startup.</param>
+public sealed record ReferenceCheckpointEvent(
+    string Operation,
+    string Outcome,
+    string TransactionBoundary,
+    long ElapsedMilliseconds);
 
 internal sealed class ReferenceWorkRegistration(DurableProviderSafety providerSafety) : DurableWorkRegistration(
     $"reference.{providerSafety.ToString().ToLowerInvariant()}",

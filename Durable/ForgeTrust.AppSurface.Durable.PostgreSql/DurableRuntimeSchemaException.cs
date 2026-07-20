@@ -13,6 +13,17 @@ public sealed class DurableRuntimeSchemaException : InvalidOperationException
         Status = status;
     }
 
+    /// <summary>Initializes an exception from an incompatible schema status and the PostgreSQL failure that exposed it.</summary>
+    /// <param name="status">Incompatible schema status.</param>
+    /// <param name="innerException">Original PostgreSQL failure, including its concrete type, stack, and SQLSTATE.</param>
+    internal DurableRuntimeSchemaException(DurableRuntimeSchemaStatus status, Exception innerException)
+        : base(
+            CreateMessage(status ?? throw new ArgumentNullException(nameof(status))),
+            innerException ?? throw new ArgumentNullException(nameof(innerException)))
+    {
+        Status = status;
+    }
+
     /// <summary>Gets the incompatible schema status.</summary>
     public DurableRuntimeSchemaStatus Status { get; }
 

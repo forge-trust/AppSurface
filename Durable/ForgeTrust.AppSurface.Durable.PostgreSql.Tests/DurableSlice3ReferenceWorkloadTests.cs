@@ -7,17 +7,20 @@ using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
+[Collection("PostgreSQL reference evidence")]
 public sealed class DurableSlice3ReferenceWorkloadTests
 {
     [Fact]
     public async Task CallerOwnedTransaction_CommitsOrRollsBackDomainFactWithWorkAcceptance()
     {
+        var evidence = new ReferenceWorkloadEvidence("caller-owned-transaction");
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.ApplyAsync();
         var status = await schema.GetStatusAsync();
         var runtimeEpoch = Guid.NewGuid();
         await schema.InitializeRuntimeEpochAsync(runtimeEpoch, "reference-test", "initial-activation");
+        evidence.Record("application", "schema.apply-and-activate", "compatible", "migration-owner");
         await using (var setup = database.DataSource.CreateCommand("CREATE TABLE domain_fact (fact_id text PRIMARY KEY);"))
         {
             await setup.ExecuteNonQueryAsync();
@@ -38,6 +41,7 @@ public sealed class DurableSlice3ReferenceWorkloadTests
 
         Assert.Equal(0, await CountAsync(database.DataSource, "SELECT count(*) FROM domain_fact;"));
         Assert.Equal(0, await CountWorkAsync(database.DataSource, request.ScopeId));
+        evidence.Record("transaction", "domain-mutation-and-work-acceptance", "rolled-back", "caller-owned");
 
         await using (var commit = await connection.BeginTransactionAsync())
         {
@@ -50,6 +54,8 @@ public sealed class DurableSlice3ReferenceWorkloadTests
 
         Assert.Equal(1, await CountAsync(database.DataSource, "SELECT count(*) FROM domain_fact;"));
         Assert.Equal(1, await CountWorkAsync(database.DataSource, request.ScopeId));
+        evidence.Record("transaction", "domain-mutation-and-work-acceptance", "committed", "caller-owned");
+        _ = await evidence.WriteAsync("accepted");
     }
 
     [Theory]
@@ -62,24 +68,42 @@ public sealed class DurableSlice3ReferenceWorkloadTests
         bool shouldReclaim,
         string expectedState)
     {
+        var evidence = new ReferenceWorkloadEvidence($"process-loss-{providerSafety.ToString().ToLowerInvariant()}");
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.ApplyAsync();
         var status = await schema.GetStatusAsync();
         var runtimeEpoch = Guid.NewGuid();
         await schema.InitializeRuntimeEpochAsync(runtimeEpoch, "reference-test", "initial-activation");
+        evidence.Record("application", "schema.apply-and-activate", "compatible", "migration-owner");
 
         var checkpoint = await RunUntilPermitAndTerminateAsync(
             database.ConnectionString,
             runtimeEpoch,
             status.StoreId,
             providerSafety);
+        foreach (var childEvent in checkpoint.Events)
+        {
+            evidence.Record(
+                "child-process",
+                childEvent.Operation,
+                childEvent.Outcome,
+                childEvent.TransactionBoundary,
+                childEvent.ElapsedMilliseconds);
+        }
+
+        evidence.Record("application", "process.force-terminate", "terminated-after-permit", "none");
         await Task.Delay(TimeSpan.FromMilliseconds(1_250));
 
         var store = new PostgreSqlDurableWorkStore(database.DataSource, runtimeEpoch);
         var candidate = (await store.DiscoverAsync(20)).Single(item =>
             item.WorkId.Value == checkpoint.WorkId && item.ScopeId.Value == checkpoint.ScopeId);
         var recovered = await store.TryClaimAsync(candidate, "reference-parent");
+        evidence.Record(
+            "recovery",
+            "work.reclaim-after-lease-expiry",
+            recovered is null ? "suspended-by-provider-safety" : "reclaimed",
+            "provider-owned");
 
         if (shouldReclaim)
         {
@@ -93,7 +117,9 @@ public sealed class DurableSlice3ReferenceWorkloadTests
                 recovered.ToProviderClaim());
             var permit = await store.TryAcquireEffectPermitAsync(recovered);
             Assert.NotNull(permit);
+            evidence.Record("transaction", "effect-permit.acquire", "committed", "provider-owned");
             var result = await prepared.InvokeAsync();
+            evidence.Record("provider", "provider.invoke", "completed", "no-database-transaction");
             var completion = await store.RecordCompletionAsync(
                 permit!.Claim,
                 new PostgreSqlWorkCompletion(
@@ -102,6 +128,7 @@ public sealed class DurableSlice3ReferenceWorkloadTests
                     "{}",
                     result));
             Assert.Equal(DurableWorkState.Succeeded, completion.State);
+            evidence.Record("transaction", "work.complete", "committed", "provider-owned");
         }
         else
         {
@@ -112,6 +139,44 @@ public sealed class DurableSlice3ReferenceWorkloadTests
             database.DataSource,
             new DurableScopeId(checkpoint.ScopeId),
             new DurableWorkId(checkpoint.WorkId)));
+        _ = await evidence.WriteAsync(expectedState);
+    }
+
+    [Fact]
+    public async Task OperatorDisableScope_CommitsAuditAndRejectsFurtherAcceptance()
+    {
+        var evidence = new ReferenceWorkloadEvidence("operator-disable-scope");
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var status = await schema.GetStatusAsync();
+        var runtimeEpoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(runtimeEpoch, "reference-test", "initial-activation");
+        evidence.Record("application", "schema.apply-and-activate", "compatible", "migration-owner");
+
+        var registry = PostgreSqlTestWorkContracts.CreateDeleteProviderAccessRegistry();
+        var options = new PostgreSqlDurableWorkOptions(runtimeEpoch, status.StoreId);
+        var client = new PostgreSqlDurableWorkClient(database.DataSource, registry, options);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, runtimeEpoch);
+        var scopeId = new DurableScopeId("reference-operator-disable");
+        var accepted = await client.EnqueueAsync(CreateRequest(scopeId.Value, "reference-before-disable"));
+        Assert.True(accepted.IsSuccess);
+        evidence.Record("application", "work.accept", "committed", "provider-owned");
+
+        var disabled = await store.DisableScopeAsync(
+            scopeId,
+            "reference-operator",
+            "account-closed",
+            expectedGeneration: 1);
+        Assert.Equal(PostgreSqlScopeMutationOutcome.Applied, disabled.Outcome);
+        Assert.Equal(2, disabled.Generation);
+        evidence.Record("operator", "scope.disable", "applied-and-audited", "provider-owned");
+
+        var refused = await client.EnqueueAsync(CreateRequest(scopeId.Value, "reference-after-disable"));
+        Assert.False(refused.IsSuccess);
+        Assert.Equal(DurableProblemCodes.ScopeDisabled, refused.Problem!.Code);
+        evidence.Record("application", "work.accept", "scope-disabled", "provider-owned");
+        _ = await evidence.WriteAsync("disabled");
     }
 
     private static async ValueTask<ReferenceCheckpoint> RunUntilPermitAndTerminateAsync(

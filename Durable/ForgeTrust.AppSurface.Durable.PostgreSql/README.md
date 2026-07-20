@@ -49,19 +49,49 @@ authorization.
 
 Create `PostgreSqlDurableWorkOptions` from the non-empty StoreId and explicitly active epoch returned by deployment:
 
+<!-- appsurface:snippet id="durable-postgresql-accept-work" file="Durable/packed-consumers/PostgreSqlProvider/PostgreSqlReadmeProof.cs" marker="durable-postgresql-accept-work" lang="csharp" -->
 ```csharp
-var options = new PostgreSqlDurableWorkOptions(
-    runtimeEpoch,
-    expectedStoreId,
-    PostgreSqlDurableWakeNotificationMode.Disabled);
+using ForgeTrust.AppSurface.Durable;
+using ForgeTrust.AppSurface.Durable.PostgreSql;
+using Npgsql;
 
-var writer = new PostgreSqlDurableWorkTransactionWriter(dataSource, workRegistry, options);
-var accepted = await writer.EnqueueAsync(transaction, request, cancellationToken);
-await transaction.CommitAsync(cancellationToken);
+namespace DurablePostgreSqlConsumer;
+
+internal static class PostgreSqlReadmeProof
+{
+    internal static async ValueTask<DurableOperationResult<DurableWorkAcceptance>> AcceptAsync(
+        NpgsqlDataSource dataSource,
+        IDurableWorkRegistry workRegistry,
+        Guid runtimeEpoch,
+        Guid expectedStoreId,
+        NpgsqlTransaction transaction,
+        DurableWorkRequest request,
+        CancellationToken cancellationToken)
+    {
+        var options = new PostgreSqlDurableWorkOptions(
+            runtimeEpoch,
+            expectedStoreId,
+            PostgreSqlDurableWakeNotificationMode.Disabled);
+
+        var writer = new PostgreSqlDurableWorkTransactionWriter(dataSource, workRegistry, options);
+        var accepted = await writer.EnqueueAsync(transaction, request, cancellationToken);
+        if (!accepted.IsSuccess)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return accepted;
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return accepted;
+    }
+}
 ```
+<!-- /appsurface:snippet -->
 
-The writer uses the exact active `NpgsqlTransaction`. It never opens a second connection, commits, rolls back, replaces,
-or disposes the caller transaction. Caller rollback removes both the domain mutation and Work acceptance. Use
+The proof helper owns transaction completion: it rolls back when acceptance returns a domain problem and commits only
+after successful Work acceptance. The writer itself uses the exact active `NpgsqlTransaction`; it never opens a second
+connection, commits, rolls back, replaces, or disposes the caller transaction. Caller rollback removes both the domain
+mutation and Work acceptance. Use
 `PostgreSqlDurableWorkClient` with the same data source, registry, and options only when the package may own a short
 acceptance transaction.
 
@@ -73,6 +103,12 @@ and never replace authoritative discovery.
 
 Local preflight and expected domain outcomes leave an otherwise active transaction usable. PostgreSQL errors, timeout,
 network loss, server cancellation, or an aborting SQLSTATE require caller rollback. Savepoints are unsupported.
+The API method being called is the operation context: failures are not wrapped in a generic provider exception that
+would hide the concrete Npgsql type. Missing or incompatible schema failures expose safe `Status`; when PostgreSQL
+reveals missing schema during Work acceptance, `InnerException` preserves the original `PostgresException`, stack, and
+SQLSTATE. Only the outer durable message and status are safe to log. Never log or serialize the inner exception's
+server-controlled message, detail, hint, SQL text, object names, or other fields; project only its concrete type and
+SQLSTATE.
 
 External provider I/O happens only after an exact-fence permit commits and never while a database connection or
 transaction is held. `Idempotent` and `ProviderKeyed` work can recover safely; `ReconcileBeforeRetry` and

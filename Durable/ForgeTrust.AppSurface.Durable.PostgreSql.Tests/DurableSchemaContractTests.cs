@@ -207,10 +207,40 @@ public sealed class DurableSchemaContractTests
             "Schema problem.");
 
         var exception = new DurableRuntimeSchemaException(status);
+        var providerFailure = new PostgresException(
+            "server-controlled secret",
+            "ERROR",
+            "ERROR",
+            PostgresErrorCodes.UndefinedTable);
+        var exceptionWithContext = new DurableRuntimeSchemaException(status, providerFailure);
 
         Assert.Same(status, exception.Status);
         Assert.StartsWith(expectedCode, exception.Message, StringComparison.Ordinal);
+        Assert.Same(status, exceptionWithContext.Status);
+        Assert.Same(providerFailure, exceptionWithContext.InnerException);
+        Assert.Equal(PostgresErrorCodes.UndefinedTable, providerFailure.SqlState);
+        Assert.Equal(exception.Message, exceptionWithContext.Message);
+        Assert.DoesNotContain("server-controlled secret", exceptionWithContext.Message, StringComparison.Ordinal);
         Assert.Throws<ArgumentNullException>(() => new DurableRuntimeSchemaException(null!));
+        Assert.Throws<ArgumentNullException>(() => new DurableRuntimeSchemaException(null!, providerFailure));
+        Assert.Throws<ArgumentNullException>(() => new DurableRuntimeSchemaException(status, null!));
+    }
+
+    [Fact]
+    public void MissingSchemaFactory_PreservesConcretePostgreSqlFailureAndSqlState()
+    {
+        var providerFailure = new PostgresException(
+            "server-controlled detail",
+            "ERROR",
+            "ERROR",
+            PostgresErrorCodes.InvalidSchemaName);
+
+        var exception = PostgreSqlDurableWorkStore.CreateMissingSchemaException(providerFailure);
+
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, exception.Status.Compatibility);
+        Assert.Same(providerFailure, exception.InnerException);
+        Assert.Equal(PostgresErrorCodes.InvalidSchemaName, ((PostgresException)exception.InnerException!).SqlState);
+        Assert.DoesNotContain("server-controlled detail", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
