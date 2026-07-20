@@ -365,7 +365,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             const row = sourceRow.cloneNode(true) as HTMLElement;
             this.rewriteAttributes(row, sourceIndex, index);
             row.setAttribute('data-rw-form-index', index);
-            this.copyRowValues(sourceRow, row);
+            this.copyRowValues(root, sourceRow, row);
             this.rewriteHiddenIndexValues(row, sourceIndex, index);
             this.ensureIndexMarker(row, collection, index);
             this.clearValidationState(row);
@@ -665,24 +665,42 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             return marker?.value || row.getAttribute('data-rw-form-index');
         }
 
-        private copyRowValues(sourceRow: HTMLElement, cloneRow: HTMLElement) {
+        private copyRowValues(root: HTMLElement, sourceRow: HTMLElement, cloneRow: HTMLElement) {
             const sourceControls = this.getControls(sourceRow);
             const cloneControls = this.getControls(cloneRow);
+            const deleteFieldSelector = root.getAttribute('data-rw-form-collection-delete-field');
+            let selectedDeleteField: Element | null = null;
+            if (deleteFieldSelector) {
+                try {
+                    selectedDeleteField = sourceRow.querySelector(deleteFieldSelector);
+                } catch {
+                    // Duplicate stays fail-soft; mark-remove records the invalid selector if invoked.
+                }
+            }
+
             for (let i = 0; i < cloneControls.length; i += 1) {
                 const source = sourceControls[i];
                 const clone = cloneControls[i];
                 if (!source || !clone) continue;
-                this.copyControlValue(source, clone);
+                this.copyControlValue(source, clone, source === selectedDeleteField);
             }
         }
 
-        private copyControlValue(source: FormControl, clone: FormControl) {
+        private copyControlValue(source: FormControl, clone: FormControl, isSelectedDeleteField: boolean) {
             if (clone.name.endsWith('.index')) {
                 return;
             }
 
             if (clone instanceof HTMLInputElement && clone.type === 'file') {
                 clone.value = '';
+                return;
+            }
+
+            if (clone instanceof HTMLInputElement
+                && clone.type === 'hidden'
+                && (clone.hasAttribute('data-rw-form-collection-delete-field') || isSelectedDeleteField)) {
+                clone.value = clone.getAttribute('value') || 'false';
+                clone.disabled = false;
                 return;
             }
 

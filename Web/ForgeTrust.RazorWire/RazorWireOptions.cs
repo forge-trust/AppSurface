@@ -76,7 +76,7 @@ public class RazorWireTurboOptions
 public enum RazorWireTurboRuntimeMode
 {
     /// <summary>
-    /// Emit the package-owned, same-origin Turbo 8.0.12 runtime before RazorWire's scripts.
+    /// Emit the package-owned, same-origin Turbo 8.0.23 runtime before RazorWire's scripts.
     /// </summary>
     Bundled = 0,
 

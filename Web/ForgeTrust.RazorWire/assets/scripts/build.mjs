@@ -70,11 +70,11 @@ const copiedThirdPartyOutputs = [
     output: path.join(outputRoot, 'turbo.es2017-umd.js'),
     label: 'turbo.es2017-umd.js',
     component: '@hotwired/turbo',
-    version: '8.0.12',
+    version: '8.0.23',
     expectedEntry: 'dist/turbo.es2017-umd.js',
-    sha256: 'd5ebcdfcec4244326db950b3437824955abc2f337aaa10a6ef1fec6dac249ce9',
-    rawBytes: 210_000,
-    gzipBytes: 45_000
+    sha256: 'f9e09e3a3093874fe56d5341ca3594ac959f8b097c9b6171a5b37838da3aec81',
+    rawBytes: 220_000,
+    gzipBytes: 47_000
   }
 ];
 

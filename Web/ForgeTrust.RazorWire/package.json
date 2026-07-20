@@ -9,6 +9,6 @@
     "verify-generated": "node assets/scripts/verify-generated.mjs"
   },
   "dependencies": {
-    "@hotwired/turbo": "8.0.12"
+    "@hotwired/turbo": "8.0.23"
   }
 }

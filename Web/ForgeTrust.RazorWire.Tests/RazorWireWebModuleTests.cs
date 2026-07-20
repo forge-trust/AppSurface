@@ -263,7 +263,7 @@ public class RazorWireWebModuleTests
             Assert.Equal(HttpStatusCode.OK, turboResponse.StatusCode);
             Assert.Equal("text/javascript", turboResponse.Content.Headers.ContentType?.MediaType);
             Assert.Contains(
-                "Turbo 8.0.12",
+                "Turbo 8.0.23",
                 await turboResponse.Content.ReadAsStringAsync(),
                 StringComparison.Ordinal);
 

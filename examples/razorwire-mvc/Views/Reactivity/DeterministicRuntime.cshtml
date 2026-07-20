@@ -8,6 +8,34 @@
 <p data-deterministic-runtime-state="@state">State: @state</p>
 <p data-deterministic-runtime-proof data-render-kind="pending">pending</p>
 
+<a href="#deterministic-hash-target" data-deterministic-hash-link>
+    Jump to hash target
+</a>
+<p id="deterministic-hash-target">Hash target</p>
+
+<turbo-frame id="grandparent-frame">
+    <div data-grandparent-state="stable">
+        <turbo-frame id="parent-frame">
+            <div data-parent-frame-state="initial">
+                <turbo-frame id="child-frame">
+                    <form asp-controller="Reactivity"
+                          asp-action="ParentFrameTarget"
+                          method="post"
+                          data-turbo-frame="_parent">
+                        <button type="submit">Replace parent frame</button>
+                    </form>
+                </turbo-frame>
+            </div>
+        </turbo-frame>
+    </div>
+</turbo-frame>
+
+<div data-stream-compatibility-fixture>
+    <div id="stream-duplicate-sibling" data-stream-value="old">old</div>
+    <div id="stream-insertion-target">target</div>
+    <div id="stream-inline-target"></div>
+</div>
+
 @if (state == "first")
 {
     <a asp-controller="Reactivity" asp-action="DeterministicRuntime" asp-route-state="second">
