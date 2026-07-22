@@ -50,4 +50,13 @@ jobs:
         run: dotnet build Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore
 
       - name: Verify nested process-tree cleanup
-        run: dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree --logger "console;verbosity=normal"
+        run: dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree --logger "console;verbosity=normal" --blame-hang-timeout 2m --blame-hang-dump-type mini --results-directory "TestResults/${{ matrix.os }}"
+
+      - name: Upload process-tree hang diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-watchdog-process-tree-${{ matrix.os }}
+          path: TestResults/${{ matrix.os }}
+          if-no-files-found: ignore
+          retention-days: 7
