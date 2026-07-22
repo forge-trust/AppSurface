@@ -385,6 +385,33 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldAcceptMergedCoverageCountsAboveInt32MaxValue()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            ReportGeneratorCoverageText =
+                "<coverage lines-covered=\"2147483648\" lines-valid=\"4294967296\" branches-covered=\"2147483648\" branches-valid=\"4294967296\" />",
+        };
+        var app = CreateApp(runner);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(0, exitCode);
+        var summary = File.ReadAllText(Path.Join(
+            workspace.Root,
+            "TestResults",
+            "coverage-merged",
+            "summary.txt"));
+        Assert.Contains("Line coverage: 50.00% (2147483648/4294967296)", summary, StringComparison.Ordinal);
+        Assert.Contains("Branch coverage: 50.00% (2147483648/4294967296)", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task WriteSummaryAsync_ShouldReturnFalseWhenMergedCoverageFileIsMissing()
     {
         using var workspace = TestRepo.Create();

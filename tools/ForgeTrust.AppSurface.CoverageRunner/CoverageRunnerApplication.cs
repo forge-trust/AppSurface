@@ -811,10 +811,10 @@ internal sealed class CoverageRunnerApplication
         }
 
         var coverageText = await File.ReadAllTextAsync(coveragePath, cancellationToken);
-        if (!TryReadIntAttribute(coverageText, "lines-covered", out var linesCovered)
-            || !TryReadIntAttribute(coverageText, "lines-valid", out var linesValid)
-            || !TryReadIntAttribute(coverageText, "branches-covered", out var branchesCovered)
-            || !TryReadIntAttribute(coverageText, "branches-valid", out var branchesValid))
+        if (!TryReadCountAttribute(coverageText, "lines-covered", out var linesCovered)
+            || !TryReadCountAttribute(coverageText, "lines-valid", out var linesValid)
+            || !TryReadCountAttribute(coverageText, "branches-covered", out var branchesCovered)
+            || !TryReadCountAttribute(coverageText, "branches-valid", out var branchesValid))
         {
             await _standardError.WriteLineAsync($"Failed to parse numeric coverage attributes from {coveragePath}");
             return false;
@@ -887,10 +887,10 @@ internal sealed class CoverageRunnerApplication
                     return "the document root is not 'coverage'";
                 }
 
-                if (!HasNumericCoverageAttribute(root, "lines-covered")
-                    || !HasNumericCoverageAttribute(root, "lines-valid")
-                    || !HasNumericCoverageAttribute(root, "branches-covered")
-                    || !HasNumericCoverageAttribute(root, "branches-valid"))
+                if (!HasCoverageCountAttribute(root, "lines-covered")
+                    || !HasCoverageCountAttribute(root, "lines-valid")
+                    || !HasCoverageCountAttribute(root, "branches-covered")
+                    || !HasCoverageCountAttribute(root, "branches-valid"))
                 {
                     return "required numeric coverage attributes are missing or invalid";
                 }
@@ -965,8 +965,8 @@ internal sealed class CoverageRunnerApplication
         await WriteCanonicalTextAsync(destinationPath, contents, cancellationToken, beforeCommit);
     }
 
-    private static bool HasNumericCoverageAttribute(XElement root, string name)
-        => int.TryParse(root.Attribute(name)?.Value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _);
+    private static bool HasCoverageCountAttribute(XElement root, string name)
+        => ulong.TryParse(root.Attribute(name)?.Value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _);
 
     private static string CreateSiblingStagingPath(string destinationPath)
     {
@@ -1002,7 +1002,7 @@ internal sealed class CoverageRunnerApplication
         return WriteSummaryAsync(options, diagnostics: null, cancellationToken);
     }
 
-    private static bool TryReadIntAttribute(string text, string attributeName, out int value)
+    private static bool TryReadCountAttribute(string text, string attributeName, out ulong value)
     {
         value = 0;
         var needle = attributeName + "=\"";
@@ -1014,7 +1014,12 @@ internal sealed class CoverageRunnerApplication
 
         start += needle.Length;
         var end = text.IndexOf('"', start);
-        return end > start && int.TryParse(text[start..end], out value);
+        return end > start
+            && ulong.TryParse(
+                text[start..end],
+                System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out value);
     }
 
     private static async Task WriteTimingsAsync(
