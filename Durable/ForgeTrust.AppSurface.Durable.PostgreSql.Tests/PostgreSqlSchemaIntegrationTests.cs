@@ -7,6 +7,9 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class PostgreSqlSchemaIntegrationTests
 {
     private const long MigrationAdvisoryLock = 4_707_181_168_775_217_740;
+    private const string RoleRecipeDatabase = "appsurface_durable";
+    private const string RoleRecipeUsername = "appsurface";
+    private const string RoleRecipePassword = "appsurface-test-password";
 
     [Fact]
     public async Task ApplyStatusInitializeRotate_AreExplicitAndIdempotent()
@@ -124,9 +127,9 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var recipePath = TestPathUtils.PathUnder(repositoryRoot, "Durable/configure-postgresql-roles.sql");
         const string containerRecipePath = "/tmp/configure-postgresql-roles.sql";
         await using var container = new PostgreSqlBuilder(PostgreSqlTestContainerImage.Reference)
-            .WithDatabase("appsurface_durable")
-            .WithUsername("appsurface")
-            .WithPassword("appsurface-test-password")
+            .WithDatabase(RoleRecipeDatabase)
+            .WithUsername(RoleRecipeUsername)
+            .WithPassword(RoleRecipePassword)
             .WithResourceMapping(File.ReadAllBytes(recipePath), containerRecipePath)
             .Build();
         await container.StartAsync();
@@ -517,8 +520,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
         container.ExecAsync(
             [
                 "psql",
-                "-U", "appsurface",
-                "-d", "appsurface_durable",
+                "-U", RoleRecipeUsername,
+                "-d", RoleRecipeDatabase,
                 "-v", $"migration_owner_role={owner}",
                 "-v", $"dispatcher_role={dispatcher}",
                 "-v", $"runtime_role={runtime}",

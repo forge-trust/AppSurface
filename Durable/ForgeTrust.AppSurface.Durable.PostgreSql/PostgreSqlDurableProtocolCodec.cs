@@ -56,6 +56,6 @@ internal static class PostgreSqlDurableProtocolCodec
     {
         "operational" => DurableDataClassification.Operational,
         "approved_application" => DurableDataClassification.ApprovedApplication,
-        _ => throw new InvalidDataException($"Unknown persisted data classification '{value}'."),
+        _ => throw new InvalidDataException($"Unknown persisted classification '{value}'."),
     };
 }
