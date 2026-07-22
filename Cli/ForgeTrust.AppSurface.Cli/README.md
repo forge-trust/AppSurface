@@ -181,9 +181,10 @@ selected Application Default Credentials there.
 
 `plan` performs metadata-only probes and records a configuration digest, expiry, canonical resources, and destination
 preconditions. It never reads a secret payload. `apply --apply` requires the same configuration, rejects stale or changed
-plans before reading values, and requires `--confirm <job>` for production-labelled destinations. Output and plan/receipt
-JSON contain resources, actions, and diagnostic codes only: never values, bytes, hashes, credentials, or raw provider
-exceptions.
+plans before reading values, and requires `--confirm <job>` for production-labelled destinations. Text and JSON summaries
+may identify the requested plan or receipt artifact path. Summaries and plan/receipt JSON contain resources, actions,
+diagnostic codes, and configuration/plan identity digests, but never secret values, payload bytes, secret-value hashes,
+credentials, or raw provider exceptions.
 
 Google destination secret parents must already exist. Without `--replace`, a Google destination with no enabled versions
 receives its first enabled version, while a destination that already has an enabled version is skipped and independent

@@ -17,7 +17,8 @@ public class PathUtilsTests : IDisposable
     {
         var result = PathUtils.PathUnder(_testRoot, "receipts", "receipt.json");
 
-        Assert.Equal(Path.GetFullPath(Path.Combine(_testRoot, "receipts", "receipt.json")), result);
+        var expected = Path.GetFullPath($"receipts{Path.DirectorySeparatorChar}receipt.json", _testRoot);
+        Assert.Equal(expected, result);
     }
 
     [Fact]

@@ -203,7 +203,7 @@ internal sealed class SecretPromotionWorkflow(
         var loaded = LoadConfiguration(request.ConfigPath);
         var job = FindJob(loaded.Configuration, request.JobName);
         var endpoints = ResolveEndpoints(loaded.Configuration, job);
-        ValidateJob(job, endpoints, request.Replace);
+        ValidateJob(job, endpoints);
 
         var draftRows = job.Rows.Select((row, index) => CreatePlanRow(row, index + 1, endpoints, request.Context)).ToArray();
         if (draftRows.GroupBy(row => row.LocalStorageName, StringComparer.Ordinal).Any(group => group.Count() > 1))
@@ -266,14 +266,14 @@ internal sealed class SecretPromotionWorkflow(
 
         var job = FindJob(loaded.Configuration, plan.JobName);
         var endpoints = ResolveEndpoints(loaded.Configuration, job);
-        ValidateJob(job, endpoints, plan.Replace);
+        ValidateJob(job, endpoints);
         ValidatePlanRows(plan.Rows, job, endpoints, request.Context);
         if (IsProduction(endpoints.Destination) && !string.Equals(request.Confirmation, plan.JobName, StringComparison.Ordinal))
         {
             throw SecretPromotionCommandExtensions.Usage("A production destination requires --confirm with the exact job name.");
         }
 
-        var plannedRows = plan.Rows.Select(row => RehydrateRow(row, endpoints, request.Context)).ToArray();
+        var plannedRows = plan.Rows.ToArray();
         var resumeState = LoadResumeState(request.ResumeReceiptPath, plan);
         var completedRows = resumeState.CompletedRows;
         VerifyCompletedRows(completedRows, endpoints.Destination);
@@ -288,15 +288,19 @@ internal sealed class SecretPromotionWorkflow(
             .ToArray();
         if (plannedResults.Any(row => !IsReadyOrSkipped(row)))
         {
-            var blocked = new SecretPromotionSummary("apply", plan.JobName, request.Apply, false, plannedResults, null, null);
-            var blockedJournalRows = resumeState.Rows.ToList();
-            foreach (var row in plannedResults.Where(row => !completedRows.ContainsKey(row.RowNumber)))
+            string? blockedReceiptPath = null;
+            if (request.Apply)
             {
-                SetJournalResult(blockedJournalRows, row);
+                var blockedJournalRows = resumeState.Rows.ToList();
+                foreach (var row in plannedResults.Where(row => !completedRows.ContainsKey(row.RowNumber)))
+                {
+                    SetJournalResult(blockedJournalRows, row);
+                }
+
+                blockedReceiptPath = WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, blockedJournalRows));
             }
 
-            WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, blockedJournalRows));
-            return blocked;
+            return new SecretPromotionSummary("apply", plan.JobName, request.Apply, false, plannedResults, null, blockedReceiptPath);
         }
 
         if (!request.Apply)
@@ -306,7 +310,7 @@ internal sealed class SecretPromotionWorkflow(
 
         var results = new List<SecretPromotionRowResult>(plannedRows.Length);
         var journalResults = resumeState.Rows.ToList();
-        WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
+        var receiptPath = WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
         foreach (var row in plannedRows)
         {
             if (completedRows.ContainsKey(row.RowNumber))
@@ -324,6 +328,14 @@ internal sealed class SecretPromotionWorkflow(
                 continue;
             }
 
+            if (!TryReadSource(row, endpoints.Source, request.Context, out var value, out var readFailure))
+            {
+                results.Add(readFailure!);
+                SetJournalResult(journalResults, results[^1]);
+                WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
+                continue;
+            }
+
             results.Add(row.Result(
                 "IndeterminateWrite",
                 "WritePending",
@@ -333,15 +345,13 @@ internal sealed class SecretPromotionWorkflow(
             SetJournalResult(journalResults, results[^1]);
             WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
 
-            results[^1] = ApplyRow(row, endpoints, request.Context);
+            results[^1] = WriteGoogle(row, endpoints.Destination, value!);
             SetJournalResult(journalResults, results[^1]);
             WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
         }
 
         var succeeded = results.All(row => row.Status is "Written" or "Skipped");
-        var summary = new SecretPromotionSummary("apply", plan.JobName, true, succeeded, results, null, null);
-        WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
-        return summary;
+        return new SecretPromotionSummary("apply", plan.JobName, true, succeeded, results, null, receiptPath);
     }
 
     private static SecretPromotionSummary CreateJournalSummary(
@@ -469,7 +479,7 @@ internal sealed class SecretPromotionWorkflow(
         return matches[0];
     }
 
-    private static void ValidateJob(SecretPromotionJob job, ResolvedEndpoints endpoints, bool replace)
+    private static void ValidateJob(SecretPromotionJob job, ResolvedEndpoints endpoints)
     {
         if (string.IsNullOrWhiteSpace(job.Name) || job.Rows.Count == 0)
         {
@@ -516,8 +526,6 @@ internal sealed class SecretPromotionWorkflow(
         {
             throw SecretPromotionCommandExtensions.Usage("Promotion job contains duplicate destination resources.");
         }
-
-        _ = replace;
     }
 
     private SecretPromotionPlanRow CreatePlanRow(
@@ -610,16 +618,6 @@ internal sealed class SecretPromotionWorkflow(
             : row.Result("Ready", result.HasEnabledVersions ? "WouldAddVersion" : "WouldWriteFirstVersion", null, null, null);
     }
 
-    private SecretPromotionRowResult ApplyRow(SecretPromotionPlanRow row, ResolvedEndpoints endpoints, SecretsCommandContext context)
-    {
-        if (!TryReadSource(row, endpoints.Source, context, out var value, out var failure))
-        {
-            return failure!;
-        }
-
-        return WriteGoogle(row, endpoints.Destination, value!);
-    }
-
     private bool TryReadSource(
         SecretPromotionPlanRow row,
         SecretPromotionEndpoint endpoint,
@@ -698,13 +696,6 @@ internal sealed class SecretPromotionWorkflow(
         }
 
         return identity.Identity!;
-    }
-
-    private static SecretPromotionPlanRow RehydrateRow(SecretPromotionPlanRow row, ResolvedEndpoints endpoints, SecretsCommandContext context)
-    {
-        _ = endpoints;
-        _ = context;
-        return row;
     }
 
     private static void ValidatePlanRows(
@@ -959,12 +950,13 @@ internal sealed class SecretPromotionWorkflow(
         }
     }
 
-    private void WriteReceipt(SecretPromotionApplyRequest request, SecretPromotionPlanArtifact plan, SecretPromotionSummary summary)
+    private string WriteReceipt(SecretPromotionApplyRequest request, SecretPromotionPlanArtifact plan, SecretPromotionSummary summary)
     {
         var path = request.ReceiptPath ?? $"{request.PlanPath}.receipt.json";
         _receiptWriter.Write(
             path,
             new SecretPromotionReceipt(plan.JobName, plan.ConfigDigest, plan.PlanIdentity, summary.Rows));
+        return path;
     }
 
     private static void ValidateReceiptRows(
@@ -1164,6 +1156,7 @@ internal sealed record SecretPromotionPlanRow(int RowNumber, string Key, string 
         Result(
             status switch
             {
+                GoogleSecretManagerTransferStatus.Missing => "DestinationMissing",
                 GoogleSecretManagerTransferStatus.AccessDenied => "AccessDenied",
                 GoogleSecretManagerTransferStatus.Unavailable => "Unavailable",
                 GoogleSecretManagerTransferStatus.Cancelled => "Cancelled",

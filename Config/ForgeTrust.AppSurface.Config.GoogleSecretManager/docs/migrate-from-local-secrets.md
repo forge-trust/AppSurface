@@ -76,8 +76,9 @@ Apply validates the whole job before any payload read. Writes are ordered but no
 the workflow persists a value-free journal for the planned rows, then updates that journal atomically after each row. If
 the process crashes, resume from the latest journal or receipt; rows already confirmed as `Written` are skipped, rows not
 confirmed are revalidated before another write, and indeterminate Google writes require operator reconciliation instead
-of automatic retry. Journals and receipts record resources, row statuses, and written version names only; they never
-include secret values, payload bytes, hashes, credentials, or raw provider exceptions.
+of automatic retry. Journals and receipts record resources, row statuses, written version names, and configuration/plan
+identity digests only; they never include secret values, payload bytes, secret-value hashes, credentials, or raw provider
+exceptions.
 
 ## Pitfalls
 

@@ -264,7 +264,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.False(result.Succeeded);
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-store-command-untrusted", result.Diagnostic?.Code);
-        Assert.Contains(fakePath, result.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.DoesNotContain(fakePath, result.Diagnostic?.Cause, StringComparison.Ordinal);
         Assert.Contains("ignores PATH", result.Diagnostic?.Cause, StringComparison.Ordinal);
     }
 
@@ -282,8 +282,8 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.False(result.Succeeded);
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-store-command-untrusted", result.Diagnostic?.Code);
-        Assert.Contains("/usr/bin/secret-tool", result.Diagnostic?.Cause, StringComparison.Ordinal);
-        Assert.Contains("/bin/secret-tool", result.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.DoesNotContain(UsrSecretTool, result.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.DoesNotContain(BinSecretTool, result.Diagnostic?.Cause, StringComparison.Ordinal);
         Assert.Contains("does not search PATH", result.Diagnostic?.Cause, StringComparison.Ordinal);
     }
 
@@ -412,6 +412,10 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
         Assert.Equal("local-secret-store-command-invalid", result.Diagnostic?.Code);
         Assert.Contains(expectedCause, result.Diagnostic?.Cause, StringComparison.Ordinal);
+        if (!string.IsNullOrEmpty(overridePath))
+        {
+            Assert.DoesNotContain(overridePath, result.Diagnostic?.Fix ?? string.Empty, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -423,6 +427,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-store-command-unsupported", result.Diagnostic?.Code);
         Assert.Contains("Linux-only", result.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.DoesNotContain("/usr/local/bin/secret-tool", result.Diagnostic?.ToDisplayString() ?? string.Empty, StringComparison.Ordinal);
     }
 
     [Fact]
