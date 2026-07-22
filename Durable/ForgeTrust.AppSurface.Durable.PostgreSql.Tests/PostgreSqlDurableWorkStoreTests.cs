@@ -39,6 +39,32 @@ public sealed class PostgreSqlDurableWorkStoreTests
     }
 
     [Fact]
+    public async Task SchemaRemovedAfterExistenceProbe_PreservesPostgreSqlFailureContext()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        await using var connection = await database.DataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        var exception = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(async () =>
+            await PostgreSqlDurableWorkStore.ValidateSchemaAsync(
+                connection,
+                transaction,
+                expectedStoreId: null,
+                CancellationToken.None,
+                async () =>
+                {
+                    await using var drop = database.DataSource.CreateCommand("DROP SCHEMA appsurface_durable CASCADE;");
+                    await drop.ExecuteNonQueryAsync();
+                }));
+
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, exception.Status.Compatibility);
+        var providerFailure = Assert.IsType<PostgresException>(exception.InnerException);
+        Assert.Equal(PostgresErrorCodes.UndefinedTable, providerFailure.SqlState);
+        Assert.DoesNotContain(providerFailure.MessageText, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TransactionWriter_UsesCallerTransactionWithoutOwningIt_AndDeduplicatesExactRequest()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

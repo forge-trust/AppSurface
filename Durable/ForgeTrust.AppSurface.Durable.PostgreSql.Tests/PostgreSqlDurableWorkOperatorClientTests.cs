@@ -1884,7 +1884,7 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         for (var attempt = 0; attempt < 100; attempt++)
         {
             await using var command = dataSource.CreateCommand(
-                "SELECT count(*) FROM pg_catalog.pg_stat_activity WHERE state = 'active' AND wait_event_type = 'Lock';");
+                "SELECT count(*) FROM pg_catalog.pg_stat_activity WHERE datname = current_database() AND state = 'active' AND wait_event_type = 'Lock';");
             if ((long)(await command.ExecuteScalarAsync())! >= expectedCount)
             {
                 return;

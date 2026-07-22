@@ -79,8 +79,21 @@ public sealed class PostgreSqlDurablePublicContractTests
         var options = new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid());
         var writer = new PostgreSqlDurableWorkTransactionWriter(dataSource, registry, options);
         var client = new PostgreSqlDurableWorkClient(dataSource, registry, options);
+        var request = new DurableWorkRequest(
+            new DurableScopeId("scope"),
+            new DurableCommandId("command"),
+            "request-command",
+            "tests.work",
+            "v1",
+            new DurableEncodedPayload(
+                "tests.payload",
+                "v1",
+                DurableDataClassification.ApprovedApplication,
+                new byte[] { 1 }),
+            DurableProviderSafety.Idempotent);
 
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await writer.EnqueueAsync(null!, null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await writer.EnqueueAsync(null!, request));
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.EnqueueAsync(null!));
     }
 

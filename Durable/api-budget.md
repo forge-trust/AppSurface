@@ -2,7 +2,7 @@
 
 This ledger records how the public surface from the original durable-contract commit was treated when the contract was
 rebuilt as three preview packages. The checked-in
-[Durable](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt) and
+[Durable](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt),
 [Provider](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.Provider/PublicAPI.Shipped.txt), and
 [PostgreSQL](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/PublicAPI.Shipped.txt) snapshots are the exhaustive member-level
 source of truth; this ledger explains the intentional package and visibility decisions.

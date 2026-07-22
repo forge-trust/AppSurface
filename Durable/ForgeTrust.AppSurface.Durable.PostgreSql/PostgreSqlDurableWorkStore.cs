@@ -49,7 +49,8 @@ internal sealed class PostgreSqlDurableWorkStore
                 $"The PostgreSQL durable protocol does not support retry algorithm '{request.RetryPolicy.BackoffAlgorithm}'.");
         }
 
-        await ValidateSchemaAsync(connection, transaction, expectedStoreId, cancellationToken).ConfigureAwait(false);
+        await ValidateSchemaAsync(connection, transaction, expectedStoreId, cancellationToken, afterExistence: null)
+            .ConfigureAwait(false);
         await EnsureCurrentEpochAsync(
             connection, transaction, runtimeEpoch, cancellationToken).ConfigureAwait(false);
         await SetScopeAsync(connection, transaction, request.ScopeId, cancellationToken).ConfigureAwait(false);
@@ -2054,11 +2055,22 @@ internal sealed class PostgreSqlDurableWorkStore
         DurableWorkState.FailedTerminal or
         DurableWorkState.CanceledBeforeEffect;
 
-    private static async ValueTask ValidateSchemaAsync(
+    /// <summary>Validates the caller transaction's schema with an optional post-existence test seam.</summary>
+    /// <remarks>
+    /// Production callers pass no callback. Tests may use <paramref name="afterExistence"/> to reproduce a schema
+    /// removal between the initial catalog probe and the authoritative metadata read without timing races.
+    /// </remarks>
+    /// <param name="connection">Open connection that owns the caller transaction.</param>
+    /// <param name="transaction">Caller-owned transaction used for every validation query.</param>
+    /// <param name="expectedStoreId">Expected durable store identity, or <see langword="null"/> to omit identity validation.</param>
+    /// <param name="cancellationToken">Token that cancels validation database operations.</param>
+    /// <param name="afterExistence">Optional test callback invoked after the catalog probe and before metadata is read.</param>
+    internal static async ValueTask ValidateSchemaAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         Guid? expectedStoreId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<ValueTask>? afterExistence)
     {
         const string existenceSql = "SELECT to_regclass('appsurface_durable.store_metadata') IS NOT NULL;";
         await using (var existenceCommand = new NpgsqlCommand(existenceSql, connection, transaction))
@@ -2068,6 +2080,11 @@ internal sealed class PostgreSqlDurableWorkStore
             {
                 throw CreateMissingSchemaException();
             }
+        }
+
+        if (afterExistence is not null)
+        {
+            await afterExistence().ConfigureAwait(false);
         }
 
         const string sql = """

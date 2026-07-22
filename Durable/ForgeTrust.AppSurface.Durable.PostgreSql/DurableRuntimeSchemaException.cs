@@ -16,6 +16,11 @@ public sealed class DurableRuntimeSchemaException : InvalidOperationException
     /// <summary>Initializes an exception from an incompatible schema status and the PostgreSQL failure that exposed it.</summary>
     /// <param name="status">Incompatible schema status.</param>
     /// <param name="innerException">Original PostgreSQL failure, including its concrete type, stack, and SQLSTATE.</param>
+    /// <remarks>
+    /// This overload is used when schema validation observes a PostgreSQL failure that proves the durable schema is
+    /// missing. <see cref="Status"/> remains the stable, safe operation context for callers; the inner exception is
+    /// diagnostic evidence and may contain server-controlled details, so it must not be logged or serialized wholesale.
+    /// </remarks>
     internal DurableRuntimeSchemaException(DurableRuntimeSchemaStatus status, Exception innerException)
         : base(
             CreateMessage(status ?? throw new ArgumentNullException(nameof(status))),
