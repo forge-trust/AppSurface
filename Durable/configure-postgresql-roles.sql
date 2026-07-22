@@ -71,6 +71,8 @@ SELECT NOT
   SELECT 1 / 0;
 \endif
 
+BEGIN;
+
 SELECT format('ALTER SCHEMA appsurface_durable OWNER TO %I', :'migration_owner_role') \gexec
 SELECT format(
     'ALTER %s %I.%I OWNER TO %I',
@@ -117,6 +119,190 @@ SELECT NOT EXISTS
   \echo 'Every durable table, sequence, view, and foreign table must be owned by the migration owner.'
   SELECT 1 / 0;
 \endif
+
+SELECT NOT
+(
+  pg_catalog.has_schema_privilege(:'dispatcher_role', 'appsurface_durable', 'CREATE')
+  OR pg_catalog.has_schema_privilege(:'runtime_role', 'appsurface_durable', 'CREATE')
+) AS service_roles_have_safe_schema_privileges \gset
+\if :service_roles_have_safe_schema_privileges
+\else
+  \echo 'Dispatcher and scoped runtime roles must not inherit CREATE on the durable schema.'
+  SELECT 1 / 0;
+\endif
+
+WITH service_role(role_name) AS
+(
+  VALUES (:'dispatcher_role'), (:'runtime_role')
+),
+durable_relation AS
+(
+  SELECT object.oid, object.relname
+  FROM pg_catalog.pg_class AS object
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+  WHERE namespace.nspname = 'appsurface_durable'
+    AND object.relkind IN ('r', 'p', 'v', 'm', 'f')
+),
+relation_privilege(privilege_name) AS
+(
+  VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
+)
+SELECT NOT EXISTS
+(
+  SELECT 1
+  FROM service_role AS service
+  CROSS JOIN durable_relation AS relation
+  CROSS JOIN relation_privilege AS privilege
+  WHERE pg_catalog.has_table_privilege(
+      service.role_name::pg_catalog.name,
+      relation.oid,
+      privilege.privilege_name)
+    AND NOT
+    (
+      service.role_name = :'dispatcher_role'
+      AND relation.relname = 'dispatch'
+      AND privilege.privilege_name = 'SELECT'
+      OR service.role_name = :'runtime_role'
+      AND
+      (
+        privilege.privilege_name = 'SELECT'
+        AND relation.relname IN
+        (
+          'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
+          'work_operator_command', 'effect_permit', 'scope_history', 'work_history'
+        )
+        OR privilege.privilege_name = 'INSERT'
+        AND relation.relname IN
+        (
+          'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
+          'scope_history', 'work_history'
+        )
+      )
+    )
+) AS service_roles_have_safe_relation_privileges \gset
+\if :service_roles_have_safe_relation_privileges
+\else
+  \echo 'Dispatcher or scoped runtime role has an effective durable-table privilege outside the package allowlist.'
+  SELECT 1 / 0;
+\endif
+
+WITH service_role(role_name) AS
+(
+  VALUES (:'dispatcher_role'), (:'runtime_role')
+),
+durable_column AS
+(
+  SELECT object.oid, object.relname, attribute.attnum, attribute.attname
+  FROM pg_catalog.pg_class AS object
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+  JOIN pg_catalog.pg_attribute AS attribute ON attribute.attrelid = object.oid
+  WHERE namespace.nspname = 'appsurface_durable'
+    AND object.relkind IN ('r', 'p', 'v', 'm', 'f')
+    AND attribute.attnum > 0
+    AND NOT attribute.attisdropped
+),
+column_privilege(privilege_name) AS
+(
+  VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('REFERENCES')
+)
+SELECT NOT EXISTS
+(
+  SELECT 1
+  FROM service_role AS service
+  CROSS JOIN durable_column AS column_value
+  CROSS JOIN column_privilege AS privilege
+  WHERE pg_catalog.has_column_privilege(
+      service.role_name::pg_catalog.name,
+      column_value.oid,
+      column_value.attnum,
+      privilege.privilege_name)
+    AND NOT
+    (
+      service.role_name = :'dispatcher_role'
+      AND column_value.relname = 'dispatch'
+      AND privilege.privilege_name = 'SELECT'
+      OR service.role_name = :'runtime_role'
+      AND
+      (
+        privilege.privilege_name = 'SELECT'
+        AND column_value.relname IN
+        (
+          'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
+          'work_operator_command', 'effect_permit', 'scope_history', 'work_history'
+        )
+        OR privilege.privilege_name = 'INSERT'
+        AND column_value.relname IN
+        (
+          'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
+          'scope_history', 'work_history'
+        )
+        OR privilege.privilege_name = 'UPDATE'
+        AND
+        (
+          column_value.relname = 'scope'
+          AND column_value.attname IN ('generation', 'state', 'updated_at')
+          OR column_value.relname = 'work'
+          AND column_value.attname IN
+          (
+            'state', 'due_at', 'updated_at', 'terminal_at', 'cancellation_requested_at', 'attempt_number',
+            'lease_generation', 'lease_owner', 'lease_started_at', 'lease_expires_at', 'runtime_epoch', 'revision',
+            'result_contract_id', 'result_schema_version', 'result_codec_id', 'result_classification',
+            'result_retention_policy_id', 'result_payload', 'result_sha256', 'terminal_code'
+          )
+          OR column_value.relname = 'dispatch'
+          AND column_value.attname IN ('due_at', 'state', 'expected_revision', 'updated_at')
+          OR column_value.relname = 'work_operator_command'
+          AND column_value.attname IN ('status', 'resulting_state', 'resulting_revision', 'completed_at')
+          OR column_value.relname = 'effect_permit'
+          AND column_value.attname IN ('status', 'observed_at', 'details', 'runtime_epoch')
+        )
+      )
+    )
+) AS service_roles_have_safe_column_privileges \gset
+\if :service_roles_have_safe_column_privileges
+\else
+  \echo 'Dispatcher or scoped runtime role has an effective durable-column privilege outside the package allowlist.'
+  SELECT 1 / 0;
+\endif
+
+WITH service_role(role_name) AS
+(
+  VALUES (:'dispatcher_role'), (:'runtime_role')
+),
+durable_sequence AS
+(
+  SELECT object.oid
+  FROM pg_catalog.pg_class AS object
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+  WHERE namespace.nspname = 'appsurface_durable'
+    AND object.relkind = 'S'
+),
+sequence_privilege(privilege_name) AS
+(
+  VALUES ('USAGE'), ('SELECT'), ('UPDATE')
+)
+SELECT NOT EXISTS
+(
+  SELECT 1
+  FROM service_role AS service
+  CROSS JOIN durable_sequence AS sequence_value
+  CROSS JOIN sequence_privilege AS privilege
+  WHERE pg_catalog.has_sequence_privilege(
+      service.role_name::pg_catalog.name,
+      sequence_value.oid,
+      privilege.privilege_name)
+    AND NOT
+    (
+      service.role_name = :'runtime_role'
+      AND privilege.privilege_name IN ('USAGE', 'SELECT')
+    )
+) AS service_roles_have_safe_sequence_privileges \gset
+\if :service_roles_have_safe_sequence_privileges
+\else
+  \echo 'Dispatcher or scoped runtime role has an effective durable-sequence privilege outside the package allowlist.'
+  SELECT 1 / 0;
+\endif
+
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT SELECT ON appsurface_durable.dispatch TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'runtime_role') \gexec
@@ -151,6 +337,8 @@ SELECT format(
     'GRANT SELECT, INSERT ON appsurface_durable.scope_history, appsurface_durable.work_history TO %I',
     :'runtime_role') \gexec
 SELECT format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA appsurface_durable TO %I', :'runtime_role') \gexec
+
+COMMIT;
 
 -- The host creates roles and assigns membership. This recipe transfers every package relation to the migration owner,
 -- never grants DDL or BYPASSRLS to service roles, and does not treat runtime credentials as application authorization.

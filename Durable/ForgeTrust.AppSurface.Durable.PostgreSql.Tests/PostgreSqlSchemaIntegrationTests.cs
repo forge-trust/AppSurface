@@ -121,7 +121,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
-    public async Task RoleRecipe_RejectsUnsafeRolesAndRemovesPreexistingRuntimeOwnership()
+    public async Task RoleRecipe_RejectsUnsafeRolesAndPrivilegesAndRemovesPreexistingRuntimeOwnership()
     {
         var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var recipePath = TestPathUtils.PathUnder(repositoryRoot, "Durable/configure-postgresql-roles.sql");
@@ -144,8 +144,20 @@ public sealed class PostgreSqlSchemaIntegrationTests
             CREATE ROLE owner_inheriting_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
             CREATE ROLE member_dispatcher NOLOGIN NOSUPERUSER NOBYPASSRLS;
             CREATE ROLE member_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE direct_privilege_dispatcher NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE direct_privilege_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE inherited_privilege_dispatcher NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE inherited_privilege_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE dispatcher_privilege_parent NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE runtime_privilege_parent NOLOGIN NOSUPERUSER NOBYPASSRLS;
             GRANT durable_owner TO owner_inheriting_runtime;
             GRANT member_dispatcher TO member_runtime;
+            GRANT TRUNCATE ON appsurface_durable.work TO direct_privilege_dispatcher;
+            GRANT CREATE ON SCHEMA appsurface_durable TO direct_privilege_runtime;
+            GRANT CREATE ON SCHEMA appsurface_durable TO dispatcher_privilege_parent;
+            GRANT TRIGGER ON appsurface_durable.work TO runtime_privilege_parent;
+            GRANT dispatcher_privilege_parent TO inherited_privilege_dispatcher;
+            GRANT runtime_privilege_parent TO inherited_privilege_runtime;
             ALTER TABLE appsurface_durable.work OWNER TO durable_runtime;
             """))
         {
@@ -158,6 +170,10 @@ public sealed class PostgreSqlSchemaIntegrationTests
             (Owner: "durable_owner", Dispatcher: "bypass_dispatcher", Runtime: "durable_runtime", Expected: "must not inherit SUPERUSER or BYPASSRLS"),
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "owner_inheriting_runtime", Expected: "must not inherit each other or the migration owner"),
             (Owner: "durable_owner", Dispatcher: "member_dispatcher", Runtime: "member_runtime", Expected: "must not inherit each other or the migration owner"),
+            (Owner: "durable_owner", Dispatcher: "direct_privilege_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-table privilege outside the package allowlist"),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "direct_privilege_runtime", Expected: "must not inherit CREATE on the durable schema"),
+            (Owner: "durable_owner", Dispatcher: "inherited_privilege_dispatcher", Runtime: "durable_runtime", Expected: "must not inherit CREATE on the durable schema"),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "inherited_privilege_runtime", Expected: "effective durable-table privilege outside the package allowlist"),
         };
         foreach (var item in rejected)
         {
@@ -193,6 +209,42 @@ public sealed class PostgreSqlSchemaIntegrationTests
             """))
         {
             Assert.True((bool)(await ownership.ExecuteScalarAsync())!);
+        }
+
+        await using (var effectivePrivileges = dataSource.CreateCommand(
+            """
+            SELECT
+                has_schema_privilege('durable_dispatcher', 'appsurface_durable', 'USAGE')
+                AND NOT has_schema_privilege('durable_dispatcher', 'appsurface_durable', 'CREATE')
+                AND has_table_privilege('durable_dispatcher', 'appsurface_durable.dispatch', 'SELECT')
+                AND NOT has_table_privilege(
+                    'durable_dispatcher',
+                    'appsurface_durable.work',
+                    'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')
+                AND NOT has_sequence_privilege(
+                    'durable_dispatcher',
+                    'appsurface_durable.scope_history_event_id_seq',
+                    'USAGE,SELECT,UPDATE')
+                AND has_schema_privilege('durable_runtime', 'appsurface_durable', 'USAGE')
+                AND NOT has_schema_privilege('durable_runtime', 'appsurface_durable', 'CREATE')
+                AND has_table_privilege('durable_runtime', 'appsurface_durable.work', 'SELECT,INSERT')
+                AND NOT has_table_privilege(
+                    'durable_runtime',
+                    'appsurface_durable.work',
+                    'UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')
+                AND has_column_privilege('durable_runtime', 'appsurface_durable.work', 'state', 'UPDATE')
+                AND NOT has_column_privilege('durable_runtime', 'appsurface_durable.work', 'work_name', 'UPDATE')
+                AND has_sequence_privilege(
+                    'durable_runtime',
+                    'appsurface_durable.scope_history_event_id_seq',
+                    'USAGE,SELECT')
+                AND NOT has_sequence_privilege(
+                    'durable_runtime',
+                    'appsurface_durable.scope_history_event_id_seq',
+                    'UPDATE');
+            """))
+        {
+            Assert.True((bool)(await effectivePrivileges.ExecuteScalarAsync())!);
         }
 
         await using var runtimeConnection = await dataSource.OpenConnectionAsync();
