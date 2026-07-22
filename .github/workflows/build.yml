@@ -14,10 +14,6 @@ on:
       - main
   workflow_dispatch:
 
-concurrency:
-  group: build-v2-${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
   coverage-watchdog-process-tree:
     if: ${{ github.event_name == 'pull_request' }}
