@@ -3,6 +3,7 @@ using System.Text.Json;
 using ForgeTrust.AppSurface.Durable.Provider;
 using Npgsql;
 using NpgsqlTypes;
+using static ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableProtocolCodec;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 
@@ -2024,24 +2025,6 @@ internal sealed class PostgreSqlDurableWorkStore
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
-    private static DurableWorkState ParseWorkState(string state) => state switch
-    {
-        "pending" => DurableWorkState.Ready,
-        "leased" or "effect_permitted" => DurableWorkState.Claimed,
-        "reconciling" => DurableWorkState.Suspended,
-        "retry_wait" => DurableWorkState.Ready,
-        "cancel_pending" => DurableWorkState.CancelPending,
-        "succeeded" => DurableWorkState.Succeeded,
-        "succeeded_after_cancel_requested" => DurableWorkState.SucceededAfterCancelRequested,
-        "failed" => DurableWorkState.FailedTerminal,
-        "canceled_before_effect" => DurableWorkState.CanceledBeforeEffect,
-        "suspended_ambiguous_external_outcome" or
-        "suspended_reconciliation_required" or
-        "suspended_manual_resolution" or
-        "suspended_contract_unavailable" => DurableWorkState.Suspended,
-        _ => throw new InvalidDataException($"Unknown persisted durable work state '{state}'."),
-    };
-
     private static bool IsTerminal(DurableWorkState state) => state is
         DurableWorkState.Succeeded or
         DurableWorkState.SucceededAfterCancelRequested or
@@ -2576,38 +2559,6 @@ internal sealed class PostgreSqlDurableWorkStore
             throw new ArgumentException("Durable history details must not exceed 16384 UTF-8 bytes.", nameof(detailsJson));
         }
     }
-
-    private static string FormatProviderSafety(DurableProviderSafety safety) => safety switch
-    {
-        DurableProviderSafety.Idempotent => "idempotent",
-        DurableProviderSafety.ProviderKeyed => "provider_keyed",
-        DurableProviderSafety.ReconcileBeforeRetry => "reconcile_before_retry",
-        DurableProviderSafety.ManualResolution => "manual_resolution",
-        _ => throw new ArgumentOutOfRangeException(nameof(safety)),
-    };
-
-    private static DurableProviderSafety ParseProviderSafety(string value) => value switch
-    {
-        "idempotent" => DurableProviderSafety.Idempotent,
-        "provider_keyed" => DurableProviderSafety.ProviderKeyed,
-        "reconcile_before_retry" => DurableProviderSafety.ReconcileBeforeRetry,
-        "manual_resolution" => DurableProviderSafety.ManualResolution,
-        _ => throw new InvalidDataException($"Unknown persisted provider safety value '{value}'."),
-    };
-
-    private static string FormatClassification(DurableDataClassification classification) => classification switch
-    {
-        DurableDataClassification.Operational => "operational",
-        DurableDataClassification.ApprovedApplication => "approved_application",
-        _ => throw new ArgumentOutOfRangeException(nameof(classification)),
-    };
-
-    private static DurableDataClassification ParseClassification(string value) => value switch
-    {
-        "operational" => DurableDataClassification.Operational,
-        "approved_application" => DurableDataClassification.ApprovedApplication,
-        _ => throw new InvalidDataException($"Unknown persisted data classification '{value}'."),
-    };
 
     private sealed record DuplicateAcceptanceRow(
         string WorkId,

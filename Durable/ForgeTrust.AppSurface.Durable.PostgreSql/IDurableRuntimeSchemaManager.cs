@@ -36,8 +36,8 @@ public interface IDurableRuntimeSchemaManager
 
     /// <summary>Activates the first non-empty store recovery epoch exactly once.</summary>
     /// <param name="initialEpoch">Deployment-selected initial epoch.</param>
-    /// <param name="actorId">Privacy-safe operator identity.</param>
-    /// <param name="reasonCode">Privacy-safe activation reason.</param>
+    /// <param name="actorId">Privacy-safe operator code of 1-200 ASCII letters, digits, <c>-</c>, <c>_</c>, <c>.</c>, or <c>:</c>.</param>
+    /// <param name="reasonCode">Privacy-safe activation code of 1-120 ASCII letters, digits, <c>-</c>, <c>_</c>, <c>.</c>, or <c>:</c>.</param>
     /// <param name="cancellationToken">Token that cancels lock acquisition or activation.</param>
     /// <returns>The activated epoch and database observation time.</returns>
     /// <exception cref="ArgumentException">The epoch is empty, or an operator code is empty, too long, or outside the opaque-code grammar.</exception>
@@ -54,8 +54,8 @@ public interface IDurableRuntimeSchemaManager
     /// <summary>Atomically rotates the recovery epoch when the expected epoch remains active.</summary>
     /// <param name="expectedActiveEpoch">Epoch that must still be active when the mutation commits.</param>
     /// <param name="newActiveEpoch">Distinct, non-empty replacement epoch.</param>
-    /// <param name="actorId">Privacy-safe operator identity.</param>
-    /// <param name="reasonCode">Privacy-safe rotation reason.</param>
+    /// <param name="actorId">Privacy-safe operator code of 1-200 ASCII letters, digits, <c>-</c>, <c>_</c>, <c>.</c>, or <c>:</c>.</param>
+    /// <param name="reasonCode">Privacy-safe rotation code of 1-120 ASCII letters, digits, <c>-</c>, <c>_</c>, <c>.</c>, or <c>:</c>.</param>
     /// <param name="cancellationToken">Token that cancels lock acquisition or rotation.</param>
     /// <returns>The previous and active epochs and database observation time.</returns>
     /// <exception cref="ArgumentException">An epoch is empty, the epochs match, or an operator code violates its bounds or grammar.</exception>

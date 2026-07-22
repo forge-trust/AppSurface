@@ -1,6 +1,7 @@
 using ForgeTrust.AppSurface.Durable.Provider;
 using Npgsql;
 using NpgsqlTypes;
+using static ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableProtocolCodec;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 
@@ -565,7 +566,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
         return DurableOperationResult<DurableWorkOperatorResult>.Success(new DurableWorkOperatorResult(
             command.WorkId,
             DurableWorkOperatorOutcome.Applied,
-            ParseState(transition.State),
+            ParseWorkState(transition.State),
             revision));
     }
 
@@ -614,7 +615,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
             workId,
             reader.GetString(0),
             reader.GetString(1),
-            ParseSafety(reader.GetString(2)),
+            ParseProviderSafety(reader.GetString(2)),
             reader.GetString(3),
             reader.GetInt32(4),
             reader.GetInt64(5),
@@ -746,7 +747,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
         return DurableOperationResult<DurableWorkOperatorResult>.Success(new DurableWorkOperatorResult(
             workId,
             DurableWorkOperatorOutcome.Duplicate,
-            ParseState(existing.ResultingState!),
+            ParseWorkState(existing.ResultingState!),
             existing.ResultingRevision!.Value));
     }
 
@@ -874,46 +875,6 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
             "Reload Work truth and submit only the exact authorized operation supported by provider evidence.",
             Documentation,
             commandId.Value));
-
-    private static DurableWorkState ParseState(string state) => state switch
-    {
-        "pending" or "retry_wait" => DurableWorkState.Ready,
-        "leased" or "effect_permitted" => DurableWorkState.Claimed,
-        "cancel_pending" => DurableWorkState.CancelPending,
-        "succeeded" => DurableWorkState.Succeeded,
-        "succeeded_after_cancel_requested" => DurableWorkState.SucceededAfterCancelRequested,
-        "failed" => DurableWorkState.FailedTerminal,
-        "canceled_before_effect" => DurableWorkState.CanceledBeforeEffect,
-        "reconciling" or
-        "suspended_ambiguous_external_outcome" or
-        "suspended_reconciliation_required" or
-        "suspended_manual_resolution" or
-        "suspended_contract_unavailable" => DurableWorkState.Suspended,
-        _ => throw new InvalidDataException($"Unknown persisted durable Work state '{state}'."),
-    };
-
-    private static DurableProviderSafety ParseSafety(string safety) => safety switch
-    {
-        "idempotent" => DurableProviderSafety.Idempotent,
-        "provider_keyed" => DurableProviderSafety.ProviderKeyed,
-        "reconcile_before_retry" => DurableProviderSafety.ReconcileBeforeRetry,
-        "manual_resolution" => DurableProviderSafety.ManualResolution,
-        _ => throw new InvalidDataException($"Unknown persisted provider safety '{safety}'."),
-    };
-
-    private static DurableDataClassification ParseClassification(string classification) => classification switch
-    {
-        "operational" => DurableDataClassification.Operational,
-        "approved_application" => DurableDataClassification.ApprovedApplication,
-        _ => throw new InvalidDataException($"Unknown persisted classification '{classification}'."),
-    };
-
-    private static string FormatClassification(DurableDataClassification classification) => classification switch
-    {
-        DurableDataClassification.Operational => "operational",
-        DurableDataClassification.ApprovedApplication => "approved_application",
-        _ => throw new ArgumentOutOfRangeException(nameof(classification)),
-    };
 
     private static string FormatPermitProof(DurableEffectReconciliationKind proof) => proof switch
     {

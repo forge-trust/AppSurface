@@ -1,3 +1,4 @@
+using DotNet.Testcontainers.Builders;
 using Npgsql;
 using Testcontainers.PostgreSql;
 
@@ -114,6 +115,102 @@ public sealed class PostgreSqlSchemaIntegrationTests
         Assert.Equal([2], retry.AppliedVersions);
         Assert.True(compatible.IsCompatible);
         Assert.Equal([1, 2], compatible.AppliedVersions);
+    }
+
+    [Fact]
+    public async Task RoleRecipe_RejectsUnsafeRolesAndRemovesPreexistingRuntimeOwnership()
+    {
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var recipePath = TestPathUtils.PathUnder(repositoryRoot, "Durable/configure-postgresql-roles.sql");
+        const string containerRecipePath = "/tmp/configure-postgresql-roles.sql";
+        await using var container = new PostgreSqlBuilder(PostgreSqlTestContainerImage.Reference)
+            .WithDatabase("appsurface_durable")
+            .WithUsername("appsurface")
+            .WithPassword("appsurface-test-password")
+            .WithResourceMapping(File.ReadAllBytes(recipePath), containerRecipePath)
+            .Build();
+        await container.StartAsync();
+        await using var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());
+        await new PostgreSqlDurableRuntimeSchemaManager(dataSource).ApplyAsync();
+        await using (var roles = dataSource.CreateCommand(
+            """
+            CREATE ROLE durable_owner NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE durable_dispatcher NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE durable_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE bypass_dispatcher NOLOGIN NOSUPERUSER BYPASSRLS;
+            CREATE ROLE owner_inheriting_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE member_dispatcher NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE member_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            GRANT durable_owner TO owner_inheriting_runtime;
+            GRANT member_dispatcher TO member_runtime;
+            ALTER TABLE appsurface_durable.work OWNER TO durable_runtime;
+            """))
+        {
+            await roles.ExecuteNonQueryAsync();
+        }
+
+        var rejected = new[]
+        {
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "durable_dispatcher", Expected: "must be distinct"),
+            (Owner: "durable_owner", Dispatcher: "bypass_dispatcher", Runtime: "durable_runtime", Expected: "must not inherit SUPERUSER or BYPASSRLS"),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "owner_inheriting_runtime", Expected: "must not inherit each other or the migration owner"),
+            (Owner: "durable_owner", Dispatcher: "member_dispatcher", Runtime: "member_runtime", Expected: "must not inherit each other or the migration owner"),
+        };
+        foreach (var item in rejected)
+        {
+            var result = await RunRoleRecipeAsync(container, containerRecipePath, item.Owner, item.Dispatcher, item.Runtime);
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains(item.Expected, $"{result.Stdout}\n{result.Stderr}", StringComparison.Ordinal);
+        }
+
+        await using (var noRejectedGrant = dataSource.CreateCommand(
+            "SELECT has_schema_privilege('durable_dispatcher', 'appsurface_durable', 'USAGE');"))
+        {
+            Assert.False((bool)(await noRejectedGrant.ExecuteScalarAsync())!);
+        }
+
+        var accepted = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            "durable_dispatcher",
+            "durable_runtime");
+        Assert.True(
+            accepted.ExitCode == 0,
+            $"Role recipe failed with exit {accepted.ExitCode}. stdout: {accepted.Stdout} stderr: {accepted.Stderr}");
+        await using (var ownership = dataSource.CreateCommand(
+            """
+            SELECT count(*) = 0
+            FROM pg_catalog.pg_class AS object
+            JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+            JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = object.relowner
+            WHERE namespace.nspname = 'appsurface_durable'
+              AND object.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
+              AND owner_role.rolname <> 'durable_owner';
+            """))
+        {
+            Assert.True((bool)(await ownership.ExecuteScalarAsync())!);
+        }
+
+        await using var runtimeConnection = await dataSource.OpenConnectionAsync();
+        await using (var assumeRuntime = runtimeConnection.CreateCommand())
+        {
+            assumeRuntime.CommandText = "SET ROLE durable_runtime;";
+            await assumeRuntime.ExecuteNonQueryAsync();
+        }
+
+        var denied = await Assert.ThrowsAsync<PostgresException>(async () =>
+        {
+            await using var disableRls = runtimeConnection.CreateCommand();
+            disableRls.CommandText = "ALTER TABLE appsurface_durable.work DISABLE ROW LEVEL SECURITY;";
+            await disableRls.ExecuteNonQueryAsync();
+        });
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, denied.SqlState);
+        await using (var resetRole = runtimeConnection.CreateCommand())
+        {
+            resetRole.CommandText = "RESET ROLE;";
+            await resetRole.ExecuteNonQueryAsync();
+        }
     }
 
     [Fact]
@@ -410,6 +507,23 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
     private static ValueTask<int> WaitForBackendAsync(NpgsqlDataSource dataSource, string applicationName)
         => WaitForBackendAsync(dataSource, applicationName, "advisory");
+
+    private static Task<DotNet.Testcontainers.Containers.ExecResult> RunRoleRecipeAsync(
+        PostgreSqlContainer container,
+        string recipePath,
+        string owner,
+        string dispatcher,
+        string runtime) =>
+        container.ExecAsync(
+            [
+                "psql",
+                "-U", "appsurface",
+                "-d", "appsurface_durable",
+                "-v", $"migration_owner_role={owner}",
+                "-v", $"dispatcher_role={dispatcher}",
+                "-v", $"runtime_role={runtime}",
+                "-f", recipePath,
+            ]);
 
     private static async ValueTask ExecuteNonQueryAsync(NpgsqlDataSource dataSource, string sql)
     {

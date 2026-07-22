@@ -44,7 +44,8 @@ Create host principals outside migrations. Use [`configure-postgresql-roles.sql`
 grant the migration-owner, payload-free dispatcher, and scoped-runtime capabilities. Runtime roles must not receive
 ownership or `BYPASSRLS`. Transaction-local scope context is defense in depth, not a replacement for application
 authorization. The recipe fails before granting privileges when role names alias each other or a service role can
-inherit the migration owner, `SUPERUSER`, or `BYPASSRLS`.
+inherit the migration owner, `SUPERUSER`, or `BYPASSRLS`. It also transfers every package table, sequence, and view to
+the migration owner so pre-existing object ownership cannot preserve runtime DDL authority.
 
 ## Accept Work
 

@@ -284,7 +284,9 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("AS roles_are_distinct", recipe, StringComparison.Ordinal);
         Assert.Contains("AS service_roles_are_unprivileged", recipe, StringComparison.Ordinal);
         Assert.Contains("AS service_roles_are_separated", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS durable_objects_owned_by_migration_role", recipe, StringComparison.Ordinal);
         Assert.Equal(6, CountOccurrences(recipe, "pg_catalog.pg_has_role"));
+        Assert.DoesNotContain("\\quit", recipe, StringComparison.Ordinal);
         Assert.Contains("format('ALTER SCHEMA appsurface_durable OWNER TO %I'", recipe, StringComparison.Ordinal);
         Assert.Contains("appsurface_durable.store_metadata, appsurface_durable.schema_migration", recipe, StringComparison.Ordinal);
         Assert.Contains("appsurface_durable.scope_history", recipe, StringComparison.Ordinal);

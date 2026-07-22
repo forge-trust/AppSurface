@@ -8,7 +8,7 @@ SELECT :'migration_owner_role' <> :'dispatcher_role'
 \if :roles_are_distinct
 \else
   \echo 'Migration owner, dispatcher, and scoped runtime roles must be distinct.'
-  \quit 3
+  SELECT 1 / 0;
 \endif
 
 SELECT EXISTS
@@ -18,7 +18,7 @@ SELECT EXISTS
 \if :role_exists
 \else
   \echo 'Required migration owner role does not exist:' :'migration_owner_role'
-  \quit 3
+  SELECT 1 / 0;
 \endif
 
 SELECT EXISTS
@@ -28,7 +28,7 @@ SELECT EXISTS
 \if :role_exists
 \else
   \echo 'Required dispatcher role does not exist:' :'dispatcher_role'
-  \quit 3
+  SELECT 1 / 0;
 \endif
 
 SELECT EXISTS
@@ -38,7 +38,7 @@ SELECT EXISTS
 \if :role_exists
 \else
   \echo 'Required scoped runtime role does not exist:' :'runtime_role'
-  \quit 3
+  SELECT 1 / 0;
 \endif
 
 SELECT NOT EXISTS
@@ -55,7 +55,7 @@ SELECT NOT EXISTS
 \if :service_roles_are_unprivileged
 \else
   \echo 'Dispatcher and scoped runtime roles must not inherit SUPERUSER or BYPASSRLS.'
-  \quit 3
+  SELECT 1 / 0;
 \endif
 
 SELECT NOT
@@ -68,10 +68,55 @@ SELECT NOT
 \if :service_roles_are_separated
 \else
   \echo 'Dispatcher and scoped runtime roles must not inherit each other or the migration owner.'
-  \quit 3
+  SELECT 1 / 0;
 \endif
 
 SELECT format('ALTER SCHEMA appsurface_durable OWNER TO %I', :'migration_owner_role') \gexec
+SELECT format(
+    'ALTER %s %I.%I OWNER TO %I',
+    CASE object.relkind
+      WHEN 'r' THEN 'TABLE'
+      WHEN 'p' THEN 'TABLE'
+      WHEN 'S' THEN 'SEQUENCE'
+      WHEN 'v' THEN 'VIEW'
+      WHEN 'm' THEN 'MATERIALIZED VIEW'
+      WHEN 'f' THEN 'FOREIGN TABLE'
+    END,
+    namespace.nspname,
+    object.relname,
+    :'migration_owner_role')
+FROM pg_catalog.pg_class AS object
+JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+WHERE namespace.nspname = 'appsurface_durable'
+  AND object.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
+  AND
+  (
+    object.relkind <> 'S'
+    OR NOT EXISTS
+    (
+      SELECT 1
+      FROM pg_catalog.pg_depend AS dependency
+      WHERE dependency.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+        AND dependency.objid = object.oid
+        AND dependency.deptype IN ('a', 'i')
+    )
+  )
+ORDER BY CASE WHEN object.relkind = 'S' THEN 2 ELSE 1 END, object.relname \gexec
+SELECT NOT EXISTS
+(
+  SELECT 1
+  FROM pg_catalog.pg_class AS object
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+  JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = object.relowner
+  WHERE namespace.nspname = 'appsurface_durable'
+    AND object.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
+    AND owner_role.rolname <> :'migration_owner_role'
+) AS durable_objects_owned_by_migration_role \gset
+\if :durable_objects_owned_by_migration_role
+\else
+  \echo 'Every durable table, sequence, view, and foreign table must be owned by the migration owner.'
+  SELECT 1 / 0;
+\endif
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT SELECT ON appsurface_durable.dispatch TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'runtime_role') \gexec
@@ -107,5 +152,5 @@ SELECT format(
     :'runtime_role') \gexec
 SELECT format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA appsurface_durable TO %I', :'runtime_role') \gexec
 
--- The host creates roles and assigns membership. This recipe never creates a principal, grants DDL,
--- grants BYPASSRLS, or treats runtime credentials as independent application authorization.
+-- The host creates roles and assigns membership. This recipe transfers every package relation to the migration owner,
+-- never grants DDL or BYPASSRLS to service roles, and does not treat runtime credentials as application authorization.
