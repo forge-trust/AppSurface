@@ -2834,7 +2834,7 @@ public sealed class CoverageRunTests
                 "grandchild.sh",
                 """
                 echo $$ > "$1"
-                sleep 30
+                exec sleep 30
                 """);
             var childScript = repo.WriteFile(
                 "child.sh",
