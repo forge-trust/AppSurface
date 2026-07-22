@@ -2803,7 +2803,7 @@ public sealed class CoverageRunTests
         using var console = new FakeInMemoryConsole();
         using var safetyCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var bootstrapDirectory = Path.Join(repo.Path, "watchdog-bootstrap");
-        await using var watchdog = new CoverageRunWatchdogRuntime(
+        var watchdog = new CoverageRunWatchdogRuntime(
             console,
             TimeProvider.System,
             new CoverageRunWatchdogOptions(
@@ -2934,6 +2934,16 @@ public sealed class CoverageRunTests
                 {
                     TryKillFixtureProcess(childProcessId);
                     TryKillFixtureProcess(grandchildProcessId);
+                }
+
+                try
+                {
+                    await watchdog.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (TimeoutException) when (OperatingSystem.IsMacOS())
+                {
+                    // A platform tree-kill request can outlive the verified descendant exits.
+                    // Keep the fixture teardown bounded after emergency cancellation.
                 }
             }
         }
