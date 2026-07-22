@@ -153,6 +153,25 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public void TryClaimTerminal_ShouldRevalidateConcurrentStallsAtClaimTime()
+    {
+        var time = new ManualTimeProvider();
+        var supervisor = CreateSupervisor(time, CoverageRunWatchdogMode.Fail);
+        supervisor.Register(Project("project-a", 0), CoverageRunWatchdogOperationState.Running);
+        supervisor.Register(Project("project-b", 1), CoverageRunWatchdogOperationState.Running);
+        time.Advance(TimeSpan.FromMinutes(10));
+        var candidates = supervisor.Evaluate().NewlyStale;
+        supervisor.ObserveOutput("project-b", 1);
+
+        var claimed = supervisor.TryClaimTerminal(candidates[0], out var terminal, out var terminalEvaluation);
+
+        Assert.True(claimed);
+        Assert.Equal("project-a", terminal?.Identity);
+        var stale = Assert.Single(Assert.IsType<CoverageRunWatchdogEvaluation>(terminalEvaluation).NewlyStale);
+        Assert.Equal("project-a", stale.Identity);
+    }
+
+    [Fact]
     public void TryClaimTerminal_ShouldAllowOnlyFirstCauseAndCloseMutations()
     {
         var time = new ManualTimeProvider();
@@ -336,12 +355,21 @@ public sealed class CoverageRunWatchdogTests
         var root = json.RootElement;
 
         Assert.True(bytes.Length <= CoverageRunWatchdogArtifactSerializer.MaximumBytes);
-        Assert.True(root.GetProperty("concurrentlyStaleOmitted").GetInt32() > 0);
-        Assert.True(root.GetProperty("concurrentlyStale").GetArrayLength() < operations.Length);
-        foreach (var operation in root.GetProperty("concurrentlyStale").EnumerateArray())
+        var omitted = root.GetProperty("concurrentlyStaleOmitted").GetInt32();
+        Assert.True(omitted > 0);
+        var retained = root.GetProperty("concurrentlyStale");
+        Assert.InRange(
+            retained.GetArrayLength(),
+            0,
+            CoverageRunWatchdogArtifactSerializer.MaximumConcurrentOperations);
+        Assert.Equal(operations.Length, retained.GetArrayLength() + omitted);
+        var retainedIndex = 0;
+        foreach (var operation in retained.EnumerateArray())
         {
+            Assert.Equal(operations[retainedIndex].Project, operation.GetProperty("project").GetString());
             Assert.Equal(JsonValueKind.Null, operation.GetProperty("log").ValueKind);
             Assert.Empty(operation.GetProperty("command").GetProperty("options").EnumerateArray());
+            retainedIndex++;
         }
     }
 
@@ -365,7 +393,47 @@ public sealed class CoverageRunWatchdogTests
 
         Assert.Equal(1, artifact.SchemaVersion);
         Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize("null"u8));
+        Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize("{\"schemaVersion\":1}"u8));
         Assert.Throws<ArgumentOutOfRangeException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(unsupported));
+
+        var invalidMode = CreateArtifact([]) with { WatchdogMode = CoverageRunWatchdogMode.Off };
+        var invalidCleanup = CreateArtifact([]) with { Cleanup = new CoverageRunWatchdogCleanup("failed", "root-timeout") };
+        var invalidPrimary = CreateArtifact([]) with
+        {
+            Primary = CreateIncidentOperation("tests/Primary.Tests/Primary.Tests.csproj") with
+            {
+                State = CoverageRunWatchdogOperationState.Complete,
+            },
+        };
+        Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(
+            CoverageRunWatchdogArtifactSerializer.Serialize(invalidMode)));
+        Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(
+            CoverageRunWatchdogArtifactSerializer.Serialize(invalidCleanup)));
+        Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(
+            CoverageRunWatchdogArtifactSerializer.Serialize(invalidPrimary)));
+
+        var minimalOperation = new CoverageRunWatchdogIncidentOperation(
+            CoverageRunWatchdogOperationKind.Project,
+            null,
+            CoverageRunWatchdogOperationState.Running,
+            0,
+            0,
+            null,
+            0,
+            0,
+            null,
+            null);
+        var overCap = CreateArtifact(Enumerable.Repeat(
+            minimalOperation,
+            CoverageRunWatchdogArtifactSerializer.MaximumConcurrentOperations + 1).ToArray());
+        var unboundedOptions = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
+        };
+        var overCapBytes = JsonSerializer.SerializeToUtf8Bytes(overCap, unboundedOptions);
+        Assert.True(overCapBytes.Length <= CoverageRunWatchdogArtifactSerializer.MaximumBytes);
+        Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(overCapBytes));
     }
 
     [Fact]
@@ -726,6 +794,30 @@ public sealed class CoverageRunWatchdogTests
         Assert.Contains("Artifact: unavailable (forced-failure) Cleanup: complete", exception.Message, StringComparison.Ordinal);
         Assert.Contains("ASCOV122", console.ReadErrorString(), StringComparison.Ordinal);
         Assert.Contains("forced-failure", console.ReadErrorString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Runtime_ShouldQuoteTerminalArtifactPathForLogSafety()
+    {
+        using var directory = new TemporaryDirectory();
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Fail,
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(50)),
+            CancellationToken.None,
+            artifactWriter: new StubArtifactWriter(CoverageRunWatchdogArtifactWriteResult.Success),
+            bootstrapDirectory: Path.Join(directory.Path, "line\nbreak"));
+        runtime.Register(Project("project-a", 0), CoverageRunWatchdogOperationState.Running);
+
+        var exception = await runtime.TerminalTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(124, exception.ExitCode);
+        Assert.DoesNotContain('\n', exception.Message);
+        Assert.Contains("line\\nbreak", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

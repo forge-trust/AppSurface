@@ -1841,7 +1841,7 @@ internal sealed class CoverageRunWorkflow
         {
             File.Delete(stagedPath);
         }
-        catch
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             // Staged cleanup is best effort; the unique path is never a canonical artifact.
         }
@@ -2066,7 +2066,7 @@ internal sealed class CoverageRunWorkflow
             {
                 Directory.Delete(stagingDirectory, recursive: true);
             }
-            catch
+            catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
             {
                 // Abandoned diagnostics remain confined to a unique private staging directory.
             }
@@ -2784,7 +2784,7 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         {
             observer?.Invoke();
         }
-        catch
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             // Lifecycle observers are evidence-only and must not fault process drainage.
         }
@@ -2796,7 +2796,7 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         {
             observer?.Invoke(value);
         }
-        catch
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             // Lifecycle observers are evidence-only and must not fault process drainage.
         }

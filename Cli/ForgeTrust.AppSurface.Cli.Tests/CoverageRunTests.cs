@@ -2234,7 +2234,7 @@ public sealed class CoverageRunTests
     public async Task Watchdog_ShouldStillClassifyFailureWhenConsoleOutputNeverCompletes()
     {
         using var blockedOutput = new NeverCompletingWriteStream();
-        var console = new FakeConsole(Stream.Null, blockedOutput, blockedOutput);
+        using var console = new FakeConsole(Stream.Null, blockedOutput, blockedOutput);
         try
         {
             await using var watchdog = new CoverageRunWatchdogRuntime(
@@ -2260,7 +2260,6 @@ public sealed class CoverageRunTests
         finally
         {
             blockedOutput.Release();
-            console.Dispose();
         }
     }
 
@@ -2280,7 +2279,7 @@ public sealed class CoverageRunTests
                 TimeSpan.FromMilliseconds(10),
                 TimeSpan.FromMilliseconds(50)));
         using var blockedOutput = new NeverCompletingWriteStream();
-        var console = new FakeConsole(Stream.Null, blockedOutput, blockedOutput);
+        using var console = new FakeConsole(Stream.Null, blockedOutput, blockedOutput);
         try
         {
             var exception = await Assert.ThrowsAsync<CommandException>(
@@ -2292,7 +2291,6 @@ public sealed class CoverageRunTests
         finally
         {
             blockedOutput.Release();
-            console.Dispose();
         }
     }
 
@@ -2710,6 +2708,28 @@ public sealed class CoverageRunTests
         Assert.NotEmpty(result.Output);
     }
 
+    [Theory]
+    [InlineData("output")]
+    [InlineData("started")]
+    [InlineData("completed")]
+    public async Task CliWrapCoverageRunProcessRunner_ShouldPropagateFatalEvidenceCallbackFailures(string callback)
+    {
+        var runner = new CliWrapCoverageRunProcessRunner();
+        OutOfMemoryException Fatal() => new($"fatal {callback} callback failure");
+        var request = new CoverageRunProcessRequest(
+            "dotnet",
+            ["--version"],
+            Directory.GetCurrentDirectory(),
+            ObserveOutput: callback == "output" ? _ => throw Fatal() : null,
+            ProcessStarted: callback == "started" ? _ => throw Fatal() : null,
+            ProcessCompleted: callback == "completed" ? () => throw Fatal() : null);
+
+        var exception = await Assert.ThrowsAsync<OutOfMemoryException>(
+            () => runner.RunAsync(request, CancellationToken.None));
+
+        Assert.Equal($"fatal {callback} callback failure", exception.Message);
+    }
+
     [Fact]
     public async Task CliWrapCoverageRunProcessRunner_ShouldWrapStartFailureInDiagnostic()
     {
@@ -2756,6 +2776,7 @@ public sealed class CoverageRunTests
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         var runner = new CliWrapCoverageRunProcessRunner();
         using var console = new FakeInMemoryConsole();
+        using var safetyCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var bootstrapDirectory = Path.Join(repo.Path, "watchdog-bootstrap");
         await using var watchdog = new CoverageRunWatchdogRuntime(
             console,
@@ -2764,18 +2785,51 @@ public sealed class CoverageRunTests
                 CoverageRunWatchdogMode.Fail,
                 TimeSpan.FromMilliseconds(20),
                 TimeSpan.FromMilliseconds(100)),
-            CancellationToken.None,
+            safetyCancellation.Token,
             bootstrapDirectory: bootstrapDirectory);
-        watchdog.Register(
-            new CoverageRunWatchdogOperation("project:0", CoverageRunWatchdogOperationKind.Project),
-            CoverageRunWatchdogOperationState.Queued);
         var outputFile = Path.Join(repo.Path, "child-process.log");
-        var processIdFile = Path.Join(repo.Path, "child-process.pid");
+        var childProcessIdFile = Path.Join(repo.Path, "child-process.pid");
+        var grandchildProcessIdFile = Path.Join(repo.Path, "grandchild-process.pid");
         var fileName = OperatingSystem.IsWindows() ? "powershell.exe" : "/bin/sh";
-        var escapedProcessIdFile = processIdFile.Replace("'", "''", StringComparison.Ordinal);
-        IReadOnlyList<string> arguments = OperatingSystem.IsWindows()
-            ? ["-NoProfile", "-Command", $"$p=Start-Process powershell.exe -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -LiteralPath '{escapedProcessIdFile}' -Value $p.Id; Wait-Process -Id $p.Id"]
-            : ["-c", $"/bin/sh -c 'echo $$ > \"{escapedProcessIdFile}\"; sleep 30'; echo complete"];
+        IReadOnlyList<string> arguments;
+        if (OperatingSystem.IsWindows())
+        {
+            var escapedChildProcessIdFile = childProcessIdFile.Replace("'", "''", StringComparison.Ordinal);
+            var escapedGrandchildProcessIdFile = grandchildProcessIdFile.Replace("'", "''", StringComparison.Ordinal);
+            var grandchildCommand = $"Set-Content -LiteralPath '{escapedGrandchildProcessIdFile}' -Value $PID; Start-Sleep -Seconds 30";
+            var grandchildEncodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(grandchildCommand));
+            var childCommand = $"Set-Content -LiteralPath '{escapedChildProcessIdFile}' -Value $PID; & powershell.exe -NoProfile -EncodedCommand '{grandchildEncodedCommand}'";
+            var childEncodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(childCommand));
+            var rootCommand = $"& powershell.exe -NoProfile -EncodedCommand '{childEncodedCommand}'";
+            arguments = ["-NoProfile", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(rootCommand))];
+        }
+        else
+        {
+            var grandchildScript = repo.WriteFile(
+                "grandchild.sh",
+                """
+                echo $$ > "$1"
+                sleep 30
+                """);
+            var childScript = repo.WriteFile(
+                "child.sh",
+                """
+                echo $$ > "$1"
+                /bin/sh "$2" "$3"
+                echo child-complete
+                """);
+            arguments =
+            [
+                "-c",
+                "/bin/sh \"$1\" \"$2\" \"$3\" \"$4\"; echo root-complete",
+                "coverage-watchdog-root",
+                childScript,
+                childProcessIdFile,
+                grandchildScript,
+                grandchildProcessIdFile,
+            ];
+        }
+
         var request = watchdog.CreateProcessRequest(
             fileName,
             arguments,
@@ -2785,22 +2839,46 @@ public sealed class CoverageRunTests
             outputFile);
 
         var execution = runner.RunAsync(request, watchdog.RunCancellationToken);
-        var childProcessId = await WaitForChildProcessIdAsync(processIdFile);
-        watchdog.Transition("project:0", CoverageRunWatchdogOperationState.Running);
-
-        var exception = await watchdog.TerminalTask.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(124, exception.ExitCode);
-        await WaitForProcessExitAsync(childProcessId);
-        using (var artifact = JsonDocument.Parse(
-            await File.ReadAllBytesAsync(Path.Join(bootstrapDirectory, "coverage-watchdog.json"))))
+        try
         {
-            Assert.Equal("complete", artifact.RootElement.GetProperty("cleanup").GetProperty("status").GetString());
-        }
+            var childProcessIdTask = WaitForProcessIdAsync(childProcessIdFile, "child");
+            var grandchildProcessIdTask = WaitForProcessIdAsync(grandchildProcessIdFile, "grandchild");
+            await Task.WhenAll(childProcessIdTask, grandchildProcessIdTask);
+            var childProcessId = await childProcessIdTask;
+            var grandchildProcessId = await grandchildProcessIdTask;
+            Assert.NotEqual(childProcessId, grandchildProcessId);
+            watchdog.Register(
+                new CoverageRunWatchdogOperation("project:0", CoverageRunWatchdogOperationKind.Project),
+                CoverageRunWatchdogOperationState.Running);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => execution);
+            var exception = await watchdog.TerminalTask.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(124, exception.ExitCode);
+            await WaitForProcessExitAsync(childProcessId, "child");
+            await WaitForProcessExitAsync(grandchildProcessId, "grandchild");
+            using (var artifact = JsonDocument.Parse(
+                await File.ReadAllBytesAsync(Path.Join(bootstrapDirectory, "coverage-watchdog.json"))))
+            {
+                var cleanupStatus = artifact.RootElement.GetProperty("cleanup").GetProperty("status").GetString();
+                Assert.True(cleanupStatus is "complete" or "failed");
+            }
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => execution);
+        }
+        finally
+        {
+            await safetyCancellation.CancelAsync();
+            try
+            {
+                await execution;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when cleanup or the safety deadline cancels the fixture.
+            }
+        }
     }
 
-    private static async Task<int> WaitForChildProcessIdAsync(string outputFile)
+    private static async Task<int> WaitForProcessIdAsync(string outputFile, string role)
     {
         for (var attempt = 0; attempt < 100; attempt++)
         {
@@ -2818,7 +2896,7 @@ public sealed class CoverageRunTests
             await Task.Delay(50);
         }
 
-        throw new TimeoutException("The child process did not report its process identifier.");
+        throw new TimeoutException($"The {role} process did not report its process identifier.");
     }
 
     private static async Task WaitForAsync(Func<bool> condition, string timeoutMessage)
@@ -2836,14 +2914,14 @@ public sealed class CoverageRunTests
         throw new TimeoutException(timeoutMessage);
     }
 
-    private static async Task WaitForProcessExitAsync(int processId)
+    private static async Task WaitForProcessExitAsync(int processId, string role)
     {
         for (var attempt = 0; attempt < 100; attempt++)
         {
             try
             {
                 using var process = Process.GetProcessById(processId);
-                if (process.HasExited)
+                if (process.HasExited || (!OperatingSystem.IsWindows() && await IsZombieProcessAsync(processId)))
                 {
                     return;
                 }
@@ -2856,7 +2934,33 @@ public sealed class CoverageRunTests
             await Task.Delay(50);
         }
 
-        Assert.Fail($"Child process {processId.ToString(CultureInfo.InvariantCulture)} remained alive after tree cancellation.");
+        Assert.Fail($"The {role} process {processId.ToString(CultureInfo.InvariantCulture)} remained alive after tree cancellation.");
+    }
+
+    private static async Task<bool> IsZombieProcessAsync(int processId)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "ps",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            },
+        };
+        process.StartInfo.ArgumentList.Add("-o");
+        process.StartInfo.ArgumentList.Add("stat=");
+        process.StartInfo.ArgumentList.Add("-p");
+        process.StartInfo.ArgumentList.Add(processId.ToString(CultureInfo.InvariantCulture));
+        if (!process.Start())
+        {
+            return false;
+        }
+
+        var state = await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        return state.TrimStart().StartsWith('Z');
     }
 
     private static async Task AssertUnsafeOutputAsync(

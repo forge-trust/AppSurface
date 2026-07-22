@@ -83,7 +83,13 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
     /// <summary>Gets the task that completes after fail-mode cleanup and terminal evidence handling finish.</summary>
     public Task<CommandException> TerminalTask => _terminal.Task;
 
-    /// <summary>Registers an operation with the underlying monotonic supervisor.</summary>
+    /// <summary>Registers an operation with the underlying monotonic supervisor and wakes the monitor.</summary>
+    /// <param name="operation">Unique run-scoped operation metadata.</param>
+    /// <param name="state">Initial queued or active lifecycle state.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="operation"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The operation identity is empty or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">The identity is already registered or the supervisor is closed.</exception>
+    /// <exception cref="OperationCanceledException">External run cancellation has been requested.</exception>
     public void Register(CoverageRunWatchdogOperation operation, CoverageRunWatchdogOperationState state)
     {
         _externalCancellation.ThrowIfCancellationRequested();
@@ -98,7 +104,13 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         }
     }
 
-    /// <summary>Transitions an operation and records the transition as progress.</summary>
+    /// <summary>Transitions an operation, records the transition as progress, and wakes the monitor.</summary>
+    /// <param name="identity">Previously registered run-scoped operation identity.</param>
+    /// <param name="state">New lifecycle state.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="identity"/> is <see langword="null"/>.</exception>
+    /// <exception cref="KeyNotFoundException">The identity is not registered.</exception>
+    /// <exception cref="InvalidOperationException">The supervisor is closed.</exception>
+    /// <exception cref="OperationCanceledException">External run cancellation has been requested.</exception>
     public void Transition(string identity, CoverageRunWatchdogOperationState state)
     {
         _externalCancellation.ThrowIfCancellationRequested();
@@ -116,6 +128,14 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
     /// <summary>
     /// Creates a structured process request and reserves its lifecycle before process creation begins.
     /// </summary>
+    /// <param name="fileName">Executable passed to the retained CliWrap runner.</param>
+    /// <param name="arguments">Already-tokenized command arguments.</param>
+    /// <param name="workingDirectory">Process working directory.</param>
+    /// <param name="operationId">Registered operation that receives output progress.</param>
+    /// <param name="command">Privacy-normalized command metadata retained for incident evidence.</param>
+    /// <param name="outputFile">Optional streamed log destination.</param>
+    /// <returns>A request whose launch reservation is already visible to terminal cleanup.</returns>
+    /// <exception cref="OperationCanceledException">Process registration is closed by terminal cleanup.</exception>
     public CoverageRunProcessRequest CreateProcessRequest(
         string fileName,
         IReadOnlyList<string> arguments,
@@ -148,6 +168,9 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
     /// <summary>
     /// Binds incident evidence to a fully validated AppSurface-owned output directory.
     /// </summary>
+    /// <param name="outputDirectory">Canonical directory after the project-aware ownership guard succeeds.</param>
+    /// <returns>A task that completes after any private bootstrap artifact is promoted or diagnosed.</returns>
+    /// <exception cref="ArgumentException"><paramref name="outputDirectory"/> is empty or whitespace.</exception>
     public async Task BindCanonicalOutputAsync(string outputDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
@@ -262,12 +285,18 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
     }
 
     /// <summary>Writes ordinary workflow output through the same bounded, serialized sink as heartbeats.</summary>
+    /// <param name="text">Text to write with one trailing newline.</param>
+    /// <returns>A task that completes after the bounded write succeeds, times out, or is abandoned.</returns>
     public Task WriteOutputLineAsync(string text) => WriteConsoleAsync(text, waitForTurn: true);
 
     /// <summary>Writes ordinary workflow output without appending a newline through the bounded sink.</summary>
+    /// <param name="text">Text to write without adding a newline.</param>
+    /// <returns>A task that completes after the bounded write succeeds, times out, or is abandoned.</returns>
     public Task WriteOutputAsync(string text) => WriteConsoleAsync(text, appendNewLine: false, waitForTurn: true);
 
     /// <summary>Writes ordinary workflow errors through the same bounded, serialized sink as incidents.</summary>
+    /// <param name="text">Error text to write with one trailing newline.</param>
+    /// <returns>A task that completes after the bounded write succeeds, times out, or is abandoned.</returns>
     public Task WriteErrorLineAsync(string text) => WriteConsoleAsync(text, error: true, waitForTurn: true);
 
     private async Task MonitorAsync(CancellationToken externalCancellation)
@@ -288,10 +317,9 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                 var evaluation = _supervisor.Evaluate();
                 if (_options.Mode == CoverageRunWatchdogMode.Fail &&
                     evaluation.NewlyStale.Count > 0 &&
-                    TryClaimTerminal(evaluation.NewlyStale[0], out var terminal) &&
-                    terminal is not null)
+                    TryClaimTerminal(evaluation.NewlyStale[0], out var terminal, out var terminalEvaluation))
                 {
-                    await HandleTerminalAsync(evaluation, terminal);
+                    await HandleTerminalAsync(terminalEvaluation!, terminal!);
                     return;
                 }
 
@@ -365,12 +393,12 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                 await WriteArtifactFailureAsync(write.Detail);
             }
 
-            var artifactText = write.Success ? write.Path! : $"unavailable ({write.Detail})";
+            var artifactText = write.Success ? QuotePath(write.Path!) : $"unavailable ({write.Detail})";
             exception = CreateTerminalException(evaluation, terminal, cleanup, artifactText);
             await WriteConsoleAsync(exception.Message, error: true);
             await WriteConsoleAsync(RenderHeartbeat(evaluation.Snapshot, evaluation.NewlyStale));
         }
-        catch
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             // Terminal classification is authoritative even when cleanup, evidence, or console IO fails.
         }
@@ -382,11 +410,12 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
 
     private bool TryClaimTerminal(
         CoverageRunWatchdogOperationSnapshot candidate,
-        out CoverageRunWatchdogOperationSnapshot? terminal)
+        out CoverageRunWatchdogOperationSnapshot? terminal,
+        out CoverageRunWatchdogEvaluation? terminalEvaluation)
     {
         lock (_gate)
         {
-            if (!_supervisor.TryClaimTerminal(candidate, out terminal))
+            if (!_supervisor.TryClaimTerminal(candidate, out terminal, out terminalEvaluation))
             {
                 return false;
             }
@@ -409,6 +438,11 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
     /// Atomically claims the terminal gate and promotes a related set of staged files without a terminal interleaving.
     /// </summary>
     /// <param name="files">Private staged paths paired with canonical AppSurface-owned destinations.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="files"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A staged or destination path is empty or whitespace.</exception>
+    /// <exception cref="CoverageRunStagedCommitPreflightException">A staged file is missing or a destination is a directory.</exception>
+    /// <exception cref="IOException">A same-directory promotion fails.</exception>
+    /// <exception cref="UnauthorizedAccessException">A canonical destination cannot be replaced.</exception>
     /// <exception cref="OperationCanceledException">A terminal cause or external cancellation won before commit.</exception>
     public void CommitStagedFiles(IReadOnlyList<(string StagedPath, string DestinationPath)> files)
     {
@@ -513,6 +547,11 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         CoverageRunWatchdogCleanup cleanup)
     {
         var stale = evaluation.NewlyStale;
+        var concurrent = stale
+            .Skip(1)
+            .Take(CoverageRunWatchdogArtifactSerializer.MaximumConcurrentOperations)
+            .Select(ToIncident)
+            .ToArray();
         return new CoverageRunWatchdogArtifact(
             1,
             Interlocked.Increment(ref _incidentOrdinal),
@@ -524,8 +563,8 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
             checked((long)evaluation.Snapshot.RunElapsed.TotalMilliseconds),
             evaluation.Snapshot.CapturedAtUtc,
             ToIncident(primary),
-            stale.Skip(1).Select(ToIncident).ToArray(),
-            0,
+            concurrent,
+            Math.Max(0, stale.Count - 1 - concurrent.Length),
             cleanup);
     }
 
@@ -787,7 +826,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                 MarkConsoleWriteAbandoned(write);
             }
         }
-        catch
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             // Console failures cannot disable deadline evaluation or terminal classification.
         }
@@ -840,7 +879,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                 Directory.Delete(_bootstrapDirectory, recursive: true);
             }
         }
-        catch
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             // Bootstrap cleanup is best effort and must not replace the run's terminal result.
             return;
@@ -856,7 +895,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                 Directory.Delete(_bootstrapDirectory);
             }
         }
-        catch
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             // Bootstrap cleanup is best effort and must not replace the run's terminal result.
             return;
@@ -909,7 +948,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
 
                         return true;
                     }
-                    catch
+                    catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
                     {
                         return false;
                     }
@@ -937,7 +976,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
             var killTasks = reservations.Select(reservation => reservation.KillTask).Where(task => task is not null).Cast<Task<bool>>();
             await Task.WhenAll(killTasks);
         }
-        catch
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             // Reservation disposal in finally is authoritative; cleanup task failures are not.
             return;

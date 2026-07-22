@@ -19,6 +19,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  coverage-watchdog-process-tree:
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/coverage-watchdog-process-tree.yml
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20

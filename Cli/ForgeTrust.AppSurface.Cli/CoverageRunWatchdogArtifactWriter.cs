@@ -6,7 +6,7 @@ internal interface ICoverageRunWatchdogArtifactWriter
     /// <summary>Attempts one atomic artifact replacement.</summary>
     /// <param name="destinationPath">Fully resolved destination path.</param>
     /// <param name="artifact">Normalized watchdog incident.</param>
-    /// <param name="cancellationToken">External run cancellation token.</param>
+    /// <param name="cancellationToken">Cancellation token that can revoke staging before canonical commit begins.</param>
     /// <returns>
     /// A result whose private staging phase is bounded and that never contains exception text.
     /// If the final same-directory rename has already begun, the call waits for that non-cancellable
@@ -90,7 +90,7 @@ internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogAr
             {
                 bytes = CoverageRunWatchdogArtifactSerializer.Serialize(artifact);
             }
-            catch
+            catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
             {
                 return CoverageRunWatchdogArtifactWriteResult.Failed;
             }
@@ -148,7 +148,7 @@ internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogAr
             permission.TryRevoke();
             throw;
         }
-        catch
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             permission.TryRevoke();
             return CoverageRunWatchdogArtifactWriteResult.Failed;
@@ -275,7 +275,7 @@ internal sealed class CoverageRunWatchdogArtifactStorage : ICoverageRunWatchdogA
 
             return temporaryPath;
         }
-        catch
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             DeleteTemporary(temporaryPath);
             throw;
@@ -293,7 +293,7 @@ internal sealed class CoverageRunWatchdogArtifactStorage : ICoverageRunWatchdogA
         {
             File.Delete(temporaryPath);
         }
-        catch
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             // Temporary cleanup is best effort and never replaces the bounded public result.
         }

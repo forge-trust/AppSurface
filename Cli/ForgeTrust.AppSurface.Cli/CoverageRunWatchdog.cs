@@ -464,14 +464,31 @@ internal sealed class CoverageRunWatchdogSupervisor
     /// <param name="candidate">Previously evaluated candidate.</param>
     /// <param name="terminalCause">Revalidated terminal snapshot on success.</param>
     /// <returns>Whether this candidate won the terminal gate.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="candidate"/> is <see langword="null"/>.</exception>
     public bool TryClaimTerminal(
         CoverageRunWatchdogOperationSnapshot candidate,
         out CoverageRunWatchdogOperationSnapshot? terminalCause)
+        => TryClaimTerminal(candidate, out terminalCause, out _);
+
+    /// <summary>
+    /// Atomically revalidates and claims one fail-mode candidate together with every operation
+    /// that remains stale at the claim instant.
+    /// </summary>
+    /// <param name="candidate">Previously evaluated candidate.</param>
+    /// <param name="terminalCause">Revalidated terminal snapshot on success.</param>
+    /// <param name="terminalEvaluation">Fresh terminal evidence with the primary candidate first on success.</param>
+    /// <returns>Whether this candidate won the terminal gate.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="candidate"/> is <see langword="null"/>.</exception>
+    public bool TryClaimTerminal(
+        CoverageRunWatchdogOperationSnapshot candidate,
+        out CoverageRunWatchdogOperationSnapshot? terminalCause,
+        out CoverageRunWatchdogEvaluation? terminalEvaluation)
     {
         ArgumentNullException.ThrowIfNull(candidate);
         lock (_gate)
         {
             terminalCause = _terminalCause;
+            terminalEvaluation = null;
             if (_stopped || _options.Mode != CoverageRunWatchdogMode.Fail || _terminalCause is not null ||
                 !_operations.TryGetValue(candidate.Identity, out var operation) || !operation.IsActive ||
                 operation.ProgressSequence != candidate.ProgressSequence)
@@ -485,8 +502,16 @@ internal sealed class CoverageRunWatchdogSupervisor
                 return false;
             }
 
-            _terminalCause = operation.Snapshot(_timeProvider, now);
+            var stale = OrderedOperations()
+                .Where(item => item.IsActive && _timeProvider.GetElapsedTime(item.LastProgress, now) >= _options.NoProgressTimeout)
+                .Select(item => item.Snapshot(_timeProvider, now))
+                .ToArray();
+            _terminalCause = stale.Single(item => string.Equals(item.Identity, candidate.Identity, StringComparison.Ordinal));
             terminalCause = _terminalCause;
+            terminalEvaluation = new CoverageRunWatchdogEvaluation(
+                false,
+                CreateSnapshot(now),
+                [_terminalCause, .. stale.Where(item => !string.Equals(item.Identity, candidate.Identity, StringComparison.Ordinal))]);
             return true;
         }
     }
@@ -725,11 +750,17 @@ internal sealed record CoverageRunWatchdogArtifact(
     int ConcurrentlyStaleOmitted,
     CoverageRunWatchdogCleanup Cleanup);
 
-/// <summary>Serializes watchdog artifacts using deterministic lowercase enum strings and a strict size budget.</summary>
+/// <summary>
+/// Validates and serializes watchdog artifacts using deterministic lowercase enum strings,
+/// a 256-concurrent-operation pre-cap, and a strict size budget.
+/// </summary>
 internal static class CoverageRunWatchdogArtifactSerializer
 {
     /// <summary>Gets the largest permitted UTF-8 artifact size, strictly below 64 KiB.</summary>
     public const int MaximumBytes = (64 * 1024) - 1;
+
+    /// <summary>Gets the maximum number of concurrent operations considered before size fitting.</summary>
+    public const int MaximumConcurrentOperations = 256;
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -741,10 +772,17 @@ internal static class CoverageRunWatchdogArtifactSerializer
     /// <summary>Deserializes a bounded schema-version-one artifact for bootstrap promotion.</summary>
     /// <param name="bytes">UTF-8 JSON previously written by <see cref="Serialize"/>.</param>
     /// <returns>The validated watchdog artifact.</returns>
-    /// <exception cref="JsonException">The payload is malformed or does not contain an artifact.</exception>
+    /// <exception cref="JsonException">
+    /// The payload is malformed, empty, oversized, or violates the schema-version-one field contract.
+    /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">The artifact uses an unsupported schema version.</exception>
     public static CoverageRunWatchdogArtifact Deserialize(ReadOnlySpan<byte> bytes)
     {
+        if (bytes.Length > MaximumBytes)
+        {
+            throw new JsonException("Watchdog artifact payload exceeded the size budget.");
+        }
+
         var artifact = JsonSerializer.Deserialize<CoverageRunWatchdogArtifact>(bytes, SerializerOptions)
             ?? throw new JsonException("Watchdog artifact payload was empty.");
         if (artifact.SchemaVersion != 1)
@@ -752,14 +790,35 @@ internal static class CoverageRunWatchdogArtifactSerializer
             throw new ArgumentOutOfRangeException(nameof(bytes), "Only watchdog artifact schema version 1 is supported.");
         }
 
+        if (artifact.IncidentOrdinal <= 0 ||
+            artifact.HeartbeatIntervalMilliseconds < 0 ||
+            artifact.NoProgressTimeoutMilliseconds <= 0 ||
+            artifact.RunElapsedMilliseconds < 0 ||
+            artifact.ConcurrentlyStaleOmitted < 0 ||
+            !Enum.IsDefined(artifact.WatchdogMode) ||
+            artifact.Primary is null ||
+            artifact.ConcurrentlyStale is null ||
+            artifact.Cleanup is null ||
+            artifact.ConcurrentlyStale.Count > MaximumConcurrentOperations ||
+            artifact.ConcurrentlyStale.Any(operation => operation is null) ||
+            !IsValidOperation(artifact.Primary) ||
+            artifact.ConcurrentlyStale.Any(operation => !IsValidOperation(operation)) ||
+            !IsValidOutcome(artifact))
+        {
+            throw new JsonException("Watchdog artifact payload did not satisfy the schema-version-one contract.");
+        }
+
         return artifact;
     }
 
     /// <summary>
-    /// Serializes an artifact, first dropping concurrent command options and log pointers and then trailing records.
+    /// Serializes an artifact, pre-capping concurrent operations at 256, then dropping
+    /// concurrent command options, log pointers, and trailing records to fit the byte budget.
     /// </summary>
     /// <param name="artifact">Complete normalized incident.</param>
     /// <returns>UTF-8 JSON below 64 KiB.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="artifact"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The artifact uses an unsupported schema version.</exception>
     /// <exception cref="InvalidOperationException">Required primary and top-level fields alone exceed the budget.</exception>
     public static byte[] Serialize(CoverageRunWatchdogArtifact artifact)
     {
@@ -769,33 +828,87 @@ internal static class CoverageRunWatchdogArtifactSerializer
             throw new ArgumentOutOfRangeException(nameof(artifact), "Only watchdog artifact schema version 1 is supported.");
         }
 
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(artifact, SerializerOptions);
+        var retained = artifact.ConcurrentlyStale.Take(MaximumConcurrentOperations).ToArray();
+        var omitted = SaturatingAdd(
+            artifact.ConcurrentlyStaleOmitted,
+            artifact.ConcurrentlyStale.Count - retained.Length);
+        var bounded = artifact with { ConcurrentlyStale = retained, ConcurrentlyStaleOmitted = omitted };
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(bounded, SerializerOptions);
         if (bytes.Length <= MaximumBytes)
         {
             return bytes;
         }
 
-        var concurrent = artifact.ConcurrentlyStale
+        var concurrent = retained
             .Select(operation => operation with
             {
                 Log = null,
                 Command = operation.Command is null ? null : operation.Command with { Options = [] },
             })
             .ToList();
-        var omitted = artifact.ConcurrentlyStaleOmitted;
-        var bounded = artifact with { ConcurrentlyStale = concurrent, ConcurrentlyStaleOmitted = omitted };
+        bounded = artifact with { ConcurrentlyStale = concurrent, ConcurrentlyStaleOmitted = omitted };
         bytes = JsonSerializer.SerializeToUtf8Bytes(bounded, SerializerOptions);
-
-        while (bytes.Length > MaximumBytes && concurrent.Count > 0)
+        if (bytes.Length <= MaximumBytes)
         {
-            concurrent.RemoveAt(concurrent.Count - 1);
-            omitted++;
-            bounded = artifact with { ConcurrentlyStale = concurrent.ToArray(), ConcurrentlyStaleOmitted = omitted };
-            bytes = JsonSerializer.SerializeToUtf8Bytes(bounded, SerializerOptions);
+            return bytes;
         }
 
-        return bytes.Length <= MaximumBytes
-            ? bytes
-            : throw new InvalidOperationException("Required watchdog artifact fields exceed the 64 KiB budget.");
+        var lower = 0;
+        var upper = concurrent.Count;
+        byte[]? fittedBytes = null;
+        while (lower <= upper)
+        {
+            var candidateCount = lower + ((upper - lower) / 2);
+            var candidate = concurrent.Take(candidateCount).ToArray();
+            var candidateOmitted = SaturatingAdd(omitted, concurrent.Count - candidateCount);
+            bounded = artifact with { ConcurrentlyStale = candidate, ConcurrentlyStaleOmitted = candidateOmitted };
+            var candidateBytes = JsonSerializer.SerializeToUtf8Bytes(bounded, SerializerOptions);
+            if (candidateBytes.Length <= MaximumBytes)
+            {
+                fittedBytes = candidateBytes;
+                lower = candidateCount + 1;
+            }
+            else
+            {
+                upper = candidateCount - 1;
+            }
+        }
+
+        return fittedBytes
+            ?? throw new InvalidOperationException("Required watchdog artifact fields exceed the 64 KiB budget.");
     }
+
+    private static int SaturatingAdd(int left, int right)
+        => (int)Math.Min(int.MaxValue, (long)left + right);
+
+    private static bool IsValidOutcome(CoverageRunWatchdogArtifact artifact)
+        => artifact.Outcome switch
+        {
+            "warning" => artifact.WatchdogMode == CoverageRunWatchdogMode.Warn &&
+                artifact.DiagnosticCode is null &&
+                artifact.Cleanup is { Status: "not-requested", Detail: null },
+            "terminated" => artifact.WatchdogMode == CoverageRunWatchdogMode.Fail &&
+                string.Equals(artifact.DiagnosticCode, "ASCOV121", StringComparison.Ordinal) &&
+                IsValidTerminalCleanup(artifact.Cleanup),
+            _ => false,
+        };
+
+    private static bool IsValidTerminalCleanup(CoverageRunWatchdogCleanup cleanup)
+        => cleanup switch
+        {
+            { Status: "complete", Detail: null } => true,
+            { Status: "failed", Detail: "kill-failed" } => true,
+            { Status: "deadline-exceeded", Detail: "cleanup-incomplete" or "root-timeout" or "kill-failed" } => true,
+            _ => false,
+        };
+
+    private static bool IsValidOperation(CoverageRunWatchdogIncidentOperation operation)
+        => Enum.IsDefined(operation.Kind) &&
+            operation.State is CoverageRunWatchdogOperationState.Running or CoverageRunWatchdogOperationState.Finalizing &&
+            operation.ElapsedMilliseconds >= 0 &&
+            operation.NoProgressMilliseconds >= 0 &&
+            operation.ProgressSequence >= 0 &&
+            operation.OutputBytes >= 0 &&
+            (operation.Command is null ||
+                (!string.IsNullOrWhiteSpace(operation.Command.Executable) && operation.Command.Options is not null));
 }
