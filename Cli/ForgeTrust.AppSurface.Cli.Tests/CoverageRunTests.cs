@@ -2798,7 +2798,6 @@ public sealed class CoverageRunTests
     [Fact]
     public async Task CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree()
     {
-        TraceProcessTreeFixture("test-started");
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         var runner = new CliWrapCoverageRunProcessRunner();
         using var console = new FakeInMemoryConsole();
@@ -2813,7 +2812,6 @@ public sealed class CoverageRunTests
                 TimeSpan.FromMilliseconds(100)),
             safetyCancellation.Token,
             bootstrapDirectory: bootstrapDirectory);
-        TraceProcessTreeFixture("watchdog-created");
         var outputFile = Path.Join(repo.Path, "child-process.log");
         var childProcessIdFile = Path.Join(repo.Path, "child-process.pid");
         var grandchildProcessIdFile = Path.Join(repo.Path, "grandchild-process.pid");
@@ -2866,7 +2864,6 @@ public sealed class CoverageRunTests
             outputFile);
 
         var execution = runner.RunAsync(request, watchdog.RunCancellationToken);
-        TraceProcessTreeFixture("execution-started");
         int? childProcessId = null;
         int? grandchildProcessId = null;
         try
@@ -2876,35 +2873,27 @@ public sealed class CoverageRunTests
             await Task.WhenAll(childProcessIdTask, grandchildProcessIdTask);
             childProcessId = await childProcessIdTask;
             grandchildProcessId = await grandchildProcessIdTask;
-            TraceProcessTreeFixture("process-identifiers-observed");
             Assert.NotEqual(childProcessId, grandchildProcessId);
             watchdog.Register(
                 new CoverageRunWatchdogOperation("project:0", CoverageRunWatchdogOperationKind.Project),
                 CoverageRunWatchdogOperationState.Running);
 
             var exception = await watchdog.TerminalTask.WaitAsync(TimeSpan.FromSeconds(5));
-            TraceProcessTreeFixture("terminal-observed");
             Assert.Equal(124, exception.ExitCode);
             await WaitForProcessExitAsync(childProcessId.Value, "child");
-            TraceProcessTreeFixture("child-exit-observed");
             await WaitForProcessExitAsync(grandchildProcessId.Value, "grandchild");
-            TraceProcessTreeFixture("grandchild-exit-observed");
             using (var artifact = JsonDocument.Parse(
                 await File.ReadAllBytesAsync(Path.Join(bootstrapDirectory, "coverage-watchdog.json"))))
             {
                 var cleanupStatus = artifact.RootElement.GetProperty("cleanup").GetProperty("status").GetString();
                 Assert.True(cleanupStatus is "complete" or "failed");
             }
-            TraceProcessTreeFixture("artifact-observed");
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => execution);
-            TraceProcessTreeFixture("execution-cancellation-observed");
         }
         finally
         {
-            TraceProcessTreeFixture("fixture-finally-started");
             await safetyCancellation.CancelAsync();
-            TraceProcessTreeFixture("safety-cancellation-complete");
             try
             {
                 await execution.WaitAsync(TimeSpan.FromSeconds(5));
@@ -2915,33 +2904,9 @@ public sealed class CoverageRunTests
             }
             finally
             {
-                TraceProcessTreeFixture("execution-finalized");
                 TryKillFixtureProcess(childProcessId);
                 TryKillFixtureProcess(grandchildProcessId);
-                TraceProcessTreeFixture("fixture-processes-cleaned");
             }
-        }
-
-        TraceProcessTreeFixture("watchdog-disposal-pending");
-    }
-
-    private static void TraceProcessTreeFixture(string stage)
-    {
-        var path = Environment.GetEnvironmentVariable("COVERAGE_WATCHDOG_PROCESS_TREE_TRACE");
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-
-        try
-        {
-            var fullPath = Path.GetFullPath(path);
-            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-            File.AppendAllText(fullPath, $"{DateTimeOffset.UtcNow:O} {stage}{Environment.NewLine}");
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
-        {
-            // Diagnostic tracing must not affect the process-tree assertion.
         }
     }
 
