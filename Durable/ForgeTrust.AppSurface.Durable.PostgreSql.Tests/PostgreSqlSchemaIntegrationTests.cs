@@ -153,6 +153,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             CREATE ROLE column_privilege_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE sequence_privilege_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE grant_option_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE schema_grant_option_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE database_owner_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE inherited_privilege_dispatcher LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE inherited_privilege_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
@@ -167,6 +168,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             GRANT UPDATE (work_name) ON appsurface_durable.work TO column_privilege_runtime;
             GRANT UPDATE ON SEQUENCE appsurface_durable.scope_history_event_id_seq TO sequence_privilege_dispatcher;
             GRANT SELECT ON appsurface_durable.dispatch TO grant_option_dispatcher WITH GRANT OPTION;
+            GRANT USAGE ON SCHEMA appsurface_durable TO schema_grant_option_runtime WITH GRANT OPTION;
             GRANT CREATE ON SCHEMA appsurface_durable TO dispatcher_privilege_parent;
             GRANT TRIGGER ON appsurface_durable.work TO runtime_privilege_parent;
             GRANT dispatcher_privilege_parent TO inherited_privilege_dispatcher WITH INHERIT FALSE, SET TRUE;
@@ -191,6 +193,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "column_privilege_runtime", Expected: "effective durable-column privilege outside the package allowlist"),
             (Owner: "durable_owner", Dispatcher: "sequence_privilege_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-sequence privilege outside the package allowlist"),
             (Owner: "durable_owner", Dispatcher: "grant_option_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-table privilege outside the package allowlist"),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "schema_grant_option_runtime", Expected: "schema CREATE or grant options"),
             (Owner: "durable_owner", Dispatcher: "inherited_privilege_dispatcher", Runtime: "durable_runtime", Expected: "exact login leaves with no role memberships"),
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "inherited_privilege_runtime", Expected: "exact login leaves with no role memberships"),
             (Owner: "durable_owner", Dispatcher: "downstream_dispatcher", Runtime: "durable_runtime", Expected: "exact login leaves with no role memberships"),
@@ -204,6 +207,42 @@ public sealed class PostgreSqlSchemaIntegrationTests
                 output.Contains(item.Expected, StringComparison.Ordinal),
                 $"Expected role recipe case ({item.Owner}, {item.Dispatcher}, {item.Runtime}) to contain '{item.Expected}'. Output: {output}");
         }
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "ALTER TABLE appsurface_durable.work DISABLE ROW LEVEL SECURITY;");
+        var disabledRls = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            "durable_dispatcher",
+            "durable_runtime");
+        Assert.NotEqual(0, disabledRls.ExitCode);
+        Assert.Contains(
+            "row-level security flags must exactly match",
+            $"{disabledRls.Stdout}\n{disabledRls.Stderr}",
+            StringComparison.Ordinal);
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "ALTER TABLE appsurface_durable.work ENABLE ROW LEVEL SECURITY;");
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "CREATE POLICY work_permissive_bypass ON appsurface_durable.work USING (true) WITH CHECK (true);");
+        var permissivePolicy = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            "durable_dispatcher",
+            "durable_runtime");
+        Assert.NotEqual(0, permissivePolicy.ExitCode);
+        Assert.Contains(
+            "row-level security policies must exactly match",
+            $"{permissivePolicy.Stdout}\n{permissivePolicy.Stderr}",
+            StringComparison.Ordinal);
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "DROP POLICY work_permissive_bypass ON appsurface_durable.work;");
 
         await ExecuteNonQueryAsync(
             dataSource,
@@ -234,7 +273,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             "database_owner_runtime");
         Assert.NotEqual(0, databaseOwner.ExitCode);
         Assert.Contains(
-            "must not own the durable database",
+            "must not own any database",
             $"{databaseOwner.Stdout}\n{databaseOwner.Stderr}",
             StringComparison.Ordinal);
         await ExecuteNonQueryAsync(
@@ -356,8 +395,16 @@ public sealed class PostgreSqlSchemaIntegrationTests
             SELECT
                 has_schema_privilege('durable_dispatcher', 'appsurface_durable', 'USAGE')
                 AND NOT has_schema_privilege('durable_dispatcher', 'appsurface_durable', 'CREATE')
+                AND NOT has_schema_privilege(
+                    'durable_dispatcher',
+                    'appsurface_durable',
+                    'USAGE WITH GRANT OPTION')
                 AND has_schema_privilege('durable_runtime', 'appsurface_durable', 'USAGE')
                 AND NOT has_schema_privilege('durable_runtime', 'appsurface_durable', 'CREATE')
+                AND NOT has_schema_privilege(
+                    'durable_runtime',
+                    'appsurface_durable',
+                    'USAGE WITH GRANT OPTION')
                 AND NOT EXISTS
                 (
                     SELECT 1

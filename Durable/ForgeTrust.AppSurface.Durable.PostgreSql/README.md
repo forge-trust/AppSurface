@@ -66,8 +66,9 @@ psql -v ON_ERROR_STOP=1 \
 The dispatcher and runtime values identify the exact non-human credentials used to connect, not reusable capability
 groups. Both must be distinct `LOGIN` leaf roles with no memberships in either direction and without `SUPERUSER`,
 `CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS`. Create and rotate their credentials through the deployment
-secret system; the recipe never accepts or changes passwords. Neither service credential may own the database or hold
-grant options. The migration owner remains separate and may be `NOLOGIN`.
+secret system; the recipe never accepts or changes passwords. Neither service credential may own any database or hold
+grant options on the `appsurface_durable` schema or its objects. The migration owner remains separate and may be
+`NOLOGIN`.
 
 The `appsurface_durable` schema is package-reserved. The recipe serializes with migrations and runtime transactions,
 then transfers every table, partition, sequence, view, materialized view, and foreign table in that schema to the
@@ -83,7 +84,8 @@ migration owner. Do not place application-owned objects there.
 
 Neither service credential receives schema `CREATE`, table-wide `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`,
 `TRIGGER`, or `MAINTAIN`; the dispatcher receives no sequence privileges. Forced RLS remains an additional scope fence,
-not the reason destructive privileges are safe.
+not the reason destructive privileges are safe. The recipe also rejects disabled or unforced RLS and any policy whose
+name, command, role target, permissiveness, `USING`, or `WITH CHECK` expression differs from the reviewed migration.
 
 ## Accept Work
 

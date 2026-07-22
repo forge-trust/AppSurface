@@ -81,12 +81,11 @@ SELECT NOT EXISTS
   SELECT 1
   FROM pg_catalog.pg_database AS database_value
   JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = database_value.datdba
-  WHERE database_value.datname = pg_catalog.current_database()
-    AND owner_role.rolname IN (:'dispatcher_role', :'runtime_role')
+  WHERE owner_role.rolname IN (:'dispatcher_role', :'runtime_role')
 ) AS service_roles_do_not_own_database \gset
 \if :service_roles_do_not_own_database
 \else
-  \echo 'Dispatcher and scoped runtime roles must not own the durable database.'
+  \echo 'Dispatcher and scoped runtime roles must not own any database.'
   SELECT 1 / 0;
 \endif
 
@@ -138,6 +137,92 @@ SELECT NOT EXISTS
 \if :durable_objects_owned_by_migration_role
 \else
   \echo 'Every durable table, sequence, view, and foreign table must be owned by the migration owner.'
+  SELECT 1 / 0;
+\endif
+
+SELECT bool_and(
+    object.relrowsecurity =
+      (object.relname IN
+        ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit'))
+    AND object.relforcerowsecurity =
+      (object.relname IN
+        ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit')))
+  AS durable_rls_flags_are_exact
+FROM pg_catalog.pg_class AS object
+JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+WHERE namespace.nspname = 'appsurface_durable'
+  AND object.relkind IN ('r', 'p') \gset
+\if :durable_rls_flags_are_exact
+\else
+  \echo 'Durable row-level security flags must exactly match the package migration.'
+  SELECT 1 / 0;
+\endif
+
+WITH expected_policy(relation_name, policy_name, command_name, using_expression, check_expression) AS
+(
+  VALUES
+    ('dispatch', 'dispatch_global_discovery', 'r', 'true', NULL::text),
+    ('dispatch', 'dispatch_scope_insert', 'a', NULL::text,
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('dispatch', 'dispatch_scope_update', 'w',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('effect_permit', 'effect_permit_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('scope', 'scope_disable', 'w',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '((scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text)) AND (state = ''disabled''::text))'),
+    ('scope', 'scope_insert', 'a', NULL::text,
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('scope', 'scope_select', 'r',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))', NULL::text),
+    ('scope_history', 'scope_history_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('work', 'work_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('work_history', 'work_history_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('work_operator_command', 'work_operator_command_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))')
+),
+actual_policy AS
+(
+  SELECT
+    object.relname AS relation_name,
+    policy.polname AS policy_name,
+    policy.polcmd::text AS command_name,
+    policy.polpermissive,
+    policy.polroles,
+    pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) AS using_expression,
+    pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid) AS check_expression
+  FROM pg_catalog.pg_policy AS policy
+  JOIN pg_catalog.pg_class AS object ON object.oid = policy.polrelid
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+  WHERE namespace.nspname = 'appsurface_durable'
+)
+SELECT NOT EXISTS
+(
+  SELECT 1
+  FROM expected_policy AS expected
+  FULL OUTER JOIN actual_policy AS actual
+    ON actual.relation_name = expected.relation_name
+    AND actual.policy_name = expected.policy_name
+  WHERE expected.policy_name IS NULL
+    OR actual.policy_name IS NULL
+    OR NOT actual.polpermissive
+    OR actual.polroles <> ARRAY[0]::oid[]
+    OR actual.command_name <> expected.command_name
+    OR actual.using_expression IS DISTINCT FROM expected.using_expression
+    OR actual.check_expression IS DISTINCT FROM expected.check_expression
+) AS durable_rls_policies_are_exact \gset
+\if :durable_rls_policies_are_exact
+\else
+  \echo 'Durable row-level security policies must exactly match the package migration.'
   SELECT 1 / 0;
 \endif
 

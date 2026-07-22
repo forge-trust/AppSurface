@@ -286,6 +286,10 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("AS service_roles_are_membership_free", recipe, StringComparison.Ordinal);
         Assert.Contains("AS service_roles_do_not_own_database", recipe, StringComparison.Ordinal);
         Assert.Contains("AS durable_objects_owned_by_migration_role", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS durable_rls_flags_are_exact", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS durable_rls_policies_are_exact", recipe, StringComparison.Ordinal);
+        Assert.Contains("pg_catalog.pg_policy", recipe, StringComparison.Ordinal);
+        Assert.Contains("pg_catalog.pg_get_expr", recipe, StringComparison.Ordinal);
         foreach (var restrictedAttribute in new[]
                  {
                      "rolcanlogin", "rolsuper", "rolcreatedb", "rolcreaterole", "rolreplication", "rolbypassrls",
