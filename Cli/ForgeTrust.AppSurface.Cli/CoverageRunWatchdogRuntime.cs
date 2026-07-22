@@ -361,8 +361,11 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         var write = await WriteArtifactAsync(artifact);
         var primary = evaluation.NewlyStale[0];
         var artifactText = write.Success ? QuotePath(write.Path!) : $"unavailable ({write.Detail})";
+        var identity = primary.Project is null
+            ? $"operation={Kind(primary.Kind)}"
+            : $"operation={Kind(primary.Kind)}; project={QuotePath(primary.Project)}";
         await WriteConsoleAsync(
-            $"Coverage watchdog warning: operation={Kind(primary.Kind)}; project={QuotePath(primary.Project)}; " +
+            $"Coverage watchdog warning: {identity}; " +
             $"no-progress={WholeSeconds(primary.NoProgress)}s; concurrent-stalls={(evaluation.NewlyStale.Count - 1).ToString(CultureInfo.InvariantCulture)}; artifact={artifactText}");
         if (!write.Success)
         {
@@ -406,7 +409,9 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
 
             var artifactText = write.Success ? QuotePath(write.Path!) : $"unavailable ({write.Detail})";
             exception = CreateTerminalException(evaluation, terminal, cleanup, artifactText);
-            await WriteConsoleAsync(exception.Message, error: true);
+            // A healthy earlier heartbeat may still own the console briefly. Give it the
+            // bounded console window so the authoritative terminal diagnostic is not dropped.
+            await WriteConsoleAsync(exception.Message, error: true, waitForTurn: true);
             await WriteConsoleAsync(RenderHeartbeat(evaluation.Snapshot, evaluation.NewlyStale));
         }
         catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
@@ -446,7 +451,9 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         => CommitStagedFiles([(stagedPath, destinationPath)]);
 
     /// <summary>
-    /// Atomically claims the terminal gate and promotes a related set of staged files without a terminal interleaving.
+    /// Claims the terminal gate and promotes a related set of staged files without a terminal interleaving.
+    /// Each same-directory move is atomic; if a later move fails, earlier promotions and replaced
+    /// destinations are rolled back on a best-effort basis before the original exception is rethrown.
     /// </summary>
     /// <param name="files">Private staged paths paired with canonical AppSurface-owned destinations.</param>
     /// <exception cref="ArgumentNullException"><paramref name="files"/> is <see langword="null"/>.</exception>
@@ -484,13 +491,87 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                 throw new OperationCanceledException(RunCancellationToken);
             }
 
-            foreach (var (stagedPath, destinationPath) in files)
+            var promotions = files
+                .Select(file => new StagedPromotion(file.StagedPath, file.DestinationPath))
+                .ToArray();
+            try
             {
-                // Same-directory atomic rename is the terminal critical section. There is no
-                // await or callback between the gate check and commit, so abandoned async work
-                // never retains publication authority after a terminal claim.
-                File.Move(stagedPath, destinationPath, overwrite: true);
+                foreach (var promotion in promotions)
+                {
+                    if (File.Exists(promotion.DestinationPath))
+                    {
+                        var directory = Path.GetDirectoryName(Path.GetFullPath(promotion.DestinationPath))!;
+                        promotion.BackupPath = Path.Join(
+                            directory,
+                            $".{Path.GetFileName(promotion.DestinationPath)}.{Guid.NewGuid():N}.watchdog-backup");
+                        File.Move(promotion.DestinationPath, promotion.BackupPath);
+                    }
+
+                    // Same-directory atomic rename is the terminal critical section. There is no
+                    // await or callback between the gate check and commit, so abandoned async work
+                    // never retains publication authority after a terminal claim.
+                    File.Move(promotion.StagedPath, promotion.DestinationPath);
+                    promotion.Promoted = true;
+                }
             }
+            catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
+            {
+                RollBackPromotions(promotions);
+                throw;
+            }
+
+            foreach (var promotion in promotions)
+            {
+                TryDeletePromotionBackup(promotion.BackupPath);
+            }
+        }
+    }
+
+    private static void RollBackPromotions(IReadOnlyList<StagedPromotion> promotions)
+    {
+        for (var index = promotions.Count - 1; index >= 0; index--)
+        {
+            var promotion = promotions[index];
+            if (promotion.Promoted)
+            {
+                try
+                {
+                    File.Move(promotion.DestinationPath, promotion.StagedPath, overwrite: true);
+                }
+                catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
+                {
+                    // Continue restoring any destination that was replaced before the failure.
+                }
+            }
+
+            if (promotion.BackupPath is not null)
+            {
+                try
+                {
+                    File.Move(promotion.BackupPath, promotion.DestinationPath, overwrite: true);
+                }
+                catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
+                {
+                    // Rollback is best effort; the original promotion exception remains authoritative.
+                }
+            }
+        }
+    }
+
+    private static void TryDeletePromotionBackup(string? backupPath)
+    {
+        if (backupPath is null)
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(backupPath);
+        }
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
+        {
+            // A private backup is safer than failing an otherwise complete artifact promotion.
         }
     }
 
@@ -929,7 +1010,29 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
 
     private static long WholeSeconds(TimeSpan value) => checked((long)Math.Floor(value.TotalSeconds));
     private static string Kind(CoverageRunWatchdogOperationKind kind) => kind.ToString().ToLowerInvariant();
-    private static string QuotePath(string? value) => value is null ? "null" : System.Text.Json.JsonSerializer.Serialize(value.Length <= 512 ? value : value[..512]);
+    private static string QuotePath(string? value)
+    {
+        if (value is null)
+        {
+            return "null";
+        }
+
+        var bounded = value.Length <= 512 ? value : value[..512];
+        if (bounded.Length > 0 && char.IsHighSurrogate(bounded[^1]))
+        {
+            bounded = bounded[..^1];
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(bounded);
+    }
+
+    private sealed class StagedPromotion(string stagedPath, string destinationPath)
+    {
+        public string StagedPath { get; } = stagedPath;
+        public string DestinationPath { get; } = destinationPath;
+        public string? BackupPath { get; set; }
+        public bool Promoted { get; set; }
+    }
 
     private sealed class ProcessReservation
     {
@@ -972,9 +1075,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                         // for it. Waiting for the captured root here ensures cleanup is not
                         // reported complete while the owned root is still alive. Descendant
                         // guarantees remain bounded by the platform API's documented limits.
-                        process.WaitForExit();
-
-                        return true;
+                        return process.WaitForExit(checked((int)CleanupTimeout.TotalMilliseconds));
                     }
                     catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
                     {

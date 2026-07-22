@@ -4097,6 +4097,36 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void CoverageCliConsumerProofWorkflow_ResolvesActualFixtureTargetDirectory()
+    {
+        var projectDirectory = CombineSafeChildPath(_repositoryRoot, "Smoke.Tests");
+        var targetDirectory = CombineSafeChildPath(projectDirectory, "bin/Release/net-next");
+        Directory.CreateDirectory(targetDirectory);
+        File.WriteAllText(CombineSafeChildPath(targetDirectory, "Smoke.Tests.dll"), string.Empty);
+        File.WriteAllText(CombineSafeChildPath(targetDirectory, "Smoke.Tests.deps.json"), "{}");
+
+        var resolved = CoverageCliConsumerProofWorkflow.ResolveFixtureOutputDirectory(projectDirectory);
+
+        Assert.Equal(targetDirectory, resolved);
+    }
+
+    [Fact]
+    public void CoverageCliConsumerProofWorkflow_RejectsAmbiguousFixtureTargetDirectories()
+    {
+        var projectDirectory = CombineSafeChildPath(_repositoryRoot, "Smoke.Tests");
+        foreach (var target in new[] { "bin/Debug/net9.0", "bin/Debug/net10.0" })
+        {
+            var targetDirectory = CombineSafeChildPath(projectDirectory, target);
+            Directory.CreateDirectory(targetDirectory);
+            File.WriteAllText(CombineSafeChildPath(targetDirectory, "Smoke.Tests.dll"), string.Empty);
+            File.WriteAllText(CombineSafeChildPath(targetDirectory, "Smoke.Tests.deps.json"), "{}");
+        }
+
+        Assert.Throws<InvalidOperationException>(
+            () => CoverageCliConsumerProofWorkflow.ResolveFixtureOutputDirectory(projectDirectory));
+    }
+
+    [Fact]
     public void CoverageCliConsumerProofWorkflow_PrepareWorkDirectoryRejectsUnsafeDeletionTargets()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -6528,6 +6558,11 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 {
                     CreateCoverageRunArtifacts(outputDirectory, _createExcludedProjectArtifacts);
                 }
+
+                var testHostDirectory = Path.Join(request.WorkingDirectory, "Smoke.Tests", "bin", "Debug", "net10.0");
+                Directory.CreateDirectory(testHostDirectory);
+                File.WriteAllText(Path.Join(testHostDirectory, "Smoke.Tests.dll"), string.Empty);
+                File.WriteAllText(Path.Join(testHostDirectory, "Smoke.Tests.deps.json"), "{}");
 
                 return Task.FromResult(new ExternalCommandResult(
                     0,

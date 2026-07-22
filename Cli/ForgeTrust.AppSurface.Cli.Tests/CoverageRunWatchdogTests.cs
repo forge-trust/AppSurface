@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using CliFx;
 using CliFx.Infrastructure;
@@ -669,6 +670,7 @@ public sealed class CoverageRunWatchdogTests
         using var artifact = JsonDocument.Parse(await File.ReadAllBytesAsync(artifactPath));
         Assert.Equal("warning", artifact.RootElement.GetProperty("outcome").GetString());
         Assert.Equal("discovery", artifact.RootElement.GetProperty("primary").GetProperty("kind").GetString());
+        Assert.DoesNotContain("project=null", console.ReadOutputString(), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -893,6 +895,90 @@ public sealed class CoverageRunWatchdogTests
 
         Assert.True(File.Exists(firstStaged));
         Assert.False(File.Exists(firstDestination));
+    }
+
+    [Fact]
+    public async Task Runtime_ShouldRollBackEarlierStagedPromotionsWhenALaterMoveFails()
+    {
+        using var directory = new TemporaryDirectory();
+        var firstStaged = Path.Join(directory.Path, ".first.staged");
+        var firstDestination = Path.Join(directory.Path, "first.json");
+        var secondStaged = Path.Join(directory.Path, ".second.staged");
+        var secondDestination = Path.Join(directory.Path, "missing", "second.json");
+        await File.WriteAllTextAsync(firstStaged, "new-first");
+        await File.WriteAllTextAsync(firstDestination, "old-first");
+        await File.WriteAllTextAsync(secondStaged, "new-second");
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            CoverageRunWatchdogOptions.Default,
+            CancellationToken.None);
+
+        Assert.ThrowsAny<IOException>(() => runtime.CommitStagedFiles(
+            [(firstStaged, firstDestination), (secondStaged, secondDestination)]));
+        await runtime.CompleteAsync();
+
+        Assert.Equal("new-first", await File.ReadAllTextAsync(firstStaged));
+        Assert.Equal("old-first", await File.ReadAllTextAsync(firstDestination));
+        Assert.Equal("new-second", await File.ReadAllTextAsync(secondStaged));
+        Assert.False(File.Exists(secondDestination));
+        Assert.Empty(Directory.EnumerateFiles(directory.Path, "*.watchdog-backup", SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
+    public async Task Runtime_ShouldRenderBoundedProjectIdentityWithoutSplittingASurrogatePair()
+    {
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Fail,
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(50)),
+            CancellationToken.None,
+            artifactWriter: new StubArtifactWriter(CoverageRunWatchdogArtifactWriteResult.Success));
+        var project = new string('p', 511) + "😀";
+        runtime.Register(
+            new CoverageRunWatchdogOperation("project:unicode", CoverageRunWatchdogOperationKind.Project, 0, project),
+            CoverageRunWatchdogOperationState.Running);
+
+        var terminal = await runtime.TerminalTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(124, terminal.ExitCode);
+        Assert.Contains(new string('p', 511), terminal.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("😀", terminal.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Runtime_ShouldWaitForHealthyBusyConsoleBeforeWritingTerminalDiagnostic()
+    {
+        using var input = new MemoryStream();
+        using var output = new GateWriteStream();
+        using var error = new MemoryStream();
+        using var console = new FakeConsole(input, output, error);
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Fail,
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(50)),
+            CancellationToken.None,
+            consoleTimeout: TimeSpan.FromSeconds(1),
+            artifactWriter: new StubArtifactWriter(CoverageRunWatchdogArtifactWriteResult.Success));
+        var busyWrite = runtime.WriteOutputLineAsync("earlier output");
+        await output.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        runtime.Register(Project("project-a", 0), CoverageRunWatchdogOperationState.Running);
+
+        await Task.Delay(100);
+        output.Release.Set();
+        var terminal = await runtime.TerminalTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await busyWrite;
+
+        Assert.Equal(124, terminal.ExitCode);
+        Assert.Contains("ASCOV121", Encoding.UTF8.GetString(error.ToArray()), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1191,6 +1277,26 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogArtifact artifact,
             CancellationToken cancellationToken)
             => Task.FromResult(result);
+    }
+
+    private sealed class GateWriteStream : MemoryStream
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ManualResetEventSlim Release { get; } = new(initialState: false);
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            Entered.TrySetResult();
+            Release.Wait();
+            base.Write(buffer, offset, count);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            Release.Set();
+            Release.Dispose();
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class ThrowingArtifactWriter : ICoverageRunWatchdogArtifactWriter

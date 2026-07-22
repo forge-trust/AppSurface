@@ -108,6 +108,7 @@ internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogAr
         {
             if (permission.TryRevoke())
             {
+                ObserveFault(writeTask);
                 cancellationToken.ThrowIfCancellationRequested();
             }
 

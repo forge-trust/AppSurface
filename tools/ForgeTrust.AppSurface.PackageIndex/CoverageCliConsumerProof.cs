@@ -267,7 +267,21 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return BuildReport(context, commands, artifacts);
         }
 
-        var fixtureOutputDirectory = Path.Join(fixtureDirectory, "Smoke.Tests", "bin", "Debug", "net10.0");
+        string fixtureOutputDirectory;
+        try
+        {
+            fixtureOutputDirectory = ResolveFixtureOutputDirectory(Path.Join(fixtureDirectory, "Smoke.Tests"));
+        }
+        catch (InvalidOperationException)
+        {
+            commands[^1] = coverageRunCommand with
+            {
+                Succeeded = false,
+                FailureReason = "Coverage run did not produce one unambiguous Smoke.Tests test-host output directory."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
         var quietTrigger = Path.Join(fixtureOutputDirectory, "watchdog-quiet.trigger");
         var noisyTrigger = Path.Join(fixtureOutputDirectory, "watchdog-noisy.trigger");
         var failureTrigger = Path.Join(fixtureOutputDirectory, "ordinary-failure.trigger");
@@ -638,6 +652,39 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
               </packageSources>
             </configuration>
             """;
+    }
+
+    /// <summary>Resolves the built test-host directory used by the generated watchdog fixture.</summary>
+    /// <param name="projectDirectory">Generated test project directory containing the build output tree.</param>
+    /// <returns>The single directory containing both the project assembly and dependency manifest.</returns>
+    /// <exception cref="ArgumentException"><paramref name="projectDirectory" /> is empty or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The build produced no matching test-host output directory or more than one unambiguous candidate.
+    /// </exception>
+    /// <remarks>
+    /// The proof discovers the actual output instead of assuming a configuration or target framework, so template
+    /// framework changes cannot silently disconnect trigger files from <see cref="AppContext.BaseDirectory" />.
+    /// </remarks>
+    internal static string ResolveFixtureOutputDirectory(string projectDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectDirectory);
+        var projectName = Path.GetFileName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectDirectory)));
+        var outputRoot = Path.Join(projectDirectory, "bin");
+        if (!Directory.Exists(outputRoot))
+        {
+            throw new InvalidOperationException("The fixture build output directory does not exist.");
+        }
+
+        var candidates = Directory
+            .EnumerateFiles(outputRoot, $"{projectName}.deps.json", SearchOption.AllDirectories)
+            .Select(Path.GetDirectoryName)
+            .Where(directory => directory is not null && File.Exists(Path.Join(directory, $"{projectName}.dll")))
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .Cast<string>()
+            .ToArray();
+        return candidates.Length == 1
+            ? candidates[0]
+            : throw new InvalidOperationException("The fixture build output directory is missing or ambiguous.");
     }
 
     /// <summary>
