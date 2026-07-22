@@ -107,15 +107,15 @@ public sealed class DurableSlice3ReferenceWorkloadTests
 
         if (shouldReclaim)
         {
-            Assert.NotNull(recovered);
-            Assert.Equal(checkpoint.ActivityId, recovered.ActivityId);
-            Assert.Equal(checkpoint.AttemptNumber + 1, recovered.AttemptNumber);
+            var claimed = recovered ?? throw new InvalidOperationException("Expected the expired Work claim to be reclaimed.");
+            Assert.Equal(checkpoint.ActivityId, claimed.ActivityId);
+            Assert.Equal(checkpoint.AttemptNumber + 1, claimed.AttemptNumber);
             var registration = new ReferenceCompletionRegistration(providerSafety);
             var prepared = DurableProviderWorkAdapter.Prepare(
                 registration,
                 ReferenceServiceProvider.Instance,
-                recovered.ToProviderClaim());
-            var permit = await store.TryAcquireEffectPermitAsync(recovered);
+                claimed.ToProviderClaim());
+            var permit = await store.TryAcquireEffectPermitAsync(claimed);
             Assert.NotNull(permit);
             evidence.Record("transaction", "effect-permit.acquire", "committed", "provider-owned");
             var result = await prepared.InvokeAsync();

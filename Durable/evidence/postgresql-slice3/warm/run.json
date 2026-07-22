@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
   "mode": "warm",
-  "startedAtUtc": "2026-07-20T05:31:08Z",
-  "elapsedSeconds": 23,
+  "startedAtUtc": "2026-07-20T06:46:59Z",
+  "elapsedSeconds": 22,
   "thresholdSeconds": 300,
   "postgresImage": "postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302",
   "imagePlatform": "linux/arm64",
   "hostOs": "Darwin",
   "hostArchitecture": "arm64",
-  "baseCommitSha": "d040188b7170326129af5be269f86c64afec6778",
+  "baseCommitSha": "de39bbf816d0f1da9e2e5927a7918416230a6866",
   "sourceState": "working-tree-fingerprint",
-  "sourceSha256": "6d066cf32beb2256b34896d7e3b4b5b250b66e086996abc9226bb702ef9131fe",
-  "scenarioSetSha256": "6de1401fed8f93b5f368e9d0afed3d7ba0beb02afcacf469316c17441391f0df",
+  "sourceSha256": "253558fd45b811ed762d1dca4e23bdfc000baa0e6d639109b4f897af50368299",
+  "scenarioSetSha256": "e741c3a94ac35946960740fc5408f80d8c0322b1408c580b70de4f5487e22783",
   "discoveredTests": 6,
   "result": "passed"
 }

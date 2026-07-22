@@ -1674,6 +1674,34 @@ public sealed class PostgreSqlDurableWorkStoreTests
     }
 
     [Fact]
+    public async Task RecordCompletion_MissingDispatchRollsBackWorkAndHistory()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var client = CreateClient(database.DataSource, epoch);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var request = CreateRequest("scope-completion-projection-rollback", "command-completion-projection-rollback");
+        var accepted = (await client.EnqueueAsync(request)).Value!;
+        var claim = await store.TryClaimAsync(Assert.Single(await store.DiscoverAsync(1)), "projection-worker");
+        var original = await ReadWorkStateAndRevisionAsync(database.DataSource, request.ScopeId, accepted.WorkId);
+        await DeleteDispatchAsync(database.DataSource, request.ScopeId, accepted.WorkId);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await store.RecordCompletionAsync(
+                claim!,
+                new PostgreSqlWorkCompletion(PostgreSqlWorkCompletionKind.Retry, "transient_failure", "{}")));
+
+        Assert.Contains("dispatch row", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            original,
+            await ReadWorkStateAndRevisionAsync(database.DataSource, request.ScopeId, accepted.WorkId));
+        Assert.Equal(
+            0,
+            await CountHistoryAsync(database.DataSource, request.ScopeId, accepted.WorkId, "completion_retry"));
+    }
+
+    [Fact]
     public async Task RequestCancellation_MissingDispatchRollsBackWorkHistoryAndCallback()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

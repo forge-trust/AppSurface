@@ -81,6 +81,22 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
+    public async Task RenamedMigrationHistory_FailsClosed()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await manager.ApplyAsync();
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            "UPDATE appsurface_durable.schema_migration SET name = 'renamed' WHERE version = 1;");
+
+        var status = await manager.GetStatusAsync();
+
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Inconsistent, status.Compatibility);
+        Assert.Contains("does not match", status.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task NonContiguousMigrationHistory_FailsClosed()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ForgeTrust.AppSurface.Durable.Tests.Support;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
@@ -25,7 +26,9 @@ public sealed class ReferenceWorkloadEvidenceTests
     [Fact]
     public async Task WriteAsync_RecordsOnlyAllowlistedOperationalEvidence()
     {
-        var directory = Path.Combine(Path.GetTempPath(), $"appsurface-reference-evidence-{Guid.NewGuid():N}");
+        var directory = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            $"appsurface-reference-evidence-{Guid.NewGuid():N}");
         var originalDirectory = Environment.GetEnvironmentVariable(ReferenceWorkloadEvidence.DirectoryEnvironmentVariable);
         var originalMode = Environment.GetEnvironmentVariable(ReferenceWorkloadEvidence.ModeEnvironmentVariable);
         var originalRunId = Environment.GetEnvironmentVariable(ReferenceWorkloadEvidence.RunIdEnvironmentVariable);
@@ -79,7 +82,9 @@ public sealed class ReferenceWorkloadEvidenceTests
         var originalDirectory = Environment.GetEnvironmentVariable(ReferenceWorkloadEvidence.DirectoryEnvironmentVariable);
         var originalMode = Environment.GetEnvironmentVariable(ReferenceWorkloadEvidence.ModeEnvironmentVariable);
         var originalRunId = Environment.GetEnvironmentVariable(ReferenceWorkloadEvidence.RunIdEnvironmentVariable);
-        var directory = Path.Combine(Path.GetTempPath(), $"appsurface-reference-evidence-invalid-{Guid.NewGuid():N}");
+        var directory = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            $"appsurface-reference-evidence-invalid-{Guid.NewGuid():N}");
         try
         {
             Environment.SetEnvironmentVariable(ReferenceWorkloadEvidence.DirectoryEnvironmentVariable, directory);

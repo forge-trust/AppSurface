@@ -56,10 +56,10 @@ crash-recovery, provider-invocation, and operator-action checkpoints. Evidence n
 credential, SQL parameter, payload, actor-provided value, or provider response. Exact log wording is not API;
 committed-state assertions are.
 
-The checked-in [cold](evidence/postgresql-slice3/cold/run.json) and
-[warm](evidence/postgresql-slice3/warm/run.json) manifests record the July 20, 2026 Apple arm64 proof. Both discovered
-and passed six workload cases. The cold run, including the immutable image pull, completed in 32 seconds against the
-600-second target; the warm run completed in 23 seconds against the 300-second target. Both manifests identify the
+The checked-in [cold](https://github.com/forge-trust/AppSurface/blob/main/Durable/evidence/postgresql-slice3/cold/run.json) and
+[warm](https://github.com/forge-trust/AppSurface/blob/main/Durable/evidence/postgresql-slice3/warm/run.json) manifests record the July 20, 2026 Apple arm64 proof. Both discovered
+and passed six workload cases. The cold run, including the immutable image pull, completed in 29 seconds against the
+600-second target; the warm run completed in 22 seconds against the 300-second target. Both manifests identify the
 Linux arm64 image and Darwin arm64 host, share the same SHA-256 source fingerprint, and bind the exact six freshly
 written scenario documents with a second SHA-256 fingerprint. Their scenario documents are the operation-level
 evidence; the base commit is lineage, not a claim that the tested working tree was already committed.

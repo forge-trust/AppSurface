@@ -48,6 +48,8 @@ public sealed class PostgreSqlDurableRetryDelayCalculatorTests
         Assert.Throws<ArgumentOutOfRangeException>(() => PostgreSqlDurableRetryDelayCalculator.Calculate(
             "exponential-v1", 1, TimeSpan.Zero, TimeSpan.FromMinutes(1)));
         Assert.Throws<ArgumentOutOfRangeException>(() => PostgreSqlDurableRetryDelayCalculator.Calculate(
+            "exponential-v1", 1, TimeSpan.FromSeconds(1), TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => PostgreSqlDurableRetryDelayCalculator.Calculate(
             "exponential-v1", 1, TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(1)));
     }
 }

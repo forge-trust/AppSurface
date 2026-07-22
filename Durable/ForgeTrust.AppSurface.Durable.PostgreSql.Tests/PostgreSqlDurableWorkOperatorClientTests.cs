@@ -528,6 +528,147 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
     }
 
     [Theory]
+    [InlineData(false, DurableProblemCodes.OperatorCommandInProgress)]
+    [InlineData(true, DurableProblemCodes.CommandConflict)]
+    public async Task Reconcile_CommandInsertedWhileWaitingForWorkLockReturnsDurableReplayOutcome(
+        bool conflicting,
+        string expectedProblemCode)
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var registration = new OperatorRegistration(
+            $"operator.reconcile-insert-race-{conflicting}",
+            DurableProviderSafety.ReconcileBeforeRetry,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.NotApplied, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId($"operator-reconcile-insert-race-{conflicting}");
+        var accepted = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, $"reconcile-insert-race-{conflicting}");
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+        var request = new DurableWorkReconcileRequest(
+            scope,
+            accepted.WorkId,
+            new DurableCommandId($"operator-reconcile-insert-race-command-{conflicting}"),
+            "operator-test",
+            "insert-race",
+            revision);
+        var persistedFingerprint = conflicting
+            ? new DurableWorkReconcileRequest(
+                scope,
+                accepted.WorkId,
+                request.CommandId,
+                request.ActorId,
+                "conflicting-insert-race",
+                revision).Fingerprint
+            : request.Fingerprint;
+
+        await using var blockerConnection = await database.DataSource.OpenConnectionAsync();
+        await using var blockerTransaction = await blockerConnection.BeginTransactionAsync();
+        await SetScopeAsync(blockerConnection, blockerTransaction, scope);
+        await using (var blocker = new NpgsqlCommand(
+            "SELECT 1 FROM appsurface_durable.work WHERE scope_id = @scope_id AND work_id = @work_id FOR UPDATE;",
+            blockerConnection,
+            blockerTransaction))
+        {
+            blocker.Parameters.AddWithValue("scope_id", scope.Value);
+            blocker.Parameters.AddWithValue("work_id", accepted.WorkId.Value);
+            _ = await blocker.ExecuteScalarAsync();
+        }
+
+        var reconciliation = operators.ReconcileAsync(request).AsTask();
+        await WaitForLockWaitersAsync(database.DataSource, 1);
+        await SeedOperatorCommandAsync(
+            blockerConnection,
+            blockerTransaction,
+            scope,
+            accepted.WorkId,
+            request.CommandId,
+            "reconcile",
+            request.ActorId,
+            conflicting ? "conflicting-insert-race" : request.ReasonCode,
+            persistedFingerprint,
+            false,
+            "suspended_reconciliation_required",
+            revision);
+        await blockerTransaction.CommitAsync();
+
+        var result = await reconciliation.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(expectedProblemCode, result.Problem!.Code);
+        Assert.Equal(0, registration.ReconciliationCount);
+    }
+
+    [Fact]
+    public async Task Reconcile_SameCommandAcrossDifferentWorkItemsContendingAtInsertReturnsConflict()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var registration = new OperatorRegistration(
+            "operator.reconcile-insert-conflict",
+            DurableProviderSafety.ReconcileBeforeRetry,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.NotApplied, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId("operator-reconcile-insert-conflict");
+        var first = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, "reconcile-insert-conflict-first");
+        var second = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, "reconcile-insert-conflict-second");
+        var firstRevision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            first.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+        var secondRevision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            second.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+        var commandId = new DurableCommandId("operator-reconcile-shared-insert-command");
+        var firstRequest = new DurableWorkReconcileRequest(
+            scope, first.WorkId, commandId, "operator-test", "first-work", firstRevision);
+        var secondRequest = new DurableWorkReconcileRequest(
+            scope, second.WorkId, commandId, "operator-test", "second-work", secondRevision);
+
+        await using var blockerConnection = await database.DataSource.OpenConnectionAsync();
+        await using var blockerTransaction = await blockerConnection.BeginTransactionAsync();
+        await using (var blocker = new NpgsqlCommand(
+            "LOCK TABLE appsurface_durable.work_operator_command IN SHARE MODE;",
+            blockerConnection,
+            blockerTransaction))
+        {
+            await blocker.ExecuteNonQueryAsync();
+        }
+
+        var firstReconciliation = operators.ReconcileAsync(firstRequest).AsTask();
+        var secondReconciliation = operators.ReconcileAsync(secondRequest).AsTask();
+        await WaitForLockWaitersAsync(database.DataSource, 2);
+        await blockerTransaction.CommitAsync();
+        var results = await Task.WhenAll(firstReconciliation, secondReconciliation)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Contains(results, result => result.IsSuccess);
+        var conflict = Assert.Single(results, result => !result.IsSuccess);
+        Assert.Equal(DurableProblemCodes.CommandConflict, conflict.Problem!.Code);
+        Assert.Equal(1, registration.ReconciliationCount);
+    }
+
+    [Theory]
     [InlineData(false, DurableProblemCodes.CommandConflict)]
     [InlineData(true, null)]
     public async Task Reconcile_PreExistingCommandReturnsConflictOrCompletedReplay(
@@ -1229,7 +1370,7 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
 
         var first = operators.ResolveAsync(request).AsTask();
         var second = operators.ResolveAsync(request).AsTask();
-        await Task.Delay(100);
+        await WaitForLockWaitersAsync(database.DataSource, 2);
         await blockerTransaction.CommitAsync();
         var results = await Task.WhenAll(first, second);
 
@@ -1270,13 +1411,166 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         }
 
         var conflictTasks = conflictRequests.Select(request => operators.ResolveAsync(request).AsTask()).ToArray();
-        await Task.Delay(100);
+        await WaitForLockWaitersAsync(database.DataSource, 2);
         await conflictTransaction.CommitAsync();
         var conflictResults = await Task.WhenAll(conflictTasks);
 
         Assert.Single(conflictResults, result => result.IsSuccess);
         Assert.Single(conflictResults, result =>
             !result.IsSuccess && result.Problem!.Code == DurableProblemCodes.CommandConflict);
+    }
+
+    [Fact]
+    public async Task Resolve_SameCommandAcrossDifferentWorkItemsContendingAtInsertReturnsConflict()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var registration = new OperatorRegistration(
+            "operator.resolve-insert-conflict",
+            DurableProviderSafety.ManualResolution,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Unknown, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId("operator-resolve-insert-conflict");
+        var first = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, "resolve-insert-conflict-first");
+        var second = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, "resolve-insert-conflict-second");
+        var firstRevision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            first.WorkId,
+            "suspended_manual_resolution",
+            "ambiguous_external_outcome");
+        var secondRevision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            second.WorkId,
+            "suspended_manual_resolution",
+            "ambiguous_external_outcome");
+        var commandId = new DurableCommandId("operator-resolve-shared-insert-command");
+        var firstRequest = new DurableWorkManualResolutionRequest(
+            scope,
+            first.WorkId,
+            commandId,
+            "operator-test",
+            "first-work",
+            firstRevision,
+            DurableManualResolutionKind.ProvenNotApplied);
+        var secondRequest = new DurableWorkManualResolutionRequest(
+            scope,
+            second.WorkId,
+            commandId,
+            "operator-test",
+            "second-work",
+            secondRevision,
+            DurableManualResolutionKind.ProvenNotApplied);
+
+        await using var blockerConnection = await database.DataSource.OpenConnectionAsync();
+        await using var blockerTransaction = await blockerConnection.BeginTransactionAsync();
+        await using (var blocker = new NpgsqlCommand(
+            "LOCK TABLE appsurface_durable.work_operator_command IN SHARE MODE;",
+            blockerConnection,
+            blockerTransaction))
+        {
+            await blocker.ExecuteNonQueryAsync();
+        }
+
+        var firstResolution = operators.ResolveAsync(firstRequest).AsTask();
+        var secondResolution = operators.ResolveAsync(secondRequest).AsTask();
+        await WaitForLockWaitersAsync(database.DataSource, 2);
+        await blockerTransaction.CommitAsync();
+        var results = await Task.WhenAll(firstResolution, secondResolution)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Contains(results, result => result.IsSuccess);
+        var conflict = Assert.Single(results, result => !result.IsSuccess);
+        Assert.Equal(DurableProblemCodes.CommandConflict, conflict.Problem!.Code);
+    }
+
+    [Theory]
+    [InlineData(false, DurableProblemCodes.OperatorCommandInProgress)]
+    [InlineData(true, DurableProblemCodes.CommandConflict)]
+    public async Task Resolve_CommandInsertedWhileWaitingForWorkLockReturnsDurableReplayOutcome(
+        bool conflicting,
+        string expectedProblemCode)
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var registration = new OperatorRegistration(
+            $"operator.resolve-insert-race-{conflicting}",
+            DurableProviderSafety.ManualResolution,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.Unknown, null));
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource, registry, NullServices.Instance, epoch);
+        var scope = new DurableScopeId($"operator-resolve-insert-race-{conflicting}");
+        var accepted = await AcceptAndPermitAsync(
+            client, database.DataSource, epoch, registration, scope, $"resolve-insert-race-{conflicting}");
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_manual_resolution",
+            "ambiguous_external_outcome");
+        var request = new DurableWorkManualResolutionRequest(
+            scope,
+            accepted.WorkId,
+            new DurableCommandId($"operator-resolve-insert-race-command-{conflicting}"),
+            "operator-test",
+            "insert-race",
+            revision,
+            DurableManualResolutionKind.ProvenNotApplied);
+        var persistedFingerprint = conflicting
+            ? new DurableWorkManualResolutionRequest(
+                scope,
+                accepted.WorkId,
+                request.CommandId,
+                request.ActorId,
+                "conflicting-insert-race",
+                revision,
+                DurableManualResolutionKind.ProvenNotApplied).Fingerprint
+            : request.Fingerprint;
+
+        await using var blockerConnection = await database.DataSource.OpenConnectionAsync();
+        await using var blockerTransaction = await blockerConnection.BeginTransactionAsync();
+        await SetScopeAsync(blockerConnection, blockerTransaction, scope);
+        await using (var blocker = new NpgsqlCommand(
+            "SELECT 1 FROM appsurface_durable.work WHERE scope_id = @scope_id AND work_id = @work_id FOR UPDATE;",
+            blockerConnection,
+            blockerTransaction))
+        {
+            blocker.Parameters.AddWithValue("scope_id", scope.Value);
+            blocker.Parameters.AddWithValue("work_id", accepted.WorkId.Value);
+            _ = await blocker.ExecuteScalarAsync();
+        }
+
+        var resolution = operators.ResolveAsync(request).AsTask();
+        await WaitForLockWaitersAsync(database.DataSource, 1);
+        await SeedOperatorCommandAsync(
+            blockerConnection,
+            blockerTransaction,
+            scope,
+            accepted.WorkId,
+            request.CommandId,
+            "manual_resolve",
+            request.ActorId,
+            conflicting ? "conflicting-insert-race" : request.ReasonCode,
+            persistedFingerprint,
+            false,
+            "suspended_manual_resolution",
+            revision);
+        await blockerTransaction.CommitAsync();
+
+        var result = await resolution.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(expectedProblemCode, result.Problem!.Code);
     }
 
     [Fact]
@@ -1585,6 +1879,23 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         return epoch;
     }
 
+    private static async ValueTask WaitForLockWaitersAsync(NpgsqlDataSource dataSource, int expectedCount)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            await using var command = dataSource.CreateCommand(
+                "SELECT count(*) FROM pg_catalog.pg_stat_activity WHERE state = 'active' AND wait_event_type = 'Lock';");
+            if ((long)(await command.ExecuteScalarAsync())! >= expectedCount)
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+
+        throw new TimeoutException($"Expected {expectedCount} PostgreSQL lock waiter(s).");
+    }
+
     private static async ValueTask<PostgreSqlDurableWorkOptions> OptionsAsync(NpgsqlDataSource dataSource, Guid epoch)
     {
         var status = await new PostgreSqlDurableRuntimeSchemaManager(dataSource).GetStatusAsync();
@@ -1757,6 +2068,36 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         await using var connection = await dataSource.OpenConnectionAsync();
         await using var transaction = await connection.BeginTransactionAsync();
         await SetScopeAsync(connection, transaction, scope);
+        await SeedOperatorCommandAsync(
+            connection,
+            transaction,
+            scope,
+            work,
+            commandId,
+            commandType,
+            actorId,
+            reasonCode,
+            fingerprint,
+            completed,
+            resultingState,
+            resultingRevision);
+        await transaction.CommitAsync();
+    }
+
+    private static async ValueTask SeedOperatorCommandAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        DurableScopeId scope,
+        DurableWorkId work,
+        DurableCommandId commandId,
+        string commandType,
+        string actorId,
+        string reasonCode,
+        DurableCommandFingerprint fingerprint,
+        bool completed,
+        string resultingState,
+        long resultingRevision)
+    {
         await using var command = new NpgsqlCommand(
             """
             INSERT INTO appsurface_durable.work_operator_command
@@ -1784,7 +2125,6 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         command.Parameters.AddWithValue("resulting_state", resultingState);
         command.Parameters.AddWithValue("resulting_revision", resultingRevision);
         Assert.Equal(1, await command.ExecuteNonQueryAsync());
-        await transaction.CommitAsync();
     }
 
     private static async ValueTask MutateOperatorCommandAuthorityAsync(

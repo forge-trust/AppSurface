@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Text;
 using ForgeTrust.AppSurface.Durable.PostgreSql;
 using ForgeTrust.AppSurface.Durable.Tests.Support;
 using Npgsql;
@@ -53,6 +55,32 @@ public sealed class DurableSchemaContractTests
         var explicitAssemblyFailure = Assert.Throws<InvalidOperationException>(
             () => DurablePostgreSqlMigrationCatalog.Load(typeof(DurableSchemaContractTests).Assembly));
         Assert.Contains("contains no embedded migrations", explicitAssemblyFailure.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Fixture.Migrations.0002_gap.sql", "must be contiguous")]
+    [InlineData("Fixture.Migrations.bad.sql", "NNNN_name.sql")]
+    public void MigrationCatalog_RejectsInvalidEmbeddedResources(string resourceName, string expectedMessage)
+    {
+        var assembly = new ResourceAssembly([resourceName], new Dictionary<string, byte[]>
+        {
+            [resourceName] = Encoding.UTF8.GetBytes("SELECT 1;"),
+        });
+
+        var exception = Assert.Throws<InvalidOperationException>(() => DurablePostgreSqlMigrationCatalog.Load(assembly));
+
+        Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MigrationCatalog_RejectsUnreadableEmbeddedResource()
+    {
+        const string resourceName = "Fixture.Migrations.0001_missing.sql";
+        var assembly = new ResourceAssembly([resourceName], new Dictionary<string, byte[]>());
+
+        var exception = Assert.Throws<InvalidOperationException>(() => DurablePostgreSqlMigrationCatalog.Load(assembly));
+
+        Assert.Contains("could not be read", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -344,5 +372,15 @@ public sealed class DurableSchemaContractTests
         }
 
         return count;
+    }
+
+    private sealed class ResourceAssembly(
+        string[] resourceNames,
+        IReadOnlyDictionary<string, byte[]> resources) : Assembly
+    {
+        public override string[] GetManifestResourceNames() => resourceNames;
+
+        public override Stream? GetManifestResourceStream(string name) =>
+            resources.TryGetValue(name, out var content) ? new MemoryStream(content, writable: false) : null;
     }
 }

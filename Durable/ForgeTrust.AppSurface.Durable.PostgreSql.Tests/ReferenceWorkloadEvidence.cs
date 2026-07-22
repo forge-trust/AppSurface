@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using ForgeTrust.AppSurface.Durable.Tests.Support;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
@@ -118,7 +119,7 @@ internal sealed class ReferenceWorkloadEvidence
             _stopwatch.ElapsedMilliseconds,
             finalState,
             _events.ToArray());
-        var path = Path.Combine(directory, $"{_scenario}.json");
+        var path = TestPathUtils.PathUnder(directory, $"{_scenario}.json");
         await using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         await JsonSerializer.SerializeAsync(
             stream,

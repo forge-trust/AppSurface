@@ -1,11 +1,11 @@
 {
   "SchemaVersion": 1,
-  "RunId": "20260720T053031Z-73214",
+  "RunId": "20260720T064618Z-16607",
   "Scenario": "operator-disable-scope",
   "Mode": "cold",
   "DatabaseSource": "postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302",
-  "StartedAtUtc": "2026-07-20T05:31:02.475745+00:00",
-  "ElapsedMilliseconds": 1298,
+  "StartedAtUtc": "2026-07-20T06:46:47.412046+00:00",
+  "ElapsedMilliseconds": 1284,
   "FinalState": "disabled",
   "Events": [
     {
@@ -14,7 +14,7 @@
       "Operation": "schema.apply-and-activate",
       "Outcome": "compatible",
       "TransactionBoundary": "migration-owner",
-      "ElapsedMilliseconds": 1284,
+      "ElapsedMilliseconds": 1271,
       "SourceElapsedMilliseconds": null
     },
     {
@@ -23,7 +23,7 @@
       "Operation": "work.accept",
       "Outcome": "committed",
       "TransactionBoundary": "provider-owned",
-      "ElapsedMilliseconds": 1288,
+      "ElapsedMilliseconds": 1275,
       "SourceElapsedMilliseconds": null
     },
     {
@@ -32,7 +32,7 @@
       "Operation": "scope.disable",
       "Outcome": "applied-and-audited",
       "TransactionBoundary": "provider-owned",
-      "ElapsedMilliseconds": 1295,
+      "ElapsedMilliseconds": 1282,
       "SourceElapsedMilliseconds": null
     },
     {
@@ -41,7 +41,7 @@
       "Operation": "work.accept",
       "Outcome": "scope-disabled",
       "TransactionBoundary": "provider-owned",
-      "ElapsedMilliseconds": 1297,
+      "ElapsedMilliseconds": 1284,
       "SourceElapsedMilliseconds": null
     }
   ]
