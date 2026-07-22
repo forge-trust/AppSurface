@@ -2868,6 +2868,7 @@ public sealed class CoverageRunTests
         var execution = runner.RunAsync(request, watchdog.RunCancellationToken);
         int? childProcessId = null;
         int? grandchildProcessId = null;
+        var processCleanupVerified = false;
         try
         {
             var childProcessIdTask = WaitForProcessIdAsync(childProcessIdFile, "child");
@@ -2884,6 +2885,7 @@ public sealed class CoverageRunTests
             Assert.Equal(124, exception.ExitCode);
             await WaitForProcessExitAsync(childProcessId.Value, "child");
             await WaitForProcessExitAsync(grandchildProcessId.Value, "grandchild");
+            processCleanupVerified = true;
             using (var artifact = JsonDocument.Parse(
                 await File.ReadAllBytesAsync(Path.Join(bootstrapDirectory, "coverage-watchdog.json"))))
             {
@@ -2914,8 +2916,11 @@ public sealed class CoverageRunTests
             }
             finally
             {
-                TryKillFixtureProcess(childProcessId);
-                TryKillFixtureProcess(grandchildProcessId);
+                if (!processCleanupVerified)
+                {
+                    TryKillFixtureProcess(childProcessId);
+                    TryKillFixtureProcess(grandchildProcessId);
+                }
             }
         }
     }
