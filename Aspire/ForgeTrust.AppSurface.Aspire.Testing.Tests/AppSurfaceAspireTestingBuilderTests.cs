@@ -453,7 +453,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     }
 
     [Fact]
-    public async Task BuildAsync_RealAspireFailureReproducesPinnedPartialHostLeak()
+    public async Task BuildAsync_RealAspireFailureDisposesCapturedPartialHostProvider()
     {
         var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
@@ -474,8 +474,164 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
 
         await Assert.ThrowsAsync<PartialHostBuildException>(() => builder.BuildAsync());
 
-        Assert.False(Assert.IsType<OwnedBuildProbe>(partialHostProbe).IsDisposed);
+        Assert.True(Assert.IsType<OwnedBuildProbe>(partialHostProbe).IsDisposed);
         Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public async Task BuildAsync_RealAspireFailureDisposesAsyncOnlyPartialHostService()
+    {
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        AsyncOwnedBuildProbe? partialHostProbe = null;
+        actualBuilder.Services.AddSingleton<AsyncOwnedBuildProbe>();
+        actualBuilder.Services.AddSingleton<IHostLifetime>(services =>
+        {
+            partialHostProbe = services.GetRequiredService<AsyncOwnedBuildProbe>();
+            throw new PartialHostBuildException();
+        });
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = new AppSurfaceAspireProfileTestingBuilder(actualBuilder, activation);
+
+        await Assert.ThrowsAsync<PartialHostBuildException>(() => builder.BuildAsync());
+
+        Assert.True(Assert.IsType<AsyncOwnedBuildProbe>(partialHostProbe).IsDisposed);
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public async Task BuildAsync_PartialProviderCleanupFailureDoesNotReplaceBuildFailure()
+    {
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        ThrowingDisposalProbe? partialHostProbe = null;
+        actualBuilder.Services.AddSingleton<ThrowingDisposalProbe>();
+        actualBuilder.Services.AddSingleton<IHostLifetime>(services =>
+        {
+            partialHostProbe = services.GetRequiredService<ThrowingDisposalProbe>();
+            throw new PartialHostBuildException();
+        });
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = new AppSurfaceAspireProfileTestingBuilder(actualBuilder, activation);
+
+        await Assert.ThrowsAsync<PartialHostBuildException>(() => builder.BuildAsync());
+
+        Assert.Equal(1, Assert.IsType<ThrowingDisposalProbe>(partialHostProbe).DisposeCount);
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public async Task BuildAsync_SuccessTransfersCapturedProviderOwnershipToApplication()
+    {
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        actualBuilder.Services.AddSingleton<OwnedBuildProbe>();
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = new AppSurfaceAspireProfileTestingBuilder(actualBuilder, activation);
+
+        var application = await builder.BuildAsync();
+        var ownedProbe = application.Services.GetRequiredService<OwnedBuildProbe>();
+
+        Assert.False(ownedProbe.IsDisposed);
+        await application.DisposeAsync();
+        Assert.True(ownedProbe.IsDisposed);
+        await builder.DisposeAsync();
+        Assert.Equal(1, ownedProbe.DisposeCount);
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public async Task BuildAsync_UnexpectedAspireHostRegistrationFailsClosedBeforeBuild()
+    {
+        var inner = A.Fake<IDistributedApplicationBuilder>();
+        A.CallTo(() => inner.Services).Returns(new ServiceCollection());
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = new AppSurfaceAspireProfileTestingBuilder(inner, activation);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => builder.BuildAsync());
+
+        Assert.Contains("pinned Aspire IHost service registration", exception.Message, StringComparison.Ordinal);
+        A.CallTo(() => inner.Build()).MustNotHaveHappened();
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public void ProviderLease_NullServiceCollectionIsRejected()
+    {
+        Assert.Throws<ArgumentNullException>(() => AspireBuildServiceProviderLease.Install(null!));
+    }
+
+    [Fact]
+    public void ProviderLease_KeyedHostRegistrationIsRejected()
+    {
+        var services = new ServiceCollection();
+        services.AddKeyedSingleton<IHost>("host", (_, _) => A.Fake<IHost>());
+
+        Assert.Throws<InvalidOperationException>(() => AspireBuildServiceProviderLease.Install(services));
+    }
+
+    [Fact]
+    public void ProviderLease_NonSingletonHostFactoryIsRejected()
+    {
+        var services = new ServiceCollection();
+        services.AddTransient(_ => A.Fake<IHost>());
+
+        Assert.Throws<InvalidOperationException>(() => AspireBuildServiceProviderLease.Install(services));
+    }
+
+    [Fact]
+    public void ProviderLease_NonFactoryHostRegistrationIsRejected()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<IHost>());
+
+        Assert.Throws<InvalidOperationException>(() => AspireBuildServiceProviderLease.Install(services));
+    }
+
+    [Fact]
+    public async Task ProviderLease_DisposesSynchronousCapturedProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(_ => A.Fake<IHost>());
+        var lease = AspireBuildServiceProviderLease.Install(services);
+        var provider = new SynchronousServiceProviderProbe();
+
+        _ = Assert.IsAssignableFrom<Func<IServiceProvider, object>>(services[^1].ImplementationFactory)(provider);
+        await lease.DisposeAsync();
+
+        Assert.Equal(1, provider.DisposeCount);
+    }
+
+    [Fact]
+    public async Task ProviderLease_RepeatedHostFactoryInvocationIsRejected()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(_ => A.Fake<IHost>());
+        var lease = AspireBuildServiceProviderLease.Install(services);
+        var provider = new SynchronousServiceProviderProbe();
+        var hostFactory = Assert.IsAssignableFrom<Func<IServiceProvider, object>>(services[^1].ImplementationFactory);
+
+        _ = hostFactory(provider);
+        var exception = Assert.Throws<InvalidOperationException>(() => hostFactory(provider));
+        await lease.DisposeAsync();
+
+        Assert.Contains("more than once", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(1, provider.DisposeCount);
     }
 
     [Fact]
@@ -491,7 +647,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
             releaseBuild.Wait(TimeSpan.FromSeconds(10));
             throw new InvalidOperationException("expected failure");
         });
-        var builder = new AppSurfaceAspireProfileTestingBuilder(inner, activation);
+        var builder = CreateTestingBuilder(inner, activation);
 
         var buildTask = Task.Run(async () => await builder.BuildAsync());
         Assert.True(enteredBuild.Wait(TimeSpan.FromSeconds(10)));
@@ -816,7 +972,13 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         IAsyncDisposable activation,
         IServiceCollection? services = null)
     {
-        A.CallTo(() => inner.Services).Returns(services ?? new ServiceCollection());
+        services ??= new ServiceCollection();
+        if (!services.Any(descriptor => descriptor.ServiceType == typeof(IHost)))
+        {
+            services.AddSingleton(_ => A.Fake<IHost>());
+        }
+
+        A.CallTo(() => inner.Services).Returns(services);
         return new AppSurfaceAspireProfileTestingBuilder(inner, activation);
     }
 
@@ -1129,7 +1291,33 @@ public sealed class OwnedBuildProbe : IDisposable
 {
     public bool IsDisposed { get; private set; }
 
-    public void Dispose() => IsDisposed = true;
+    public int DisposeCount { get; private set; }
+
+    public void Dispose()
+    {
+        IsDisposed = true;
+        DisposeCount++;
+    }
+}
+
+public sealed class AsyncOwnedBuildProbe : IAsyncDisposable
+{
+    public bool IsDisposed { get; private set; }
+
+    public ValueTask DisposeAsync()
+    {
+        IsDisposed = true;
+        return ValueTask.CompletedTask;
+    }
+}
+
+public sealed class SynchronousServiceProviderProbe : IServiceProvider, IDisposable
+{
+    public int DisposeCount { get; private set; }
+
+    public object? GetService(Type serviceType) => null;
+
+    public void Dispose() => DisposeCount++;
 }
 
 public sealed class ThrowingDisposalProbe : IDisposable

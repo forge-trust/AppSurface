@@ -96,9 +96,18 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     /// <summary>
     /// Builds the composed distributed application exactly once.
     /// </summary>
+    /// <remarks>
+    /// Immediately before delegating to the pinned Aspire builder, this method installs an internal ownership lease
+    /// around Aspire's root-provider host factory. A successful build transfers provider ownership to the returned
+    /// application. A non-process-fatal host-construction failure disposes the captured partial provider before profile
+    /// activation services, without replacing the original failure with non-fatal cleanup errors.
+    /// </remarks>
     /// <param name="cancellationToken">A token checked before and immediately after Aspire's synchronous build.</param>
     /// <returns>The built application. The caller controls starting, stopping, and primary disposal.</returns>
-    /// <exception cref="InvalidOperationException">The builder is already building, built, faulted, or disposing.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The builder is already building, built, faulted, or disposing; or the pinned Aspire host registration no longer
+    /// has the expected singleton-factory shape.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The builder has been disposed.</exception>
     /// <exception cref="OperationCanceledException">The operation is cancelled; any unreturned application is disposed.</exception>
     public async Task<DistributedApplication> BuildAsync(CancellationToken cancellationToken = default)
@@ -112,11 +121,14 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         }
 
         DistributedApplication? application = null;
+        AspireBuildServiceProviderLease? buildServiceProviderLease = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             var inner = _innerBuilder!;
+            buildServiceProviderLease = AspireBuildServiceProviderLease.Install(inner.Services);
             application = inner.Build();
+            buildServiceProviderLease.Release();
             cancellationToken.ThrowIfCancellationRequested();
             _application = application;
             Volatile.Write(ref _state, Built);
@@ -135,6 +147,17 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
                     catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
                     {
                         // Non-fatal cleanup must not replace the build or cancellation failure.
+                    }
+                }
+                else if (buildServiceProviderLease is not null)
+                {
+                    try
+                    {
+                        await buildServiceProviderLease.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
+                    {
+                        // Non-fatal cleanup must not replace the build failure.
                     }
                 }
 

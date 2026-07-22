@@ -12,7 +12,7 @@ Do not use it as a replacement for [Aspire's native testing API](https://learn.m
 
 Version 1 of this preview is compiled and tested against exactly `Aspire.Hosting` and `Aspire.Hosting.Testing` **13.4.4**. Keep the AppHost SDK and Aspire testing package on that patch line. Advancing Aspire requires an AppSurface package release that re-verifies the complete delegated `IDistributedApplicationTestingBuilder` surface, packed-package consumer compilation, failed-build cleanup, and build/start/disposal integration proof.
 
-Publication is currently blocked by a pinned Aspire 13.4.4 failure-path defect: if Aspire host construction throws after creating its internal service provider, `DistributedApplicationBuilder.Build()` does not expose or dispose that partial host. AppSurface still disposes the profile activation host and preserves the build exception, but it cannot reach Aspire's leaked partial provider. The package remains blocked until the pinned dependency disposes that state or exposes a supported cleanup seam.
+Aspire 13.4.4 does not expose or dispose the partial root service provider when host construction fails after provider creation. Immediately before building, this package decorates Aspire's pinned singleton `IHost` factory so it can capture that provider and dispose it on a non-process-fatal build failure. A successful build transfers ownership unchanged to the returned `DistributedApplication`. The compatibility guard fails closed before build if a future Aspire version changes the expected registration shape, which is why the exact package pin and upgrade verification above are required.
 
 ## Release Guidance
 
@@ -20,7 +20,7 @@ AppSurface ships as a coordinated package family. Before installing this package
 
 ## Install
 
-After the publication blocker above is cleared, install the coordinated package with:
+Install the coordinated package with:
 
 ```bash
 dotnet add package ForgeTrust.AppSurface.Aspire.Testing --prerelease
@@ -68,11 +68,13 @@ Typed tests support constructor-injected services, `PassThroughArgs`, `GetDepend
 - Customize `Configuration`, `Services`, and resources before `BuildAsync`.
 - Call `BuildAsync` exactly once. Concurrent or repeated builds fail with `InvalidOperationException`.
 - After a successful build, every builder member is rejected; inspect or customize the graph before `BuildAsync` and use the returned application afterward.
-- A failed or cancelled build is terminal and releases activation services. Cancellation observed after Aspire builds an application disposes that unreturned application first.
+- A failed or cancelled build is terminal and releases activation services. If Aspire created its root provider before a non-process-fatal host-construction failure, the builder disposes that provider first. Cancellation observed after Aspire builds an application disposes that unreturned application first.
 - `Dispose` and `DisposeAsync` are idempotent, and concurrent calls join the same cleanup. Disposal during an in-flight build is rejected; retry after the build task settles. After a successful build, builder disposal provides a fallback that disposes the application before activation services.
 - Cached `Services`, `Configuration`, or resource collections cannot be invalidated. Mutating cached objects after build or disposal is unsupported caller behavior.
 
 Factory validation, activation, composition, and cancellation failures remain primary even when factory-owned activation cleanup throws, including when that secondary cleanup failure is process-fatal. During `BuildAsync`, non-fatal cleanup does not replace the build or cancellation failure, while process-fatal cleanup propagates immediately. Explicit disposal without an earlier failure propagates its cleanup exception.
+
+The failed-build provider capture is intentionally package-internal and tied to the exact Aspire dependency. Do not copy it into application code, schedule delayed cleanup, or dispose cached `Services`: those approaches cannot distinguish a failed partial build from a live application and can race successful ownership transfer.
 
 ## Troubleshooting
 
