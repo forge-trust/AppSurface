@@ -2853,7 +2853,7 @@ public sealed class CoverageRunTests
         {
             var escapedChildProcessIdFile = childProcessIdFile.Replace("'", "''", StringComparison.Ordinal);
             var escapedGrandchildProcessIdFile = grandchildProcessIdFile.Replace("'", "''", StringComparison.Ordinal);
-            var grandchildCommand = $"Set-Content -LiteralPath '{escapedGrandchildProcessIdFile}' -Value $PID; Start-Sleep -Seconds 30";
+            var grandchildCommand = $"Set-Content -LiteralPath '{escapedGrandchildProcessIdFile}' -Value $PID; Start-Sleep -Seconds 15";
             var grandchildEncodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(grandchildCommand));
             var childCommand = $"Set-Content -LiteralPath '{escapedChildProcessIdFile}' -Value $PID; & powershell.exe -NoProfile -EncodedCommand '{grandchildEncodedCommand}'";
             var childEncodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(childCommand));
@@ -2866,7 +2866,7 @@ public sealed class CoverageRunTests
                 "child.sh",
                 """
                 echo $$ > "$1"
-                sleep 30 &
+                sleep 15 &
                 grandchild_pid=$!
                 echo "$grandchild_pid" > "$2"
                 wait "$grandchild_pid"
