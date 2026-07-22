@@ -47,7 +47,7 @@ public sealed class PostgreSqlDurableWorkStoreTests
         await using var transaction = await connection.BeginTransactionAsync();
 
         var exception = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(async () =>
-            await PostgreSqlDurableWorkStore.ValidateSchemaAsync(
+            await PostgreSqlDurableWorkStore.ValidateSchemaRemovalForTestingAsync(
                 connection,
                 transaction,
                 expectedStoreId: null,

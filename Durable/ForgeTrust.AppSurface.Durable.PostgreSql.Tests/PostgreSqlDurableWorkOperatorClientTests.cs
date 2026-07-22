@@ -897,6 +897,10 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
             (Persisted: "failed", Projected: DurableWorkState.FailedTerminal),
             (Persisted: "canceled_before_effect", Projected: DurableWorkState.CanceledBeforeEffect),
             (Persisted: "reconciling", Projected: DurableWorkState.Suspended),
+            (Persisted: "suspended_ambiguous_external_outcome", Projected: DurableWorkState.Suspended),
+            (Persisted: "suspended_reconciliation_required", Projected: DurableWorkState.Suspended),
+            (Persisted: "suspended_manual_resolution", Projected: DurableWorkState.Suspended),
+            (Persisted: "suspended_contract_unavailable", Projected: DurableWorkState.Suspended),
         };
 
         for (var index = 0; index < cases.Length; index++)
@@ -950,7 +954,7 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
             corruptRequest.ReasonCode,
             corruptRequest.Fingerprint,
             true,
-            "corrupt",
+            "suspended_corrupt",
             corruptAccepted.Revision);
 
         var exception = await Assert.ThrowsAsync<InvalidDataException>(async () =>

@@ -43,7 +43,8 @@ stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
 Create host principals outside migrations. Use [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) to
 grant the migration-owner, payload-free dispatcher, and scoped-runtime capabilities. Runtime roles must not receive
 ownership or `BYPASSRLS`. Transaction-local scope context is defense in depth, not a replacement for application
-authorization.
+authorization. The recipe fails before granting privileges when role names alias each other or a service role can
+inherit the migration owner, `SUPERUSER`, or `BYPASSRLS`.
 
 ## Accept Work
 

@@ -81,6 +81,42 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
+    public async Task FailedMigration_RollsBackPartialDdlAndRetriesFromLastCommittedVersion()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var embedded = DurablePostgreSqlMigrationCatalog.Load();
+        var failingMigration = new DurablePostgreSqlMigration(
+            2,
+            "forced_failure",
+            "CREATE TABLE appsurface_durable.rollback_probe (id integer); SELECT 1 / 0;",
+            new string('0', 64));
+        var failingManager = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            [embedded[0], failingMigration]);
+
+        var exception = await Assert.ThrowsAsync<PostgresException>(async () => await failingManager.ApplyAsync());
+
+        Assert.Equal(PostgresErrorCodes.DivisionByZero, exception.SqlState);
+        await using (var partialDdl = database.DataSource.CreateCommand(
+            "SELECT to_regclass('appsurface_durable.rollback_probe') IS NOT NULL;"))
+        {
+            Assert.False((bool)(await partialDdl.ExecuteScalarAsync())!);
+        }
+
+        var retryManager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var afterFailure = await retryManager.GetStatusAsync();
+        Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, afterFailure.Compatibility);
+        Assert.Equal(1, afterFailure.InstalledVersion);
+        Assert.Equal([1], afterFailure.AppliedVersions);
+
+        var retry = await retryManager.ApplyAsync();
+        var compatible = await retryManager.GetStatusAsync();
+        Assert.Equal([2], retry.AppliedVersions);
+        Assert.True(compatible.IsCompatible);
+        Assert.Equal([1, 2], compatible.AppliedVersions);
+    }
+
+    [Fact]
     public async Task RenamedMigrationHistory_FailsClosed()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

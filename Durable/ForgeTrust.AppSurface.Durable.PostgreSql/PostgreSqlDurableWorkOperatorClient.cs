@@ -148,7 +148,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
                 }
             }
 
-            var problem = ValidateSnapshot(snapshot, request.ExpectedRevision, "reconcile", request.CommandId);
+            var problem = ValidateSnapshot(snapshot, request.ExpectedRevision, request.CommandId);
             if (problem is not null)
             {
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -301,7 +301,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
                     "The exact operator command is already in progress.");
             }
 
-            var problem = ValidateSnapshot(snapshot, command.ExpectedRevision, command.Type, command.CommandId);
+            var problem = ValidateSnapshot(snapshot, command.ExpectedRevision, command.CommandId);
             if (problem is not null)
             {
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -753,7 +753,6 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
     private static DurableOperationResult<DurableWorkOperatorResult>? ValidateSnapshot(
         OperatorWorkSnapshot? snapshot,
         long expectedRevision,
-        string type,
         DurableCommandId commandId)
     {
         if (snapshot is null)
@@ -772,7 +771,6 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
             return Failure(commandId, DurableProblemCodes.AlreadyTerminal, "Terminal Work cannot accept an operator transition.");
         }
 
-        _ = type;
         return null;
     }
 
@@ -886,7 +884,11 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
         "succeeded_after_cancel_requested" => DurableWorkState.SucceededAfterCancelRequested,
         "failed" => DurableWorkState.FailedTerminal,
         "canceled_before_effect" => DurableWorkState.CanceledBeforeEffect,
-        _ when state.StartsWith("suspended_", StringComparison.Ordinal) || state == "reconciling" => DurableWorkState.Suspended,
+        "reconciling" or
+        "suspended_ambiguous_external_outcome" or
+        "suspended_reconciliation_required" or
+        "suspended_manual_resolution" or
+        "suspended_contract_unavailable" => DurableWorkState.Suspended,
         _ => throw new InvalidDataException($"Unknown persisted durable Work state '{state}'."),
     };
 

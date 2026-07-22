@@ -14,9 +14,21 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
 
     /// <summary>Initializes a schema manager using a migration-owner data source.</summary>
     public PostgreSqlDurableRuntimeSchemaManager(NpgsqlDataSource dataSource)
+        : this(dataSource, DurablePostgreSqlMigrationCatalog.Load())
+    {
+    }
+
+    /// <summary>Initializes a schema manager with an explicit migration catalog for transaction-boundary verification.</summary>
+    /// <param name="dataSource">Migration-owner data source.</param>
+    /// <param name="migrations">Ordered, contiguous migration definitions.</param>
+    /// <remarks>This test seam is internal so production callers always use the embedded, checksum-verified catalog.</remarks>
+    internal PostgreSqlDurableRuntimeSchemaManager(
+        NpgsqlDataSource dataSource,
+        IReadOnlyList<DurablePostgreSqlMigration> migrations)
     {
         _dataSource = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
-        _migrations = DurablePostgreSqlMigrationCatalog.Load();
+        ArgumentNullException.ThrowIfNull(migrations);
+        _migrations = migrations.ToArray();
     }
 
     /// <summary>Gets the schema version required by this package.</summary>

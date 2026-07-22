@@ -2,6 +2,15 @@
 
 -- Required psql variables contain role names as data, never raw SQL identifiers:
 --   migration_owner_role, dispatcher_role, runtime_role
+SELECT :'migration_owner_role' <> :'dispatcher_role'
+   AND :'migration_owner_role' <> :'runtime_role'
+   AND :'dispatcher_role' <> :'runtime_role' AS roles_are_distinct \gset
+\if :roles_are_distinct
+\else
+  \echo 'Migration owner, dispatcher, and scoped runtime roles must be distinct.'
+  \quit 3
+\endif
+
 SELECT EXISTS
 (
   SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = :'migration_owner_role'
@@ -29,6 +38,36 @@ SELECT EXISTS
 \if :role_exists
 \else
   \echo 'Required scoped runtime role does not exist:' :'runtime_role'
+  \quit 3
+\endif
+
+SELECT NOT EXISTS
+(
+  SELECT 1
+  FROM pg_catalog.pg_roles AS privileged_role
+  WHERE (privileged_role.rolsuper OR privileged_role.rolbypassrls)
+    AND
+    (
+      pg_catalog.pg_has_role(:'dispatcher_role', privileged_role.oid, 'MEMBER')
+      OR pg_catalog.pg_has_role(:'runtime_role', privileged_role.oid, 'MEMBER')
+    )
+) AS service_roles_are_unprivileged \gset
+\if :service_roles_are_unprivileged
+\else
+  \echo 'Dispatcher and scoped runtime roles must not inherit SUPERUSER or BYPASSRLS.'
+  \quit 3
+\endif
+
+SELECT NOT
+(
+  pg_catalog.pg_has_role(:'dispatcher_role', :'migration_owner_role', 'MEMBER')
+  OR pg_catalog.pg_has_role(:'runtime_role', :'migration_owner_role', 'MEMBER')
+  OR pg_catalog.pg_has_role(:'dispatcher_role', :'runtime_role', 'MEMBER')
+  OR pg_catalog.pg_has_role(:'runtime_role', :'dispatcher_role', 'MEMBER')
+) AS service_roles_are_separated \gset
+\if :service_roles_are_separated
+\else
+  \echo 'Dispatcher and scoped runtime roles must not inherit each other or the migration owner.'
   \quit 3
 \endif
 
