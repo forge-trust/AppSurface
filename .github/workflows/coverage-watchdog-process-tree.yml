@@ -55,6 +55,7 @@ jobs:
         run: |
           results_directory="TestResults/${{ matrix.os }}"
           mkdir -p "$results_directory"
+          driver_log="$results_directory/coverage-watchdog-driver.log"
           test_arguments=(
             test
             Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
@@ -67,12 +68,19 @@ jobs:
             --results-directory "$results_directory"
           )
 
-          dotnet "${test_arguments[@]}" &
+          # Keep any surviving descendant from retaining the Actions runner's
+          # output pipes after the bounded driver exits.
+          dotnet "${test_arguments[@]}" >"$driver_log" 2>&1 </dev/null &
           test_driver_pid=$!
           for _ in {1..120}; do
             if ! kill -0 "$test_driver_pid" 2>/dev/null; then
-              wait "$test_driver_pid"
-              exit $?
+              if wait "$test_driver_pid"; then
+                driver_status=0
+              else
+                driver_status=$?
+              fi
+              sed -n '1,500p' "$driver_log" || true
+              exit "$driver_status"
             fi
 
             sleep 1
@@ -84,6 +92,7 @@ jobs:
           pkill -KILL -P "$test_driver_pid" 2>/dev/null || true
           kill -KILL "$test_driver_pid" 2>/dev/null || true
           wait "$test_driver_pid" 2>/dev/null || true
+          sed -n '1,500p' "$driver_log" || true
 
           trx_path="$results_directory/coverage-watchdog.trx"
           counters="$(grep -Eo '<Counters[^>]*/>' "$trx_path" 2>/dev/null | head -1 || true)"
