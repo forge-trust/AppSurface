@@ -7,10 +7,6 @@ on:
   workflow_call:
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
-  cancel-in-progress: true
-
 jobs:
   process-tree:
     name: Coverage watchdog tree cleanup (${{ matrix.os }})
