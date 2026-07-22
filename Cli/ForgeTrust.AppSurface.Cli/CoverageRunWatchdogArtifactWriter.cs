@@ -104,7 +104,6 @@ internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogAr
 
         var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         var completed = await Task.WhenAny(writeTask, timeoutTask, cancellationTask);
-        var cancellationWonAfterCommitStarted = false;
         if (completed == cancellationTask)
         {
             if (permission.TryRevoke())
@@ -112,7 +111,6 @@ internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogAr
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
-            cancellationWonAfterCommitStarted = true;
             completed = writeTask;
         }
 
@@ -134,10 +132,7 @@ internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogAr
         try
         {
             await writeTask;
-            if (cancellationWonAfterCommitStarted)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-            }
+            cancellationToken.ThrowIfCancellationRequested();
 
             return permission.WasCommitted
                 ? CoverageRunWatchdogArtifactWriteResult.Success
