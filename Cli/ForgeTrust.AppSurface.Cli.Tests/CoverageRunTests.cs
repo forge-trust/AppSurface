@@ -529,11 +529,16 @@ public sealed class CoverageRunTests
         using var current = PushCurrentDirectory(repo.Path);
         var runner = new RecordingCoverageRunProcessRunner();
         var reportGenerator = new RecordingReportGenerator();
+        var timeProvider = new FreezableTimeProvider();
         var workflow = new CoverageRunWorkflow(
             runner,
             reportGenerator,
-            TimeProvider.System,
-            cancellationToken => Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken));
+            timeProvider,
+            cancellationToken =>
+            {
+                timeProvider.Release();
+                return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            });
         using var console = new FakeInMemoryConsole();
         var request = CreateRequest(
             TestProjects: [project],
@@ -1151,7 +1156,7 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
-    public async Task RunAsync_Clean_ShouldTakeOverLegacyCoverageOutputWithoutMarker()
+    public async Task RunAsync_Clean_ShouldRejectLegacyCoverageOutputWithoutMarker()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
@@ -1164,14 +1169,16 @@ public sealed class CoverageRunTests
         using var console = new FakeInMemoryConsole();
         var request = CreateRequest(TestProjects: [project]);
 
-        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
 
-        Assert.True(result.Success);
-        Assert.False(File.Exists(oldJunit));
-        Assert.False(File.Exists(oldGate));
-        Assert.False(File.Exists(oldProjectArtifact));
-        Assert.NotEqual("old coverage", File.ReadAllText(oldCoverage));
-        Assert.True(File.Exists(Path.Join(result.OutputDirectory, ".appsurface-coverage-output")));
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("not marked as AppSurface-owned", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("old junit", File.ReadAllText(oldJunit));
+        Assert.Equal("{}", File.ReadAllText(oldGate));
+        Assert.Equal("old project", File.ReadAllText(oldProjectArtifact));
+        Assert.Equal("old coverage", File.ReadAllText(oldCoverage));
+        Assert.False(File.Exists(Path.Join(repo.Path, "TestResults/coverage-merged/.appsurface-coverage-output")));
     }
 
     [Fact]
@@ -1532,10 +1539,19 @@ public sealed class CoverageRunTests
         var third = repo.WriteFile("tests/Third.Tests/Third.Tests.csproj", "<Project />");
         using var current = PushCurrentDirectory(repo.Path);
         var runner = new RecordingCoverageRunProcessRunner();
+        var timeProvider = new FreezableTimeProvider();
+        var startedTests = 0;
+        runner.TestStarted = _ =>
+        {
+            if (Interlocked.Increment(ref startedTests) == 2)
+            {
+                timeProvider.Release();
+            }
+        };
         runner.TestDelays[first] = TimeSpan.FromSeconds(5);
         runner.TestDelays[second] = TimeSpan.FromSeconds(5);
         var reportGenerator = new RecordingReportGenerator();
-        var workflow = CreateWorkflow(runner, reportGenerator);
+        var workflow = new CoverageRunWorkflow(runner, reportGenerator, timeProvider);
         using var console = new FakeInMemoryConsole();
         var request = CreateRequest(
             TestProjects: [first, second, third],
@@ -1554,7 +1570,7 @@ public sealed class CoverageRunTests
             File.ReadAllText(Path.Join(repo.Path, "TestResults/coverage-merged/timings.json")));
         var projects = timings.RootElement.GetProperty("projects").EnumerateArray().ToArray();
         Assert.Equal(["terminated", "terminated", "skipped-after-terminal"], projects.Select(project => project.GetProperty("executionStatus").GetString()));
-        Assert.Equal(["terminated", "terminated", "skipped-after-terminal"], projects.Select(project => project.GetProperty("coverageArtifactStatus").GetString()));
+        Assert.Equal(["skipped-after-terminal", "skipped-after-terminal", "skipped-after-terminal"], projects.Select(project => project.GetProperty("coverageArtifactStatus").GetString()));
     }
 
     [Fact]
@@ -1625,6 +1641,34 @@ public sealed class CoverageRunTests
         Assert.Empty(Directory.EnumerateFiles(
             Path.GetDirectoryName(canonical)!,
             ".timings.*.tmp",
+            SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
+    public async Task RunAsync_CancelledStagedSummary_ShouldPreserveCanonicalSummary()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        repo.WriteFile("TestResults/coverage-merged/.appsurface-coverage-output", "AppSurface coverage output directory");
+        var canonical = repo.WriteFile("TestResults/coverage-merged/summary.txt", "prior summary");
+        using var current = PushCurrentDirectory(repo.Path);
+        using var cancellation = new CancellationTokenSource();
+        var workflow = new CoverageRunWorkflow(
+            new RecordingCoverageRunProcessRunner(),
+            new RecordingReportGenerator(),
+            TimeProvider.System,
+            summaryStaged: cancellation.Cancel);
+        using var console = new FakeInMemoryConsole();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], Clean: false),
+            console,
+            cancellation.Token));
+
+        Assert.Equal("prior summary", File.ReadAllText(canonical));
+        Assert.Empty(Directory.EnumerateFiles(
+            Path.GetDirectoryName(canonical)!,
+            ".summary.*.tmp",
             SearchOption.TopDirectoryOnly));
     }
 
@@ -1954,6 +1998,7 @@ public sealed class CoverageRunTests
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        repo.WriteFile("TestResults/coverage-merged/.appsurface-coverage-output", "AppSurface coverage output directory");
         repo.WriteFile("TestResults/coverage-merged/timings.json", """
             {
               "projects": []
@@ -3358,7 +3403,14 @@ public sealed class CoverageRunTests
     {
         CoverageRunDriverStrategy.ValidateTestArguments(
             CoverageRunDriver.Msbuild,
-            ["--settings", "coverage.runsettings", "--filter", "Category=Fast"]);
+            [
+                "--collect", "Custom Collector",
+                "--results-directory", "custom-results",
+                "--settings", "coverage.runsettings",
+                "--filter", "Category=Fast",
+                "--",
+                "DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=json",
+            ]);
     }
 
     [Fact]
@@ -3410,9 +3462,7 @@ public sealed class CoverageRunTests
         var recordedProject = Assert.Single(timings.RootElement.GetProperty("projects").EnumerateArray());
         Assert.Equal(expectedStatus, recordedProject.GetProperty("coverageArtifactStatus").GetString());
         Assert.Contains(expected, recordedProject.GetProperty("coverageArtifactCause").GetString(), StringComparison.Ordinal);
-        var coverageFile = recordedProject.GetProperty("coverageFile").GetString();
-        Assert.StartsWith("projects/", coverageFile, StringComparison.Ordinal);
-        Assert.EndsWith("/coverage.cobertura.xml", coverageFile, StringComparison.Ordinal);
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, recordedProject.GetProperty("coverageFile").ValueKind);
     }
 
     [Fact]
@@ -3803,6 +3853,7 @@ public sealed class CoverageRunTests
             </testsuite>
             """;
         public Dictionary<string, TimeSpan> TestDelays { get; } = [];
+        public Action<string>? TestStarted { get; set; }
         public HashSet<string> ProjectsWithoutCoverage { get; } = [];
         public List<RecordedCommand> Commands { get; } = [];
 
@@ -3861,6 +3912,7 @@ public sealed class CoverageRunTests
 
             if (arguments.FirstOrDefault() == "test")
             {
+                TestStarted?.Invoke(arguments[1]);
                 if (CancelTest)
                 {
                     throw new OperationCanceledException(cancellationToken);
@@ -3971,6 +4023,28 @@ public sealed class CoverageRunTests
 
         public void Advance(TimeSpan elapsed)
             => Interlocked.Add(ref _timestamp, elapsed.Ticks);
+    }
+
+    private sealed class FreezableTimeProvider : TimeProvider
+    {
+        private readonly long _frozenTimestamp = TimeProvider.System.GetTimestamp();
+        private readonly DateTimeOffset _frozenUtcNow = TimeProvider.System.GetUtcNow();
+        private int _released;
+
+        public override long GetTimestamp()
+            => Volatile.Read(ref _released) == 0 ? _frozenTimestamp : TimeProvider.System.GetTimestamp();
+
+        public override DateTimeOffset GetUtcNow()
+            => Volatile.Read(ref _released) == 0 ? _frozenUtcNow : TimeProvider.System.GetUtcNow();
+
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period)
+            => TimeProvider.System.CreateTimer(callback, state, dueTime, period);
+
+        public void Release() => Volatile.Write(ref _released, 1);
     }
 
     private sealed class RecordingReportGeneratorPackageLocator(string path) : IReportGeneratorPackageLocator

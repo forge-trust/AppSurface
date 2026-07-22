@@ -454,6 +454,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     private readonly TimeSpan _artifactWriteTimeout;
     private readonly Action? _artifactStaged;
     private readonly Action? _artifactIncidentQueued;
+    private readonly Action? _artifactResourcesDisposed;
     private readonly List<OperationState> _operations = [];
     private readonly HashSet<CoverageRunProcessLease> _processLeases = [];
     private readonly TaskCompletionSource _terminalCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -464,12 +465,25 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     private CoverageRunIncident? _terminalIncident;
     private CoverageRunIncident? _pendingArtifactIncident;
     private Task? _activeArtifactWrite;
+    private CancellationTokenSource? _activeArtifactWriteCancellation;
     private long _nextId;
     private int _incidentOrdinal;
+    private int _artifactResourcesDisposeState;
 
     /// <summary>
     /// Initializes and starts a run-scoped watchdog monitor.
     /// </summary>
+    /// <param name="mode">Whether stalls are ignored, warned, or terminate the run.</param>
+    /// <param name="heartbeatInterval">Interval between progress heartbeats; zero disables them.</param>
+    /// <param name="timeout">Maximum observable no-progress duration for an active operation.</param>
+    /// <param name="console">Console receiving serialized heartbeat and incident output.</param>
+    /// <param name="timeProvider">Clock and timer source used for monotonic stall classification.</param>
+    /// <param name="externalCancellation">Caller cancellation linked to supervised work.</param>
+    /// <param name="artifactStaged">Optional test seam invoked after an incident artifact is staged.</param>
+    /// <param name="artifactCommitTimeout">Optional bound for bootstrap artifact promotion.</param>
+    /// <param name="artifactWriteTimeout">Optional bound for waiting on one incident write.</param>
+    /// <param name="artifactIncidentQueued">Optional test seam invoked when a newer incident is queued behind an active write.</param>
+    /// <param name="artifactResourcesDisposed">Optional test seam invoked after deferred artifact resources are released.</param>
     public CoverageRunWatchdogSupervisor(
         CoverageRunWatchdogMode mode,
         TimeSpan heartbeatInterval,
@@ -480,7 +494,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         Action? artifactStaged = null,
         TimeSpan? artifactCommitTimeout = null,
         TimeSpan? artifactWriteTimeout = null,
-        Action? artifactIncidentQueued = null)
+        Action? artifactIncidentQueued = null,
+        Action? artifactResourcesDisposed = null)
     {
         _mode = mode;
         _heartbeatInterval = heartbeatInterval;
@@ -491,8 +506,9 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         _artifactCommitTimeout = artifactCommitTimeout ?? TimeSpan.FromSeconds(2);
         _artifactWriteTimeout = artifactWriteTimeout ?? TimeSpan.FromSeconds(2);
         _artifactIncidentQueued = artifactIncidentQueued;
+        _artifactResourcesDisposed = artifactResourcesDisposed;
         _runStarted = timeProvider.GetTimestamp();
-        _bootstrapDirectory = Path.Join(Path.GetTempPath(), "appsurface-coverage-watchdog", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+        _bootstrapDirectory = Directory.CreateTempSubdirectory("appsurface-coverage-watchdog-").FullName;
         _linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(externalCancellation, _watchdogCancellation.Token);
         _monitor = MonitorAsync(_stop.Token);
     }
@@ -510,6 +526,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     /// <summary>
     /// Binds watchdog artifacts to an AppSurface-owned output directory after full output validation.
     /// </summary>
+    /// <param name="outputDirectory">Absolute prepared output directory for canonical watchdog artifacts.</param>
+    /// <remarks>Promotion failures are reported as <c>ASCOV122</c> and do not replace the watchdog's terminal outcome.</remarks>
     public void BindOutputDirectory(string outputDirectory)
     {
         var destination = Path.Join(outputDirectory, ArtifactName);
@@ -557,6 +575,14 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     /// <summary>
     /// Starts a supervised operation. Queued work should call this only when it becomes active.
     /// </summary>
+    /// <param name="kind">Stable operation kind used for ordering and diagnostics.</param>
+    /// <param name="project">Optional solution-relative project path.</param>
+    /// <param name="order">Stable execution order among operations of the same kind.</param>
+    /// <param name="state">Initial operation state.</param>
+    /// <param name="log">Optional output-relative log path.</param>
+    /// <param name="commandOptions">Safe command option names; values must already be excluded.</param>
+    /// <returns>A disposable operation that marks completion and exposes progress/process seams.</returns>
+    /// <exception cref="OperationCanceledException">Thrown after the watchdog claims terminal ownership.</exception>
     public CoverageRunOperation Start(
         string kind,
         string? project = null,
@@ -576,6 +602,11 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Reserves a process lease before a child-process start callback can attach its root process.
+    /// </summary>
+    /// <returns>A lease registered for terminal cleanup.</returns>
+    /// <exception cref="OperationCanceledException">Thrown after the watchdog claims terminal ownership.</exception>
     internal CoverageRunProcessLease ReserveProcess()
     {
         lock (_sync)
@@ -587,6 +618,10 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Releases a completed process lease from terminal cleanup tracking.
+    /// </summary>
+    /// <param name="lease">The completed lease.</param>
     internal void ReleaseProcess(CoverageRunProcessLease lease)
     {
         lock (_sync)
@@ -595,6 +630,11 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Records positive observed output bytes for an active operation.
+    /// </summary>
+    /// <param name="id">Operation identifier.</param>
+    /// <param name="count">Positive byte count reported by the process observer.</param>
     internal void ObserveBytes(long id, int count)
     {
         lock (_sync)
@@ -607,6 +647,11 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Records an explicit state transition as operation progress.
+    /// </summary>
+    /// <param name="id">Operation identifier.</param>
+    /// <param name="state">New stable state.</param>
     internal void Transition(long id, string state)
     {
         lock (_sync)
@@ -619,6 +664,10 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Marks an active operation complete exactly once.
+    /// </summary>
+    /// <param name="id">Operation identifier.</param>
     internal void Complete(long id)
     {
         lock (_sync)
@@ -635,6 +684,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     /// <summary>
     /// Converts watchdog-owned cancellation into the stable <c>ASCOV121</c> exit-124 diagnostic.
     /// </summary>
+    /// <exception cref="CommandException">Thrown with exit code 124 after terminal cleanup and the bounded incident-write attempt finish.</exception>
     public void ThrowIfFailed()
     {
         CoverageRunIncident? incident;
@@ -665,6 +715,9 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     /// <summary>
     /// Revalidates that the watchdog has not claimed terminal ownership before an atomic artifact commit.
     /// </summary>
+    /// <param name="commit">Synchronous canonical replacement performed while terminal ownership is locked.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="commit"/> is <see langword="null"/>.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the watchdog already owns the terminal outcome.</exception>
     public void Commit(Action commit)
     {
         ArgumentNullException.ThrowIfNull(commit);
@@ -778,7 +831,9 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
 
     private Task StartArtifactWriteLocked(CoverageRunIncident incident)
     {
-        var write = Task.Run(() => WriteIncidentAsync(incident, CancellationToken.None));
+        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+        var write = Task.Run(() => WriteIncidentAsync(incident, cancellation.Token));
+        _activeArtifactWriteCancellation = cancellation;
         _activeArtifactWrite = write;
         _ = write.ContinueWith(
             CompleteArtifactWrite,
@@ -799,11 +854,47 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
             }
 
             _activeArtifactWrite = null;
-            if (_pendingArtifactIncident is { } pending)
+            _activeArtifactWriteCancellation?.Dispose();
+            _activeArtifactWriteCancellation = null;
+            if (!_stop.IsCancellationRequested && _pendingArtifactIncident is { } pending)
             {
                 _pendingArtifactIncident = null;
                 StartArtifactWriteLocked(pending);
             }
+            else
+            {
+                _pendingArtifactIncident = null;
+            }
+        }
+    }
+
+    private async Task<bool> DrainArtifactWriteAsync()
+    {
+        Task? active;
+        lock (_artifactWriteSync)
+        {
+            _pendingArtifactIncident = null;
+            _activeArtifactWriteCancellation?.Cancel();
+            active = _activeArtifactWrite;
+        }
+
+        if (active is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            await active.WaitAsync(_artifactWriteTimeout);
+            return true;
+        }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+        {
+            return active.IsCompleted;
+        }
+        catch (Exception)
+        {
+            return true;
         }
     }
 
@@ -857,16 +948,11 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     {
         var nowUtc = _timeProvider.GetUtcNow();
         var heartbeatDelay = nextHeartbeat == DateTimeOffset.MaxValue ? TimeSpan.MaxValue : nextHeartbeat - nowUtc;
-        var stallDelay = TimeSpan.MaxValue;
-        foreach (var remaining in Snapshot()
-                     .Where(operation => _mode != CoverageRunWatchdogMode.Off && !operation.WarningLatched)
-                     .Select(operation => _timeout - operation.NoProgress))
-        {
-            if (remaining < stallDelay)
-            {
-                stallDelay = remaining;
-            }
-        }
+        var stallDelay = Snapshot()
+            .Where(operation => _mode != CoverageRunWatchdogMode.Off && !operation.WarningLatched)
+            .Select(operation => _timeout - operation.NoProgress)
+            .DefaultIfEmpty(TimeSpan.MaxValue)
+            .Min();
 
         var delay = heartbeatDelay < stallDelay ? heartbeatDelay : stallDelay;
         if (delay == TimeSpan.MaxValue)
@@ -945,13 +1031,12 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
 
     private CoverageRunIncident CreateIncident(IReadOnlyList<OperationSnapshot> stale, bool terminated)
     {
-        var output = ResolveArtifactPath();
         return new CoverageRunIncident(
             Interlocked.Increment(ref _incidentOrdinal),
             terminated ? "terminated" : "warning",
             stale[0],
             stale.Skip(1).ToArray(),
-            output);
+            ArtifactPath: null);
     }
 
     private string ResolveArtifactPath()
@@ -977,7 +1062,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         var elapsed = (long)_timeProvider.GetElapsedTime(_runStarted).TotalSeconds;
         var lines = new List<string>
         {
-            FormattableString.Invariant($"Coverage heartbeat: elapsed={elapsed}s; queued=0; running={snapshot.Count(item => item.State == "running")}; finalizing={snapshot.Count(item => item.State == "finalizing")}; complete={CompletedCount()}")
+            FormattableString.Invariant($"Coverage heartbeat: elapsed={elapsed}s; running={snapshot.Count(item => item.State == "running")}; finalizing={snapshot.Count(item => item.State == "finalizing")}; complete={CompletedCount()}")
         };
         lines.AddRange(snapshot.Select(item => FormattableString.Invariant(
             $"  operation={JsonSerializer.Serialize(item.Kind)}; project={JsonSerializer.Serialize(item.Project)}; state={item.State}; elapsed={(long)item.Elapsed.TotalSeconds}s; no-progress={(long)item.NoProgress.TotalSeconds}s; output-bytes={item.OutputBytes}")));
@@ -989,12 +1074,15 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
 
     private async Task WriteIncidentAsync(CoverageRunIncident incident, CancellationToken cancellationToken)
     {
-        var directory = Path.GetDirectoryName(incident.ArtifactPath)!;
-        var reportedArtifactPath = incident.ArtifactPath;
+        var initialArtifactPath = ResolveArtifactPath();
+        var directory = Path.GetDirectoryName(initialArtifactPath)!;
+        string? reportedArtifactPath = null;
         string? staged = null;
-        await _artifactCommitGate.WaitAsync(cancellationToken);
+        var gateHeld = false;
         try
         {
+            await _artifactCommitGate.WaitAsync(cancellationToken);
+            gateHeld = true;
             Directory.CreateDirectory(directory);
             var concurrent = incident.Concurrent.Take(MaximumConcurrentArtifactOperations).ToArray();
             var payload = new
@@ -1059,6 +1147,12 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
                 "ASCOV122 Coverage watchdog artifact unavailable. Cause: artifact-write-failed. Fix: Use a writable dedicated --output directory. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog",
                 CancellationToken.None);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await _console.WriteCriticalErrorAsync(
+                "ASCOV122 Coverage watchdog artifact unavailable. Cause: artifact-write-cancelled. Fix: Inspect the coverage run terminal diagnostic and rerun with a writable dedicated --output directory. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog",
+                CancellationToken.None);
+        }
         finally
         {
             if (staged is not null)
@@ -1072,14 +1166,20 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
                 }
             }
 
-            _artifactCommitGate.Release();
+            if (gateHeld)
+            {
+                _artifactCommitGate.Release();
+            }
         }
 
         var primary = incident.Primary;
         var subject = primary.Project is null ? $"operation={primary.Kind}" : $"project={JsonSerializer.Serialize(primary.Project)}";
         var prefix = incident.Outcome == "terminated" ? "Coverage watchdog termination" : "Coverage watchdog warning";
-        await _console.WriteCriticalErrorAsync(FormattableString.Invariant(
-            $"{prefix}: {subject}; no-progress={(long)primary.NoProgress.TotalSeconds}s; concurrent-stalls={incident.Concurrent.Count}; artifact={JsonSerializer.Serialize(DisplayArtifactPath(reportedArtifactPath))}"), cancellationToken);
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            await _console.WriteCriticalErrorAsync(FormattableString.Invariant(
+                $"{prefix}: {subject}; no-progress={(long)primary.NoProgress.TotalSeconds}s; concurrent-stalls={incident.Concurrent.Count}; artifact={JsonSerializer.Serialize(DisplayArtifactPath(reportedArtifactPath))}"), cancellationToken);
+        }
     }
 
     private object ToArtifactRecord(OperationSnapshot item) => new
@@ -1118,8 +1218,10 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         command = (object?)null,
     };
 
-    private static string DisplayArtifactPath(string path)
-        => Path.GetRelativePath(Directory.GetCurrentDirectory(), path).Replace('\\', '/');
+    private static string DisplayArtifactPath(string? path)
+        => path is null
+            ? "unavailable"
+            : Path.GetRelativePath(Directory.GetCurrentDirectory(), path).Replace('\\', '/');
 
     private static string? BoundArtifactText(string? value, int maximumLength = MaximumArtifactTextLength)
         => value is null || value.Length <= maximumLength ? value : value[..maximumLength];
@@ -1166,10 +1268,49 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     {
         _stop.Cancel();
         await _monitor;
+        var artifactWriteDrained = await DrainArtifactWriteAsync();
         _linkedCancellation.Dispose();
         _watchdogCancellation.Dispose();
         _stop.Dispose();
         _stateChanged.Dispose();
+        if (!artifactWriteDrained)
+        {
+            ScheduleDeferredArtifactCleanup();
+            return;
+        }
+
+        DisposeArtifactResources();
+    }
+
+    private void ScheduleDeferredArtifactCleanup()
+    {
+        Task? active;
+        lock (_artifactWriteSync)
+        {
+            active = _activeArtifactWrite;
+        }
+
+        if (active is null)
+        {
+            DisposeArtifactResources();
+            return;
+        }
+
+        _ = active.ContinueWith(
+            _ => DisposeArtifactResources(),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private void DisposeArtifactResources()
+    {
+        if (Interlocked.Exchange(ref _artifactResourcesDisposeState, 1) != 0)
+        {
+            return;
+        }
+
+        _artifactCommitGate.Dispose();
         _console.Dispose();
         try
         {
@@ -1181,6 +1322,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
         }
+
+        _artifactResourcesDisposed?.Invoke();
     }
 
     private sealed class OperationState(
@@ -1229,6 +1372,6 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         string Outcome,
         OperationSnapshot Primary,
         IReadOnlyList<OperationSnapshot> Concurrent,
-        string ArtifactPath,
+        string? ArtifactPath,
         string CleanupStatus = "not-requested");
 }

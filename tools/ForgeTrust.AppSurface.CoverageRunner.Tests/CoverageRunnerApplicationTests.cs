@@ -198,6 +198,9 @@ public sealed class CoverageRunnerApplicationTests
         var testArguments = Assert.Single(runner.TestArguments);
         Assert.Contains("--no-build", testArguments);
         Assert.Contains("--no-restore", testArguments);
+        Assert.Contains(
+            "DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude=[*.Tests]*,[*.IntegrationTests]*",
+            testArguments);
     }
 
     [Fact]
@@ -401,7 +404,7 @@ public sealed class CoverageRunnerApplicationTests
                 BuildSolution = false,
                 BuildNoRestore = false,
                 IncludeFilter = "[ForgeTrust.AppSurface.*]*",
-                ExcludeFilter = "[*.Tests]*%2c[*.IntegrationTests]*",
+                ExcludeFilter = "[*.Tests]*,[*.IntegrationTests]*",
                 Parallelism = 1,
                 MergeOnly = false,
                 ListGroups = false,
@@ -1605,7 +1608,7 @@ public sealed class CoverageRunnerApplicationTests
             BuildSolution = false,
             BuildNoRestore = false,
             IncludeFilter = "[ForgeTrust.AppSurface.*]*",
-            ExcludeFilter = "[*.Tests]*%2c[*.IntegrationTests]*",
+            ExcludeFilter = "[*.Tests]*,[*.IntegrationTests]*",
             Parallelism = 1,
             MergeOnly = false,
             ListGroups = false,

@@ -551,6 +551,7 @@ internal sealed class CoverageRunWorkflow
     private readonly ICoverageRunReportGenerator _reportGenerator;
     private readonly TimeProvider _timeProvider;
     private readonly Func<CancellationToken, Task>? _beforeSlowTestDiagnostics;
+    private readonly Action? _summaryStaged;
     private readonly Action? _timingsStaged;
 
     /// <summary>
@@ -560,18 +561,21 @@ internal sealed class CoverageRunWorkflow
     /// <param name="reportGenerator">Package-owned ReportGenerator wrapper.</param>
     /// <param name="timeProvider">Time provider used for timings.</param>
     /// <param name="beforeSlowTestDiagnostics">Optional test seam invoked after the supervised diagnostics operation starts.</param>
+    /// <param name="summaryStaged">Optional test seam invoked after the text summary is staged and before its atomic commit.</param>
     /// <param name="timingsStaged">Optional test seam invoked after timings JSON is staged and before its atomic commit.</param>
     public CoverageRunWorkflow(
         ICoverageRunProcessRunner processRunner,
         ICoverageRunReportGenerator reportGenerator,
         TimeProvider timeProvider,
         Func<CancellationToken, Task>? beforeSlowTestDiagnostics = null,
+        Action? summaryStaged = null,
         Action? timingsStaged = null)
     {
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
         _reportGenerator = reportGenerator ?? throw new ArgumentNullException(nameof(reportGenerator));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _beforeSlowTestDiagnostics = beforeSlowTestDiagnostics;
+        _summaryStaged = summaryStaged;
         _timingsStaged = timingsStaged;
     }
 
@@ -817,7 +821,15 @@ internal sealed class CoverageRunWorkflow
 
             using (supervisor.Start("artifacts"))
             {
-                await WriteSummaryAsync(outputDirectory, mergedCoveragePath, request, diagnostics, runConsole, supervisedCancellationToken);
+                await WriteSummaryAsync(
+                    outputDirectory,
+                    mergedCoveragePath,
+                    request,
+                    diagnostics,
+                    runConsole,
+                    supervisor.Commit,
+                    _summaryStaged,
+                    supervisedCancellationToken);
                 await WriteTimingsAsync(
                     request,
                     resolution,
@@ -1915,6 +1927,8 @@ internal sealed class CoverageRunWorkflow
         CoverageRunRequest request,
         CoverageRunSlowTestDiagnosticsRun? diagnostics,
         CoverageRunConsoleSink console,
+        Action<Action> commit,
+        Action? staged,
         CancellationToken cancellationToken)
     {
         var root = ReadMergedCoverageRoot(coveragePath);
@@ -1946,7 +1960,20 @@ internal sealed class CoverageRunWorkflow
                 """);
         }
 
-        await File.WriteAllTextAsync(Path.Join(outputDirectory, "summary.txt"), summary, cancellationToken);
+        var summaryPath = Path.Join(outputDirectory, "summary.txt");
+        var stagedPath = Path.Join(outputDirectory, $".summary.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await File.WriteAllTextAsync(stagedPath, summary, cancellationToken);
+            staged?.Invoke();
+            cancellationToken.ThrowIfCancellationRequested();
+            commit(() => File.Move(stagedPath, summaryPath, overwrite: true));
+        }
+        finally
+        {
+            File.Delete(stagedPath);
+        }
+
         await console.WriteOutputAsync(summary, cancellationToken);
     }
 
@@ -2113,11 +2140,11 @@ internal sealed class CoverageRunWorkflow
                             result?.LogFile ?? Path.Join(outputDirectory, "projects", entry.Project.Slug, "dotnet-test.log")),
                         coverageDriver = result?.CoverageDriver ?? CoverageRunDriverPreflight.DriverName(request.CoverageDriver),
                         invocationDirectory = result?.InvocationDirectory,
-                        coverageArtifactStatus = result?.CoverageArtifactStatus ?? state.Status,
+                        coverageArtifactStatus = result?.CoverageArtifactStatus ?? "skipped-after-terminal",
                         coverageArtifactCause = result?.CoverageArtifactCause,
-                        coverageFile = ToArtifactPath(
-                            outputDirectory,
-                            Path.Join(outputDirectory, "projects", entry.Project.Slug, "coverage.cobertura.xml")),
+                        coverageFile = result?.CoverageFile is null
+                            ? null
+                            : ToArtifactPath(outputDirectory, result.CoverageFile),
                         testResults = (result?.TestResults ?? []).Select(artifact => new
                         {
                             format = artifact.Format.ToString().ToLowerInvariant(),
@@ -3207,8 +3234,12 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
 
 internal static class CoverageRunOutputGuard
 {
-    private const string MarkerFileName = ".appsurface-coverage-output";
-
+    /// <summary>
+    /// Verifies that a coverage output path is safe and, when it exists, is owned by AppSurface.
+    /// </summary>
+    /// <param name="outputDirectory">The proposed coverage output directory.</param>
+    /// <param name="solutionDirectory">The resolved solution directory that must not be used as output.</param>
+    /// <param name="projects">The resolved test projects whose directories must not be used as output.</param>
     public static void Validate(
         string outputDirectory,
         string solutionDirectory,
@@ -3217,25 +3248,33 @@ internal static class CoverageRunOutputGuard
         ValidateCore(outputDirectory, solutionDirectory, projects);
     }
 
+    /// <summary>
+    /// Securely acquires and prepares an AppSurface-owned coverage output directory.
+    /// </summary>
+    /// <param name="outputDirectory">The coverage output directory to acquire without following links.</param>
+    /// <param name="solutionDirectory">The resolved solution directory that must not be used as output.</param>
+    /// <param name="projects">The resolved test projects whose directories must not be used as output.</param>
+    /// <param name="clean">Whether known artifacts from an earlier run should be removed.</param>
+    /// <param name="beforeMutation">An optional test seam invoked after acquisition but before binding revalidation.</param>
+    /// <param name="beforeCleanup">An optional test seam invoked after authorization is revalidated but before cleanup.</param>
     public static void Prepare(
         string outputDirectory,
         string solutionDirectory,
         IReadOnlyList<CoverageRunProject> projects,
-        bool clean)
+        bool clean,
+        Action? beforeMutation = null,
+        Action? beforeCleanup = null)
     {
         ValidateCore(outputDirectory, solutionDirectory, projects);
-
-        var output = Path.GetFullPath(outputDirectory);
-        Directory.CreateDirectory(output);
-        var marker = Path.Join(output, MarkerFileName);
-        var legacyOwned = !File.Exists(marker) && IsLegacyOwnedOutput(EnumerateOutputEntries(output));
-        if (clean && (File.Exists(marker) || legacyOwned))
+        try
         {
-            DeleteKnownOutput(output);
+            using var lease = CoverageRunOutputLease.Acquire(Path.GetFullPath(outputDirectory));
+            lease.Prepare(clean, beforeMutation, beforeCleanup);
         }
-
-        File.WriteAllText(marker, "AppSurface coverage output directory" + Environment.NewLine);
-        Directory.CreateDirectory(Path.Join(output, "projects"));
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw UnsafeOutput($"the output binding changed or contains a symbolic link or reparse point ({ex.GetType().Name}): {outputDirectory}");
+        }
     }
 
     private static void ValidateCore(
@@ -3253,7 +3292,7 @@ internal static class CoverageRunOutputGuard
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
         }
 
-        var output = Path.GetFullPath(outputDirectory);
+        var output = CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(outputDirectory));
         if (File.Exists(output))
         {
             throw UnsafeOutput($"--output points to a file: {output}");
@@ -3275,19 +3314,20 @@ internal static class CoverageRunOutputGuard
             throw UnsafeOutput("--output must not be a filesystem root.");
         }
 
-        var current = Trim(Path.GetFullPath(Directory.GetCurrentDirectory()));
+        var current = Trim(CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(Directory.GetCurrentDirectory())));
         if (string.Equals(trimmedOutput, current, comparison))
         {
             throw UnsafeOutput("--output must not be the current working directory.");
         }
 
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var home = CoverageRunOutputLease.NormalizePlatformPath(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         if (!string.IsNullOrWhiteSpace(home) && string.Equals(trimmedOutput, Trim(home), comparison))
         {
             throw UnsafeOutput("--output must not be the user home directory.");
         }
 
-        var solution = Trim(Path.GetFullPath(solutionDirectory));
+        var solution = Trim(CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(solutionDirectory)));
         if (string.Equals(trimmedOutput, solution, comparison))
         {
             throw UnsafeOutput("--output must not be the solution directory.");
@@ -3296,29 +3336,21 @@ internal static class CoverageRunOutputGuard
         if (projects
             .Select(project => Path.GetDirectoryName(project.FullPath))
             .OfType<string>()
-            .Any(projectDirectory => string.Equals(trimmedOutput, Trim(projectDirectory), comparison)))
+            .Any(projectDirectory => string.Equals(
+                trimmedOutput,
+                Trim(CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(projectDirectory))),
+                comparison)))
         {
             throw UnsafeOutput("--output must not be a test project directory.");
         }
 
         try
         {
-            RejectReparsePointsBelow(output);
+            CoverageRunOutputLease.ValidateExisting(output);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            throw UnsafeOutput($"the existing artifact tree cannot be safely inspected ({ex.GetType().Name}): {output}");
-        }
-        var marker = Path.Join(output, MarkerFileName);
-        if (Directory.Exists(output))
-        {
-            var entries = Directory.EnumerateFileSystemEntries(output)
-                .Where(path => !string.Equals(Path.GetFileName(path), MarkerFileName, StringComparison.Ordinal))
-                .ToArray();
-            if (entries.Length > 0 && !File.Exists(marker) && !IsLegacyOwnedOutput(entries))
-            {
-                throw UnsafeOutput("--output already contains files and is not marked as AppSurface-owned.");
-            }
+            throw UnsafeOutput($"the existing artifact tree contains a symbolic link or reparse point, or cannot be safely inspected ({ex.GetType().Name}): {output}");
         }
     }
 
@@ -3331,110 +3363,7 @@ internal static class CoverageRunOutputGuard
         }
     }
 
-    private static void RejectReparsePointsBelow(string output)
-    {
-        if (!Directory.Exists(output))
-        {
-            return;
-        }
-
-        var pending = new Stack<string>();
-        pending.Push(output);
-        while (pending.TryPop(out var directory))
-        {
-            foreach (var entry in Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.TopDirectoryOnly))
-            {
-                var attributes = File.GetAttributes(entry);
-                if ((attributes & FileAttributes.ReparsePoint) != 0)
-                {
-                    throw UnsafeOutput($"the existing artifact tree contains a symbolic link or reparse point: {entry}");
-                }
-
-                if ((attributes & FileAttributes.Directory) != 0)
-                {
-                    pending.Push(entry);
-                }
-            }
-        }
-    }
-
-    private static string[] EnumerateOutputEntries(string output)
-    {
-        return Directory.Exists(output)
-            ? Directory.EnumerateFileSystemEntries(output)
-                .Where(path => !string.Equals(Path.GetFileName(path), MarkerFileName, StringComparison.Ordinal))
-                .ToArray()
-            : [];
-    }
-
-    private static bool IsLegacyOwnedOutput(IReadOnlyList<string> entries)
-    {
-        return entries.Count > 0 && entries.All(IsKnownOutputEntry);
-    }
-
-    private static bool IsKnownOutputEntry(string path)
-    {
-        var name = Path.GetFileName(path);
-        if (Directory.Exists(path))
-        {
-            return string.Equals(name, "projects", StringComparison.Ordinal)
-                || string.Equals(name, "reportgenerator", StringComparison.Ordinal);
-        }
-
-        return string.Equals(name, "coverage.cobertura.xml", StringComparison.Ordinal)
-            || string.Equals(name, "coverage.json", StringComparison.Ordinal)
-            || string.Equals(name, "coverage-gate.json", StringComparison.Ordinal)
-            || string.Equals(name, "coverage-gate.md", StringComparison.Ordinal)
-            || string.Equals(name, "coverage-watchdog.json", StringComparison.Ordinal)
-            || string.Equals(name, "summary.txt", StringComparison.Ordinal)
-            || string.Equals(name, "timings.json", StringComparison.Ordinal)
-            || string.Equals(name, "reportgenerator-summary.txt", StringComparison.Ordinal)
-            || string.Equals(name, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName, StringComparison.Ordinal)
-            || string.Equals(name, CoverageRunSlowTestDiagnosticsWriter.JsonFileName, StringComparison.Ordinal)
-            || name.StartsWith("junit-", StringComparison.Ordinal) && name.EndsWith(".xml", StringComparison.Ordinal)
-            || name.StartsWith("test-results-", StringComparison.Ordinal) && name.EndsWith(".xml", StringComparison.Ordinal);
-    }
-
-    private static void DeleteKnownOutput(string output)
-    {
-        foreach (var path in new[]
-            {
-                "coverage.cobertura.xml",
-                "coverage.json",
-                "coverage-gate.json",
-                "coverage-gate.md",
-                "coverage-watchdog.json",
-                "summary.txt",
-                "timings.json",
-                "reportgenerator-summary.txt",
-                CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName,
-                CoverageRunSlowTestDiagnosticsWriter.JsonFileName,
-            }
-            .Select(file => Path.Join(output, file))
-            .Where(File.Exists))
-        {
-            File.Delete(path);
-        }
-
-        foreach (var junitFile in Directory.EnumerateFiles(output, "junit-*.xml", SearchOption.TopDirectoryOnly))
-        {
-            File.Delete(junitFile);
-        }
-
-        foreach (var testResultFile in Directory.EnumerateFiles(output, "test-results-*.xml", SearchOption.TopDirectoryOnly))
-        {
-            File.Delete(testResultFile);
-        }
-
-        foreach (var path in new[] { "projects", "reportgenerator" }
-            .Select(directory => Path.Join(output, directory))
-            .Where(Directory.Exists))
-        {
-            Directory.Delete(path, recursive: true);
-        }
-    }
-
-    private static CommandException UnsafeOutput(string cause)
+    internal static CommandException UnsafeOutput(string cause)
     {
         return CoverageRunDiagnostics.Create(
             "ASCOV109",

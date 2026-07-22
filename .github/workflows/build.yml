@@ -19,10 +19,14 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  coverage-security-windows:
-    name: Coverage security contracts (Windows)
-    runs-on: windows-latest
+  coverage-security-platform:
+    name: Coverage security contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
     env:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
@@ -49,7 +53,7 @@ jobs:
           dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
           --configuration Release
           --no-restore
-          --filter FullyQualifiedName~CoverageRunArtifactReaderTests
+          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests"
 
   build:
     runs-on: ubuntu-latest

@@ -214,6 +214,72 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public async Task DisposeAsync_ShouldCancelAndCleanDelayedArtifactWriteWithoutBlocking()
+    {
+        using var output = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        using var staged = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        using var resourcesDisposed = new ManualResetEventSlim();
+        var supervisor = new CoverageRunWatchdogSupervisor(
+            CoverageRunWatchdogMode.Warn,
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(10),
+            console,
+            TimeProvider.System,
+            CancellationToken.None,
+            artifactStaged: () =>
+            {
+                staged.Set();
+                release.Wait();
+            },
+            artifactWriteTimeout: TimeSpan.FromMilliseconds(20),
+            artifactResourcesDisposed: resourcesDisposed.Set);
+        supervisor.BindOutputDirectory(output.Path);
+        using var operation = supervisor.Start("project", "tests/Dispose.Tests/Dispose.Tests.csproj");
+        Assert.True(staged.Wait(TimeSpan.FromSeconds(5)));
+        operation.Dispose();
+
+        await supervisor.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.False(resourcesDisposed.IsSet);
+        release.Set();
+
+        Assert.True(resourcesDisposed.Wait(TimeSpan.FromSeconds(2)));
+        Assert.Empty(Directory.EnumerateFiles(output.Path, ".coverage-watchdog.json.*.tmp"));
+        Assert.False(File.Exists(Path.Join(output.Path, "coverage-watchdog.json")));
+    }
+
+    [Fact]
+    public async Task FailMode_ShouldAdvertiseArtifactOnlyAfterAtomicCommit()
+    {
+        using var output = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        using var staged = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        await using var supervisor = new CoverageRunWatchdogSupervisor(
+            CoverageRunWatchdogMode.Fail,
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(10),
+            console,
+            TimeProvider.System,
+            CancellationToken.None,
+            artifactStaged: () =>
+            {
+                staged.Set();
+                release.Wait();
+            },
+            artifactWriteTimeout: TimeSpan.FromMilliseconds(20));
+        supervisor.BindOutputDirectory(output.Path);
+        using var operation = supervisor.Start("project", "tests/Artifact.Tests/Artifact.Tests.csproj");
+        Assert.True(staged.Wait(TimeSpan.FromSeconds(5)));
+
+        var exception = Assert.Throws<CommandException>(supervisor.ThrowIfFailed);
+
+        Assert.Contains("Artifact: unavailable", exception.Message, StringComparison.Ordinal);
+        release.Set();
+    }
+
+    [Fact]
     public async Task WarnMode_ShouldClassifySimultaneousStallsOnce()
     {
         using var output = TestDirectory.Create();
@@ -317,8 +383,8 @@ public sealed class CoverageRunWatchdogTests
         using var process = Process.Start(CreateLongRunningProcess())!;
         lease.Attach(process);
         await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
-        await WaitForFileAsync(Path.Join(output.Path, "coverage-watchdog.json"));
         lease.Complete();
+        await WaitForFileAsync(Path.Join(output.Path, "coverage-watchdog.json"));
 
         Assert.True(process.HasExited);
         var exception = Assert.Throws<CommandException>(supervisor.ThrowIfFailed);
