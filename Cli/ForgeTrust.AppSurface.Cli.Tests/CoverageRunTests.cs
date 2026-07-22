@@ -2877,6 +2877,10 @@ public sealed class CoverageRunTests
             childProcessId = await childProcessIdTask;
             grandchildProcessId = await grandchildProcessIdTask;
             Assert.NotEqual(childProcessId, grandchildProcessId);
+            // The PID files prove creation, but macOS may not expose the complete parent/child
+            // topology to Process.Kill(true) immediately. Start the watchdog clock only after
+            // the ordinary nested fixture has had a bounded stabilization window.
+            await Task.Delay(100);
             watchdog.Register(
                 new CoverageRunWatchdogOperation("project:0", CoverageRunWatchdogOperationKind.Project),
                 CoverageRunWatchdogOperationState.Running);
