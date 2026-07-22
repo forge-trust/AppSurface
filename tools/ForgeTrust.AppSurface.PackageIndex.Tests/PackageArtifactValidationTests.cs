@@ -3470,12 +3470,12 @@ public sealed class PackageArtifactValidationTests : IDisposable
             StringComparison.Ordinal);
         Assert.Contains(
             report.Artifacts,
-            artifact => artifact.Description == "excluded project 'Smoke.Browser.Tests' produced no coverage artifacts" && artifact.Exists);
+            artifact => artifact.Description == "excluded project 'Smoke.Browser.Tests' produced no coverage artifacts" && artifact.Satisfied);
         var warnRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run watchdog warn");
         Assert.Contains("warn", warnRequest.Arguments);
         Assert.Contains("100ms", warnRequest.Arguments);
         Assert.Contains("1s", warnRequest.Arguments);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run watchdog warning incident" && artifact.Exists);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run watchdog warning incident" && artifact.Satisfied);
         var watchdogFailure = Assert.Single(report.Commands, command => command.OperationName == "appsurface coverage run watchdog fail");
         Assert.Equal(124, watchdogFailure.ExitCode);
         Assert.Contains("ASCOV121", watchdogFailure.StandardError, StringComparison.Ordinal);
@@ -3485,7 +3485,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var offRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run watchdog off");
         Assert.Contains("off", offRequest.Arguments);
         Assert.Contains("0", offRequest.Arguments);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "disabled watchdog produced no incident artifact" && artifact.Exists);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "disabled watchdog produced no incident artifact" && artifact.Satisfied);
         var addPackageRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet add package");
         Assert.DoesNotContain("--configfile", addPackageRequest.Arguments);
         Assert.True(File.Exists(CombineSafeChildPath(report.WorkDirectory, "consumer/NuGet.config")));
@@ -3498,8 +3498,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             Assert.True(File.Exists(command.StandardOutputPath));
             Assert.True(File.Exists(command.StandardErrorPath));
         });
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate JSON report" && artifact.Exists);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate Markdown report" && artifact.Exists);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate JSON report" && artifact.Satisfied);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate Markdown report" && artifact.Satisfied);
     }
 
     [Fact]
@@ -3524,7 +3524,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Contains("did not write both gate reports", report.FirstFailure, StringComparison.Ordinal);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate JSON report" && !artifact.Exists);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate JSON report" && !artifact.Satisfied);
     }
 
     [Fact]
@@ -3749,7 +3749,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Contains("coverage run merged Cobertura", report.FirstFailure, StringComparison.Ordinal);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run merged Cobertura" && !artifact.Exists);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run merged Cobertura" && !artifact.Satisfied);
         Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage merge");
     }
 
@@ -3834,7 +3834,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Contains("coverage merge Cobertura", report.FirstFailure, StringComparison.Ordinal);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage merge Cobertura" && !artifact.Exists);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage merge Cobertura" && !artifact.Satisfied);
         Assert.DoesNotContain(
             commandRunner.Requests,
             request => request.OperationName == "appsurface coverage gate"
@@ -3866,7 +3866,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Contains("passing gate JSON report", report.FirstFailure, StringComparison.Ordinal);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "passing gate JSON report" && !artifact.Exists);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "passing gate JSON report" && !artifact.Satisfied);
         Assert.DoesNotContain(
             commandRunner.Requests,
             request => request.OperationName == "appsurface coverage gate"
@@ -4206,13 +4206,13 @@ public sealed class PackageArtifactValidationTests : IDisposable
             "/tmp/fixture.config",
             "/tmp/logs",
             [command],
-            [new CoverageCliConsumerProofArtifactCheck("failing gate JSON report", "/tmp/coverage-gate.json", Exists: true)],
+            [new CoverageCliConsumerProofArtifactCheck("failing gate JSON report", "/tmp/coverage-gate.json", Satisfied: true)],
             string.Empty,
             "dotnet run -- verify-packages");
         var failure = success with
         {
             FirstFailure = "missing artifact",
-            Artifacts = [new CoverageCliConsumerProofArtifactCheck("coverage merge Cobertura", "/tmp/coverage.cobertura.xml", Exists: false)]
+            Artifacts = [new CoverageCliConsumerProofArtifactCheck("coverage merge Cobertura", "/tmp/coverage.cobertura.xml", Satisfied: false)]
         };
 
         var successMarkdown = CoverageCliConsumerProofReportRenderer.RenderMarkdown(success);
@@ -4222,7 +4222,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("Selected artifact SHA-512: `abc123`", successMarkdown, StringComparison.Ordinal);
         Assert.Contains("ASCOV020 Coverage gate failed.", successMarkdown, StringComparison.Ordinal);
         Assert.Contains("Status: `failed`", failureMarkdown, StringComparison.Ordinal);
-        Assert.Contains("## Missing artifacts", failureMarkdown, StringComparison.Ordinal);
+        Assert.Contains("## Failed artifact checks", failureMarkdown, StringComparison.Ordinal);
     }
 
     [Fact]

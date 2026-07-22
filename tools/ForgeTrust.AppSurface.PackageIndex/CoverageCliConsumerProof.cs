@@ -262,7 +262,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
 
         artifacts.AddRange(CheckCoverageRunArtifacts(coverageMergedDirectory));
         artifacts.Add(CheckExcludedProjectArtifacts(coverageMergedDirectory, "Smoke.Browser.Tests"));
-        if (artifacts.Any(artifact => !artifact.Exists))
+        if (artifacts.Any(artifact => !artifact.Satisfied))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -318,7 +318,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             diagnosticCode: null,
             cleanupStatus: "not-requested");
         artifacts.Add(watchdogWarnArtifact);
-        if (!commands[^1].Succeeded || !watchdogWarnArtifact.Exists)
+        if (!commands[^1].Succeeded || !watchdogWarnArtifact.Satisfied)
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -354,7 +354,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             diagnosticCode: "ASCOV121",
             cleanupStatus: "complete");
         artifacts.Add(watchdogArtifact);
-        if (!commands[^1].Succeeded || !watchdogArtifact.Exists)
+        if (!commands[^1].Succeeded || !watchdogArtifact.Satisfied)
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -391,7 +391,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         artifacts.Add(CheckAbsentArtifact(
             Path.Join(watchdogNoisyDirectory, "coverage-watchdog.json"),
             "noisy coverage run produced no watchdog incident"));
-        if (!commands[^1].Succeeded || artifacts.Any(artifact => !artifact.Exists))
+        if (!commands[^1].Succeeded || artifacts.Any(artifact => !artifact.Satisfied))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -421,7 +421,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         artifacts.Add(CheckAbsentArtifact(
             Path.Join(ordinaryFailureDirectory, "coverage-watchdog.json"),
             "ordinary coverage failure produced no watchdog incident"));
-        if (!ordinaryFailureResult.Succeeded || artifacts.Any(artifact => !artifact.Exists))
+        if (!ordinaryFailureResult.Succeeded || artifacts.Any(artifact => !artifact.Satisfied))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -454,7 +454,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         artifacts.Add(CheckAbsentArtifact(
             Path.Join(watchdogOffDirectory, "coverage-watchdog.json"),
             "disabled watchdog produced no incident artifact"));
-        if (!commands[^1].Succeeded || artifacts.Any(artifact => !artifact.Exists))
+        if (!commands[^1].Succeeded || artifacts.Any(artifact => !artifact.Satisfied))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -472,7 +472,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         }
 
         artifacts.AddRange(CheckCoverageMergeArtifacts(coverageFanInDirectory));
-        if (artifacts.Any(artifact => !artifact.Exists))
+        if (artifacts.Any(artifact => !artifact.Satisfied))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -489,7 +489,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         }
 
         artifacts.AddRange(CheckCoverageGateArtifacts(passingGateDirectory, "passing gate"));
-        if (artifacts.Any(artifact => !artifact.Exists))
+        if (artifacts.Any(artifact => !artifact.Satisfied))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -510,7 +510,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
 
         var failingGateArtifactsMissing = artifacts
             .Where(artifact => artifact.Description.StartsWith("failing gate ", StringComparison.Ordinal)
-                && !artifact.Exists)
+                && !artifact.Satisfied)
             .ToArray();
         if (failingGateArtifactsMissing.Length > 0)
         {
@@ -1064,7 +1064,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)
         {
-            return new CoverageCliConsumerProofArtifactCheck(description, path, Exists: false);
+            return new CoverageCliConsumerProofArtifactCheck(description, path, Satisfied: false);
         }
     }
 
@@ -1129,7 +1129,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var firstFailure = failedCommand?.FailureReason;
         if (string.IsNullOrWhiteSpace(firstFailure))
         {
-            firstFailure = artifacts.FirstOrDefault(artifact => !artifact.Exists)?.Description;
+            firstFailure = artifacts.FirstOrDefault(artifact => !artifact.Satisfied)?.Description;
         }
 
         return new CoverageCliConsumerProofReport(
@@ -1260,7 +1260,7 @@ internal sealed record CoverageCliConsumerProofSelectedArtifact(
 /// <param name="FixtureNuGetConfigPath">NuGet config used for fixture dependencies.</param>
 /// <param name="LogsDirectory">Directory containing per-command stdout/stderr logs.</param>
 /// <param name="Commands">Executed command ledger.</param>
-/// <param name="Artifacts">Produced and missing artifact checks.</param>
+/// <param name="Artifacts">Artifact presence, absence, and content contract checks.</param>
 /// <param name="FirstFailure">First failure summary, or empty when the proof passed.</param>
 /// <param name="ReproduceCommand">Command that reruns the package verifier with the same proof workspace.</param>
 internal sealed record CoverageCliConsumerProofReport(
@@ -1281,7 +1281,7 @@ internal sealed record CoverageCliConsumerProofReport(
     /// </summary>
     internal bool Succeeded => string.IsNullOrWhiteSpace(FirstFailure)
         && Commands.All(command => command.Succeeded)
-        && Artifacts.All(artifact => artifact.Exists);
+        && Artifacts.All(artifact => artifact.Satisfied);
 
     internal static CoverageCliConsumerProofReport Failed(
         string packageVersion,
@@ -1341,8 +1341,8 @@ internal sealed record CoverageCliConsumerProofCommandResult(
 /// </summary>
 /// <param name="Description">Artifact role.</param>
 /// <param name="Path">Expected or produced artifact path.</param>
-/// <param name="Exists">Whether the artifact exists.</param>
-internal sealed record CoverageCliConsumerProofArtifactCheck(string Description, string Path, bool Exists);
+/// <param name="Satisfied">Whether the presence, absence, or content check matched its declared contract.</param>
+internal sealed record CoverageCliConsumerProofArtifactCheck(string Description, string Path, bool Satisfied);
 
 /// <summary>
 /// Runtime paths shared across the packaged coverage CLI consumer proof.
@@ -1451,7 +1451,7 @@ internal static class CoverageCliConsumerProofReportRenderer
             }
         }
 
-        var missingArtifacts = report.Artifacts.Where(artifact => !artifact.Exists).ToArray();
+        var failedArtifactChecks = report.Artifacts.Where(artifact => !artifact.Satisfied).ToArray();
         builder.AppendLine();
         builder.AppendLine("## Artifacts");
         if (report.Artifacts.Count == 0)
@@ -1466,7 +1466,7 @@ internal static class CoverageCliConsumerProofReportRenderer
             builder.AppendLine("| --- | --- | --- |");
             foreach (var artifact in report.Artifacts)
             {
-                builder.AppendLine($"| `{(artifact.Exists ? "produced" : "missing")}` | `{EscapeCode(artifact.Description)}` | `{artifact.Path}` |");
+                builder.AppendLine($"| `{(artifact.Satisfied ? "passed" : "failed")}` | `{EscapeCode(artifact.Description)}` | `{artifact.Path}` |");
             }
         }
 
@@ -1480,11 +1480,11 @@ internal static class CoverageCliConsumerProofReportRenderer
             AppendExcerpt(builder, "stderr", command.StandardError);
         }
 
-        if (missingArtifacts.Length > 0)
+        if (failedArtifactChecks.Length > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("## Missing artifacts");
-            foreach (var artifact in missingArtifacts)
+            builder.AppendLine("## Failed artifact checks");
+            foreach (var artifact in failedArtifactChecks)
             {
                 builder.AppendLine($"- `{artifact.Description}` at `{artifact.Path}`");
             }
