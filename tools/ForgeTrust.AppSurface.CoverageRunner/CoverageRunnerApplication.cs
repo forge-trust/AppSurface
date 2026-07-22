@@ -457,9 +457,9 @@ internal sealed class CoverageRunnerApplication
         var seconds = timer.ElapsedSeconds;
 
         await _standardOut.WriteLineAsync($"[{index + 1}/{count}][{options.GroupName}] finished {project.RelativePath} in {seconds}s (exit {exitCode})");
-        if (exitCode != 0)
+        if (result.ExitCode != 0)
         {
-            await _standardError.WriteLineAsync($"Test run failed for {project.RelativePath} (exit {exitCode})");
+            await _standardError.WriteLineAsync($"Test run failed for {project.RelativePath} (exit {result.ExitCode})");
         }
 
         return new ProjectRunResult(index, project, seconds, exitCode, junitFile, logFile);

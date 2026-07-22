@@ -234,7 +234,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
         ];
         foreach (var file in knownFiles)
         {
-            root.WriteFile(Path.Join("coverage", file), "stale output");
+            root.WriteFile(TestPathUtils.RelativePath("coverage", file), "stale output");
         }
 
         var wrongExtension = root.WriteFile("coverage/junit-old.txt", "must remain");
@@ -243,7 +243,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
 
         CoverageRunOutputGuard.Prepare(output, root.Path, [], clean: true);
 
-        Assert.All(knownFiles, file => Assert.False(File.Exists(Path.Join(output, file))));
+        Assert.All(knownFiles, file => Assert.False(File.Exists(TestPathUtils.PathUnder(output, file))));
         Assert.Equal("must remain", File.ReadAllText(wrongExtension));
         Assert.Equal("must remain", File.ReadAllText(unrelated));
         Assert.True(Directory.Exists(patternedDirectory));
@@ -379,8 +379,16 @@ public sealed class CoverageRunOutputGuardSecurityTests
             beforeMutation: () => Directory.Move(output, parked)));
 
         Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
-        Assert.True(Directory.Exists(parked));
-        Assert.False(Directory.Exists(output));
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.True(Directory.Exists(output));
+            Assert.False(Directory.Exists(parked));
+        }
+        else
+        {
+            Assert.True(Directory.Exists(parked));
+            Assert.False(Directory.Exists(output));
+        }
     }
 
     [Fact]
@@ -459,7 +467,8 @@ public sealed class CoverageRunOutputGuardSecurityTests
 
         Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
         Assert.Equal("original output", File.ReadAllText(Path.Join(parkedProjects, Path.GetFileName(original))));
-        Assert.Equal("must remain", File.ReadAllText(Path.Join(projects, Path.GetFileName(replacementSentinel))));
+        var replacementLocation = OperatingSystem.IsWindows() ? replacement : projects;
+        Assert.Equal("must remain", File.ReadAllText(Path.Join(replacementLocation, Path.GetFileName(replacementSentinel))));
     }
 
     [Fact]
@@ -489,7 +498,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
         Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
         Assert.Equal("original output", File.ReadAllText(Path.Join(parkedProjects, Path.GetFileName(original))));
         var replacementLocation = OperatingSystem.IsWindows()
-            ? projects
+            ? replacement
             : Assert.Single(Directory.EnumerateDirectories(output, ".appsurface-clean-*"));
         Assert.Equal("must remain", File.ReadAllText(Path.Join(replacementLocation, "original.txt")));
     }
@@ -519,7 +528,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
         Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
         Assert.Equal("original output", File.ReadAllText(parkedSummary));
         var replacementLocation = OperatingSystem.IsWindows()
-            ? summary
+            ? replacement
             : Assert.Single(Directory.EnumerateFiles(output, ".appsurface-clean-*"));
         Assert.Equal("must remain", File.ReadAllText(replacementLocation));
     }

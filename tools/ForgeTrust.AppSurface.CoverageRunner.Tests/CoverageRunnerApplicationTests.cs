@@ -1108,6 +1108,7 @@ public sealed class CoverageRunnerApplicationTests
         Assert.Equal(1, exitCode);
         Assert.Contains("Coverage artifact invalid for tools/Pass.Tests/Pass.Tests.csproj", error.ToString(), StringComparison.Ordinal);
         Assert.Contains(expectedError, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Test run failed", error.ToString(), StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Join(
             workspace.Root,
             "TestResults",
