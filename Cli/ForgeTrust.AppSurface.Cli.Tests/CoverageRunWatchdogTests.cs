@@ -585,7 +585,7 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
-    public async Task ArtifactWriter_ShouldAwaitAnAlreadyStartedCommitBeforePropagatingCancellation()
+    public async Task ArtifactWriter_ShouldReportAnAlreadyStartedCommitDespiteCancellation()
     {
         var storage = new BlockingCommitArtifactStorage();
         var writer = new CoverageRunWatchdogArtifactWriter(storage, new ControlledDelay());
@@ -598,7 +598,7 @@ public sealed class CoverageRunWatchdogTests
         Assert.False(write.IsCompleted);
         storage.ReleaseCommit.TrySetResult();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => write);
+        Assert.Equal(CoverageRunWatchdogArtifactWriteResult.Success, await write);
         Assert.Equal(1, storage.CommitCount);
     }
 

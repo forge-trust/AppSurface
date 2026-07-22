@@ -345,12 +345,9 @@ internal sealed partial class CoverageRunCommand : ICommand
     private static TimeSpan ParseWatchdogDuration(string option, string? value, bool allowZero)
     {
         var parsed = CoverageRunWatchdogDuration.TryParse(value, out var duration);
-        if (parsed)
+        if (parsed && (allowZero || duration > TimeSpan.Zero))
         {
-            if (allowZero || duration > TimeSpan.Zero)
-            {
-                return duration;
-            }
+            return duration;
         }
 
         var zeroDetail = !allowZero && parsed && duration == TimeSpan.Zero
@@ -3283,7 +3280,7 @@ internal static class CoverageRunOutputGuard
 
     private static bool IsOwnedStagedArtifact(string name)
     {
-        foreach (var canonicalName in new[]
+        foreach (var prefix in new[]
             {
                 "coverage.cobertura.xml",
                 "coverage.json",
@@ -3295,9 +3292,8 @@ internal static class CoverageRunOutputGuard
                 "reportgenerator-summary.txt",
                 CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName,
                 CoverageRunSlowTestDiagnosticsWriter.JsonFileName,
-            })
+            }.Select(canonicalName => $".{canonicalName}."))
         {
-            var prefix = $".{canonicalName}.";
             if (!name.StartsWith(prefix, StringComparison.Ordinal))
             {
                 continue;

@@ -137,8 +137,6 @@ internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogAr
         try
         {
             await writeTask;
-            cancellationToken.ThrowIfCancellationRequested();
-
             return permission.WasCommitted
                 ? CoverageRunWatchdogArtifactWriteResult.Success
                 : CoverageRunWatchdogArtifactWriteResult.Failed;
