@@ -10,6 +10,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
     private const string RoleRecipeDatabase = "appsurface_durable";
     private const string RoleRecipeUsername = "appsurface";
     private const string RoleRecipePassword = "appsurface-test-password";
+    private const string RoleRecipeApplicationName = "durable-role-recipe";
+    private const string RuntimeRoleTestPassword = "durable-runtime-test-password";
 
     [Fact]
     public async Task ApplyStatusInitializeRotate_AreExplicitAndIdempotent()
@@ -136,28 +138,36 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await using var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());
         await new PostgreSqlDurableRuntimeSchemaManager(dataSource).ApplyAsync();
         await using (var roles = dataSource.CreateCommand(
-            """
+            $"""
             CREATE ROLE durable_owner NOLOGIN NOSUPERUSER NOBYPASSRLS;
-            CREATE ROLE durable_dispatcher NOLOGIN NOSUPERUSER NOBYPASSRLS;
-            CREATE ROLE durable_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
-            CREATE ROLE bypass_dispatcher NOLOGIN NOSUPERUSER BYPASSRLS;
-            CREATE ROLE owner_inheriting_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
-            CREATE ROLE member_dispatcher NOLOGIN NOSUPERUSER NOBYPASSRLS;
-            CREATE ROLE member_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
-            CREATE ROLE direct_privilege_dispatcher NOLOGIN NOSUPERUSER NOBYPASSRLS;
-            CREATE ROLE direct_privilege_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
-            CREATE ROLE inherited_privilege_dispatcher NOLOGIN NOSUPERUSER NOBYPASSRLS;
-            CREATE ROLE inherited_privilege_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE durable_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE durable_runtime LOGIN PASSWORD '{RuntimeRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE bypass_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+            CREATE ROLE nologin_dispatcher NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE owner_inheriting_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE member_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE member_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE direct_privilege_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE direct_privilege_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE column_privilege_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE sequence_privilege_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE inherited_privilege_dispatcher LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE inherited_privilege_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE dispatcher_privilege_parent NOLOGIN NOSUPERUSER NOBYPASSRLS;
             CREATE ROLE runtime_privilege_parent NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE downstream_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE downstream_login LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             GRANT durable_owner TO owner_inheriting_runtime;
             GRANT member_dispatcher TO member_runtime;
             GRANT TRUNCATE ON appsurface_durable.work TO direct_privilege_dispatcher;
             GRANT CREATE ON SCHEMA appsurface_durable TO direct_privilege_runtime;
+            GRANT UPDATE (work_name) ON appsurface_durable.work TO column_privilege_runtime;
+            GRANT UPDATE ON SEQUENCE appsurface_durable.scope_history_event_id_seq TO sequence_privilege_dispatcher;
             GRANT CREATE ON SCHEMA appsurface_durable TO dispatcher_privilege_parent;
             GRANT TRIGGER ON appsurface_durable.work TO runtime_privilege_parent;
-            GRANT dispatcher_privilege_parent TO inherited_privilege_dispatcher;
-            GRANT runtime_privilege_parent TO inherited_privilege_runtime;
+            GRANT dispatcher_privilege_parent TO inherited_privilege_dispatcher WITH INHERIT FALSE, SET TRUE;
+            GRANT runtime_privilege_parent TO inherited_privilege_runtime WITH INHERIT FALSE, SET TRUE;
+            GRANT downstream_dispatcher TO downstream_login;
             ALTER TABLE appsurface_durable.work OWNER TO durable_runtime;
             """))
         {
@@ -167,33 +177,71 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var rejected = new[]
         {
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "durable_dispatcher", Expected: "must be distinct"),
-            (Owner: "durable_owner", Dispatcher: "bypass_dispatcher", Runtime: "durable_runtime", Expected: "must not inherit SUPERUSER or BYPASSRLS"),
-            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "owner_inheriting_runtime", Expected: "must not inherit each other or the migration owner"),
-            (Owner: "durable_owner", Dispatcher: "member_dispatcher", Runtime: "member_runtime", Expected: "must not inherit each other or the migration owner"),
+            (Owner: "durable_owner", Dispatcher: "bypass_dispatcher", Runtime: "durable_runtime", Expected: "must be LOGIN roles without SUPERUSER"),
+            (Owner: "durable_owner", Dispatcher: "nologin_dispatcher", Runtime: "durable_runtime", Expected: "must be LOGIN roles without SUPERUSER"),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "owner_inheriting_runtime", Expected: "exact login leaves with no role memberships"),
+            (Owner: "durable_owner", Dispatcher: "member_dispatcher", Runtime: "member_runtime", Expected: "exact login leaves with no role memberships"),
             (Owner: "durable_owner", Dispatcher: "direct_privilege_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-table privilege outside the package allowlist"),
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "direct_privilege_runtime", Expected: "must not inherit CREATE on the durable schema"),
-            (Owner: "durable_owner", Dispatcher: "inherited_privilege_dispatcher", Runtime: "durable_runtime", Expected: "must not inherit CREATE on the durable schema"),
-            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "inherited_privilege_runtime", Expected: "effective durable-table privilege outside the package allowlist"),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "column_privilege_runtime", Expected: "effective durable-column privilege outside the package allowlist"),
+            (Owner: "durable_owner", Dispatcher: "sequence_privilege_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-sequence privilege outside the package allowlist"),
+            (Owner: "durable_owner", Dispatcher: "inherited_privilege_dispatcher", Runtime: "durable_runtime", Expected: "exact login leaves with no role memberships"),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "inherited_privilege_runtime", Expected: "exact login leaves with no role memberships"),
+            (Owner: "durable_owner", Dispatcher: "downstream_dispatcher", Runtime: "durable_runtime", Expected: "exact login leaves with no role memberships"),
         };
         foreach (var item in rejected)
         {
             var result = await RunRoleRecipeAsync(container, containerRecipePath, item.Owner, item.Dispatcher, item.Runtime);
             Assert.NotEqual(0, result.ExitCode);
-            Assert.Contains(item.Expected, $"{result.Stdout}\n{result.Stderr}", StringComparison.Ordinal);
+            var output = $"{result.Stdout}\n{result.Stderr}";
+            Assert.True(
+                output.Contains(item.Expected, StringComparison.Ordinal),
+                $"Expected role recipe case ({item.Owner}, {item.Dispatcher}, {item.Runtime}) to contain '{item.Expected}'. Output: {output}");
         }
 
         await using (var noRejectedGrant = dataSource.CreateCommand(
-            "SELECT has_schema_privilege('durable_dispatcher', 'appsurface_durable', 'USAGE');"))
+            """
+            SELECT
+                NOT has_schema_privilege('durable_dispatcher', 'appsurface_durable', 'USAGE')
+                AND NOT has_table_privilege(
+                    'direct_privilege_dispatcher',
+                    'appsurface_durable.dispatch',
+                    'SELECT')
+                AND
+                (
+                    SELECT owner_role.rolname = 'durable_runtime'
+                    FROM pg_catalog.pg_class AS object
+                    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+                    JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = object.relowner
+                    WHERE namespace.nspname = 'appsurface_durable'
+                      AND object.relname = 'work'
+                );
+            """))
         {
-            Assert.False((bool)(await noRejectedGrant.ExecuteScalarAsync())!);
+            Assert.True((bool)(await noRejectedGrant.ExecuteScalarAsync())!);
         }
 
-        var accepted = await RunRoleRecipeAsync(
+        await using var lockConnection = await dataSource.OpenConnectionAsync();
+        await using var lockTransaction = await lockConnection.BeginTransactionAsync();
+        await using (var holdRuntimeFence = new NpgsqlCommand(
+            "SELECT pg_advisory_xact_lock_shared(@lock_id);",
+            lockConnection,
+            lockTransaction))
+        {
+            holdRuntimeFence.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await holdRuntimeFence.ExecuteNonQueryAsync();
+        }
+
+        var acceptedTask = RunRoleRecipeAsync(
             container,
             containerRecipePath,
             "durable_owner",
             "durable_dispatcher",
             "durable_runtime");
+        await WaitForBackendAsync(dataSource, RoleRecipeApplicationName);
+        Assert.False(acceptedTask.IsCompleted);
+        await lockTransaction.CommitAsync();
+        var accepted = await acceptedTask;
         Assert.True(
             accepted.ExitCode == 0,
             $"Role recipe failed with exit {accepted.ExitCode}. stdout: {accepted.Stdout} stderr: {accepted.Stderr}");
@@ -213,46 +261,179 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         await using (var effectivePrivileges = dataSource.CreateCommand(
             """
+            WITH service_role(role_name) AS
+            (
+                VALUES ('durable_dispatcher'), ('durable_runtime')
+            ),
+            durable_relation AS
+            (
+                SELECT object.oid, object.relname
+                FROM pg_catalog.pg_class AS object
+                JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+                WHERE namespace.nspname = 'appsurface_durable'
+                  AND object.relkind IN ('r', 'p', 'v', 'm', 'f')
+            ),
+            relation_privilege(privilege_name) AS
+            (
+                VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
+            ),
+            durable_column AS
+            (
+                SELECT object.oid, object.relname, attribute.attnum, attribute.attname
+                FROM durable_relation AS relation
+                JOIN pg_catalog.pg_class AS object ON object.oid = relation.oid
+                JOIN pg_catalog.pg_attribute AS attribute ON attribute.attrelid = object.oid
+                WHERE attribute.attnum > 0
+                  AND NOT attribute.attisdropped
+            ),
+            column_privilege(privilege_name) AS
+            (
+                VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('REFERENCES')
+            ),
+            durable_sequence AS
+            (
+                SELECT object.oid
+                FROM pg_catalog.pg_class AS object
+                JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+                WHERE namespace.nspname = 'appsurface_durable'
+                  AND object.relkind = 'S'
+            ),
+            sequence_privilege(privilege_name) AS
+            (
+                VALUES ('USAGE'), ('SELECT'), ('UPDATE')
+            )
             SELECT
                 has_schema_privilege('durable_dispatcher', 'appsurface_durable', 'USAGE')
                 AND NOT has_schema_privilege('durable_dispatcher', 'appsurface_durable', 'CREATE')
-                AND has_table_privilege('durable_dispatcher', 'appsurface_durable.dispatch', 'SELECT')
-                AND NOT has_table_privilege(
-                    'durable_dispatcher',
-                    'appsurface_durable.work',
-                    'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')
-                AND NOT has_sequence_privilege(
-                    'durable_dispatcher',
-                    'appsurface_durable.scope_history_event_id_seq',
-                    'USAGE,SELECT,UPDATE')
                 AND has_schema_privilege('durable_runtime', 'appsurface_durable', 'USAGE')
                 AND NOT has_schema_privilege('durable_runtime', 'appsurface_durable', 'CREATE')
-                AND has_table_privilege('durable_runtime', 'appsurface_durable.work', 'SELECT,INSERT')
-                AND NOT has_table_privilege(
-                    'durable_runtime',
-                    'appsurface_durable.work',
-                    'UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')
-                AND has_column_privilege('durable_runtime', 'appsurface_durable.work', 'state', 'UPDATE')
-                AND NOT has_column_privilege('durable_runtime', 'appsurface_durable.work', 'work_name', 'UPDATE')
-                AND has_sequence_privilege(
-                    'durable_runtime',
-                    'appsurface_durable.scope_history_event_id_seq',
-                    'USAGE,SELECT')
-                AND NOT has_sequence_privilege(
-                    'durable_runtime',
-                    'appsurface_durable.scope_history_event_id_seq',
-                    'UPDATE');
+                AND NOT EXISTS
+                (
+                    SELECT 1
+                    FROM service_role AS service
+                    CROSS JOIN durable_relation AS relation
+                    CROSS JOIN relation_privilege AS privilege
+                    WHERE has_table_privilege(
+                        service.role_name,
+                        relation.oid,
+                        privilege.privilege_name)
+                      <>
+                        (
+                            service.role_name = 'durable_dispatcher'
+                            AND relation.relname = 'dispatch'
+                            AND privilege.privilege_name = 'SELECT'
+                            OR service.role_name = 'durable_runtime'
+                            AND
+                            (
+                                privilege.privilege_name = 'SELECT'
+                                AND relation.relname IN
+                                (
+                                    'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
+                                    'work_operator_command', 'effect_permit', 'scope_history', 'work_history'
+                                )
+                                OR privilege.privilege_name = 'INSERT'
+                                AND relation.relname IN
+                                (
+                                    'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
+                                    'scope_history', 'work_history'
+                                )
+                            )
+                        )
+                )
+                AND NOT EXISTS
+                (
+                    SELECT 1
+                    FROM service_role AS service
+                    CROSS JOIN durable_column AS column_value
+                    CROSS JOIN column_privilege AS privilege
+                    WHERE has_column_privilege(
+                        service.role_name,
+                        column_value.oid,
+                        column_value.attnum,
+                        privilege.privilege_name)
+                      <>
+                        (
+                            service.role_name = 'durable_dispatcher'
+                            AND column_value.relname = 'dispatch'
+                            AND privilege.privilege_name = 'SELECT'
+                            OR service.role_name = 'durable_runtime'
+                            AND
+                            (
+                                privilege.privilege_name = 'SELECT'
+                                AND column_value.relname IN
+                                (
+                                    'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
+                                    'work_operator_command', 'effect_permit', 'scope_history', 'work_history'
+                                )
+                                OR privilege.privilege_name = 'INSERT'
+                                AND column_value.relname IN
+                                (
+                                    'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
+                                    'scope_history', 'work_history'
+                                )
+                                OR privilege.privilege_name = 'UPDATE'
+                                AND
+                                (
+                                    column_value.relname = 'scope'
+                                    AND column_value.attname IN ('generation', 'state', 'updated_at')
+                                    OR column_value.relname = 'work'
+                                    AND column_value.attname IN
+                                    (
+                                        'state', 'due_at', 'updated_at', 'terminal_at', 'cancellation_requested_at',
+                                        'attempt_number', 'lease_generation', 'lease_owner', 'lease_started_at',
+                                        'lease_expires_at', 'runtime_epoch', 'revision', 'result_contract_id',
+                                        'result_schema_version', 'result_codec_id', 'result_classification',
+                                        'result_retention_policy_id', 'result_payload', 'result_sha256', 'terminal_code'
+                                    )
+                                    OR column_value.relname = 'dispatch'
+                                    AND column_value.attname IN ('due_at', 'state', 'expected_revision', 'updated_at')
+                                    OR column_value.relname = 'work_operator_command'
+                                    AND column_value.attname IN
+                                        ('status', 'resulting_state', 'resulting_revision', 'completed_at')
+                                    OR column_value.relname = 'effect_permit'
+                                    AND column_value.attname IN ('status', 'observed_at', 'details', 'runtime_epoch')
+                                )
+                            )
+                        )
+                )
+                AND NOT EXISTS
+                (
+                    SELECT 1
+                    FROM service_role AS service
+                    CROSS JOIN durable_sequence AS sequence_value
+                    CROSS JOIN sequence_privilege AS privilege
+                    WHERE has_sequence_privilege(
+                        service.role_name,
+                        sequence_value.oid,
+                        privilege.privilege_name)
+                      <>
+                        (
+                            service.role_name = 'durable_runtime'
+                            AND privilege.privilege_name IN ('USAGE', 'SELECT')
+                        )
+                );
             """))
         {
             Assert.True((bool)(await effectivePrivileges.ExecuteScalarAsync())!);
         }
 
-        await using var runtimeConnection = await dataSource.OpenConnectionAsync();
-        await using (var assumeRuntime = runtimeConnection.CreateCommand())
+        var reapplied = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            "durable_dispatcher",
+            "durable_runtime");
+        Assert.True(
+            reapplied.ExitCode == 0,
+            $"Role recipe reapply failed with exit {reapplied.ExitCode}. stdout: {reapplied.Stdout} stderr: {reapplied.Stderr}");
+
+        var runtimeConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
         {
-            assumeRuntime.CommandText = "SET ROLE durable_runtime;";
-            await assumeRuntime.ExecuteNonQueryAsync();
-        }
+            Username = "durable_runtime",
+            Password = RuntimeRoleTestPassword,
+        }.ConnectionString;
+        await using var runtimeDataSource = NpgsqlDataSource.Create(runtimeConnectionString);
+        await using var runtimeConnection = await runtimeDataSource.OpenConnectionAsync();
 
         var denied = await Assert.ThrowsAsync<PostgresException>(async () =>
         {
@@ -261,11 +442,6 @@ public sealed class PostgreSqlSchemaIntegrationTests
             await disableRls.ExecuteNonQueryAsync();
         });
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, denied.SqlState);
-        await using (var resetRole = runtimeConnection.CreateCommand())
-        {
-            resetRole.CommandText = "RESET ROLE;";
-            await resetRole.ExecuteNonQueryAsync();
-        }
     }
 
     [Fact]
@@ -571,6 +747,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
         string runtime) =>
         container.ExecAsync(
             [
+                "env",
+                $"PGAPPNAME={RoleRecipeApplicationName}",
                 "psql",
                 "-U", RoleRecipeUsername,
                 "-d", RoleRecipeDatabase,

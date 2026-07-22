@@ -9,6 +9,8 @@ PostgreSQL transaction, and when process-loss recovery must use explicit leases,
 and provider-safety policy. Choose a larger workflow platform for arbitrary deterministic replay, child workflows, or
 unbounded fan-out. PostgreSQL is this provider's sole durable truth.
 
+The verified database target is PostgreSQL 17.5.
+
 The package references the adopter-facing
 [`ForgeTrust.AppSurface.Durable`](../ForgeTrust.AppSurface.Durable/README.md) contracts and the
 [`ForgeTrust.AppSurface.Durable.Provider`](../ForgeTrust.AppSurface.Durable.Provider/README.md) SPI. Neither package
@@ -48,6 +50,40 @@ inherit the migration owner, `SUPERUSER`, or `BYPASSRLS`. It also transfers ever
 the migration owner so pre-existing object ownership cannot preserve runtime DDL authority. Existing direct,
 inherited, or `PUBLIC` schema, relation, column, and sequence privileges outside the documented allowlist cause the
 transactional recipe to fail and roll back; remove those host-managed grants before retrying.
+
+### Role recipe contract
+
+Run the recipe with `psql` as a principal that can transfer ownership and grant privileges:
+
+```console
+psql -v ON_ERROR_STOP=1 \
+  -v migration_owner_role=appsurface_durable_owner \
+  -v dispatcher_role=appsurface_durable_dispatcher \
+  -v runtime_role=appsurface_durable_runtime \
+  -f Durable/configure-postgresql-roles.sql "$CONNECTION_STRING"
+```
+
+The dispatcher and runtime values identify the exact non-human credentials used to connect, not reusable capability
+groups. Both must be distinct `LOGIN` leaf roles with no memberships in either direction and without `SUPERUSER`,
+`CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS`. Create and rotate their credentials through the deployment
+secret system; the recipe never accepts or changes passwords. The migration owner remains separate and may be
+`NOLOGIN`.
+
+The `appsurface_durable` schema is package-reserved. The recipe serializes with migrations and runtime transactions,
+then transfers every table, partition, sequence, view, materialized view, and foreign table in that schema to the
+migration owner. Do not place application-owned objects there.
+
+| Principal | Allowed privileges |
+| --- | --- |
+| Dispatcher | Schema `USAGE`; table `SELECT` on `dispatch` only. |
+| Runtime reads | Schema `USAGE`; table `SELECT` on `store_metadata`, `schema_migration`, `scope`, `work`, `dispatch`, `work_operator_command`, `effect_permit`, `scope_history`, and `work_history`. |
+| Runtime inserts | Table `INSERT` on `scope`, `work`, `dispatch`, `work_operator_command`, `effect_permit`, `scope_history`, and `work_history`. |
+| Runtime updates | Column `UPDATE` on `scope(generation, state, updated_at)`, the mutable lease/result/state columns of `work`, `dispatch(due_at, state, expected_revision, updated_at)`, `work_operator_command(status, resulting_state, resulting_revision, completed_at)`, and `effect_permit(status, observed_at, details, runtime_epoch)`. |
+| Runtime sequences | `USAGE` and `SELECT` on every sequence in the package schema. |
+
+Neither service credential receives schema `CREATE`, table-wide `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`,
+`TRIGGER`, or `MAINTAIN`; the dispatcher receives no sequence privileges. Forced RLS remains an additional scope fence,
+not the reason destructive privileges are safe.
 
 ## Accept Work
 

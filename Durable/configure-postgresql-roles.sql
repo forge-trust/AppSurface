@@ -41,37 +41,44 @@ SELECT EXISTS
   SELECT 1 / 0;
 \endif
 
-SELECT NOT EXISTS
-(
-  SELECT 1
-  FROM pg_catalog.pg_roles AS privileged_role
-  WHERE (privileged_role.rolsuper OR privileged_role.rolbypassrls)
-    AND
-    (
-      pg_catalog.pg_has_role(:'dispatcher_role', privileged_role.oid, 'MEMBER')
-      OR pg_catalog.pg_has_role(:'runtime_role', privileged_role.oid, 'MEMBER')
-    )
-) AS service_roles_are_unprivileged \gset
-\if :service_roles_are_unprivileged
+SELECT bool_and(role_value.rolcanlogin)
+   AND bool_and(NOT role_value.rolsuper)
+   AND bool_and(NOT role_value.rolcreatedb)
+   AND bool_and(NOT role_value.rolcreaterole)
+   AND bool_and(NOT role_value.rolreplication)
+   AND bool_and(NOT role_value.rolbypassrls)
+  AS service_roles_are_restricted_login_leaves
+FROM pg_catalog.pg_roles AS role_value
+WHERE role_value.rolname IN (:'dispatcher_role', :'runtime_role') \gset
+\if :service_roles_are_restricted_login_leaves
 \else
-  \echo 'Dispatcher and scoped runtime roles must not inherit SUPERUSER or BYPASSRLS.'
+  \echo 'Dispatcher and scoped runtime roles must be LOGIN roles without SUPERUSER, CREATEDB, CREATEROLE, REPLICATION, or BYPASSRLS.'
   SELECT 1 / 0;
 \endif
 
-SELECT NOT
+WITH service_role AS
 (
-  pg_catalog.pg_has_role(:'dispatcher_role', :'migration_owner_role', 'MEMBER')
-  OR pg_catalog.pg_has_role(:'runtime_role', :'migration_owner_role', 'MEMBER')
-  OR pg_catalog.pg_has_role(:'dispatcher_role', :'runtime_role', 'MEMBER')
-  OR pg_catalog.pg_has_role(:'runtime_role', :'dispatcher_role', 'MEMBER')
-) AS service_roles_are_separated \gset
-\if :service_roles_are_separated
+  SELECT role_value.oid
+  FROM pg_catalog.pg_roles AS role_value
+  WHERE role_value.rolname IN (:'dispatcher_role', :'runtime_role')
+)
+SELECT NOT EXISTS
+(
+  SELECT 1
+  FROM pg_catalog.pg_auth_members AS membership
+  JOIN service_role AS service
+    ON service.oid = membership.member
+    OR service.oid = membership.roleid
+) AS service_roles_are_membership_free \gset
+\if :service_roles_are_membership_free
 \else
-  \echo 'Dispatcher and scoped runtime roles must not inherit each other or the migration owner.'
+  \echo 'Dispatcher and scoped runtime roles must be exact login leaves with no role memberships in either direction.'
   SELECT 1 / 0;
 \endif
 
 BEGIN;
+
+SELECT pg_catalog.pg_advisory_xact_lock(4707181168775217740);
 
 SELECT format('ALTER SCHEMA appsurface_durable OWNER TO %I', :'migration_owner_role') \gexec
 SELECT format(

@@ -282,10 +282,19 @@ public sealed class DurableSchemaContractTests
         Assert.DoesNotContain("to_regrole", recipe, StringComparison.Ordinal);
         Assert.Equal(3, CountOccurrences(recipe, "WHERE rolname = :"));
         Assert.Contains("AS roles_are_distinct", recipe, StringComparison.Ordinal);
-        Assert.Contains("AS service_roles_are_unprivileged", recipe, StringComparison.Ordinal);
-        Assert.Contains("AS service_roles_are_separated", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS service_roles_are_restricted_login_leaves", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS service_roles_are_membership_free", recipe, StringComparison.Ordinal);
         Assert.Contains("AS durable_objects_owned_by_migration_role", recipe, StringComparison.Ordinal);
-        Assert.Equal(6, CountOccurrences(recipe, "pg_catalog.pg_has_role"));
+        Assert.Contains("pg_catalog.pg_auth_members", recipe, StringComparison.Ordinal);
+        Assert.DoesNotContain("pg_catalog.pg_has_role", recipe, StringComparison.Ordinal);
+        Assert.Contains(
+            "pg_catalog.pg_advisory_xact_lock(4707181168775217740)",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.Contains("AS service_roles_have_safe_schema_privileges", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS service_roles_have_safe_relation_privileges", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS service_roles_have_safe_column_privileges", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS service_roles_have_safe_sequence_privileges", recipe, StringComparison.Ordinal);
         Assert.DoesNotContain("\\quit", recipe, StringComparison.Ordinal);
         Assert.Contains("format('ALTER SCHEMA appsurface_durable OWNER TO %I'", recipe, StringComparison.Ordinal);
         Assert.Contains("appsurface_durable.store_metadata, appsurface_durable.schema_migration", recipe, StringComparison.Ordinal);
