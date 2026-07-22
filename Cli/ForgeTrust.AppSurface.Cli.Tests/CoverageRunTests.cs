@@ -3129,6 +3129,35 @@ public sealed class CoverageRunTests
         Assert.Single(runner.Commands);
     }
 
+    [Theory]
+    [InlineData("null")]
+    [InlineData("{}")]
+    [InlineData("{ \"Identity\": 42 }")]
+    public async Task RunAsync_Preflight_ShouldIgnoreMalformedUnrelatedPackageReferences(string malformedReference)
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            CapabilityOutput = $$"""
+                {
+                  "Properties": { "TargetFramework": "net10.0", "TestingPlatformDotnetTestSupport": true },
+                  "Items": { "PackageReference": [{{malformedReference}}, { "Identity": "coverlet.collector" }] }
+                }
+                """,
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        await workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None);
+
+        Assert.Single(runner.Commands);
+    }
+
     [Fact]
     public async Task RunAsync_Preflight_ShouldRejectFailedCapabilityCommand()
     {
@@ -3207,6 +3236,105 @@ public sealed class CoverageRunTests
         Assert.Equal(3, runner.Commands.Count);
         Assert.Contains(runner.Commands, command => command.Arguments.Contains("-property:TargetFramework=net9.0"));
         Assert.Contains(runner.Commands, command => command.Arguments.Contains("-property:TargetFramework=net10.0"));
+    }
+
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldValidateSingleTargetFrameworkFromEvaluatedProperties()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            CapabilityOutput = """
+                { "Properties": { "TargetFramework": "net10.0" }, "Items": { "PackageReference": [{ "Identity": "coverlet.collector" }] } }
+                """,
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        await workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None);
+
+        Assert.Single(runner.Commands);
+    }
+
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldRejectMissingEvaluatedTargetFramework()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            CapabilityOutput = """
+                { "Properties": {}, "Items": { "PackageReference": [{ "Identity": "coverlet.collector" }] } }
+                """,
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("capability evaluation returned no TargetFramework or TargetFrameworks", exception.Message, StringComparison.Ordinal);
+        Assert.Single(runner.Commands);
+    }
+
+    [Theory]
+    [InlineData("{ \"TargetFrameworks\": 42 }")]
+    [InlineData("{ \"TargetFrameworks\": \"\" }")]
+    [InlineData("{ \"TargetFramework\": 42 }")]
+    [InlineData("{ \"TargetFramework\": \"   \" }")]
+    public async Task RunAsync_Preflight_ShouldRejectMissingUsableTargetFramework(string properties)
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            CapabilityOutput = $$"""
+                { "Properties": {{properties}}, "Items": { "PackageReference": [{ "Identity": "coverlet.collector" }] } }
+                """,
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("capability evaluation returned no TargetFramework or TargetFrameworks", exception.Message, StringComparison.Ordinal);
+        Assert.Single(runner.Commands);
+    }
+
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldQuoteMissingPackageFixForProjectPathWithSpaces()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample Tests/Sample Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            CapabilityOutput = """
+                { "Properties": { "TargetFramework": "net10.0" }, "Items": { "PackageReference": [] } }
+                """,
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("fix: dotnet add \"", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Sample Tests.csproj\" package coverlet.collector", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3580,6 +3708,23 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task CollectorNormalization_ShouldPreserveProcessFailureWhenArtifactIsMissing()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var projectOutput = Path.Join(repo.Path, "project");
+        Directory.CreateDirectory(projectOutput);
+        var raw = Path.Join(projectOutput, "collector-results", "missing");
+
+        var produced = await CoverageRunDriverStrategy.NormalizeAsync(
+            new CoverageRunDriverInvocation(CoverageRunDriver.Collector, projectOutput, raw, []),
+            processExitCode: 1,
+            Path.Join(projectOutput, "dotnet-test.log"),
+            CancellationToken.None);
+
+        Assert.False(produced);
+    }
+
+    [Fact]
     public async Task CollectorNormalization_ShouldUseCommitGate()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -3833,7 +3978,7 @@ public sealed class CoverageRunTests
         public string TestOutput { get; init; } = "test output";
         public string CapabilityOutput { get; init; } = """
             {
-              "Properties": { "TestingPlatformDotnetTestSupport": "false" },
+              "Properties": { "TestingPlatformDotnetTestSupport": "false", "TargetFramework": "net10.0" },
               "Items": {
                 "PackageReference": [
                   { "Identity": "coverlet.collector" },

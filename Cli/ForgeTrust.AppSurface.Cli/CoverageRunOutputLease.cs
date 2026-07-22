@@ -279,7 +279,11 @@ internal sealed class CoverageRunOutputLease : IDisposable
                 }
             }
 
-            current = OpenWindowsDirectory(currentPath, denyWriteSharing: index == components.Length - 1);
+            var isOutputDirectory = index == components.Length - 1;
+            current = OpenWindowsDirectory(
+                currentPath,
+                access: isOutputDirectory ? WindowsGenericRead : 0,
+                denyWriteSharing: isOutputDirectory);
             _windowsHandles.Add(current);
             VerifyWindowsPathIdentity(current, currentPath);
         }

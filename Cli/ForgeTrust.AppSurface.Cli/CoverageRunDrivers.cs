@@ -91,13 +91,31 @@ internal static class CoverageRunDriverPreflight
 
             if (result.ExitCode != 0
                 || result.StandardOutput is null
-                || !TryReadCapabilities(result.StandardOutput, requiredPackage, out var hasPackage, out var usesMtp, out var targetFrameworks))
+                || !TryReadCapabilities(
+                    result.StandardOutput,
+                    requiredPackage,
+                    out var hasPackage,
+                    out var usesMtp,
+                    out var targetFrameworks,
+                    out var requiresPerFrameworkEvaluation))
             {
                 failures.Add($"{project.RelativePath}: capability evaluation failed");
                 continue;
             }
 
             if (targetFrameworks.Count == 0)
+            {
+                var failureCount = failures.Count;
+                AddCapabilityFailure(project.RelativePath, hasPackage, usesMtp, driver, requiredPackage, failures);
+                if (failures.Count == failureCount)
+                {
+                    failures.Add($"{project.RelativePath}: capability evaluation returned no TargetFramework or TargetFrameworks");
+                }
+
+                continue;
+            }
+
+            if (!requiresPerFrameworkEvaluation)
             {
                 AddCapabilityFailure(project.RelativePath, hasPackage, usesMtp, driver, requiredPackage, failures);
                 continue;
@@ -115,7 +133,7 @@ internal static class CoverageRunDriverPreflight
                     cancellationToken);
                 if (innerResult.ExitCode != 0
                     || innerResult.StandardOutput is null
-                    || !TryReadCapabilities(innerResult.StandardOutput, requiredPackage, out var innerHasPackage, out var innerUsesMtp, out _))
+                    || !TryReadCapabilities(innerResult.StandardOutput, requiredPackage, out var innerHasPackage, out var innerUsesMtp, out _, out _))
                 {
                     failures.Add($"{project.RelativePath} [{targetFramework}]: capability evaluation failed");
                     continue;
@@ -276,11 +294,13 @@ internal static class CoverageRunDriverPreflight
         string requiredPackage,
         out bool hasPackage,
         out bool usesMtp,
-        out IReadOnlyList<string> targetFrameworks)
+        out IReadOnlyList<string> targetFrameworks,
+        out bool requiresPerFrameworkEvaluation)
     {
         hasPackage = false;
         usesMtp = false;
         targetFrameworks = [];
+        requiresPerFrameworkEvaluation = false;
         try
         {
             using var document = JsonDocument.Parse(json);
@@ -309,6 +329,13 @@ internal static class CoverageRunDriverPreflight
             {
                 targetFrameworks = targetFrameworksProperty.GetString()!
                     .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                requiresPerFrameworkEvaluation = true;
+            }
+            else if (properties.TryGetProperty("TargetFramework", out var targetFrameworkProperty)
+                && targetFrameworkProperty.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(targetFrameworkProperty.GetString()))
+            {
+                targetFrameworks = [targetFrameworkProperty.GetString()!.Trim()];
             }
 
             var matches = packageReferences.EnumerateArray()

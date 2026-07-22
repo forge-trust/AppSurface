@@ -212,6 +212,44 @@ public sealed class CoverageRunOutputGuardSecurityTests
     }
 
     [Fact]
+    public void Prepare_Clean_ShouldReplaceEveryKnownAndPatternedRootArtifact()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        root.WriteFile("coverage/.appsurface-coverage-output", MarkerContents + Environment.NewLine);
+        string[] knownFiles =
+        [
+            "coverage.cobertura.xml",
+            "coverage.json",
+            "coverage-gate.json",
+            "coverage-gate.md",
+            "coverage-watchdog.json",
+            "summary.txt",
+            "timings.json",
+            "reportgenerator-summary.txt",
+            "slow-test-diagnostics.md",
+            "slow-test-diagnostics.json",
+            "junit-old.xml",
+            "test-results-old.xml",
+        ];
+        foreach (var file in knownFiles)
+        {
+            root.WriteFile(Path.Join("coverage", file), "stale output");
+        }
+
+        var wrongExtension = root.WriteFile("coverage/junit-old.txt", "must remain");
+        var unrelated = root.WriteFile("coverage/unrelated.xml", "must remain");
+        var patternedDirectory = root.CreateDirectory("coverage/test-results-directory.xml");
+
+        CoverageRunOutputGuard.Prepare(output, root.Path, [], clean: true);
+
+        Assert.All(knownFiles, file => Assert.False(File.Exists(Path.Join(output, file))));
+        Assert.Equal("must remain", File.ReadAllText(wrongExtension));
+        Assert.Equal("must remain", File.ReadAllText(unrelated));
+        Assert.True(Directory.Exists(patternedDirectory));
+    }
+
+    [Fact]
     public void Prepare_Clean_ShouldRejectUnmarkedKnownArtifactsWithoutDeletingThem()
     {
         using var root = TestDirectory.Create();
@@ -258,6 +296,141 @@ public sealed class CoverageRunOutputGuardSecurityTests
 
         Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
         Assert.Equal("must remain", File.ReadAllText(sentinel));
+    }
+
+    [Fact]
+    public void Validate_ShouldRejectMarkerDirectory()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        root.CreateDirectory("coverage/.appsurface-coverage-output");
+
+        var exception = Assert.Throws<CommandException>(
+            () => CoverageRunOutputGuard.Validate(output, root.Path, []));
+
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.True(Directory.Exists(Path.Join(output, ".appsurface-coverage-output")));
+    }
+
+    [Fact]
+    public void Validate_ShouldRejectOversizedMarker()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        var marker = root.WriteFile("coverage/.appsurface-coverage-output", new string('x', 129));
+
+        var exception = Assert.Throws<CommandException>(
+            () => CoverageRunOutputGuard.Validate(output, root.Path, []));
+
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(129, new FileInfo(marker).Length);
+    }
+
+    [Fact]
+    public void Validate_ShouldAcceptMarkerWithoutTrailingNewline()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        root.WriteFile("coverage/.appsurface-coverage-output", MarkerContents);
+
+        CoverageRunOutputGuard.Validate(output, root.Path, []);
+
+        Assert.Equal(MarkerContents, File.ReadAllText(Path.Join(output, ".appsurface-coverage-output")));
+    }
+
+    [Fact]
+    public void Validate_ShouldNotCreateMissingOutput()
+    {
+        using var root = TestDirectory.Create();
+        var output = Path.Join(root.Path, "missing", "coverage");
+
+        CoverageRunOutputGuard.Validate(output, root.Path, []);
+
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
+    public void Validate_ShouldRejectOutputBelowRegularFile()
+    {
+        using var root = TestDirectory.Create();
+        var parent = root.WriteFile("parent", "not a directory");
+        var output = Path.Join(parent, "coverage");
+
+        var exception = Assert.Throws<CommandException>(
+            () => CoverageRunOutputGuard.Validate(output, root.Path, []));
+
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("not a directory", File.ReadAllText(parent));
+    }
+
+    [Fact]
+    public void Prepare_ShouldFailClosedWhenOutputIsMovedBeforeBindingRevalidation()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        root.WriteFile("coverage/.appsurface-coverage-output", MarkerContents + Environment.NewLine);
+        var parked = Path.Join(root.Path, "parked-coverage");
+
+        var exception = Assert.Throws<CommandException>(() => CoverageRunOutputGuard.Prepare(
+            output,
+            root.Path,
+            [],
+            clean: true,
+            beforeMutation: () => Directory.Move(output, parked)));
+
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.True(Directory.Exists(parked));
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
+    public void PrepareUnix_ShouldFailClosedWhenArtifactIsRemovedBeforeCleanup()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        root.WriteFile("coverage/.appsurface-coverage-output", MarkerContents + Environment.NewLine);
+        var summary = root.WriteFile("coverage/summary.txt", "stale output");
+
+        var exception = Assert.Throws<CommandException>(() => CoverageRunOutputGuard.Prepare(
+            output,
+            root.Path,
+            [],
+            clean: true,
+            beforeCleanup: () => File.Delete(summary)));
+
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(summary));
+    }
+
+    [Fact]
+    public void PrepareUnix_ShouldFailClosedWhenManagedDirectoryGainsArtifactBeforeCleanup()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        root.WriteFile("coverage/.appsurface-coverage-output", MarkerContents + Environment.NewLine);
+        root.WriteFile("coverage/projects/original.txt", "stale output");
+
+        var exception = Assert.Throws<CommandException>(() => CoverageRunOutputGuard.Prepare(
+            output,
+            root.Path,
+            [],
+            clean: true,
+            beforeCleanup: () => root.WriteFile("coverage/projects/late.txt", "must remain")));
+
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            Directory.EnumerateFiles(output, "late.txt", SearchOption.AllDirectories),
+            path => string.Equals(File.ReadAllText(path), "must remain", StringComparison.Ordinal));
     }
 
     [Fact]

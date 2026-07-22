@@ -160,6 +160,41 @@ public sealed class CoverageRunArtifactReaderTests
     }
 
     [Fact]
+    public void OpenRegularFile_ShouldRejectRawResultsOutsideProjectOutput()
+    {
+        using var repo = ArtifactTempDirectory.Create("appsurface-coverage-artifact-");
+        var projectOutput = Path.Join(repo.Path, "project");
+        var raw = Path.Join(repo.Path, "external-results");
+        Directory.CreateDirectory(projectOutput);
+        Directory.CreateDirectory(raw);
+        var candidate = repo.WriteFile("external-results/coverage.cobertura.xml", "<coverage />");
+
+        var exception = Assert.Throws<IOException>(() =>
+            CoverageRunArtifactReader.OpenRegularFile(projectOutput, raw, candidate));
+
+        Assert.Contains("escaped its invocation directory", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OpenRegularFile_ShouldAcceptContainedPathsWithTrailingDirectorySeparators()
+    {
+        using var repo = ArtifactTempDirectory.Create("appsurface-coverage-artifact-");
+        var projectOutput = Path.Join(repo.Path, "project");
+        var raw = Path.Join(projectOutput, "collector-results", "invocation");
+        Directory.CreateDirectory(raw);
+        var candidate = repo.WriteFile(
+            "project/collector-results/invocation/coverage.cobertura.xml",
+            "<coverage />");
+
+        using var stream = CoverageRunArtifactReader.OpenRegularFile(
+            Path.EndsInDirectorySeparator(projectOutput) ? projectOutput : projectOutput + Path.DirectorySeparatorChar,
+            Path.EndsInDirectorySeparator(raw) ? raw : raw + Path.DirectorySeparatorChar,
+            candidate);
+
+        Assert.True(stream.CanRead);
+    }
+
+    [Fact]
     public void OpenRegularFile_ShouldPreventWindowsParentReplacementDuringCandidateOpen()
     {
         if (!OperatingSystem.IsWindows())
