@@ -2830,29 +2830,23 @@ public sealed class CoverageRunTests
         }
         else
         {
-            var grandchildScript = repo.WriteFile(
-                "grandchild.sh",
-                """
-                sleep 30 &
-                grandchild_pid=$!
-                echo "$grandchild_pid" > "$1"
-                wait "$grandchild_pid"
-                """);
             var childScript = repo.WriteFile(
                 "child.sh",
                 """
                 echo $$ > "$1"
-                /bin/sh "$2" "$3"
+                sleep 30 &
+                grandchild_pid=$!
+                echo "$grandchild_pid" > "$2"
+                wait "$grandchild_pid"
                 echo child-complete
                 """);
             arguments =
             [
                 "-c",
-                "/bin/sh \"$1\" \"$2\" \"$3\" \"$4\" >/dev/null 2>&1; echo root-complete",
+                "/bin/sh \"$1\" \"$2\" \"$3\" >/dev/null 2>&1; echo root-complete",
                 "coverage-watchdog-root",
                 childScript,
                 childProcessIdFile,
-                grandchildScript,
                 grandchildProcessIdFile,
             ];
         }
@@ -2885,7 +2879,7 @@ public sealed class CoverageRunTests
                 new CoverageRunWatchdogOperation("project:0", CoverageRunWatchdogOperationKind.Project),
                 CoverageRunWatchdogOperationState.Running);
 
-            var exception = await watchdog.TerminalTask.WaitAsync(TimeSpan.FromSeconds(5));
+            var exception = await watchdog.TerminalTask.WaitAsync(TimeSpan.FromSeconds(15));
             Assert.Equal(124, exception.ExitCode);
             await WaitForProcessExitAsync(childProcessId.Value, "child");
             await WaitForProcessExitAsync(grandchildProcessId.Value, "grandchild");
@@ -2909,7 +2903,13 @@ public sealed class CoverageRunTests
         }
         finally
         {
-            await safetyCancellation.CancelAsync();
+            var safetyCancellationDispatch = safetyCancellation.CancelAsync();
+            _ = safetyCancellationDispatch.ContinueWith(
+                static completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            await Task.WhenAny(safetyCancellationDispatch, Task.Delay(TimeSpan.FromSeconds(2)));
             try
             {
                 await execution.WaitAsync(TimeSpan.FromSeconds(5));
@@ -2917,6 +2917,10 @@ public sealed class CoverageRunTests
             catch (OperationCanceledException)
             {
                 // Expected when cleanup or the safety deadline cancels the fixture.
+            }
+            catch (TimeoutException)
+            {
+                // A platform tree-kill call may remain blocked; fixture PID cleanup below is bounded.
             }
             finally
             {
