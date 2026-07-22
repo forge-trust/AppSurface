@@ -31,8 +31,10 @@ services.ConfigureAppSurfaceGoogleSecretManager(options =>
 ```
 
 Grant the runtime identity `secretmanager.versions.access` only for the secrets it should read. Prefer Workload Identity
-or host-owned Application Default Credentials. This package does not mint credentials, create secrets, assign IAM,
-provision Terraform, shell out to `gcloud`, write secret versions, delete secrets, or rotate values.
+or host-owned Application Default Credentials. The runtime provider does not mint credentials, create secrets, assign
+IAM, provision Terraform, shell out to `gcloud`, write secret versions, delete secrets, or rotate values. The package
+also exposes a separate transfer client seam used by the declared `appsurface secrets transfer` promotion workflow; that
+workflow can add a new version to an existing secret only when the user applies a validated plan.
 
 ## Provider Order
 
@@ -153,6 +155,36 @@ services.UseAppSurfaceGoogleSecretManagerClient(new FakeGoogleSecretManagerClien
 
 The seam returns payload bytes from a resource name and timeout. Test fakes can return deterministic bytes or throw
 Google `RpcException` instances so the provider's status mapping remains deterministic without network access.
+
+Use `UseAppSurfaceGoogleSecretTransferClient(...)` to replace the explicit transfer seam used by CLI transfer workflows:
+
+```csharp
+services.UseAppSurfaceGoogleSecretTransferClient(new FakeGoogleSecretTransferClient());
+```
+
+The transfer seam is separate from the read-only provider client. It probes secret parents and enabled versions, returns
+structured payload access only during apply, and adds a new enabled version to an existing secret. It does not include
+create, delete, disable, destroy, rotate, IAM, Terraform, or `gcloud` operations.
+
+Transfer writes use `GoogleSecretManagerTransferStatus.IndeterminateWrite` when Google may have accepted a new version
+but did not return a definitive response. Callers must not retry that result automatically because `AddSecretVersion`
+has no idempotency key; reconcile the destination's versions first, then create a new reviewed plan for any remaining
+work. Definitive missing-resource, access-denied, and invalid-resource failures remain separately classified.
+
+## CLI Transfer
+
+Use the [AppSurface CLI transfer workflow](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-secrets-transfer)
+to promote a declared LocalSecrets or Google source into an existing Google secret. Configuration names the source and
+destination endpoints plus exact job rows; Google production sources must use numeric version resources, never `latest`.
+
+```bash
+appsurface secrets transfer plan --config ./secret-promotion.json --job staging-to-production --out ./promotion.plan.json
+appsurface secrets transfer apply --config ./secret-promotion.json --plan ./promotion.plan.json --apply --confirm staging-to-production
+```
+
+The plan is value-free and metadata-only. Apply rechecks its digest, expiry, and destination preconditions before
+materializing a UTF-8 payload. `--replace` adds a new enabled Google version; it does not overwrite, disable, or destroy
+an existing version. Treat endpoint configuration and plan artifacts as operator-controlled security-sensitive files.
 
 ## Migration
 

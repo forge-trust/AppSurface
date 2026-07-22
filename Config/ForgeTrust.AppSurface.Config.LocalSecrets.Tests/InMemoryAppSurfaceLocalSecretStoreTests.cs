@@ -14,7 +14,7 @@ public sealed class InMemoryAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Found, deleted.Status);
         Assert.Equal(LocalSecretResultStatus.Missing, missing.Status);
-        Assert.DoesNotContain("sk_test_secret", deleted.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", deleted.ToString());
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public sealed class InMemoryAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Missing, result.Status);
         Assert.Equal("local-secret-store-ready", result.Diagnostic?.Code);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     private static AppSurfaceLocalSecretIdentity Normalize(

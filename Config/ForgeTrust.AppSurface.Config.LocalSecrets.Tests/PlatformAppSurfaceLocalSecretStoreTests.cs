@@ -111,7 +111,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
         Assert.Contains("ExitCode=-2", result.Diagnostic?.Cause, StringComparison.Ordinal);
         Assert.Contains(typeof(StartFailureException).FullName!, result.Diagnostic?.Cause, StringComparison.Ordinal);
-        Assert.DoesNotContain(message, result.Diagnostic?.Cause, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(message, result.Diagnostic?.Cause);
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
         Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
         Assert.Contains("No additional startup detail was reported; ExitCode=-2.", result.Diagnostic?.Cause, StringComparison.Ordinal);
-        Assert.DoesNotContain(". ;", result.Diagnostic?.Cause, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(". ;", result.Diagnostic?.Cause);
     }
 
     [Fact]
@@ -162,8 +162,8 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.StartFailedExitCode, result.ExitCode);
         Assert.Contains(typeof(StartFailureException).FullName!, result.Error, StringComparison.Ordinal);
         Assert.Contains($"HResult={exception.HResult}", result.Error, StringComparison.Ordinal);
-        Assert.DoesNotContain(rawMessage, result.Error, StringComparison.Ordinal);
-        Assert.DoesNotContain(Path.GetTempPath(), result.Error, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(rawMessage, result.Error);
+        ValueSafeAssert.DoesNotExpose(Path.GetTempPath(), result.Error);
     }
 
     [Fact]
@@ -264,7 +264,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.False(result.Succeeded);
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-store-command-untrusted", result.Diagnostic?.Code);
-        Assert.Contains(fakePath, result.Diagnostic?.Cause, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(fakePath, result.Diagnostic?.Cause);
         Assert.Contains("ignores PATH", result.Diagnostic?.Cause, StringComparison.Ordinal);
     }
 
@@ -282,8 +282,8 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.False(result.Succeeded);
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-store-command-untrusted", result.Diagnostic?.Code);
-        Assert.Contains("/usr/bin/secret-tool", result.Diagnostic?.Cause, StringComparison.Ordinal);
-        Assert.Contains("/bin/secret-tool", result.Diagnostic?.Cause, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(UsrSecretTool, result.Diagnostic?.Cause);
+        ValueSafeAssert.DoesNotExpose(BinSecretTool, result.Diagnostic?.Cause);
         Assert.Contains("does not search PATH", result.Diagnostic?.Cause, StringComparison.Ordinal);
     }
 
@@ -412,6 +412,10 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
         Assert.Equal("local-secret-store-command-invalid", result.Diagnostic?.Code);
         Assert.Contains(expectedCause, result.Diagnostic?.Cause, StringComparison.Ordinal);
+        if (!string.IsNullOrEmpty(overridePath))
+        {
+            ValueSafeAssert.DoesNotExpose(overridePath, result.Diagnostic?.Fix);
+        }
     }
 
     [Fact]
@@ -423,6 +427,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-store-command-unsupported", result.Diagnostic?.Code);
         Assert.Contains("Linux-only", result.Diagnostic?.Cause, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("/usr/local/bin/secret-tool", result.Diagnostic?.ToDisplayString());
     }
 
     [Fact]
@@ -517,6 +522,42 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         store.Set(upper, "upper-secret");
 
         Assert.Equal(["Stripe:ApiKey", "stripe:apikey"], store.ReadIndexKeys("MyApp", "Development", null));
+    }
+
+    [Fact]
+    public void IndexedStoreSet_Should_NotWriteValue_WhenIndexWriteFails()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var live = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+        store.FailIndexWrites(LocalSecretResultStatus.Unavailable);
+
+        var set = store.Set(live, "live-secret");
+        var probe = store.Probe(live);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, set.Status);
+        Assert.False(store.HasIndex("MyApp", "Development", null));
+        Assert.False(store.HasStoredValue(live));
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+        ValueSafeAssert.DoesNotExpose("live-secret", probe.ToString());
+    }
+
+    [Fact]
+    public void IndexedStoreSet_Should_RemoveNewIndexEntry_WhenValueWriteFails()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var live = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+        store.FailValueWrites(LocalSecretResultStatus.Unavailable);
+
+        var set = store.Set(live, "live-secret");
+        var probe = store.Probe(live);
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, set.Status);
+        Assert.False(store.HasStoredValue(live));
+        Assert.DoesNotContain(live.Key, store.ReadIndexKeys("MyApp", "Development", null));
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+        ValueSafeAssert.DoesNotExpose("live-secret", probe.ToString());
     }
 
     [Fact]
@@ -684,6 +725,8 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
         private readonly Dictionary<string, AppSurfaceLocalSecretResult> _readFailures = new(StringComparer.Ordinal);
         private LocalSecretResultStatus? _nextWriteFailure;
+        private LocalSecretResultStatus? _indexWriteFailure;
+        private LocalSecretResultStatus? _valueWriteFailure;
 
         public override string Name => nameof(IndexedMemoryStore);
 
@@ -704,10 +747,17 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         public bool HasIndex(string applicationName, string environment, string? keyPrefix) =>
             _values.ContainsKey(IndexStorageName(applicationName, environment, keyPrefix));
 
+        public bool HasStoredValue(AppSurfaceLocalSecretIdentity identity) =>
+            _values.ContainsKey(identity.StorageName);
+
         public void FailRead(AppSurfaceLocalSecretIdentity identity, LocalSecretResultStatus status) =>
             _readFailures[identity.StorageName] = Failure(status);
 
         public void FailNextWrite(LocalSecretResultStatus status) => _nextWriteFailure = status;
+
+        public void FailIndexWrites(LocalSecretResultStatus status) => _indexWriteFailure = status;
+
+        public void FailValueWrites(LocalSecretResultStatus status) => _valueWriteFailure = status;
 
         protected override AppSurfaceLocalSecretResult ReadStoredValue(AppSurfaceLocalSecretIdentity identity)
         {
@@ -723,6 +773,16 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
 
         protected override AppSurfaceLocalSecretResult WriteStoredValue(AppSurfaceLocalSecretIdentity identity, string value)
         {
+            if (string.Equals(identity.Key, IndexKey, StringComparison.Ordinal) && _indexWriteFailure is { } indexStatus)
+            {
+                return Failure(indexStatus);
+            }
+
+            if (!string.Equals(identity.Key, IndexKey, StringComparison.Ordinal) && _valueWriteFailure is { } valueStatus)
+            {
+                return Failure(valueStatus);
+            }
+
             if (_nextWriteFailure is { } status)
             {
                 _nextWriteFailure = null;

@@ -130,7 +130,24 @@ index entry still reports `local-secret-missing`.
 - `Disabled` stops LocalSecrets from resolving values.
 
 Use environment variables, key-per-file, or `ForgeTrust.AppSurface.Config.GoogleSecretManager` in CI, containers, team
-environments, and Google Cloud production hosts.
+environments, and Google Cloud production hosts. When you are ready to move a local development value into an existing
+Google Secret Manager secret, declare a LocalSecrets-to-Google job and run `appsurface secrets transfer plan` before
+`appsurface secrets transfer apply --apply`. The workflow never prints the value and does not create secrets, grant IAM,
+rotate, or disable old Google versions.
+
+## Metadata-Only Probes
+
+`IAppSurfaceLocalSecretMetadataStore` is the LocalSecrets seam for transfer planning and overwrite checks. It answers
+whether a normalized `AppSurfaceLocalSecretIdentity` is present without returning the stored secret value. Built-in
+stores implement it directly:
+
+- `InMemoryAppSurfaceLocalSecretStore` checks its key dictionary.
+- `FileAppSurfaceLocalSecretStore` scans top-level storage-name metadata instead of deserializing value records.
+- OS-backed platform stores use the LocalSecrets index and defer stale-entry verification until an apply path needs the
+  value.
+
+Use `IAppSurfaceLocalSecretStore.Get(...)` only when the caller is intentionally materializing the value, such as
+`appsurface secrets transfer apply --apply`.
 
 ## Release Guidance
 

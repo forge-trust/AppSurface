@@ -57,7 +57,7 @@ This approach aims to:
 
 ### [Core](./ForgeTrust.AppSurface.Core/README.md)
 
-- [**ForgeTrust.AppSurface.Core**](./ForgeTrust.AppSurface.Core/README.md) – Core abstractions for defining modules, starting an application via `AppSurfaceStartup` and `StartupContext`, and running AppSurface-owned process workflows through a CliWrap-backed policy surface.
+- [**ForgeTrust.AppSurface.Core**](./ForgeTrust.AppSurface.Core/README.md) – Core abstractions for defining modules, starting an application via `AppSurfaceStartup` and `StartupContext`, running AppSurface-owned process workflows, and constructing lexically contained filesystem paths.
 
 ### [Auth](./Auth/ForgeTrust.AppSurface.Auth/README.md)
 

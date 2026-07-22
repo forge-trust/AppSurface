@@ -21,6 +21,18 @@ AppSurface ships as a coordinated package family. Before installing this package
 - **`AppSurfaceStartup`**: The base class that orchestrates the host building and service registration process.
 - **`AppSurfaceStartup.RegisterDependencies`**: A protected seam for specialized startup types that need the module graph prepared before they build the Generic Host.
 - **`ProcessUtils`**: The AppSurface-owned process execution surface for framework code that needs to capture stdout and stderr, non-throwing non-zero exit codes, cancellation-aware execution, and optional line-by-line logging.
+- **`PathUtils`**: Shared repository-root discovery and lexically contained path construction for framework code.
+
+## Path utilities
+
+Use `PathUtils.PathUnder(basePath, segments)` when framework code must construct a file or directory path beneath a
+known base. It rejects rooted values, Windows absolute-looking values, blank segments, and parent traversal before
+returning a normalized full path. This avoids later path segments resetting or escaping the intended base.
+
+`PathUnder` guarantees lexical containment only. It does not resolve symbolic links, inspect filesystem permissions, or
+prove that an existing path remains physically beneath the base. Pair it with a feature-specific filesystem posture check
+when links, aliases, ownership, or permissions are part of the security boundary. Use ordinary `Path.GetFullPath` when a
+caller intentionally accepts an arbitrary absolute destination rather than a path constrained beneath a trusted base.
 
 ## Application labels and host identity
 

@@ -12,7 +12,7 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// store and should not be used as a production vault. The file contains secret values and must stay outside source
 /// control.
 /// </remarks>
-public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
+public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -160,6 +160,49 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
     }
 
     /// <inheritdoc />
+    public AppSurfaceLocalSecretResult Probe(AppSurfaceLocalSecretIdentity identity)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+
+        lock (_gate)
+        {
+            if (!TryInspectExistingFilePosture(out var posture, out var failure))
+            {
+                return failure;
+            }
+
+            if (posture.Kind == FileSecretPostureKind.Unsupported)
+            {
+                return PostureFailure(posture);
+            }
+
+            if (!_fileSystem.FileExists(_path))
+            {
+                return AppSurfaceLocalSecretResult.Missing(Name);
+            }
+
+            try
+            {
+                return ContainsStorageName(identity.StorageName)
+                    ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
+                    : AppSurfaceLocalSecretResult.Missing(Name);
+            }
+            catch (JsonException)
+            {
+                return InvalidStoreFailure();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return ReadLockedFailure();
+            }
+            catch (IOException)
+            {
+                return ReadUnavailableFailure();
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix)
     {
         lock (_gate)
@@ -239,12 +282,7 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
         catch (JsonException)
         {
             data = [];
-            failure = Failure(
-                LocalSecretResultStatus.ProviderFailed,
-                "local-secret-store-invalid",
-                "Local secret file store is invalid.",
-                "The configured local secret file could not be parsed.",
-                "Delete and recreate the LocalSecrets namespace with `appsurface secrets init`.");
+            failure = InvalidStoreFailure();
             return false;
         }
         catch (UnauthorizedAccessException)
@@ -276,6 +314,593 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
 
         return JsonSerializer.Deserialize<Dictionary<string, FileSecretEntry>>(text, JsonOptions)
                ?? new Dictionary<string, FileSecretEntry>(StringComparer.Ordinal);
+    }
+
+    private bool ContainsStorageName(string storageName)
+    {
+        using var stream = _fileSystem.OpenRead(_path);
+        return ContainsTopLevelProperty(stream, storageName);
+    }
+
+    private static bool ContainsTopLevelProperty(Stream stream, string propertyName)
+    {
+        var reader = new JsonByteReader(stream);
+        var next = reader.ReadNextNonWhitespace();
+        if (next < 0)
+        {
+            return false;
+        }
+
+        if (next == 'n')
+        {
+            ReadJsonLiteral(reader, "ull");
+            EnsureEndOfJson(reader);
+            return false;
+        }
+
+        if (next != '{')
+        {
+            throw new JsonException("Local secret file store root must be a JSON object.");
+        }
+
+        while (true)
+        {
+            next = reader.ReadNextNonWhitespace();
+            if (next == '}')
+            {
+                EnsureEndOfJson(reader);
+                return false;
+            }
+
+            if (next != '"')
+            {
+                throw new JsonException("Local secret file store root contains an invalid property name.");
+            }
+
+            var matched = ReadJsonStringEquals(reader, propertyName);
+            next = reader.ReadNextNonWhitespace();
+            if (next != ':')
+            {
+                throw new JsonException("Local secret file store root contains an invalid property separator.");
+            }
+
+            var valueStart = reader.ReadNextNonWhitespace();
+            if (valueStart != '{')
+            {
+                throw new JsonException("Local secret file store entry must be a JSON object.");
+            }
+
+            reader.Unread(valueStart);
+            if (matched)
+            {
+                return true;
+            }
+
+            SkipJsonValue(reader);
+            var delimiter = reader.ReadNextNonWhitespace();
+            if (delimiter == ',')
+            {
+                continue;
+            }
+
+            if (delimiter == '}')
+            {
+                EnsureEndOfJson(reader);
+                return false;
+            }
+
+            throw new JsonException("Local secret file store root contains an invalid value delimiter.");
+        }
+    }
+
+    private static bool ReadJsonStringEquals(JsonByteReader reader, string expected)
+    {
+        var matched = true;
+        var index = 0;
+        while (true)
+        {
+            var next = reader.Read();
+            if (next < 0)
+            {
+                throw new JsonException("Local secret file store string is unterminated.");
+            }
+
+            if (next == '"')
+            {
+                return matched && index == expected.Length;
+            }
+
+            if (next == '\\')
+            {
+                ReadJsonEscapeAndMatch(reader, expected, ref matched, ref index);
+                continue;
+            }
+
+            if (next < 0x20)
+            {
+                throw new JsonException("Local secret file store string contains an invalid control character.");
+            }
+
+            if (next < 0x80)
+            {
+                MatchJsonStringChar((char)next, expected, ref matched, ref index);
+                continue;
+            }
+
+            MatchJsonCodePoint(ReadJsonUtf8CodePoint(reader, next), expected, ref matched, ref index);
+        }
+    }
+
+    private static void MatchJsonStringChar(char value, string expected, ref bool matched, ref int index)
+    {
+        if (matched && (index >= expected.Length || expected[index] != value))
+        {
+            matched = false;
+        }
+
+        index++;
+    }
+
+    private static void MatchJsonCodePoint(int codePoint, string expected, ref bool matched, ref int index)
+    {
+        if (codePoint <= 0xFFFF)
+        {
+            MatchJsonStringChar((char)codePoint, expected, ref matched, ref index);
+            return;
+        }
+
+        var scalar = codePoint - 0x10000;
+        MatchJsonStringChar((char)((scalar >> 10) + 0xD800), expected, ref matched, ref index);
+        MatchJsonStringChar((char)((scalar & 0x3FF) + 0xDC00), expected, ref matched, ref index);
+    }
+
+    private static void ReadJsonEscapeAndMatch(JsonByteReader reader, string expected, ref bool matched, ref int index)
+    {
+        var escaped = reader.Read();
+        if (escaped < 0)
+        {
+            throw new JsonException("Local secret file store escape sequence is unterminated.");
+        }
+
+        if (escaped is not ('"' or '\\' or '/' or 'b' or 'f' or 'n' or 'r' or 't' or 'u'))
+        {
+            throw new JsonException("Local secret file store escape sequence is invalid.");
+        }
+
+        switch (escaped)
+        {
+            case '"':
+            case '\\':
+            case '/':
+                MatchJsonStringChar((char)escaped, expected, ref matched, ref index);
+                return;
+            case 'b':
+                MatchJsonStringChar('\b', expected, ref matched, ref index);
+                return;
+            case 'f':
+                MatchJsonStringChar('\f', expected, ref matched, ref index);
+                return;
+            case 'n':
+                MatchJsonStringChar('\n', expected, ref matched, ref index);
+                return;
+            case 'r':
+                MatchJsonStringChar('\r', expected, ref matched, ref index);
+                return;
+            case 't':
+                MatchJsonStringChar('\t', expected, ref matched, ref index);
+                return;
+        }
+
+        ReadJsonUnicodeEscape(reader, out var high);
+        if (char.IsHighSurrogate((char)high))
+        {
+            ReadJsonLowSurrogateEscape(reader, out var low);
+            MatchJsonStringChar((char)high, expected, ref matched, ref index);
+            MatchJsonStringChar((char)low, expected, ref matched, ref index);
+            return;
+        }
+
+        if (char.IsLowSurrogate((char)high))
+        {
+            throw new JsonException("Local secret file store unicode escape sequence is invalid.");
+        }
+
+        MatchJsonStringChar((char)high, expected, ref matched, ref index);
+    }
+
+    private static void SkipJsonValue(JsonByteReader reader)
+    {
+        var next = reader.ReadNextNonWhitespace();
+        if (!IsJsonValueStart(next))
+        {
+            throw new JsonException("Local secret file store value is missing.");
+        }
+
+        switch (next)
+        {
+            case '"':
+                SkipJsonString(reader);
+                return;
+            case '{':
+                SkipJsonObject(reader);
+                return;
+            case '[':
+                SkipJsonArray(reader);
+                return;
+            case 't':
+                ReadJsonLiteral(reader, "rue");
+                return;
+            case 'f':
+                ReadJsonLiteral(reader, "alse");
+                return;
+            case 'n':
+                ReadJsonLiteral(reader, "ull");
+                return;
+            case '-' or >= '0' and <= '9':
+                SkipJsonNumber(reader, next);
+                return;
+            default:
+                throw new JsonException("Local secret file store contains an invalid value.");
+        }
+    }
+
+    private static void SkipJsonObject(JsonByteReader reader)
+    {
+        var next = reader.ReadNextNonWhitespace();
+        if (next == '}')
+        {
+            return;
+        }
+
+        reader.Unread(next);
+        while (true)
+        {
+            if (reader.ReadNextNonWhitespace() != '"')
+            {
+                throw new JsonException("Local secret file store object contains an invalid property name.");
+            }
+
+            SkipJsonString(reader);
+            if (reader.ReadNextNonWhitespace() != ':')
+            {
+                throw new JsonException("Local secret file store object contains an invalid property separator.");
+            }
+
+            SkipJsonValue(reader);
+            next = reader.ReadNextNonWhitespace();
+            if (next == ',')
+            {
+                continue;
+            }
+
+            if (next == '}')
+            {
+                return;
+            }
+
+            throw new JsonException("Local secret file store object contains an invalid value delimiter.");
+        }
+    }
+
+    private static void SkipJsonArray(JsonByteReader reader)
+    {
+        var next = reader.ReadNextNonWhitespace();
+        if (next == ']')
+        {
+            return;
+        }
+
+        reader.Unread(next);
+        while (true)
+        {
+            SkipJsonValue(reader);
+            next = reader.ReadNextNonWhitespace();
+            if (next == ',')
+            {
+                continue;
+            }
+
+            if (next == ']')
+            {
+                return;
+            }
+
+            throw new JsonException("Local secret file store array contains an invalid value delimiter.");
+        }
+    }
+
+    private static void SkipJsonString(JsonByteReader reader)
+    {
+        while (true)
+        {
+            var next = reader.Read();
+            if (next < 0)
+            {
+                throw new JsonException("Local secret file store string is unterminated.");
+            }
+
+            if (next == '"')
+            {
+                return;
+            }
+
+            if (next == '\\')
+            {
+                SkipJsonEscape(reader);
+                continue;
+            }
+
+            if (next < 0x20)
+            {
+                throw new JsonException("Local secret file store string contains an invalid control character.");
+            }
+
+            if (next >= 0x80)
+            {
+                _ = ReadJsonUtf8CodePoint(reader, next);
+            }
+        }
+    }
+
+    private static void SkipJsonEscape(JsonByteReader reader)
+    {
+        var escaped = reader.Read();
+        if (escaped < 0)
+        {
+            throw new JsonException("Local secret file store escape sequence is unterminated.");
+        }
+
+        if (escaped is not ('"' or '\\' or '/' or 'b' or 'f' or 'n' or 'r' or 't' or 'u'))
+        {
+            throw new JsonException("Local secret file store escape sequence is invalid.");
+        }
+
+        if (escaped == 'u')
+        {
+            ReadJsonUnicodeEscape(reader, out var high);
+            if (char.IsHighSurrogate((char)high))
+            {
+                ReadJsonLowSurrogateEscape(reader, out _);
+            }
+            else if (char.IsLowSurrogate((char)high))
+            {
+                throw new JsonException("Local secret file store unicode escape sequence is invalid.");
+            }
+        }
+    }
+
+    private static int ReadJsonUtf8CodePoint(JsonByteReader reader, int first)
+    {
+        if (first is >= 0xC2 and <= 0xDF)
+        {
+            var second = ReadJsonUtf8Continuation(reader);
+            return ((first & 0x1F) << 6) | (second & 0x3F);
+        }
+
+        if (first is >= 0xE0 and <= 0xEF)
+        {
+            var second = ReadJsonUtf8Continuation(reader);
+            if ((first == 0xE0 && second < 0xA0) || (first == 0xED && second > 0x9F))
+            {
+                throw new JsonException("Local secret file store string contains invalid UTF-8.");
+            }
+
+            var third = ReadJsonUtf8Continuation(reader);
+            return ((first & 0x0F) << 12) | ((second & 0x3F) << 6) | (third & 0x3F);
+        }
+
+        if (first is >= 0xF0 and <= 0xF4)
+        {
+            var second = ReadJsonUtf8Continuation(reader);
+            if ((first == 0xF0 && second < 0x90) || (first == 0xF4 && second > 0x8F))
+            {
+                throw new JsonException("Local secret file store string contains invalid UTF-8.");
+            }
+
+            var third = ReadJsonUtf8Continuation(reader);
+            var fourth = ReadJsonUtf8Continuation(reader);
+            return ((first & 0x07) << 18) | ((second & 0x3F) << 12) | ((third & 0x3F) << 6) | (fourth & 0x3F);
+        }
+
+        throw new JsonException("Local secret file store string contains invalid UTF-8.");
+    }
+
+    private static int ReadJsonUtf8Continuation(JsonByteReader reader)
+    {
+        var next = reader.Read();
+        if (next is < 0x80 or > 0xBF)
+        {
+            throw new JsonException("Local secret file store string contains invalid UTF-8.");
+        }
+
+        return next;
+    }
+
+    private static void ReadJsonUnicodeEscape(JsonByteReader reader, out int value)
+    {
+        value = 0;
+        for (var index = 0; index < 4; index++)
+        {
+            var hex = reader.Read();
+            if (hex < 0)
+            {
+                throw new JsonException("Local secret file store unicode escape sequence is unterminated.");
+            }
+
+            if (!IsJsonHexDigit(hex))
+            {
+                throw new JsonException("Local secret file store unicode escape sequence is invalid.");
+            }
+
+            value = (value << 4) | JsonHexValue(hex);
+        }
+    }
+
+    private static void ReadJsonLowSurrogateEscape(JsonByteReader reader, out int low)
+    {
+        if (reader.Read() != '\\' || reader.Read() != 'u')
+        {
+            throw new JsonException("Local secret file store unicode escape sequence is invalid.");
+        }
+
+        ReadJsonUnicodeEscape(reader, out low);
+        if (!char.IsLowSurrogate((char)low))
+        {
+            throw new JsonException("Local secret file store unicode escape sequence is invalid.");
+        }
+    }
+
+    private static void ReadJsonLiteral(JsonByteReader reader, string literalTail)
+    {
+        foreach (var expected in literalTail)
+        {
+            if (reader.Read() != expected)
+            {
+                throw new JsonException("Local secret file store contains an invalid literal.");
+            }
+        }
+    }
+
+    private static void EnsureEndOfJson(JsonByteReader reader)
+    {
+        if (reader.ReadNextNonWhitespace() >= 0)
+        {
+            throw new JsonException("Local secret file store contains trailing JSON content.");
+        }
+    }
+
+    private static void SkipJsonNumber(JsonByteReader reader, int first)
+    {
+        var next = first;
+        if (next == '-')
+        {
+            next = reader.Read();
+            if (next < 0)
+            {
+                throw new JsonException("Local secret file store number is incomplete.");
+            }
+        }
+
+        if (next == '0')
+        {
+            next = reader.Read();
+            if (next is >= '0' and <= '9')
+            {
+                throw new JsonException("Local secret file store number has an invalid leading zero.");
+            }
+        }
+        else if (next is >= '1' and <= '9')
+        {
+            do
+            {
+                next = reader.Read();
+            }
+            while (next is >= '0' and <= '9');
+        }
+        else
+        {
+            throw new JsonException("Local secret file store number is invalid.");
+        }
+
+        if (next == '.')
+        {
+            next = reader.Read();
+            if (next is not (>= '0' and <= '9'))
+            {
+                throw new JsonException("Local secret file store number fraction is invalid.");
+            }
+
+            do
+            {
+                next = reader.Read();
+            }
+            while (next is >= '0' and <= '9');
+        }
+
+        if (next is 'e' or 'E')
+        {
+            next = reader.Read();
+            if (next is '+' or '-')
+            {
+                next = reader.Read();
+            }
+
+            if (next is not (>= '0' and <= '9'))
+            {
+                throw new JsonException("Local secret file store number exponent is invalid.");
+            }
+
+            do
+            {
+                next = reader.Read();
+            }
+            while (next is >= '0' and <= '9');
+        }
+
+        reader.Unread(next);
+    }
+
+    private static bool IsJsonWhitespace(byte value) =>
+        value is (byte)' ' or (byte)'\n' or (byte)'\r' or (byte)'\t';
+
+    private static bool IsJsonValueStart(int value) =>
+        value is '"' or '{' or '[' or 't' or 'f' or 'n' or '-' or >= '0' and <= '9';
+
+    private static bool IsJsonHexDigit(int value) =>
+        value is >= '0' and <= '9' or >= 'A' and <= 'F' or >= 'a' and <= 'f';
+
+    private static int JsonHexValue(int value) =>
+        value switch
+        {
+            >= '0' and <= '9' => value - '0',
+            >= 'A' and <= 'F' => value - 'A' + 10,
+            _ => value - 'a' + 10
+        };
+
+    private sealed class JsonByteReader(Stream stream)
+    {
+        private int _pushedBack = -1;
+
+        public int Read()
+        {
+            if (_pushedBack < 0)
+            {
+                return stream.ReadByte();
+            }
+
+            var value = _pushedBack;
+            _pushedBack = -1;
+            return value;
+        }
+
+        public void Unread(int value)
+        {
+            if (value < 0)
+            {
+                return;
+            }
+
+            if (_pushedBack >= 0)
+            {
+                throw new InvalidOperationException("Only one JSON byte can be pushed back.");
+            }
+
+            _pushedBack = value;
+        }
+
+        public int ReadNextNonWhitespace()
+        {
+            int next;
+            while ((next = Read()) >= 0)
+            {
+                if (!IsJsonWhitespace((byte)next))
+                {
+                    return next;
+                }
+            }
+
+            return -1;
+        }
     }
 
     private AppSurfaceLocalSecretResult? TryWrite(Dictionary<string, FileSecretEntry> data)
@@ -365,6 +990,14 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
             "Close other processes using the file and retry.",
             retryable: true);
 
+    private AppSurfaceLocalSecretResult InvalidStoreFailure() =>
+        Failure(
+            LocalSecretResultStatus.ProviderFailed,
+            "local-secret-store-invalid",
+            "Local secret file store is invalid.",
+            "The configured local secret file could not be parsed.",
+            "Delete and recreate the LocalSecrets namespace with `appsurface secrets init`.");
+
     private AppSurfaceLocalSecretResult WriteLockedFailure() =>
         Failure(
             LocalSecretResultStatus.Locked,
@@ -430,6 +1063,13 @@ internal interface IFileAppSurfaceLocalSecretStoreFileSystem
     /// <param name="path">The normalized fallback file path.</param>
     /// <returns>The raw JSON contents.</returns>
     string ReadAllText(string path);
+
+    /// <summary>
+    /// Opens the fallback JSON file for metadata-only streaming scans after posture inspection has already succeeded.
+    /// </summary>
+    /// <param name="path">The normalized fallback file path.</param>
+    /// <returns>A readable stream for the raw JSON contents.</returns>
+    Stream OpenRead(string path);
 
     /// <summary>
     /// Inspects only the path shape needed before read attempts that do not need file mode posture.
@@ -522,6 +1162,9 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
 
     /// <inheritdoc />
     public string ReadAllText(string path) => File.ReadAllText(path);
+
+    /// <inheritdoc />
+    public Stream OpenRead(string path) => File.OpenRead(path);
 
     /// <inheritdoc />
     public FileSecretPostureResult InspectReadPath(string path) => ValidateExistingPathShape(path, finalMustBeFile: true);
