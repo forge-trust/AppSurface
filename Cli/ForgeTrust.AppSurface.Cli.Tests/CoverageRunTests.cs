@@ -2833,8 +2833,10 @@ public sealed class CoverageRunTests
             var grandchildScript = repo.WriteFile(
                 "grandchild.sh",
                 """
-                echo $$ > "$1"
-                exec sleep 30
+                sleep 30 &
+                grandchild_pid=$!
+                echo "$grandchild_pid" > "$1"
+                wait "$grandchild_pid"
                 """);
             var childScript = repo.WriteFile(
                 "child.sh",
