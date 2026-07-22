@@ -159,10 +159,10 @@ internal enum CoverageRunWatchdogOperationKind
     Build,
     /// <summary>One scheduled test project.</summary>
     Project,
-    /// <summary>Coverage report merge.</summary>
-    Merge,
     /// <summary>Slow-test diagnostics.</summary>
     Diagnostics,
+    /// <summary>Coverage report merge.</summary>
+    Merge,
     /// <summary>Summary and timing artifact finalization.</summary>
     Artifacts,
 }

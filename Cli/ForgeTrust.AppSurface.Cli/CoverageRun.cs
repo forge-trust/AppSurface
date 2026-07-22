@@ -344,12 +344,18 @@ internal sealed partial class CoverageRunCommand : ICommand
 
     private static TimeSpan ParseWatchdogDuration(string option, string? value, bool allowZero)
     {
-        if (CoverageRunWatchdogDuration.TryParse(value, out var duration) && (allowZero || duration > TimeSpan.Zero))
+        var parsed = CoverageRunWatchdogDuration.TryParse(value, out var duration);
+        if (parsed)
         {
-            return duration;
+            if (allowZero || duration > TimeSpan.Zero)
+            {
+                return duration;
+            }
         }
 
-        var zeroDetail = allowZero ? string.Empty : " This timeout must be greater than 0.";
+        var zeroDetail = !allowZero && parsed && duration == TimeSpan.Zero
+            ? " This timeout must be greater than 0."
+            : string.Empty;
         throw CoverageRunDiagnostics.Create(
             "ASCOV101",
             $"{option} has an invalid duration.",
@@ -2006,24 +2012,17 @@ internal sealed class CoverageRunWorkflow
         }
 
         var diagnosticStarted = _timeProvider.GetTimestamp();
-        var stagingDirectory = Path.Join(outputDirectory, $".slow-test-diagnostics.{Guid.NewGuid():N}.tmp");
+        var markdownPath = Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName);
+        var jsonPath = Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.JsonFileName);
+        var stagedMarkdownPath = CreateStagedPath(markdownPath);
+        var stagedJsonPath = CreateStagedPath(jsonPath);
 
-        async Task<CoverageRunSlowTestDiagnosticsRun> WarnAsync(Exception exception)
+        async Task<CoverageRunSlowTestDiagnosticsRun?> WarnAsync(Exception exception)
         {
             var aggregationSeconds = ElapsedSeconds(diagnosticStarted);
-            var failedDiagnostics = new CoverageRunSlowTestDiagnosticsRun(
-                Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName),
-                Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.JsonFileName),
-                aggregationSeconds,
-                CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
-                WarningCount: 1,
-                MetadataComplete: false,
-                projectResults
-                    .SelectMany(result => result.TestResults)
-                    .ToDictionary(artifact => artifact.Path, _ => "diagnosticsFailed", StringComparer.Ordinal));
             await watchdog.WriteErrorLineAsync(FormattableString.Invariant(
-                $"Slow-test diagnostics failed after {failedDiagnostics.AggregationSeconds}s ({failedDiagnostics.AggregationPercent:0.00}% overhead): {exception.Message}"));
-            return failedDiagnostics;
+                $"Slow-test diagnostics failed after {aggregationSeconds}s ({CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()):0.00}% overhead): {exception.Message}"));
+            return null;
         }
 
         try
@@ -2033,7 +2032,8 @@ internal sealed class CoverageRunWorkflow
             {
                 var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(projectResults, cancellationToken);
                 diagnostics = await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
-                    stagingDirectory,
+                    stagedMarkdownPath,
+                    stagedJsonPath,
                     outputDirectory,
                     report,
                     () => ElapsedSeconds(diagnosticStarted),
@@ -2051,8 +2051,8 @@ internal sealed class CoverageRunWorkflow
             {
                 watchdog.CommitStagedFiles(
                     [
-                        (Path.Join(stagingDirectory, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName), diagnostics.MarkdownPath),
-                        (Path.Join(stagingDirectory, CoverageRunSlowTestDiagnosticsWriter.JsonFileName), diagnostics.JsonPath),
+                        (stagedMarkdownPath, diagnostics.MarkdownPath),
+                        (stagedJsonPath, diagnostics.JsonPath),
                     ]);
             }
             catch (CoverageRunStagedCommitPreflightException ex)
@@ -2066,14 +2066,8 @@ internal sealed class CoverageRunWorkflow
         }
         finally
         {
-            try
-            {
-                Directory.Delete(stagingDirectory, recursive: true);
-            }
-            catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
-            {
-                // Abandoned diagnostics remain confined to a unique private staging directory.
-            }
+            TryDeleteStagedFile(stagedMarkdownPath);
+            TryDeleteStagedFile(stagedJsonPath);
         }
     }
 
@@ -3221,7 +3215,8 @@ internal static class CoverageRunOutputGuard
         if (Directory.Exists(path))
         {
             return string.Equals(name, "projects", StringComparison.Ordinal)
-                || string.Equals(name, "reportgenerator", StringComparison.Ordinal);
+                || string.Equals(name, "reportgenerator", StringComparison.Ordinal)
+                || IsOwnedSlowTestDiagnosticsStagingDirectory(name);
         }
 
         return string.Equals(name, "coverage.cobertura.xml", StringComparison.Ordinal)
@@ -3234,6 +3229,7 @@ internal static class CoverageRunOutputGuard
             || string.Equals(name, "reportgenerator-summary.txt", StringComparison.Ordinal)
             || string.Equals(name, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName, StringComparison.Ordinal)
             || string.Equals(name, CoverageRunSlowTestDiagnosticsWriter.JsonFileName, StringComparison.Ordinal)
+            || IsOwnedStagedArtifact(name)
             || name.StartsWith("junit-", StringComparison.Ordinal) && name.EndsWith(".xml", StringComparison.Ordinal)
             || name.StartsWith("test-results-", StringComparison.Ordinal) && name.EndsWith(".xml", StringComparison.Ordinal);
     }
@@ -3269,12 +3265,68 @@ internal static class CoverageRunOutputGuard
             File.Delete(testResultFile);
         }
 
-        foreach (var path in new[] { "projects", "reportgenerator" }
-            .Select(directory => Path.Join(output, directory))
+        foreach (var stagedFile in Directory.EnumerateFiles(output, ".*", SearchOption.TopDirectoryOnly)
+            .Where(path => IsOwnedStagedArtifact(Path.GetFileName(path))))
+        {
+            File.Delete(stagedFile);
+        }
+
+        foreach (var path in Directory.EnumerateDirectories(output, "*", SearchOption.TopDirectoryOnly)
+            .Where(path => string.Equals(Path.GetFileName(path), "projects", StringComparison.Ordinal)
+                || string.Equals(Path.GetFileName(path), "reportgenerator", StringComparison.Ordinal)
+                || IsOwnedSlowTestDiagnosticsStagingDirectory(Path.GetFileName(path)))
             .Where(Directory.Exists))
         {
             Directory.Delete(path, recursive: true);
         }
+    }
+
+    private static bool IsOwnedStagedArtifact(string name)
+    {
+        foreach (var canonicalName in new[]
+            {
+                "coverage.cobertura.xml",
+                "coverage.json",
+                "coverage-watchdog.json",
+                "coverage-gate.json",
+                "coverage-gate.md",
+                "summary.txt",
+                "timings.json",
+                "reportgenerator-summary.txt",
+                CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName,
+                CoverageRunSlowTestDiagnosticsWriter.JsonFileName,
+            })
+        {
+            var prefix = $".{canonicalName}.";
+            if (!name.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var suffix = name.EndsWith(".tmp", StringComparison.Ordinal)
+                ? ".tmp"
+                : name.EndsWith(".watchdog-backup", StringComparison.Ordinal)
+                    ? ".watchdog-backup"
+                    : null;
+            if (suffix is null)
+            {
+                continue;
+            }
+
+            var identifier = name[prefix.Length..^suffix.Length];
+            return Guid.TryParseExact(identifier, "N", out _);
+        }
+
+        return false;
+    }
+
+    private static bool IsOwnedSlowTestDiagnosticsStagingDirectory(string name)
+    {
+        const string prefix = ".slow-test-diagnostics.";
+        const string suffix = ".tmp";
+        return name.StartsWith(prefix, StringComparison.Ordinal)
+            && name.EndsWith(suffix, StringComparison.Ordinal)
+            && Guid.TryParseExact(name[prefix.Length..^suffix.Length], "N", out _);
     }
 
     private static CommandException UnsafeOutput(string cause)

@@ -125,7 +125,8 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         Func<long, decimal> calculateAggregationPercent,
         CancellationToken cancellationToken)
         => await WriteAsync(
-            outputDirectory,
+            Path.Join(outputDirectory, MarkdownFileName),
+            Path.Join(outputDirectory, JsonFileName),
             outputDirectory,
             report,
             getAggregationSeconds,
@@ -133,9 +134,10 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
             cancellationToken);
 
     /// <summary>
-    /// Writes diagnostics to a private staging directory while recording canonical artifact paths in their contents.
+    /// Writes diagnostics to private same-directory staging files while recording canonical artifact paths in their contents.
     /// </summary>
-    /// <param name="stagingDirectory">Private directory that receives the uncommitted files.</param>
+    /// <param name="stagedMarkdownPath">Unique private Markdown path alongside its canonical destination.</param>
+    /// <param name="stagedJsonPath">Unique private JSON path alongside its canonical destination.</param>
     /// <param name="artifactDirectory">Canonical directory represented in returned and embedded artifact paths.</param>
     /// <param name="report">Report model returned by <see cref="CollectAsync"/>.</param>
     /// <param name="getAggregationSeconds">Reads elapsed diagnostic aggregation seconds.</param>
@@ -143,16 +145,14 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
     /// <param name="cancellationToken">Cancellation token for artifact writes.</param>
     /// <returns>Canonical artifact paths and high-level metadata after staging completes.</returns>
     public static async Task<CoverageRunSlowTestDiagnosticsRun> WriteAsync(
-        string stagingDirectory,
+        string stagedMarkdownPath,
+        string stagedJsonPath,
         string artifactDirectory,
         CoverageRunSlowTestDiagnosticsReport report,
         Func<long> getAggregationSeconds,
         Func<long, decimal> calculateAggregationPercent,
         CancellationToken cancellationToken)
     {
-        Directory.CreateDirectory(stagingDirectory);
-        var stagedMarkdownPath = Path.Join(stagingDirectory, MarkdownFileName);
-        var stagedJsonPath = Path.Join(stagingDirectory, JsonFileName);
         var markdownPath = Path.Join(artifactDirectory, MarkdownFileName);
         var jsonPath = Path.Join(artifactDirectory, JsonFileName);
         var aggregationSeconds = getAggregationSeconds();

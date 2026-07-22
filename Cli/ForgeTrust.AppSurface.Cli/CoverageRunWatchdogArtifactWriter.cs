@@ -102,7 +102,11 @@ internal sealed class CoverageRunWatchdogArtifactWriter : ICoverageRunWatchdogAr
             _activeWrite = writeTask;
         }
 
-        var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        var cancellationCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellationRegistration = cancellationToken.UnsafeRegister(
+            static state => ((TaskCompletionSource<bool>)state!).TrySetResult(true),
+            cancellationCompletion);
+        var cancellationTask = cancellationCompletion.Task;
         var completed = await Task.WhenAny(writeTask, timeoutTask, cancellationTask);
         if (completed == cancellationTask)
         {

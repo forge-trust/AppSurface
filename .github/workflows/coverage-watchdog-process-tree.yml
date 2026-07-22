@@ -46,7 +46,7 @@ jobs:
         run: dotnet build Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore
 
       - name: Verify nested process-tree cleanup
-        run: dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree --logger "console;verbosity=normal" ${{ runner.os == 'macOS' && '' || '--blame-hang-timeout 2m --blame-hang-dump-type none' }} --results-directory "TestResults/${{ matrix.os }}"
+        run: dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree --logger "console;verbosity=normal" ${{ runner.os != 'macOS' && '--blame-hang-timeout 2m --blame-hang-dump-type none' || '' }} --results-directory "TestResults/${{ matrix.os }}"
 
       - name: Upload process-tree hang diagnostics
         if: ${{ failure() }}

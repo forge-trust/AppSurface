@@ -1012,6 +1012,16 @@ public sealed class CoverageRunTests
         var oldJson = repo.WriteFile("TestResults/coverage-merged/slow-test-diagnostics.json", "{}");
         var oldGateMarkdown = repo.WriteFile("TestResults/coverage-merged/coverage-gate.md", "old gate");
         var oldGateJson = repo.WriteFile("TestResults/coverage-merged/coverage-gate.json", "{}");
+        var stagedSummary = repo.WriteFile($"TestResults/coverage-merged/.summary.txt.{Guid.NewGuid():N}.tmp", "staged summary");
+        var summaryBackup = repo.WriteFile($"TestResults/coverage-merged/.summary.txt.{Guid.NewGuid():N}.watchdog-backup", "summary backup");
+        var diagnosticsStaging = Path.Join(
+            repo.Path,
+            "TestResults",
+            "coverage-merged",
+            $".slow-test-diagnostics.{Guid.NewGuid():N}.tmp");
+        Directory.CreateDirectory(diagnosticsStaging);
+        File.WriteAllText(Path.Join(diagnosticsStaging, "partial.json"), "{}");
+        var unrelatedTemporary = repo.WriteFile("TestResults/coverage-merged/.custom.tmp", "not ours");
         using var current = PushCurrentDirectory(repo.Path);
         var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
         using var console = new FakeInMemoryConsole();
@@ -1026,6 +1036,10 @@ public sealed class CoverageRunTests
         Assert.False(File.Exists(oldJson));
         Assert.False(File.Exists(oldGateMarkdown));
         Assert.False(File.Exists(oldGateJson));
+        Assert.False(File.Exists(stagedSummary));
+        Assert.False(File.Exists(summaryBackup));
+        Assert.False(Directory.Exists(diagnosticsStaging));
+        Assert.True(File.Exists(unrelatedTemporary));
     }
 
     [Fact]
@@ -1037,6 +1051,13 @@ public sealed class CoverageRunTests
         var oldCoverage = repo.WriteFile("TestResults/coverage-merged/coverage.cobertura.xml", "old coverage");
         var oldGate = repo.WriteFile("TestResults/coverage-merged/coverage-gate.json", "{}");
         var oldProjectArtifact = repo.WriteFile("TestResults/coverage-merged/projects/old/coverage.cobertura.xml", "old project");
+        var stagedCoverage = repo.WriteFile($"TestResults/coverage-merged/.coverage.json.{Guid.NewGuid():N}.tmp", "{}");
+        var diagnosticsStaging = Path.Join(
+            repo.Path,
+            "TestResults",
+            "coverage-merged",
+            $".slow-test-diagnostics.{Guid.NewGuid():N}.tmp");
+        Directory.CreateDirectory(diagnosticsStaging);
         using var current = PushCurrentDirectory(repo.Path);
         var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
         using var console = new FakeInMemoryConsole();
@@ -1048,6 +1069,8 @@ public sealed class CoverageRunTests
         Assert.False(File.Exists(oldJunit));
         Assert.False(File.Exists(oldGate));
         Assert.False(File.Exists(oldProjectArtifact));
+        Assert.False(File.Exists(stagedCoverage));
+        Assert.False(Directory.Exists(diagnosticsStaging));
         Assert.NotEqual("old coverage", File.ReadAllText(oldCoverage));
         Assert.True(File.Exists(Path.Join(result.OutputDirectory, ".appsurface-coverage-output")));
     }
@@ -1122,9 +1145,8 @@ public sealed class CoverageRunTests
         Assert.True(result.Success);
         Assert.Contains("Slow-test diagnostics failed", console.ReadErrorString(), StringComparison.Ordinal);
         var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
-        Assert.Contains("\"warningCount\": 1", timings, StringComparison.Ordinal);
-        Assert.Contains("\"metadataComplete\": false", timings, StringComparison.Ordinal);
-        Assert.Contains("\"parserStatus\": \"diagnosticsFailed\"", timings, StringComparison.Ordinal);
+        Assert.Contains("\"diagnostics\": null", timings, StringComparison.Ordinal);
+        Assert.DoesNotContain("diagnosticsFailed", timings, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1144,7 +1166,8 @@ public sealed class CoverageRunTests
         Assert.True(result.Success);
         Assert.Contains("Slow-test diagnostics failed", console.ReadErrorString(), StringComparison.Ordinal);
         var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
-        Assert.Contains("\"parserStatus\": \"diagnosticsFailed\"", timings, StringComparison.Ordinal);
+        Assert.Contains("\"diagnostics\": null", timings, StringComparison.Ordinal);
+        Assert.DoesNotContain("diagnosticsFailed", timings, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2123,6 +2146,15 @@ public sealed class CoverageRunTests
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
         Assert.Contains($"{optionName} has an invalid duration", exception.Message, StringComparison.Ordinal);
         Assert.Contains("Use an integer duration such as 500ms, 30s, 10m, or 1h", exception.Message, StringComparison.Ordinal);
+        if (option == "timeout" && duration == "0")
+        {
+            Assert.Contains("This timeout must be greater than 0", exception.Message, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.DoesNotContain("greater than 0", exception.Message, StringComparison.Ordinal);
+        }
+
         Assert.Empty(runner.Commands);
     }
 

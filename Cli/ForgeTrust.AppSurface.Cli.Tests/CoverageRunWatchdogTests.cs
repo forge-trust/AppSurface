@@ -9,6 +9,12 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class CoverageRunWatchdogTests
 {
+    [Fact]
+    public void OperationKinds_ShouldFollowCoveragePipelineOrder()
+    {
+        Assert.True(CoverageRunWatchdogOperationKind.Diagnostics < CoverageRunWatchdogOperationKind.Merge);
+    }
+
     [Theory]
     [InlineData("0", 0)]
     [InlineData("1ms", 1)]
