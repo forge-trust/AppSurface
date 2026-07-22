@@ -983,6 +983,23 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public async Task Runtime_ShouldContainRawConsoleWriteFailures()
+    {
+        using var input = new MemoryStream();
+        using var output = new ThrowingWriteStream();
+        using var error = new MemoryStream();
+        using var console = new FakeConsole(input, output, error);
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            new CoverageRunWatchdogOptions(CoverageRunWatchdogMode.Off, TimeSpan.Zero, TimeSpan.FromSeconds(1)),
+            CancellationToken.None);
+
+        await runtime.WriteOutputAsync("raw output");
+        await runtime.CompleteAsync();
+    }
+
+    [Fact]
     public async Task Runtime_ShouldCloseProcessRegistrationAndIgnoreLateOutputAfterTerminalClaim()
     {
         using var console = new FakeInMemoryConsole();
@@ -1373,6 +1390,12 @@ public sealed class CoverageRunWatchdogTests
             Release.Dispose();
             base.Dispose(disposing);
         }
+    }
+
+    private sealed class ThrowingWriteStream : MemoryStream
+    {
+        public override void Write(byte[] buffer, int offset, int count)
+            => throw new IOException("simulated console failure");
     }
 
     private sealed class ThrowingArtifactWriter : ICoverageRunWatchdogArtifactWriter
