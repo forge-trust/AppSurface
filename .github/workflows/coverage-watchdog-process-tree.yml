@@ -15,7 +15,7 @@ jobs:
   process-tree:
     name: Coverage watchdog tree cleanup (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
     strategy:
