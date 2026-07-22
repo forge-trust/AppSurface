@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Reflection;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
@@ -19,7 +18,8 @@ namespace ForgeTrust.AppSurface.Aspire.Testing;
 /// all builder access and a second build are rejected. Dispose the
 /// returned <see cref="DistributedApplication"/> before disposing this builder so stop and disposal failures remain at
 /// the application call site. As a fallback, builder disposal disposes the application before profile activation
-/// services. Both disposal methods are idempotent; disposal during a build is rejected.
+/// services. After a process-fatal build failure, builder disposal also makes a best effort to release any captured
+/// partial Aspire provider. Both disposal methods are idempotent; disposal during a build is rejected.
 /// </remarks>
 public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicationTestingBuilder
 {
@@ -33,15 +33,28 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     private IDistributedApplicationBuilder? _innerBuilder;
     private DistributedApplication? _application;
     private IAsyncDisposable? _activation;
+    private AspireBuildServiceProviderLease? _failedBuildServiceProviderLease;
+    private readonly Action<string> _warningSink;
     private readonly TaskCompletionSource _disposeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _state;
 
+    /// <summary>
+    /// Initializes a testing builder around the composed Aspire builder and its profile activation lifetime.
+    /// </summary>
+    /// <param name="innerBuilder">The Aspire builder to expose and build exactly once.</param>
+    /// <param name="activation">The profile activation lifetime owned by this builder.</param>
+    /// <param name="warningSink">
+    /// An optional best-effort destination for compatibility and cleanup warnings. Non-process-fatal sink failures are
+    /// suppressed.
+    /// </param>
     internal AppSurfaceAspireProfileTestingBuilder(
         IDistributedApplicationBuilder innerBuilder,
-        IAsyncDisposable activation)
+        IAsyncDisposable activation,
+        Action<string>? warningSink = null)
     {
         _innerBuilder = innerBuilder;
         _activation = activation;
+        _warningSink = warningSink ?? AspireTestingDiagnostics.TraceWarning;
     }
 
     /// <inheritdoc />
@@ -101,9 +114,10 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     /// Immediately before delegating to Aspire, this method attempts to install an internal ownership lease
     /// around Aspire's root-provider host factory. A successful build transfers provider ownership to the returned
     /// application. A non-process-fatal host-construction failure disposes the captured partial provider before profile
-    /// activation services, without replacing the original failure with non-fatal cleanup errors. A consumer-selected
-    /// Aspire version with an unfamiliar host registration continues without this additional cleanup and emits a trace
-    /// warning.
+    /// activation services, without replacing the original failure with non-fatal cleanup errors. A process-fatal
+    /// failure retains the captured provider for best-effort cleanup when this builder is later disposed. A
+    /// consumer-selected Aspire version with an unfamiliar host registration continues without this additional cleanup
+    /// and emits a trace warning.
     /// </remarks>
     /// <param name="cancellationToken">A token checked before and immediately after Aspire's synchronous build.</param>
     /// <returns>The built application. The caller controls starting, stopping, and primary disposal.</returns>
@@ -130,7 +144,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
             var inner = _innerBuilder!;
             buildServiceProviderLease = AspireBuildServiceProviderLease.TryInstall(
                 inner.Services,
-                static warning => Trace.TraceWarning(warning));
+                _warningSink);
             application = inner.Build();
             buildServiceProviderLease?.Release();
             cancellationToken.ThrowIfCancellationRequested();
@@ -162,6 +176,10 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
                     catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
                     {
                         // Non-fatal cleanup must not replace the build failure.
+                        AspireTestingDiagnostics.TryWrite(
+                            _warningSink,
+                            () => "Aspire partial-provider cleanup failed while preserving the primary build failure. " +
+                            $"Cleanup exception type: {cleanupException.GetType().FullName}.");
                     }
                 }
 
@@ -176,6 +194,11 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         }
         finally
         {
+            if (Volatile.Read(ref _state) == Building)
+            {
+                _failedBuildServiceProviderLease = buildServiceProviderLease;
+            }
+
             Interlocked.CompareExchange(ref _state, Faulted, Building);
         }
     }
@@ -186,7 +209,10 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     /// <summary>
     /// Releases the profile activation host synchronously.
     /// </summary>
-    /// <remarks>After a successful build, this method disposes the application before profile activation services.</remarks>
+    /// <remarks>
+    /// After a successful build, this method disposes the application before profile activation services. After a
+    /// process-fatal build failure, it instead attempts to dispose the captured partial provider before activation.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">A build is in progress.</exception>
     public void Dispose()
     {
@@ -211,6 +237,21 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
             catch (Exception ex)
             {
                 primaryException = ex;
+            }
+
+            try
+            {
+                var failedBuildServiceProviderLease = Interlocked.Exchange(
+                    ref _failedBuildServiceProviderLease,
+                    null);
+                if (failedBuildServiceProviderLease is not null)
+                {
+                    failedBuildServiceProviderLease.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+            }
+            catch (Exception ex)
+            {
+                primaryException ??= ex;
             }
 
             try
@@ -240,7 +281,10 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     /// <summary>
     /// Releases the profile activation host asynchronously.
     /// </summary>
-    /// <remarks>After a successful build, this method disposes the application before profile activation services.</remarks>
+    /// <remarks>
+    /// After a successful build, this method disposes the application before profile activation services. After a
+    /// process-fatal build failure, it instead attempts to dispose the captured partial provider before activation.
+    /// </remarks>
     /// <returns>A value task that completes after activation services are disposed.</returns>
     /// <exception cref="InvalidOperationException">A build is in progress.</exception>
     public async ValueTask DisposeAsync()
@@ -266,6 +310,21 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
             catch (Exception ex)
             {
                 primaryException = ex;
+            }
+
+            try
+            {
+                var failedBuildServiceProviderLease = Interlocked.Exchange(
+                    ref _failedBuildServiceProviderLease,
+                    null);
+                if (failedBuildServiceProviderLease is not null)
+                {
+                    await failedBuildServiceProviderLease.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                primaryException ??= ex;
             }
 
             try

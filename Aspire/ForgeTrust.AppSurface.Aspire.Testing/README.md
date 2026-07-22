@@ -16,7 +16,7 @@ Aspire 13.4.4 does not expose or dispose the partial root service provider when 
 
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for the current publication blocker, compatibility guidance, and readiness.
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for the current publication status, compatibility guidance, and readiness.
 
 ## Install
 
@@ -68,7 +68,7 @@ Typed tests support constructor-injected services, `PassThroughArgs`, `GetDepend
 - Customize `Configuration`, `Services`, and resources before `BuildAsync`.
 - Call `BuildAsync` exactly once. Concurrent or repeated builds fail with `InvalidOperationException`.
 - After a successful build, every builder member is rejected; inspect or customize the graph before `BuildAsync` and use the returned application afterward.
-- A failed or cancelled build is terminal and releases activation services. If Aspire created its root provider before a non-process-fatal host-construction failure, the builder disposes that provider first. Cancellation observed after Aspire builds an application disposes that unreturned application first.
+- A failed or cancelled build is terminal. A non-process-fatal failure releases activation services immediately and, if Aspire created its root provider before host construction failed, disposes that provider first. After catching a process-fatal build failure, the caller must dispose the builder to make a best-effort provider cleanup before activation cleanup; an explicit cleanup failure is then propagated. Cancellation observed after Aspire builds an application disposes that unreturned application first.
 - `Dispose` and `DisposeAsync` are idempotent, and concurrent calls join the same cleanup. Disposal during an in-flight build is rejected; retry after the build task settles. After a successful build, builder disposal provides a fallback that disposes the application before activation services.
 - Cached `Services`, `Configuration`, or resource collections cannot be invalidated. Mutating cached objects after build or disposal is unsupported caller behavior.
 

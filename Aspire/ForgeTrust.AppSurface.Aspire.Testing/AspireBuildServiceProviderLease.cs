@@ -12,7 +12,8 @@ namespace ForgeTrust.AppSurface.Aspire.Testing;
 /// partial provider. This lease decorates the verified registration shape when it is present. If a consumer-selected
 /// Aspire version changes that shape, installation warns and yields to Aspire without the additional failed-build
 /// cleanup. A successful build transfers provider ownership to the returned distributed application by calling
-/// <see cref="Release"/>; only a failed build calls <see cref="DisposeAsync"/>.
+/// <see cref="Release"/>. Non-process-fatal failures dispose the lease immediately; process-fatal failures retain it
+/// for best-effort cleanup when the testing builder is later disposed.
 /// </remarks>
 internal sealed class AspireBuildServiceProviderLease : IAsyncDisposable
 {
@@ -43,7 +44,8 @@ internal sealed class AspireBuildServiceProviderLease : IAsyncDisposable
             descriptor.Lifetime != ServiceLifetime.Singleton ||
             descriptor.ImplementationFactory is null)
         {
-            warningSink?.Invoke(
+            AspireTestingDiagnostics.TryWrite(
+                warningSink,
                 "The Aspire IHost service registration does not have the singleton factory shape verified with " +
                 "Aspire 13.4.4. Build will continue without AppSurface's partial-provider cleanup; verify failed-build " +
                 "cleanup before relying on this consumer-selected Aspire version.");

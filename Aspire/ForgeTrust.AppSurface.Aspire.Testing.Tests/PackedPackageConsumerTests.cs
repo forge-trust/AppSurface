@@ -8,7 +8,7 @@ public sealed class PackedPackageConsumerTests
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task PackedPackage_SetsAspireMinimumAndCompilesConsumerOverride()
+    public async Task PackedPackage_SetsAspireMinimumAndRunsConsumerOverrideCleanup()
     {
         var repositoryRoot = GetRepositoryRoot();
         var workDirectory = Path.Join(Path.GetTempPath(), $"appsurface-aspire-testing-consumer-&-{Guid.NewGuid():N}");
@@ -80,6 +80,7 @@ public sealed class PackedPackageConsumerTests
                 <Project Sdk="Microsoft.NET.Sdk">
                   <PropertyGroup>
                     <TargetFramework>net10.0</TargetFramework>
+                    <OutputType>Exe</OutputType>
                     <ImplicitUsings>enable</ImplicitUsings>
                     <Nullable>enable</Nullable>
                     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -127,12 +128,51 @@ public sealed class PackedPackageConsumerTests
                 {
                     public static Task<AppSurfaceAspireProfileTestingBuilder> CreateAsync() =>
                         AppSurfaceAspireTestingBuilder.CreateAsync<ConsumerAppHost, ConsumerModule, ConsumerProfile>();
+
+                    public static async Task Main()
+                    {
+                        await using var builder = await CreateAsync();
+                        builder.Services.AddSingleton<ConsumerBuildProbe>();
+                        builder.Services.AddSingleton<IHostLifetime>(services =>
+                        {
+                            ConsumerBuildProbe.Instance = services.GetRequiredService<ConsumerBuildProbe>();
+                            throw new ConsumerBuildException();
+                        });
+
+                        try
+                        {
+                            await builder.BuildAsync();
+                            throw new InvalidOperationException("Expected packed Aspire host construction to fail.");
+                        }
+                        catch (ConsumerBuildException)
+                        {
+                        }
+
+                        if (ConsumerBuildProbe.Instance?.IsDisposed != true)
+                        {
+                            throw new InvalidOperationException("Expected the packed package to dispose the partial provider.");
+                        }
+                    }
+                }
+
+                public sealed class ConsumerBuildProbe : IDisposable
+                {
+                    public static ConsumerBuildProbe? Instance { get; set; }
+                    public bool IsDisposed { get; private set; }
+                    public void Dispose() => IsDisposed = true;
+                }
+
+                public sealed class ConsumerBuildException : Exception
+                {
                 }
                 """);
 
             await RunDotNetAsync(
                 consumerDirectory,
                 ["build", "Consumer.csproj", "--configfile", nugetConfigPath, "--nologo"]);
+            await RunDotNetAsync(
+                consumerDirectory,
+                ["run", "--project", "Consumer.csproj", "--no-build", "--no-restore"]);
         }
         finally
         {
