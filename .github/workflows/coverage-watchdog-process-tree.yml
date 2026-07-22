@@ -16,6 +16,8 @@ jobs:
     name: Coverage watchdog tree cleanup (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
     strategy:
       fail-fast: false
       matrix:
@@ -31,10 +33,21 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET SDK
+        id: setup-dotnet
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: |
             10.0.x
+          cache: true
+          cache-dependency-path: |
+            **/packages.lock.json
+            **/packages.*.lock.json
+
+      - name: Restore .NET packages (locked, cache-aware)
+        run: dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode
+
+      - name: Build process-tree tests
+        run: dotnet build Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore
 
       - name: Verify nested process-tree cleanup
-        run: dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --filter FullyQualifiedName~CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree --logger "console;verbosity=normal"
+        run: dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree --logger "console;verbosity=normal"
