@@ -793,6 +793,7 @@ public sealed class CoverageRunWatchdogTests
 
         Assert.Equal(124, exception.ExitCode);
         Assert.StartsWith("ASCOV121 Coverage run stalled. Cause: Project \"tests/project-a.csproj\" produced no observable progress", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("progress for 0s", exception.Message, StringComparison.Ordinal);
         Assert.Contains("Artifact: unavailable (forced-failure) Cleanup: complete", exception.Message, StringComparison.Ordinal);
         Assert.Contains("ASCOV122", console.ReadErrorString(), StringComparison.Ordinal);
         Assert.Contains("forced-failure", console.ReadErrorString(), StringComparison.Ordinal);
@@ -1015,6 +1016,66 @@ public sealed class CoverageRunWatchdogTests
         using var process = new Process();
         request.ProcessStarted?.Invoke(process);
         request.ProcessCompleted?.Invoke();
+    }
+
+    [Fact]
+    public async Task Runtime_ShouldNotTransferCleanupOwnershipForAReservedProcessThatHasNotStarted()
+    {
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Fail,
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(50)),
+            CancellationToken.None,
+            artifactWriter: new StubArtifactWriter(CoverageRunWatchdogArtifactWriteResult.Success));
+        runtime.Register(Project("project-a", 0), CoverageRunWatchdogOperationState.Running);
+        var request = runtime.CreateProcessRequest(
+            "dotnet",
+            ["test"],
+            Directory.GetCurrentDirectory(),
+            "project-a",
+            new CoverageRunSafeCommand("dotnet", ["test"]));
+
+        var terminal = await runtime.TerminalTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(124, terminal.ExitCode);
+        using var lateProcess = new Process();
+        request.ProcessStarted?.Invoke(lateProcess);
+        request.ProcessCompleted?.Invoke();
+    }
+
+    [Fact]
+    public async Task Runtime_ShouldCancelCanonicalBindingWhileAnIncidentWriterOwnsTheGate()
+    {
+        using var output = new TemporaryDirectory();
+        using var console = new FakeInMemoryConsole();
+        using var cancellation = new CancellationTokenSource();
+        var writer = new BlockingArtifactWriter();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Warn,
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(50)),
+            cancellation.Token,
+            artifactWriter: writer);
+        runtime.Register(Project("project-a", 0), CoverageRunWatchdogOperationState.Running);
+        await writer.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var binding = runtime.BindCanonicalOutputAsync(output.Path);
+
+        try
+        {
+            await cancellation.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => binding);
+        }
+        finally
+        {
+            writer.Completion.TrySetResult(CoverageRunWatchdogArtifactWriteResult.Failed);
+        }
     }
 
     [Fact]
@@ -1277,6 +1338,21 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogArtifact artifact,
             CancellationToken cancellationToken)
             => Task.FromResult(result);
+    }
+
+    private sealed class BlockingArtifactWriter : ICoverageRunWatchdogArtifactWriter
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<CoverageRunWatchdogArtifactWriteResult> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<CoverageRunWatchdogArtifactWriteResult> WriteAsync(
+            string destinationPath,
+            CoverageRunWatchdogArtifact artifact,
+            CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            return Completion.Task;
+        }
     }
 
     private sealed class GateWriteStream : MemoryStream

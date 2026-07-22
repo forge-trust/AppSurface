@@ -180,10 +180,11 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
     /// <param name="outputDirectory">Canonical directory after the project-aware ownership guard succeeds.</param>
     /// <returns>A task that completes after any private bootstrap artifact is promoted or diagnosed.</returns>
     /// <exception cref="ArgumentException"><paramref name="outputDirectory"/> is empty or whitespace.</exception>
+    /// <exception cref="OperationCanceledException">External or watchdog cancellation wins while artifact publication is busy.</exception>
     public async Task BindCanonicalOutputAsync(string outputDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
-        await _artifactBindingGate.WaitAsync();
+        await _artifactBindingGate.WaitAsync(RunCancellationToken);
         string? promotionFailure = null;
         try
         {
@@ -366,7 +367,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
             : $"operation={Kind(primary.Kind)}; project={QuotePath(primary.Project)}";
         await WriteConsoleAsync(
             $"Coverage watchdog warning: {identity}; " +
-            $"no-progress={WholeSeconds(primary.NoProgress)}s; concurrent-stalls={(evaluation.NewlyStale.Count - 1).ToString(CultureInfo.InvariantCulture)}; artifact={artifactText}");
+            $"no-progress={RenderDuration(primary.NoProgress)}; concurrent-stalls={(evaluation.NewlyStale.Count - 1).ToString(CultureInfo.InvariantCulture)}; artifact={artifactText}");
         if (!write.Success)
         {
             await WriteArtifactFailureAsync(write.Detail);
@@ -382,7 +383,9 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         ProcessReservation[] reservations;
         lock (_gate)
         {
-            reservations = _processes.Values.ToArray();
+            reservations = _processes.Values
+                .Where(reservation => reservation.Process is not null)
+                .ToArray();
             foreach (var reservation in reservations)
             {
                 reservation.CleanupOwnsDisposal = true;
@@ -589,7 +592,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         var diagnostic = CoverageRunDiagnostics.Create(
             "ASCOV121",
             "Coverage run stalled.",
-            $"{project} produced no observable progress for {WholeSeconds(terminal.NoProgress)}s; " +
+            $"{project} produced no observable progress for {RenderDuration(terminal.NoProgress)}; " +
             concurrentText,
             "Inspect the local project log, raise --no-progress-timeout for intentionally quiet tests, or rerun with --watchdog warn.",
             "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog",
@@ -962,14 +965,14 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         var staleIds = stale.Select(operation => operation.Identity).ToHashSet(StringComparer.Ordinal);
         var lines = new List<string>
         {
-            $"Coverage heartbeat: elapsed={WholeSeconds(snapshot.RunElapsed)}s; queued={snapshot.Queued}; running={snapshot.Running}; finalizing={snapshot.Finalizing}; complete={snapshot.Complete}",
+            $"Coverage heartbeat: elapsed={RenderDuration(snapshot.RunElapsed)}; queued={snapshot.Queued}; running={snapshot.Running}; finalizing={snapshot.Finalizing}; complete={snapshot.Complete}",
         };
         foreach (var operation in snapshot.Operations.Where(operation => operation.State is CoverageRunWatchdogOperationState.Running or CoverageRunWatchdogOperationState.Finalizing))
         {
             var identity = operation.Project is null ? $"operation={QuotePath(Kind(operation.Kind))}" : $"project={QuotePath(operation.Project)}";
             lines.Add(
-                $"  {identity}; state={operation.State.ToString().ToLowerInvariant()}; elapsed={WholeSeconds(operation.Elapsed)}s; " +
-                $"no-progress={WholeSeconds(operation.NoProgress)}s; output-bytes={operation.OutputBytes.ToString(CultureInfo.InvariantCulture)}" +
+                $"  {identity}; state={operation.State.ToString().ToLowerInvariant()}; elapsed={RenderDuration(operation.Elapsed)}; " +
+                $"no-progress={RenderDuration(operation.NoProgress)}; output-bytes={operation.OutputBytes.ToString(CultureInfo.InvariantCulture)}" +
                 (staleIds.Contains(operation.Identity) ? "; stale=true" : string.Empty));
         }
 
@@ -1008,7 +1011,21 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         }
     }
 
-    private static long WholeSeconds(TimeSpan value) => checked((long)Math.Floor(value.TotalSeconds));
+    private static string RenderDuration(TimeSpan value)
+    {
+        if (value <= TimeSpan.Zero)
+        {
+            return "0s";
+        }
+
+        if (value < TimeSpan.FromSeconds(1))
+        {
+            var milliseconds = Math.Max(1, checked((long)Math.Floor(value.TotalMilliseconds)));
+            return milliseconds.ToString(CultureInfo.InvariantCulture) + "ms";
+        }
+
+        return checked((long)Math.Floor(value.TotalSeconds)).ToString(CultureInfo.InvariantCulture) + "s";
+    }
     private static string Kind(CoverageRunWatchdogOperationKind kind) => kind.ToString().ToLowerInvariant();
     private static string QuotePath(string? value)
     {
