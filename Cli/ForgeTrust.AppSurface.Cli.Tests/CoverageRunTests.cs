@@ -1519,9 +1519,14 @@ public sealed class CoverageRunTests
 
         Assert.True(result.Success);
         var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
-        Assert.Equal([first, second, browser], tests.Select(command => command.Arguments[1]).ToArray());
-        Assert.True(tests[2].StartedAt >= tests[0].FinishedAt);
-        Assert.True(tests[2].StartedAt >= tests[1].FinishedAt);
+        Assert.Equal(
+            [browser, first, second],
+            tests.Select(command => command.Arguments[1]).Order(StringComparer.Ordinal).ToArray());
+        var browserTest = Assert.Single(tests, command => command.Arguments[1] == browser);
+        var firstTest = Assert.Single(tests, command => command.Arguments[1] == first);
+        var secondTest = Assert.Single(tests, command => command.Arguments[1] == second);
+        Assert.True(browserTest.StartedAt >= firstTest.FinishedAt);
+        Assert.True(browserTest.StartedAt >= secondTest.FinishedAt);
         Assert.Contains("(exclusive)", console.ReadOutputString(), StringComparison.Ordinal);
     }
 
