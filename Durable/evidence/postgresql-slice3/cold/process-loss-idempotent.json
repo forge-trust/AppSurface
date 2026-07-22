@@ -1,0 +1,102 @@
+{
+  "SchemaVersion": 1,
+  "RunId": "20260720T064618Z-16607",
+  "Scenario": "process-loss-idempotent",
+  "Mode": "cold",
+  "DatabaseSource": "postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302",
+  "StartedAtUtc": "2026-07-20T06:46:38.432643+00:00",
+  "ElapsedMilliseconds": 2826,
+  "FinalState": "succeeded",
+  "Events": [
+    {
+      "Sequence": 1,
+      "Category": "application",
+      "Operation": "schema.apply-and-activate",
+      "Outcome": "compatible",
+      "TransactionBoundary": "migration-owner",
+      "ElapsedMilliseconds": 1295,
+      "SourceElapsedMilliseconds": null
+    },
+    {
+      "Sequence": 2,
+      "Category": "child-process",
+      "Operation": "work.accept",
+      "Outcome": "committed",
+      "TransactionBoundary": "provider-owned",
+      "ElapsedMilliseconds": 1530,
+      "SourceElapsedMilliseconds": 102
+    },
+    {
+      "Sequence": 3,
+      "Category": "child-process",
+      "Operation": "work.discover",
+      "Outcome": "found",
+      "TransactionBoundary": "read-only",
+      "ElapsedMilliseconds": 1530,
+      "SourceElapsedMilliseconds": 105
+    },
+    {
+      "Sequence": 4,
+      "Category": "child-process",
+      "Operation": "work.claim",
+      "Outcome": "committed",
+      "TransactionBoundary": "provider-owned",
+      "ElapsedMilliseconds": 1530,
+      "SourceElapsedMilliseconds": 129
+    },
+    {
+      "Sequence": 5,
+      "Category": "child-process",
+      "Operation": "effect-permit.acquire",
+      "Outcome": "committed",
+      "TransactionBoundary": "provider-owned",
+      "ElapsedMilliseconds": 1530,
+      "SourceElapsedMilliseconds": 138
+    },
+    {
+      "Sequence": 6,
+      "Category": "application",
+      "Operation": "process.force-terminate",
+      "Outcome": "terminated-after-permit",
+      "TransactionBoundary": "none",
+      "ElapsedMilliseconds": 1530,
+      "SourceElapsedMilliseconds": null
+    },
+    {
+      "Sequence": 7,
+      "Category": "recovery",
+      "Operation": "work.reclaim-after-lease-expiry",
+      "Outcome": "reclaimed",
+      "TransactionBoundary": "provider-owned",
+      "ElapsedMilliseconds": 2798,
+      "SourceElapsedMilliseconds": null
+    },
+    {
+      "Sequence": 8,
+      "Category": "transaction",
+      "Operation": "effect-permit.acquire",
+      "Outcome": "committed",
+      "TransactionBoundary": "provider-owned",
+      "ElapsedMilliseconds": 2812,
+      "SourceElapsedMilliseconds": null
+    },
+    {
+      "Sequence": 9,
+      "Category": "provider",
+      "Operation": "provider.invoke",
+      "Outcome": "completed",
+      "TransactionBoundary": "no-database-transaction",
+      "ElapsedMilliseconds": 2812,
+      "SourceElapsedMilliseconds": null
+    },
+    {
+      "Sequence": 10,
+      "Category": "transaction",
+      "Operation": "work.complete",
+      "Outcome": "committed",
+      "TransactionBoundary": "provider-owned",
+      "ElapsedMilliseconds": 2823,
+      "SourceElapsedMilliseconds": null
+    }
+  ]
+}
