@@ -388,11 +388,13 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
 
         try
         {
-            // Dispatch tree termination while callback-delivered Process instances are still valid,
-            // then signal CliWrap/in-process cancellation without allowing a blocking callback to
-            // hold the authoritative terminal outcome open.
-            var cleanupTask = KillProcessesAsync(reservations);
-            _watchdogCancellationDispatch = _watchdogCancellation.CancelAsync();
+            // Dispatch tree termination while callback-delivered Process instances are still valid.
+            // Signal CliWrap/in-process cancellation after those kill requests return so two callers
+            // do not concurrently enter Process.Kill(true) for the same root. A blocked request still
+            // falls through to cancellation at the shared cleanup deadline.
+            var cleanupDeadline = Task.Delay(CleanupTimeout, _timeProvider);
+            var cleanupTask = KillProcessesAsync(reservations, cleanupDeadline);
+            _watchdogCancellationDispatch = CancelAfterKillRequestsAsync(reservations, cleanupDeadline);
             ObserveFault(_watchdogCancellationDispatch);
             cleanup = await cleanupTask;
             var artifact = CreateArtifact(evaluation, terminal, "terminated", "ASCOV121", cleanup);
@@ -518,7 +520,22 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
             showHelp: false);
     }
 
-    private async Task<CoverageRunWatchdogCleanup> KillProcessesAsync(IReadOnlyList<ProcessReservation> reservations)
+    private async Task CancelAfterKillRequestsAsync(
+        IReadOnlyList<ProcessReservation> reservations,
+        Task cleanupDeadline)
+    {
+        var requests = reservations
+            .Where(reservation => reservation.KillTask is not null)
+            .Select(reservation => reservation.KillRequestCompletion.Task)
+            .ToArray();
+        var requestsCompleted = Task.WhenAll(requests);
+        await Task.WhenAny(requestsCompleted, cleanupDeadline);
+        await _watchdogCancellation.CancelAsync();
+    }
+
+    private async Task<CoverageRunWatchdogCleanup> KillProcessesAsync(
+        IReadOnlyList<ProcessReservation> reservations,
+        Task cleanupDeadline)
     {
         foreach (var reservation in reservations)
         {
@@ -526,8 +543,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         }
 
         var allCompleted = Task.WhenAll(reservations.Select(reservation => reservation.Completion.Task));
-        var deadline = Task.Delay(CleanupTimeout, _timeProvider);
-        if (await Task.WhenAny(allCompleted, deadline) != allCompleted)
+        if (await Task.WhenAny(allCompleted, cleanupDeadline) != allCompleted)
         {
             _ = DisposeReservationsWhenFinishedAsync(reservations, allCompleted);
             return new CoverageRunWatchdogCleanup("deadline-exceeded", "root-timeout");
@@ -535,7 +551,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
 
         var killTasks = reservations.Select(reservation => reservation.KillTask).Where(task => task is not null).Cast<Task<bool>>().ToArray();
         var allKilled = Task.WhenAll(killTasks);
-        if (await Task.WhenAny(allKilled, deadline) != allKilled)
+        if (await Task.WhenAny(allKilled, cleanupDeadline) != allKilled)
         {
             _ = DisposeReservationsWhenFinishedAsync(reservations, allCompleted);
             return new CoverageRunWatchdogCleanup("deadline-exceeded", "kill-failed");
@@ -927,6 +943,7 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
         public string Id { get; }
         public Process? Process { get; set; }
         public Task<bool>? KillTask { get; private set; }
+        public TaskCompletionSource KillRequestCompletion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool CleanupOwnsDisposal { get; set; }
         public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -949,6 +966,8 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                             process.Kill(entireProcessTree: true);
                         }
 
+                        KillRequestCompletion.TrySetResult();
+
                         // Process.Kill(true) requests descendant termination but does not wait
                         // for it. Waiting for the captured root here ensures cleanup is not
                         // reported complete while the owned root is still alive. Descendant
@@ -960,6 +979,10 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
                     catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
                     {
                         return false;
+                    }
+                    finally
+                    {
+                        KillRequestCompletion.TrySetResult();
                     }
                 });
                 return KillTask;

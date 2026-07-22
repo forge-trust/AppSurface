@@ -2891,7 +2891,15 @@ public sealed class CoverageRunTests
                 Assert.True(cleanupStatus is "complete" or "failed");
             }
 
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => execution);
+            try
+            {
+                var result = await execution;
+                Assert.NotEqual(0, result.ExitCode);
+            }
+            catch (OperationCanceledException)
+            {
+                // CliWrap may observe cancellation before the explicitly killed root exits.
+            }
         }
         finally
         {
