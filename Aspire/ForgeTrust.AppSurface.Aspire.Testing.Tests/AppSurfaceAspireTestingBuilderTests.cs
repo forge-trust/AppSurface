@@ -556,24 +556,44 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     }
 
     [Fact]
-    public async Task BuildAsync_UnexpectedAspireHostRegistrationFailsClosedBeforeBuild()
+    public void ProviderLease_MissingHostRegistrationWarnsAndSkipsCleanup()
     {
+        var warnings = new List<string>();
+
+        var lease = AspireBuildServiceProviderLease.TryInstall(new ServiceCollection(), warnings.Add);
+
+        Assert.Null(lease);
+        Assert.Contains("Build will continue", Assert.Single(warnings), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BuildAsync_UnexpectedAspireHostRegistrationStillDelegatesBuild()
+    {
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
         var inner = A.Fake<IDistributedApplicationBuilder>();
         A.CallTo(() => inner.Services).Returns(new ServiceCollection());
+        A.CallTo(() => inner.Build()).ReturnsLazily(() => actualBuilder.Build());
         var activation = new AsyncOnlyDisposalProbe();
         var builder = new AppSurfaceAspireProfileTestingBuilder(inner, activation);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => builder.BuildAsync());
+        var application = await builder.BuildAsync();
 
-        Assert.Contains("pinned Aspire IHost service registration", exception.Message, StringComparison.Ordinal);
-        A.CallTo(() => inner.Build()).MustNotHaveHappened();
+        Assert.NotNull(application);
+        A.CallTo(() => inner.Build()).MustHaveHappenedOnceExactly();
+        await builder.DisposeAsync();
         Assert.Equal(1, activation.DisposeCount);
     }
 
     [Fact]
     public void ProviderLease_NullServiceCollectionIsRejected()
     {
-        Assert.Throws<ArgumentNullException>(() => AspireBuildServiceProviderLease.Install(null!));
+        Assert.Throws<ArgumentNullException>(() => AspireBuildServiceProviderLease.TryInstall(null!));
     }
 
     [Fact]
@@ -582,7 +602,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         var services = new ServiceCollection();
         services.AddKeyedSingleton<IHost>("host", (_, _) => A.Fake<IHost>());
 
-        Assert.Throws<InvalidOperationException>(() => AspireBuildServiceProviderLease.Install(services));
+        Assert.Null(AspireBuildServiceProviderLease.TryInstall(services));
     }
 
     [Fact]
@@ -591,7 +611,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         var services = new ServiceCollection();
         services.AddTransient(_ => A.Fake<IHost>());
 
-        Assert.Throws<InvalidOperationException>(() => AspireBuildServiceProviderLease.Install(services));
+        Assert.Null(AspireBuildServiceProviderLease.TryInstall(services));
     }
 
     [Fact]
@@ -600,7 +620,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         var services = new ServiceCollection();
         services.AddSingleton(A.Fake<IHost>());
 
-        Assert.Throws<InvalidOperationException>(() => AspireBuildServiceProviderLease.Install(services));
+        Assert.Null(AspireBuildServiceProviderLease.TryInstall(services));
     }
 
     [Fact]
@@ -608,7 +628,8 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     {
         var services = new ServiceCollection();
         services.AddSingleton(_ => A.Fake<IHost>());
-        var lease = AspireBuildServiceProviderLease.Install(services);
+        var lease = Assert.IsType<AspireBuildServiceProviderLease>(
+            AspireBuildServiceProviderLease.TryInstall(services));
         var provider = new SynchronousServiceProviderProbe();
 
         _ = Assert.IsAssignableFrom<Func<IServiceProvider, object>>(services[^1].ImplementationFactory)(provider);
@@ -622,7 +643,8 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     {
         var services = new ServiceCollection();
         services.AddSingleton(_ => A.Fake<IHost>());
-        var lease = AspireBuildServiceProviderLease.Install(services);
+        var lease = Assert.IsType<AspireBuildServiceProviderLease>(
+            AspireBuildServiceProviderLease.TryInstall(services));
         var provider = new SynchronousServiceProviderProbe();
         var hostFactory = Assert.IsAssignableFrom<Func<IServiceProvider, object>>(services[^1].ImplementationFactory);
 

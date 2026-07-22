@@ -10,9 +10,9 @@ Do not use it as a replacement for [Aspire's native testing API](https://learn.m
 
 ## Compatibility
 
-Version 1 of this preview is compiled and tested against exactly `Aspire.Hosting` and `Aspire.Hosting.Testing` **13.4.4**. Keep the AppHost SDK and Aspire testing package on that patch line. Advancing Aspire requires an AppSurface package release that re-verifies the complete delegated `IDistributedApplicationTestingBuilder` surface, packed-package consumer compilation, failed-build cleanup, and build/start/disposal integration proof.
+Version 1 of this preview is compiled and tested against `Aspire.Hosting` and `Aspire.Hosting.Testing` **13.4.4**, which is the package's minimum Aspire version. Consumers may select a later Aspire version without a NuGet exact-version conflict, but that combination is not AppSurface-verified. Advancing Aspire should include re-verifying the complete delegated `IDistributedApplicationTestingBuilder` surface, packed-package consumer compilation, failed-build cleanup, and build/start/disposal integration proof.
 
-Aspire 13.4.4 does not expose or dispose the partial root service provider when host construction fails after provider creation. Immediately before building, this package decorates Aspire's pinned singleton `IHost` factory so it can capture that provider and dispose it on a non-process-fatal build failure. A successful build transfers ownership unchanged to the returned `DistributedApplication`. The compatibility guard fails closed before build if a future Aspire version changes the expected registration shape, which is why the exact package pin and upgrade verification above are required.
+Aspire 13.4.4 does not expose or dispose the partial root service provider when host construction fails after provider creation. Immediately before building, this package decorates the verified singleton `IHost` factory so it can capture that provider and dispose it on a non-process-fatal build failure. A successful build transfers ownership unchanged to the returned `DistributedApplication`. If a consumer-selected Aspire version changes that registration shape, AppSurface emits a `System.Diagnostics.Trace` warning and continues through Aspire without the additional failed-build cleanup. This preserves potentially compatible builds while making the cleanup limitation explicit.
 
 ## Release Guidance
 
@@ -74,7 +74,7 @@ Typed tests support constructor-injected services, `PassThroughArgs`, `GetDepend
 
 Factory validation, activation, composition, and cancellation failures remain primary even when factory-owned activation cleanup throws, including when that secondary cleanup failure is process-fatal. During `BuildAsync`, non-fatal cleanup does not replace the build or cancellation failure, while process-fatal cleanup propagates immediately. Explicit disposal without an earlier failure propagates its cleanup exception.
 
-The failed-build provider capture is intentionally package-internal and tied to the exact Aspire dependency. Do not copy it into application code, schedule delayed cleanup, or dispose cached `Services`: those approaches cannot distinguish a failed partial build from a live application and can race successful ownership transfer.
+The failed-build provider capture is intentionally package-internal and tied to the Aspire registration shape verified by this release. Do not copy it into application code, schedule delayed cleanup, or dispose cached `Services`: those approaches cannot distinguish a failed partial build from a live application and can race successful ownership transfer. When overriding Aspire, configure an appropriate `TraceListener` if your test runner does not surface trace warnings and include failed-build cleanup in your compatibility proof.
 
 ## Troubleshooting
 

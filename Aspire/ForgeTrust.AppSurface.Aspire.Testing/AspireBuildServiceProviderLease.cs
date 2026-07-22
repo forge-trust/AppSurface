@@ -9,8 +9,9 @@ namespace ForgeTrust.AppSurface.Aspire.Testing;
 /// <remarks>
 /// Aspire 13.4.4 registers <see cref="IHost"/> as a singleton factory. The factory receives the root provider before
 /// host construction can fail, while <c>DistributedApplicationBuilder.Build()</c> does not otherwise expose that
-/// partial provider. This lease decorates that exact pinned registration shape and deliberately fails closed when the
-/// shape changes. A successful build transfers provider ownership to the returned distributed application by calling
+/// partial provider. This lease decorates the verified registration shape when it is present. If a consumer-selected
+/// Aspire version changes that shape, installation warns and yields to Aspire without the additional failed-build
+/// cleanup. A successful build transfers provider ownership to the returned distributed application by calling
 /// <see cref="Release"/>; only a failed build calls <see cref="DisposeAsync"/>.
 /// </remarks>
 internal sealed class AspireBuildServiceProviderLease : IAsyncDisposable
@@ -22,14 +23,17 @@ internal sealed class AspireBuildServiceProviderLease : IAsyncDisposable
     }
 
     /// <summary>
-    /// Decorates Aspire's pinned host factory and returns the lease that will capture its root provider.
+    /// Attempts to decorate Aspire's verified host factory and returns the lease that will capture its root provider.
     /// </summary>
     /// <param name="services">The mutable Aspire builder service collection immediately before build.</param>
-    /// <returns>A lease that owns a captured provider until released after a successful build.</returns>
-    /// <exception cref="InvalidOperationException">
-    /// Aspire's final <see cref="IHost"/> registration is missing, keyed, not singleton, or not factory-backed.
-    /// </exception>
-    internal static AspireBuildServiceProviderLease Install(IServiceCollection services)
+    /// <param name="warningSink">Receives a compatibility warning when the verified registration shape is absent.</param>
+    /// <returns>
+    /// A lease that owns a captured provider until released after a successful build, or <see langword="null"/> when
+    /// the consumer-selected Aspire version does not expose the verified registration shape.
+    /// </returns>
+    internal static AspireBuildServiceProviderLease? TryInstall(
+        IServiceCollection services,
+        Action<string>? warningSink = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 
@@ -39,9 +43,11 @@ internal sealed class AspireBuildServiceProviderLease : IAsyncDisposable
             descriptor.Lifetime != ServiceLifetime.Singleton ||
             descriptor.ImplementationFactory is null)
         {
-            throw new InvalidOperationException(
-                "The pinned Aspire IHost service registration no longer has the expected singleton factory shape. " +
-                "Update ForgeTrust.AppSurface.Aspire.Testing for this Aspire version before building.");
+            warningSink?.Invoke(
+                "The Aspire IHost service registration does not have the singleton factory shape verified with " +
+                "Aspire 13.4.4. Build will continue without AppSurface's partial-provider cleanup; verify failed-build " +
+                "cleanup before relying on this consumer-selected Aspire version.");
+            return null;
         }
 
         var originalFactory = descriptor.ImplementationFactory;

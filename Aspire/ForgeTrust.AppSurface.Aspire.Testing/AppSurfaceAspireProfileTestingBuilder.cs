@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
@@ -97,16 +98,17 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     /// Builds the composed distributed application exactly once.
     /// </summary>
     /// <remarks>
-    /// Immediately before delegating to the pinned Aspire builder, this method installs an internal ownership lease
+    /// Immediately before delegating to Aspire, this method attempts to install an internal ownership lease
     /// around Aspire's root-provider host factory. A successful build transfers provider ownership to the returned
     /// application. A non-process-fatal host-construction failure disposes the captured partial provider before profile
-    /// activation services, without replacing the original failure with non-fatal cleanup errors.
+    /// activation services, without replacing the original failure with non-fatal cleanup errors. A consumer-selected
+    /// Aspire version with an unfamiliar host registration continues without this additional cleanup and emits a trace
+    /// warning.
     /// </remarks>
     /// <param name="cancellationToken">A token checked before and immediately after Aspire's synchronous build.</param>
     /// <returns>The built application. The caller controls starting, stopping, and primary disposal.</returns>
     /// <exception cref="InvalidOperationException">
-    /// The builder is already building, built, faulted, or disposing; or the pinned Aspire host registration no longer
-    /// has the expected singleton-factory shape.
+    /// The builder is already building, built, faulted, or disposing.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The builder has been disposed.</exception>
     /// <exception cref="OperationCanceledException">The operation is cancelled; any unreturned application is disposed.</exception>
@@ -126,9 +128,11 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         {
             cancellationToken.ThrowIfCancellationRequested();
             var inner = _innerBuilder!;
-            buildServiceProviderLease = AspireBuildServiceProviderLease.Install(inner.Services);
+            buildServiceProviderLease = AspireBuildServiceProviderLease.TryInstall(
+                inner.Services,
+                static warning => Trace.TraceWarning(warning));
             application = inner.Build();
-            buildServiceProviderLease.Release();
+            buildServiceProviderLease?.Release();
             cancellationToken.ThrowIfCancellationRequested();
             _application = application;
             Volatile.Write(ref _state, Built);

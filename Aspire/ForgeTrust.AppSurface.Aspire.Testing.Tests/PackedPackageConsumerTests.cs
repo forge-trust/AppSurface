@@ -4,11 +4,11 @@ using System.Xml.Linq;
 
 public sealed class PackedPackageConsumerTests
 {
-    private const string PackageVersion = "0.0.0-consumer-proof";
+    private const string PackageVersion = "0.0.0-consumer-override-proof";
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task PackedPackage_PinsAspireAndCompilesDocumentedConsumer()
+    public async Task PackedPackage_SetsAspireMinimumAndCompilesConsumerOverride()
     {
         var repositoryRoot = GetRepositoryRoot();
         var workDirectory = Path.Join(Path.GetTempPath(), $"appsurface-aspire-testing-consumer-&-{Guid.NewGuid():N}");
@@ -49,7 +49,7 @@ public sealed class PackedPackageConsumerTests
 
             var packagePath = Assert.Single(
                 Directory.GetFiles(feedDirectory, "ForgeTrust.AppSurface.Aspire.Testing.*.nupkg"));
-            var packedPackageVersion = AssertExactAspireDependencies(packagePath);
+            var packedPackageVersion = AssertMinimumAspireDependencies(packagePath);
 
             var nugetConfigPath = Path.Join(consumerDirectory, "NuGet.config");
             var nugetConfiguration = new XDocument(
@@ -86,6 +86,9 @@ public sealed class PackedPackageConsumerTests
                   </PropertyGroup>
                   <ItemGroup>
                     <PackageReference Include="ForgeTrust.AppSurface.Aspire.Testing" Version="{{packedPackageVersion}}" />
+                    <PackageReference Include="Aspire.Hosting" Version="13.4.6" />
+                    <PackageReference Include="Aspire.Hosting.AppHost" Version="13.4.6" />
+                    <PackageReference Include="Aspire.Hosting.Testing" Version="13.4.6" />
                   </ItemGroup>
                 </Project>
                 """);
@@ -137,7 +140,7 @@ public sealed class PackedPackageConsumerTests
         }
     }
 
-    private static string AssertExactAspireDependencies(string packagePath)
+    private static string AssertMinimumAspireDependencies(string packagePath)
     {
         using var archive = ZipFile.OpenRead(packagePath);
         var nuspecEntry = Assert.Single(archive.Entries, entry => entry.FullName.EndsWith(".nuspec", StringComparison.Ordinal));
@@ -151,9 +154,9 @@ public sealed class PackedPackageConsumerTests
                 element => element.Attribute("version")?.Value ?? string.Empty,
                 StringComparer.OrdinalIgnoreCase);
 
-        Assert.Equal("[13.4.4]", dependencies["Aspire.Hosting"]);
-        Assert.Equal("[13.4.4]", dependencies["Aspire.Hosting.AppHost"]);
-        Assert.Equal("[13.4.4]", dependencies["Aspire.Hosting.Testing"]);
+        Assert.Equal("13.4.4", dependencies["Aspire.Hosting"]);
+        Assert.Equal("13.4.4", dependencies["Aspire.Hosting.AppHost"]);
+        Assert.Equal("13.4.4", dependencies["Aspire.Hosting.Testing"]);
         Assert.Equal(packageVersion, dependencies["ForgeTrust.AppSurface.Aspire"]);
         return packageVersion;
     }
