@@ -558,6 +558,33 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public async Task ArtifactStorage_ShouldDeleteTemporaryFileWhenAWriteIsCanceled()
+    {
+        using var directory = new TemporaryDirectory();
+        var storage = new CoverageRunWatchdogArtifactStorage();
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => storage.WriteTemporaryAsync(
+            Path.Join(directory.Path, "coverage-watchdog.json"),
+            new byte[] { 1 },
+            cancellation.Token));
+
+        Assert.Empty(Directory.EnumerateFiles(directory.Path, "*", SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
+    public void ArtifactStorage_ShouldContainBestEffortDeleteFailures()
+    {
+        using var directory = new TemporaryDirectory();
+        var storage = new CoverageRunWatchdogArtifactStorage();
+
+        storage.DeleteTemporary(directory.Path);
+
+        Assert.True(Directory.Exists(directory.Path));
+    }
+
+    [Fact]
     public async Task ArtifactWriter_ShouldAwaitAnAlreadyStartedCommitBeforePropagatingCancellation()
     {
         var storage = new BlockingCommitArtifactStorage();
@@ -905,6 +932,20 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public async Task Runtime_ShouldPermitAnEmptyStagedCommit()
+    {
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            CoverageRunWatchdogOptions.Default,
+            CancellationToken.None);
+
+        runtime.CommitStagedFiles([]);
+        await runtime.CompleteAsync();
+    }
+
+    [Fact]
     public async Task Runtime_ShouldRollBackEarlierStagedPromotionsWhenALaterMoveFails()
     {
         using var directory = new TemporaryDirectory();
@@ -993,7 +1034,7 @@ public sealed class CoverageRunWatchdogTests
     {
         using var input = new MemoryStream();
         using var output = new ThrowingWriteStream();
-        using var error = new MemoryStream();
+        using var error = new ThrowingWriteStream();
         using var console = new FakeConsole(input, output, error);
         await using var runtime = new CoverageRunWatchdogRuntime(
             console,
@@ -1002,9 +1043,11 @@ public sealed class CoverageRunWatchdogTests
             CancellationToken.None);
 
         await runtime.WriteOutputAsync("raw output");
+        await runtime.WriteErrorAsync("raw error");
         await runtime.CompleteAsync();
 
         Assert.True(output.WriteAttempted);
+        Assert.True(error.WriteAttempted);
     }
 
     [Fact]

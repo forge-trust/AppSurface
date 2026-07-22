@@ -309,6 +309,11 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
     /// <returns>A task that completes after the bounded write succeeds, times out, or is abandoned.</returns>
     public Task WriteErrorLineAsync(string text) => WriteConsoleAsync(text, error: true, waitForTurn: true);
 
+    /// <summary>Writes ordinary workflow error text without appending a newline through the bounded sink.</summary>
+    /// <param name="text">Error text to write without adding a newline.</param>
+    /// <returns>A task that completes after the bounded write succeeds, times out, or is abandoned.</returns>
+    public Task WriteErrorAsync(string text) => WriteConsoleAsync(text, error: true, appendNewLine: false, waitForTurn: true);
+
     private async Task MonitorAsync(CancellationToken externalCancellation)
     {
         using var delayCancellation = CancellationTokenSource.CreateLinkedTokenSource(
