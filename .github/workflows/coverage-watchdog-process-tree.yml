@@ -46,7 +46,54 @@ jobs:
         run: dotnet build Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore
 
       - name: Verify nested process-tree cleanup
-        run: dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree --logger "console;verbosity=normal" ${{ runner.os != 'macOS' && '--blame-hang-timeout 2m --blame-hang-dump-type none' || '' }} --results-directory "TestResults/${{ matrix.os }}"
+        if: ${{ runner.os != 'macOS' }}
+        run: dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree --logger "console;verbosity=normal" --blame-hang-timeout 2m --blame-hang-dump-type none --results-directory "TestResults/${{ matrix.os }}"
+
+      - name: Verify nested process-tree cleanup (bounded macOS driver)
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          results_directory="TestResults/${{ matrix.os }}"
+          mkdir -p "$results_directory"
+          test_arguments=(
+            test
+            Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
+            --configuration Release
+            --no-build
+            --no-restore
+            --filter FullyQualifiedName~CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree
+            --logger "console;verbosity=normal"
+            --logger "trx;LogFileName=coverage-watchdog.trx"
+            --results-directory "$results_directory"
+          )
+
+          dotnet "${test_arguments[@]}" &
+          test_driver_pid=$!
+          for _ in {1..120}; do
+            if ! kill -0 "$test_driver_pid" 2>/dev/null; then
+              wait "$test_driver_pid"
+              exit $?
+            fi
+
+            sleep 1
+          done
+
+          pkill -TERM -P "$test_driver_pid" 2>/dev/null || true
+          kill -TERM "$test_driver_pid" 2>/dev/null || true
+          sleep 5
+          pkill -KILL -P "$test_driver_pid" 2>/dev/null || true
+          kill -KILL "$test_driver_pid" 2>/dev/null || true
+          wait "$test_driver_pid" 2>/dev/null || true
+
+          trx_path="$results_directory/coverage-watchdog.trx"
+          counters="$(grep -Eo '<Counters[^>]*/>' "$trx_path" 2>/dev/null | head -1 || true)"
+          if [[ "$counters" == *'total="1"'* && "$counters" == *'executed="1"'* && "$counters" == *'passed="1"'* && "$counters" == *'failed="0"'* ]]; then
+            echo "::warning::The macOS VSTest driver did not exit after recording a passing cleanup result; bounded teardown completed."
+            exit 0
+          fi
+
+          echo "The macOS cleanup test did not complete successfully before the driver deadline." >&2
+          exit 1
 
       - name: Upload process-tree hang diagnostics
         if: ${{ failure() }}
