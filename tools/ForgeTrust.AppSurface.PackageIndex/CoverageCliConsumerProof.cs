@@ -316,7 +316,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             "warning",
             "warn",
             diagnosticCode: null,
-            cleanupStatus: "not-requested");
+            cleanupOutcomes: [("not-requested", null)]);
         artifacts.Add(watchdogWarnArtifact);
         if (!commands[^1].Succeeded || !watchdogWarnArtifact.Satisfied)
         {
@@ -352,7 +352,14 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             "terminated",
             "fail",
             diagnosticCode: "ASCOV121",
-            cleanupStatus: "complete");
+            cleanupOutcomes:
+            [
+                ("complete", null),
+                ("failed", "kill-failed"),
+                ("deadline-exceeded", "cleanup-incomplete"),
+                ("deadline-exceeded", "root-timeout"),
+                ("deadline-exceeded", "kill-failed"),
+            ]);
         artifacts.Add(watchdogArtifact);
         if (!commands[^1].Succeeded || !watchdogArtifact.Satisfied)
         {
@@ -1042,7 +1049,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         string outcome,
         string watchdogMode,
         string? diagnosticCode,
-        string cleanupStatus)
+        IReadOnlyCollection<(string Status, string? Detail)> cleanupOutcomes)
     {
         try
         {
@@ -1052,14 +1059,20 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             var diagnosticMatches = diagnosticCode is null
                 ? actualDiagnostic.ValueKind == JsonValueKind.Null
                 : string.Equals(actualDiagnostic.GetString(), diagnosticCode, StringComparison.Ordinal);
+            var cleanup = root.GetProperty("cleanup");
+            var actualCleanupStatus = cleanup.GetProperty("status").GetString();
+            var actualCleanupDetailElement = cleanup.GetProperty("detail");
+            var actualCleanupDetail = actualCleanupDetailElement.ValueKind == JsonValueKind.Null
+                ? null
+                : actualCleanupDetailElement.GetString();
+            var cleanupMatches = cleanupOutcomes.Any(expected =>
+                string.Equals(actualCleanupStatus, expected.Status, StringComparison.Ordinal)
+                && string.Equals(actualCleanupDetail, expected.Detail, StringComparison.Ordinal));
             var valid = root.GetProperty("schemaVersion").GetInt32() == 1
                 && string.Equals(root.GetProperty("outcome").GetString(), outcome, StringComparison.Ordinal)
                 && string.Equals(root.GetProperty("watchdogMode").GetString(), watchdogMode, StringComparison.Ordinal)
                 && diagnosticMatches
-                && string.Equals(
-                    root.GetProperty("cleanup").GetProperty("status").GetString(),
-                    cleanupStatus,
-                    StringComparison.Ordinal);
+                && cleanupMatches;
             return new CoverageCliConsumerProofArtifactCheck(description, path, valid);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)

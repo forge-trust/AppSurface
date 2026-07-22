@@ -3503,6 +3503,35 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_AcceptsDocumentedFailedTerminalCleanup()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            failModeCleanupFailed: true);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.True(report.Succeeded, report.FirstFailure);
+        Assert.Contains(
+            report.Artifacts,
+            artifact => artifact.Description == "coverage run watchdog terminal incident" && artifact.Satisfied);
+    }
+
+    [Fact]
     public async Task CoverageCliConsumerProofWorkflow_FailsWhenIntentionalGateDoesNotWriteReports()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -6486,6 +6515,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         private readonly int _ordinaryFailureExitCode;
         private readonly string _coverageRunHelp;
         private readonly string _coverageRunHelpError;
+        private readonly bool _failModeCleanupFailed;
 
         public CoverageProofRecordingCommandRunner(
             string packageVersion,
@@ -6500,7 +6530,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             bool createExcludedProjectArtifacts = false,
             int ordinaryFailureExitCode = 1,
             string coverageRunHelp = "--watchdog --heartbeat-interval --no-progress-timeout",
-            string coverageRunHelpError = "")
+            string coverageRunHelpError = "",
+            bool failModeCleanupFailed = false)
         {
             _packageVersion = packageVersion;
             _createFailingGateReports = createFailingGateReports;
@@ -6515,6 +6546,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _ordinaryFailureExitCode = ordinaryFailureExitCode;
             _coverageRunHelp = coverageRunHelp;
             _coverageRunHelpError = coverageRunHelpError;
+            _failModeCleanupFailed = failModeCleanupFailed;
         }
 
         public List<ExternalCommandRequest> Requests { get; } = [];
@@ -6582,7 +6614,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
                 File.WriteAllText(
                     Path.Join(outputDirectory, "coverage-watchdog.json"),
-                    "{\"schemaVersion\":1,\"outcome\":\"terminated\",\"diagnosticCode\":\"ASCOV121\",\"watchdogMode\":\"fail\",\"cleanup\":{\"status\":\"complete\"}}");
+                    _failModeCleanupFailed
+                        ? "{\"schemaVersion\":1,\"outcome\":\"terminated\",\"diagnosticCode\":\"ASCOV121\",\"watchdogMode\":\"fail\",\"cleanup\":{\"status\":\"failed\",\"detail\":\"kill-failed\"}}"
+                        : "{\"schemaVersion\":1,\"outcome\":\"terminated\",\"diagnosticCode\":\"ASCOV121\",\"watchdogMode\":\"fail\",\"cleanup\":{\"status\":\"complete\",\"detail\":null}}");
                 return Task.FromResult(new ExternalCommandResult(124, string.Empty, "ASCOV121 no observable progress"));
             }
 
@@ -6593,7 +6627,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
                 File.WriteAllText(
                     Path.Join(outputDirectory, "coverage-watchdog.json"),
-                    "{\"schemaVersion\":1,\"outcome\":\"warning\",\"diagnosticCode\":null,\"watchdogMode\":\"warn\",\"cleanup\":{\"status\":\"not-requested\"}}");
+                    "{\"schemaVersion\":1,\"outcome\":\"warning\",\"diagnosticCode\":null,\"watchdogMode\":\"warn\",\"cleanup\":{\"status\":\"not-requested\",\"detail\":null}}");
                 return Task.FromResult(new ExternalCommandResult(
                     0,
                     "Coverage heartbeat: elapsed=1s" + Environment.NewLine + "Coverage watchdog warning: operation=projects",
