@@ -2920,7 +2920,10 @@ public sealed class CoverageRunTests
         try
         {
             using var process = Process.GetProcessById(processId.Value);
-            process.Kill(entireProcessTree: true);
+            // Both fixture descendants are tracked and cleaned independently. Avoid tree
+            // discovery here so best-effort teardown cannot re-enter the behavior under test
+            // for an already-terminated or zombie process on Unix.
+            process.Kill(entireProcessTree: false);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
         {
