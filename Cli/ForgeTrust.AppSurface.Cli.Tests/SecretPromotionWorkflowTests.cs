@@ -66,7 +66,7 @@ public sealed class SecretPromotionWorkflowTests
             DefaultSecretPromotionGoogleClientFactory.ValidateCredentialFile(credentialPath, isWindows: true));
 
         Assert.Contains("not supported on Windows", exception.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain(credentialPath, exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(credentialPath, exception.ToString());
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public sealed class SecretPromotionWorkflowTests
         Assert.True(planned.Summary.Succeeded, JsonSerializer.Serialize(planned.Summary));
         Assert.Equal(0, google.AccessCalls);
         Assert.Empty(google.Writes);
-        Assert.DoesNotContain("sentinel-local-secret", File.ReadAllText(planPath), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", File.ReadAllText(planPath));
 
         var applied = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
 
@@ -95,7 +95,7 @@ public sealed class SecretPromotionWorkflowTests
         Assert.Equal($"{planPath}.receipt.json", applied.ReceiptPath);
         Assert.Single(google.Writes);
         Assert.Equal("projects/staging/secrets/stripe-api-key", google.Writes[0]);
-        Assert.DoesNotContain("sentinel-local-secret", JsonSerializer.Serialize(applied), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", JsonSerializer.Serialize(applied));
     }
 
     [Fact]
@@ -121,7 +121,7 @@ public sealed class SecretPromotionWorkflowTests
         var row = Assert.Single(applied.Rows);
         Assert.Equal("Skipped", row.Status);
         Assert.Equal("SkippedExistingDestination", row.Action);
-        Assert.DoesNotContain("sentinel-local-secret", JsonSerializer.Serialize(applied), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", JsonSerializer.Serialize(applied));
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public sealed class SecretPromotionWorkflowTests
         var row = Assert.Single(resumed.Rows);
         Assert.Equal("Skipped", row.Status);
         Assert.Equal("ResumeSkippedConfirmedWrite", row.Action);
-        Assert.DoesNotContain("sentinel-local-secret", JsonSerializer.Serialize(resumed), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", JsonSerializer.Serialize(resumed));
 
         var resumedAgain = workflow.Apply(new SecretPromotionApplyRequest(
             configPath,
@@ -236,7 +236,7 @@ public sealed class SecretPromotionWorkflowTests
         Assert.Contains("rows that do not match", exception.Message, StringComparison.Ordinal);
         Assert.Single(google.Writes);
         Assert.Equal(0, google.AccessCalls);
-        Assert.DoesNotContain("sentinel-alias-value", exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-alias-value", exception.ToString());
     }
 
     [Fact]
@@ -343,7 +343,7 @@ public sealed class SecretPromotionWorkflowTests
         var exception = Assert.Throws<CommandException>(() => factory.Create(endpoint));
 
         Assert.Contains("group or other users", exception.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain(credentialPath, exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(credentialPath, exception.ToString());
     }
 
     [Fact]
@@ -368,7 +368,7 @@ public sealed class SecretPromotionWorkflowTests
                 Path.Join(linkedDirectory, "credentials.json")));
 
         Assert.Contains("must not use symbolic links", exception.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain(credentialPath, exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(credentialPath, exception.ToString());
     }
 
     [Fact]
@@ -395,7 +395,7 @@ public sealed class SecretPromotionWorkflowTests
             DefaultSecretPromotionGoogleClientFactory.ValidateCredentialFile(credentialPath));
 
         Assert.Contains("must not be writable by group or other users unless sticky", exception.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain(credentialPath, exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(credentialPath, exception.ToString());
     }
 
     [Fact]
@@ -418,8 +418,8 @@ public sealed class SecretPromotionWorkflowTests
         var exception = Assert.Throws<CommandException>(() => factory.Create(endpoint));
 
         Assert.Contains("could not be loaded", exception.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("sentinel-credential", exception.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(credentialPath, exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-credential", exception.ToString());
+        ValueSafeAssert.DoesNotExpose(credentialPath, exception.ToString());
     }
 
     [Fact]
@@ -443,7 +443,30 @@ public sealed class SecretPromotionWorkflowTests
 
         Assert.Contains("--confirm", exception.Message, StringComparison.Ordinal);
         Assert.Empty(google.Writes);
-        Assert.DoesNotContain("sentinel-remote-secret", exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-remote-secret", exception.ToString());
+    }
+
+    [Fact]
+    public void Apply_ProductionSource_RequiresPinnedVersionAndExactJobConfirmation()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var context = CreateContext(new InMemoryAppSurfaceLocalSecretStore());
+        var configPath = temp.WriteFile("promotion.json", ProductionToStagingConfiguration());
+        var planPath = Path.Join(temp.Path, "promotion.plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/production/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "production-to-staging", planPath, false, TimeSpan.FromMinutes(10), context));
+
+        Assert.True(JsonNode.Parse(File.ReadAllText(planPath))!["production"]!.GetValue<bool>());
+        var exception = Assert.Throws<CommandException>(() => workflow.Apply(
+            new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context)));
+        Assert.Contains("--confirm", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, google.AccessCalls);
+        Assert.Empty(google.Writes);
+        ValueSafeAssert.DoesNotExpose("sentinel-remote-secret", exception.ToString());
     }
 
     [Fact]
@@ -470,7 +493,7 @@ public sealed class SecretPromotionWorkflowTests
 
         Assert.Contains("plan identity is invalid", exception.Message, StringComparison.Ordinal);
         Assert.Empty(google.Writes);
-        Assert.DoesNotContain("sentinel-remote-secret", exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-remote-secret", exception.ToString());
     }
 
     [Fact]
@@ -496,7 +519,7 @@ public sealed class SecretPromotionWorkflowTests
         Assert.Contains("does not match", exception.Message, StringComparison.Ordinal);
         Assert.Equal(0, google.AccessCalls);
         Assert.Empty(google.Writes);
-        Assert.DoesNotContain("sentinel-local-secret", exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", exception.ToString());
     }
 
     [Fact]
@@ -563,7 +586,7 @@ public sealed class SecretPromotionWorkflowTests
         Assert.Contains("plan identity is invalid", exception.Message, StringComparison.Ordinal);
         Assert.Empty(google.Writes);
         Assert.Equal(0, google.AccessCalls);
-        Assert.DoesNotContain("sentinel-local-secret", exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", exception.ToString());
     }
 
     [Theory]
@@ -687,7 +710,7 @@ public sealed class SecretPromotionWorkflowTests
         Assert.True(row.Retryable);
         Assert.Empty(google.Writes);
         Assert.True(File.Exists($"{planPath}.receipt.json"));
-        Assert.DoesNotContain("sentinel-local-secret", File.ReadAllText($"{planPath}.receipt.json"), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", File.ReadAllText($"{planPath}.receipt.json"));
     }
 
     [Fact]
@@ -798,7 +821,7 @@ public sealed class SecretPromotionWorkflowTests
         Assert.False(result.Succeeded);
         Assert.Empty(google.Writes);
         Assert.DoesNotContain("IndeterminateWrite", File.ReadAllText(receiptPath), StringComparison.Ordinal);
-        Assert.DoesNotContain("sentinel", JsonSerializer.Serialize(result), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel", JsonSerializer.Serialize(result));
     }
 
     [Theory]
@@ -835,8 +858,8 @@ public sealed class SecretPromotionWorkflowTests
         Assert.False(result.Succeeded);
         Assert.Equal(expected, Assert.Single(result.Rows).Status);
         Assert.Equal(expected, JsonNode.Parse(File.ReadAllText(receiptPath))!["rows"]![0]!["status"]!.GetValue<string>());
-        Assert.DoesNotContain("sentinel", JsonSerializer.Serialize(result), StringComparison.Ordinal);
-        Assert.DoesNotContain("sentinel", File.ReadAllText(receiptPath), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel", JsonSerializer.Serialize(result));
+        ValueSafeAssert.DoesNotExpose("sentinel", File.ReadAllText(receiptPath));
     }
 
     [Theory]
@@ -1156,7 +1179,7 @@ public sealed class SecretPromotionWorkflowTests
         Assert.Single(google.Writes);
         var receiptText = File.ReadAllText(receiptPath);
         Assert.Contains("IndeterminateWrite", receiptText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sentinel-local-secret", receiptText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", receiptText);
 
         var resumeException = Assert.Throws<CommandException>(() => new SecretPromotionWorkflow(new FakeGoogleFactory(google)).Apply(
             new SecretPromotionApplyRequest(configPath, planPath, true, null, null, receiptPath, context)));
@@ -1305,7 +1328,7 @@ public sealed class SecretPromotionWorkflowTests
         Assert.Contains("rows that do not match", exception.Message, StringComparison.Ordinal);
         Assert.Equal(0, google.AccessCalls);
         Assert.Empty(google.Writes);
-        Assert.DoesNotContain("sentinel-local-secret", exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", exception.ToString());
     }
 
     [Fact]
@@ -1456,8 +1479,10 @@ public sealed class SecretPromotionWorkflowTests
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"\",\"destination\":\"projects/p/secrets/s\"}]}]}", "unique non-empty keys"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"production\",\"provider\":\"google\",\"environment\":\"production\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"production\",\"rows\":[{\"key\":\"Key\",\"destination\":\"projects/p/secrets/s\"}]}]}", "allowMutableLocalSource"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}},{\"name\":\"production\",\"provider\":\"google\",\"environment\":\"production\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"staging\",\"destination\":\"production\",\"rows\":[{\"key\":\"Key\",\"source\":\"projects/p/secrets/s/versions/latest\",\"destination\":\"projects/q/secrets/t\"}]}]}", "explicit numeric version"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"production\",\"provider\":\"google\",\"environment\":\"production\",\"credential\":{\"mode\":\"applicationDefault\"}},{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"production\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"source\":\"projects/p/secrets/s/versions/latest\",\"destination\":\"projects/q/secrets/t\"}]}]}", "explicit numeric version"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"source\":\"unexpected\",\"destination\":\"projects/p/secrets/s\"}]}]}", "Local source rows"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"staging\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"source\":\"projects/p/secrets/s/versions/1\",\"destination\":\"projects/p/secrets/t\"}]}]}", "same source and destination"];
+        yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"source\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}},{\"name\":\"destination\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"source\",\"destination\":\"destination\",\"rows\":[{\"key\":\"Key\",\"source\":\"projects/p/secrets/s/versions/1\",\"destination\":\"projects/p/secrets/s\"}]}]}", "same Google secret"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[]}]}", "at least one row"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"staging\",\"destination\":\"local\",\"rows\":[{\"key\":\"Key\",\"source\":\"bad\"}]}]}", "destinations must be declared Google endpoints"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\",\"credential\":{\"mode\":\"applicationDefault\"}}],\"jobs\":[{\"name\":\"job\",\"source\":\"staging\",\"destination\":\"local\",\"rows\":[{\"key\":\"Key\"}]}]}", "destinations must be declared Google endpoints"];
@@ -1574,6 +1599,31 @@ public sealed class SecretPromotionWorkflowTests
               "destination": "local",
               "rows": [
                 { "key": "Stripe:ApiKey", "source": "projects/staging/secrets/stripe-api-key/versions/7" }
+              ]
+            }
+          ]
+        }
+        """;
+
+    private static string ProductionToStagingConfiguration() =>
+        """
+        {
+          "version": 1,
+          "endpoints": [
+            { "name": "production", "provider": "google", "environment": "production", "credential": { "mode": "applicationDefault" } },
+            { "name": "staging", "provider": "google", "environment": "staging", "credential": { "mode": "applicationDefault" } }
+          ],
+          "jobs": [
+            {
+              "name": "production-to-staging",
+              "source": "production",
+              "destination": "staging",
+              "rows": [
+                {
+                  "key": "Stripe:ApiKey",
+                  "source": "projects/production/secrets/stripe-api-key/versions/7",
+                  "destination": "projects/staging/secrets/stripe-api-key"
+                }
               ]
             }
           ]

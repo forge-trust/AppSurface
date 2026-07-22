@@ -181,7 +181,9 @@ selected Application Default Credentials there.
 
 `plan` performs metadata-only probes and records a configuration digest, expiry, canonical resources, and destination
 preconditions. It never reads a secret payload. `apply --apply` requires the same configuration, rejects stale or changed
-plans before reading values, and requires `--confirm <job>` for production-labelled destinations. Text and JSON summaries
+plans before reading values, and requires `--confirm <job>` when either endpoint is production-labelled. When a production job
+declares `allowMutableLocalSource: true`, the same exact-job confirmation also acknowledges that the LocalSecrets value may
+have changed since planning. Text and JSON summaries
 may identify the requested plan or receipt artifact path. Summaries and plan/receipt JSON contain resources, actions,
 diagnostic codes, and configuration/plan identity digests, but never secret values, payload bytes, secret-value hashes,
 credentials, or raw provider exceptions.

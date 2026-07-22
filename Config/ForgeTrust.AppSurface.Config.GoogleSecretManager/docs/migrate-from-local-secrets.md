@@ -72,6 +72,9 @@ The promotion configuration carries batch mappings and keeps source/sink authori
 }
 ```
 
+For a production destination, `--confirm local-to-production` acknowledges both the exact reviewed job and its declared
+mutable LocalSecrets source exception. Create a fresh plan immediately before apply so that acknowledgement is deliberate.
+
 Apply validates the whole job before any payload read. Writes are ordered but not cross-secret atomic. Before mutation,
 the workflow persists a value-free journal for the planned rows, then updates that journal atomically after each row. If
 the process crashes, resume from the latest journal or receipt; rows already confirmed as `Written` are skipped, rows not
@@ -84,8 +87,8 @@ exceptions.
 
 - Do not rename `Stripe:ApiKey` in app code during the move. Preserve the logical key so wrappers, validation, audit
   redaction, and diagnostics continue to work.
-- Do not rely on `latest` as a hidden production default. Pin a version or opt in with `AllowLatest()` for workflows
-  that intentionally accept a mutable alias.
+- Transfer jobs targeting production require an explicit numeric Google source version; they never accept `latest`.
+  Separately, runtime provider mappings may opt into a mutable alias with `AllowLatest()` when that behavior is intentional.
 - Do not leave a production fallback secret in `appsettings.*.json`. Claimed remote failures fail closed by default so
   a missing IAM grant or outage does not silently read a stale file value.
 - Keep environment variables for emergency overrides, CI injection, and short-lived operational recovery.

@@ -154,7 +154,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal("projects/staging/secrets/stripe-api-key", Assert.Single(client.Writes));
         var planArtifact = await File.ReadAllTextAsync(planPath);
         var receiptArtifact = await File.ReadAllTextAsync($"{planPath}.receipt.json");
-        Assert.DoesNotContain("sentinel-local-secret", plan.AllText + dryRun.AllText + apply.AllText + planArtifact + receiptArtifact, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", plan.AllText + dryRun.AllText + apply.AllText + planArtifact + receiptArtifact);
     }
 
     [Fact]
@@ -209,7 +209,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, plan.ExitCode);
         Assert.Equal(1, apply.ExitCode);
         Assert.Contains("ProbeGoogleDestination", apply.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sentinel-local-secret", apply.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", apply.AllText);
         Assert.Empty(client.Writes);
     }
 
@@ -233,7 +233,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, delete.ExitCode);
         Assert.Contains("Stripe:ApiKey", list.AllText, StringComparison.Ordinal);
         Assert.Contains("Found: local secret namespace", get.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", init.AllText + set.AllText + list.AllText + get.AllText + delete.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", init.AllText + set.AllText + list.AllText + get.AllText + delete.AllText);
     }
 
     [Fact]
@@ -250,7 +250,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, list.ExitCode);
         Assert.Contains("Stripe:ApiKey", list.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Source:", list.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", list.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", list.AllText);
     }
 
     [Fact]
@@ -270,7 +270,7 @@ public sealed class ProgramEntryPointTests
 
         Assert.NotEqual(0, list.ExitCode);
         Assert.Contains("local-secret-store-invalid", list.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", list.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", list.AllText);
     }
 
     [Fact]
@@ -285,7 +285,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Ready: local secret namespace", result.AllText, StringComparison.Ordinal);
         Assert.Contains(OperatingSystem.IsWindows() ? "local-secret-file-posture-degraded" : "local-secret-store-ready", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.AllText);
     }
 
     [Fact]
@@ -307,7 +307,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Ready: local secret namespace", result.AllText, StringComparison.Ordinal);
         Assert.Contains("local-secret-file-posture-repaired", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.AllText);
     }
 
     [Fact]
@@ -335,7 +335,7 @@ public sealed class ProgramEntryPointTests
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("Use either --store-file or --secret-tool-path", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.AllText);
     }
 
     [Fact]
@@ -422,8 +422,8 @@ public sealed class ProgramEntryPointTests
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("Use either --value or --stdin", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_other_secret", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.AllText);
+        ValueSafeAssert.DoesNotExpose("sk_other_secret", result.AllText);
     }
 
     [Fact]
@@ -441,7 +441,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, get.ExitCode);
         Assert.Contains("Set: local secret namespace", set.AllText, StringComparison.Ordinal);
         Assert.Contains("Found: local secret namespace", get.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", set.AllText + get.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", set.AllText + get.AllText);
     }
 
     [Fact]
@@ -468,7 +468,7 @@ public sealed class ProgramEntryPointTests
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("Local secret was not found", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.AllText);
     }
 
     [Fact]
@@ -507,7 +507,7 @@ public sealed class ProgramEntryPointTests
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("local-secret-file-posture-unsupported", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.AllText);
     }
 
     [Fact]

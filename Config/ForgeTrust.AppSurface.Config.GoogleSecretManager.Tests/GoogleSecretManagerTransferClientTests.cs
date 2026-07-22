@@ -88,7 +88,7 @@ public sealed class GoogleSecretManagerTransferClientTests
         Assert.Equal(
             failure == "rpc" ? GoogleSecretManagerTransferStatus.AccessDenied : GoogleSecretManagerTransferStatus.Unavailable,
             result.Status);
-        Assert.DoesNotContain("sentinel-secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-secret", result.ToString());
     }
 
     [Theory]
@@ -175,7 +175,7 @@ public sealed class GoogleSecretManagerTransferClientTests
 
         Assert.Equal(GoogleSecretManagerTransferStatus.Missing, result.Status);
         Assert.Equal("google-secret-transfer-missing", result.Diagnostic?.Code);
-        Assert.DoesNotContain("raw-secret", result.Diagnostic?.ToDisplayString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", result.Diagnostic?.ToDisplayString());
     }
 
     [Theory]
@@ -197,7 +197,7 @@ public sealed class GoogleSecretManagerTransferClientTests
 
         Assert.Equal(expectedStatus, result.Status);
         Assert.Equal(expectedDiagnostic, result.Diagnostic?.Code);
-        Assert.DoesNotContain("sentinel-secret", result.Diagnostic?.ToDisplayString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-secret", result.Diagnostic?.ToDisplayString());
     }
 
     [Theory]
@@ -243,7 +243,7 @@ public sealed class GoogleSecretManagerTransferClientTests
         Assert.Equal(GoogleSecretManagerTransferStatus.IndeterminateWrite, result.Status);
         Assert.Equal("google-secret-transfer-indeterminate-write", result.Diagnostic?.Code);
         Assert.False(result.Diagnostic?.Retryable);
-        Assert.DoesNotContain("sentinel-secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-secret", result.ToString());
     }
 
     [Fact]
@@ -256,7 +256,7 @@ public sealed class GoogleSecretManagerTransferClientTests
 
         Assert.Equal(GoogleSecretManagerTransferStatus.AccessDenied, result.Status);
         Assert.Equal("google-secret-transfer-access-denied", result.Diagnostic?.Code);
-        Assert.DoesNotContain("raw-secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", result.ToString());
     }
 
     [Fact]
@@ -270,7 +270,7 @@ public sealed class GoogleSecretManagerTransferClientTests
         Assert.Equal(GoogleSecretManagerTransferStatus.AccessDenied, result.Status);
         Assert.Equal("google-secret-transfer-access-denied", result.Diagnostic?.Code);
         Assert.Null(result.Payload);
-        Assert.DoesNotContain("raw-secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", result.ToString());
     }
 
     [Fact]
@@ -355,7 +355,7 @@ public sealed class GoogleSecretManagerTransferClientTests
         var result = client.AccessSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1));
 
         Assert.Equal(expected, result.Status);
-        Assert.DoesNotContain("sentinel-secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-secret", result.ToString());
     }
 
     [Theory]
@@ -375,7 +375,7 @@ public sealed class GoogleSecretManagerTransferClientTests
 
         Assert.Equal(expected, result.Status);
         Assert.Equal(expectedDiagnostic, result.Diagnostic?.Code);
-        Assert.DoesNotContain("sentinel-secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-secret", result.ToString());
     }
 
     [Theory]
@@ -397,7 +397,7 @@ public sealed class GoogleSecretManagerTransferClientTests
         Assert.Equal(GoogleSecretManagerTransferStatus.IndeterminateWrite, result.Status);
         Assert.Equal("google-secret-transfer-indeterminate-write", result.Diagnostic?.Code);
         Assert.False(result.Diagnostic?.Retryable);
-        Assert.DoesNotContain("sentinel-secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-secret", result.ToString());
     }
 
     private sealed class TransferSecretManagerServiceClient(

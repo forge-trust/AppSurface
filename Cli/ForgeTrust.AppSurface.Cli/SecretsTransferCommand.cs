@@ -1,4 +1,3 @@
-using System.Text.Json;
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
@@ -86,7 +85,7 @@ internal sealed partial class SecretsTransferApplyCommand(SecretPromotionWorkflo
     [CommandOption("apply", Description = "Execute the plan. Omit to inspect the apply preflight only.")]
     public bool Apply { get; set; }
 
-    [CommandOption("confirm", Description = "Required exact job name when a production-labelled endpoint is the destination.")]
+    [CommandOption("confirm", Description = "Required exact job name when either endpoint is production-labelled; also acknowledges any declared mutable LocalSecrets source exception.")]
     public string? Confirmation { get; set; }
 
     [CommandOption("receipt", Description = "Path for the value-free apply receipt. Defaults beside the plan.")]

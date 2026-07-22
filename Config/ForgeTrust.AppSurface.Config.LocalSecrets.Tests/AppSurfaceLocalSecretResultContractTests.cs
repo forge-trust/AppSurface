@@ -30,7 +30,7 @@ public sealed class AppSurfaceLocalSecretResultContractTests
             AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.Found, Diagnostic(), "Fixed"));
 
         Assert.Contains("[redacted]", found.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", found.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", found.ToString());
         Assert.Contains("Value: none", nullValue.ToString(), StringComparison.Ordinal);
         Assert.Equal("status", exception.ParamName);
     }
@@ -49,7 +49,7 @@ public sealed class AppSurfaceLocalSecretResultContractTests
             AppSurfaceLocalSecretResolution<string>.NotFound(LocalSecretResultStatus.Found, Diagnostic(), "Fixed"));
 
         Assert.Contains("[redacted]", found.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", found.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", found.ToString());
         Assert.Contains("Value: none", nullValue.ToString(), StringComparison.Ordinal);
         Assert.Contains("Problem:", missing.ToString(), StringComparison.Ordinal);
         Assert.Equal("status", exception.ParamName);

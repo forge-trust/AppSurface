@@ -216,7 +216,7 @@ internal sealed class SecretPromotionWorkflow(
         var succeeded = summaryRows.All(IsReadyOrSkipped);
         var createdAtUtc = DateTimeOffset.UtcNow;
         var expiresAtUtc = createdAtUtc.Add(request.Expiry);
-        var production = IsProduction(endpoints.Destination);
+        var production = IsProductionJob(endpoints);
         var planIdentity = ComputePlanIdentity(
             job.Name,
             loaded.Digest,
@@ -268,9 +268,9 @@ internal sealed class SecretPromotionWorkflow(
         var endpoints = ResolveEndpoints(loaded.Configuration, job);
         ValidateJob(job, endpoints);
         ValidatePlanRows(plan.Rows, job, endpoints, request.Context);
-        if (IsProduction(endpoints.Destination) && !string.Equals(request.Confirmation, plan.JobName, StringComparison.Ordinal))
+        if (IsProductionJob(endpoints) && !string.Equals(request.Confirmation, plan.JobName, StringComparison.Ordinal))
         {
-            throw SecretPromotionCommandExtensions.Usage("A production destination requires --confirm with the exact job name.");
+            throw SecretPromotionCommandExtensions.Usage("A production-labelled promotion job requires --confirm with the exact job name.");
         }
 
         var plannedRows = plan.Rows.ToArray();
@@ -507,7 +507,7 @@ internal sealed class SecretPromotionWorkflow(
             throw SecretPromotionCommandExtensions.Usage("A LocalSecrets source targeting production requires allowMutableLocalSource: true in the declared job.");
         }
 
-        if (IsProduction(endpoints.Destination) && !IsLocal(endpoints.Source))
+        if (IsProductionJob(endpoints) && !IsLocal(endpoints.Source))
         {
             foreach (var row in job.Rows)
             {
@@ -516,6 +516,12 @@ internal sealed class SecretPromotionWorkflow(
                     throw SecretPromotionCommandExtensions.Usage("Production Google sources must use explicit numeric version resources.");
                 }
             }
+        }
+
+        if (!IsLocal(endpoints.Source) && job.Rows.Any(row =>
+                string.Equals(SecretParentForVersionResource(row.Source), ResourceForDestination(row, endpoints.Destination), StringComparison.Ordinal)))
+        {
+            throw SecretPromotionCommandExtensions.Usage("A promotion row cannot copy a Google secret version back into the same Google secret.");
         }
 
         var duplicates = job.Rows
@@ -792,6 +798,10 @@ internal sealed class SecretPromotionWorkflow(
     private static bool IsProduction(SecretPromotionEndpoint endpoint) =>
         string.Equals(endpoint.Environment, "production", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Returns whether either declared endpoint carries the production environment label.</summary>
+    private static bool IsProductionJob(ResolvedEndpoints endpoints) =>
+        IsProduction(endpoints.Source) || IsProduction(endpoints.Destination);
+
     private static bool IsSecretParentResource(string? value)
     {
         var parts = value?.Split('/') ?? [];
@@ -806,6 +816,21 @@ internal sealed class SecretPromotionWorkflow(
 
     private static bool IsNumericVersionResource(string? value) =>
         IsVersionResource(value) && value!.Split('/')[5].All(static character => character is >= '0' and <= '9');
+
+    /// <summary>
+    /// Returns the canonical Google secret parent for a syntactically valid version resource.
+    /// </summary>
+    /// <remarks>Invalid resources return null so their existing shape diagnostic remains authoritative.</remarks>
+    private static string? SecretParentForVersionResource(string? value)
+    {
+        if (!IsVersionResource(value))
+        {
+            return null;
+        }
+
+        var parts = value!.Split('/');
+        return string.Join('/', parts[..4]);
+    }
 
     private static bool IsReadyOrSkipped(SecretPromotionRowResult row) =>
         row.Status is "Ready" or "Skipped" or "DestinationExists";
@@ -1047,7 +1072,7 @@ internal sealed record SecretPromotionPlanRequest(string ConfigPath, string JobN
 /// <param name="ConfigPath">Path to the same reviewed configuration used for planning.</param>
 /// <param name="PlanPath">Path to the unexpired value-free plan.</param>
 /// <param name="Apply">Whether destination mutations are permitted; false performs apply preflight only.</param>
-/// <param name="Confirmation">Exact job name required for a production destination.</param>
+/// <param name="Confirmation">Exact job name required when either endpoint is production-labelled.</param>
 /// <param name="ReceiptPath">Optional value-free receipt path; defaults beside the plan.</param>
 /// <param name="ResumeReceiptPath">Optional prior receipt whose confirmed writes may be skipped.</param>
 /// <param name="Context">LocalSecrets identity and store context used only after preflight permits payload access.</param>

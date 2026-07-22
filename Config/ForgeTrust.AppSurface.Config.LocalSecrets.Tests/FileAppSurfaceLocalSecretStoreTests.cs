@@ -32,8 +32,8 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Contains("Stripe:ApiKey", list.Keys);
         Assert.Equal(LocalSecretResultStatus.Found, delete.Status);
         Assert.Equal(LocalSecretResultStatus.Missing, missing.Status);
-        Assert.DoesNotContain("sk_test_secret", set.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", delete.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", set.ToString());
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", delete.ToString());
     }
 
     [Fact]
@@ -51,7 +51,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.Found, set.Status);
         Assert.Equal(LocalSecretResultStatus.Found, probe.Status);
         Assert.Equal(string.Empty, probe.Value);
-        Assert.DoesNotContain("sk_test_secret", probe.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", probe.ToString());
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Found, probe.Status);
         Assert.Equal(string.Empty, probe.Value);
-        Assert.DoesNotContain("sentinel-local-secret", probe.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", probe.ToString());
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var probe = store.Probe(identity);
 
         Assert.Equal(LocalSecretResultStatus.Found, probe.Status);
-        Assert.DoesNotContain("sk_test_secret", probe.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", probe.ToString());
     }
 
     [Theory]
@@ -192,7 +192,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
         Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
-        Assert.DoesNotContain("raw-secret", probe.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", probe.ToString());
     }
 
     [Fact]
@@ -217,7 +217,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
         Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
-        Assert.DoesNotContain("raw-secret", probe.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", probe.ToString());
     }
 
     [Fact]
@@ -301,7 +301,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var probe = store.Probe(identity);
 
         Assert.Equal(unauthorized ? LocalSecretResultStatus.Locked : LocalSecretResultStatus.Unavailable, probe.Status);
-        Assert.DoesNotContain("sentinel-local-secret", probe.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", probe.ToString());
     }
 
     [Theory]
@@ -327,7 +327,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         var probe = store.Probe(identity);
 
         Assert.Equal(unauthorized ? LocalSecretResultStatus.Locked : LocalSecretResultStatus.Unavailable, probe.Status);
-        Assert.DoesNotContain("sentinel-local-secret", probe.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", probe.ToString());
     }
 
     [Fact]
@@ -687,7 +687,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal(looseMode, new DirectoryInfo(directory).UnixFileMode);
         Assert.False(File.Exists(path));
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -741,8 +741,8 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.ProviderFailed, list.Status);
         Assert.Equal("local-secret-store-invalid", get.Diagnostic?.Code);
         Assert.Equal("local-secret-store-invalid", list.Diagnostic?.Code);
-        Assert.DoesNotContain("raw-secret", get.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("raw-secret", list.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", get.ToString());
+        ValueSafeAssert.DoesNotExpose("raw-secret", list.ToString());
     }
 
     [Fact]
@@ -781,7 +781,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal("Local secret file posture is unsupported.", result.Diagnostic?.Problem);
         Assert.Null(result.Value);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -807,7 +807,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal("Local secret file posture is unsupported.", result.Diagnostic?.Problem);
         Assert.Null(result.Value);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -833,7 +833,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal("{}", File.ReadAllText(target));
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -864,7 +864,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Null(result.Value);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -892,7 +892,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.False(File.Exists(Path.Join(nestedDirectory, "secrets.json")));
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -920,7 +920,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.False(readCalled);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -946,7 +946,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
         Assert.Null(result.Value);
         Assert.False(readCalled);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -974,7 +974,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.False(readCalled);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -1003,7 +1003,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.False(readCalled);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -1031,7 +1031,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal(2, postureChecks);
         Assert.Null(result.Value);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -1086,7 +1086,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
         Assert.Null(result.Value);
         Assert.Equal(2, postureChecks);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -1162,7 +1162,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.True(writeCalled);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -1179,7 +1179,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
         Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -1196,7 +1196,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
         Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -1216,8 +1216,8 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.False(Directory.Exists(ancestor));
-        Assert.DoesNotContain("sk_test_secret", File.ReadAllText(ancestor), StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", File.ReadAllText(ancestor));
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -1233,7 +1233,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -1280,7 +1280,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
         Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -1325,7 +1325,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
         Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -1368,7 +1368,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(SecretDirectoryMode, new DirectoryInfo(temp.Path).UnixFileMode);
         Assert.Equal(SecretFileMode, new FileInfo(path).UnixFileMode);
         Assert.Empty(store.List("MyApp", "Development", null).Keys);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]

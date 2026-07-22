@@ -111,7 +111,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
         Assert.Contains("ExitCode=-2", result.Diagnostic?.Cause, StringComparison.Ordinal);
         Assert.Contains(typeof(StartFailureException).FullName!, result.Diagnostic?.Cause, StringComparison.Ordinal);
-        Assert.DoesNotContain(message, result.Diagnostic?.Cause, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(message, result.Diagnostic?.Cause);
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
         Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
         Assert.Contains("No additional startup detail was reported; ExitCode=-2.", result.Diagnostic?.Cause, StringComparison.Ordinal);
-        Assert.DoesNotContain(". ;", result.Diagnostic?.Cause, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(". ;", result.Diagnostic?.Cause);
     }
 
     [Fact]
@@ -162,8 +162,8 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal(PlatformAppSurfaceLocalSecretStore.PlatformSecretCommandResult.StartFailedExitCode, result.ExitCode);
         Assert.Contains(typeof(StartFailureException).FullName!, result.Error, StringComparison.Ordinal);
         Assert.Contains($"HResult={exception.HResult}", result.Error, StringComparison.Ordinal);
-        Assert.DoesNotContain(rawMessage, result.Error, StringComparison.Ordinal);
-        Assert.DoesNotContain(Path.GetTempPath(), result.Error, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(rawMessage, result.Error);
+        ValueSafeAssert.DoesNotExpose(Path.GetTempPath(), result.Error);
     }
 
     [Fact]
@@ -264,7 +264,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.False(result.Succeeded);
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-store-command-untrusted", result.Diagnostic?.Code);
-        Assert.DoesNotContain(fakePath, result.Diagnostic?.Cause, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(fakePath, result.Diagnostic?.Cause);
         Assert.Contains("ignores PATH", result.Diagnostic?.Cause, StringComparison.Ordinal);
     }
 
@@ -282,8 +282,8 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.False(result.Succeeded);
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-store-command-untrusted", result.Diagnostic?.Code);
-        Assert.DoesNotContain(UsrSecretTool, result.Diagnostic?.Cause, StringComparison.Ordinal);
-        Assert.DoesNotContain(BinSecretTool, result.Diagnostic?.Cause, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(UsrSecretTool, result.Diagnostic?.Cause);
+        ValueSafeAssert.DoesNotExpose(BinSecretTool, result.Diagnostic?.Cause);
         Assert.Contains("does not search PATH", result.Diagnostic?.Cause, StringComparison.Ordinal);
     }
 
@@ -414,7 +414,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Contains(expectedCause, result.Diagnostic?.Cause, StringComparison.Ordinal);
         if (!string.IsNullOrEmpty(overridePath))
         {
-            Assert.DoesNotContain(overridePath, result.Diagnostic?.Fix ?? string.Empty, StringComparison.Ordinal);
+            ValueSafeAssert.DoesNotExpose(overridePath, result.Diagnostic?.Fix);
         }
     }
 
@@ -427,7 +427,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-store-command-unsupported", result.Diagnostic?.Code);
         Assert.Contains("Linux-only", result.Diagnostic?.Cause, StringComparison.Ordinal);
-        Assert.DoesNotContain("/usr/local/bin/secret-tool", result.Diagnostic?.ToDisplayString() ?? string.Empty, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("/usr/local/bin/secret-tool", result.Diagnostic?.ToDisplayString());
     }
 
     [Fact]
@@ -539,7 +539,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.False(store.HasIndex("MyApp", "Development", null));
         Assert.False(store.HasStoredValue(live));
         Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
-        Assert.DoesNotContain("live-secret", probe.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("live-secret", probe.ToString());
     }
 
     [Fact]
@@ -557,7 +557,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         Assert.False(store.HasStoredValue(live));
         Assert.DoesNotContain(live.Key, store.ReadIndexKeys("MyApp", "Development", null));
         Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
-        Assert.DoesNotContain("live-secret", probe.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("live-secret", probe.ToString());
     }
 
     [Fact]

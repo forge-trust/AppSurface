@@ -37,7 +37,7 @@ public sealed class AppSurfaceLocalSecretIdentityNormalizerTests
 
         Assert.False(result.Succeeded);
         Assert.Equal(expectedCode, result.Diagnostic!.Code);
-        Assert.DoesNotContain("secret-value", result.Diagnostic.ToDisplayString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("secret-value", result.Diagnostic.ToDisplayString());
     }
 
     [Fact]
