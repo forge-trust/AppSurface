@@ -997,6 +997,8 @@ public sealed class CoverageRunWatchdogTests
 
         await runtime.WriteOutputAsync("raw output");
         await runtime.CompleteAsync();
+
+        Assert.True(output.WriteAttempted);
     }
 
     [Fact]
@@ -1394,8 +1396,25 @@ public sealed class CoverageRunWatchdogTests
 
     private sealed class ThrowingWriteStream : MemoryStream
     {
+        public bool WriteAttempted { get; private set; }
+
         public override void Write(byte[] buffer, int offset, int count)
-            => throw new IOException("simulated console failure");
+        {
+            WriteAttempted = true;
+            throw new IOException("simulated console failure");
+        }
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            WriteAttempted = true;
+            return Task.FromException(new IOException("simulated console failure"));
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            WriteAttempted = true;
+            return ValueTask.FromException(new IOException("simulated console failure"));
+        }
     }
 
     private sealed class ThrowingArtifactWriter : ICoverageRunWatchdogArtifactWriter
