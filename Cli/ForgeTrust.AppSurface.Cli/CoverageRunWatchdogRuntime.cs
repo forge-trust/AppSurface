@@ -83,6 +83,15 @@ internal sealed class CoverageRunWatchdogRuntime : IAsyncDisposable
     /// <summary>Gets the task that completes after fail-mode cleanup and terminal evidence handling finish.</summary>
     public Task<CommandException> TerminalTask => _terminal.Task;
 
+    /// <summary>Determines whether an exception is the already-published authoritative watchdog terminal result.</summary>
+    /// <param name="exception">Exception currently being handled by the coverage workflow.</param>
+    /// <returns><see langword="true"/> when completion would rethrow the same terminal exception instance.</returns>
+    public bool IsTerminalException(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return _terminal.Task.IsCompletedSuccessfully && ReferenceEquals(_terminal.Task.Result, exception);
+    }
+
     /// <summary>Registers an operation with the underlying monotonic supervisor and wakes the monitor.</summary>
     /// <param name="operation">Unique run-scoped operation metadata.</param>
     /// <param name="state">Initial queued or active lifecycle state.</param>

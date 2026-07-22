@@ -797,6 +797,30 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public async Task Runtime_ShouldIdentifyOnlyItsPublishedTerminalException()
+    {
+        using var directory = new TemporaryDirectory();
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Fail,
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(50)),
+            CancellationToken.None,
+            bootstrapDirectory: directory.Path);
+
+        Assert.False(runtime.IsTerminalException(new InvalidOperationException()));
+        Assert.Throws<ArgumentNullException>(() => runtime.IsTerminalException(null!));
+        runtime.Register(Project("project-a", 0), CoverageRunWatchdogOperationState.Running);
+
+        var terminal = await runtime.TerminalTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(runtime.IsTerminalException(terminal));
+    }
+
+    [Fact]
     public async Task Runtime_ShouldQuoteTerminalArtifactPathForLogSafety()
     {
         using var directory = new TemporaryDirectory();

@@ -212,8 +212,9 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         }
 
         var coverageRunHelp = commands[^1];
+        var coverageRunHelpText = coverageRunHelp.StandardOutput + Environment.NewLine + coverageRunHelp.StandardError;
         var missingWatchdogOptions = new[] { "--watchdog", "--heartbeat-interval", "--no-progress-timeout" }
-            .Where(option => !coverageRunHelp.StandardOutput.Contains(option, StringComparison.Ordinal))
+            .Where(option => !coverageRunHelpText.Contains(option, StringComparison.Ordinal))
             .ToArray();
         if (missingWatchdogOptions.Length > 0)
         {

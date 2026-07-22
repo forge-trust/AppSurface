@@ -3692,6 +3692,39 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_AcceptsPackagedHelpWrittenToStandardError()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            coverageRunHelp: string.Empty,
+            coverageRunHelpError: "--watchdog --heartbeat-interval --no-progress-timeout");
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.True(report.Succeeded, report.FirstFailure);
+        Assert.Contains(commandRunner.Requests, request => request.OperationName == "appsurface coverage run --help");
+        var testProjectRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet new xunit");
+        Assert.Contains(
+            "NoisyStuckOperation",
+            await File.ReadAllTextAsync(Path.Join(testProjectRequest.WorkingDirectory, "Smoke.Tests", "Smoke.Tests.csproj")),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CoverageCliConsumerProofWorkflow_FailsWhenCoverageRunArtifactsAreMissing()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -6422,6 +6455,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         private readonly bool _createExcludedProjectArtifacts;
         private readonly int _ordinaryFailureExitCode;
         private readonly string _coverageRunHelp;
+        private readonly string _coverageRunHelpError;
 
         public CoverageProofRecordingCommandRunner(
             string packageVersion,
@@ -6435,7 +6469,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             bool emitCoverageRunExclusionEvidence = true,
             bool createExcludedProjectArtifacts = false,
             int ordinaryFailureExitCode = 1,
-            string coverageRunHelp = "--watchdog --heartbeat-interval --no-progress-timeout")
+            string coverageRunHelp = "--watchdog --heartbeat-interval --no-progress-timeout",
+            string coverageRunHelpError = "")
         {
             _packageVersion = packageVersion;
             _createFailingGateReports = createFailingGateReports;
@@ -6449,6 +6484,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _createExcludedProjectArtifacts = createExcludedProjectArtifacts;
             _ordinaryFailureExitCode = ordinaryFailureExitCode;
             _coverageRunHelp = coverageRunHelp;
+            _coverageRunHelpError = coverageRunHelpError;
         }
 
         public List<ExternalCommandRequest> Requests { get; } = [];
@@ -6470,12 +6506,19 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 return Task.FromResult(new ExternalCommandResult(0, _packageVersion, string.Empty));
             }
 
+            if (request.OperationName == "dotnet new xunit")
+            {
+                var testDirectory = Path.Join(request.WorkingDirectory, "Smoke.Tests");
+                Directory.CreateDirectory(testDirectory);
+                File.WriteAllText(Path.Join(testDirectory, "Smoke.Tests.csproj"), "<Project></Project>");
+            }
+
             if (request.OperationName == "appsurface coverage run --help")
             {
                 return Task.FromResult(new ExternalCommandResult(
                     0,
                     _coverageRunHelp,
-                    string.Empty));
+                    _coverageRunHelpError));
             }
 
             if (request.OperationName == "appsurface coverage run")

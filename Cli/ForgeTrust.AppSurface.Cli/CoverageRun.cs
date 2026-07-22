@@ -587,9 +587,13 @@ internal sealed class CoverageRunWorkflow
             await watchdog.CompleteAsync();
             return result;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            await watchdog.CompleteAsync();
+            if (!watchdog.IsTerminalException(exception))
+            {
+                await watchdog.CompleteAsync();
+            }
+
             throw;
         }
     }

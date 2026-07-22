@@ -2223,6 +2223,10 @@ public sealed class CoverageRunTests
 
             Assert.Equal(124, exception.ExitCode);
             Assert.Contains("ASCOV121", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                nameof(CoverageRunWatchdogRuntime.CompleteAsync),
+                exception.StackTrace ?? string.Empty,
+                StringComparison.Ordinal);
         }
         finally
         {
@@ -2771,6 +2775,27 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task CliWrapCoverageRunProcessRunner_ShouldBoundBufferedOutput()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var runner = new CliWrapCoverageRunProcessRunner();
+        var fileName = OperatingSystem.IsWindows() ? "powershell.exe" : "/bin/sh";
+        IReadOnlyList<string> arguments = OperatingSystem.IsWindows()
+            ? ["-NoProfile", "-Command", "[Console]::Out.Write(('x' * 1100000))"]
+            : ["-c", "yes x | head -c 1100000"];
+
+        var result = await runner.RunAsync(
+            fileName,
+            arguments,
+            repo.Path,
+            CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(result.OutputTruncated);
+        Assert.InRange(Encoding.UTF8.GetByteCount(result.Output), 1024 * 1024, 2 * 1024 * 1024);
+    }
+
+    [Fact]
     public async Task CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -2821,7 +2846,7 @@ public sealed class CoverageRunTests
             arguments =
             [
                 "-c",
-                "/bin/sh \"$1\" \"$2\" \"$3\" \"$4\"; echo root-complete",
+                "/bin/sh \"$1\" \"$2\" \"$3\" \"$4\" >/dev/null 2>&1; echo root-complete",
                 "coverage-watchdog-root",
                 childScript,
                 childProcessIdFile,
@@ -2839,13 +2864,15 @@ public sealed class CoverageRunTests
             outputFile);
 
         var execution = runner.RunAsync(request, watchdog.RunCancellationToken);
+        int? childProcessId = null;
+        int? grandchildProcessId = null;
         try
         {
             var childProcessIdTask = WaitForProcessIdAsync(childProcessIdFile, "child");
             var grandchildProcessIdTask = WaitForProcessIdAsync(grandchildProcessIdFile, "grandchild");
             await Task.WhenAll(childProcessIdTask, grandchildProcessIdTask);
-            var childProcessId = await childProcessIdTask;
-            var grandchildProcessId = await grandchildProcessIdTask;
+            childProcessId = await childProcessIdTask;
+            grandchildProcessId = await grandchildProcessIdTask;
             Assert.NotEqual(childProcessId, grandchildProcessId);
             watchdog.Register(
                 new CoverageRunWatchdogOperation("project:0", CoverageRunWatchdogOperationKind.Project),
@@ -2853,8 +2880,8 @@ public sealed class CoverageRunTests
 
             var exception = await watchdog.TerminalTask.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(124, exception.ExitCode);
-            await WaitForProcessExitAsync(childProcessId, "child");
-            await WaitForProcessExitAsync(grandchildProcessId, "grandchild");
+            await WaitForProcessExitAsync(childProcessId.Value, "child");
+            await WaitForProcessExitAsync(grandchildProcessId.Value, "grandchild");
             using (var artifact = JsonDocument.Parse(
                 await File.ReadAllBytesAsync(Path.Join(bootstrapDirectory, "coverage-watchdog.json"))))
             {
@@ -2869,12 +2896,35 @@ public sealed class CoverageRunTests
             await safetyCancellation.CancelAsync();
             try
             {
-                await execution;
+                await execution.WaitAsync(TimeSpan.FromSeconds(5));
             }
             catch (OperationCanceledException)
             {
                 // Expected when cleanup or the safety deadline cancels the fixture.
             }
+            finally
+            {
+                TryKillFixtureProcess(childProcessId);
+                TryKillFixtureProcess(grandchildProcessId);
+            }
+        }
+    }
+
+    private static void TryKillFixtureProcess(int? processId)
+    {
+        if (processId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId.Value);
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            // The watchdog already cleaned the fixture, or the platform cannot inspect it.
         }
     }
 
