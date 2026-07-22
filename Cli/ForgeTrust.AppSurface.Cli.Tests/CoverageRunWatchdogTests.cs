@@ -946,6 +946,28 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public async Task Runtime_ShouldPromoteAStagedFileWithoutAnExistingDestination()
+    {
+        using var directory = new TemporaryDirectory();
+        var staged = Path.Join(directory.Path, ".summary.txt.staged");
+        var destination = Path.Join(directory.Path, "summary.txt");
+        await File.WriteAllTextAsync(staged, "summary");
+        using var console = new FakeInMemoryConsole();
+        await using var runtime = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            CoverageRunWatchdogOptions.Default,
+            CancellationToken.None);
+
+        runtime.CommitStagedFile(staged, destination);
+        await runtime.CompleteAsync();
+
+        Assert.False(File.Exists(staged));
+        Assert.Equal("summary", await File.ReadAllTextAsync(destination));
+        Assert.Empty(Directory.EnumerateFiles(directory.Path, "*.watchdog-backup", SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
     public async Task Runtime_ShouldRollBackEarlierStagedPromotionsWhenALaterMoveFails()
     {
         using var directory = new TemporaryDirectory();
