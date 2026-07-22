@@ -284,7 +284,16 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("AS roles_are_distinct", recipe, StringComparison.Ordinal);
         Assert.Contains("AS service_roles_are_restricted_login_leaves", recipe, StringComparison.Ordinal);
         Assert.Contains("AS service_roles_are_membership_free", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS service_roles_do_not_own_database", recipe, StringComparison.Ordinal);
         Assert.Contains("AS durable_objects_owned_by_migration_role", recipe, StringComparison.Ordinal);
+        foreach (var restrictedAttribute in new[]
+                 {
+                     "rolcanlogin", "rolsuper", "rolcreatedb", "rolcreaterole", "rolreplication", "rolbypassrls",
+                 })
+        {
+            Assert.Contains(restrictedAttribute, recipe, StringComparison.Ordinal);
+        }
+
         Assert.Contains("pg_catalog.pg_auth_members", recipe, StringComparison.Ordinal);
         Assert.DoesNotContain("pg_catalog.pg_has_role", recipe, StringComparison.Ordinal);
         Assert.Contains(
@@ -295,6 +304,7 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("AS service_roles_have_safe_relation_privileges", recipe, StringComparison.Ordinal);
         Assert.Contains("AS service_roles_have_safe_column_privileges", recipe, StringComparison.Ordinal);
         Assert.Contains("AS service_roles_have_safe_sequence_privileges", recipe, StringComparison.Ordinal);
+        Assert.Contains("WITH GRANT OPTION", recipe, StringComparison.Ordinal);
         Assert.DoesNotContain("\\quit", recipe, StringComparison.Ordinal);
         Assert.Contains("format('ALTER SCHEMA appsurface_durable OWNER TO %I'", recipe, StringComparison.Ordinal);
         Assert.Contains("appsurface_durable.store_metadata, appsurface_durable.schema_migration", recipe, StringComparison.Ordinal);

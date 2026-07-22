@@ -76,6 +76,20 @@ SELECT NOT EXISTS
   SELECT 1 / 0;
 \endif
 
+SELECT NOT EXISTS
+(
+  SELECT 1
+  FROM pg_catalog.pg_database AS database_value
+  JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = database_value.datdba
+  WHERE database_value.datname = pg_catalog.current_database()
+    AND owner_role.rolname IN (:'dispatcher_role', :'runtime_role')
+) AS service_roles_do_not_own_database \gset
+\if :service_roles_do_not_own_database
+\else
+  \echo 'Dispatcher and scoped runtime roles must not own the durable database.'
+  SELECT 1 / 0;
+\endif
+
 BEGIN;
 
 SELECT pg_catalog.pg_advisory_xact_lock(4707181168775217740);
@@ -131,10 +145,12 @@ SELECT NOT
 (
   pg_catalog.has_schema_privilege(:'dispatcher_role', 'appsurface_durable', 'CREATE')
   OR pg_catalog.has_schema_privilege(:'runtime_role', 'appsurface_durable', 'CREATE')
+  OR pg_catalog.has_schema_privilege(:'dispatcher_role', 'appsurface_durable', 'USAGE WITH GRANT OPTION')
+  OR pg_catalog.has_schema_privilege(:'runtime_role', 'appsurface_durable', 'USAGE WITH GRANT OPTION')
 ) AS service_roles_have_safe_schema_privileges \gset
 \if :service_roles_have_safe_schema_privileges
 \else
-  \echo 'Dispatcher and scoped runtime roles must not inherit CREATE on the durable schema.'
+  \echo 'Dispatcher and scoped runtime roles must not have schema CREATE or grant options.'
   SELECT 1 / 0;
 \endif
 
@@ -152,7 +168,11 @@ durable_relation AS
 ),
 relation_privilege(privilege_name) AS
 (
-  VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
+  VALUES
+    ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN'),
+    ('SELECT WITH GRANT OPTION'), ('INSERT WITH GRANT OPTION'), ('UPDATE WITH GRANT OPTION'),
+    ('DELETE WITH GRANT OPTION'), ('TRUNCATE WITH GRANT OPTION'), ('REFERENCES WITH GRANT OPTION'),
+    ('TRIGGER WITH GRANT OPTION'), ('MAINTAIN WITH GRANT OPTION')
 )
 SELECT NOT EXISTS
 (
@@ -210,7 +230,10 @@ durable_column AS
 ),
 column_privilege(privilege_name) AS
 (
-  VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('REFERENCES')
+  VALUES
+    ('SELECT'), ('INSERT'), ('UPDATE'), ('REFERENCES'),
+    ('SELECT WITH GRANT OPTION'), ('INSERT WITH GRANT OPTION'),
+    ('UPDATE WITH GRANT OPTION'), ('REFERENCES WITH GRANT OPTION')
 )
 SELECT NOT EXISTS
 (
@@ -286,7 +309,9 @@ durable_sequence AS
 ),
 sequence_privilege(privilege_name) AS
 (
-  VALUES ('USAGE'), ('SELECT'), ('UPDATE')
+  VALUES
+    ('USAGE'), ('SELECT'), ('UPDATE'),
+    ('USAGE WITH GRANT OPTION'), ('SELECT WITH GRANT OPTION'), ('UPDATE WITH GRANT OPTION')
 )
 SELECT NOT EXISTS
 (

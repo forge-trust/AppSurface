@@ -66,8 +66,8 @@ psql -v ON_ERROR_STOP=1 \
 The dispatcher and runtime values identify the exact non-human credentials used to connect, not reusable capability
 groups. Both must be distinct `LOGIN` leaf roles with no memberships in either direction and without `SUPERUSER`,
 `CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS`. Create and rotate their credentials through the deployment
-secret system; the recipe never accepts or changes passwords. The migration owner remains separate and may be
-`NOLOGIN`.
+secret system; the recipe never accepts or changes passwords. Neither service credential may own the database or hold
+grant options. The migration owner remains separate and may be `NOLOGIN`.
 
 The `appsurface_durable` schema is package-reserved. The recipe serializes with migrations and runtime transactions,
 then transfers every table, partition, sequence, view, materialized view, and foreign table in that schema to the
@@ -78,7 +78,7 @@ migration owner. Do not place application-owned objects there.
 | Dispatcher | Schema `USAGE`; table `SELECT` on `dispatch` only. |
 | Runtime reads | Schema `USAGE`; table `SELECT` on `store_metadata`, `schema_migration`, `scope`, `work`, `dispatch`, `work_operator_command`, `effect_permit`, `scope_history`, and `work_history`. |
 | Runtime inserts | Table `INSERT` on `scope`, `work`, `dispatch`, `work_operator_command`, `effect_permit`, `scope_history`, and `work_history`. |
-| Runtime updates | Column `UPDATE` on `scope(generation, state, updated_at)`, the mutable lease/result/state columns of `work`, `dispatch(due_at, state, expected_revision, updated_at)`, `work_operator_command(status, resulting_state, resulting_revision, completed_at)`, and `effect_permit(status, observed_at, details, runtime_epoch)`. |
+| Runtime updates | Column `UPDATE` on `scope(generation, state, updated_at)`, `work(state, due_at, updated_at, terminal_at, cancellation_requested_at, attempt_number, lease_generation, lease_owner, lease_started_at, lease_expires_at, runtime_epoch, revision, result_contract_id, result_schema_version, result_codec_id, result_classification, result_retention_policy_id, result_payload, result_sha256, terminal_code)`, `dispatch(due_at, state, expected_revision, updated_at)`, `work_operator_command(status, resulting_state, resulting_revision, completed_at)`, and `effect_permit(status, observed_at, details, runtime_epoch)`. |
 | Runtime sequences | `USAGE` and `SELECT` on every sequence in the package schema. |
 
 Neither service credential receives schema `CREATE`, table-wide `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`,

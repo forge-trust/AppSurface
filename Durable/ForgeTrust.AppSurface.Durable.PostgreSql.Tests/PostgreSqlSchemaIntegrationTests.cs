@@ -143,6 +143,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             CREATE ROLE durable_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE durable_runtime LOGIN PASSWORD '{RuntimeRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE bypass_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+            CREATE ROLE createdb_dispatcher LOGIN NOSUPERUSER CREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE nologin_dispatcher NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE owner_inheriting_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE member_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
@@ -151,6 +152,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
             CREATE ROLE direct_privilege_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE column_privilege_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE sequence_privilege_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE grant_option_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE database_owner_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE inherited_privilege_dispatcher LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE inherited_privilege_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE dispatcher_privilege_parent NOLOGIN NOSUPERUSER NOBYPASSRLS;
@@ -163,6 +166,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             GRANT CREATE ON SCHEMA appsurface_durable TO direct_privilege_runtime;
             GRANT UPDATE (work_name) ON appsurface_durable.work TO column_privilege_runtime;
             GRANT UPDATE ON SEQUENCE appsurface_durable.scope_history_event_id_seq TO sequence_privilege_dispatcher;
+            GRANT SELECT ON appsurface_durable.dispatch TO grant_option_dispatcher WITH GRANT OPTION;
             GRANT CREATE ON SCHEMA appsurface_durable TO dispatcher_privilege_parent;
             GRANT TRIGGER ON appsurface_durable.work TO runtime_privilege_parent;
             GRANT dispatcher_privilege_parent TO inherited_privilege_dispatcher WITH INHERIT FALSE, SET TRUE;
@@ -178,13 +182,15 @@ public sealed class PostgreSqlSchemaIntegrationTests
         {
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "durable_dispatcher", Expected: "must be distinct"),
             (Owner: "durable_owner", Dispatcher: "bypass_dispatcher", Runtime: "durable_runtime", Expected: "must be LOGIN roles without SUPERUSER"),
+            (Owner: "durable_owner", Dispatcher: "createdb_dispatcher", Runtime: "durable_runtime", Expected: "must be LOGIN roles without SUPERUSER"),
             (Owner: "durable_owner", Dispatcher: "nologin_dispatcher", Runtime: "durable_runtime", Expected: "must be LOGIN roles without SUPERUSER"),
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "owner_inheriting_runtime", Expected: "exact login leaves with no role memberships"),
             (Owner: "durable_owner", Dispatcher: "member_dispatcher", Runtime: "member_runtime", Expected: "exact login leaves with no role memberships"),
             (Owner: "durable_owner", Dispatcher: "direct_privilege_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-table privilege outside the package allowlist"),
-            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "direct_privilege_runtime", Expected: "must not inherit CREATE on the durable schema"),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "direct_privilege_runtime", Expected: "schema CREATE or grant options"),
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "column_privilege_runtime", Expected: "effective durable-column privilege outside the package allowlist"),
             (Owner: "durable_owner", Dispatcher: "sequence_privilege_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-sequence privilege outside the package allowlist"),
+            (Owner: "durable_owner", Dispatcher: "grant_option_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-table privilege outside the package allowlist"),
             (Owner: "durable_owner", Dispatcher: "inherited_privilege_dispatcher", Runtime: "durable_runtime", Expected: "exact login leaves with no role memberships"),
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "inherited_privilege_runtime", Expected: "exact login leaves with no role memberships"),
             (Owner: "durable_owner", Dispatcher: "downstream_dispatcher", Runtime: "durable_runtime", Expected: "exact login leaves with no role memberships"),
@@ -198,6 +204,42 @@ public sealed class PostgreSqlSchemaIntegrationTests
                 output.Contains(item.Expected, StringComparison.Ordinal),
                 $"Expected role recipe case ({item.Owner}, {item.Dispatcher}, {item.Runtime}) to contain '{item.Expected}'. Output: {output}");
         }
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "GRANT CREATE ON SCHEMA appsurface_durable TO PUBLIC;");
+        var publicPrivilege = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            "durable_dispatcher",
+            "durable_runtime");
+        Assert.NotEqual(0, publicPrivilege.ExitCode);
+        Assert.Contains(
+            "schema CREATE or grant options",
+            $"{publicPrivilege.Stdout}\n{publicPrivilege.Stderr}",
+            StringComparison.Ordinal);
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "REVOKE CREATE ON SCHEMA appsurface_durable FROM PUBLIC;");
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "ALTER DATABASE appsurface_durable OWNER TO database_owner_runtime;");
+        var databaseOwner = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            "durable_dispatcher",
+            "database_owner_runtime");
+        Assert.NotEqual(0, databaseOwner.ExitCode);
+        Assert.Contains(
+            "must not own the durable database",
+            $"{databaseOwner.Stdout}\n{databaseOwner.Stderr}",
+            StringComparison.Ordinal);
+        await ExecuteNonQueryAsync(
+            dataSource,
+            $"ALTER DATABASE appsurface_durable OWNER TO {RoleRecipeUsername};");
 
         await using (var noRejectedGrant = dataSource.CreateCommand(
             """
@@ -275,7 +317,11 @@ public sealed class PostgreSqlSchemaIntegrationTests
             ),
             relation_privilege(privilege_name) AS
             (
-                VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
+                VALUES
+                    ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN'),
+                    ('SELECT WITH GRANT OPTION'), ('INSERT WITH GRANT OPTION'), ('UPDATE WITH GRANT OPTION'),
+                    ('DELETE WITH GRANT OPTION'), ('TRUNCATE WITH GRANT OPTION'), ('REFERENCES WITH GRANT OPTION'),
+                    ('TRIGGER WITH GRANT OPTION'), ('MAINTAIN WITH GRANT OPTION')
             ),
             durable_column AS
             (
@@ -288,7 +334,10 @@ public sealed class PostgreSqlSchemaIntegrationTests
             ),
             column_privilege(privilege_name) AS
             (
-                VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('REFERENCES')
+                VALUES
+                    ('SELECT'), ('INSERT'), ('UPDATE'), ('REFERENCES'),
+                    ('SELECT WITH GRANT OPTION'), ('INSERT WITH GRANT OPTION'),
+                    ('UPDATE WITH GRANT OPTION'), ('REFERENCES WITH GRANT OPTION')
             ),
             durable_sequence AS
             (
@@ -300,7 +349,9 @@ public sealed class PostgreSqlSchemaIntegrationTests
             ),
             sequence_privilege(privilege_name) AS
             (
-                VALUES ('USAGE'), ('SELECT'), ('UPDATE')
+                VALUES
+                    ('USAGE'), ('SELECT'), ('UPDATE'),
+                    ('USAGE WITH GRANT OPTION'), ('SELECT WITH GRANT OPTION'), ('UPDATE WITH GRANT OPTION')
             )
             SELECT
                 has_schema_privilege('durable_dispatcher', 'appsurface_durable', 'USAGE')
@@ -434,6 +485,12 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }.ConnectionString;
         await using var runtimeDataSource = NpgsqlDataSource.Create(runtimeConnectionString);
         await using var runtimeConnection = await runtimeDataSource.OpenConnectionAsync();
+        await using (var allowedRead = runtimeConnection.CreateCommand())
+        {
+            allowedRead.CommandText =
+                "SELECT current_user = 'durable_runtime' AND EXISTS (SELECT 1 FROM appsurface_durable.store_metadata);";
+            Assert.True((bool)(await allowedRead.ExecuteScalarAsync())!);
+        }
 
         var denied = await Assert.ThrowsAsync<PostgresException>(async () =>
         {
