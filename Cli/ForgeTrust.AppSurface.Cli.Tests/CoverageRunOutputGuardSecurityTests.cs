@@ -364,6 +364,43 @@ public sealed class CoverageRunOutputGuardSecurityTests
     }
 
     [Fact]
+    public void Acquire_ShouldWrapOutputBelowRegularFileAsUnsafeOutput()
+    {
+        using var root = TestDirectory.Create();
+        var parent = root.WriteFile("parent", "not a directory");
+        var output = Path.Join(parent, "coverage");
+
+        var exception = Assert.Throws<CommandException>(() => CoverageRunOutputLease.Acquire(output));
+
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("securely acquired", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("not a directory", File.ReadAllText(parent));
+    }
+
+    [Fact]
+    public void PrepareUnix_ShouldFailClosedWhenMarkerAppearsBeforeCreation()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        var marker = Path.Join(output, ".appsurface-coverage-output");
+
+        var exception = Assert.Throws<CommandException>(() => CoverageRunOutputGuard.Prepare(
+            output,
+            root.Path,
+            [],
+            clean: true,
+            beforeCleanup: () => File.WriteAllText(marker, "competing marker")));
+
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("competing marker", File.ReadAllText(marker));
+    }
+
+    [Fact]
     public void Prepare_ShouldFailClosedWhenOutputIsMovedBeforeBindingRevalidation()
     {
         using var root = TestDirectory.Create();

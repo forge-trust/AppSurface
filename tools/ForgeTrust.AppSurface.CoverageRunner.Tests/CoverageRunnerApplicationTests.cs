@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Testing;
@@ -409,6 +410,28 @@ public sealed class CoverageRunnerApplicationTests
             "summary.txt"));
         Assert.Contains("Line coverage: 50.00% (2147483648/4294967296)", summary, StringComparison.Ordinal);
         Assert.Contains("Branch coverage: 50.00% (2147483648/4294967296)", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldRejectEmptyMergedCoverageCount()
+    {
+        using var workspace = TestRepo.Create();
+        workspace.AddProject("tools/Sample.Tests/Sample.Tests.csproj");
+        var runner = new RecordingCommandRunner(workspace)
+        {
+            ReportGeneratorCoverageText =
+                "<coverage lines-covered=\"\" lines-valid=\"10\" branches-covered=\"2\" branches-valid=\"4\" />",
+        };
+        var error = new StringWriter();
+        var app = CreateApp(runner, standardError: error);
+
+        var exitCode = await app.RunAsync(
+            ["--group", "tools", "--skip-solution-build"],
+            workspace.Root,
+            new Dictionary<string, string?>());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Failed to parse numeric coverage attributes", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1382,6 +1405,45 @@ public sealed class CoverageRunnerApplicationTests
 
         Assert.Equal("previous", File.ReadAllText(destination));
         Assert.Empty(Directory.EnumerateFiles(workspace.Root, $".{fileName}.*.tmp"));
+    }
+
+    [Fact]
+    [UnsupportedOSPlatform("windows")]
+    public async Task WriteCanonicalTextAsync_ShouldPreserveCancellationWhenStagingCleanupIsDenied()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var workspace = TestRepo.Create();
+        var outputDirectory = Path.Join(workspace.Root, "output");
+        Directory.CreateDirectory(outputDirectory);
+        var destination = Path.Join(outputDirectory, "summary.txt");
+        File.WriteAllText(destination, "previous");
+        using var cancellation = new CancellationTokenSource();
+
+        try
+        {
+            await Assert.ThrowsAsync<OperationCanceledException>(() => CoverageRunnerApplication.WriteCanonicalTextAsync(
+                destination,
+                "replacement",
+                cancellation.Token,
+                () =>
+                {
+                    File.SetUnixFileMode(outputDirectory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+                    cancellation.Cancel();
+                }));
+        }
+        finally
+        {
+            File.SetUnixFileMode(
+                outputDirectory,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        Assert.Equal("previous", File.ReadAllText(destination));
+        Assert.Single(Directory.EnumerateFiles(outputDirectory, ".summary.txt.*.tmp"));
     }
 
     [Fact]

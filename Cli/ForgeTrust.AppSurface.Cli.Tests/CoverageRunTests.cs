@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.Versioning;
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
@@ -3749,6 +3750,75 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    [UnsupportedOSPlatform("windows")]
+    public async Task CollectorNormalization_ShouldPreserveCancellationWhenStagingCleanupIsDenied()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var projectOutput = Path.Join(repo.Path, "project");
+        var raw = Path.Join(projectOutput, "collector-results", "0123456789abcdef0123456789abcdef");
+        Directory.CreateDirectory(raw);
+        repo.WriteFile(
+            "project/collector-results/0123456789abcdef0123456789abcdef/coverage.cobertura.xml",
+            "<coverage />");
+        var invocation = new CoverageRunDriverInvocation(CoverageRunDriver.Collector, projectOutput, raw, []);
+        using var cancellation = new CancellationTokenSource();
+
+        try
+        {
+            await Assert.ThrowsAsync<OperationCanceledException>(() => CoverageRunDriverStrategy.NormalizeDetailedAsync(
+                invocation,
+                cancellation.Token,
+                _ =>
+                {
+                    File.SetUnixFileMode(projectOutput, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+                    cancellation.Cancel();
+                    cancellation.Token.ThrowIfCancellationRequested();
+                }));
+        }
+        finally
+        {
+            File.SetUnixFileMode(
+                projectOutput,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        Assert.False(File.Exists(Path.Join(projectOutput, "coverage.cobertura.xml")));
+        Assert.Single(Directory.EnumerateFiles(projectOutput, ".coverage.*.tmp"));
+    }
+
+    [Fact]
+    public async Task CollectorNormalization_ShouldRejectSymbolicLinkRawDirectory()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var projectOutput = Path.Join(repo.Path, "project");
+        var realRaw = Path.Join(projectOutput, "real-results");
+        Directory.CreateDirectory(realRaw);
+        repo.WriteFile("project/real-results/coverage.cobertura.xml", "<coverage />");
+        var raw = Path.Join(projectOutput, "collector-results", "0123456789abcdef0123456789abcdef");
+        Directory.CreateDirectory(Path.GetDirectoryName(raw)!);
+        Directory.CreateSymbolicLink(raw, realRaw);
+        var invocation = new CoverageRunDriverInvocation(CoverageRunDriver.Collector, projectOutput, raw, []);
+
+        var result = await CoverageRunDriverStrategy.NormalizeDetailedAsync(
+            invocation,
+            CancellationToken.None);
+
+        Assert.Equal("escaping", result.Status);
+        Assert.Contains("symbolic link or reparse point", result.Cause, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Join(projectOutput, "coverage.cobertura.xml")));
+    }
+
+    [Fact]
     public async Task CollectorNormalization_ShouldReportArtifactRemovedBeforeOpenAsUnreadable()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -3840,6 +3910,59 @@ public sealed class CoverageRunTests
         Assert.Contains("ASCOV113", exception.Message, StringComparison.Ordinal);
         Assert.Contains("global.json", exception.Message, StringComparison.Ordinal);
         Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldRejectUnreadableGlobalJsonBeforeCommands()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var globalJson = repo.WriteFile("global.json", "{}");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        File.SetUnixFileMode(globalJson, UnixFileMode.None);
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+                CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+                console,
+                CancellationToken.None));
+
+            Assert.Contains("ASCOV113", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("unreadable global.json", exception.Message, StringComparison.Ordinal);
+            Assert.Empty(runner.Commands);
+        }
+        finally
+        {
+            File.SetUnixFileMode(globalJson, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
+    public void AppendCollectorRunSettings_Collector_ShouldOmitBlankFilters()
+    {
+        var request = CreateRequest(
+            IncludeFilter: " ",
+            ExcludeFilter: " ",
+            CoverageDriver: CoverageRunDriver.Collector);
+        var arguments = new List<string>();
+
+        CoverageRunDriverStrategy.AppendCollectorRunSettings(request, arguments);
+
+        Assert.Equal(
+            [
+                "--",
+                "DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura",
+            ],
+            arguments);
     }
 
     [Fact]
